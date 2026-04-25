@@ -1,0 +1,53 @@
+{
+  "name": "@rundesk/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@rundesk/feature-flags": "workspace:*",
+    "@rundesk/ui": "workspace:*",
+    "@tanstack/react-query": "^5.59.16",
+    "@tanstack/react-router": "^1.81.9",
+    "@tiptap/extension-placeholder": "^3.22.4",
+    "@tiptap/extension-task-item": "^3.22.4",
+    "@tiptap/extension-task-list": "^3.22.4",
+    "@tiptap/pm": "^3.22.4",
+    "@tiptap/react": "^3.22.4",
+    "@tiptap/starter-kit": "^3.22.4",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.454.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "socket.io-client": "^4.8.3",
+    "tailwind-merge": "^2.5.4",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "@rundesk/eslint-config": "workspace:*",
+    "@rundesk/typescript-config": "workspace:*",
+    "@tanstack/router-devtools": "^1.81.9",
+    "@tanstack/router-plugin": "^1.81.9",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.14.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

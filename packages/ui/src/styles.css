@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+ * Aura — Rundesk brand palette
+ * Every value is HSL triplet (no hsl() wrapper) for Tailwind + Shadcn compat.
+ * ------------------------------------------------------------------------- */
+
+@layer base {
+  :root {
+    /* Brand scale (Aura) */
+    --brand-900: 224 78% 21%; /* #0c215d */
+    --brand-700: 227 54% 45%; /* #354fb0 */
+    --brand-500: 217 52% 63%; /* #6f96d1 */
+    --brand-300: 204 62% 83%; /* #bad6eb */
+    --brand-200: 217 96% 91%; /* #d1e5fe */
+    --surface-100: 220 25% 95%; /* #eef1f6 */
+    --surface-50: 0 0% 98%; /* #f9f9f9 */
+
+    /* Shadcn semantic tokens (light) */
+    --background: var(--surface-50);
+    --foreground: var(--brand-900);
+
+    --card: 0 0% 100%;
+    --card-foreground: var(--brand-900);
+
+    --popover: 0 0% 100%;
+    --popover-foreground: var(--brand-900);
+
+    --primary: var(--brand-700);
+    --primary-foreground: var(--surface-50);
+
+    --secondary: var(--surface-100);
+    --secondary-foreground: var(--brand-900);
+
+    --muted: var(--surface-100);
+    --muted-foreground: 217 14% 40%;
+
+    --accent: var(--brand-500);
+    --accent-foreground: var(--surface-50);
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: var(--surface-50);
+
+    --border: var(--brand-200);
+    --input: var(--brand-200);
+    --ring: var(--brand-500);
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: var(--brand-900);
+    --foreground: var(--surface-50);
+
+    --card: 224 60% 14%;
+    --card-foreground: var(--surface-50);
+
+    --popover: 224 60% 14%;
+    --popover-foreground: var(--surface-50);
+
+    --primary: var(--brand-500);
+    --primary-foreground: var(--brand-900);
+
+    --secondary: 224 40% 22%;
+    --secondary-foreground: var(--surface-50);
+
+    --muted: 224 40% 22%;
+    --muted-foreground: 217 30% 75%;
+
+    --accent: var(--brand-300);
+    --accent-foreground: var(--brand-900);
+
+    --destructive: 0 62% 40%;
+    --destructive-foreground: var(--surface-50);
+
+    --border: 224 40% 28%;
+    --input: 224 40% 28%;
+    --ring: var(--brand-500);
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+}

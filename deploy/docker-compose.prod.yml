@@ -1,0 +1,98 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rundesk-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rundesk}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rundesk@aura}
+      POSTGRES_DB: ${POSTGRES_DB:-rundesk}
+    volumes:
+      - rundesk_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-rundesk} -d ${POSTGRES_DB:-rundesk}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - rundesk
+
+  redis:
+    image: redis:7-alpine
+    container_name: rundesk-redis
+    restart: unless-stopped
+    volumes:
+      - rundesk_redis:/data
+    command: ['redis-server', '--appendonly', 'yes']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - rundesk
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    container_name: rundesk-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: production
+      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}
+    volumes:
+      - rundesk_meili:/meili_data
+    networks:
+      - rundesk
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    image: rundesk-api:latest
+    container_name: rundesk-api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rundesk}:${POSTGRES_PASSWORD:-rundesk@aura}@postgres:5432/${POSTGRES_DB:-rundesk}
+      REDIS_URL: redis://redis:6379
+      MEILISEARCH_URL: http://meilisearch:7700
+      PORT: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - rundesk
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: rundesk-caddy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../apps/web/dist:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on:
+      - api
+    networks:
+      - rundesk
+
+volumes:
+  rundesk_pg:
+  rundesk_redis:
+  rundesk_meili:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
+
+networks:
+  rundesk:
+    driver: bridge

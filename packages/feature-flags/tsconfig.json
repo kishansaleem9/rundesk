@@ -1,0 +1,9 @@
+{
+  "extends": "@rundesk/typescript-config/base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rundesk-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rundesk
+      POSTGRES_PASSWORD: rundesk@aura
+      POSTGRES_DB: rundesk
+    ports:
+      - '5433:5432'
+    volumes:
+      - rundesk_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rundesk -d rundesk']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: rundesk-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - rundesk_redis:/data
+    command: ['redis-server', '--appendonly', 'yes']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    container_name: rundesk-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_ENV: development
+      MEILI_MASTER_KEY: rundesk_meili_dev_key
+    ports:
+      - '7700:7700'
+    volumes:
+      - rundesk_meili:/meili_data
+
+volumes:
+  rundesk_pg:
+  rundesk_redis:
+  rundesk_meili:

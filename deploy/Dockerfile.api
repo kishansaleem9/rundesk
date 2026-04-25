@@ -1,0 +1,29 @@
+# Rundesk API container — runs NestJS via ts-node-dev (transpile-only).
+# Packages use "main": "./src/index.ts" in this monorepo, so no separate
+# compile step is needed; ts-node handles workspace deps directly.
+FROM node:20-alpine
+
+RUN apk add --no-cache python3 make g++ \
+  && corepack enable \
+  && corepack prepare pnpm@9.15.0 --activate
+
+WORKDIR /app
+
+# Copy lockfile + workspace manifests for cached install layer.
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json turbo.json ./
+COPY apps/api/package.json ./apps/api/
+COPY packages/db/package.json ./packages/db/
+COPY packages/feature-flags/package.json ./packages/feature-flags/
+COPY packages/typescript-config/package.json ./packages/typescript-config/
+COPY packages/ui/package.json ./packages/ui/
+
+RUN pnpm install --frozen-lockfile
+
+# Copy source.
+COPY apps/api ./apps/api
+COPY packages ./packages
+
+ENV NODE_ENV=production
+EXPOSE 3001
+WORKDIR /app/apps/api
+CMD ["pnpm", "exec", "ts-node-dev", "--transpile-only", "--exit-child", "-r", "tsconfig-paths/register", "src/main.ts"]
