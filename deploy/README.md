@@ -1,6 +1,11 @@
 # Rundesk Production Deployment
 
-Single-server Docker stack: Postgres + Redis + Meilisearch + NestJS API + Caddy (HTTPS reverse proxy serving the Vite SPA).
+Single-server Docker stack: Postgres + Redis + Meilisearch + NestJS API.
+The Vite SPA is built into `apps/web/dist` and served as static files by
+the host's existing nginx (which also handles TLS via certbot).
+
+This stack coexists with other apps on the host because it does **not**
+bind to ports 80/443 itself — only `127.0.0.1:3010` (API).
 
 ## First-time deploy on a fresh server
 
@@ -18,42 +23,47 @@ cd rundesk
 cp deploy/env.production.template .env
 nano .env
 
-# 4. Bring everything up
+# 4. Bring up containers
 ./deploy/deploy.sh up
 
 # 5. Apply schema and seed (first time only)
 ./deploy/deploy.sh migrate
+
+# 6. Install nginx vhost + Let's Encrypt SSL
+./deploy/deploy.sh nginx
 ```
 
-After step 4, Caddy will issue a Let's Encrypt cert for `rundesk.theaura.agency` automatically — make sure DNS is already pointing at the server.
+DNS for `rundesk.theaura.agency` must already point at the server before
+step 6 (so certbot can complete the HTTP-01 challenge).
 
 ## Updating to a new release
 
 ```bash
 cd /opt/rundesk
-git pull
 ./deploy/deploy.sh rebuild
 ```
+
+This pulls latest code, rebuilds web + api, and restarts the api container.
 
 ## Other commands
 
 | Command | Purpose |
 |---|---|
-| `./deploy/deploy.sh logs` | Tail API + Caddy logs |
-| `./deploy/deploy.sh down` | Stop everything (data persists) |
-| `docker compose -f deploy/docker-compose.prod.yml exec postgres psql -U rundesk` | Open a psql shell |
+| `./deploy/deploy.sh logs` | Tail API logs |
+| `./deploy/deploy.sh down` | Stop all containers (data persists) |
+| `docker exec -it rundesk-postgres psql -U rundesk` | psql shell |
 
 ## File layout
 
 ```
 deploy/
-├── Dockerfile.api            # NestJS container (ts-node-dev runtime)
-├── Dockerfile.web            # SPA build → exports apps/web/dist
-├── caddy/Caddyfile           # HTTPS, /api proxy, /realtime websocket, SPA fallback
-├── docker-compose.prod.yml   # Full stack
-├── deploy.sh                 # up | migrate | rebuild | logs | down
-├── env.production.template   # Template for /opt/rundesk/.env
-└── README.md                 # This file
+├── Dockerfile.api                              # NestJS container
+├── Dockerfile.web                              # SPA build → apps/web/dist
+├── docker-compose.prod.yml                     # postgres + redis + meili + api
+├── nginx/rundesk.theaura.agency.conf           # Host nginx vhost
+├── deploy.sh                                   # up | migrate | nginx | rebuild | logs | down
+├── env.production.template                     # Template for /opt/rundesk/.env
+└── README.md                                   # This file
 ```
 
 ## Default super admin (after `migrate`)
@@ -61,4 +71,12 @@ deploy/
 - Email: `admin@rundesk.internal`
 - Password: `Admin@123!`
 
-**Change this immediately after first login.**
+**Change this after first login.**
+
+## Troubleshooting
+
+- **`./deploy/deploy.sh nginx` fails with cert error** — DNS isn't pointing
+  at the server yet, or port 80 isn't reachable. Check with `dig +short rundesk.theaura.agency`.
+- **`502 Bad Gateway`** — API container is down. Check `./deploy/deploy.sh logs`.
+- **`docker compose` not found** — install the v2 plugin:
+  `curl -SL https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose`

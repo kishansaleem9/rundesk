@@ -1,3 +1,8 @@
+# Rundesk production stack — designed to coexist with the host's existing
+# nginx (which proxies *.theaura.agency to per-app loopback ports).
+#
+# Container ports are bound to 127.0.0.1 so they are not publicly reachable;
+# nginx on the host terminates TLS and proxies into rundesk-api.
 services:
   postgres:
     image: postgres:16-alpine
@@ -59,6 +64,9 @@ services:
       REDIS_URL: redis://redis:6379
       MEILISEARCH_URL: http://meilisearch:7700
       PORT: 3001
+    # Bind only to loopback — nginx on the host proxies into this port.
+    ports:
+      - '127.0.0.1:${API_HOST_PORT:-3010}:3001'
     depends_on:
       postgres:
         condition: service_healthy
@@ -67,31 +75,10 @@ services:
     networks:
       - rundesk
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: rundesk-caddy
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../apps/web/dist:/srv:ro
-      - caddy_data:/data
-      - caddy_config:/config
-      - caddy_logs:/var/log/caddy
-    depends_on:
-      - api
-    networks:
-      - rundesk
-
 volumes:
   rundesk_pg:
   rundesk_redis:
   rundesk_meili:
-  caddy_data:
-  caddy_config:
-  caddy_logs:
 
 networks:
   rundesk:
