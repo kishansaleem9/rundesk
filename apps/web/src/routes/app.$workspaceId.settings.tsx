@@ -280,34 +280,136 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
 }
 
 function IntegrationsTab() {
-  const items = [
-    { name: 'Slack', desc: 'Mirror notifications and post task updates to channels.', status: 'available' },
-    { name: 'Google Calendar', desc: 'Sync task due dates with calendars.', status: 'available' },
-    { name: 'Google Drive', desc: 'Attach Drive files to tasks.', status: 'available' },
-    { name: 'Webhooks', desc: 'Send outbound events to your own URLs.', status: 'available' },
+  const { workspaceId } = Route.useParams()
+  const qc = useQueryClient()
+  const [showWebhookForm, setShowWebhookForm] = useState(false)
+  const [whName, setWhName] = useState('')
+  const [whUrl, setWhUrl] = useState('')
+  const [whEvents, setWhEvents] = useState<string[]>(['task.created', 'task.status_changed'])
+
+  const ALL_EVENTS = ['task.created','task.updated','task.deleted','task.status_changed','task.assigned','comment.created','project.created','member.invited','member.removed','form.submitted']
+
+  type Webhook = { id: string; name: string; url: string; events: string[]; isEnabled: boolean; successCount: number; failureCount: number }
+  const whQuery = useQuery({
+    queryKey: ['webhooks', workspaceId],
+    queryFn: () => api<Webhook[]>(`/workspaces/${workspaceId}/webhooks`),
+  })
+
+  const createWh = useMutation({
+    mutationFn: () => api(`/workspaces/${workspaceId}/webhooks`, { method: 'POST', body: { name: whName, url: whUrl, events: whEvents } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['webhooks', workspaceId] }); setShowWebhookForm(false); setWhName(''); setWhUrl('') },
+  })
+
+  const deleteWh = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/webhooks/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks', workspaceId] }),
+  })
+
+  const testWh = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/webhooks/${id}/test`, { method: 'POST' }),
+  })
+
+  const integrations = [
+    { name: 'Slack', desc: 'Mirror notifications and post task updates to channels.', status: 'planned' },
+    { name: 'Google Calendar', desc: 'Sync task due dates with calendars.', status: 'planned' },
+    { name: 'Google Drive', desc: 'Attach Drive files to tasks.', status: 'planned' },
     { name: 'GitHub / GitLab', desc: 'Link commits & PRs to tasks via task ID.', status: 'planned' },
     { name: 'ClickUp Import', desc: 'One-click migration from ClickUp.', status: 'planned' },
   ]
+
+  const hooks = whQuery.data ?? []
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {items.map((i) => (
-        <Card key={i.name} className="p-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <h3 className="font-semibold text-sm">{i.name}</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">{i.desc}</p>
-            </div>
-            <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider',
-              i.status === 'available' ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground',
-            )}>
-              {i.status}
-            </span>
+    <div className="space-y-5">
+      {/* Webhooks */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="font-semibold text-sm">Webhooks</h3>
+            <p className="text-xs text-muted-foreground">Send outbound HTTP events to your URLs when things happen in Rundesk.</p>
           </div>
-          <Button size="sm" variant="outline" className="mt-3 w-full" disabled>
-            {i.status === 'available' ? 'Connect (UI coming)' : 'Coming soon'}
+          <Button size="sm" onClick={() => setShowWebhookForm(true)} disabled={showWebhookForm}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> Add webhook
           </Button>
-        </Card>
-      ))}
+        </div>
+
+        {showWebhookForm && (
+          <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
+            <Input value={whName} onChange={(e) => setWhName(e.target.value)} placeholder="Name (e.g. Slack notifications)" />
+            <Input value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-endpoint.com/hook" />
+            <div className="flex flex-wrap gap-1">
+              {ALL_EVENTS.map((ev) => (
+                <button
+                  key={ev}
+                  onClick={() => setWhEvents((prev) => prev.includes(ev) ? prev.filter((e) => e !== ev) : [...prev, ev])}
+                  className={cn('text-xs px-2 py-0.5 rounded-full border transition-colors', whEvents.includes(ev) ? 'bg-brand-700 text-white border-brand-700' : 'border-border text-muted-foreground')}
+                >
+                  {ev}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" disabled={!whName || !whUrl || createWh.isPending} onClick={() => createWh.mutate()}>Save</Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowWebhookForm(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {hooks.length === 0 && !showWebhookForm && (
+          <p className="text-xs text-muted-foreground">No webhooks configured yet.</p>
+        )}
+        {hooks.map((hook) => (
+          <div key={hook.id} className="flex items-center gap-3 py-2 border-t border-border/50">
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm">{hook.name}</div>
+              <div className="text-xs text-muted-foreground font-mono truncate">{hook.url}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{(hook.events as string[]).join(', ')}</div>
+            </div>
+            <div className="text-xs text-muted-foreground shrink-0">
+              <span className="text-emerald-600">{hook.successCount}✓</span>
+              {' '}<span className="text-red-500">{hook.failureCount}✗</span>
+            </div>
+            <Button variant="ghost" size="sm" className="text-xs" onClick={() => testWh.mutate(hook.id)} disabled={testWh.isPending}>Test</Button>
+            <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => deleteWh.mutate(hook.id)}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+      </Card>
+
+      {/* Other integrations */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {integrations.map((i) => (
+          <Card key={i.name} className="p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="font-semibold text-sm">{i.name}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">{i.desc}</p>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider bg-muted text-muted-foreground">
+                v1.1
+              </span>
+            </div>
+            <Button size="sm" variant="outline" className="mt-3 w-full" disabled>
+              Coming soon
+            </Button>
+          </Card>
+        ))}
+      </div>
+
+      {/* Data export */}
+      <Card className="p-4">
+        <h3 className="font-semibold text-sm mb-1">Data export</h3>
+        <p className="text-xs text-muted-foreground mb-3">Download a full copy of your workspace data.</p>
+        <div className="flex gap-2">
+          <a href={`/api/v1/workspaces/${workspaceId}/export/json`} download>
+            <Button size="sm" variant="outline">Export JSON</Button>
+          </a>
+          <a href={`/api/v1/workspaces/${workspaceId}/export/csv/tasks`} download>
+            <Button size="sm" variant="outline">Export tasks CSV</Button>
+          </a>
+        </div>
+      </Card>
     </div>
   )
 }
