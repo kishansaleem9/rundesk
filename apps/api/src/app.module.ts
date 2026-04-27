@@ -17,6 +17,7 @@ import { TimeEntriesModule } from './modules/time-entries/time-entries.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { ViewsModule } from './modules/views/views.module'
 import { FormsModule } from './modules/forms/forms.module'
+import { AutomationsModule } from './modules/automations/automations.module'
 import { SearchModule } from './modules/search/search.module'
 import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
@@ -53,6 +54,7 @@ import { DatabaseModule } from './common/database/database.module'
     NotificationsModule,
     ViewsModule,
     FormsModule,
+    AutomationsModule,
   ],
 })
 export class AppModule {}
