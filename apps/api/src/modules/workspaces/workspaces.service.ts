@@ -1,6 +1,6 @@
-import { ConflictException, Injectable, Inject } from '@nestjs/common'
+import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { organizations, workspaces, workspaceMembers } from '@rundesk/db'
+import { organizations, workspaces, workspaceMembers, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
@@ -40,6 +40,62 @@ export class WorkspacesService {
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
     return row ?? null
+  }
+
+  async update(
+    workspaceId: string,
+    patch: { name?: string; logoUrl?: string | null; primaryColor?: string | null; customDomain?: string | null },
+  ) {
+    const [row] = await this.db
+      .update(workspaces)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(workspaces.id, workspaceId))
+      .returning()
+    if (!row) throw new NotFoundException('Workspace not found')
+    return row
+  }
+
+  async listMembers(workspaceId: string) {
+    return this.db
+      .select({
+        userId: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        role: workspaceMembers.role,
+        joinedAt: workspaceMembers.joinedAt,
+      })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+  }
+
+  async addMember(workspaceId: string, email: string, role: string = 'member') {
+    const [user] = await this.db.select().from(users).where(eq(users.email, email))
+    if (!user) throw new BadRequestException(`No user with email ${email}`)
+    const existing = await this.getMembership(workspaceId, user.id)
+    if (existing) throw new ConflictException('User is already a member')
+    await this.db.insert(workspaceMembers).values({
+      workspaceId,
+      userId: user.id,
+      role: role as any,
+    })
+    return { ok: true, userId: user.id }
+  }
+
+  async updateMemberRole(workspaceId: string, userId: string, role: string) {
+    await this.db
+      .update(workspaceMembers)
+      .set({ role: role as any })
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    return { ok: true }
+  }
+
+  async removeMember(workspaceId: string, userId: string) {
+    await this.db
+      .delete(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    return { ok: true }
   }
 
   async create(userId: string, dto: CreateWorkspaceDto) {

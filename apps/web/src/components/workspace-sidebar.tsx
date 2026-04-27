@@ -521,16 +521,30 @@ function ProjectNode({
 }
 
 function SidebarFooter() {
+  const params = useParams({ strict: false }) as { workspaceId?: string }
+  const workspaceId = params.workspaceId
+  if (!workspaceId) return null
+
   return (
     <div className="border-t border-border p-2 space-y-0.5">
-      <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground">
+      <Link
+        to="/app/$workspaceId/time"
+        params={{ workspaceId }}
+        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground"
+        activeProps={{ className: 'bg-brand-200/50 text-brand-900 font-medium' }}
+      >
         <Clock className="h-4 w-4" />
         <span>Time tracked</span>
-      </button>
-      <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground">
+      </Link>
+      <Link
+        to="/app/$workspaceId/settings"
+        params={{ workspaceId }}
+        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground"
+        activeProps={{ className: 'bg-brand-200/50 text-brand-900 font-medium' }}
+      >
         <Settings className="h-4 w-4" />
         <span>Settings</span>
-      </button>
+      </Link>
     </div>
   )
 }
