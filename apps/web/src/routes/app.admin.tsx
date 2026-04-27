@@ -12,7 +12,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { label: 'Features', to: '/app/admin/features' },
-  { label: 'Audit log', disabled: true },
+  { label: 'Audit log', to: '/app/admin/audit' },
   { label: 'Users', disabled: true },
 ]
 

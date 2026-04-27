@@ -19,6 +19,7 @@ import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppWorkspaceIdRouteImport } from './routes/app.$workspaceId'
 import { Route as AppAdminFeaturesRouteImport } from './routes/app.admin.features'
+import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppWorkspaceIdTimeRouteImport } from './routes/app.$workspaceId.time'
 import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspaceId.sprints'
 import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$workspaceId.settings'
@@ -84,6 +85,11 @@ const AppWorkspaceIdRoute = AppWorkspaceIdRouteImport.update({
 const AppAdminFeaturesRoute = AppAdminFeaturesRouteImport.update({
   id: '/features',
   path: '/features',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => AppAdminRoute,
 } as any)
 const AppWorkspaceIdTimeRoute = AppWorkspaceIdTimeRouteImport.update({
@@ -194,6 +200,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
@@ -221,6 +228,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
@@ -250,6 +258,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
@@ -280,6 +289,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/time'
+    | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
@@ -307,6 +317,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/time'
+    | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
@@ -335,6 +346,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/time'
+    | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
@@ -419,6 +431,13 @@ declare module '@tanstack/react-router' {
       path: '/features'
       fullPath: '/app/admin/features'
       preLoaderRoute: typeof AppAdminFeaturesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/audit': {
+      id: '/app/admin/audit'
+      path: '/audit'
+      fullPath: '/app/admin/audit'
+      preLoaderRoute: typeof AppAdminAuditRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/$workspaceId/time': {
@@ -613,10 +632,12 @@ const AppWorkspaceIdRouteWithChildren = AppWorkspaceIdRoute._addFileChildren(
 )
 
 interface AppAdminRouteChildren {
+  AppAdminAuditRoute: typeof AppAdminAuditRoute
   AppAdminFeaturesRoute: typeof AppAdminFeaturesRoute
 }
 
 const AppAdminRouteChildren: AppAdminRouteChildren = {
+  AppAdminAuditRoute: AppAdminAuditRoute,
   AppAdminFeaturesRoute: AppAdminFeaturesRoute,
 }
 

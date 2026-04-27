@@ -20,6 +20,7 @@ import { FormsModule } from './modules/forms/forms.module'
 import { AutomationsModule } from './modules/automations/automations.module'
 import { AiModule } from './modules/ai/ai.module'
 import { ReportsModule } from './modules/reports/reports.module'
+import { SecurityModule } from './modules/security/security.module'
 import { SearchModule } from './modules/search/search.module'
 import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
@@ -59,6 +60,7 @@ import { DatabaseModule } from './common/database/database.module'
     AutomationsModule,
     AiModule,
     ReportsModule,
+    SecurityModule,
   ],
 })
 export class AppModule {}

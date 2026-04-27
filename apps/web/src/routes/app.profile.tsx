@@ -207,20 +207,7 @@ function SecurityTab() {
         </div>
       </Card>
 
-      <Card className="p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="font-semibold mb-1 flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
-              Two-factor authentication
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Add an extra layer of security with a TOTP authenticator app.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" disabled>Set up (coming soon)</Button>
-        </div>
-      </Card>
+      <TotpCard />
 
       <Card className="p-6">
         <div className="flex items-start justify-between gap-4">
@@ -237,6 +224,111 @@ function SecurityTab() {
         </div>
       </Card>
     </div>
+  )
+}
+
+function TotpCard() {
+  const qc = useQueryClient()
+  const [step, setStep] = useState<'idle' | 'setup' | 'verify' | 'done' | 'backup'>('idle')
+  const [setupData, setSetupData] = useState<{ qrCodeUrl: string; secret: string } | null>(null)
+  const [code, setCode] = useState('')
+  const [backupCodes, setBackupCodes] = useState<string[]>([])
+
+  const statusQuery = useQuery({
+    queryKey: ['totp-status'],
+    queryFn: () => api<{ enabled: boolean }>('/security/totp/status'),
+    retry: false,
+  })
+
+  const setupMutation = useMutation({
+    mutationFn: () => api<{ qrCodeUrl: string; secret: string; otpauthUrl: string }>('/security/totp/setup', { method: 'POST' }),
+    onSuccess: (data) => {
+      setSetupData(data)
+      setStep('setup')
+    },
+  })
+
+  const verifyMutation = useMutation({
+    mutationFn: () => api<{ backupCodes: string[] }>('/security/totp/verify', { method: 'POST', body: { code } }),
+    onSuccess: (data) => {
+      setBackupCodes(data.backupCodes)
+      setStep('backup')
+      qc.invalidateQueries({ queryKey: ['totp-status'] })
+    },
+  })
+
+  const disableMutation = useMutation({
+    mutationFn: () => api('/security/totp/disable', { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['totp-status'] })
+      setStep('idle')
+      setSetupData(null)
+      setCode('')
+    },
+  })
+
+  const enabled = statusQuery.data?.enabled
+
+  return (
+    <Card className="p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-semibold mb-1 flex items-center gap-2">
+            <ShieldCheck className={cn('h-4 w-4', enabled ? 'text-emerald-600' : 'text-muted-foreground')} />
+            Two-factor authentication
+            {enabled && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Enabled</span>}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Add an extra layer of security with a TOTP authenticator app (Google Authenticator, Authy, etc.).
+          </p>
+        </div>
+        {!enabled && step === 'idle' && (
+          <Button variant="outline" size="sm" onClick={() => setupMutation.mutate()} disabled={setupMutation.isPending}>
+            {setupMutation.isPending ? 'Loading…' : 'Set up 2FA'}
+          </Button>
+        )}
+        {enabled && (
+          <Button variant="outline" size="sm" className="text-destructive" onClick={() => disableMutation.mutate()} disabled={disableMutation.isPending}>
+            Disable
+          </Button>
+        )}
+      </div>
+
+      {step === 'setup' && setupData && (
+        <div className="mt-4 space-y-3 border-t border-border pt-4">
+          <p className="text-sm font-medium">Scan with your authenticator app:</p>
+          <img src={setupData.qrCodeUrl} alt="TOTP QR code" className="h-40 w-40 border border-border rounded" />
+          <p className="text-xs text-muted-foreground">Can't scan? Enter this code manually: <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{setupData.secret}</code></p>
+          <div className="flex gap-2">
+            <Input
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="6-digit code"
+              maxLength={6}
+              className="w-36"
+              onKeyDown={(e) => { if (e.key === 'Enter' && code.length === 6) verifyMutation.mutate() }}
+            />
+            <Button size="sm" onClick={() => verifyMutation.mutate()} disabled={code.length !== 6 || verifyMutation.isPending}>
+              {verifyMutation.isPending ? 'Verifying…' : 'Verify'}
+            </Button>
+          </div>
+          {verifyMutation.isError && <p className="text-xs text-destructive">Invalid code. Try again.</p>}
+        </div>
+      )}
+
+      {step === 'backup' && (
+        <div className="mt-4 space-y-3 border-t border-border pt-4">
+          <p className="text-sm font-semibold text-emerald-600">2FA enabled! Save your backup codes:</p>
+          <p className="text-xs text-muted-foreground">These one-time backup codes can be used if you lose access to your authenticator app. Store them securely.</p>
+          <div className="grid grid-cols-2 gap-1">
+            {backupCodes.map((c) => (
+              <code key={c} className="bg-muted px-2 py-1 rounded text-xs font-mono">{c}</code>
+            ))}
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setStep('idle')}>Done</Button>
+        </div>
+      )}
+    </Card>
   )
 }
 

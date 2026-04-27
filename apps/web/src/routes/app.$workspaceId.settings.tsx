@@ -313,28 +313,120 @@ function IntegrationsTab() {
 }
 
 function SecurityTab() {
+  const { workspaceId } = Route.useParams()
+  const qc = useQueryClient()
+  const [newKeyName, setNewKeyName] = useState('')
+  const [newKeyScope, setNewKeyScope] = useState('read_write')
+  const [revealedKey, setRevealedKey] = useState<string | null>(null)
+
+  type ApiKey = {
+    id: string
+    name: string
+    keyPrefix: string
+    scope: string
+    isRevoked: boolean
+    lastUsedAt?: string | null
+    requestCount: number
+    createdAt: string
+  }
+
+  const keysQuery = useQuery({
+    queryKey: ['api-keys', workspaceId],
+    queryFn: () => api<ApiKey[]>(`/workspaces/${workspaceId}/api-keys`),
+  })
+
+  const createKey = useMutation({
+    mutationFn: () =>
+      api<ApiKey & { key: string }>(`/workspaces/${workspaceId}/api-keys`, {
+        method: 'POST',
+        body: { name: newKeyName.trim(), scope: newKeyScope },
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['api-keys', workspaceId] })
+      setRevealedKey(data.key)
+      setNewKeyName('')
+    },
+  })
+
+  const revokeKey = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/api-keys/${id}/revoke`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys', workspaceId] }),
+  })
+
+  const deleteKey = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/api-keys/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys', workspaceId] }),
+  })
+
+  const keys = keysQuery.data ?? []
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* API Keys */}
       <Card className="p-4">
-        <h3 className="font-semibold text-sm mb-1">Require 2FA for all members</h3>
+        <h3 className="font-semibold text-sm mb-1">API keys</h3>
         <p className="text-xs text-muted-foreground mb-3">
-          Members will be prompted to enroll a TOTP authenticator on next login.
+          Generate API keys to integrate with external tools.
         </p>
-        <Button size="sm" variant="outline" disabled>Enable (coming soon)</Button>
+
+        {revealedKey && (
+          <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-md">
+            <p className="text-xs font-medium text-emerald-700 mb-1">Key created — copy it now, it won't be shown again:</p>
+            <code className="text-xs font-mono break-all">{revealedKey}</code>
+            <button className="text-xs text-emerald-700 hover:underline ml-2" onClick={() => navigator.clipboard.writeText(revealedKey)}>Copy</button>
+            <button className="text-xs text-muted-foreground hover:underline ml-2" onClick={() => setRevealedKey(null)}>Dismiss</button>
+          </div>
+        )}
+
+        <div className="flex gap-2 mb-3">
+          <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="Key name" className="flex-1" />
+          <select
+            value={newKeyScope}
+            onChange={(e) => setNewKeyScope(e.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          >
+            <option value="read_only">Read only</option>
+            <option value="read_write">Read/Write</option>
+            <option value="admin">Admin</option>
+          </select>
+          <Button size="sm" disabled={!newKeyName.trim() || createKey.isPending} onClick={() => createKey.mutate()}>
+            Generate
+          </Button>
+        </div>
+
+        {keys.length > 0 && (
+          <div className="space-y-2">
+            {keys.map((key) => (
+              <div key={key.id} className="flex items-center gap-2 text-sm py-1.5 border-t border-border/50">
+                <div className="flex-1 min-w-0">
+                  <span className="font-medium">{key.name}</span>
+                  <span className="ml-2 text-xs text-muted-foreground font-mono">{key.keyPrefix}…</span>
+                  {key.isRevoked && <span className="ml-2 text-xs text-destructive">Revoked</span>}
+                </div>
+                <span className="text-xs text-muted-foreground">{key.scope}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{key.requestCount} req</span>
+                {!key.isRevoked && (
+                  <Button variant="ghost" size="sm" className="text-xs" onClick={() => revokeKey.mutate(key.id)}>Revoke</Button>
+                )}
+                <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => deleteKey.mutate(key.id)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
+
       <Card className="p-4">
         <h3 className="font-semibold text-sm mb-1">IP allowlist</h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Restrict workspace access to specific IP ranges.
-        </p>
-        <Button size="sm" variant="outline" disabled>Configure (coming soon)</Button>
+        <p className="text-xs text-muted-foreground mb-3">Restrict workspace access to specific IP ranges.</p>
+        <Button size="sm" variant="outline" disabled>Configure (v1.1)</Button>
       </Card>
+
       <Card className="p-4">
         <h3 className="font-semibold text-sm mb-1">Session timeout</h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Force re-login after a period of inactivity.
-        </p>
-        <Button size="sm" variant="outline" disabled>Configure (coming soon)</Button>
+        <p className="text-xs text-muted-foreground mb-3">Force re-login after a period of inactivity.</p>
+        <Button size="sm" variant="outline" disabled>Configure (v1.1)</Button>
       </Card>
     </div>
   )
