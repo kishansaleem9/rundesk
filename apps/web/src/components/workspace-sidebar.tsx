@@ -22,6 +22,7 @@ import {
   Shield,
   MessageSquare,
   ClipboardList,
+  BarChart3,
 } from 'lucide-react'
 import { Button, Input, LogoMark, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
@@ -149,6 +150,7 @@ function PinnedLinks({ workspaceId }: { workspaceId?: string }) {
     { label: 'Time', icon: Clock, to: '/app/$workspaceId/time' as const },
     { label: 'Forms', icon: ClipboardList, to: '/app/$workspaceId/forms' as const },
     { label: 'AI', icon: Sparkles, to: '/app/$workspaceId/ai' as const },
+    { label: 'Reports', icon: BarChart3, to: '/app/$workspaceId/reports' as const },
     { label: 'Automations', icon: Zap, to: '/app/$workspaceId/automations' as const },
   ]
 
