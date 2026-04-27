@@ -2,9 +2,11 @@ import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@n
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { SecurityService } from './security.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
-// ─── 2FA / TOTP ───────────────────────────────────────────────────────────────
+// ─── 2FA / TOTP (per-user, no workspace) ──────────────────────────────────────
 @ApiTags('security')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -41,7 +43,7 @@ export class TotpController {
 // ─── API Keys ─────────────────────────────────────────────────────────────────
 @ApiTags('security')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
 @Controller('workspaces/:workspaceId/api-keys')
 export class ApiKeysController {
   constructor(private readonly svc: SecurityService) {}
@@ -53,7 +55,8 @@ export class ApiKeysController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a new API key' })
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Create a new API key (admin only)' })
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
@@ -63,28 +66,36 @@ export class ApiKeysController {
   }
 
   @Post(':keyId/revoke')
-  @ApiOperation({ summary: 'Revoke an API key' })
-  revoke(@Param('keyId') keyId: string) {
-    return this.svc.revokeApiKey(keyId)
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Revoke an API key (admin only)' })
+  revoke(
+    @Param('workspaceId') workspaceId: string,
+    @Param('keyId') keyId: string,
+  ) {
+    return this.svc.revokeApiKey(workspaceId, keyId)
   }
 
   @Delete(':keyId')
-  @ApiOperation({ summary: 'Delete an API key' })
-  delete(@Param('keyId') keyId: string) {
-    return this.svc.deleteApiKey(keyId)
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Delete an API key (admin only)' })
+  delete(
+    @Param('workspaceId') workspaceId: string,
+    @Param('keyId') keyId: string,
+  ) {
+    return this.svc.deleteApiKey(workspaceId, keyId)
   }
 }
 
 // ─── Audit Logs ───────────────────────────────────────────────────────────────
 @ApiTags('security')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
 @Controller('workspaces/:workspaceId/audit-logs')
 export class AuditLogsController {
   constructor(private readonly svc: SecurityService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Get audit trail for workspace' })
+  @ApiOperation({ summary: 'Get audit trail for workspace (admin only)' })
   list(
     @Param('workspaceId') workspaceId: string,
     @Query('page') page?: string,

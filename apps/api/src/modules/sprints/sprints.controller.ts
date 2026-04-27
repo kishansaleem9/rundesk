@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { SprintsService } from './sprints.service'
 import type { SprintStatus } from '@rundesk/db'
 
@@ -12,11 +13,13 @@ export class SprintsController {
   constructor(private sprints: SprintsService) {}
 
   @Get('workspaces/:workspaceId/sprints')
+  @UseGuards(WorkspaceMemberGuard)
   list(@Param('workspaceId') workspaceId: string) {
     return this.sprints.list(workspaceId)
   }
 
   @Post('workspaces/:workspaceId/sprints')
+  @UseGuards(WorkspaceMemberGuard)
   create(
     @Param('workspaceId') workspaceId: string,
     @Body() body: {

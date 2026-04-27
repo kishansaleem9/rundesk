@@ -35,10 +35,18 @@ export class AutomationsService {
       .orderBy(desc(automations.createdAt))
   }
 
-  async getOne(id: string) {
-    const [row] = await this.db.select().from(automations).where(eq(automations.id, id))
+  private async assertOwnership(workspaceId: string, automationId: string) {
+    const [row] = await this.db
+      .select()
+      .from(automations)
+      .where(and(eq(automations.id, automationId), eq(automations.workspaceId, workspaceId)))
+      .limit(1)
     if (!row) throw new NotFoundException('Automation not found')
     return row
+  }
+
+  async getOne(workspaceId: string, id: string) {
+    return this.assertOwnership(workspaceId, id)
   }
 
   async create(
@@ -58,6 +66,7 @@ export class AutomationsService {
   }
 
   async update(
+    workspaceId: string,
     id: string,
     patch: {
       name?: string
@@ -66,6 +75,7 @@ export class AutomationsService {
       actions?: Array<{ type: string; params: Record<string, string | string[] | undefined> }>
     },
   ) {
+    await this.assertOwnership(workspaceId, id)
     const [row] = await this.db
       .update(automations)
       .set({ ...patch, updatedAt: new Date() })
@@ -75,12 +85,14 @@ export class AutomationsService {
     return row
   }
 
-  async remove(id: string) {
+  async remove(workspaceId: string, id: string) {
+    await this.assertOwnership(workspaceId, id)
     await this.db.delete(automations).where(eq(automations.id, id))
     return { ok: true }
   }
 
-  async listRuns(automationId: string) {
+  async listRuns(workspaceId: string, automationId: string) {
+    await this.assertOwnership(workspaceId, automationId)
     return this.db
       .select()
       .from(automationRuns)

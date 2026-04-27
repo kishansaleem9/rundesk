@@ -23,6 +23,8 @@ import { ReportsModule } from './modules/reports/reports.module'
 import { SecurityModule } from './modules/security/security.module'
 import { ExportModule } from './modules/export/export.module'
 import { WebhooksModule } from './modules/webhooks/webhooks.module'
+import { SlackModule } from './modules/integrations/slack/slack.module'
+import { ClickUpImportModule } from './modules/integrations/clickup-import/clickup-import.module'
 import { SearchModule } from './modules/search/search.module'
 import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
@@ -65,6 +67,8 @@ import { DatabaseModule } from './common/database/database.module'
     SecurityModule,
     ExportModule,
     WebhooksModule,
+    SlackModule,
+    ClickUpImportModule,
   ],
 })
 export class AppModule {}

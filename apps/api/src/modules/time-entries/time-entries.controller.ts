@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { TimeEntriesService } from './time-entries.service'
 
 @ApiTags('time-entries')
@@ -11,6 +12,7 @@ export class WorkspaceTimeEntriesController {
   constructor(private time: TimeEntriesService) {}
 
   @Get('workspaces/:workspaceId/time-entries')
+  @UseGuards(WorkspaceMemberGuard)
   list(
     @Param('workspaceId') workspaceId: string,
     @Query('userId') userId?: string,

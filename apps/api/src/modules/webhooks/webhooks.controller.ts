@@ -2,11 +2,13 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WebhooksService } from './webhooks.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('webhooks')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
 @Controller('workspaces/:workspaceId/webhooks')
 export class WebhooksController {
   constructor(private readonly svc: WebhooksService) {}
@@ -24,7 +26,8 @@ export class WebhooksController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a new webhook' })
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Create a new webhook (admin only)' })
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
@@ -34,24 +37,40 @@ export class WebhooksController {
   }
 
   @Patch(':webhookId')
-  update(@Param('webhookId') webhookId: string, @Body() body: any) {
-    return this.svc.update(webhookId, body)
+  @UseGuards(WorkspaceAdminGuard)
+  update(
+    @Param('workspaceId') workspaceId: string,
+    @Param('webhookId') webhookId: string,
+    @Body() body: any,
+  ) {
+    return this.svc.update(workspaceId, webhookId, body)
   }
 
   @Delete(':webhookId')
-  delete(@Param('webhookId') webhookId: string) {
-    return this.svc.delete(webhookId)
+  @UseGuards(WorkspaceAdminGuard)
+  delete(
+    @Param('workspaceId') workspaceId: string,
+    @Param('webhookId') webhookId: string,
+  ) {
+    return this.svc.delete(workspaceId, webhookId)
   }
 
   @Post(':webhookId/test')
+  @UseGuards(WorkspaceAdminGuard)
   @ApiOperation({ summary: 'Send a test event to the webhook' })
-  test(@Param('webhookId') webhookId: string) {
-    return this.svc.testWebhook(webhookId)
+  test(
+    @Param('workspaceId') workspaceId: string,
+    @Param('webhookId') webhookId: string,
+  ) {
+    return this.svc.testWebhook(workspaceId, webhookId)
   }
 
   @Get(':webhookId/deliveries')
   @ApiOperation({ summary: 'List recent deliveries for a webhook' })
-  deliveries(@Param('webhookId') webhookId: string) {
-    return this.svc.listDeliveries(webhookId)
+  deliveries(
+    @Param('workspaceId') workspaceId: string,
+    @Param('webhookId') webhookId: string,
+  ) {
+    return this.svc.listDeliveries(workspaceId, webhookId)
   }
 }

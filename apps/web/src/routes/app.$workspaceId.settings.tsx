@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 
 export const Route = createFileRoute('/app/$workspaceId/settings')({
@@ -309,12 +309,54 @@ function IntegrationsTab() {
     mutationFn: (id: string) => api(`/workspaces/${workspaceId}/webhooks/${id}/test`, { method: 'POST' }),
   })
 
-  const integrations = [
-    { name: 'Slack', desc: 'Mirror notifications and post task updates to channels.', status: 'planned' },
+  // Slack integration
+  type SlackInfo = {
+    id: string
+    isEnabled: boolean
+    channelName: string | null
+    successCount: number
+    failureCount: number
+    webhookUrlHint: string
+  } | null
+
+  const [slackUrl, setSlackUrl] = useState('')
+  const [slackChannel, setSlackChannel] = useState('')
+  const [showSlackForm, setShowSlackForm] = useState(false)
+
+  const slackQuery = useQuery({
+    queryKey: ['slack', workspaceId],
+    queryFn: () => api<SlackInfo>(`/workspaces/${workspaceId}/integrations/slack`),
+  })
+
+  const connectSlack = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/integrations/slack`, {
+        method: 'POST',
+        body: { webhookUrl: slackUrl, channelName: slackChannel || undefined },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['slack', workspaceId] })
+      setShowSlackForm(false)
+      setSlackUrl('')
+      setSlackChannel('')
+    },
+  })
+
+  const disconnectSlack = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/integrations/slack`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['slack', workspaceId] }),
+  })
+
+  const testSlack = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/integrations/slack/test`, { method: 'POST' }),
+  })
+
+  const otherIntegrations = [
     { name: 'Google Calendar', desc: 'Sync task due dates with calendars.', status: 'planned' },
     { name: 'Google Drive', desc: 'Attach Drive files to tasks.', status: 'planned' },
     { name: 'GitHub / GitLab', desc: 'Link commits & PRs to tasks via task ID.', status: 'planned' },
-    { name: 'ClickUp Import', desc: 'One-click migration from ClickUp.', status: 'planned' },
   ]
 
   const hooks = whQuery.data ?? []
@@ -377,9 +419,121 @@ function IntegrationsTab() {
         ))}
       </Card>
 
+      {/* Slack integration */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="font-semibold text-sm flex items-center gap-2">
+              Slack
+              {slackQuery.data?.isEnabled && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+                  Connected
+                </span>
+              )}
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Send task notifications to a Slack channel via incoming webhook.
+            </p>
+          </div>
+          {!slackQuery.data && !showSlackForm && (
+            <Button size="sm" onClick={() => setShowSlackForm(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Connect
+            </Button>
+          )}
+        </div>
+
+        {showSlackForm && !slackQuery.data && (
+          <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
+            <Input
+              value={slackUrl}
+              onChange={(e) => setSlackUrl(e.target.value)}
+              placeholder="https://hooks.slack.com/services/T.../B.../..."
+            />
+            <Input
+              value={slackChannel}
+              onChange={(e) => setSlackChannel(e.target.value)}
+              placeholder="Channel name (optional, e.g. #project-updates)"
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={!slackUrl || connectSlack.isPending}
+                onClick={() => connectSlack.mutate()}
+              >
+                Connect
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowSlackForm(false)}>
+                Cancel
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Get your incoming-webhook URL from{' '}
+              <a
+                href="https://api.slack.com/messaging/webhooks"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Slack apps
+              </a>.
+            </p>
+          </div>
+        )}
+
+        {slackQuery.data && (
+          <div className="space-y-2">
+            <div className="text-xs text-muted-foreground">
+              <span className="font-mono">{slackQuery.data.webhookUrlHint}</span>
+              {slackQuery.data.channelName && (
+                <span className="ml-2">• {slackQuery.data.channelName}</span>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              <span className="text-emerald-600">{slackQuery.data.successCount}✓</span>
+              {' '}
+              <span className="text-red-500">{slackQuery.data.failureCount}✗</span>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => testSlack.mutate()} disabled={testSlack.isPending}>
+                {testSlack.isPending ? 'Sending...' : 'Send test'}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-destructive"
+                onClick={() => disconnectSlack.mutate()}
+              >
+                Disconnect
+              </Button>
+            </div>
+            {testSlack.isSuccess && (
+              <p className="text-xs text-emerald-600">Test message sent.</p>
+            )}
+            {testSlack.isError && (
+              <p className="text-xs text-destructive">{(testSlack.error as Error).message}</p>
+            )}
+          </div>
+        )}
+      </Card>
+
+      {/* ClickUp Import */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-sm">ClickUp import</h3>
+            <p className="text-xs text-muted-foreground">
+              Migrate spaces, lists, and tasks from a ClickUp CSV export.
+            </p>
+          </div>
+          <a href={`/app/${workspaceId}/import`}>
+            <Button size="sm" variant="outline">Open importer</Button>
+          </a>
+        </div>
+      </Card>
+
       {/* Other integrations */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {integrations.map((i) => (
+        {otherIntegrations.map((i) => (
           <Card key={i.name} className="p-4">
             <div className="flex items-start justify-between">
               <div>

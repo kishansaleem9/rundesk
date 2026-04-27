@@ -13,12 +13,13 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { FormsService } from './forms.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 // ─── Workspace-scoped routes (JWT-protected) ──────────────────────────────────
 @ApiTags('forms')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
 @Controller('workspaces/:workspaceId/forms')
 export class WorkspaceFormsController {
   constructor(private readonly formsService: FormsService) {}

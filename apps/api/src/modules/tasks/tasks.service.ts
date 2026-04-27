@@ -23,6 +23,9 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
+import { AutomationsService } from '../automations/automations.service'
+import { WebhooksService } from '../webhooks/webhooks.service'
+import { SlackService } from '../integrations/slack/slack.service'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
@@ -57,7 +60,80 @@ export class TasksService {
     @Inject(DB_TOKEN) private db: Db,
     private realtime: RealtimeGateway,
     private search: SearchService,
+    private automations: AutomationsService,
+    private webhooks: WebhooksService,
+    private slack: SlackService,
   ) {}
+
+  /**
+   * Best-effort fan-out of a task event to automations + webhooks.
+   * Errors are logged but never propagated — task ops must not break
+   * because a webhook URL is down.
+   */
+  private async fireTaskEvent(
+    eventType: string,
+    workspaceId: string,
+    payload: Record<string, unknown>,
+    triggerCtx: {
+      taskId?: string
+      userId?: string
+      projectId?: string
+      listId?: string
+      oldValue?: string
+      newValue?: string
+      changedField?: string
+    } = {},
+  ) {
+    try {
+      await this.automations.fire(eventType, { workspaceId, ...triggerCtx })
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[automations.fire] ${eventType} failed:`, e)
+    }
+    try {
+      await this.webhooks.fire(workspaceId, eventType, payload)
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[webhooks.fire] ${eventType} failed:`, e)
+    }
+    try {
+      await this.slack.notify(workspaceId, eventType, this.formatSlackMessage(eventType, payload))
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[slack.notify] ${eventType} failed:`, e)
+    }
+  }
+
+  private formatSlackMessage(eventType: string, payload: Record<string, unknown>): string {
+    const task = (payload.task as { title?: string; id?: string } | undefined) ?? null
+    const title = task?.title ?? 'a task'
+    switch (eventType) {
+      case 'task.created':
+        return `:sparkles: New task created: *${title}*`
+      case 'task.status_changed':
+        return `:arrows_counterclockwise: *${title}* → ${payload.to ?? '?'}`
+      case 'task.assigned':
+        return `:bust_in_silhouette: *${title}* was assigned to a teammate`
+      case 'task.deleted':
+        return `:wastebasket: Task archived: *${title}*`
+      default:
+        return `:bell: ${eventType} — ${title}`
+    }
+  }
+
+  private async resolveWorkspaceForList(listId: string): Promise<{
+    workspaceId: string
+    projectId: string
+  } | null> {
+    const [row] = await this.db
+      .select({ workspaceId: spaces.workspaceId, projectId: lists.projectId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    return row ?? null
+  }
 
   private async indexTaskInSearch(taskId: string) {
     try {
@@ -166,6 +242,18 @@ export class TasksService {
     const hydrated = await this.getTask(task.id)
     this.realtime.emitToList(data.listId, { type: 'task.created', listId: data.listId, task: hydrated })
     void this.indexTaskInSearch(task.id)
+
+    // Fire automations + webhooks (best effort)
+    const ctx = await this.resolveWorkspaceForList(data.listId)
+    if (ctx) {
+      void this.fireTaskEvent('task.created', ctx.workspaceId, { task: hydrated }, {
+        taskId: task.id,
+        userId: data.createdById,
+        projectId: ctx.projectId,
+        listId: data.listId,
+      })
+    }
+
     return hydrated
   }
 
@@ -325,6 +413,35 @@ export class TasksService {
       patch: set as Record<string, unknown>,
     })
     if ('title' in patch || 'description' in patch) void this.indexTaskInSearch(taskId)
+
+    // Fire automation/webhook events
+    const ctx = await this.resolveWorkspaceForList(after.listId)
+    if (ctx) {
+      const hydrated = await this.getTask(taskId)
+      if (patch.status && patch.status !== before.status) {
+        void this.fireTaskEvent('task.status_changed', ctx.workspaceId, {
+          task: hydrated,
+          from: before.status,
+          to: patch.status,
+        }, {
+          taskId,
+          userId: actorId,
+          projectId: ctx.projectId,
+          listId: after.listId,
+          changedField: 'status',
+          oldValue: before.status,
+          newValue: patch.status,
+        })
+      }
+      void this.fireTaskEvent('task.updated', ctx.workspaceId, { task: hydrated, patch }, {
+        taskId,
+        userId: actorId,
+        projectId: ctx.projectId,
+        listId: after.listId,
+      })
+      return hydrated
+    }
+
     return this.getTask(taskId)
   }
 
@@ -334,6 +451,17 @@ export class TasksService {
     await this.db.update(tasks).set({ isArchived: true, updatedAt: new Date() }).where(eq(tasks.id, taskId))
     await this.logActivity({ taskId, actorId, action: 'archived' })
     this.realtime.emitToList(before.listId, { type: 'task.deleted', listId: before.listId, taskId })
+
+    // Fire delete event
+    const ctx = await this.resolveWorkspaceForList(before.listId)
+    if (ctx) {
+      void this.fireTaskEvent('task.deleted', ctx.workspaceId, { taskId, listId: before.listId }, {
+        taskId,
+        userId: actorId,
+        projectId: ctx.projectId,
+        listId: before.listId,
+      })
+    }
     return { ok: true }
   }
 
@@ -360,6 +488,21 @@ export class TasksService {
     await this.db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
     await this.db.insert(taskWatchers).values({ taskId, userId }).onConflictDoNothing()
     await this.logActivity({ taskId, actorId, action: 'assigned', meta: { userId } })
+
+    const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
+    if (taskRow) {
+      const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+      if (ctx) {
+        void this.fireTaskEvent('task.assigned', ctx.workspaceId, { taskId, assigneeId: userId }, {
+          taskId,
+          userId: actorId,
+          projectId: ctx.projectId,
+          listId: taskRow.listId,
+          newValue: userId,
+        })
+      }
+    }
+
     return this.getTask(taskId)
   }
 

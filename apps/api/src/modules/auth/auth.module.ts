@@ -8,6 +8,8 @@ import { JwtStrategy } from './strategies/jwt.strategy'
 import { LocalStrategy } from './strategies/local.strategy'
 import { UsersModule } from '../users/users.module'
 import { WorkspacesModule } from '../workspaces/workspaces.module'
+import { WorkspaceMemberGuard } from './guards/workspace-member.guard'
+import { WorkspaceAdminGuard } from './guards/workspace-admin.guard'
 
 @Module({
   imports: [
@@ -23,7 +25,13 @@ import { WorkspacesModule } from '../workspaces/workspaces.module'
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LocalStrategy],
-  exports: [AuthService],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    LocalStrategy,
+    WorkspaceMemberGuard,
+    WorkspaceAdminGuard,
+  ],
+  exports: [AuthService, WorkspaceMemberGuard, WorkspaceAdminGuard],
 })
 export class AuthModule {}

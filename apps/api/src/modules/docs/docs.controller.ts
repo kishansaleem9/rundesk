@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { DocsService } from './docs.service'
 import type { CurrentUserPayload } from '../tasks/types'
@@ -13,6 +14,7 @@ export class DocsController {
   constructor(private docs: DocsService) {}
 
   @Get('workspaces/:workspaceId/docs')
+  @UseGuards(WorkspaceMemberGuard)
   list(
     @Param('workspaceId') workspaceId: string,
     @Query('spaceId') spaceId?: string,
@@ -25,6 +27,7 @@ export class DocsController {
   }
 
   @Post('workspaces/:workspaceId/docs')
+  @UseGuards(WorkspaceMemberGuard)
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,

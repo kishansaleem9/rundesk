@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ChatService } from './chat.service'
 import type { CurrentUserPayload } from '../tasks/types'
@@ -13,12 +14,14 @@ export class ChatController {
   constructor(private chat: ChatService) {}
 
   @Get('workspaces/:workspaceId/chat/channels')
+  @UseGuards(WorkspaceMemberGuard)
   async list(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
     await this.chat.ensureGeneralChannel(workspaceId, user.id)
     return this.chat.listChannels(workspaceId, user.id)
   }
 
   @Post('workspaces/:workspaceId/chat/channels')
+  @UseGuards(WorkspaceMemberGuard)
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,

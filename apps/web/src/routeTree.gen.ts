@@ -25,6 +25,7 @@ import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspa
 import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$workspaceId.settings'
 import { Route as AppWorkspaceIdReportsRouteImport } from './routes/app.$workspaceId.reports'
 import { Route as AppWorkspaceIdInboxRouteImport } from './routes/app.$workspaceId.inbox'
+import { Route as AppWorkspaceIdImportRouteImport } from './routes/app.$workspaceId.import'
 import { Route as AppWorkspaceIdGoalsRouteImport } from './routes/app.$workspaceId.goals'
 import { Route as AppWorkspaceIdFormsRouteImport } from './routes/app.$workspaceId.forms'
 import { Route as AppWorkspaceIdDocsRouteImport } from './routes/app.$workspaceId.docs'
@@ -117,6 +118,11 @@ const AppWorkspaceIdInboxRoute = AppWorkspaceIdInboxRouteImport.update({
   path: '/inbox',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
+const AppWorkspaceIdImportRoute = AppWorkspaceIdImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any)
 const AppWorkspaceIdGoalsRoute = AppWorkspaceIdGoalsRouteImport.update({
   id: '/goals',
   path: '/goals',
@@ -195,6 +201,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
+  '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
@@ -223,6 +230,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
+  '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
@@ -253,6 +261,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
+  '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
@@ -284,6 +293,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
+    | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
@@ -312,6 +322,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
+    | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
@@ -341,6 +352,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
+    | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
@@ -475,6 +487,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdInboxRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/import': {
+      id: '/app/$workspaceId/import'
+      path: '/import'
+      fullPath: '/app/$workspaceId/import'
+      preLoaderRoute: typeof AppWorkspaceIdImportRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/goals': {
       id: '/app/$workspaceId/goals'
       path: '/goals'
@@ -604,6 +623,7 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdDocsRoute: typeof AppWorkspaceIdDocsRoute
   AppWorkspaceIdFormsRoute: typeof AppWorkspaceIdFormsRouteWithChildren
   AppWorkspaceIdGoalsRoute: typeof AppWorkspaceIdGoalsRoute
+  AppWorkspaceIdImportRoute: typeof AppWorkspaceIdImportRoute
   AppWorkspaceIdInboxRoute: typeof AppWorkspaceIdInboxRoute
   AppWorkspaceIdReportsRoute: typeof AppWorkspaceIdReportsRoute
   AppWorkspaceIdSettingsRoute: typeof AppWorkspaceIdSettingsRoute
@@ -620,6 +640,7 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdDocsRoute: AppWorkspaceIdDocsRoute,
   AppWorkspaceIdFormsRoute: AppWorkspaceIdFormsRouteWithChildren,
   AppWorkspaceIdGoalsRoute: AppWorkspaceIdGoalsRoute,
+  AppWorkspaceIdImportRoute: AppWorkspaceIdImportRoute,
   AppWorkspaceIdInboxRoute: AppWorkspaceIdInboxRoute,
   AppWorkspaceIdReportsRoute: AppWorkspaceIdReportsRoute,
   AppWorkspaceIdSettingsRoute: AppWorkspaceIdSettingsRoute,

@@ -9,7 +9,7 @@ import {
   lists,
   tasks,
   taskAssignees,
-  comments,
+  taskComments,
   goals,
   sprints,
   forms,

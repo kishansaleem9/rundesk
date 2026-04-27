@@ -7,9 +7,12 @@ import { TaskActivityController } from './activity.controller'
 import { TaskDependenciesController } from './dependencies.controller'
 import { TaskTimeEntriesController, TimeEntriesController } from './time-entries.controller'
 import { RealtimeModule } from '../realtime/realtime.module'
+import { AutomationsModule } from '../automations/automations.module'
+import { WebhooksModule } from '../webhooks/webhooks.module'
+import { SlackModule } from '../integrations/slack/slack.module'
 
 @Module({
-  imports: [RealtimeModule],
+  imports: [RealtimeModule, AutomationsModule, WebhooksModule, SlackModule],
   providers: [TasksService],
   controllers: [
     TasksController,

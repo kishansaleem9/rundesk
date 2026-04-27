@@ -132,12 +132,24 @@ export class SecurityService {
     return { ...key, key: raw }
   }
 
-  async revokeApiKey(keyId: string) {
+  private async assertApiKeyOwnership(workspaceId: string, keyId: string) {
+    const [row] = await this.db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.id, keyId), eq(apiKeys.workspaceId, workspaceId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('API key not found')
+    return row
+  }
+
+  async revokeApiKey(workspaceId: string, keyId: string) {
+    await this.assertApiKeyOwnership(workspaceId, keyId)
     await this.db.update(apiKeys).set({ isRevoked: true }).where(eq(apiKeys.id, keyId))
     return { ok: true }
   }
 
-  async deleteApiKey(keyId: string) {
+  async deleteApiKey(workspaceId: string, keyId: string) {
+    await this.assertApiKeyOwnership(workspaceId, keyId)
     await this.db.delete(apiKeys).where(eq(apiKeys.id, keyId))
     return { ok: true }
   }

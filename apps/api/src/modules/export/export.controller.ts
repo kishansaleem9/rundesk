@@ -2,10 +2,11 @@ import { Controller, Get, Param, Res, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ExportService } from './export.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 
 @ApiTags('export')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
 @Controller('workspaces/:workspaceId/export')
 export class ExportController {
   constructor(private readonly svc: ExportService) {}

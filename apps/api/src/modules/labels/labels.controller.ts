@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { LabelsService } from './labels.service'
 
 @ApiTags('labels')
@@ -11,11 +12,13 @@ export class LabelsController {
   constructor(private labels: LabelsService) {}
 
   @Get('workspaces/:workspaceId/labels')
+  @UseGuards(WorkspaceMemberGuard)
   list(@Param('workspaceId') workspaceId: string) {
     return this.labels.list(workspaceId)
   }
 
   @Post('workspaces/:workspaceId/labels')
+  @UseGuards(WorkspaceMemberGuard)
   create(
     @Param('workspaceId') workspaceId: string,
     @Body() body: { name: string; color: string },

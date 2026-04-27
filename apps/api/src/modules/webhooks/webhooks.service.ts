@@ -48,10 +48,22 @@ export class WebhooksService {
     return row
   }
 
+  private async assertOwnership(workspaceId: string, webhookId: string) {
+    const [row] = await this.db
+      .select()
+      .from(webhooks)
+      .where(and(eq(webhooks.id, webhookId), eq(webhooks.workspaceId, workspaceId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('Webhook not found')
+    return row
+  }
+
   async update(
+    workspaceId: string,
     webhookId: string,
     patch: { name?: string; url?: string; events?: string[]; isEnabled?: boolean },
   ) {
+    await this.assertOwnership(workspaceId, webhookId)
     const [row] = await this.db
       .update(webhooks)
       .set({ ...patch, updatedAt: new Date() })
@@ -61,12 +73,14 @@ export class WebhooksService {
     return row
   }
 
-  async delete(webhookId: string) {
+  async delete(workspaceId: string, webhookId: string) {
+    await this.assertOwnership(workspaceId, webhookId)
     await this.db.delete(webhooks).where(eq(webhooks.id, webhookId))
     return { ok: true }
   }
 
-  async listDeliveries(webhookId: string) {
+  async listDeliveries(workspaceId: string, webhookId: string) {
+    await this.assertOwnership(workspaceId, webhookId)
     return this.db
       .select()
       .from(webhookDeliveries)
@@ -147,9 +161,8 @@ export class WebhooksService {
     })
   }
 
-  async testWebhook(webhookId: string) {
-    const [hook] = await this.db.select().from(webhooks).where(eq(webhooks.id, webhookId))
-    if (!hook) throw new NotFoundException('Webhook not found')
+  async testWebhook(workspaceId: string, webhookId: string) {
+    const hook = await this.assertOwnership(workspaceId, webhookId)
     await this.deliver(hook, 'webhook.test', { message: 'Test delivery from Rundesk' })
     return { ok: true }
   }

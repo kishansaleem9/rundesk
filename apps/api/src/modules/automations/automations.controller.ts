@@ -2,11 +2,13 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@n
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AutomationsService } from './automations.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('automations')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
 @Controller('workspaces/:workspaceId/automations')
 export class AutomationsController {
   constructor(private readonly svc: AutomationsService) {}
@@ -18,7 +20,8 @@ export class AutomationsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create an automation rule' })
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Create an automation rule (admin only)' })
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
@@ -33,22 +36,37 @@ export class AutomationsController {
   }
 
   @Get(':automationId')
-  getOne(@Param('automationId') automationId: string) {
-    return this.svc.getOne(automationId)
+  getOne(
+    @Param('workspaceId') workspaceId: string,
+    @Param('automationId') automationId: string,
+  ) {
+    return this.svc.getOne(workspaceId, automationId)
   }
 
   @Patch(':automationId')
-  update(@Param('automationId') automationId: string, @Body() body: any) {
-    return this.svc.update(automationId, body)
+  @UseGuards(WorkspaceAdminGuard)
+  update(
+    @Param('workspaceId') workspaceId: string,
+    @Param('automationId') automationId: string,
+    @Body() body: any,
+  ) {
+    return this.svc.update(workspaceId, automationId, body)
   }
 
   @Delete(':automationId')
-  remove(@Param('automationId') automationId: string) {
-    return this.svc.remove(automationId)
+  @UseGuards(WorkspaceAdminGuard)
+  remove(
+    @Param('workspaceId') workspaceId: string,
+    @Param('automationId') automationId: string,
+  ) {
+    return this.svc.remove(workspaceId, automationId)
   }
 
   @Get(':automationId/runs')
-  listRuns(@Param('automationId') automationId: string) {
-    return this.svc.listRuns(automationId)
+  listRuns(
+    @Param('workspaceId') workspaceId: string,
+    @Param('automationId') automationId: string,
+  ) {
+    return this.svc.listRuns(workspaceId, automationId)
   }
 }
