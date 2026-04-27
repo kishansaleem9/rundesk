@@ -14,6 +14,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
+import { Route as SubmitSlugRouteImport } from './routes/submit.$slug'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppWorkspaceIdRouteImport } from './routes/app.$workspaceId'
@@ -23,11 +24,13 @@ import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspa
 import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$workspaceId.settings'
 import { Route as AppWorkspaceIdInboxRouteImport } from './routes/app.$workspaceId.inbox'
 import { Route as AppWorkspaceIdGoalsRouteImport } from './routes/app.$workspaceId.goals'
+import { Route as AppWorkspaceIdFormsRouteImport } from './routes/app.$workspaceId.forms'
 import { Route as AppWorkspaceIdDocsRouteImport } from './routes/app.$workspaceId.docs'
 import { Route as AppWorkspaceIdDashboardRouteImport } from './routes/app.$workspaceId.dashboard'
 import { Route as AppWorkspaceIdChatRouteImport } from './routes/app.$workspaceId.chat'
 import { Route as AppWorkspaceIdAutomationsRouteImport } from './routes/app.$workspaceId.automations'
 import { Route as AppWorkspaceIdSpaceIdRouteImport } from './routes/app.$workspaceId.$spaceId'
+import { Route as AppWorkspaceIdFormsFormIdRouteImport } from './routes/app.$workspaceId.forms.$formId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdListIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId.$listId'
 
@@ -55,6 +58,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppRoute,
+} as any)
+const SubmitSlugRoute = SubmitSlugRouteImport.update({
+  id: '/submit/$slug',
+  path: '/submit/$slug',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
@@ -101,6 +109,11 @@ const AppWorkspaceIdGoalsRoute = AppWorkspaceIdGoalsRouteImport.update({
   path: '/goals',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
+const AppWorkspaceIdFormsRoute = AppWorkspaceIdFormsRouteImport.update({
+  id: '/forms',
+  path: '/forms',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any)
 const AppWorkspaceIdDocsRoute = AppWorkspaceIdDocsRouteImport.update({
   id: '/docs',
   path: '/docs',
@@ -127,6 +140,12 @@ const AppWorkspaceIdSpaceIdRoute = AppWorkspaceIdSpaceIdRouteImport.update({
   path: '/$spaceId',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
+const AppWorkspaceIdFormsFormIdRoute =
+  AppWorkspaceIdFormsFormIdRouteImport.update({
+    id: '/$formId',
+    path: '/$formId',
+    getParentRoute: () => AppWorkspaceIdFormsRoute,
+  } as any)
 const AppWorkspaceIdSpaceIdProjectIdRoute =
   AppWorkspaceIdSpaceIdProjectIdRouteImport.update({
     id: '/$projectId',
@@ -148,12 +167,14 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
+  '/submit/$slug': typeof SubmitSlugRoute
   '/app/': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
+  '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
@@ -161,6 +182,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
+  '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRoutesByTo {
@@ -170,12 +192,14 @@ export interface FileRoutesByTo {
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
+  '/submit/$slug': typeof SubmitSlugRoute
   '/app': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
+  '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
@@ -183,6 +207,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
+  '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRoutesById {
@@ -194,12 +219,14 @@ export interface FileRoutesById {
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
+  '/submit/$slug': typeof SubmitSlugRoute
   '/app/': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
+  '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
@@ -207,6 +234,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
+  '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRouteTypes {
@@ -219,12 +247,14 @@ export interface FileRouteTypes {
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
+    | '/submit/$slug'
     | '/app/'
     | '/app/$workspaceId/$spaceId'
     | '/app/$workspaceId/automations'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/settings'
@@ -232,6 +262,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/time'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
+    | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -241,12 +272,14 @@ export interface FileRouteTypes {
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
+    | '/submit/$slug'
     | '/app'
     | '/app/$workspaceId/$spaceId'
     | '/app/$workspaceId/automations'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/settings'
@@ -254,6 +287,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/time'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
+    | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   id:
     | '__root__'
@@ -264,12 +298,14 @@ export interface FileRouteTypes {
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
+    | '/submit/$slug'
     | '/app/'
     | '/app/$workspaceId/$spaceId'
     | '/app/$workspaceId/automations'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/settings'
@@ -277,6 +313,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/time'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
+    | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   fileRoutesById: FileRoutesById
 }
@@ -285,6 +322,7 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  SubmitSlugRoute: typeof SubmitSlugRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -323,6 +361,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/'
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/submit/$slug': {
+      id: '/submit/$slug'
+      path: '/submit/$slug'
+      fullPath: '/submit/$slug'
+      preLoaderRoute: typeof SubmitSlugRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/app/profile': {
       id: '/app/profile'
@@ -387,6 +432,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdGoalsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/forms': {
+      id: '/app/$workspaceId/forms'
+      path: '/forms'
+      fullPath: '/app/$workspaceId/forms'
+      preLoaderRoute: typeof AppWorkspaceIdFormsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/docs': {
       id: '/app/$workspaceId/docs'
       path: '/docs'
@@ -421,6 +473,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/$workspaceId/$spaceId'
       preLoaderRoute: typeof AppWorkspaceIdSpaceIdRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/forms/$formId': {
+      id: '/app/$workspaceId/forms/$formId'
+      path: '/$formId'
+      fullPath: '/app/$workspaceId/forms/$formId'
+      preLoaderRoute: typeof AppWorkspaceIdFormsFormIdRouteImport
+      parentRoute: typeof AppWorkspaceIdFormsRoute
     }
     '/app/$workspaceId/$spaceId/$projectId': {
       id: '/app/$workspaceId/$spaceId/$projectId'
@@ -468,12 +527,24 @@ const AppWorkspaceIdSpaceIdRouteWithChildren =
     AppWorkspaceIdSpaceIdRouteChildren,
   )
 
+interface AppWorkspaceIdFormsRouteChildren {
+  AppWorkspaceIdFormsFormIdRoute: typeof AppWorkspaceIdFormsFormIdRoute
+}
+
+const AppWorkspaceIdFormsRouteChildren: AppWorkspaceIdFormsRouteChildren = {
+  AppWorkspaceIdFormsFormIdRoute: AppWorkspaceIdFormsFormIdRoute,
+}
+
+const AppWorkspaceIdFormsRouteWithChildren =
+  AppWorkspaceIdFormsRoute._addFileChildren(AppWorkspaceIdFormsRouteChildren)
+
 interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdSpaceIdRoute: typeof AppWorkspaceIdSpaceIdRouteWithChildren
   AppWorkspaceIdAutomationsRoute: typeof AppWorkspaceIdAutomationsRoute
   AppWorkspaceIdChatRoute: typeof AppWorkspaceIdChatRoute
   AppWorkspaceIdDashboardRoute: typeof AppWorkspaceIdDashboardRoute
   AppWorkspaceIdDocsRoute: typeof AppWorkspaceIdDocsRoute
+  AppWorkspaceIdFormsRoute: typeof AppWorkspaceIdFormsRouteWithChildren
   AppWorkspaceIdGoalsRoute: typeof AppWorkspaceIdGoalsRoute
   AppWorkspaceIdInboxRoute: typeof AppWorkspaceIdInboxRoute
   AppWorkspaceIdSettingsRoute: typeof AppWorkspaceIdSettingsRoute
@@ -487,6 +558,7 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdChatRoute: AppWorkspaceIdChatRoute,
   AppWorkspaceIdDashboardRoute: AppWorkspaceIdDashboardRoute,
   AppWorkspaceIdDocsRoute: AppWorkspaceIdDocsRoute,
+  AppWorkspaceIdFormsRoute: AppWorkspaceIdFormsRouteWithChildren,
   AppWorkspaceIdGoalsRoute: AppWorkspaceIdGoalsRoute,
   AppWorkspaceIdInboxRoute: AppWorkspaceIdInboxRoute,
   AppWorkspaceIdSettingsRoute: AppWorkspaceIdSettingsRoute,
@@ -531,6 +603,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  SubmitSlugRoute: SubmitSlugRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

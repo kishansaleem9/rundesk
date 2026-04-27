@@ -76,28 +76,41 @@ async function fetchWithAuth(path: string, init: RequestInit, token: string | nu
   })
 }
 
+type ApiOptions = Omit<RequestInit, 'body'> & {
+  body?: unknown
+  skipAuth?: boolean
+}
+
 export async function api<T = unknown>(
   path: string,
-  init: RequestInit = {},
+  options: ApiOptions = {},
 ): Promise<T> {
-  const token = useAuthStore.getState().accessToken
-  let res = await fetchWithAuth(path, init, token)
+  const { skipAuth, body, ...init } = options
 
-  if (res.status === 401 && useAuthStore.getState().refreshToken && !path.startsWith('/auth/')) {
+  // Serialize body — accept pre-stringified strings (legacy callers) or plain objects
+  const rawInit: RequestInit = { ...init }
+  if (body !== undefined) {
+    rawInit.body = typeof body === 'string' ? body : JSON.stringify(body)
+  }
+
+  const token = skipAuth ? null : useAuthStore.getState().accessToken
+  let res = await fetchWithAuth(path, rawInit, token)
+
+  if (!skipAuth && res.status === 401 && useAuthStore.getState().refreshToken && !path.startsWith('/auth/')) {
     const newToken = await ensureFreshToken()
     if (newToken) {
-      res = await fetchWithAuth(path, init, newToken)
+      res = await fetchWithAuth(path, rawInit, newToken)
     } else {
       useAuthStore.getState().clear()
     }
   }
 
   const text = await res.text()
-  const body: Envelope<T> = text ? JSON.parse(text) : { data: null, error: null }
+  const parsed: Envelope<T> = text ? JSON.parse(text) : { data: null, error: null }
 
-  if (!res.ok || body.error) {
-    const err = body.error ?? { status: res.status, message: res.statusText }
+  if (!res.ok || parsed.error) {
+    const err = parsed.error ?? { status: res.status, message: res.statusText }
     throw new ApiError(err.status, err.message, err.details)
   }
-  return body.data as T
+  return parsed.data as T
 }

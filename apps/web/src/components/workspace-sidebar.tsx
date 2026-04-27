@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   Shield,
   MessageSquare,
+  ClipboardList,
 } from 'lucide-react'
 import { Button, Input, LogoMark, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
@@ -146,6 +147,7 @@ function PinnedLinks({ workspaceId }: { workspaceId?: string }) {
     { label: 'Goals', icon: Target, to: '/app/$workspaceId/goals' as const },
     { label: 'Sprints', icon: Sparkles, to: '/app/$workspaceId/sprints' as const },
     { label: 'Time', icon: Clock, to: '/app/$workspaceId/time' as const },
+    { label: 'Forms', icon: ClipboardList, to: '/app/$workspaceId/forms' as const },
     { label: 'Automations', icon: Zap, to: '/app/$workspaceId/automations' as const },
   ]
 
