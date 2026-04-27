@@ -148,6 +148,7 @@ function PinnedLinks({ workspaceId }: { workspaceId?: string }) {
     { label: 'Sprints', icon: Sparkles, to: '/app/$workspaceId/sprints' as const },
     { label: 'Time', icon: Clock, to: '/app/$workspaceId/time' as const },
     { label: 'Forms', icon: ClipboardList, to: '/app/$workspaceId/forms' as const },
+    { label: 'AI', icon: Sparkles, to: '/app/$workspaceId/ai' as const },
     { label: 'Automations', icon: Zap, to: '/app/$workspaceId/automations' as const },
   ]
 

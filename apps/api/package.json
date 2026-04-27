@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "@fastify/static": "^8.0.1",
     "@nestjs/bullmq": "^11.0.2",
     "@nestjs/common": "^11.1.0",
