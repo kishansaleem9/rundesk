@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 
 export const Route = createFileRoute('/app/$workspaceId/settings')({
@@ -48,27 +48,38 @@ function SettingsPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <header className="px-6 py-4 border-b border-border bg-card">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-        <h1 className="font-display text-2xl font-semibold text-brand-900">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
+      <header className="px-6 py-5 border-b border-border/40">
+        <div className="flex items-center gap-3 mb-1">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
+            <SettingsIcon className="h-4 w-4" />
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+              Workspace
+            </div>
+            <h1 className="font-display text-2xl font-semibold leading-tight">Settings</h1>
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground mt-0.5 max-w-2xl">
           Manage your workspace name, members, integrations, and security policies.
         </p>
       </header>
 
       <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-4xl mx-auto grid grid-cols-[200px_1fr] gap-8">
-          <nav className="space-y-1">
+        <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8">
+          <nav className="space-y-0.5">
             {TABS.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 className={cn(
-                  'w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
-                  tab === t.id ? 'bg-brand-200/50 text-brand-900 font-medium' : 'hover:bg-surface-50 text-muted-foreground',
+                  'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all',
+                  tab === t.id
+                    ? 'bg-accent/15 text-foreground font-medium [&>svg]:text-accent'
+                    : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
                 )}
               >
-                <t.icon className="h-4 w-4" />
+                <t.icon className="h-4 w-4 shrink-0" />
                 {t.label}
               </button>
             ))}
@@ -243,7 +254,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
         <ul className="divide-y divide-border">
           {(membersQuery.data ?? []).map((m) => (
             <li key={m.userId} className="px-4 py-3 flex items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-brand-300 text-brand-900 flex items-center justify-center text-sm font-semibold">
+              <div className="h-9 w-9 rounded-full bg-brand-300 text-foreground flex items-center justify-center text-sm font-semibold">
                 {m.displayName.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">

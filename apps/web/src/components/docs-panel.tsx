@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input } from '@rundesk/ui'
+import { Plus } from 'lucide-react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -93,72 +94,104 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   })
 
   return (
-    <Card className="p-4 h-[520px] flex gap-4">
-      <div className="w-64 border-r border-border pr-3 space-y-2 overflow-auto">
-        <div className="font-semibold">Docs</div>
-        {docsQuery.data?.map((doc) => (
-          <button
-            key={doc.id}
-            className={`w-full text-left rounded px-2 py-1 text-sm ${doc.id === selectedDocId ? 'bg-muted font-medium' : 'hover:bg-muted'}`}
-            onClick={() => setSelectedDocId(doc.id)}
-          >
-            {doc.title}
-          </button>
-        ))}
-        <div className="pt-2 space-y-2">
+    <Card variant="glass" className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-0 h-[640px] overflow-hidden p-0">
+      {/* Sidebar */}
+      <div className="border-b md:border-b-0 md:border-r border-border/60 bg-card/30 flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Pages
+          </span>
+        </div>
+        <div className="flex-1 overflow-auto px-2 py-2 space-y-0.5">
+          {docsQuery.data?.length === 0 && (
+            <p className="px-2 py-3 text-xs text-muted-foreground">
+              No docs yet — create your first page below.
+            </p>
+          )}
+          {docsQuery.data?.map((doc) => (
+            <button
+              key={doc.id}
+              className={`w-full truncate text-left rounded-md px-2 py-1.5 text-sm transition-colors ${
+                doc.id === selectedDocId
+                  ? 'bg-accent/15 text-foreground font-medium'
+                  : 'hover:bg-card/60 text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => setSelectedDocId(doc.id)}
+            >
+              {doc.title}
+            </button>
+          ))}
+        </div>
+        <div className="border-t border-border/60 p-2 space-y-2">
           <Input
             value={newDocName}
             onChange={(e) => setNewDocName(e.target.value)}
-            placeholder="New doc name"
+            placeholder="New page name"
+            className="h-9"
           />
-          <Button size="sm" className="w-full" onClick={() => createDoc.mutate()}>
-            Add doc
+          <Button size="sm" variant="outline" className="w-full" onClick={() => createDoc.mutate()}>
+            <Plus className="h-3.5 w-3.5" /> Add page
           </Button>
         </div>
       </div>
-      <div className="flex-1 flex flex-col">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold">{activeDoc?.title ?? 'Select a doc'}</h3>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => editor?.chain().focus().toggleBold().run()}
-              disabled={!editor}
-            >
-              Bold
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => editor?.chain().focus().toggleItalic().run()}
-              disabled={!editor}
-            >
-              Italic
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
-              disabled={!editor}
-            >
-              H2
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => editor?.chain().focus().toggleBulletList().run()}
-              disabled={!editor}
-            >
-              List
-            </Button>
-            <Button size="sm" onClick={() => saveDoc.mutate()} disabled={!activeDoc || saveDoc.isPending}>
-              Save
-            </Button>
-          </div>
+
+      {/* Editor pane */}
+      <div className="flex flex-col min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-border/60">
+          <h3 className="font-display text-base font-semibold truncate">
+            {activeDoc?.title ?? 'Select a doc'}
+          </h3>
+          {activeDoc && (
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => editor?.chain().focus().toggleBold().run()}
+                disabled={!editor}
+              >
+                <strong>B</strong>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => editor?.chain().focus().toggleItalic().run()}
+                disabled={!editor}
+              >
+                <em>I</em>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
+                disabled={!editor}
+              >
+                H2
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => editor?.chain().focus().toggleBulletList().run()}
+                disabled={!editor}
+              >
+                List
+              </Button>
+              <Button
+                size="sm"
+                variant="gradient"
+                onClick={() => saveDoc.mutate()}
+                disabled={saveDoc.isPending}
+              >
+                {saveDoc.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          )}
         </div>
-        <div className="flex-1 overflow-auto rounded border border-border p-3 bg-background">
-          {activeDoc ? <EditorContent editor={editor} /> : <p className="text-sm text-muted-foreground">No doc selected</p>}
+        <div className="flex-1 overflow-auto px-6 py-5 prose prose-invert prose-sm max-w-none">
+          {activeDoc ? (
+            <EditorContent editor={editor} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Pick a page on the left to start editing.</p>
+          )}
         </div>
       </div>
     </Card>

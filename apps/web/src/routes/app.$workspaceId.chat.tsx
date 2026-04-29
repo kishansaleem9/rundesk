@@ -135,7 +135,7 @@ function ChatPage() {
     <div className="h-full flex">
       <aside className="w-60 border-r border-border bg-surface-100 flex flex-col">
         <div className="p-3 border-b border-border">
-          <h2 className="font-display text-lg font-semibold text-brand-900">Chat</h2>
+          <h2 className="font-display text-lg font-semibold text-foreground">Chat</h2>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
           <section>
@@ -187,8 +187,8 @@ function ChatPage() {
                   className={cn(
                     'w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-left transition-colors',
                     selectedId === c.id
-                      ? 'bg-brand-200/50 text-brand-900 font-medium'
-                      : 'text-brand-900/70 hover:bg-surface-50',
+                      ? 'bg-accent/15 text-foreground font-medium'
+                      : 'text-foreground/70 hover:bg-surface-50',
                   )}
                 >
                   {c.isPrivate ? <Lock className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
@@ -227,7 +227,7 @@ function ChatPage() {
           {messages.length === 0 ? (
             <Card className="p-6 text-center border-dashed mx-auto max-w-md">
               <Hash className="h-8 w-8 text-brand-500 mx-auto mb-2" />
-              <h3 className="font-display text-lg font-semibold text-brand-900 mb-1">
+              <h3 className="font-display text-lg font-semibold text-foreground mb-1">
                 #{selectedChannel?.name ?? 'channel'}
               </h3>
               <p className="text-sm text-muted-foreground">
@@ -246,7 +246,7 @@ function ChatPage() {
                   <div key={m.id} className="flex gap-2 group">
                     <div className="w-8 shrink-0">
                       {showAuthor && (
-                        <div className="h-8 w-8 rounded-full bg-brand-300 text-brand-900 text-xs font-bold flex items-center justify-center">
+                        <div className="h-8 w-8 rounded-full bg-brand-300 text-foreground text-xs font-bold flex items-center justify-center">
                           {(m.authorName ?? '?')[0]?.toUpperCase()}
                         </div>
                       )}
@@ -254,7 +254,7 @@ function ChatPage() {
                     <div className="flex-1 min-w-0">
                       {showAuthor && (
                         <div className="flex items-baseline gap-2 mb-0.5">
-                          <span className={cn('text-sm font-semibold', mine ? 'text-brand-700' : 'text-brand-900')}>
+                          <span className={cn('text-sm font-semibold', mine ? 'text-accent' : 'text-foreground')}>
                             {m.authorName ?? 'Unknown'}
                           </span>
                           <span className="text-[10px] text-muted-foreground tabular-nums">

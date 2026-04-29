@@ -108,9 +108,11 @@ type TabKey =
   | 'comments'
   | 'activity'
   | 'time'
+  | 'fields'
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'overview', label: 'Overview' },
+  { key: 'fields', label: 'Fields' },
   { key: 'subtasks', label: 'Subtasks' },
   { key: 'checklists', label: 'Checklists' },
   { key: 'watchers', label: 'Watchers' },
@@ -147,6 +149,11 @@ function EmptyState({ title, hint }: { title: string; hint?: string }) {
       {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   )
+}
+
+/** Build a short, human-readable task ref from a UUID — first 4 hex chars uppercased. */
+function shortId(uuid: string): string {
+  return uuid.replace(/[^a-f0-9]/gi, '').slice(0, 4).toUpperCase()
 }
 
 function priorityColor(p: TaskPriority | undefined): string {
@@ -190,10 +197,12 @@ export function TaskDetailSheet({
   taskId,
   open,
   onOpenChange,
+  workspaceId,
 }: {
   taskId: string | null
   open: boolean
   onOpenChange: (next: boolean) => void
+  workspaceId?: string
 }) {
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
 
@@ -211,14 +220,37 @@ export function TaskDetailSheet({
           <p className="text-sm text-muted-foreground">Loading task…</p>
         ) : detailQuery.data ? (
           <>
+            {/* Cover band — gradient placeholder; replace with real image when available */}
+            <div
+              className="-mx-6 -mt-6 mb-4 h-24 bg-brand-gradient relative overflow-hidden rounded-t-md"
+              aria-hidden
+            >
+              <div className="absolute inset-0 bg-grid-dim opacity-40" />
+              <div className="absolute -bottom-12 -right-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+            </div>
+
             <SheetHeader className="pb-3">
-              <SheetTitle className="text-xl">{detailQuery.data.title}</SheetTitle>
+              <div className="flex items-center gap-2 mb-1">
+                <Badge variant="soft" className="font-mono text-[10px] tracking-wider uppercase">
+                  RD-{shortId(detailQuery.data.id)}
+                </Badge>
+                {detailQuery.data.dueDate && (
+                  <Badge variant="info" className="text-[10px]">
+                    Due {new Date(detailQuery.data.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </Badge>
+                )}
+              </div>
+              <SheetTitle className="text-2xl font-display leading-tight">
+                {detailQuery.data.title}
+              </SheetTitle>
               <SheetDescription className="sr-only">Task details</SheetDescription>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <Badge variant="secondary">{detailQuery.data.status}</Badge>
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <Badge variant="secondary" className="capitalize">
+                  {detailQuery.data.status.replace('_', ' ')}
+                </Badge>
                 <Badge
-                  variant="outline"
-                  className={cn('capitalize', priorityColor(detailQuery.data.priority))}
+                  variant={detailQuery.data.priority as 'urgent' | 'high' | 'normal' | 'low'}
+                  className="capitalize"
                 >
                   {detailQuery.data.priority}
                 </Badge>
@@ -236,7 +268,7 @@ export function TaskDetailSheet({
             </SheetHeader>
 
             {/* Tab strip */}
-            <div className="flex gap-4 overflow-x-auto border-b border-border -mx-6 px-6">
+            <div className="flex gap-4 overflow-x-auto scrollbar-none border-b border-border/60 -mx-6 px-6">
               {TABS.map((tab) => {
                 const isActive = activeTab === tab.key
                 return (
@@ -247,7 +279,7 @@ export function TaskDetailSheet({
                     className={cn(
                       'whitespace-nowrap py-2.5 text-sm transition-colors',
                       isActive
-                        ? 'border-b-2 border-brand-700 text-brand-900 font-medium -mb-px'
+                        ? 'border-b-2 border-accent text-foreground font-medium -mb-px'
                         : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
@@ -259,6 +291,9 @@ export function TaskDetailSheet({
 
             <div className="pt-4">
               {activeTab === 'overview' && <OverviewPanel detail={detailQuery.data} />}
+              {activeTab === 'fields' && (
+                <CustomFieldsPanel taskId={detailQuery.data.id} workspaceId={workspaceId} />
+              )}
               {activeTab === 'subtasks' && (
                 <SubtasksPanel taskId={detailQuery.data.id} inline={detailQuery.data.subtasks ?? []} />
               )}
@@ -617,7 +652,7 @@ function WatchersPanel({ taskId, inline }: { taskId: string; inline: Watcher[] }
         <ul className="divide-y divide-border rounded-md border border-border">
           {inline.map((w) => (
             <li key={w.userId} className="flex items-center gap-3 px-3 py-2">
-              <div className="h-7 w-7 rounded-full bg-brand-100 text-brand-900 flex items-center justify-center text-xs font-medium">
+              <div className="h-7 w-7 rounded-full bg-brand-100 text-foreground flex items-center justify-center text-xs font-medium">
                 {(w.user?.displayName ?? w.user?.email ?? '?').slice(0, 1).toUpperCase()}
               </div>
               <div className="min-w-0">
@@ -796,7 +831,7 @@ function AttachmentsPanel({
               key={a.id}
               className="flex items-center gap-3 rounded-md border border-border p-3 hover:bg-muted/40 transition-colors"
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded bg-brand-100 text-brand-900 text-xs font-medium">
+              <div className="flex h-10 w-10 items-center justify-center rounded bg-brand-100 text-foreground text-xs font-medium">
                 {(a.mimeType ?? a.fileName.split('.').pop() ?? 'FILE').slice(0, 4).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
@@ -1076,4 +1111,178 @@ function TimePanel({ taskId }: { taskId: string }) {
       )}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Custom fields
+// ---------------------------------------------------------------------------
+
+type CustomFieldDef = {
+  id: string
+  projectId: string
+  name: string
+  type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
+  isRequired: boolean
+  options: Array<{ label: string; value: string; color?: string }> | null
+}
+
+type CustomFieldRow = {
+  definition: CustomFieldDef
+  value: string | number | boolean | null
+}
+
+function CustomFieldsPanel({
+  taskId,
+  workspaceId,
+}: {
+  taskId: string
+  workspaceId?: string
+}) {
+  if (!workspaceId) {
+    return <NotWiredNote>Custom fields require workspace context.</NotWiredNote>
+  }
+  return <CustomFieldsPanelInner taskId={taskId} workspaceId={workspaceId} />
+}
+
+function CustomFieldsPanelInner({
+  taskId,
+  workspaceId,
+}: {
+  taskId: string
+  workspaceId: string
+}) {
+  const qc = useQueryClient()
+
+  const fieldsQuery = useQuery({
+    queryKey: ['custom-fields', workspaceId, taskId],
+    queryFn: () =>
+      api<CustomFieldRow[]>(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields`),
+  })
+
+  const setValue = useMutation({
+    mutationFn: ({ fieldId, value }: { fieldId: string; value: string | number | boolean | null }) =>
+      api(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${fieldId}`, {
+        method: 'PUT',
+        body: { value },
+      }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['custom-fields', workspaceId, taskId] }),
+  })
+
+  if (fieldsQuery.isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading custom fields…</p>
+  }
+
+  const fields = fieldsQuery.data ?? []
+  if (fields.length === 0) {
+    return (
+      <EmptyState
+        title="No custom fields yet"
+        hint="Add fields at the project level — they'll appear here for every task."
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {fields.map(({ definition, value }) => (
+        <div key={definition.id}>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">
+            {definition.name}
+            {definition.isRequired && <span className="text-destructive">*</span>}
+            <span className="ml-auto text-[10px] opacity-70">{definition.type}</span>
+          </div>
+          <CustomFieldEditor
+            definition={definition}
+            value={value}
+            disabled={setValue.isPending}
+            onCommit={(next) => setValue.mutate({ fieldId: definition.id, value: next })}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CustomFieldEditor({
+  definition,
+  value,
+  disabled,
+  onCommit,
+}: {
+  definition: CustomFieldDef
+  value: string | number | boolean | null
+  disabled?: boolean
+  onCommit: (next: string | number | boolean | null) => void
+}) {
+  const [draft, setDraft] = useState<string>(() => {
+    if (value == null) return ''
+    if (typeof value === 'boolean') return value ? 'true' : 'false'
+    return String(value)
+  })
+
+  switch (definition.type) {
+    case 'text':
+    case 'url':
+      return (
+        <Input
+          value={draft}
+          disabled={disabled}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => onCommit(draft.trim() === '' ? null : draft)}
+          placeholder={definition.type === 'url' ? 'https://...' : ''}
+        />
+      )
+    case 'number':
+      return (
+        <Input
+          type="number"
+          value={draft}
+          disabled={disabled}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => onCommit(draft === '' ? null : Number(draft))}
+        />
+      )
+    case 'date':
+      return (
+        <Input
+          type="date"
+          value={typeof value === 'string' ? value.slice(0, 10) : ''}
+          disabled={disabled}
+          onChange={(e) => onCommit(e.target.value || null)}
+        />
+      )
+    case 'checkbox':
+      return (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onCommit(!value)}
+          className={cn(
+            'h-5 w-5 rounded border-2 inline-flex items-center justify-center transition-colors',
+            value ? 'bg-primary border-primary text-primary-foreground' : 'border-border',
+          )}
+        >
+          {value ? '✓' : ''}
+        </button>
+      )
+    case 'dropdown': {
+      const opts = definition.options ?? []
+      return (
+        <select
+          value={typeof value === 'string' ? value : ''}
+          disabled={disabled}
+          onChange={(e) => onCommit(e.target.value || null)}
+          className="text-sm rounded-md border border-input bg-transparent px-2 py-1.5 w-full"
+        >
+          <option value="">—</option>
+          {opts.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )
+    }
+  }
 }

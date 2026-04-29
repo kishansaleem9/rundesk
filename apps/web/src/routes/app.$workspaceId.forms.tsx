@@ -85,7 +85,7 @@ function FormsPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div className="flex items-center gap-2">
-          <FileText className="h-5 w-5 text-brand-700" />
+          <FileText className="h-5 w-5 text-accent" />
           <h1 className="text-lg font-semibold">Forms</h1>
           <span className="text-xs text-muted-foreground ml-1">
             {forms.length} form{forms.length !== 1 ? 's' : ''}
@@ -219,7 +219,7 @@ function FormCard({
         <span
           className={cn(
             'inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium',
-            form.isPublic ? 'bg-brand-200 text-brand-700' : 'bg-surface-100 text-muted-foreground',
+            form.isPublic ? 'bg-brand-200 text-accent' : 'bg-surface-100 text-muted-foreground',
           )}
         >
           {form.isPublic ? 'Public' : 'Internal'}

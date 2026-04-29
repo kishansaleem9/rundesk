@@ -282,7 +282,7 @@ function MessageBubble({ message }: { message: Message }) {
         )}
       >
         {isUser ? (
-          <User className="h-3.5 w-3.5 text-brand-700" />
+          <User className="h-3.5 w-3.5 text-accent" />
         ) : (
           <Bot className="h-3.5 w-3.5 text-white" />
         )}

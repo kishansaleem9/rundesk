@@ -352,7 +352,7 @@ function FeatureFlagsPanel() {
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-8 py-10">
       <header className="space-y-2">
-        <h1 className="font-display text-3xl text-brand-900">Feature flags</h1>
+        <h1 className="font-display text-3xl text-foreground">Feature flags</h1>
         <p className="text-muted-foreground">
           Control every feature across the platform.
         </p>
@@ -405,7 +405,7 @@ function FeatureFlagsPanel() {
             <section key={group.id} className="space-y-4">
               <div className="flex items-end justify-between gap-4 pt-2">
                 <div className="space-y-1">
-                  <h2 className="font-display text-xl font-semibold text-brand-900">
+                  <h2 className="font-display text-xl font-semibold text-foreground">
                     {group.label}
                   </h2>
                   <p className="text-xs text-muted-foreground">
@@ -521,7 +521,7 @@ function DefaultBadge({ defaultEnabled }: { defaultEnabled: boolean }) {
       className={[
         'inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
         defaultEnabled
-          ? 'bg-brand-100 text-brand-900'
+          ? 'bg-brand-100 text-foreground'
           : 'bg-secondary text-muted-foreground',
       ].join(' ')}
     >

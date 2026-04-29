@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
 import type { CurrentUserPayload } from './types'
@@ -21,6 +22,12 @@ import type { CurrentUserPayload } from './types'
 @UseGuards(JwtAuthGuard)
 export class TasksController {
   constructor(private tasks: TasksService) {}
+
+  @Get('workspace/:workspaceId/timeline')
+  @UseGuards(WorkspaceMemberGuard)
+  async getTimeline(@Param('workspaceId') workspaceId: string) {
+    return this.tasks.getTimelineForWorkspace(workspaceId)
+  }
 
   @Get('list/:listId')
   async getByList(

@@ -94,7 +94,7 @@ function ModeTab({
       onClick={() => setMode(value)}
       className={cn(
         'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-        active ? 'bg-brand-200/50 text-brand-900' : 'text-muted-foreground hover:bg-surface-50',
+        active ? 'bg-accent/15 text-foreground' : 'text-muted-foreground hover:bg-surface-50',
       )}
     >
       <Icon className="h-3.5 w-3.5" />

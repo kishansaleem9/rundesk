@@ -18,6 +18,7 @@ import {
   lists,
   projects,
   spaces,
+  workspaces,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -26,6 +27,7 @@ import { SearchService } from '../search/search.service'
 import { AutomationsService } from '../automations/automations.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
+import { NotificationsService } from '../notifications/notifications.service'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
@@ -63,6 +65,7 @@ export class TasksService {
     private automations: AutomationsService,
     private webhooks: WebhooksService,
     private slack: SlackService,
+    private notifications: NotificationsService,
   ) {}
 
   /**
@@ -133,6 +136,19 @@ export class TasksService {
       .where(eq(lists.id, listId))
       .limit(1)
     return row ?? null
+  }
+
+  private async resolveWorkspaceName(workspaceId: string): Promise<string> {
+    const [row] = await this.db
+      .select({ name: workspaces.name })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    return row?.name ?? 'Rundesk'
+  }
+
+  private buildTaskUrl(workspaceId: string, taskId: string): string {
+    return `/app/${workspaceId}/tasks/${taskId}`
   }
 
   private async indexTaskInSearch(taskId: string) {
@@ -255,6 +271,40 @@ export class TasksService {
     }
 
     return hydrated
+  }
+
+  /**
+   * All tasks across the workspace that have a start or due date — used by
+   * the Gantt / timeline view. Returns shape suitable for direct render.
+   */
+  async getTimelineForWorkspace(
+    workspaceId: string,
+    opts: { from?: Date; to?: Date } = {},
+  ) {
+    const rows = await this.db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        startDate: tasks.startDate,
+        dueDate: tasks.dueDate,
+        status: tasks.status,
+        priority: tasks.priority,
+        listId: tasks.listId,
+        listName: lists.name,
+        projectId: lists.projectId,
+        projectName: projects.name,
+        spaceId: projects.spaceId,
+        spaceName: spaces.name,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .orderBy(asc(tasks.startDate), asc(tasks.dueDate))
+
+    // Only return tasks with at least a due date — the rest can't be plotted.
+    return rows.filter((r) => r.startDate || r.dueDate)
   }
 
   async getTasksByList(
@@ -500,6 +550,20 @@ export class TasksService {
           listId: taskRow.listId,
           newValue: userId,
         })
+
+        // Don't notify someone they assigned themselves
+        if (userId !== actorId) {
+          const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+          void this.notifications.create({
+            userId,
+            workspaceId: ctx.workspaceId,
+            actorId,
+            type: 'task_assigned',
+            title: `You were assigned "${taskRow.title}"`,
+            target: { entityType: 'task', entityId: taskId, url: this.buildTaskUrl(ctx.workspaceId, taskId) },
+            emailContext: { taskTitle: taskRow.title, workspaceName },
+          })
+        }
       }
     }
 
@@ -565,7 +629,85 @@ export class TasksService {
       with: { author: true, reactions: true },
     })
     this.realtime.emitToTask(taskId, { type: 'comment.created', taskId, comment: hydrated })
+
+    // Fire comment + mention notifications (best-effort)
+    void this.notifyComment(taskId, authorId, body, mentions ?? [])
+
     return hydrated
+  }
+
+  private async notifyComment(
+    taskId: string,
+    authorId: string,
+    body: string,
+    mentions: Array<{ userId: string }>,
+  ) {
+    try {
+      const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+      if (!taskRow) return
+
+      const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+      if (!ctx) return
+
+      const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+      const taskUrl = this.buildTaskUrl(ctx.workspaceId, taskId)
+      // Trim to 200 chars for the email snippet
+      const commentSnippet = body.replace(/<[^>]+>/g, '').slice(0, 200)
+
+      // Notify watchers (excluding the commenter)
+      const watcherRows = await this.db
+        .select({ userId: taskWatchers.userId })
+        .from(taskWatchers)
+        .where(eq(taskWatchers.taskId, taskId))
+
+      const mentionedIds = new Set(mentions.map((m) => m.userId))
+
+      for (const { userId } of watcherRows) {
+        if (userId === authorId) continue
+
+        if (mentionedIds.has(userId)) {
+          // Mentioned → higher-priority mention notification
+          void this.notifications.create({
+            userId,
+            workspaceId: ctx.workspaceId,
+            actorId: authorId,
+            type: 'task_mentioned',
+            title: `You were mentioned in "${taskRow.title}"`,
+            target: { entityType: 'task', entityId: taskId, url: taskUrl },
+            emailContext: { taskTitle: taskRow.title, workspaceName },
+          })
+        } else {
+          void this.notifications.create({
+            userId,
+            workspaceId: ctx.workspaceId,
+            actorId: authorId,
+            type: 'task_commented',
+            title: `New comment on "${taskRow.title}"`,
+            target: { entityType: 'task', entityId: taskId, url: taskUrl },
+            emailContext: { taskTitle: taskRow.title, workspaceName, commentSnippet },
+          })
+        }
+      }
+
+      // Also notify non-watcher mentioned users (they may not be watching yet)
+      for (const { userId } of mentions) {
+        if (userId === authorId) continue
+        const alreadyNotified = watcherRows.some((w) => w.userId === userId)
+        if (!alreadyNotified) {
+          void this.notifications.create({
+            userId,
+            workspaceId: ctx.workspaceId,
+            actorId: authorId,
+            type: 'task_mentioned',
+            title: `You were mentioned in "${taskRow.title}"`,
+            target: { entityType: 'task', entityId: taskId, url: taskUrl },
+            emailContext: { taskTitle: taskRow.title, workspaceName },
+          })
+        }
+      }
+    } catch {
+      // Best-effort — swallow errors
+    }
   }
 
   async updateComment(commentId: string, authorId: string, body: string) {

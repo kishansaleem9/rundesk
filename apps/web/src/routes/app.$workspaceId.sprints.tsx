@@ -66,7 +66,7 @@ function SprintsPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-            <h1 className="font-display text-2xl font-semibold text-brand-900">Sprints</h1>
+            <h1 className="font-display text-2xl font-semibold text-foreground">Sprints</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               Time-boxed iterations with velocity and burndown tracking.
             </p>
@@ -89,7 +89,7 @@ function SprintsPage() {
 
         {active && (
           <section>
-            <h2 className="font-display text-lg font-semibold text-brand-900 mb-3">Active sprint</h2>
+            <h2 className="font-display text-lg font-semibold text-foreground mb-3">Active sprint</h2>
             <ActiveSprintCard sprint={active} />
           </section>
         )}
@@ -130,11 +130,11 @@ function SprintsPage() {
         )}
 
         <section>
-          <h2 className="font-display text-lg font-semibold text-brand-900 mb-3">All sprints</h2>
+          <h2 className="font-display text-lg font-semibold text-foreground mb-3">All sprints</h2>
           {sprints.length === 0 && !backendMissing ? (
             <Card className="p-10 text-center">
               <Zap className="h-10 w-10 text-brand-500 mx-auto mb-2" />
-              <h3 className="font-display text-lg font-semibold text-brand-900 mb-1">No sprints yet</h3>
+              <h3 className="font-display text-lg font-semibold text-foreground mb-1">No sprints yet</h3>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
                 Create a sprint to time-box your work. Each sprint tracks velocity, burndown, and completion rate.
               </p>
@@ -165,7 +165,7 @@ function ActiveSprintCard({ sprint }: { sprint: Sprint }) {
           <Zap className="h-6 w-6" />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="font-display text-xl font-semibold text-brand-900">{sprint.name}</h3>
+          <h3 className="font-display text-xl font-semibold text-foreground">{sprint.name}</h3>
           {sprint.goal && <p className="text-sm text-muted-foreground mt-0.5">{sprint.goal}</p>}
           <div className="mt-4 grid grid-cols-3 gap-6">
             <Metric label="Points complete" value={`${done} / ${total}`} />
@@ -188,7 +188,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-xs text-muted-foreground uppercase tracking-wider">{label}</div>
-      <div className="font-display text-xl font-semibold text-brand-900 tabular-nums">{value}</div>
+      <div className="font-display text-xl font-semibold text-foreground tabular-nums">{value}</div>
     </div>
   )
 }

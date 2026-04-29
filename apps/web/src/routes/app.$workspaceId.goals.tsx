@@ -71,7 +71,7 @@ function GoalsPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-            <h1 className="font-display text-2xl font-semibold text-brand-900">Goals &amp; OKRs</h1>
+            <h1 className="font-display text-2xl font-semibold text-foreground">Goals &amp; OKRs</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               Align the team around measurable outcomes.
             </p>
@@ -121,14 +121,14 @@ function GoalsPage() {
 
         <section>
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="font-display text-lg font-semibold text-brand-900">Active goals</h2>
+            <h2 className="font-display text-lg font-semibold text-foreground">Active goals</h2>
             <span className="text-xs text-muted-foreground tabular-nums">{goals.length} goals</span>
           </div>
 
           {goals.length === 0 && !backendMissing ? (
             <Card className="p-10 text-center">
               <Target className="h-10 w-10 text-brand-500 mx-auto mb-2" />
-              <h3 className="font-display text-lg font-semibold text-brand-900 mb-1">No goals yet</h3>
+              <h3 className="font-display text-lg font-semibold text-foreground mb-1">No goals yet</h3>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
                 Goals give your team a north star. Each goal tracks progress toward a measurable outcome —
                 a percentage, a number, or simple done/not-done.
@@ -150,14 +150,20 @@ function GoalsPage() {
   )
 }
 
+function clampPct(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(100, n))
+}
+
 function GoalCard({ goal }: { goal: Goal }) {
   const meta = STATUS_META[goal.status]
   const Icon = meta.icon
   return (
     <Card className="p-4 hover:shadow-md transition-shadow">
       <div className="flex items-start gap-3">
-        <div className="h-10 w-10 rounded-lg bg-brand-200/50 flex items-center justify-center shrink-0">
-          <Target className="h-5 w-5 text-brand-700" />
+        <div className="h-10 w-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
+          <Target className="h-5 w-5 text-accent" />
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold truncate">{goal.title}</h3>
@@ -165,14 +171,14 @@ function GoalCard({ goal }: { goal: Goal }) {
             <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{goal.description}</p>
           )}
           <div className="mt-3 flex items-center gap-2">
-            <div className="flex-1 h-1.5 rounded-full bg-surface-100 overflow-hidden">
+            <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
               <div
                 className={cn('h-full transition-all', meta.color)}
-                style={{ width: `${Math.max(0, Math.min(100, goal.progress))}%` }}
+                style={{ width: `${clampPct(goal.progress)}%` }}
               />
             </div>
             <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">
-              {Math.round(goal.progress)}%
+              {Math.round(clampPct(goal.progress))}%
             </span>
           </div>
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">

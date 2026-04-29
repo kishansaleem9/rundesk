@@ -173,13 +173,13 @@ function FormBuilderPage() {
             className={cn(
               'py-2.5 px-4 text-sm font-medium border-b-2 transition-colors capitalize',
               activeTab === tab
-                ? 'border-brand-700 text-brand-700'
+                ? 'border-brand-700 text-accent'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
           >
             {tab}
             {tab === 'submissions' && submissionsQuery.data && (
-              <span className="ml-1.5 text-xs bg-brand-200 text-brand-700 rounded-full px-1.5 py-0.5">
+              <span className="ml-1.5 text-xs bg-brand-200 text-accent rounded-full px-1.5 py-0.5">
                 {submissionsQuery.data.length}
               </span>
             )}
@@ -252,7 +252,7 @@ function FormBuilderPage() {
             ) : (
               <button
                 onClick={() => setAddingField(true)}
-                className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-border rounded-lg text-sm text-muted-foreground hover:border-brand-300 hover:text-brand-700 transition-colors"
+                className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-border rounded-lg text-sm text-muted-foreground hover:border-brand-300 hover:text-accent transition-colors"
               >
                 <Plus className="h-4 w-4" /> Add field
               </button>

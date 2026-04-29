@@ -66,7 +66,7 @@ function TimePage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-            <h1 className="font-display text-2xl font-semibold text-brand-900">Time tracking</h1>
+            <h1 className="font-display text-2xl font-semibold text-foreground">Time tracking</h1>
             <p className="text-sm text-muted-foreground mt-0.5">Log time, build timesheets, invoice billable hours.</p>
           </div>
           <Button variant="outline" size="sm">
@@ -80,7 +80,7 @@ function TimePage() {
               onClick={() => setTab(t)}
               className={cn(
                 'relative px-3 py-2 text-sm font-medium capitalize',
-                tab === t ? 'text-brand-900' : 'text-muted-foreground hover:text-foreground',
+                tab === t ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
               )}
             >
               {t}
@@ -102,7 +102,7 @@ function TimePage() {
             <div className="h-16 w-16 rounded-full bg-brand-700 text-white mx-auto flex items-center justify-center mb-3">
               <Play className="h-7 w-7 ml-1" />
             </div>
-            <div className="font-display text-4xl font-semibold text-brand-900 tabular-nums">00:00:00</div>
+            <div className="font-display text-4xl font-semibold text-foreground tabular-nums">00:00:00</div>
             <p className="text-sm text-muted-foreground mt-2">Start a timer from any task to track time here.</p>
           </Card>
         )}
@@ -141,7 +141,7 @@ function TimePage() {
                 ))}
               </div>
             )}
-            <div className="mt-3 pt-3 border-t border-border grid grid-cols-8 gap-2 text-sm font-semibold text-brand-900">
+            <div className="mt-3 pt-3 border-t border-border grid grid-cols-8 gap-2 text-sm font-semibold text-foreground">
               <div className="col-span-1">Total</div>
               {days.map((d) => {
                 const key = format(d, 'yyyy-MM-dd')
@@ -169,12 +169,12 @@ function TimePage() {
 function StatCard({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
   return (
     <Card className="p-4 flex items-center gap-3">
-      <div className="h-10 w-10 rounded-lg bg-brand-200/50 flex items-center justify-center shrink-0">
-        <Icon className="h-5 w-5 text-brand-700" />
+      <div className="h-10 w-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
+        <Icon className="h-5 w-5 text-accent" />
       </div>
       <div>
         <div className="text-xs text-muted-foreground uppercase tracking-wider">{label}</div>
-        <div className="font-display text-xl font-semibold text-brand-900 tabular-nums">{value}</div>
+        <div className="font-display text-xl font-semibold text-foreground tabular-nums">{value}</div>
       </div>
     </Card>
   )

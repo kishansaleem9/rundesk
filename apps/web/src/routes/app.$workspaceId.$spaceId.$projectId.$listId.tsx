@@ -192,7 +192,7 @@ function ListDetail() {
       <div className="border-b border-border bg-card">
         <div className="px-6 pt-4 pb-0 flex items-end justify-between">
           <div className="flex items-center gap-4 min-w-0">
-            <h1 className="font-display text-2xl font-semibold truncate text-brand-900">Tasks</h1>
+            <h1 className="font-display text-2xl font-semibold truncate text-foreground">Tasks</h1>
             <span className="text-sm text-muted-foreground">{tasks.length} task{tasks.length !== 1 ? 's' : ''}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -213,7 +213,7 @@ function ListDetail() {
               onClick={() => setActiveView(tab.id)}
               className={`relative px-3 py-2 text-sm font-medium transition-colors ${
                 activeView === tab.id
-                  ? 'text-brand-900'
+                  ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -341,7 +341,7 @@ function ListDetail() {
           </Card>
         )}
       </div>
-      <TaskDetailSheet taskId={selectedTaskId} open={Boolean(selectedTaskId)} onOpenChange={(next) => !next && setSelectedTaskId(null)} />
+      <TaskDetailSheet taskId={selectedTaskId} open={Boolean(selectedTaskId)} onOpenChange={(next) => !next && setSelectedTaskId(null)} workspaceId={workspaceId} />
     </div>
   )
 }
@@ -438,7 +438,7 @@ function TaskRow({
       onClick={() => onOpenTask(task.id)}
     >
       <button
-        className="shrink-0 text-muted-foreground hover:text-brand-700 transition-colors"
+        className="shrink-0 text-muted-foreground hover:text-accent transition-colors"
         onClick={(e) => {
           e.stopPropagation()
           void onToggleDone(task)
@@ -478,7 +478,7 @@ function TaskRow({
           return (
             <div
               key={a.userId}
-              className="h-6 w-6 rounded-full bg-brand-300 text-brand-900 text-[10px] font-semibold flex items-center justify-center ring-2 ring-card"
+              className="h-6 w-6 rounded-full bg-brand-300 text-foreground text-[10px] font-semibold flex items-center justify-center ring-2 ring-card"
               title={a.user?.displayName ?? ''}
             >
               {label}
@@ -658,7 +658,7 @@ function TableView({
                   key={task.id}
                   className={cn(
                     'group flex items-stretch h-9 text-sm transition-colors hover:bg-surface-50 even:bg-surface-50/40',
-                    isSelected && 'bg-brand-200/20',
+                    isSelected && 'bg-accent/10',
                   )}
                 >
                   {/* Checkbox */}
@@ -770,7 +770,7 @@ function TableView({
                         setStatusOpenFor(null)
                         setDateOpenFor(null)
                       }}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-brand-900"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-foreground"
                     >
                       <Flag className={cn('h-3.5 w-3.5', PRIORITY_COLORS[task.priority])} />
                       <span className="capitalize">{task.priority}</span>
@@ -811,7 +811,7 @@ function TableView({
                           return (
                             <div
                               key={a.userId}
-                              className="h-5 w-5 rounded-full bg-brand-300 text-brand-900 text-[10px] font-semibold flex items-center justify-center ring-2 ring-card"
+                              className="h-5 w-5 rounded-full bg-brand-300 text-foreground text-[10px] font-semibold flex items-center justify-center ring-2 ring-card"
                               title={a.user?.displayName ?? ''}
                             >
                               {label}
@@ -854,7 +854,7 @@ function TableView({
                           setStatusOpenFor(null)
                           setPriorityOpenFor(null)
                         }}
-                        className="inline-flex items-center gap-1 text-xs tabular-nums hover:text-brand-900"
+                        className="inline-flex items-center gap-1 text-xs tabular-nums hover:text-foreground"
                       >
                         {task.dueDate ? (
                           <>
@@ -936,7 +936,7 @@ function BoardColumn({
       ref={setNodeRef}
       className={cn(
         'rounded-lg border border-border bg-surface-50 flex flex-col min-h-40 transition-colors',
-        isOver && 'ring-2 ring-brand-500 bg-brand-200/20',
+        isOver && 'ring-2 ring-brand-500 bg-accent/10',
       )}
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border">

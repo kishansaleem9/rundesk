@@ -124,7 +124,7 @@ function AutomationsPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-            <h1 className="font-display text-2xl font-semibold text-brand-900">Automations</h1>
+            <h1 className="font-display text-2xl font-semibold text-foreground">Automations</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               When-this-then-that rules that run automatically.
             </p>
@@ -452,7 +452,7 @@ function AutomationBuilder({
               })}
               <button
                 onClick={addAction}
-                className="text-xs text-brand-700 hover:underline flex items-center gap-1"
+                className="text-xs text-accent hover:underline flex items-center gap-1"
               >
                 <Plus className="h-3.5 w-3.5" /> Add another action
               </button>

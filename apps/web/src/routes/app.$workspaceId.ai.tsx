@@ -43,20 +43,22 @@ function AiPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <header className="px-6 py-4 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-brand-700 to-brand-500 flex items-center justify-center">
-            <Sparkles className="h-4 w-4 text-white" />
+      <header className="px-6 py-5 border-b border-border/40">
+        <div className="flex items-center gap-3">
+          <div className="relative h-11 w-11 rounded-xl bg-brand-gradient flex items-center justify-center shadow-glow animate-glow">
+            <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold">Rundesk AI</h1>
-            <p className="text-xs text-muted-foreground">Powered by Claude</p>
+            <h1 className="font-display text-2xl font-semibold leading-tight">Rundesk AI</h1>
+            <p className="text-xs text-muted-foreground">
+              Powered by Claude — knows everything in your workspace
+            </p>
           </div>
         </div>
       </header>
 
       {/* Tabs */}
-      <div className="flex border-b border-border px-6">
+      <div className="flex border-b border-border/40 px-6 gap-1 overflow-x-auto scrollbar-none">
         {(
           [
             { id: 'chat', label: 'Chat', icon: MessageSquare },
@@ -69,9 +71,9 @@ function AiPage() {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              'flex items-center gap-1.5 py-2.5 px-4 text-sm font-medium border-b-2 transition-colors',
+              'flex items-center gap-1.5 py-3 px-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap',
               activeTab === tab.id
-                ? 'border-brand-700 text-brand-700'
+                ? 'border-accent text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
           >

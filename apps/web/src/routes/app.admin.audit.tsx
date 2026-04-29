@@ -89,7 +89,7 @@ function AuditLogPage() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-brand-700" />
+          <Shield className="h-5 w-5 text-accent" />
           <h1 className="text-lg font-semibold">Audit log</h1>
         </div>
         <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv}>

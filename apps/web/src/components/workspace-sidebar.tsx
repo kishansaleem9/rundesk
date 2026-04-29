@@ -18,12 +18,14 @@ import {
   Clock,
   MoreHorizontal,
   Building2,
+  Users,
   LayoutDashboard,
   Shield,
   MessageSquare,
   ClipboardList,
   BarChart3,
   Upload,
+  GanttChart,
 } from 'lucide-react'
 import { Button, Input, LogoMark, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
@@ -44,15 +46,15 @@ export function WorkspaceSidebar() {
   const workspaceId = params.workspaceId
 
   return (
-    <aside className="w-64 h-screen bg-surface-100 border-r border-border flex flex-col shrink-0">
+    <aside className="w-[260px] h-screen bg-card/30 border-r border-border/60 flex flex-col shrink-0 backdrop-blur-md">
       <WorkspaceHeader activeWorkspaceId={workspaceId} />
 
-      <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+      <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1 scrollbar-none">
         <PinnedLinks workspaceId={workspaceId} />
 
         {workspaceId && (
           <>
-            <div className="h-px bg-border/60 my-3 mx-2" />
+            <div className="h-px bg-border/40 my-3 mx-2" />
             <SpacesTree
               workspaceId={workspaceId}
               activeSpaceId={params.spaceId}
@@ -82,15 +84,17 @@ function WorkspaceHeader({ activeWorkspaceId }: { activeWorkspaceId?: string }) 
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 p-3 border-b border-border hover:bg-surface-50 transition-colors"
+        className="w-full flex items-center gap-2.5 px-3 py-3 border-b border-border/60 hover:bg-card/40 transition-colors"
       >
-        <LogoMark className="h-7 w-7 shrink-0" />
+        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-gradient text-white shadow-glow">
+          <LogoMark className="h-5 w-5 text-white" />
+        </div>
         <div className="flex-1 min-w-0 text-left">
-          <div className="font-display text-sm font-semibold truncate text-brand-900">
+          <div className="font-display text-sm font-semibold truncate text-foreground">
             {displayName}
           </div>
           {active && (
-            <div className="text-[11px] text-muted-foreground truncate font-mono">
+            <div className="text-[10px] text-muted-foreground truncate font-mono">
               {active.slug}
             </div>
           )}
@@ -99,8 +103,8 @@ function WorkspaceHeader({ activeWorkspaceId }: { activeWorkspaceId?: string }) 
       </button>
 
       {open && workspaces && (
-        <div className="absolute left-2 right-2 top-full mt-1 z-40 bg-card rounded-lg border border-border shadow-lg overflow-hidden">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground px-3 py-2 border-b border-border">
+        <div className="absolute left-2 right-2 top-full mt-1 z-40 bg-popover rounded-lg border border-border/60 shadow-glow overflow-hidden">
+          <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-3 py-2 border-b border-border/60">
             Workspaces
           </div>
           {workspaces.map((entry) => (
@@ -110,8 +114,8 @@ function WorkspaceHeader({ activeWorkspaceId }: { activeWorkspaceId?: string }) 
               params={{ workspaceId: entry.workspace.id }}
               onClick={() => setOpen(false)}
               className={cn(
-                'flex items-center gap-2 px-3 py-2 text-sm hover:bg-surface-100 transition-colors',
-                entry.workspace.id === activeWorkspaceId && 'bg-brand-200/50 text-brand-900 font-medium',
+                'flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent/10 transition-colors',
+                entry.workspace.id === activeWorkspaceId && 'bg-accent/15 text-foreground font-medium',
               )}
             >
               <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -126,7 +130,7 @@ function WorkspaceHeader({ activeWorkspaceId }: { activeWorkspaceId?: string }) 
           <Link
             to="/app"
             onClick={() => setOpen(false)}
-            className="flex items-center gap-2 px-3 py-2 text-sm border-t border-border hover:bg-surface-100"
+            className="flex items-center gap-2 px-3 py-2 text-sm border-t border-border/60 hover:bg-accent/10"
           >
             <Plus className="h-4 w-4" />
             <span>All workspaces</span>
@@ -143,6 +147,8 @@ function PinnedLinks({ workspaceId }: { workspaceId?: string }) {
   const workspaceItems = [
     { label: 'Home', icon: Home, to: '/app/$workspaceId' as const },
     { label: 'Dashboard', icon: LayoutDashboard, to: '/app/$workspaceId/dashboard' as const },
+    { label: 'Timeline', icon: GanttChart, to: '/app/$workspaceId/timeline' as const },
+    { label: 'Workload', icon: Users, to: '/app/$workspaceId/workload' as const },
     { label: 'Inbox', icon: Inbox, to: '/app/$workspaceId/inbox' as const },
     { label: 'Chat', icon: MessageSquare, to: '/app/$workspaceId/chat' as const },
     { label: 'Docs', icon: FileText, to: '/app/$workspaceId/docs' as const },
@@ -163,21 +169,26 @@ function PinnedLinks({ workspaceId }: { workspaceId?: string }) {
           key={item.label}
           to={item.to}
           params={{ workspaceId }}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-brand-900/80 hover:bg-surface-50 transition-colors"
-          activeProps={{ className: 'bg-brand-200/50 text-brand-900 font-medium' }}
+          className="group relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-card/60 transition-all"
+          activeProps={{
+            className:
+              'bg-accent/15 text-foreground font-medium [&>svg]:text-accent',
+          }}
           activeOptions={{ exact: true }}
         >
-          <item.icon className="h-4 w-4 text-muted-foreground" />
-          <span>{item.label}</span>
+          <item.icon className="h-4 w-4 shrink-0 transition-colors" />
+          <span className="truncate">{item.label}</span>
         </Link>
       ))}
-      <div className="h-px bg-border/60 my-2 mx-2" />
+      <div className="h-px bg-border/40 my-2 mx-2" />
       <Link
         to="/app/admin/features"
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-brand-900/80 hover:bg-surface-50 transition-colors"
-        activeProps={{ className: 'bg-brand-200/50 text-brand-900 font-medium' }}
+        className="group relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-card/60 transition-all"
+        activeProps={{
+          className: 'bg-accent/15 text-foreground font-medium [&>svg]:text-accent',
+        }}
       >
-        <Shield className="h-4 w-4 text-muted-foreground" />
+        <Shield className="h-4 w-4 shrink-0 transition-colors" />
         <span>Admin · Features</span>
       </Link>
     </div>
@@ -225,7 +236,7 @@ function SpacesTree({
         </span>
         <button
           onClick={() => setCreating((v) => !v)}
-          className="h-5 w-5 rounded hover:bg-surface-50 flex items-center justify-center text-muted-foreground"
+          className="h-5 w-5 rounded hover:bg-card/60 flex items-center justify-center text-muted-foreground"
           aria-label="Create space"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -326,8 +337,8 @@ function SpaceNode({
     <div>
       <div
         className={cn(
-          'group flex items-center gap-1 px-2 py-1.5 rounded-md text-sm cursor-pointer hover:bg-surface-50',
-          isActive && 'bg-brand-200/40 text-brand-900 font-medium',
+          'group flex items-center gap-1 px-2 py-1.5 rounded-md text-sm cursor-pointer hover:bg-card/60',
+          isActive && 'bg-accent/15 text-foreground font-medium',
         )}
       >
         <button
@@ -354,7 +365,7 @@ function SpaceNode({
             setOpen(true)
             setCreating(true)
           }}
-          className="h-5 w-5 rounded opacity-0 group-hover:opacity-100 hover:bg-surface-100 flex items-center justify-center text-muted-foreground"
+          className="h-5 w-5 rounded opacity-0 group-hover:opacity-100 hover:bg-card/80 flex items-center justify-center text-muted-foreground"
           aria-label="New project"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -450,8 +461,8 @@ function ProjectNode({
     <div>
       <div
         className={cn(
-          'group flex items-center gap-1 px-1.5 py-1 rounded-md text-sm cursor-pointer hover:bg-surface-50',
-          isActive && 'bg-brand-200/30 text-brand-900 font-medium',
+          'group flex items-center gap-1 px-1.5 py-1 rounded-md text-sm cursor-pointer hover:bg-card/60',
+          isActive && 'bg-accent/10 text-foreground font-medium',
         )}
       >
         <button
@@ -473,7 +484,7 @@ function ProjectNode({
             setOpen(true)
             setCreating(true)
           }}
-          className="h-5 w-5 rounded opacity-0 group-hover:opacity-100 hover:bg-surface-100 flex items-center justify-center text-muted-foreground"
+          className="h-5 w-5 rounded opacity-0 group-hover:opacity-100 hover:bg-card/80 flex items-center justify-center text-muted-foreground"
           aria-label="New list"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -513,8 +524,8 @@ function ProjectNode({
                 listId: list.id,
               }}
               className={cn(
-                'flex items-center gap-1.5 px-1.5 py-1 rounded-md text-sm hover:bg-surface-50 min-w-0',
-                activeListId === list.id && 'bg-brand-200/50 text-brand-900 font-medium',
+                'flex items-center gap-1.5 px-1.5 py-1 rounded-md text-sm hover:bg-card/60 min-w-0',
+                activeListId === list.id && 'bg-accent/15 text-foreground font-medium',
               )}
             >
               <ListIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -533,12 +544,12 @@ function SidebarFooter() {
   if (!workspaceId) return null
 
   return (
-    <div className="border-t border-border p-2 space-y-0.5">
+    <div className="border-t border-border/40 p-2 space-y-0.5">
       <Link
         to="/app/$workspaceId/time"
         params={{ workspaceId }}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground"
-        activeProps={{ className: 'bg-brand-200/50 text-brand-900 font-medium' }}
+        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-card/60 hover:text-foreground"
+        activeProps={{ className: 'bg-accent/15 text-foreground font-medium' }}
       >
         <Clock className="h-4 w-4" />
         <span>Time tracked</span>
@@ -546,8 +557,8 @@ function SidebarFooter() {
       <Link
         to="/app/$workspaceId/settings"
         params={{ workspaceId }}
-        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground"
-        activeProps={{ className: 'bg-brand-200/50 text-brand-900 font-medium' }}
+        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-card/60 hover:text-foreground"
+        activeProps={{ className: 'bg-accent/15 text-foreground font-medium' }}
       >
         <Settings className="h-4 w-4" />
         <span>Settings</span>

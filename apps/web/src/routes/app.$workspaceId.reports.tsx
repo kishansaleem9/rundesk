@@ -41,7 +41,7 @@ function ReportsPage() {
       <header className="px-6 py-4 border-b border-border">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-brand-700" />
+            <BarChart3 className="h-5 w-5 text-accent" />
             <h1 className="text-lg font-semibold">Reports</h1>
           </div>
           <div className="flex items-center gap-2">
@@ -70,7 +70,7 @@ function ReportsPage() {
             className={cn(
               'flex items-center gap-1.5 py-2.5 px-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors shrink-0',
               activeTab === tab.id
-                ? 'border-brand-700 text-brand-700'
+                ? 'border-brand-700 text-accent'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
           >
@@ -119,8 +119,8 @@ function StatCard({
           <p className="text-3xl font-bold mt-1">{value}</p>
           {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
         </div>
-        <div className="h-10 w-10 rounded-xl bg-brand-200/50 flex items-center justify-center">
-          <Icon className="h-5 w-5 text-brand-700" />
+        <div className="h-10 w-10 rounded-xl bg-accent/15 flex items-center justify-center">
+          <Icon className="h-5 w-5 text-accent" />
         </div>
       </div>
       {trend && (
@@ -217,7 +217,7 @@ function ProductivityTab({ workspaceId, days }: { workspaceId: string; days: num
                       {row.avatarUrl ? (
                         <img src={row.avatarUrl} className="h-6 w-6 rounded-full" />
                       ) : (
-                        <div className="h-6 w-6 rounded-full bg-brand-200 flex items-center justify-center text-xs font-bold text-brand-700">
+                        <div className="h-6 w-6 rounded-full bg-brand-200 flex items-center justify-center text-xs font-bold text-accent">
                           {row.displayName[0]?.toUpperCase()}
                         </div>
                       )}

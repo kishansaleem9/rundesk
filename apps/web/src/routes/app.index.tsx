@@ -77,7 +77,7 @@ function WorkspacePicker() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 p-8">
       <div className="space-y-2">
-        <h1 className="font-display text-4xl font-semibold text-brand-900">
+        <h1 className="font-display text-4xl font-semibold text-foreground">
           {hasWorkspaces ? 'Your workspaces' : 'Create your first workspace'}
         </h1>
         <p className="text-muted-foreground">

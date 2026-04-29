@@ -17,7 +17,7 @@ function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
 
   return (
-    <div className="h-screen flex bg-surface-50 overflow-hidden">
+    <div className="h-screen flex bg-background overflow-hidden">
       <WorkspaceSidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <AppTopbar onCommandOpen={() => setCmdOpen(true)} />

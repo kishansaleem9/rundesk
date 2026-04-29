@@ -10,10 +10,12 @@ import { RealtimeModule } from '../realtime/realtime.module'
 import { AutomationsModule } from '../automations/automations.module'
 import { WebhooksModule } from '../webhooks/webhooks.module'
 import { SlackModule } from '../integrations/slack/slack.module'
+import { NotificationsModule } from '../notifications/notifications.module'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 
 @Module({
-  imports: [RealtimeModule, AutomationsModule, WebhooksModule, SlackModule],
-  providers: [TasksService],
+  imports: [RealtimeModule, AutomationsModule, WebhooksModule, SlackModule, NotificationsModule],
+  providers: [TasksService, WorkspaceMemberGuard],
   controllers: [
     TasksController,
     TaskCommentsController,

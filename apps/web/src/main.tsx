@@ -8,6 +8,7 @@ import '@rundesk/ui/styles.css'
 import { routeTree } from './routeTree.gen'
 import { queryClient } from './lib/query'
 import { useAuthStore } from './store/auth'
+import { PwaInstallPrompt } from './components/pwa-install-prompt'
 
 const router = createRouter({
   routeTree,
@@ -28,7 +29,12 @@ declare module '@tanstack/react-router' {
 
 function App() {
   const auth = useAuthStore()
-  return <RouterProvider router={router} context={{ auth, queryClient }} />
+  return (
+    <>
+      <RouterProvider router={router} context={{ auth, queryClient }} />
+      <PwaInstallPrompt />
+    </>
+  )
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -47,7 +47,7 @@ function SpaceHome() {
     <div className="max-w-6xl mx-auto p-8">
       <header className="mb-8">
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Space</div>
-        <h1 className="font-display text-3xl font-semibold text-brand-900">
+        <h1 className="font-display text-3xl font-semibold text-foreground">
           {space?.name ?? 'Space'}
         </h1>
         {space?.description && (
@@ -57,7 +57,7 @@ function SpaceHome() {
 
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-display text-xl font-semibold text-brand-900">Projects</h2>
+          <h2 className="font-display text-xl font-semibold text-foreground">Projects</h2>
           <span className="text-xs text-muted-foreground">
             {projects.length} project{projects.length !== 1 ? 's' : ''}
           </span>
@@ -113,7 +113,7 @@ function ProjectCard({
             {project.icon ?? project.name.charAt(0).toUpperCase()}
           </span>
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold truncate group-hover:text-brand-700 transition-colors">
+            <h3 className="font-semibold truncate group-hover:text-accent transition-colors">
               {project.name}
             </h3>
             {project.description && (
@@ -135,10 +135,10 @@ function ProjectCard({
 function EmptyState() {
   return (
     <Card className="p-10 text-center">
-      <div className="h-12 w-12 rounded-full bg-brand-200/50 mx-auto mb-3 flex items-center justify-center">
-        <Folder className="h-6 w-6 text-brand-700" />
+      <div className="h-12 w-12 rounded-full bg-accent/15 mx-auto mb-3 flex items-center justify-center">
+        <Folder className="h-6 w-6 text-accent" />
       </div>
-      <h3 className="font-display text-lg font-semibold text-brand-900 mb-1">
+      <h3 className="font-display text-lg font-semibold text-foreground mb-1">
         No projects in this space
       </h3>
       <p className="text-sm text-muted-foreground max-w-md mx-auto mb-4">

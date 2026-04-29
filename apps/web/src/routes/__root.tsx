@@ -1,5 +1,6 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
+import { Toaster, TooltipProvider } from '@rundesk/ui'
 import type { AuthState } from '../store/auth'
 
 export interface RouterContext {
@@ -13,8 +14,11 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 
 function RootLayout() {
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans">
-      <Outlet />
-    </div>
+    <TooltipProvider delayDuration={200}>
+      <div className="min-h-screen bg-background text-foreground font-sans">
+        <Outlet />
+      </div>
+      <Toaster />
+    </TooltipProvider>
   )
 }

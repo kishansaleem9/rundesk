@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/app'
@@ -20,6 +21,8 @@ import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppWorkspaceIdRouteImport } from './routes/app.$workspaceId'
 import { Route as AppAdminFeaturesRouteImport } from './routes/app.admin.features'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
+import { Route as AppWorkspaceIdWorkloadRouteImport } from './routes/app.$workspaceId.workload'
+import { Route as AppWorkspaceIdTimelineRouteImport } from './routes/app.$workspaceId.timeline'
 import { Route as AppWorkspaceIdTimeRouteImport } from './routes/app.$workspaceId.time'
 import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspaceId.sprints'
 import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$workspaceId.settings'
@@ -38,6 +41,11 @@ import { Route as AppWorkspaceIdFormsFormIdRouteImport } from './routes/app.$wor
 import { Route as AppWorkspaceIdSpaceIdProjectIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdListIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId.$listId'
 
+const SignUpRoute = SignUpRouteImport.update({
+  id: '/sign-up',
+  path: '/sign-up',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RegisterRoute = RegisterRouteImport.update({
   id: '/register',
   path: '/register',
@@ -92,6 +100,16 @@ const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
   getParentRoute: () => AppAdminRoute,
+} as any)
+const AppWorkspaceIdWorkloadRoute = AppWorkspaceIdWorkloadRouteImport.update({
+  id: '/workload',
+  path: '/workload',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any)
+const AppWorkspaceIdTimelineRoute = AppWorkspaceIdTimelineRouteImport.update({
+  id: '/timeline',
+  path: '/timeline',
+  getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
 const AppWorkspaceIdTimeRoute = AppWorkspaceIdTimeRouteImport.update({
   id: '/time',
@@ -188,6 +206,7 @@ export interface FileRoutesByFullPath {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/sign-up': typeof SignUpRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
@@ -207,6 +226,8 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
+  '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
@@ -217,6 +238,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/sign-up': typeof SignUpRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
@@ -236,6 +258,8 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
+  '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
@@ -248,6 +272,7 @@ export interface FileRoutesById {
   '/app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
+  '/sign-up': typeof SignUpRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
@@ -267,6 +292,8 @@ export interface FileRoutesById {
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
+  '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
@@ -280,6 +307,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/register'
+    | '/sign-up'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
@@ -299,6 +327,8 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/time'
+    | '/app/$workspaceId/timeline'
+    | '/app/$workspaceId/workload'
     | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
@@ -309,6 +339,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/register'
+    | '/sign-up'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
@@ -328,6 +359,8 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/time'
+    | '/app/$workspaceId/timeline'
+    | '/app/$workspaceId/workload'
     | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
@@ -339,6 +372,7 @@ export interface FileRouteTypes {
     | '/app'
     | '/login'
     | '/register'
+    | '/sign-up'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
@@ -358,6 +392,8 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/time'
+    | '/app/$workspaceId/timeline'
+    | '/app/$workspaceId/workload'
     | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
@@ -370,11 +406,19 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
+  SignUpRoute: typeof SignUpRoute
   SubmitSlugRoute: typeof SubmitSlugRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sign-up': {
+      id: '/sign-up'
+      path: '/sign-up'
+      fullPath: '/sign-up'
+      preLoaderRoute: typeof SignUpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/register': {
       id: '/register'
       path: '/register'
@@ -451,6 +495,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/admin/audit'
       preLoaderRoute: typeof AppAdminAuditRouteImport
       parentRoute: typeof AppAdminRoute
+    }
+    '/app/$workspaceId/workload': {
+      id: '/app/$workspaceId/workload'
+      path: '/workload'
+      fullPath: '/app/$workspaceId/workload'
+      preLoaderRoute: typeof AppWorkspaceIdWorkloadRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/timeline': {
+      id: '/app/$workspaceId/timeline'
+      path: '/timeline'
+      fullPath: '/app/$workspaceId/timeline'
+      preLoaderRoute: typeof AppWorkspaceIdTimelineRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
     }
     '/app/$workspaceId/time': {
       id: '/app/$workspaceId/time'
@@ -629,6 +687,8 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdSettingsRoute: typeof AppWorkspaceIdSettingsRoute
   AppWorkspaceIdSprintsRoute: typeof AppWorkspaceIdSprintsRoute
   AppWorkspaceIdTimeRoute: typeof AppWorkspaceIdTimeRoute
+  AppWorkspaceIdTimelineRoute: typeof AppWorkspaceIdTimelineRoute
+  AppWorkspaceIdWorkloadRoute: typeof AppWorkspaceIdWorkloadRoute
 }
 
 const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
@@ -646,6 +706,8 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdSettingsRoute: AppWorkspaceIdSettingsRoute,
   AppWorkspaceIdSprintsRoute: AppWorkspaceIdSprintsRoute,
   AppWorkspaceIdTimeRoute: AppWorkspaceIdTimeRoute,
+  AppWorkspaceIdTimelineRoute: AppWorkspaceIdTimelineRoute,
+  AppWorkspaceIdWorkloadRoute: AppWorkspaceIdWorkloadRoute,
 }
 
 const AppWorkspaceIdRouteWithChildren = AppWorkspaceIdRoute._addFileChildren(
@@ -687,6 +749,7 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
+  SignUpRoute: SignUpRoute,
   SubmitSlugRoute: SubmitSlugRoute,
 }
 export const routeTree = rootRouteImport

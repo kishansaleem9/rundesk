@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
+import { ScheduleModule } from '@nestjs/schedule'
 import { AuthModule } from './modules/auth/auth.module'
 import { UsersModule } from './modules/users/users.module'
 import { WorkspacesModule } from './modules/workspaces/workspaces.module'
@@ -25,6 +26,8 @@ import { ExportModule } from './modules/export/export.module'
 import { WebhooksModule } from './modules/webhooks/webhooks.module'
 import { SlackModule } from './modules/integrations/slack/slack.module'
 import { ClickUpImportModule } from './modules/integrations/clickup-import/clickup-import.module'
+import { ProjectTemplatesModule } from './modules/project-templates/project-templates.module'
+import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module'
 import { SearchModule } from './modules/search/search.module'
 import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
@@ -40,6 +43,7 @@ import { DatabaseModule } from './common/database/database.module'
         '../../.env',
       ],
     }),
+    ScheduleModule.forRoot(),
     DatabaseModule,
     RealtimeModule,
     SearchModule,
@@ -69,6 +73,8 @@ import { DatabaseModule } from './common/database/database.module'
     WebhooksModule,
     SlackModule,
     ClickUpImportModule,
+    ProjectTemplatesModule,
+    CustomFieldsModule,
   ],
 })
 export class AppModule {}

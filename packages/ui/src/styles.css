@@ -2,95 +2,273 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---------------------------------------------------------------------------
- * Aura — Rundesk brand palette
- * Every value is HSL triplet (no hsl() wrapper) for Tailwind + Shadcn compat.
- * ------------------------------------------------------------------------- */
+/* ===========================================================================
+ * Aura — Rundesk brand palette · v2 (dark-first)
+ *
+ * The brand keeps its periwinkle/navy roots but evolves into a richer,
+ * gradient-aware identity. Default mode is dark; light mode is supported as
+ * an alternate. Every value is HSL triplet (no hsl() wrapper) so Tailwind
+ * + Shadcn semantic-token compatibility stays intact.
+ * ========================================================================= */
 
 @layer base {
   :root {
-    /* Brand scale (Aura) */
-    --brand-900: 224 78% 21%; /* #0c215d */
-    --brand-700: 227 54% 45%; /* #354fb0 */
-    --brand-500: 217 52% 63%; /* #6f96d1 */
-    --brand-300: 204 62% 83%; /* #bad6eb */
-    --brand-200: 217 96% 91%; /* #d1e5fe */
-    --surface-100: 220 25% 95%; /* #eef1f6 */
-    --surface-50: 0 0% 98%; /* #f9f9f9 */
+    /* === Aura brand scale (cool blues → periwinkle) =====================  */
+    --brand-950: 230 60% 6%;     /* near-black with brand cast — deep BG */
+    --brand-900: 224 70% 11%;    /* rich navy — primary dark surface     */
+    --brand-800: 224 56% 17%;    /* card surface in dark mode            */
+    --brand-700: 227 54% 45%;    /* royal blue — primary action          */
+    --brand-600: 224 64% 56%;    /* hover/lift                           */
+    --brand-500: 217 60% 67%;    /* periwinkle — accent                  */
+    --brand-400: 213 78% 76%;    /* highlight                            */
+    --brand-300: 204 80% 84%;    /* soft sky                             */
+    --brand-200: 217 96% 91%;    /* pale halo                            */
+    --brand-100: 220 100% 96%;   /* near-white tint                      */
 
-    /* Shadcn semantic tokens (light) */
+    --surface-100: 220 25% 95%;
+    --surface-50:  0 0% 99%;
+
+    /* === Accent / gradient stops (used in CTA + brand glow) ==============  */
+    --accent-violet: 268 88% 70%;
+    --accent-pink:   330 88% 70%;
+    --accent-amber:  35 95% 65%;
+    --accent-mint:   160 70% 55%;
+
+    /* === Semantic radii / motion ========================================= */
+    --radius: 0.75rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.25rem;
+    --shadow-glow: 0 0 0 1px hsl(var(--brand-500) / 0.18),
+                   0 8px 28px -10px hsl(var(--brand-700) / 0.45);
+    --shadow-card: 0 1px 0 hsl(var(--brand-200) / 0.4),
+                   0 8px 24px -16px hsl(var(--brand-900) / 0.18);
+
+    /* === LIGHT-mode shadcn tokens (kept for explicit `light` opt-in) ===== */
     --background: var(--surface-50);
     --foreground: var(--brand-900);
-
     --card: 0 0% 100%;
     --card-foreground: var(--brand-900);
-
     --popover: 0 0% 100%;
     --popover-foreground: var(--brand-900);
-
     --primary: var(--brand-700);
     --primary-foreground: var(--surface-50);
-
     --secondary: var(--surface-100);
     --secondary-foreground: var(--brand-900);
-
     --muted: var(--surface-100);
     --muted-foreground: 217 14% 40%;
-
     --accent: var(--brand-500);
     --accent-foreground: var(--surface-50);
-
     --destructive: 0 72% 51%;
     --destructive-foreground: var(--surface-50);
-
+    --success: 152 60% 38%;
+    --success-foreground: var(--surface-50);
+    --warning: 35 92% 50%;
+    --warning-foreground: var(--brand-900);
     --border: var(--brand-200);
     --input: var(--brand-200);
     --ring: var(--brand-500);
-
-    --radius: 0.75rem;
   }
 
+  /* === DARK mode = the default for the app ============================== */
+  :root,
   .dark {
-    --background: var(--brand-900);
-    --foreground: var(--surface-50);
+    --background: var(--brand-950);
+    --foreground: 220 30% 96%;
 
-    --card: 224 60% 14%;
-    --card-foreground: var(--surface-50);
+    /* Glassy elevated card — slightly translucent, brand-tinted */
+    --card: 224 50% 13%;
+    --card-foreground: 220 30% 96%;
 
-    --popover: 224 60% 14%;
-    --popover-foreground: var(--surface-50);
+    --popover: 224 56% 11%;
+    --popover-foreground: 220 30% 96%;
 
     --primary: var(--brand-500);
-    --primary-foreground: var(--brand-900);
+    --primary-foreground: var(--brand-950);
 
-    --secondary: 224 40% 22%;
-    --secondary-foreground: var(--surface-50);
+    --secondary: 224 38% 19%;
+    --secondary-foreground: 220 30% 96%;
 
-    --muted: 224 40% 22%;
-    --muted-foreground: 217 30% 75%;
+    --muted: 224 32% 17%;
+    --muted-foreground: 217 22% 70%;
 
-    --accent: var(--brand-300);
-    --accent-foreground: var(--brand-900);
+    --accent: 268 88% 70%;             /* violet pop for hover/active     */
+    --accent-foreground: var(--brand-950);
 
-    --destructive: 0 62% 40%;
+    --destructive: 0 70% 58%;
+    --destructive-foreground: 220 30% 96%;
+
+    --success: 152 65% 52%;
+    --success-foreground: var(--brand-950);
+
+    --warning: 35 95% 60%;
+    --warning-foreground: var(--brand-950);
+
+    --border: 224 32% 22%;
+    --input: 224 32% 19%;
+    --ring: 268 88% 70%;
+
+    --shadow-glow: 0 0 0 1px hsl(var(--brand-500) / 0.22),
+                   0 12px 36px -12px hsl(268 88% 60% / 0.40);
+    --shadow-card: 0 1px 0 hsl(224 32% 26% / 0.6),
+                   0 16px 40px -20px hsl(0 0% 0% / 0.6);
+  }
+
+  /* Light-mode opt-in: <html class="light"> */
+  .light {
+    --background: var(--surface-50);
+    --foreground: var(--brand-900);
+    --card: 0 0% 100%;
+    --card-foreground: var(--brand-900);
+    --popover: 0 0% 100%;
+    --popover-foreground: var(--brand-900);
+    --primary: var(--brand-700);
+    --primary-foreground: var(--surface-50);
+    --secondary: var(--surface-100);
+    --secondary-foreground: var(--brand-900);
+    --muted: var(--surface-100);
+    --muted-foreground: 217 14% 40%;
+    --accent: 268 80% 60%;
+    --accent-foreground: var(--surface-50);
+    --destructive: 0 72% 51%;
     --destructive-foreground: var(--surface-50);
-
-    --border: 224 40% 28%;
-    --input: 224 40% 28%;
-    --ring: var(--brand-500);
+    --success: 152 60% 38%;
+    --success-foreground: var(--surface-50);
+    --warning: 35 92% 50%;
+    --warning-foreground: var(--brand-900);
+    --border: var(--brand-200);
+    --input: var(--brand-200);
+    --ring: 268 80% 60%;
   }
 
   * {
     @apply border-border;
   }
-  body {
+
+  html, body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  h1,
-  h2,
-  h3,
-  h4 {
+
+  h1, h2, h3, h4 {
     @apply font-display tracking-tight;
+  }
+
+  /* Scrollbar polish (dark-mode native look) */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 999px;
+    border: 2px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.4); }
+
+  /* Selection */
+  ::selection {
+    background: hsl(var(--accent) / 0.35);
+    color: hsl(var(--foreground));
+  }
+}
+
+/* ===========================================================================
+ * Reusable component classes — applied via @apply in components, or directly.
+ * ========================================================================= */
+@layer components {
+
+  /* Glass card — subtle gradient + border + glow */
+  .card-glass {
+    @apply relative overflow-hidden rounded-xl border bg-card text-card-foreground;
+    background-image:
+      linear-gradient(180deg, hsl(var(--card) / 0.9), hsl(var(--card) / 0.7)),
+      radial-gradient(120% 60% at 0% 0%, hsl(var(--brand-500) / 0.08), transparent 60%);
+    backdrop-filter: blur(8px);
+    box-shadow: var(--shadow-card);
+  }
+
+  /* Brand gradient used for CTAs, focused states, brand badges */
+  .bg-brand-gradient {
+    background-image: linear-gradient(135deg,
+      hsl(var(--brand-700)) 0%,
+      hsl(var(--accent-violet)) 50%,
+      hsl(var(--accent-pink)) 100%);
+  }
+  .bg-brand-gradient-soft {
+    background-image: linear-gradient(135deg,
+      hsl(var(--brand-700) / 0.9) 0%,
+      hsl(var(--accent-violet) / 0.85) 100%);
+  }
+  .text-brand-gradient {
+    background: linear-gradient(135deg, hsl(var(--brand-400)), hsl(var(--accent-violet)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Dotted backdrop for hero sections */
+  .bg-grid-dim {
+    background-image:
+      radial-gradient(circle at center, hsl(var(--border)) 1px, transparent 1px);
+    background-size: 24px 24px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 35%, transparent 80%);
+  }
+
+  /* Aurora gradient blob — used behind auth/signup */
+  .bg-aurora::before {
+    content: "";
+    position: absolute;
+    inset: -40% -20% auto auto;
+    width: 80%;
+    aspect-ratio: 1 / 1;
+    background: radial-gradient(circle, hsl(var(--accent-violet) / 0.4), transparent 60%);
+    filter: blur(80px);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .bg-aurora::after {
+    content: "";
+    position: absolute;
+    inset: auto auto -40% -20%;
+    width: 80%;
+    aspect-ratio: 1 / 1;
+    background: radial-gradient(circle, hsl(var(--brand-700) / 0.55), transparent 60%);
+    filter: blur(80px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Focus ring polish */
+  .focus-ring {
+    @apply outline-none ring-offset-background transition-shadow
+           focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  }
+}
+
+/* ===========================================================================
+ * Utility helpers
+ * ========================================================================= */
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--muted-foreground) / 0.12),
+      transparent
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
   }
 }

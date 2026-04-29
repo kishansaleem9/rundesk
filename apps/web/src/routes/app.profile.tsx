@@ -38,7 +38,7 @@ function ProfilePage() {
     <div className="h-full flex flex-col">
       <header className="px-6 py-4 border-b border-border bg-card">
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Account</div>
-        <h1 className="font-display text-2xl font-semibold text-brand-900">Your profile</h1>
+        <h1 className="font-display text-2xl font-semibold text-foreground">Your profile</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           Manage how others see you and how you sign in.
         </p>
@@ -53,7 +53,7 @@ function ProfilePage() {
                 onClick={() => setTab(t.id)}
                 className={cn(
                   'w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
-                  tab === t.id ? 'bg-brand-200/50 text-brand-900 font-medium' : 'hover:bg-surface-50 text-muted-foreground',
+                  tab === t.id ? 'bg-accent/15 text-foreground font-medium' : 'hover:bg-surface-50 text-muted-foreground',
                 )}
               >
                 <t.icon className="h-4 w-4" />

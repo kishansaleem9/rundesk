@@ -158,7 +158,7 @@ function Dashboard() {
     <div className="max-w-7xl mx-auto p-8">
       {/* Welcome header */}
       <header className="mb-8">
-        <h1 className="font-display text-4xl font-semibold text-brand-900 mb-1">
+        <h1 className="font-display text-4xl font-semibold text-foreground mb-1">
           {greeting()}, {displayName}
         </h1>
         <p className="text-muted-foreground">
@@ -236,7 +236,7 @@ function Dashboard() {
         <Card className="p-5 md:col-span-2 lg:col-span-2">
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h2 className="font-display text-lg font-semibold text-brand-900">
+              <h2 className="font-display text-lg font-semibold text-foreground">
                 This week&rsquo;s completion
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
@@ -262,14 +262,14 @@ function Dashboard() {
         <Card className="p-5 md:col-span-2 lg:col-span-2 row-span-2">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className="font-display text-lg font-semibold text-brand-900">
+              <h2 className="font-display text-lg font-semibold text-foreground">
                 My assigned tasks
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Your next 10 open tasks, sorted by due date.
               </p>
             </div>
-            <span className="text-xs font-medium rounded-full bg-brand-100 text-brand-700 px-2 py-0.5">
+            <span className="text-xs font-medium rounded-full bg-brand-100 text-accent px-2 py-0.5">
               {myAssigned.length}
             </span>
           </div>
@@ -290,8 +290,8 @@ function Dashboard() {
         <Card className="p-5 md:col-span-2 lg:col-span-2">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-brand-700" />
-              <h2 className="font-display text-lg font-semibold text-brand-900">
+              <Activity className="h-4 w-4 text-accent" />
+              <h2 className="font-display text-lg font-semibold text-foreground">
                 Recent activity
               </h2>
             </div>
@@ -314,7 +314,7 @@ function Dashboard() {
                         projectId: (t as Task & ListRef).projectId,
                         listId: t.listId,
                       }}
-                      className="font-medium truncate hover:text-brand-700 transition-colors block"
+                      className="font-medium truncate hover:text-accent transition-colors block"
                     >
                       {t.title}
                     </Link>
@@ -354,7 +354,7 @@ function WidgetCard({
   children: React.ReactNode
 }) {
   const accentClasses = {
-    brand: 'bg-brand-100 text-brand-700',
+    brand: 'bg-brand-100 text-accent',
     red: 'bg-red-100 text-red-700',
     green: 'bg-emerald-100 text-emerald-700',
     blue: 'bg-blue-100 text-blue-700',
@@ -372,7 +372,7 @@ function WidgetCard({
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium text-brand-900">{title}</span>
+          <span className="text-sm font-medium text-foreground">{title}</span>
         </div>
         <span
           className={`text-xs font-semibold rounded-full px-2 py-0.5 ${accentClasses}`}
@@ -380,7 +380,7 @@ function WidgetCard({
           {loading ? '…' : count}
         </span>
       </div>
-      <div className="font-display text-3xl font-semibold text-brand-900 mb-2">
+      <div className="font-display text-3xl font-semibold text-foreground mb-2">
         {loading ? '—' : count}
       </div>
       {children}
@@ -430,7 +430,7 @@ function TaskRow({
         projectId: task.projectId!,
         listId: task.listId,
       }}
-      className="block hover:text-brand-700 transition-colors"
+      className="block hover:text-accent transition-colors"
     >
       {content}
     </Link>
@@ -485,7 +485,7 @@ function CompletionRing({ pct }: { pct: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="font-display text-2xl font-semibold text-brand-900">
+        <span className="font-display text-2xl font-semibold text-foreground">
           {clamped}%
         </span>
       </div>
