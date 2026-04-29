@@ -5,6 +5,11 @@ import {
   Button,
   Badge,
   Input,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   cn,
 } from '@rundesk/ui'
 import {
@@ -148,6 +153,8 @@ const TEMPLATES: Template[] = [
 function TemplatesPage() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'project' | 'task' | 'doc'>('all')
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
+  const [applySuccess, setApplySuccess] = useState<string | null>(null)
   const filtered = TEMPLATES.filter((t) => {
     if (filter !== 'all' && t.category !== filter) return false
     return t.name.toLowerCase().includes(query.toLowerCase()) || t.description.toLowerCase().includes(query.toLowerCase())
@@ -210,14 +217,49 @@ function TemplatesPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filtered.map((t) => (
-          <TemplateCard key={t.id} template={t} />
+          <TemplateCard key={t.id} template={t} onUse={() => setSelectedTemplate(t)} />
         ))}
       </div>
+
+      <Dialog open={Boolean(selectedTemplate)} onOpenChange={(open) => !open && setSelectedTemplate(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Use template: {selectedTemplate?.name}</DialogTitle>
+            <DialogDescription>
+              Create a new {selectedTemplate?.category} from this template with prefilled defaults.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Name for new item" defaultValue={selectedTemplate?.name} />
+            <Input placeholder="Owner / assignee (optional)" />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setSelectedTemplate(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!selectedTemplate) return
+                  setApplySuccess(selectedTemplate.name)
+                  setSelectedTemplate(null)
+                }}
+              >
+                Apply template
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {applySuccess && (
+        <Card className="p-3 text-sm text-emerald-300 border-emerald-600/40">
+          Template applied successfully: {applySuccess}
+        </Card>
+      )}
     </div>
   )
 }
 
-function TemplateCard({ template }: { template: Template }) {
+function TemplateCard({ template, onUse }: { template: Template; onUse: () => void }) {
   const Icon = template.icon
   return (
     <Card variant="glass" className="overflow-hidden p-0 group transition-all hover:shadow-glow hover:border-accent/40">
@@ -252,7 +294,7 @@ function TemplateCard({ template }: { template: Template }) {
           <span className="text-[10px] text-muted-foreground">
             <Check className="h-3 w-3 inline" /> {template.uses} uses
           </span>
-          <Button variant="outline" size="sm" className="h-7 text-xs">
+          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onUse}>
             Use template
           </Button>
         </div>

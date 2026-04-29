@@ -667,9 +667,36 @@ function TableView({
     { key: 'created', label: 'Created', width: 'w-24' },
   ] as const
   const customColumns = projectFields.slice(0, 3)
+  const selectedIds = Array.from(selected)
+  const applyBulkPatch = async (patch: TaskPatch) => {
+    await Promise.all(selectedIds.map((id) => onPatchTask(id, patch)))
+    setSelected(new Set())
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
+      {selectedIds.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-accent/10 text-xs">
+          <span className="font-medium text-foreground">{selectedIds.length} selected</span>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void applyBulkPatch({ status: 'done' })}>
+            Mark done
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void applyBulkPatch({ priority: 'high' })}>
+            High priority
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => void applyBulkPatch({ dueDate: new Date().toISOString() })}
+          >
+            Due today
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs ml-auto" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <div className="min-w-[980px]">
           {/* Header */}

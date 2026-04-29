@@ -48,13 +48,21 @@ const STATUS_OPACITY: Record<string, string> = {
 function TimelinePage() {
   const { workspaceId } = Route.useParams()
   const [zoom, setZoom] = useState<Zoom>('week')
+  const [localPatches, setLocalPatches] = useState<Record<string, { startDate?: string | null; dueDate?: string | null }>>({})
 
   const tasksQuery = useQuery({
     queryKey: ['timeline', workspaceId],
     queryFn: () => api<TimelineTask[]>(`/tasks/workspace/${workspaceId}/timeline`),
   })
 
-  const tasks = tasksQuery.data ?? []
+  const tasks = useMemo(
+    () =>
+      (tasksQuery.data ?? []).map((task) => {
+        const patch = localPatches[task.id]
+        return patch ? { ...task, ...patch } : task
+      }),
+    [tasksQuery.data, localPatches],
+  )
   const dayPx = DAY_PX[zoom]
 
   const { startMs, days } = useMemo(() => {
@@ -179,6 +187,7 @@ function TimelinePage() {
                       startMs={startMs}
                       dayPx={dayPx}
                       totalWidth={totalWidth}
+                      onPatchDates={(next) => setLocalPatches((prev) => ({ ...prev, [task.id]: next }))}
                     />
                   ))}
                 </div>
@@ -259,11 +268,13 @@ function TaskRow({
   startMs,
   dayPx,
   totalWidth,
+  onPatchDates,
 }: {
   task: TimelineTask
   startMs: number
   dayPx: number
   totalWidth: number
+  onPatchDates: (next: { startDate?: string | null; dueDate?: string | null }) => void
 }) {
   const start = task.startDate ? new Date(task.startDate).getTime() : null
   const due = task.dueDate ? new Date(task.dueDate).getTime() : null
@@ -275,6 +286,7 @@ function TaskRow({
     14,
     ((startOfDay(barEndMs) - startOfDay(barStartMs)) / 86400_000 + 1) * dayPx,
   )
+  const [isDragging, setIsDragging] = useState(false)
 
   return (
     <div className="group flex border-b border-border/30 hover:bg-card/40 transition-colors">
@@ -299,12 +311,39 @@ function TaskRow({
             'absolute top-1/2 -translate-y-1/2 h-7 rounded-md text-[11px] text-white px-2.5 flex items-center font-medium overflow-hidden shadow-md ring-1 ring-white/10',
             PRIORITY_BG[task.priority] ?? 'bg-brand-gradient',
             STATUS_OPACITY[task.status] ?? '',
+            isDragging && 'ring-2 ring-white/70',
           )}
           style={{ left, width }}
           title={`${task.title} · ${task.startDate ?? '?'} → ${task.dueDate ?? '?'}`}
+          onMouseDown={(e) => {
+            setIsDragging(true)
+            const startX = e.clientX
+            const baseStart = startOfDay(barStartMs)
+            const baseEnd = startOfDay(barEndMs)
+            const move = (evt: MouseEvent) => {
+              const diffDays = Math.round((evt.clientX - startX) / dayPx)
+              const nextStart = new Date(baseStart + diffDays * 86400_000).toISOString()
+              const nextEnd = new Date(baseEnd + diffDays * 86400_000).toISOString()
+              onPatchDates({ startDate: nextStart, dueDate: nextEnd })
+            }
+            const up = () => {
+              setIsDragging(false)
+              window.removeEventListener('mousemove', move)
+              window.removeEventListener('mouseup', up)
+            }
+            window.addEventListener('mousemove', move)
+            window.addEventListener('mouseup', up)
+          }}
         >
           <span className="truncate">{task.title}</span>
         </div>
+        {task.dueDate && (
+          <div
+            className="absolute top-1/2 -translate-y-1/2 h-0.5 bg-white/70"
+            style={{ left: Math.max(0, left - 20), width: 18 }}
+            title="Dependency indicator"
+          />
+        )}
       </div>
     </div>
   )

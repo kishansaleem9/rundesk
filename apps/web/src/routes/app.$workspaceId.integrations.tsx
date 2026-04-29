@@ -6,6 +6,11 @@ import {
   Badge,
   Input,
   Switch,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
   cn,
 } from '@rundesk/ui'
 import {
@@ -81,9 +86,14 @@ const CATEGORIES: Array<{ id: Integration['category'] | 'all' | 'installed'; lab
 function IntegrationsMarketplacePage() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<typeof CATEGORIES[number]['id']>('all')
+  const [connected, setConnected] = useState<Record<string, boolean>>(
+    Object.fromEntries(INTEGRATIONS.map((i) => [i.id, Boolean(i.installed)])),
+  )
+  const [activeIntegration, setActiveIntegration] = useState<Integration | null>(null)
+  const [oauthLoading, setOauthLoading] = useState(false)
 
   const filtered = INTEGRATIONS.filter((i) => {
-    if (filter === 'installed') return i.installed
+    if (filter === 'installed') return connected[i.id]
     if (filter !== 'all' && i.category !== filter) return false
     return (
       i.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -91,7 +101,16 @@ function IntegrationsMarketplacePage() {
     )
   })
 
-  const installed = INTEGRATIONS.filter((i) => i.installed)
+  const installed = INTEGRATIONS.filter((i) => connected[i.id])
+
+  const runConnectFlow = async () => {
+    if (!activeIntegration) return
+    setOauthLoading(true)
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    setConnected((prev) => ({ ...prev, [activeIntegration.id]: true }))
+    setOauthLoading(false)
+    setActiveIntegration(null)
+  }
 
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
@@ -140,15 +159,55 @@ function IntegrationsMarketplacePage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {filtered.map((integration) => (
-          <IntegrationCard key={integration.id} integration={integration} />
+          <IntegrationCard
+            key={integration.id}
+            integration={integration}
+            connected={Boolean(connected[integration.id])}
+            onToggle={(next) =>
+              setConnected((prev) => ({ ...prev, [integration.id]: next }))
+            }
+            onOpenConnect={() => setActiveIntegration(integration)}
+          />
         ))}
       </div>
+
+      <Dialog open={Boolean(activeIntegration)} onOpenChange={(open) => !open && setActiveIntegration(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Connect {activeIntegration?.name}</DialogTitle>
+            <DialogDescription>
+              OAuth simulation for demo submission. This flow stores connected state in the UI and opens provider-specific setup fields.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input placeholder="Workspace / Team ID" />
+            <Input placeholder="Default channel / project (optional)" />
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setActiveIntegration(null)}>
+                Cancel
+              </Button>
+              <Button onClick={runConnectFlow} disabled={oauthLoading}>
+                {oauthLoading ? 'Connecting…' : 'Authorize & Connect'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
-function IntegrationCard({ integration }: { integration: Integration }) {
-  const [enabled, setEnabled] = useState(integration.installed ?? false)
+function IntegrationCard({
+  integration,
+  connected,
+  onToggle,
+  onOpenConnect,
+}: {
+  integration: Integration
+  connected: boolean
+  onToggle: (next: boolean) => void
+  onOpenConnect: () => void
+}) {
   return (
     <Card variant="glass" className="p-4 group transition-all hover:border-accent/40">
       <div className="flex items-start gap-3">
@@ -162,12 +221,12 @@ function IntegrationCard({ integration }: { integration: Integration }) {
           <div className="flex items-start gap-2">
             <span className="font-medium truncate flex-1">{integration.name}</span>
             <div className="flex items-center gap-1.5 shrink-0">
-              {integration.popular && !integration.installed && (
+              {integration.popular && !connected && (
                 <Badge variant="info" className="text-[9px] uppercase">Popular</Badge>
               )}
               {integration.comingSoon ? (
                 <Badge variant="soft" className="text-[9px] uppercase">Soon</Badge>
-              ) : integration.installed ? (
+              ) : connected ? (
                 <Badge variant="success" className="text-[9px] uppercase">
                   <CheckCircle2 className="h-2.5 w-2.5" /> Connected
                 </Badge>
@@ -179,12 +238,18 @@ function IntegrationCard({ integration }: { integration: Integration }) {
           </p>
           <div className="mt-3 flex items-center justify-between">
             <Switch
-              checked={enabled}
-              onCheckedChange={setEnabled}
+              checked={connected}
+              onCheckedChange={onToggle}
               disabled={integration.comingSoon}
             />
-            <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={integration.comingSoon}>
-              {integration.installed ? 'Configure' : 'Connect'}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              disabled={integration.comingSoon}
+              onClick={onOpenConnect}
+            >
+              {connected ? 'Configure' : 'Connect'}
             </Button>
           </div>
         </div>
