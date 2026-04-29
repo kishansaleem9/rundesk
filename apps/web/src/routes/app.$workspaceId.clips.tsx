@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import {
   Card,
@@ -15,6 +15,8 @@ import {
   Monitor,
   Search,
   Play,
+  Pause,
+  Square,
   Clock,
   MessageSquare,
   Sparkles,
@@ -34,6 +36,7 @@ type Clip = {
   comments: number
   thumbnail: string
   transcript: boolean
+  localUrl?: string
 }
 
 const MOCK_CLIPS: Clip[] = [
@@ -85,9 +88,76 @@ const MOCK_CLIPS: Clip[] = [
 
 function ClipsPage() {
   const [query, setQuery] = useState('')
-  const filtered = MOCK_CLIPS.filter((c) =>
+  const [clips, setClips] = useState<Clip[]>(MOCK_CLIPS)
+  const [recordingMode, setRecordingMode] = useState<'screen' | 'voice'>('screen')
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const filtered = clips.filter((c) =>
     c.title.toLowerCase().includes(query.toLowerCase()),
   )
+  const recordingLabel = useMemo(() => {
+    if (!recordingStartedAt) return '00:00'
+    const sec = Math.floor((Date.now() - recordingStartedAt) / 1000)
+    const mm = Math.floor(sec / 60)
+    const ss = sec % 60
+    return `${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}`
+  }, [recordingStartedAt, isRecording])
+
+  async function startRecording(mode: 'screen' | 'voice') {
+    if (isRecording) return
+    try {
+      const stream =
+        mode === 'screen'
+          ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+          : await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+      const recorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+      chunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' })
+        const url = URL.createObjectURL(blob)
+        const elapsed = recordingStartedAt ? Math.floor((Date.now() - recordingStartedAt) / 1000) : 0
+        const duration = `${Math.floor(elapsed / 60)}:${(elapsed % 60).toString().padStart(2, '0')}`
+        setClips((prev) => [
+          {
+            id: `clip-${Date.now()}`,
+            title: mode === 'screen' ? 'Screen recording' : 'Voice memo',
+            duration,
+            recordedBy: 'You',
+            recordedAt: 'Just now',
+            views: 0,
+            comments: 0,
+            thumbnail: 'linear-gradient(135deg, hsl(230 50% 45%), hsl(270 70% 55%))',
+            transcript: false,
+            localUrl: url,
+          },
+          ...prev,
+        ])
+        stream.getTracks().forEach((t) => t.stop())
+        setIsRecording(false)
+        setRecordingStartedAt(null)
+      }
+      setRecordingMode(mode)
+      recorder.start()
+      setRecordingStartedAt(Date.now())
+      setIsRecording(true)
+    } catch (error) {
+      console.error('Recording failed to start', error)
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+  }
 
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
@@ -107,12 +177,17 @@ function ClipsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="lg">
+          <Button variant="outline" size="lg" onClick={() => startRecording('voice')} disabled={isRecording}>
             <Mic className="h-4 w-4" /> Voice only
           </Button>
-          <Button variant="gradient" size="lg">
+          <Button variant="gradient" size="lg" onClick={() => startRecording('screen')} disabled={isRecording}>
             <Monitor className="h-4 w-4" /> Record screen
           </Button>
+          {isRecording && (
+            <Button variant="destructive" size="lg" onClick={stopRecording}>
+              <Square className="h-4 w-4" /> Stop ({recordingMode} · {recordingLabel})
+            </Button>
+          )}
         </div>
       </header>
 
@@ -148,15 +223,18 @@ function ClipCard({ clip }: { clip: Clip }) {
         className="relative aspect-video overflow-hidden"
         style={{ background: clip.thumbnail }}
       >
+        {clip.localUrl ? (
+          <video src={clip.localUrl} controls className="absolute inset-0 h-full w-full object-cover" />
+        ) : null}
         {/* Mock waveform / scrubber */}
-        <svg viewBox="0 0 320 90" className="absolute inset-x-0 bottom-0 h-1/3 w-full opacity-50">
+        <svg viewBox="0 0 320 90" className={cn('absolute inset-x-0 bottom-0 h-1/3 w-full opacity-50', clip.localUrl && 'hidden')}>
           {[...Array(40)].map((_, i) => {
             const h = 12 + Math.abs(Math.sin(i * 0.7) * 30 + Math.cos(i * 0.3) * 18)
             return <rect key={i} x={i * 8} y={45 - h / 2} width="3" height={h} fill="white" rx="1" />
           })}
         </svg>
         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-        <div className="absolute inset-0 flex items-center justify-center transition-transform group-hover:scale-110">
+        <div className={cn('absolute inset-0 flex items-center justify-center transition-transform group-hover:scale-110', clip.localUrl && 'hidden')}>
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/15 backdrop-blur-md ring-1 ring-white/30">
             <Play className="h-6 w-6 fill-white text-white ml-0.5" />
           </div>

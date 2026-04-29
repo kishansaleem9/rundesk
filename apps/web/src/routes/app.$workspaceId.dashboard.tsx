@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Card } from '@rundesk/ui'
+import { Card, cn } from '@rundesk/ui'
+import { useState } from 'react'
 import {
   Activity,
   AlertCircle,
@@ -11,6 +12,7 @@ import {
 import { format, formatDistanceToNowStrict, isAfter, isBefore, isToday, startOfWeek } from 'date-fns'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
 
 type TaskStatus =
   | 'backlog'
@@ -58,6 +60,7 @@ function greeting() {
 
 function Dashboard() {
   const { workspaceId } = Route.useParams()
+  const [viewMode, setViewMode] = useState<'overview' | 'custom'>('overview')
   const user = useAuthStore((s) => s.user)
   const displayName = user?.displayName ?? 'there'
   const userId = user?.id
@@ -165,7 +168,32 @@ function Dashboard() {
           {format(now, 'EEEE, MMMM d, yyyy')}
           {workspace ? <> &middot; {workspace.name}</> : null}
         </p>
+        <div className="mt-4 inline-flex rounded-lg border border-border/60 bg-card/30 p-1">
+          <button
+            onClick={() => setViewMode('overview')}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-md',
+              viewMode === 'overview' ? 'bg-brand-gradient text-white' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setViewMode('custom')}
+            className={cn(
+              'px-3 py-1.5 text-xs rounded-md',
+              viewMode === 'custom' ? 'bg-brand-gradient text-white' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Custom dashboard
+          </button>
+        </div>
       </header>
+
+      {viewMode === 'custom' ? (
+        <DashboardWidgetBuilder />
+      ) : (
+      <>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Due today */}
@@ -334,6 +362,8 @@ function Dashboard() {
           )}
         </Card>
       </div>
+      </>
+      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 import {
   Card,
   EmptyState,
@@ -11,6 +12,7 @@ import {
   cn,
 } from '@rundesk/ui'
 import { Users, Calendar, AlertTriangle } from 'lucide-react'
+import { api } from '../lib/api'
 
 export const Route = createFileRoute('/app/$workspaceId/workload')({
   component: WorkloadPage,
@@ -35,8 +37,16 @@ function seededLoad(name: string, dayIdx: number): number {
 }
 
 function WorkloadPage() {
+  const { workspaceId } = Route.useParams()
   const [view, setView] = useState<'7d' | '14d' | '30d'>('14d')
   const days = view === '7d' ? 7 : view === '14d' ? 14 : 30
+  const workloadQuery = useQuery({
+    queryKey: ['workload-report', workspaceId, days],
+    queryFn: () =>
+      api<Array<{ name: string; role?: string; capacity: number; dailyLoads: number[] }>>(
+        `/workspaces/${workspaceId}/reports/workload?days=${days}`,
+      ),
+  })
 
   const dates = useMemo(() => {
     const arr: Date[] = []
@@ -49,6 +59,21 @@ function WorkloadPage() {
     }
     return arr
   }, [days])
+  const people = useMemo(() => {
+    if (workloadQuery.data && workloadQuery.data.length > 0) {
+      return workloadQuery.data.map((p) => ({
+        name: p.name,
+        role: p.role ?? 'Member',
+        capacity: p.capacity || 8,
+        dailyLoads: p.dailyLoads,
+      }))
+    }
+    return PEOPLE.map((p) => ({
+      ...p,
+      dailyLoads: Array.from({ length: days }, (_, i) => seededLoad(p.name, i)),
+    }))
+  }, [workloadQuery.data, days])
+  const overloadedCount = people.filter((p) => p.dailyLoads.some((load) => load > p.capacity)).length
 
   return (
     <div className="p-6 space-y-5">
@@ -100,7 +125,8 @@ function WorkloadPage() {
           </div>
         ))}
         <span className="ml-auto text-muted-foreground flex items-center gap-1">
-          <AlertTriangle className="h-3 w-3" />2 people overloaded this week
+          <AlertTriangle className="h-3 w-3" />
+          {overloadedCount} people overloaded this period
         </span>
       </Card>
 
@@ -142,7 +168,7 @@ function WorkloadPage() {
             </div>
 
             {/* Person rows */}
-            {PEOPLE.map((p) => (
+            {people.map((p) => (
               <div key={p.name} className="flex border-b border-border/30 last:border-b-0 group">
                 <div className="w-[200px] shrink-0 flex items-center gap-2.5 px-4 py-2.5 border-r border-border/60 bg-card/50">
                   <PersonAvatar name={p.name} size="sm" />
@@ -155,7 +181,7 @@ function WorkloadPage() {
                   </Badge>
                 </div>
                 {dates.map((d, i) => {
-                  const load = seededLoad(p.name, i)
+                  const load = p.dailyLoads[i] ?? 0
                   const ratio = Math.min(2, load / p.capacity)
                   const isWeekend = d.getDay() === 0 || d.getDay() === 6
                   return (
@@ -197,7 +223,7 @@ function WorkloadPage() {
         </div>
       </Card>
 
-      {PEOPLE.length === 0 && (
+      {people.length === 0 && (
         <EmptyState
           icon={<Calendar className="h-6 w-6" />}
           title="No teammates with assigned tasks"
