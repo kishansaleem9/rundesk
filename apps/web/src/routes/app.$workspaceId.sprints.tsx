@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Zap, Plus, TrendingUp, CheckCircle2 } from 'lucide-react'
@@ -199,26 +199,34 @@ function SprintRow({ sprint }: { sprint: Sprint }) {
   const done = sprint.completedPoints ?? 0
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
 
+  const { workspaceId } = Route.useParams()
+
   return (
-    <Card className="p-3 hover:shadow-sm transition-shadow">
-      <div className="flex items-center gap-3">
-        <span className={cn('h-2 w-2 rounded-full shrink-0', meta.color)} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="font-medium truncate">{sprint.name}</div>
-            <span className="text-xs text-muted-foreground shrink-0">{meta.label}</span>
+    <Link
+      to="/app/$workspaceId/sprints/$sprintId"
+      params={{ workspaceId, sprintId: sprint.id }}
+      className="block group"
+    >
+      <Card className="p-3 hover:border-accent/40 hover:shadow-glow transition-all">
+        <div className="flex items-center gap-3">
+          <span className={cn('h-2 w-2 rounded-full shrink-0', meta.color)} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <div className="font-medium truncate group-hover:text-accent transition-colors">{sprint.name}</div>
+              <span className="text-xs text-muted-foreground shrink-0">{meta.label}</span>
+            </div>
+            {sprint.goal && <div className="text-xs text-muted-foreground truncate">{sprint.goal}</div>}
           </div>
-          {sprint.goal && <div className="text-xs text-muted-foreground truncate">{sprint.goal}</div>}
+          <div className="flex items-center gap-1 text-xs text-muted-foreground tabular-nums shrink-0">
+            {sprint.status === 'completed' ? (
+              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+            ) : (
+              <TrendingUp className="h-3 w-3" />
+            )}
+            {done}/{total}pt · {pct}%
+          </div>
         </div>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground tabular-nums shrink-0">
-          {sprint.status === 'completed' ? (
-            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-          ) : (
-            <TrendingUp className="h-3 w-3" />
-          )}
-          {done}/{total}pt · {pct}%
-        </div>
-      </div>
-    </Card>
+      </Card>
+    </Link>
   )
 }

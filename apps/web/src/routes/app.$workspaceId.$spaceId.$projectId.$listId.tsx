@@ -28,6 +28,18 @@ type TaskItem = {
   assignees?: TaskAssignee[]
 }
 
+type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
+type CustomFieldDef = {
+  id: string
+  name: string
+  type: CustomFieldType
+  options?: Array<{ label: string; value: string }> | null
+}
+type CustomFieldValue = {
+  fieldId: string
+  value: string | number | boolean | null
+}
+
 export const Route = createFileRoute('/app/$workspaceId/$spaceId/$projectId/$listId')({
   component: ListDetail,
 })
@@ -63,6 +75,11 @@ function ListDetail() {
   const { data: tasks = [], isLoading, refetch } = useQuery({
     queryKey: ['tasks', listId],
     queryFn: () => api<TaskItem[]>(`/tasks/list/${listId}`),
+  })
+  const { data: projectFields = [] } = useQuery({
+    queryKey: ['project-fields', workspaceId, projectId],
+    queryFn: () =>
+      api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`),
   })
 
   useEffect(() => {
@@ -280,6 +297,9 @@ function ListDetail() {
         ) : activeView === 'table' ? (
           <TableView
             tasks={tasks}
+            workspaceId={workspaceId}
+            projectId={projectId}
+            projectFields={projectFields}
             onOpenTask={(id) => setSelectedTaskId(id)}
             onPatchTask={async (id, patch) => {
               await api(`/tasks/${id}`, {
@@ -553,17 +573,25 @@ function InlineAddTask({
   )
 }
 
-type TaskPatch = Partial<Pick<TaskItem, 'title' | 'status' | 'priority' | 'dueDate'>>
+type TaskPatch = Partial<Pick<TaskItem, 'title' | 'status' | 'priority' | 'dueDate'>> & {
+  dueDate?: string | null
+}
 
 const PRIORITY_ORDER: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
 
 function TableView({
   tasks,
+  workspaceId,
+  projectId,
+  projectFields,
   onOpenTask,
   onPatchTask,
   onAddTask,
 }: {
   tasks: TaskItem[]
+  workspaceId: string
+  projectId: string
+  projectFields: CustomFieldDef[]
   onOpenTask: (taskId: string) => void
   onPatchTask: (taskId: string, patch: TaskPatch) => Promise<void> | void
   onAddTask: (title: string) => Promise<void> | void
@@ -574,8 +602,27 @@ function TableView({
   const [statusOpenFor, setStatusOpenFor] = useState<string | null>(null)
   const [priorityOpenFor, setPriorityOpenFor] = useState<string | null>(null)
   const [dateOpenFor, setDateOpenFor] = useState<string | null>(null)
+  const [customOpen, setCustomOpen] = useState<{ taskId: string; fieldId: string } | null>(null)
   const [addActive, setAddActive] = useState(false)
   const [addDraft, setAddDraft] = useState('')
+  const qc = useQueryClient()
+
+  const { data: customFieldByTask = {} } = useQuery({
+    queryKey: ['task-custom-fields-batch', workspaceId, projectId, tasks.map((t) => t.id).join(',')],
+    enabled: tasks.length > 0 && projectFields.length > 0,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        tasks.map(async (task) => {
+          const rows = await api<CustomFieldValue[]>(
+            `/workspaces/${workspaceId}/tasks/${task.id}/custom-fields`,
+          )
+          const rowMap = Object.fromEntries(rows.map((r) => [r.fieldId, r.value]))
+          return [task.id, rowMap] as const
+        }),
+      )
+      return Object.fromEntries(entries)
+    },
+  })
 
   const allSelected = tasks.length > 0 && tasks.every((t) => selected.has(t.id))
   const toggleAll = () => {
@@ -619,11 +666,12 @@ function TableView({
     { key: 'due', label: 'Due date', width: 'w-28' },
     { key: 'created', label: 'Created', width: 'w-24' },
   ] as const
+  const customColumns = projectFields.slice(0, 3)
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
       <div className="overflow-x-auto">
-        <div className="min-w-[860px]">
+        <div className="min-w-[980px]">
           {/* Header */}
           <div className="sticky top-0 z-10 flex items-center bg-surface-50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
             {columns.map((col) => (
@@ -644,6 +692,11 @@ function TableView({
                 )}
               </div>
             ))}
+            {customColumns.map((field) => (
+              <div key={field.id} className="px-3 py-2 w-36 flex items-center gap-2">
+                {field.name}
+              </div>
+            ))}
           </div>
 
           {/* Rows */}
@@ -653,6 +706,7 @@ function TableView({
               const isSelected = selected.has(task.id)
               const isEditing = editingTitleId === task.id
               const assignees = task.assignees ?? []
+              const taskCustom = customFieldByTask[task.id] ?? {}
               return (
                 <div
                   key={task.id}
@@ -872,6 +926,48 @@ function TableView({
                   <div className="w-24 px-3 flex items-center text-xs text-muted-foreground tabular-nums">
                     {task.createdAt ? formatDistanceToNowStrict(new Date(task.createdAt), { addSuffix: false }) : '—'}
                   </div>
+
+                  {customColumns.map((field) => {
+                    const open = customOpen?.taskId === task.id && customOpen.fieldId === field.id
+                    const current = taskCustom[field.id]
+                    const valueLabel =
+                      current === null || current === undefined || current === ''
+                        ? '—'
+                        : String(current)
+
+                    return (
+                      <div key={field.id} className="w-36 px-3 flex items-center relative">
+                        {open ? (
+                          <CustomFieldEditor
+                            field={field}
+                            currentValue={current}
+                            onCancel={() => setCustomOpen(null)}
+                            onSave={async (nextValue) => {
+                              setCustomOpen(null)
+                              await api(`/workspaces/${workspaceId}/tasks/${task.id}/custom-fields/${field.id}`, {
+                                method: 'PUT',
+                                body: { value: nextValue },
+                              })
+                              await qc.invalidateQueries({
+                                queryKey: ['task-custom-fields-batch', workspaceId, projectId],
+                              })
+                            }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setCustomOpen({ taskId: task.id, fieldId: field.id })
+                            }}
+                            className="text-xs truncate text-left hover:text-foreground w-full"
+                          >
+                            {valueLabel}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )
             })}
@@ -914,6 +1010,80 @@ function TableView({
         </div>
       </div>
     </div>
+  )
+}
+
+function CustomFieldEditor({
+  field,
+  currentValue,
+  onSave,
+  onCancel,
+}: {
+  field: CustomFieldDef
+  currentValue: unknown
+  onSave: (nextValue: string | number | boolean | null) => Promise<void> | void
+  onCancel: () => void
+}) {
+  const [draft, setDraft] = useState<string>(currentValue == null ? '' : String(currentValue))
+  const [checked, setChecked] = useState(Boolean(currentValue))
+  if (field.type === 'checkbox') {
+    return (
+      <label className="inline-flex items-center gap-2 text-xs">
+        <input
+          autoFocus
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => {
+            const next = e.target.checked
+            setChecked(next)
+            void onSave(next)
+          }}
+        />
+      </label>
+    )
+  }
+  if (field.type === 'dropdown') {
+    return (
+      <select
+        autoFocus
+        className="h-6 w-full text-xs bg-card border border-border rounded px-1"
+        value={draft}
+        onBlur={onCancel}
+        onChange={(e) => {
+          const next = e.target.value
+          setDraft(next)
+          void onSave(next || null)
+        }}
+      >
+        <option value="">None</option>
+        {(field.options ?? []).map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
+  const inputType = field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'
+  return (
+    <input
+      autoFocus
+      type={inputType}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (field.type === 'number') {
+          const asNum = draft.trim() ? Number(draft) : null
+          void onSave(Number.isFinite(asNum as number) ? asNum : null)
+        } else {
+          void onSave(draft.trim() || null)
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onCancel()
+      }}
+      className="h-6 w-full text-xs bg-card border border-border rounded px-1"
+    />
   )
 }
 

@@ -21,22 +21,32 @@ import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppWorkspaceIdRouteImport } from './routes/app.$workspaceId'
 import { Route as AppAdminFeaturesRouteImport } from './routes/app.admin.features'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
+import { Route as AppAdminAnnouncementsRouteImport } from './routes/app.admin.announcements'
 import { Route as AppWorkspaceIdWorkloadRouteImport } from './routes/app.$workspaceId.workload'
+import { Route as AppWorkspaceIdWhiteboardsRouteImport } from './routes/app.$workspaceId.whiteboards'
 import { Route as AppWorkspaceIdTimelineRouteImport } from './routes/app.$workspaceId.timeline'
 import { Route as AppWorkspaceIdTimeRouteImport } from './routes/app.$workspaceId.time'
+import { Route as AppWorkspaceIdTemplatesRouteImport } from './routes/app.$workspaceId.templates'
 import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspaceId.sprints'
 import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$workspaceId.settings'
 import { Route as AppWorkspaceIdReportsRouteImport } from './routes/app.$workspaceId.reports'
+import { Route as AppWorkspaceIdMindmapsRouteImport } from './routes/app.$workspaceId.mindmaps'
+import { Route as AppWorkspaceIdIntegrationsRouteImport } from './routes/app.$workspaceId.integrations'
+import { Route as AppWorkspaceIdInsightsRouteImport } from './routes/app.$workspaceId.insights'
 import { Route as AppWorkspaceIdInboxRouteImport } from './routes/app.$workspaceId.inbox'
 import { Route as AppWorkspaceIdImportRouteImport } from './routes/app.$workspaceId.import'
 import { Route as AppWorkspaceIdGoalsRouteImport } from './routes/app.$workspaceId.goals'
 import { Route as AppWorkspaceIdFormsRouteImport } from './routes/app.$workspaceId.forms'
 import { Route as AppWorkspaceIdDocsRouteImport } from './routes/app.$workspaceId.docs'
 import { Route as AppWorkspaceIdDashboardRouteImport } from './routes/app.$workspaceId.dashboard'
+import { Route as AppWorkspaceIdClipsRouteImport } from './routes/app.$workspaceId.clips'
 import { Route as AppWorkspaceIdChatRouteImport } from './routes/app.$workspaceId.chat'
 import { Route as AppWorkspaceIdAutomationsRouteImport } from './routes/app.$workspaceId.automations'
 import { Route as AppWorkspaceIdAiRouteImport } from './routes/app.$workspaceId.ai'
 import { Route as AppWorkspaceIdSpaceIdRouteImport } from './routes/app.$workspaceId.$spaceId'
+import { Route as AppWorkspaceIdTimeApprovalsRouteImport } from './routes/app.$workspaceId.time.approvals'
+import { Route as AppWorkspaceIdSprintsSprintIdRouteImport } from './routes/app.$workspaceId.sprints.$sprintId'
+import { Route as AppWorkspaceIdGoalsGoalIdRouteImport } from './routes/app.$workspaceId.goals.$goalId'
 import { Route as AppWorkspaceIdFormsFormIdRouteImport } from './routes/app.$workspaceId.forms.$formId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdListIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId.$listId'
@@ -101,11 +111,22 @@ const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   path: '/audit',
   getParentRoute: () => AppAdminRoute,
 } as any)
+const AppAdminAnnouncementsRoute = AppAdminAnnouncementsRouteImport.update({
+  id: '/announcements',
+  path: '/announcements',
+  getParentRoute: () => AppAdminRoute,
+} as any)
 const AppWorkspaceIdWorkloadRoute = AppWorkspaceIdWorkloadRouteImport.update({
   id: '/workload',
   path: '/workload',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
+const AppWorkspaceIdWhiteboardsRoute =
+  AppWorkspaceIdWhiteboardsRouteImport.update({
+    id: '/whiteboards',
+    path: '/whiteboards',
+    getParentRoute: () => AppWorkspaceIdRoute,
+  } as any)
 const AppWorkspaceIdTimelineRoute = AppWorkspaceIdTimelineRouteImport.update({
   id: '/timeline',
   path: '/timeline',
@@ -114,6 +135,11 @@ const AppWorkspaceIdTimelineRoute = AppWorkspaceIdTimelineRouteImport.update({
 const AppWorkspaceIdTimeRoute = AppWorkspaceIdTimeRouteImport.update({
   id: '/time',
   path: '/time',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any)
+const AppWorkspaceIdTemplatesRoute = AppWorkspaceIdTemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
 const AppWorkspaceIdSprintsRoute = AppWorkspaceIdSprintsRouteImport.update({
@@ -129,6 +155,22 @@ const AppWorkspaceIdSettingsRoute = AppWorkspaceIdSettingsRouteImport.update({
 const AppWorkspaceIdReportsRoute = AppWorkspaceIdReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any)
+const AppWorkspaceIdMindmapsRoute = AppWorkspaceIdMindmapsRouteImport.update({
+  id: '/mindmaps',
+  path: '/mindmaps',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any)
+const AppWorkspaceIdIntegrationsRoute =
+  AppWorkspaceIdIntegrationsRouteImport.update({
+    id: '/integrations',
+    path: '/integrations',
+    getParentRoute: () => AppWorkspaceIdRoute,
+  } as any)
+const AppWorkspaceIdInsightsRoute = AppWorkspaceIdInsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
 const AppWorkspaceIdInboxRoute = AppWorkspaceIdInboxRouteImport.update({
@@ -161,6 +203,11 @@ const AppWorkspaceIdDashboardRoute = AppWorkspaceIdDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
+const AppWorkspaceIdClipsRoute = AppWorkspaceIdClipsRouteImport.update({
+  id: '/clips',
+  path: '/clips',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any)
 const AppWorkspaceIdChatRoute = AppWorkspaceIdChatRouteImport.update({
   id: '/chat',
   path: '/chat',
@@ -182,6 +229,24 @@ const AppWorkspaceIdSpaceIdRoute = AppWorkspaceIdSpaceIdRouteImport.update({
   path: '/$spaceId',
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any)
+const AppWorkspaceIdTimeApprovalsRoute =
+  AppWorkspaceIdTimeApprovalsRouteImport.update({
+    id: '/approvals',
+    path: '/approvals',
+    getParentRoute: () => AppWorkspaceIdTimeRoute,
+  } as any)
+const AppWorkspaceIdSprintsSprintIdRoute =
+  AppWorkspaceIdSprintsSprintIdRouteImport.update({
+    id: '/$sprintId',
+    path: '/$sprintId',
+    getParentRoute: () => AppWorkspaceIdSprintsRoute,
+  } as any)
+const AppWorkspaceIdGoalsGoalIdRoute =
+  AppWorkspaceIdGoalsGoalIdRouteImport.update({
+    id: '/$goalId',
+    path: '/$goalId',
+    getParentRoute: () => AppWorkspaceIdGoalsRoute,
+  } as any)
 const AppWorkspaceIdFormsFormIdRoute =
   AppWorkspaceIdFormsFormIdRouteImport.update({
     id: '/$formId',
@@ -216,22 +281,32 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/ai': typeof AppWorkspaceIdAiRoute
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
+  '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
-  '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
+  '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRouteWithChildren
   '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
+  '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
+  '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
+  '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
-  '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
-  '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
+  '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
+  '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
+  '/app/$workspaceId/whiteboards': typeof AppWorkspaceIdWhiteboardsRoute
   '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
+  '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
+  '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
+  '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
+  '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRoutesByTo {
@@ -248,22 +323,32 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/ai': typeof AppWorkspaceIdAiRoute
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
+  '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
-  '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
+  '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRouteWithChildren
   '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
+  '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
+  '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
+  '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
-  '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
-  '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
+  '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
+  '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
+  '/app/$workspaceId/whiteboards': typeof AppWorkspaceIdWhiteboardsRoute
   '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
+  '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
+  '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
+  '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
+  '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRoutesById {
@@ -282,22 +367,32 @@ export interface FileRoutesById {
   '/app/$workspaceId/ai': typeof AppWorkspaceIdAiRoute
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
+  '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
-  '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRoute
+  '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRouteWithChildren
   '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
+  '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
+  '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
+  '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
-  '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRoute
-  '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRoute
+  '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
+  '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
+  '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
+  '/app/$workspaceId/whiteboards': typeof AppWorkspaceIdWhiteboardsRoute
   '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
+  '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
+  '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
+  '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
+  '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRouteTypes {
@@ -317,22 +412,32 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/automations'
     | '/app/$workspaceId/chat'
+    | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
+    | '/app/$workspaceId/insights'
+    | '/app/$workspaceId/integrations'
+    | '/app/$workspaceId/mindmaps'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
+    | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
     | '/app/$workspaceId/timeline'
+    | '/app/$workspaceId/whiteboards'
     | '/app/$workspaceId/workload'
+    | '/app/admin/announcements'
     | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
+    | '/app/$workspaceId/goals/$goalId'
+    | '/app/$workspaceId/sprints/$sprintId'
+    | '/app/$workspaceId/time/approvals'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -349,22 +454,32 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/automations'
     | '/app/$workspaceId/chat'
+    | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
+    | '/app/$workspaceId/insights'
+    | '/app/$workspaceId/integrations'
+    | '/app/$workspaceId/mindmaps'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
+    | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
     | '/app/$workspaceId/timeline'
+    | '/app/$workspaceId/whiteboards'
     | '/app/$workspaceId/workload'
+    | '/app/admin/announcements'
     | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
+    | '/app/$workspaceId/goals/$goalId'
+    | '/app/$workspaceId/sprints/$sprintId'
+    | '/app/$workspaceId/time/approvals'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   id:
     | '__root__'
@@ -382,22 +497,32 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/automations'
     | '/app/$workspaceId/chat'
+    | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
+    | '/app/$workspaceId/insights'
+    | '/app/$workspaceId/integrations'
+    | '/app/$workspaceId/mindmaps'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/sprints'
+    | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
     | '/app/$workspaceId/timeline'
+    | '/app/$workspaceId/whiteboards'
     | '/app/$workspaceId/workload'
+    | '/app/admin/announcements'
     | '/app/admin/audit'
     | '/app/admin/features'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
+    | '/app/$workspaceId/goals/$goalId'
+    | '/app/$workspaceId/sprints/$sprintId'
+    | '/app/$workspaceId/time/approvals'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   fileRoutesById: FileRoutesById
 }
@@ -496,11 +621,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminAuditRouteImport
       parentRoute: typeof AppAdminRoute
     }
+    '/app/admin/announcements': {
+      id: '/app/admin/announcements'
+      path: '/announcements'
+      fullPath: '/app/admin/announcements'
+      preLoaderRoute: typeof AppAdminAnnouncementsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
     '/app/$workspaceId/workload': {
       id: '/app/$workspaceId/workload'
       path: '/workload'
       fullPath: '/app/$workspaceId/workload'
       preLoaderRoute: typeof AppWorkspaceIdWorkloadRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/whiteboards': {
+      id: '/app/$workspaceId/whiteboards'
+      path: '/whiteboards'
+      fullPath: '/app/$workspaceId/whiteboards'
+      preLoaderRoute: typeof AppWorkspaceIdWhiteboardsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
     '/app/$workspaceId/timeline': {
@@ -515,6 +654,13 @@ declare module '@tanstack/react-router' {
       path: '/time'
       fullPath: '/app/$workspaceId/time'
       preLoaderRoute: typeof AppWorkspaceIdTimeRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/templates': {
+      id: '/app/$workspaceId/templates'
+      path: '/templates'
+      fullPath: '/app/$workspaceId/templates'
+      preLoaderRoute: typeof AppWorkspaceIdTemplatesRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
     '/app/$workspaceId/sprints': {
@@ -536,6 +682,27 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/app/$workspaceId/reports'
       preLoaderRoute: typeof AppWorkspaceIdReportsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/mindmaps': {
+      id: '/app/$workspaceId/mindmaps'
+      path: '/mindmaps'
+      fullPath: '/app/$workspaceId/mindmaps'
+      preLoaderRoute: typeof AppWorkspaceIdMindmapsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/integrations': {
+      id: '/app/$workspaceId/integrations'
+      path: '/integrations'
+      fullPath: '/app/$workspaceId/integrations'
+      preLoaderRoute: typeof AppWorkspaceIdIntegrationsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/insights': {
+      id: '/app/$workspaceId/insights'
+      path: '/insights'
+      fullPath: '/app/$workspaceId/insights'
+      preLoaderRoute: typeof AppWorkspaceIdInsightsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
     '/app/$workspaceId/inbox': {
@@ -580,6 +747,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdDashboardRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/clips': {
+      id: '/app/$workspaceId/clips'
+      path: '/clips'
+      fullPath: '/app/$workspaceId/clips'
+      preLoaderRoute: typeof AppWorkspaceIdClipsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/chat': {
       id: '/app/$workspaceId/chat'
       path: '/chat'
@@ -607,6 +781,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/$workspaceId/$spaceId'
       preLoaderRoute: typeof AppWorkspaceIdSpaceIdRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/time/approvals': {
+      id: '/app/$workspaceId/time/approvals'
+      path: '/approvals'
+      fullPath: '/app/$workspaceId/time/approvals'
+      preLoaderRoute: typeof AppWorkspaceIdTimeApprovalsRouteImport
+      parentRoute: typeof AppWorkspaceIdTimeRoute
+    }
+    '/app/$workspaceId/sprints/$sprintId': {
+      id: '/app/$workspaceId/sprints/$sprintId'
+      path: '/$sprintId'
+      fullPath: '/app/$workspaceId/sprints/$sprintId'
+      preLoaderRoute: typeof AppWorkspaceIdSprintsSprintIdRouteImport
+      parentRoute: typeof AppWorkspaceIdSprintsRoute
+    }
+    '/app/$workspaceId/goals/$goalId': {
+      id: '/app/$workspaceId/goals/$goalId'
+      path: '/$goalId'
+      fullPath: '/app/$workspaceId/goals/$goalId'
+      preLoaderRoute: typeof AppWorkspaceIdGoalsGoalIdRouteImport
+      parentRoute: typeof AppWorkspaceIdGoalsRoute
     }
     '/app/$workspaceId/forms/$formId': {
       id: '/app/$workspaceId/forms/$formId'
@@ -672,22 +867,63 @@ const AppWorkspaceIdFormsRouteChildren: AppWorkspaceIdFormsRouteChildren = {
 const AppWorkspaceIdFormsRouteWithChildren =
   AppWorkspaceIdFormsRoute._addFileChildren(AppWorkspaceIdFormsRouteChildren)
 
+interface AppWorkspaceIdGoalsRouteChildren {
+  AppWorkspaceIdGoalsGoalIdRoute: typeof AppWorkspaceIdGoalsGoalIdRoute
+}
+
+const AppWorkspaceIdGoalsRouteChildren: AppWorkspaceIdGoalsRouteChildren = {
+  AppWorkspaceIdGoalsGoalIdRoute: AppWorkspaceIdGoalsGoalIdRoute,
+}
+
+const AppWorkspaceIdGoalsRouteWithChildren =
+  AppWorkspaceIdGoalsRoute._addFileChildren(AppWorkspaceIdGoalsRouteChildren)
+
+interface AppWorkspaceIdSprintsRouteChildren {
+  AppWorkspaceIdSprintsSprintIdRoute: typeof AppWorkspaceIdSprintsSprintIdRoute
+}
+
+const AppWorkspaceIdSprintsRouteChildren: AppWorkspaceIdSprintsRouteChildren = {
+  AppWorkspaceIdSprintsSprintIdRoute: AppWorkspaceIdSprintsSprintIdRoute,
+}
+
+const AppWorkspaceIdSprintsRouteWithChildren =
+  AppWorkspaceIdSprintsRoute._addFileChildren(
+    AppWorkspaceIdSprintsRouteChildren,
+  )
+
+interface AppWorkspaceIdTimeRouteChildren {
+  AppWorkspaceIdTimeApprovalsRoute: typeof AppWorkspaceIdTimeApprovalsRoute
+}
+
+const AppWorkspaceIdTimeRouteChildren: AppWorkspaceIdTimeRouteChildren = {
+  AppWorkspaceIdTimeApprovalsRoute: AppWorkspaceIdTimeApprovalsRoute,
+}
+
+const AppWorkspaceIdTimeRouteWithChildren =
+  AppWorkspaceIdTimeRoute._addFileChildren(AppWorkspaceIdTimeRouteChildren)
+
 interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdSpaceIdRoute: typeof AppWorkspaceIdSpaceIdRouteWithChildren
   AppWorkspaceIdAiRoute: typeof AppWorkspaceIdAiRoute
   AppWorkspaceIdAutomationsRoute: typeof AppWorkspaceIdAutomationsRoute
   AppWorkspaceIdChatRoute: typeof AppWorkspaceIdChatRoute
+  AppWorkspaceIdClipsRoute: typeof AppWorkspaceIdClipsRoute
   AppWorkspaceIdDashboardRoute: typeof AppWorkspaceIdDashboardRoute
   AppWorkspaceIdDocsRoute: typeof AppWorkspaceIdDocsRoute
   AppWorkspaceIdFormsRoute: typeof AppWorkspaceIdFormsRouteWithChildren
-  AppWorkspaceIdGoalsRoute: typeof AppWorkspaceIdGoalsRoute
+  AppWorkspaceIdGoalsRoute: typeof AppWorkspaceIdGoalsRouteWithChildren
   AppWorkspaceIdImportRoute: typeof AppWorkspaceIdImportRoute
   AppWorkspaceIdInboxRoute: typeof AppWorkspaceIdInboxRoute
+  AppWorkspaceIdInsightsRoute: typeof AppWorkspaceIdInsightsRoute
+  AppWorkspaceIdIntegrationsRoute: typeof AppWorkspaceIdIntegrationsRoute
+  AppWorkspaceIdMindmapsRoute: typeof AppWorkspaceIdMindmapsRoute
   AppWorkspaceIdReportsRoute: typeof AppWorkspaceIdReportsRoute
   AppWorkspaceIdSettingsRoute: typeof AppWorkspaceIdSettingsRoute
-  AppWorkspaceIdSprintsRoute: typeof AppWorkspaceIdSprintsRoute
-  AppWorkspaceIdTimeRoute: typeof AppWorkspaceIdTimeRoute
+  AppWorkspaceIdSprintsRoute: typeof AppWorkspaceIdSprintsRouteWithChildren
+  AppWorkspaceIdTemplatesRoute: typeof AppWorkspaceIdTemplatesRoute
+  AppWorkspaceIdTimeRoute: typeof AppWorkspaceIdTimeRouteWithChildren
   AppWorkspaceIdTimelineRoute: typeof AppWorkspaceIdTimelineRoute
+  AppWorkspaceIdWhiteboardsRoute: typeof AppWorkspaceIdWhiteboardsRoute
   AppWorkspaceIdWorkloadRoute: typeof AppWorkspaceIdWorkloadRoute
 }
 
@@ -696,17 +932,23 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdAiRoute: AppWorkspaceIdAiRoute,
   AppWorkspaceIdAutomationsRoute: AppWorkspaceIdAutomationsRoute,
   AppWorkspaceIdChatRoute: AppWorkspaceIdChatRoute,
+  AppWorkspaceIdClipsRoute: AppWorkspaceIdClipsRoute,
   AppWorkspaceIdDashboardRoute: AppWorkspaceIdDashboardRoute,
   AppWorkspaceIdDocsRoute: AppWorkspaceIdDocsRoute,
   AppWorkspaceIdFormsRoute: AppWorkspaceIdFormsRouteWithChildren,
-  AppWorkspaceIdGoalsRoute: AppWorkspaceIdGoalsRoute,
+  AppWorkspaceIdGoalsRoute: AppWorkspaceIdGoalsRouteWithChildren,
   AppWorkspaceIdImportRoute: AppWorkspaceIdImportRoute,
   AppWorkspaceIdInboxRoute: AppWorkspaceIdInboxRoute,
+  AppWorkspaceIdInsightsRoute: AppWorkspaceIdInsightsRoute,
+  AppWorkspaceIdIntegrationsRoute: AppWorkspaceIdIntegrationsRoute,
+  AppWorkspaceIdMindmapsRoute: AppWorkspaceIdMindmapsRoute,
   AppWorkspaceIdReportsRoute: AppWorkspaceIdReportsRoute,
   AppWorkspaceIdSettingsRoute: AppWorkspaceIdSettingsRoute,
-  AppWorkspaceIdSprintsRoute: AppWorkspaceIdSprintsRoute,
-  AppWorkspaceIdTimeRoute: AppWorkspaceIdTimeRoute,
+  AppWorkspaceIdSprintsRoute: AppWorkspaceIdSprintsRouteWithChildren,
+  AppWorkspaceIdTemplatesRoute: AppWorkspaceIdTemplatesRoute,
+  AppWorkspaceIdTimeRoute: AppWorkspaceIdTimeRouteWithChildren,
   AppWorkspaceIdTimelineRoute: AppWorkspaceIdTimelineRoute,
+  AppWorkspaceIdWhiteboardsRoute: AppWorkspaceIdWhiteboardsRoute,
   AppWorkspaceIdWorkloadRoute: AppWorkspaceIdWorkloadRoute,
 }
 
@@ -715,11 +957,13 @@ const AppWorkspaceIdRouteWithChildren = AppWorkspaceIdRoute._addFileChildren(
 )
 
 interface AppAdminRouteChildren {
+  AppAdminAnnouncementsRoute: typeof AppAdminAnnouncementsRoute
   AppAdminAuditRoute: typeof AppAdminAuditRoute
   AppAdminFeaturesRoute: typeof AppAdminFeaturesRoute
 }
 
 const AppAdminRouteChildren: AppAdminRouteChildren = {
+  AppAdminAnnouncementsRoute: AppAdminAnnouncementsRoute,
   AppAdminAuditRoute: AppAdminAuditRoute,
   AppAdminFeaturesRoute: AppAdminFeaturesRoute,
 }

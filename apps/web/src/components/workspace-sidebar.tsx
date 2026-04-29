@@ -26,6 +26,12 @@ import {
   BarChart3,
   Upload,
   GanttChart,
+  Frame,
+  Network,
+  Video,
+  LayoutTemplate,
+  Bot,
+  Plug,
 } from 'lucide-react'
 import { Button, Input, LogoMark, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
@@ -144,43 +150,101 @@ function WorkspaceHeader({ activeWorkspaceId }: { activeWorkspaceId?: string }) 
 function PinnedLinks({ workspaceId }: { workspaceId?: string }) {
   if (!workspaceId) return null
 
-  const workspaceItems = [
-    { label: 'Home', icon: Home, to: '/app/$workspaceId' as const },
-    { label: 'Dashboard', icon: LayoutDashboard, to: '/app/$workspaceId/dashboard' as const },
-    { label: 'Timeline', icon: GanttChart, to: '/app/$workspaceId/timeline' as const },
-    { label: 'Workload', icon: Users, to: '/app/$workspaceId/workload' as const },
-    { label: 'Inbox', icon: Inbox, to: '/app/$workspaceId/inbox' as const },
-    { label: 'Chat', icon: MessageSquare, to: '/app/$workspaceId/chat' as const },
-    { label: 'Docs', icon: FileText, to: '/app/$workspaceId/docs' as const },
-    { label: 'Goals', icon: Target, to: '/app/$workspaceId/goals' as const },
-    { label: 'Sprints', icon: Sparkles, to: '/app/$workspaceId/sprints' as const },
-    { label: 'Time', icon: Clock, to: '/app/$workspaceId/time' as const },
-    { label: 'Forms', icon: ClipboardList, to: '/app/$workspaceId/forms' as const },
-    { label: 'AI', icon: Sparkles, to: '/app/$workspaceId/ai' as const },
-    { label: 'Reports', icon: BarChart3, to: '/app/$workspaceId/reports' as const },
-    { label: 'Automations', icon: Zap, to: '/app/$workspaceId/automations' as const },
-    { label: 'Import', icon: Upload, to: '/app/$workspaceId/import' as const },
+  type NavItem = { label: string; icon: typeof Home; to: string; badge?: string }
+
+  const sections: Array<{ label: string; items: NavItem[] }> = [
+    {
+      label: 'Plan',
+      items: [
+        { label: 'Home', icon: Home, to: '/app/$workspaceId' },
+        { label: 'Dashboard', icon: LayoutDashboard, to: '/app/$workspaceId/dashboard' },
+        { label: 'Inbox', icon: Inbox, to: '/app/$workspaceId/inbox' },
+      ],
+    },
+    {
+      label: 'Views',
+      items: [
+        { label: 'Timeline', icon: GanttChart, to: '/app/$workspaceId/timeline' },
+        { label: 'Workload', icon: Users, to: '/app/$workspaceId/workload' },
+      ],
+    },
+    {
+      label: 'Build',
+      items: [
+        { label: 'Whiteboards', icon: Frame, to: '/app/$workspaceId/whiteboards' },
+        { label: 'Mind maps', icon: Network, to: '/app/$workspaceId/mindmaps' },
+        { label: 'Docs', icon: FileText, to: '/app/$workspaceId/docs' },
+        { label: 'Templates', icon: LayoutTemplate, to: '/app/$workspaceId/templates' },
+      ],
+    },
+    {
+      label: 'Communicate',
+      items: [
+        { label: 'Chat', icon: MessageSquare, to: '/app/$workspaceId/chat' },
+        { label: 'Clips', icon: Video, to: '/app/$workspaceId/clips', badge: 'New' },
+      ],
+    },
+    {
+      label: 'Run',
+      items: [
+        { label: 'Goals', icon: Target, to: '/app/$workspaceId/goals' },
+        { label: 'Sprints', icon: Sparkles, to: '/app/$workspaceId/sprints' },
+        { label: 'Forms', icon: ClipboardList, to: '/app/$workspaceId/forms' },
+        { label: 'Time', icon: Clock, to: '/app/$workspaceId/time' },
+      ],
+    },
+    {
+      label: 'Insights',
+      items: [
+        { label: 'AI Insights', icon: Sparkles, to: '/app/$workspaceId/insights', badge: 'AI' },
+        { label: 'Reports', icon: BarChart3, to: '/app/$workspaceId/reports' },
+      ],
+    },
+    {
+      label: 'Connect',
+      items: [
+        { label: 'AI', icon: Bot, to: '/app/$workspaceId/ai' },
+        { label: 'Automations', icon: Zap, to: '/app/$workspaceId/automations' },
+        { label: 'Integrations', icon: Plug, to: '/app/$workspaceId/integrations' },
+        { label: 'Import', icon: Upload, to: '/app/$workspaceId/import' },
+      ],
+    },
   ]
 
   return (
-    <div className="space-y-0.5">
-      {workspaceItems.map((item) => (
-        <Link
-          key={item.label}
-          to={item.to}
-          params={{ workspaceId }}
-          className="group relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-card/60 transition-all"
-          activeProps={{
-            className:
-              'bg-accent/15 text-foreground font-medium [&>svg]:text-accent',
-          }}
-          activeOptions={{ exact: true }}
-        >
-          <item.icon className="h-4 w-4 shrink-0 transition-colors" />
-          <span className="truncate">{item.label}</span>
-        </Link>
+    <div className="space-y-3">
+      {sections.map((section, idx) => (
+        <div key={section.label}>
+          {idx > 0 && (
+            <div className="px-2.5 mt-2 mb-1 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+              {section.label}
+            </div>
+          )}
+          <div className="space-y-0.5">
+            {section.items.map((item) => (
+              <Link
+                key={item.label}
+                to={item.to as never}
+                params={{ workspaceId }}
+                className="group relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-card/60 transition-all"
+                activeProps={{
+                  className: 'bg-accent/15 text-foreground font-medium [&>svg]:text-accent',
+                }}
+                activeOptions={{ exact: true }}
+              >
+                <item.icon className="h-4 w-4 shrink-0 transition-colors" />
+                <span className="truncate flex-1">{item.label}</span>
+                {item.badge && (
+                  <span className="text-[9px] uppercase tracking-wider font-semibold bg-brand-gradient text-white rounded px-1 py-0.5">
+                    {item.badge}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+        </div>
       ))}
-      <div className="h-px bg-border/40 my-2 mx-2" />
+      <div className="h-px bg-border/40 mx-2" />
       <Link
         to="/app/admin/features"
         className="group relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-card/60 transition-all"

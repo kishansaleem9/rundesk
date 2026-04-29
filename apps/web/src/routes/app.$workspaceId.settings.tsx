@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn } from '@rundesk/ui'
 import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 
 export const Route = createFileRoute('/app/$workspaceId/settings')({
   component: SettingsPage,
@@ -684,17 +685,7 @@ function SecurityTab() {
         )}
       </Card>
 
-      <Card className="p-4">
-        <h3 className="font-semibold text-sm mb-1">IP allowlist</h3>
-        <p className="text-xs text-muted-foreground mb-3">Restrict workspace access to specific IP ranges.</p>
-        <Button size="sm" variant="outline" disabled>Configure (v1.1)</Button>
-      </Card>
-
-      <Card className="p-4">
-        <h3 className="font-semibold text-sm mb-1">Session timeout</h3>
-        <p className="text-xs text-muted-foreground mb-3">Force re-login after a period of inactivity.</p>
-        <Button size="sm" variant="outline" disabled>Configure (v1.1)</Button>
-      </Card>
+      <AdvancedSecurityPanel />
     </div>
   )
 }

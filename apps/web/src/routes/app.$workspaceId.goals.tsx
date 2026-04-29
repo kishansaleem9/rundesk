@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Target, TrendingUp, CheckCircle2, AlertTriangle, Plus } from 'lucide-react'
@@ -159,35 +159,42 @@ function clampPct(v: unknown): number {
 function GoalCard({ goal }: { goal: Goal }) {
   const meta = STATUS_META[goal.status]
   const Icon = meta.icon
+  const { workspaceId } = Route.useParams()
   return (
-    <Card className="p-4 hover:shadow-md transition-shadow">
-      <div className="flex items-start gap-3">
-        <div className="h-10 w-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
-          <Target className="h-5 w-5 text-accent" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="font-semibold truncate">{goal.title}</h3>
-          {goal.description && (
-            <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{goal.description}</p>
-          )}
-          <div className="mt-3 flex items-center gap-2">
-            <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
-              <div
-                className={cn('h-full transition-all', meta.color)}
-                style={{ width: `${clampPct(goal.progress)}%` }}
-              />
+    <Link
+      to="/app/$workspaceId/goals/$goalId"
+      params={{ workspaceId, goalId: goal.id }}
+      className="block group"
+    >
+      <Card className="p-4 hover:border-accent/40 hover:shadow-glow transition-all">
+        <div className="flex items-start gap-3">
+          <div className="h-10 w-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
+            <Target className="h-5 w-5 text-accent" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold truncate group-hover:text-accent transition-colors">{goal.title}</h3>
+            {goal.description && (
+              <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{goal.description}</p>
+            )}
+            <div className="mt-3 flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                <div
+                  className={cn('h-full transition-all', meta.color)}
+                  style={{ width: `${clampPct(goal.progress)}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">
+                {Math.round(clampPct(goal.progress))}%
+              </span>
             </div>
-            <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">
-              {Math.round(clampPct(goal.progress))}%
-            </span>
-          </div>
-          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <Icon className="h-3 w-3" />
-            <span>{meta.label}</span>
-            {goal.dueDate && <span>· due {new Date(goal.dueDate).toLocaleDateString()}</span>}
+            <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <Icon className="h-3 w-3" />
+              <span>{meta.label}</span>
+              {goal.dueDate && <span>· due {new Date(goal.dueDate).toLocaleDateString()}</span>}
+            </div>
           </div>
         </div>
-      </div>
-    </Card>
+      </Card>
+    </Link>
   )
 }

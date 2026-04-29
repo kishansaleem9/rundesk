@@ -5,6 +5,8 @@ import { Plus } from 'lucide-react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
 import { api } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 
@@ -40,6 +42,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     extensions: [
       StarterKit,
       Placeholder.configure({ placeholder: 'Write your doc...' }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
     ],
     content: activeDoc?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
     immediatelyRender: false,
@@ -174,6 +178,22 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 disabled={!editor}
               >
                 List
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => editor?.chain().focus().toggleTaskList().run()}
+                disabled={!editor}
+              >
+                Todo
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
+                disabled={!editor}
+              >
+                Code
               </Button>
               <Button
                 size="sm"
