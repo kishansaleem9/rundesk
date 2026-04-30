@@ -12,6 +12,7 @@ import {
   Label,
 } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
+import { useAuthStore } from '../store/auth'
 
 export const Route = createFileRoute('/app/')({
   component: WorkspacePicker,
@@ -25,6 +26,7 @@ type WorkspaceEntry = {
 function WorkspacePicker() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
   const { data, isLoading, error } = useQuery({
     queryKey: ['workspaces'],
     queryFn: () => api<WorkspaceEntry[]>('/workspaces'),
@@ -36,6 +38,10 @@ function WorkspacePicker() {
 
   // If the user has exactly one workspace, jump straight in.
   useEffect(() => {
+    if (user?.role === 'super_admin') {
+      navigate({ to: '/app/admin', replace: true })
+      return
+    }
     if (data && data.length === 1) {
       navigate({
         to: '/app/$workspaceId',
@@ -43,7 +49,7 @@ function WorkspacePicker() {
         replace: true,
       })
     }
-  }, [data, navigate])
+  }, [data, navigate, user])
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()

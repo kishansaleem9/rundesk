@@ -29,6 +29,7 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const isDev = import.meta.env.DEV
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -40,7 +41,11 @@ function LoginPage() {
         body: JSON.stringify({ email, password }),
       })
       setSession(data.user, data.accessToken, data.refreshToken)
-      navigate({ to: '/app' })
+      if (data.user.role === 'super_admin') {
+        navigate({ to: '/app/admin' })
+      } else {
+        navigate({ to: '/app' })
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Login failed')
     } finally {
@@ -173,6 +178,18 @@ function LoginPage() {
                 {loading ? 'Signing in…' : 'Sign in'}
                 {!loading && <ArrowRight className="h-4 w-4" />}
               </Button>
+
+              {isDev && (
+                <div className="rounded-lg border border-border/70 bg-card/40 p-3 text-xs space-y-2">
+                  <div className="font-medium text-foreground">Seeded test logins</div>
+                  <div className="text-muted-foreground">
+                    Super admin: <span className="text-foreground">admin@rundesk.internal / Admin@123!</span>
+                  </div>
+                  <div className="text-muted-foreground">
+                    Organization admin: <span className="text-foreground">org-admin@rundesk.internal / OrgAdmin@123!</span>
+                  </div>
+                </div>
+              )}
             </form>
 
             <p className="text-center text-sm text-muted-foreground">

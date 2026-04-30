@@ -23,6 +23,8 @@ import { DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 
 const ADMIN_EMAIL = 'admin@rundesk.internal'
 const ADMIN_PASSWORD = 'Admin@123!'
+const ORG_ADMIN_EMAIL = 'org-admin@rundesk.internal'
+const ORG_ADMIN_PASSWORD = 'OrgAdmin@123!'
 const ORG_SLUG = 'rundesk-hq'
 const WORKSPACE_SLUG = 'main'
 
@@ -46,6 +48,22 @@ async function upsertAdmin(db: ReturnType<typeof getDb>) {
       displayName: 'Super Admin',
       passwordHash: hashSync(ADMIN_PASSWORD, 12),
       role: 'super_admin',
+      emailVerified: true,
+    })
+    .returning()
+  return created
+}
+
+async function upsertOrganizationAdmin(db: ReturnType<typeof getDb>) {
+  const [existing] = await db.select().from(users).where(eq(users.email, ORG_ADMIN_EMAIL))
+  if (existing) return existing
+  const [created] = await db
+    .insert(users)
+    .values({
+      email: ORG_ADMIN_EMAIL,
+      displayName: 'Organization Admin',
+      passwordHash: hashSync(ORG_ADMIN_PASSWORD, 12),
+      role: 'workspace_admin',
       emailVerified: true,
     })
     .returning()
@@ -307,10 +325,14 @@ async function seed() {
   const admin = await upsertAdmin(db)
   console.log(`  admin       ${admin.email}`)
 
+  const orgAdmin = await upsertOrganizationAdmin(db)
+  console.log(`  org admin   ${orgAdmin.email}`)
+
   const workspace = await upsertWorkspace(db, org.id)
   console.log(`  workspace   ${workspace.slug}   (${workspace.id})`)
 
   await ensureMembership(db, workspace.id, admin.id, 'workspace_admin')
+  await ensureMembership(db, workspace.id, orgAdmin.id, 'workspace_admin')
   console.log('  membership  ok')
 
   await upsertGlobalFlags(db, admin.id)
@@ -320,8 +342,12 @@ async function seed() {
   console.log('  demo data   space + project + list + tasks + views + labels + docs + checklist')
 
   console.log('\n✅  Seed complete')
-  console.log(`    email:    ${ADMIN_EMAIL}`)
-  console.log(`    password: ${ADMIN_PASSWORD}`)
+  console.log('    super admin:')
+  console.log(`      email:    ${ADMIN_EMAIL}`)
+  console.log(`      password: ${ADMIN_PASSWORD}`)
+  console.log('    organization admin:')
+  console.log(`      email:    ${ORG_ADMIN_EMAIL}`)
+  console.log(`      password: ${ORG_ADMIN_PASSWORD}`)
   process.exit(0)
 }
 

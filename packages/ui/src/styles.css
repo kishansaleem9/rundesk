@@ -69,8 +69,7 @@
     --ring: var(--brand-500);
   }
 
-  /* === DARK mode = the default for the app ============================== */
-  :root,
+  /* === DARK mode ========================================================= */
   .dark {
     --background: var(--brand-950);
     --foreground: 220 30% 96%;

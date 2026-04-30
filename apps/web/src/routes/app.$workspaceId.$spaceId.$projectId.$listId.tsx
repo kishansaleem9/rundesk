@@ -207,23 +207,23 @@ function ListDetail() {
   return (
     <div className="flex-1 flex flex-col">
       <div className="border-b border-border bg-card">
-        <div className="px-6 pt-4 pb-0 flex items-end justify-between">
-          <div className="flex items-center gap-4 min-w-0">
+        <div className="px-3 sm:px-6 pt-4 pb-0 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
             <h1 className="font-display text-2xl font-semibold truncate text-foreground">Tasks</h1>
             <span className="text-sm text-muted-foreground">{tasks.length} task{tasks.length !== 1 ? 's' : ''}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <Input
               placeholder="Quick add task…"
               value={newTaskTitle}
               onChange={(e) => setNewTaskTitle(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateTask()}
-              className="h-8 w-56"
+              className="h-8 w-full sm:w-56"
             />
             <Button size="sm" onClick={handleCreateTask}>Add</Button>
           </div>
         </div>
-        <div className="px-6 mt-3 flex items-center gap-1 border-b-0">
+        <div className="px-3 sm:px-6 mt-3 flex items-center gap-1 border-b-0 overflow-x-auto">
           {viewTabs.map((tab) => (
             <button
               key={tab.id}
@@ -248,7 +248,7 @@ function ListDetail() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-3 sm:p-6">
         {isLoading ? (
           <div className="text-muted-foreground">Loading tasks...</div>
         ) : tasks.length === 0 ? (
@@ -275,7 +275,7 @@ function ListDetail() {
           />
         ) : activeView === 'board' ? (
           <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-            <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {(Object.keys(tasksByStatus) as TaskStatus[]).map((status) => (
                 <BoardColumn
                   key={status}
@@ -408,7 +408,7 @@ function GroupedListView({
         return (
           <section key={status} className="rounded-lg border border-border bg-card overflow-hidden">
             <header
-              className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-50 cursor-pointer select-none"
+              className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/40 cursor-pointer select-none"
               onClick={() => setCollapsed((c) => ({ ...c, [status]: !c[status] }))}
             >
               {isCollapsed ? (
@@ -454,7 +454,7 @@ function TaskRow({
 
   return (
     <div
-      className="group flex items-center gap-3 px-3 py-2 hover:bg-surface-50 cursor-pointer"
+      className="group flex items-center gap-3 px-3 py-2 hover:bg-muted/60 cursor-pointer"
       onClick={() => onOpenTask(task.id)}
     >
       <button
@@ -538,7 +538,7 @@ function InlineAddTask({
   if (!active) {
     return (
       <button
-        className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground transition-colors"
+        className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
         onClick={() => setActive(true)}
       >
         <Plus className="h-4 w-4" />
@@ -700,7 +700,7 @@ function TableView({
       <div className="overflow-x-auto">
         <div className="min-w-[980px]">
           {/* Header */}
-          <div className="sticky top-0 z-10 flex items-center bg-surface-50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <div className="sticky top-0 z-10 flex items-center bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
             {columns.map((col) => (
               <div
                 key={col.key}
@@ -738,7 +738,7 @@ function TableView({
                 <div
                   key={task.id}
                   className={cn(
-                    'group flex items-stretch h-9 text-sm transition-colors hover:bg-surface-50 even:bg-surface-50/40',
+                    'group flex items-stretch h-9 text-sm transition-colors hover:bg-muted/60 even:bg-muted/30',
                     isSelected && 'bg-accent/10',
                   )}
                 >
@@ -824,7 +824,7 @@ function TableView({
                             <button
                               key={s}
                               type="button"
-                              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-surface-50 text-left"
+                              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-muted text-left"
                               onClick={async () => {
                                 setStatusOpenFor(null)
                                 if (task.status !== s) {
@@ -865,7 +865,7 @@ function TableView({
                           <button
                             key={p}
                             type="button"
-                            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-surface-50 text-left capitalize"
+                            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-muted text-left capitalize"
                             onClick={async () => {
                               setPriorityOpenFor(null)
                               if (task.priority !== p) {
@@ -1026,7 +1026,7 @@ function TableView({
                 <button
                   type="button"
                   onClick={() => setAddActive(true)}
-                  className="w-full h-full flex items-center gap-2 px-3 text-sm text-muted-foreground hover:bg-surface-50 hover:text-foreground transition-colors text-left"
+                  className="w-full h-full flex items-center gap-2 px-3 text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors text-left"
                 >
                   <Plus className="h-4 w-4" />
                   Add task
@@ -1132,7 +1132,7 @@ function BoardColumn({
     <div
       ref={setNodeRef}
       className={cn(
-        'rounded-lg border border-border bg-surface-50 flex flex-col min-h-40 transition-colors',
+        'rounded-lg border border-border bg-muted/30 flex flex-col min-h-40 transition-colors',
         isOver && 'ring-2 ring-brand-500 bg-accent/10',
       )}
     >

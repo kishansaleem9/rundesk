@@ -133,7 +133,7 @@ function ChatPage() {
 
   return (
     <div className="h-full flex">
-      <aside className="w-60 border-r border-border bg-surface-100 flex flex-col">
+      <aside className="hidden md:flex w-60 border-r border-border bg-muted/30 flex-col">
         <div className="p-3 border-b border-border">
           <h2 className="font-display text-lg font-semibold text-foreground">Chat</h2>
         </div>
@@ -188,7 +188,7 @@ function ChatPage() {
                     'w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-left transition-colors',
                     selectedId === c.id
                       ? 'bg-accent/15 text-foreground font-medium'
-                      : 'text-foreground/70 hover:bg-surface-50',
+                      : 'text-muted-foreground hover:bg-muted',
                   )}
                 >
                   {c.isPrivate ? <Lock className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
@@ -211,19 +211,19 @@ function ChatPage() {
             <span className="text-xs text-muted-foreground truncate">{selectedChannel.description}</span>
           )}
           <div className="ml-auto flex items-center gap-1">
-            <button className="p-1.5 rounded hover:bg-surface-50 text-muted-foreground" title="Pinned">
+            <button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="Pinned">
               <Pin className="h-4 w-4" />
             </button>
-            <button className="p-1.5 rounded hover:bg-surface-50 text-muted-foreground" title="Members">
+            <button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="Members">
               <Users className="h-4 w-4" />
             </button>
-            <button className="p-1.5 rounded hover:bg-surface-50 text-muted-foreground" title="Starred">
+            <button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="Starred">
               <Star className="h-4 w-4" />
             </button>
           </div>
         </header>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-4">
           {messages.length === 0 ? (
             <Card className="p-6 text-center border-dashed mx-auto max-w-md">
               <Hash className="h-8 w-8 text-brand-500 mx-auto mb-2" />

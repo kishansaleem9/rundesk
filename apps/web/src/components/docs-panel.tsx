@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input } from '@rundesk/ui'
-import { Plus } from 'lucide-react'
+import { Button, Card, Input, Badge } from '@rundesk/ui'
+import { Download, Plus, Slash } from 'lucide-react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -21,6 +21,10 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const [newDocName, setNewDocName] = useState('')
+  const [slashOpen, setSlashOpen] = useState(false)
+  const [slashFilter, setSlashFilter] = useState('')
+  const [cursorPills, setCursorPills] = useState<Array<{ id: string; name: string; x: number; y: number }>>([])
+  const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
     queryKey: ['docs', workspaceId],
@@ -47,6 +51,17 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     ],
     content: activeDoc?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
     immediatelyRender: false,
+    onUpdate: ({ editor }) => {
+      const from = editor.state.selection.from
+      const text = editor.state.doc.textBetween(Math.max(0, from - 30), from, '\n', '\n')
+      const slashMatch = text.match(/\/([a-z]*)$/i)
+      if (!slashMatch) {
+        setSlashOpen(false)
+        return
+      }
+      setSlashFilter(slashMatch[1] ?? '')
+      setSlashOpen(true)
+    },
   })
 
   useEffect(() => {
@@ -69,6 +84,23 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       socket.emit('unsubscribe', { rooms: [`doc:${selectedDocId}`] })
     }
   }, [selectedDocId, qc, workspaceId])
+
+  useEffect(() => {
+    const demoUsers = ['Afzaal', 'Hamda', 'Iqra']
+    const timer = setInterval(() => {
+      const box = editorWrapRef.current?.getBoundingClientRect()
+      if (!box) return
+      setCursorPills(
+        demoUsers.map((name, idx) => ({
+          id: `${idx}`,
+          name,
+          x: 60 + Math.random() * Math.max(120, box.width - 180),
+          y: 40 + Math.random() * Math.max(120, box.height - 120),
+        })),
+      )
+    }, 2200)
+    return () => clearInterval(timer)
+  }, [])
 
   const createDoc = useMutation({
     mutationFn: async () =>
@@ -96,6 +128,41 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
     },
   })
+
+  const runSlashCommand = (id: 'h2' | 'todo' | 'bullet' | 'code' | 'quote') => {
+    if (!editor) return
+    const chain = editor.chain().focus()
+    if (id === 'h2') chain.toggleHeading({ level: 2 }).run()
+    if (id === 'todo') chain.toggleTaskList().run()
+    if (id === 'bullet') chain.toggleBulletList().run()
+    if (id === 'code') chain.toggleCodeBlock().run()
+    if (id === 'quote') chain.toggleBlockquote().run()
+    setSlashOpen(false)
+  }
+
+  const exportDoc = (format: 'html' | 'txt' | 'md') => {
+    if (!editor || !activeDoc) return
+    const html = editor.getHTML()
+    const plain = editor.getText()
+    const body = format === 'html' ? html : plain
+    const ext = format === 'txt' ? 'txt' : format
+    const type = format === 'html' ? 'text/html' : 'text/plain'
+    const blob = new Blob([body], { type })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${activeDoc.title.replace(/\s+/g, '-').toLowerCase() || 'doc'}.${ext}`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const slashItems = [
+    { id: 'h2' as const, label: 'Heading 2' },
+    { id: 'todo' as const, label: 'Todo list' },
+    { id: 'bullet' as const, label: 'Bullet list' },
+    { id: 'quote' as const, label: 'Quote block' },
+    { id: 'code' as const, label: 'Code block' },
+  ].filter((item) => item.label.toLowerCase().includes(slashFilter.toLowerCase()))
 
   return (
     <Card variant="glass" className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-0 h-[640px] overflow-hidden p-0">
@@ -197,6 +264,23 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               </Button>
               <Button
                 size="sm"
+                variant="ghost"
+                onClick={() => exportDoc('md')}
+                disabled={!editor}
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                MD
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => exportDoc('txt')}
+                disabled={!editor}
+              >
+                TXT
+              </Button>
+              <Button
+                size="sm"
                 variant="gradient"
                 onClick={() => saveDoc.mutate()}
                 disabled={saveDoc.isPending}
@@ -206,12 +290,41 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
             </div>
           )}
         </div>
-        <div className="flex-1 overflow-auto px-6 py-5 prose prose-invert prose-sm max-w-none">
+        <div ref={editorWrapRef} className="relative flex-1 overflow-auto px-6 py-5 prose prose-invert prose-sm max-w-none">
           {activeDoc ? (
             <EditorContent editor={editor} />
           ) : (
             <p className="text-sm text-muted-foreground">Pick a page on the left to start editing.</p>
           )}
+          {slashOpen && activeDoc && (
+            <div className="absolute top-4 right-4 z-30 w-52 rounded-md border border-border bg-card shadow-lg overflow-hidden">
+              <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border flex items-center gap-1">
+                <Slash className="h-3 w-3" /> Slash menu
+              </div>
+              {slashItems.map((item) => (
+                <button
+                  key={item.id}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50"
+                  onClick={() => runSlashCommand(item.id)}
+                >
+                  {item.label}
+                </button>
+              ))}
+              {slashItems.length === 0 && (
+                <div className="px-3 py-2 text-xs text-muted-foreground">No commands</div>
+              )}
+            </div>
+          )}
+          {activeDoc && cursorPills.map((pill) => (
+            <div
+              key={pill.id}
+              className="absolute z-20 pointer-events-none"
+              style={{ left: pill.x, top: pill.y }}
+            >
+              <div className="h-4 w-0.5 bg-brand-500" />
+              <Badge variant="gradient" className="text-[9px]">{pill.name}</Badge>
+            </div>
+          ))}
         </div>
       </div>
     </Card>

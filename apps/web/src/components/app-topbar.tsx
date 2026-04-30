@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useParams, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
+  Menu,
   Search,
   Bell,
   ChevronRight,
@@ -46,7 +47,13 @@ type Space = { id: string; name: string }
 type Project = { id: string; name: string }
 type List = { id: string; name: string }
 
-export function AppTopbar({ onCommandOpen }: { onCommandOpen?: () => void }) {
+export function AppTopbar({
+  onCommandOpen,
+  onMenuOpen,
+}: {
+  onCommandOpen?: () => void
+  onMenuOpen?: () => void
+}) {
   const params = useParams({ strict: false }) as {
     workspaceId?: string
     spaceId?: string
@@ -55,7 +62,14 @@ export function AppTopbar({ onCommandOpen }: { onCommandOpen?: () => void }) {
   }
 
   return (
-    <header className="h-14 border-b border-border/60 bg-card/40 backdrop-blur-md flex items-center gap-3 px-4 shrink-0">
+    <header className="h-14 border-b border-border/60 bg-card/40 backdrop-blur-md flex items-center gap-2 px-3 sm:px-4 shrink-0">
+      <button
+        onClick={onMenuOpen}
+        className="lg:hidden h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
+        aria-label="Open sidebar menu"
+      >
+        <Menu className="h-4 w-4" />
+      </button>
       <Breadcrumbs {...params} />
       <div className="flex-1" />
       <SearchBar onCommandOpen={onCommandOpen} />
@@ -114,7 +128,7 @@ function Breadcrumbs({
   const Sep = () => <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
 
   return (
-    <nav className="flex items-center gap-1.5 text-sm min-w-0">
+    <nav className="hidden sm:flex items-center gap-1.5 text-sm min-w-0">
       {workspace && (
         <Link
           to="/app/$workspaceId"

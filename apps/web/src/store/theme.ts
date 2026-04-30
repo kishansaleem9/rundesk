@@ -12,8 +12,8 @@ type ThemeState = {
 const applyTheme = (theme: Theme) => {
   if (typeof document === 'undefined') return
   const root = document.documentElement
-  if (theme === 'dark') root.classList.add('dark')
-  else root.classList.remove('dark')
+  root.classList.remove('light', 'dark')
+  root.classList.add(theme)
 }
 
 export const useThemeStore = create<ThemeState>()(
