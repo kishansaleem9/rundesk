@@ -29,7 +29,9 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const isDev = import.meta.env.DEV
+  const showSeededLogins =
+    import.meta.env.DEV ||
+    String(import.meta.env.VITE_SHOW_SEEDED_LOGINS).toLowerCase() === 'true'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -179,7 +181,7 @@ function LoginPage() {
                 {!loading && <ArrowRight className="h-4 w-4" />}
               </Button>
 
-              {isDev && (
+              {showSeededLogins && (
                 <div className="rounded-lg border border-border/70 bg-card/40 p-3 text-xs space-y-2">
                   <div className="font-medium text-foreground">Seeded test logins</div>
                   <div className="text-muted-foreground">
