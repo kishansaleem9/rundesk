@@ -1,5 +1,5 @@
 import { Link, useParams, useRouterState } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bot,
   Briefcase,
@@ -14,8 +14,6 @@ import {
   Inbox,
   LayoutDashboard,
   MessageCircle,
-  PanelLeftClose,
-  PanelRightClose,
   Plus,
   Search,
   Star,
@@ -29,6 +27,11 @@ export function WorkspaceSidebar() {
   const workspaceId = params.workspaceId
   const base = workspaceId ? `/app/${workspaceId}` : '/app'
   const [visibility, setVisibility] = useState<Partial<Record<HubId, boolean>>>({})
+  const [openHub, setOpenHub] = useState<HubId | null>(null)
+  const [hoverHub, setHoverHub] = useState<HubId | null>(null)
+  const [panelHovered, setPanelHovered] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const dockRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const read = () => {
@@ -50,12 +53,52 @@ export function WorkspaceSidebar() {
   }, [])
 
   const activeHub = getActiveHub(pathname, base)
+  const items = useMemo<Array<{ id: HubId; label: string; to: string; icon: typeof Home }>>(
+    () => [
+      { id: 'home', label: 'Home', to: base, icon: Home },
+      { id: 'ai', label: 'AI', to: `${base}/ai`, icon: Bot },
+      { id: 'teams', label: 'Teams', to: `${base}/chat`, icon: Users },
+      { id: 'docs', label: 'Docs', to: `${base}/docs`, icon: FileText },
+      { id: 'dashboard', label: 'Dashboards', to: `${base}/dashboard`, icon: LayoutDashboard },
+      { id: 'whiteboards', label: 'Whiteboards', to: `${base}/whiteboards`, icon: Frame },
+      { id: 'forms', label: 'Forms', to: `${base}/forms`, icon: ClipboardList },
+      { id: 'more', label: 'More', to: `${base}/integrations`, icon: Ellipsis },
+    ],
+    [base],
+  )
+
+  useEffect(() => {
+    setOpenHub(null)
+  }, [pathname])
+
+  useEffect(() => {
+    if (!openHub || panelHovered) return
+    const timer = window.setTimeout(() => setOpenHub(null), 4500)
+    return () => window.clearTimeout(timer)
+  }, [openHub, panelHovered])
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (panelRef.current?.contains(target) || dockRef.current?.contains(target)) return
+      setOpenHub(null)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [])
 
   return (
-    <aside className="h-screen w-[300px] border-r border-border/60 bg-card text-card-foreground shrink-0 flex">
-      <MiniRail base={base} activeHub={activeHub} visibility={visibility} />
-      <div className="w-[252px] border-l border-border/50 flex flex-col">
-        <SidebarHeader hub={activeHub} />
+    <>
+      <div
+        ref={panelRef}
+        className={cn(
+          'fixed left-4 bottom-20 z-40 w-[320px] max-w-[calc(100vw-2rem)] max-h-[68vh] overflow-hidden rounded-2xl border border-white/20 bg-card/80 backdrop-blur-xl shadow-2xl transition-all duration-250',
+          openHub ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-4 opacity-0 pointer-events-none',
+        )}
+        onMouseEnter={() => setPanelHovered(true)}
+        onMouseLeave={() => setPanelHovered(false)}
+      >
+        <SidebarHeader hub={openHub ?? activeHub} />
         <div className="px-3 pb-3">
           <Input
             placeholder="Search"
@@ -63,77 +106,49 @@ export function WorkspaceSidebar() {
             className="h-8 bg-background/60 border-border/70 text-xs"
           />
         </div>
-        <nav className="flex-1 overflow-y-auto px-2 pb-3 text-[13px]">
-          <HubPanel hub={activeHub} visibility={visibility} />
+        <nav className="overflow-y-auto px-2 pb-3 text-[13px] max-h-[46vh]">
+          <HubPanel hub={openHub ?? activeHub} visibility={visibility} />
         </nav>
       </div>
-    </aside>
-  )
-}
-
-function MiniRail({
-  base,
-  activeHub,
-  visibility,
-}: {
-  base: string
-  activeHub: HubId
-  visibility: Partial<Record<HubId, boolean>>
-}) {
-  const items: Array<{ id: HubId; label: string; to: string; icon: typeof Home }> = [
-    { id: 'home', label: 'Home', to: base, icon: Home },
-    { id: 'ai', label: 'AI', to: `${base}/ai`, icon: Bot },
-    { id: 'teams', label: 'Teams', to: `${base}/chat`, icon: Users },
-    { id: 'docs', label: 'Docs', to: `${base}/docs`, icon: FileText },
-    { id: 'dashboard', label: 'Dashboards', to: `${base}/dashboard`, icon: LayoutDashboard },
-    { id: 'whiteboards', label: 'Whiteboards', to: `${base}/whiteboards`, icon: Frame },
-    { id: 'forms', label: 'Forms', to: `${base}/forms`, icon: ClipboardList },
-    { id: 'more', label: 'More', to: `${base}/integrations`, icon: Ellipsis },
-  ]
-
-  return (
-    <div className="w-[48px] flex flex-col items-center py-3 gap-2 border-r border-border/50 bg-muted/30">
-      <div className="h-7 w-7 rounded-md bg-brand-gradient flex items-center justify-center text-white text-[10px] font-bold">
-        R
+      <div
+        ref={dockRef}
+        className="fixed left-4 bottom-4 z-50 flex items-center gap-1.5 rounded-full border border-white/20 bg-card/70 p-1.5 backdrop-blur-xl shadow-[0_20px_50px_-30px_rgba(0,0,0,0.75)]"
+      >
+        {items
+          .filter((item) => visibility[item.id] !== false)
+          .map((item) => {
+            const Icon = item.icon
+            const isActive = activeHub === item.id
+            const isOpen = openHub === item.id
+            const showLabel = hoverHub === item.id
+            return (
+              <div key={item.id} className="relative">
+                {showLabel && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-md border border-white/20 bg-card/90 px-2 py-1 text-[11px] text-foreground shadow-lg">
+                    {item.label}
+                  </div>
+                )}
+                <div className={cn('rounded-full p-[1px] transition-all', isActive && 'bg-brand-gradient shadow-glow')}>
+                  <Link
+                    to={item.to}
+                    onClick={() => setOpenHub((cur) => (cur === item.id ? null : item.id))}
+                    onMouseEnter={() => setHoverHub(item.id)}
+                    onMouseLeave={() => setHoverHub(null)}
+                    className={cn(
+                      'h-9 w-9 rounded-full flex items-center justify-center transition-colors',
+                      isOpen || isActive
+                        ? 'bg-background text-foreground'
+                        : 'bg-transparent text-muted-foreground hover:bg-accent/15 hover:text-foreground',
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </Link>
+                </div>
+              </div>
+            )
+          })}
       </div>
-      {items
-        .filter((item) => visibility[item.id] !== false)
-        .map((item) => (
-        <RailLink
-          key={item.id}
-          to={item.to}
-          icon={item.icon}
-          label={item.label}
-          active={activeHub === item.id}
-        />
-      ))}
-      <div className="mt-auto text-[9px] text-muted-foreground rotate-[-90deg] mb-8">Upgrade</div>
-    </div>
-  )
-}
-
-function RailLink({
-  to,
-  icon: Icon,
-  label,
-  active,
-}: {
-  to: string
-  icon: typeof Home
-  label: string
-  active?: boolean
-}) {
-  return (
-    <Link
-      to={to}
-      className={cn(
-        'w-10 rounded-md grid place-items-center py-1 text-muted-foreground hover:text-foreground hover:bg-accent/20',
-        active && 'bg-accent/20 text-foreground shadow-[0_0_0_1px_hsl(var(--border))]',
-      )}
-    >
-      <Icon className="h-4 w-4" />
-      <span className="text-[8px] mt-0.5 leading-none">{label}</span>
-    </Link>
+    </>
   )
 }
 
@@ -153,12 +168,6 @@ function SidebarHeader({ hub }: { hub: HubId }) {
       <div className="flex items-center gap-2">
         <div className="h-5 w-5 rounded bg-brand-gradient" />
         <div className="text-sm font-semibold truncate">{title[hub]}</div>
-        <button className="h-6 w-6 rounded hover:bg-accent/20 grid place-items-center text-muted-foreground">
-          <PanelLeftClose className="h-3.5 w-3.5" />
-        </button>
-        <button className="h-6 w-6 rounded hover:bg-accent/20 grid place-items-center text-muted-foreground">
-          <PanelRightClose className="h-3.5 w-3.5" />
-        </button>
         <Button size="sm" className="ml-auto h-7 text-xs px-2">
           <Plus className="h-3.5 w-3.5 mr-1" />
           Create

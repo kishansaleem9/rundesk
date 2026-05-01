@@ -23,7 +23,14 @@ ensure_env() {
 build_web() {
   echo "▶ Building web SPA → apps/web/dist"
   rm -rf apps/web/dist
-  docker buildx build -f deploy/Dockerfile.web --target export --output type=local,dest=apps/web/dist .
+  local show_seeded="${VITE_SHOW_SEEDED_LOGINS:-false}"
+  echo "▶ VITE_SHOW_SEEDED_LOGINS=$show_seeded"
+  docker buildx build \
+    --build-arg VITE_SHOW_SEEDED_LOGINS="$show_seeded" \
+    -f deploy/Dockerfile.web \
+    --target export \
+    --output type=local,dest=apps/web/dist \
+    .
   # nginx (www-data) needs traverse + read on the dist tree
   chmod -R o+rX apps/web/dist
   chmod o+x apps/web/dist /opt/rundesk/apps/web /opt/rundesk/apps /opt/rundesk 2>/dev/null || true

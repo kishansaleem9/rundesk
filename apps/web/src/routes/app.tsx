@@ -17,7 +17,6 @@ export const Route = createFileRoute('/app')({
 
 function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const isSuperAdmin = pathname.startsWith('/app/admin')
 
@@ -33,29 +32,14 @@ function AppShell() {
 
   return (
     <div className="h-screen flex bg-background overflow-hidden">
-      <div className="hidden lg:block">
-        <WorkspaceSidebar />
-      </div>
-      {mobileSidebarOpen && (
-        <div className="lg:hidden fixed inset-0 z-40">
-          <button
-            type="button"
-            aria-label="Close sidebar"
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setMobileSidebarOpen(false)}
-          />
-          <div className="absolute left-0 top-0 h-full z-50">
-            <WorkspaceSidebar />
-          </div>
-        </div>
-      )}
       <div className="flex-1 flex flex-col min-w-0">
         <WorkspaceAnnouncementBanner />
-        <AppTopbar onCommandOpen={() => setCmdOpen(true)} onMenuOpen={() => setMobileSidebarOpen(true)} />
+        <AppTopbar onCommandOpen={() => setCmdOpen(true)} />
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
       </div>
+      <WorkspaceSidebar />
       <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
     </div>
   )
