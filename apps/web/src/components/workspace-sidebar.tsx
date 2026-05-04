@@ -16,10 +16,13 @@ import {
   MessageCircle,
   Plus,
   Search,
+  Settings as SettingsIcon,
   Star,
   Users,
 } from 'lucide-react'
-import { Button, Input, cn } from '@rundesk/ui'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../lib/api'
+import { Button, Input, Slider, cn } from '@rundesk/ui'
 
 export function WorkspaceSidebar() {
   const params = useParams({ strict: false }) as { workspaceId?: string }
@@ -96,6 +99,15 @@ export function WorkspaceSidebar() {
     return () => window.removeEventListener('resize', sync)
   }, [])
 
+  const { data: dockConfig, refetch: refetchDock } = useQuery({
+    queryKey: ['user-dock-config', baseWorkspaceId],
+    queryFn: () => api<any>(`/dashboards/dock/${baseWorkspaceId}`),
+    enabled: !!baseWorkspaceId,
+  })
+
+  const appearance = dockConfig?.appearance ?? { size: 'md', opacity: 0.8, theme: 'system', orientation: 'horizontal' }
+  const pinnedLinks = dockConfig?.pinnedLinks ?? []
+
   const activeHub = getActiveHub(pathname, base)
   const items = useMemo<Array<{ id: HubId; label: string; to: string; icon: typeof Home }>>(
     () => [
@@ -104,11 +116,16 @@ export function WorkspaceSidebar() {
       { id: 'teams', label: 'Teams', to: `${base}/chat`, icon: Users },
       { id: 'docs', label: 'Docs', to: `${base}/docs`, icon: FileText },
       { id: 'dashboard', label: 'Dashboards', to: `${base}/dashboard`, icon: LayoutDashboard },
-      { id: 'whiteboards', label: 'Whiteboards', to: `${base}/whiteboards`, icon: Frame },
-      { id: 'forms', label: 'Forms', to: `${base}/forms`, icon: ClipboardList },
+      ...pinnedLinks.map((link: any) => ({
+        id: `pinned-${link.id}` as HubId,
+        label: link.label,
+        to: link.to,
+        icon: Home, // Fallback icon, could be dynamic
+      })),
       { id: 'more', label: 'More', to: `${base}/integrations`, icon: Ellipsis },
+      { id: 'settings', label: 'Dock Settings', to: '#', icon: SettingsIcon },
     ],
-    [base],
+    [base, pinnedLinks, appearance.orientation],
   )
 
   useEffect(() => {
@@ -131,50 +148,129 @@ export function WorkspaceSidebar() {
     return () => document.removeEventListener('mousedown', onPointerDown)
   }, [])
 
-  const panelTop = Math.max(16, dockPos.y - 420)
+  useEffect(() => {
+    const onReset = () => {
+      const defaultPos = { x: 16, y: 16 }
+      setDockPos(defaultPos)
+      try {
+        localStorage.setItem('rundesk.dockPos', JSON.stringify(defaultPos))
+      } catch {
+        // noop
+      }
+    }
+    window.addEventListener('rundesk:reset-dock', onReset)
+    return () => window.removeEventListener('rundesk:reset-dock', onReset)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && openHub) {
+        setOpenHub(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [openHub])
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement
+    if (target.closest('a')) return
+    setDraggingDock(true)
+    const touch = e.touches[0]
+    const startX = touch.clientX
+    const startY = touch.clientY
+    const baseX = dockPos.x
+    const baseY = dockPos.y
+    
+    const move = (evt: TouchEvent) => {
+      const t = evt.touches[0]
+      const nextX = Math.min(Math.max(8, baseX + (t.clientX - startX)), viewport.w - 380)
+      const nextY = Math.min(Math.max(8, baseY - (t.clientY - startY)), viewport.h - 72)
+      setDockPos({ x: nextX, y: nextY })
+    }
+    
+    const end = (evt: TouchEvent) => {
+      setDraggingDock(false)
+      document.removeEventListener('touchmove', move)
+      document.removeEventListener('touchend', end)
+      try {
+        const t = evt.changedTouches[0]
+        const finalX = Math.min(Math.max(8, baseX + (t.clientX - startX)), viewport.w - 380)
+        const finalY = Math.min(Math.max(8, baseY - (t.clientY - startY)), viewport.h - 72)
+        localStorage.setItem('rundesk.dockPos', JSON.stringify({ x: finalX, y: finalY }))
+      } catch {
+        // noop
+      }
+    }
+    
+    document.addEventListener('touchmove', move, { passive: false })
+    document.addEventListener('touchend', end)
+  }
+
+  const isBottomHalf = dockPos.y < viewport.h / 2
   const panelLeft = Math.min(dockPos.x, Math.max(16, viewport.w - 340))
+  const panelStyle: React.CSSProperties = isBottomHalf
+    ? { left: panelLeft, bottom: dockPos.y + 70 }
+    : { left: panelLeft, top: viewport.h - dockPos.y + 10 }
 
   return (
     <>
       <div
         ref={panelRef}
         className={cn(
-          'fixed z-40 w-[320px] max-w-[calc(100vw-2rem)] max-h-[68vh] overflow-hidden rounded-2xl border border-white/20 bg-card/85 backdrop-blur-xl shadow-2xl transition-all duration-250',
+          'fixed z-[60] w-[320px] max-w-[calc(100vw-2rem)] max-h-[68vh] overflow-hidden rounded-2xl border border-white/20 bg-card/95 backdrop-blur-2xl shadow-2xl transition-all duration-300',
           openHub ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-4 opacity-0 pointer-events-none',
         )}
-        style={{ left: panelLeft, top: panelTop }}
+        style={panelStyle}
         onMouseEnter={() => setPanelHovered(true)}
         onMouseLeave={() => setPanelHovered(false)}
       >
         <SidebarHeader hub={openHub ?? activeHub} />
-        <div className="px-3 pt-2 pb-1">
-          <Link
-            to={base}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/15 transition-colors"
-            onClick={() => setOpenHub(null)}
-          >
-            <Home className="h-3 w-3" />
-            Go to Home
-          </Link>
-        </div>
-        <div className="px-3 pb-3">
-          <Input
-            placeholder="Search"
-            leadingIcon={<Search className="h-3.5 w-3.5" />}
-            className="h-8 bg-background/60 border-border/70 text-xs"
-          />
-        </div>
+        {openHub !== 'settings' && (
+          <>
+            <div className="px-3 pt-2 pb-1">
+              <Link
+                to={base}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/15 transition-colors"
+                onClick={() => setOpenHub(null)}
+              >
+                <Home className="h-3 w-3" />
+                Go to Home
+              </Link>
+            </div>
+            <div className="px-3 pb-3">
+              <Input
+                placeholder="Search"
+                leadingIcon={<Search className="h-3.5 w-3.5" />}
+                className="h-8 bg-background/60 border-border/70 text-xs"
+              />
+            </div>
+          </>
+        )}
         <nav className="overflow-y-auto px-2 pb-3 text-[13px] max-h-[46vh]">
-          <HubPanel hub={openHub ?? activeHub} visibility={visibility} />
+          <HubPanel
+            hub={openHub ?? activeHub}
+            visibility={visibility}
+            workspaceId={baseWorkspaceId!}
+            dockConfig={dockConfig}
+            refetchDock={refetchDock}
+          />
         </nav>
       </div>
       <div
         ref={dockRef}
         className={cn(
-          'fixed z-50 flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 p-1.5 backdrop-blur-xl cursor-grab active:cursor-grabbing',
+          'fixed z-50 flex items-center rounded-full border border-border/60 bg-card/80 backdrop-blur-xl cursor-grab active:cursor-grabbing shadow-2xl transition-all duration-300',
           draggingDock && 'select-none',
+          appearance.orientation === 'vertical' ? 'flex-col' : 'flex-row',
+          appearance.size === 'sm' ? 'p-1 gap-1' : appearance.size === 'lg' ? 'p-2 gap-2' : 'p-1.5 gap-1.5',
         )}
-        style={{ left: dockPos.x, bottom: dockPos.y }}
+        style={{
+          left: dockPos.x,
+          bottom: dockPos.y,
+          opacity: appearance.opacity,
+        }}
+        onTouchStart={handleTouchStart}
         onMouseDown={(e) => {
           const target = e.target as HTMLElement
           if (target.closest('a')) return
@@ -215,7 +311,12 @@ export function WorkspaceSidebar() {
             return (
               <div key={item.id} className="relative">
                 {showLabel && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-md border border-white/20 bg-card/90 px-2 py-1 text-[11px] text-foreground shadow-lg">
+                  <div className={cn(
+                    "absolute whitespace-nowrap rounded-md border border-white/20 bg-card/90 px-2 py-1 text-[11px] text-foreground shadow-lg z-[70]",
+                    appearance.orientation === 'vertical' 
+                      ? "left-full top-1/2 -translate-y-1/2 ml-3" 
+                      : "bottom-full left-1/2 -translate-x-1/2 mb-2"
+                  )}>
                     {item.label}
                   </div>
                 )}
@@ -226,7 +327,8 @@ export function WorkspaceSidebar() {
                     onMouseEnter={() => setHoverHub(item.id)}
                     onMouseLeave={() => setHoverHub(null)}
                     className={cn(
-                      'h-9 w-9 rounded-full flex items-center justify-center transition-colors',
+                      'rounded-full flex items-center justify-center transition-all',
+                      appearance.size === 'sm' ? 'h-7 w-7' : appearance.size === 'lg' ? 'h-11 w-11' : 'h-9 w-9',
                       isOpen || isActive
                         ? 'bg-brand-gradient text-white'
                         : 'bg-transparent hover:bg-accent/15',
@@ -238,9 +340,13 @@ export function WorkspaceSidebar() {
                       item.id === 'whiteboards' && !isActive && !isOpen && 'text-pink-500',
                       item.id === 'forms' && !isActive && !isOpen && 'text-orange-500',
                       item.id === 'more' && !isActive && !isOpen && 'text-muted-foreground',
+                      item.id === 'settings' && !isActive && !isOpen && 'text-slate-500',
                     )}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className={cn(
+                      'transition-all',
+                      appearance.size === 'sm' ? 'h-3.5 w-3.5' : appearance.size === 'lg' ? 'h-5 w-5' : 'h-4 w-4'
+                    )} />
                   </Link>
                 </div>
               </div>
@@ -261,22 +367,25 @@ function SidebarHeader({ hub }: { hub: HubId }) {
     whiteboards: 'Whiteboards',
     forms: 'Forms',
     more: 'More',
+    settings: 'Dock Settings',
   }
   return (
     <div className="px-3 py-3 border-b border-border/50">
       <div className="flex items-center gap-2">
         <div className="h-5 w-5 rounded bg-brand-gradient" />
-        <div className="text-sm font-semibold truncate">{title[hub]}</div>
-        <Button size="sm" className="ml-auto h-7 text-xs px-2">
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          Create
-        </Button>
+        <div className="text-sm font-semibold truncate">{title[hub] || 'Pinned Link'}</div>
+        {hub !== 'settings' && (
+          <Button size="sm" className="ml-auto h-7 text-xs px-2">
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Create
+          </Button>
+        )}
       </div>
     </div>
   )
 }
 
-type HubId = 'home' | 'ai' | 'teams' | 'docs' | 'dashboard' | 'whiteboards' | 'forms' | 'more'
+type HubId = 'home' | 'ai' | 'teams' | 'docs' | 'dashboard' | 'whiteboards' | 'forms' | 'more' | 'settings' | string
 
 function getActiveHub(pathname: string, base: string): HubId {
   if (pathname.startsWith(`${base}/ai`)) return 'ai'
@@ -292,10 +401,118 @@ function getActiveHub(pathname: string, base: string): HubId {
 function HubPanel({
   hub,
   visibility,
+  workspaceId,
+  dockConfig,
+  refetchDock,
 }: {
   hub: HubId
   visibility: Partial<Record<HubId, boolean>>
+  workspaceId: string
+  dockConfig: any
+  refetchDock: () => void
 }) {
+  if (hub === 'settings') {
+    const appearance = dockConfig?.appearance ?? { size: 'md', opacity: 0.8, theme: 'system', orientation: 'horizontal' }
+    const pinnedLinks = dockConfig?.pinnedLinks ?? []
+
+    const update = async (patch: any) => {
+      await api(`/dashboards/dock/${workspaceId}`, {
+        method: 'POST',
+        body: patch,
+      })
+      refetchDock()
+    }
+
+    return (
+      <div className="space-y-6 p-4">
+        <Section title="Appearance">
+          <div className="space-y-4 px-2 py-1">
+            <div className="space-y-2">
+              <span className="text-[11px] text-muted-foreground">Orientation</span>
+              <div className="flex gap-2">
+                {['horizontal', 'vertical'].map((o) => (
+                  <Button
+                    key={o}
+                    size="sm"
+                    variant={appearance.orientation === o ? 'gradient' : 'outline'}
+                    className="flex-1 h-7 text-[10px]"
+                    onClick={() => update({ appearance: { ...appearance, orientation: o } })}
+                  >
+                    {o.toUpperCase()}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span>Opacity</span>
+                <span>{Math.round(appearance.opacity * 100)}%</span>
+              </div>
+              <Slider
+                value={[appearance.opacity * 100]}
+                min={20}
+                max={100}
+                step={1}
+                onValueChange={([v]) => update({ appearance: { ...appearance, opacity: v / 100 } })}
+              />
+            </div>
+            <div className="space-y-2">
+              <span className="text-[11px] text-muted-foreground">Size</span>
+              <div className="flex gap-2">
+                {['sm', 'md', 'lg'].map((s) => (
+                  <Button
+                    key={s}
+                    size="sm"
+                    variant={appearance.size === s ? 'gradient' : 'outline'}
+                    className="flex-1 h-7 text-[10px]"
+                    onClick={() => update({ appearance: { ...appearance, size: s } })}
+                  >
+                    {s.toUpperCase()}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Section>
+        <Section title="Pinned Links">
+          <div className="space-y-2">
+            {pinnedLinks.map((link: any, i: number) => (
+              <div key={i} className="flex items-center gap-2 group">
+                <SidebarItem icon={Home} label={link.label} />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                  onClick={() => {
+                    const next = [...pinnedLinks]
+                    next.splice(i, 1)
+                    update({ pinnedLinks: next })
+                  }}
+                >
+                  <Ellipsis className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full h-8 text-xs border-dashed"
+              onClick={() => {
+                const label = prompt('Link label?')
+                const to = prompt('Link URL (relative or absolute)?')
+                if (label && to) {
+                  update({ pinnedLinks: [...pinnedLinks, { id: Math.random().toString(36).slice(2), label, to }] })
+                }
+              }}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Add pinned link
+            </Button>
+          </div>
+        </Section>
+      </div>
+    )
+  }
   if (visibility[hub] === false) {
     return (
       <Section title="Disabled by Super Admin">

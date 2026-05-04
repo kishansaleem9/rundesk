@@ -432,6 +432,10 @@ function UserMenu() {
           <HelpCircle className="h-4 w-4 text-muted-foreground" />
           Help & support
         </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => window.dispatchEvent(new CustomEvent('rundesk:reset-dock'))}>
+          <Sparkles className="h-4 w-4 text-muted-foreground" />
+          Reset dock position
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem destructive onSelect={handleSignOut}>
           <LogOut className="h-4 w-4" />
