@@ -12,6 +12,7 @@ export { Separator } from './components/separator'
 export { Switch } from './components/switch'
 export { Progress } from './components/progress'
 export { Checkbox } from './components/checkbox'
+export { Slider } from './components/slider'
 export { RadioGroup, RadioGroupItem } from './components/radio-group'
 
 // Compound
