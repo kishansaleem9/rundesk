@@ -31,6 +31,7 @@ import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module
 import { SearchModule } from './modules/search/search.module'
 import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
+import { DashboardsModule } from './modules/dashboards/dashboards.module'
 import { DatabaseModule } from './common/database/database.module'
 
 @Module({
@@ -75,6 +76,7 @@ import { DatabaseModule } from './common/database/database.module'
     ClickUpImportModule,
     ProjectTemplatesModule,
     CustomFieldsModule,
+    DashboardsModule,
   ],
 })
 export class AppModule {}
