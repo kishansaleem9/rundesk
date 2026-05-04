@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { api } from '../lib/api'
 import {
   Card,
   Button,
@@ -68,16 +70,34 @@ const DEFAULT_LAYOUT: Widget[] = [
   { id: '8', type: 'pie-status', w: 1, h: 1 },
 ]
 
-export function DashboardWidgetBuilder() {
-  const [widgets, setWidgets] = useState<Widget[]>(DEFAULT_LAYOUT)
+export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; workspaceId: string }) {
+  const [widgets, setWidgets] = useState<Widget[]>(preset?.layout || DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
   const [paletteFilter, setPaletteFilter] = useState('')
+  const qc = useQueryClient()
+
+  useEffect(() => {
+    if (preset?.layout) {
+      setWidgets(preset.layout)
+    }
+  }, [preset])
 
   function addWidget(type: WidgetType) {
     setWidgets((arr) => [...arr, { id: crypto.randomUUID(), type, w: 1, h: 1 }])
   }
   function removeWidget(id: string) {
     setWidgets((arr) => arr.filter((w) => w.id !== id))
+  }
+
+  const handleSaveLayout = async () => {
+    if (preset?.id) {
+      await api(`/dashboards/${preset.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ layout: widgets }),
+      })
+      qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] })
+    }
+    setEditing(false)
   }
 
   const filtered = WIDGET_CATALOG.filter((c) => c.name.toLowerCase().includes(paletteFilter.toLowerCase()))
@@ -94,14 +114,16 @@ export function DashboardWidgetBuilder() {
             <Button variant="outline" size="sm">
               <Sparkles className="h-3.5 w-3.5" /> AI suggest layout
             </Button>
-            <Button
-              variant={editing ? 'gradient' : 'outline'}
-              size="sm"
-              onClick={() => setEditing(!editing)}
-            >
-              <SettingsIcon className="h-3.5 w-3.5" />
-              {editing ? 'Done' : 'Edit dashboard'}
-            </Button>
+            {editing ? (
+              <div className="flex items-center gap-1.5">
+                <Button variant="ghost" size="sm" onClick={() => { setWidgets(preset?.layout || DEFAULT_LAYOUT); setEditing(false); }}>Cancel</Button>
+                <Button variant="gradient" size="sm" onClick={handleSaveLayout}>Save layout</Button>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                <SettingsIcon className="h-3.5 w-3.5" /> Edit dashboard
+              </Button>
+            )}
           </div>
         </div>
 

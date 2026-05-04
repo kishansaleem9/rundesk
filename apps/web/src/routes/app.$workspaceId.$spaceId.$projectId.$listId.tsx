@@ -674,8 +674,23 @@ function TableView({
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card overflow-hidden">
-      {selectedIds.length > 0 && (
+    <div className="flex flex-col gap-4">
+      {/* Legend */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 rounded-lg border border-border bg-card/50 text-[11px] text-muted-foreground">
+        <span className="font-semibold uppercase tracking-wider text-[10px]">Status Legend:</span>
+        {STATUS_ORDER.map((status) => {
+          const meta = STATUS_META[status]
+          return (
+            <div key={status} className="flex items-center gap-1.5">
+              <span className={cn('h-2 w-2 rounded-full', meta.dot)} />
+              <span>{meta.label}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
+        {selectedIds.length > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-accent/10 text-xs">
           <span className="font-medium text-foreground">{selectedIds.length} selected</span>
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void applyBulkPatch({ status: 'done' })}>
@@ -1037,6 +1052,7 @@ function TableView({
         </div>
       </div>
     </div>
+  </div>
   )
 }
 

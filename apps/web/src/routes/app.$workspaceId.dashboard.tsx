@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
-import { Button, Card, cn } from '@rundesk/ui'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Button, Card, cn, Input } from '@rundesk/ui'
 import { useState } from 'react'
 import {
   Activity,
@@ -62,14 +62,25 @@ function greeting() {
 function Dashboard() {
   const { workspaceId } = Route.useParams()
   const [viewMode, setViewMode] = useState<'overview' | 'custom'>('overview')
+  const [activePresetId, setActivePresetId] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [newPresetName, setNewPresetName] = useState('')
   const user = useAuthStore((s) => s.user)
   const displayName = user?.displayName ?? 'there'
   const userId = user?.id
+  const qc = useQueryClient()
 
   const { data: workspace } = useQuery({
     queryKey: ['workspace', workspaceId],
     queryFn: () => api<Workspace>(`/workspaces/${workspaceId}`),
   })
+
+  const { data: presets = [] } = useQuery({
+    queryKey: ['dashboard-presets', workspaceId],
+    queryFn: () => api<any[]>(`/dashboards/workspace/${workspaceId}`),
+  })
+
+  const activePreset = presets.find((p) => p.id === activePresetId) || presets.find((p) => p.isDefault) || presets[0]
 
   // Fan out: spaces -> projects -> lists -> tasks
   const { data: tasks = [], isLoading } = useQuery({
@@ -160,15 +171,33 @@ function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-8">
-      {/* Welcome header */}
       <header className="mb-8">
-        <h1 className="font-display text-4xl font-semibold text-foreground mb-1">
-          {greeting()}, {displayName}
-        </h1>
-        <p className="text-muted-foreground">
-          {format(now, 'EEEE, MMMM d, yyyy')}
-          {workspace ? <> &middot; {workspace.name}</> : null}
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="font-display text-4xl font-semibold text-foreground mb-1">
+              {greeting()}, {displayName}
+            </h1>
+            <p className="text-muted-foreground">
+              {format(now, 'EEEE, MMMM d, yyyy')}
+              {workspace ? <> &middot; {workspace.name}</> : null}
+            </p>
+          </div>
+          {viewMode === 'custom' && (
+            <div className="flex items-center gap-2">
+              <select
+                className="h-9 px-3 rounded-md border border-border bg-card text-sm"
+                value={activePresetId || ''}
+                onChange={(e) => setActivePresetId(e.target.value)}
+              >
+                <option value="">Default Layout</option>
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <Button size="sm" onClick={() => setIsSaving(true)}>Save Preset</Button>
+            </div>
+          )}
+        </div>
         <div className="mt-4 inline-flex rounded-lg border border-border/60 bg-card/30 p-1">
           <button
             onClick={() => setViewMode('overview')}
@@ -196,287 +225,208 @@ function Dashboard() {
           <Card className="p-4 md:p-5 border-border/70 bg-card/70 backdrop-blur">
             <div className="flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
               <div>
-                <h2 className="font-display text-xl font-semibold">Custom dashboard builder</h2>
+                <h2 className="font-display text-xl font-semibold">
+                  {activePreset ? activePreset.name : 'Custom dashboard builder'}
+                </h2>
                 <p className="text-sm text-muted-foreground mt-1">
                   Build your personal cockpit with draggable metrics, charts, and workload widgets.
                 </p>
               </div>
-              <Button variant="outline" size="sm" onClick={() => setViewMode('overview')}>
-                <ArrowLeft className="h-4 w-4" />
-                Back to overview
-              </Button>
-            </div>
-          </Card>
-          <DashboardWidgetBuilder />
-        </div>
-      ) : (
-      <>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Due today */}
-        <WidgetCard
-          title="Due today"
-          icon={Clock}
-          accent="brand"
-          count={dueToday.length}
-          loading={isLoading}
-        >
-          {dueToday.length === 0 ? (
-            <EmptyLine>Nothing due today. Enjoy the calm.</EmptyLine>
-          ) : (
-            <ul className="space-y-1.5">
-              {dueToday.slice(0, 5).map((t) => (
-                <TaskRow key={t.id} task={t} workspaceId={workspaceId} />
-              ))}
-            </ul>
-          )}
-        </WidgetCard>
-
-        {/* Overdue */}
-        <WidgetCard
-          title="Overdue"
-          icon={AlertCircle}
-          accent="red"
-          count={overdue.length}
-          loading={isLoading}
-        >
-          {overdue.length === 0 ? (
-            <EmptyLine>All clear. No overdue tasks.</EmptyLine>
-          ) : (
-            <ul className="space-y-1.5">
-              {overdue.slice(0, 5).map((t) => (
-                <TaskRow key={t.id} task={t} workspaceId={workspaceId} tone="red" />
-              ))}
-            </ul>
-          )}
-        </WidgetCard>
-
-        {/* Completed this week */}
-        <WidgetCard
-          title="Completed this week"
-          icon={CheckCircle2}
-          accent="green"
-          count={completedThisWeek.length}
-          loading={isLoading}
-        >
-          <p className="text-xs text-muted-foreground">
-            Wins logged since Monday. Keep the streak going.
-          </p>
-        </WidgetCard>
-
-        {/* In progress */}
-        <WidgetCard
-          title="In progress"
-          icon={TrendingUp}
-          accent="blue"
-          count={inProgress.length}
-          loading={isLoading}
-        >
-          <p className="text-xs text-muted-foreground">
-            Active tasks on your plate right now.
-          </p>
-        </WidgetCard>
-
-        {/* Completion ring */}
-        <Card className="p-5 md:col-span-2 lg:col-span-2">
-          <div className="flex items-start justify-between mb-3">
-            <div>
-              <h2 className="font-display text-lg font-semibold text-foreground">
-                This week&rsquo;s completion
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Tasks you finished vs. tasks touched this week.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-6">
-            <CompletionRing pct={completionPct} />
-            <div className="space-y-1.5">
-              <LegendDot color="hsl(var(--brand-700))" label={`${weekDone} completed`} />
-              <LegendDot color="hsl(var(--muted))" label={`${Math.max(weekTotal - weekDone, 0)} remaining`} />
-              <div className="text-xs text-muted-foreground pt-1">
-                {weekTotal === 0
-                  ? 'No activity logged this week yet.'
-                  : `Based on ${weekTotal} tracked task${weekTotal === 1 ? '' : 's'}.`}
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setViewMode('overview')}>
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to overview
+                </Button>
               </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+          <DashboardWidgetBuilder preset={activePreset} workspaceId={workspaceId} />
 
-        {/* My assigned tasks - spans 2 cols */}
-        <Card className="p-5 md:col-span-2 lg:col-span-2 row-span-2">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="font-display text-lg font-semibold text-foreground">
-                My assigned tasks
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Your next 10 open tasks, sorted by due date.
-              </p>
-            </div>
-            <span className="text-xs font-medium rounded-full bg-brand-100 text-accent px-2 py-0.5">
-              {myAssigned.length}
-            </span>
-          </div>
-          {myAssigned.length === 0 ? (
-            <EmptyLine>Nothing assigned to you yet.</EmptyLine>
-          ) : (
-            <ul className="divide-y divide-border">
-              {myAssigned.map((t) => (
-                <li key={t.id} className="py-2 first:pt-0 last:pb-0">
-                  <TaskRow task={t} workspaceId={workspaceId} verbose />
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        {/* Recent activity */}
-        <Card className="p-5 md:col-span-2 lg:col-span-2">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-accent" />
-              <h2 className="font-display text-lg font-semibold text-foreground">
-                Recent activity
-              </h2>
-            </div>
-          </div>
-          {recent.length === 0 ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">
-              No recent activity yet. Updates to tasks will show up here.
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {recent.map((t) => (
-                <li key={t.id} className="flex items-start gap-3 text-sm">
-                  <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-brand-700 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      to="/app/$workspaceId/$spaceId/$projectId/$listId"
-                      params={{
+          {isSaving && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+              <Card className="w-full max-w-md p-6">
+                <h3 className="font-display text-xl font-semibold mb-4">Save Dashboard Preset</h3>
+                <Input
+                  label="Preset Name"
+                  placeholder="My Weekly Focus"
+                  value={newPresetName}
+                  onChange={(e) => setNewPresetName(e.target.value)}
+                />
+                <div className="flex justify-end gap-2 mt-6">
+                  <Button variant="ghost" onClick={() => setIsSaving(false)}>Cancel</Button>
+                  <Button onClick={async () => {
+                    await api('/dashboards', {
+                      method: 'POST',
+                      body: JSON.stringify({
                         workspaceId,
-                        spaceId: (t as Task & ListRef).spaceId,
-                        projectId: (t as Task & ListRef).projectId,
-                        listId: t.listId,
-                      }}
-                      className="font-medium truncate hover:text-accent transition-colors block"
-                    >
-                      {t.title}
-                    </Link>
-                    <div className="text-xs text-muted-foreground">
-                      {(t.assignees ?? [])[0]?.user?.displayName ?? 'Someone'}
-                      {' · '}
-                      {t.updatedAt
-                        ? formatDistanceToNowStrict(new Date(t.updatedAt), {
-                            addSuffix: true,
-                          })
-                        : 'recently'}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                        name: newPresetName,
+                        layout: activePreset?.layout || [],
+                      })
+                    })
+                    qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] })
+                    setIsSaving(false)
+                    setNewPresetName('')
+                  }}>Save</Button>
+                </div>
+              </Card>
+            </div>
           )}
-        </Card>
-      </div>
-      </>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <WidgetCard title="Due today" icon={Clock} accent="brand" count={dueToday.length} loading={isLoading}>
+            {dueToday.length === 0 ? (
+              <EmptyLine>Nothing due today. Enjoy the calm.</EmptyLine>
+            ) : (
+              <ul className="space-y-1.5">
+                {dueToday.slice(0, 5).map((t) => (
+                  <TaskRow key={t.id} task={t} workspaceId={workspaceId} />
+                ))}
+              </ul>
+            )}
+          </WidgetCard>
+
+          <WidgetCard title="Overdue" icon={AlertCircle} accent="red" count={overdue.length} loading={isLoading}>
+            {overdue.length === 0 ? (
+              <EmptyLine>All clear. No overdue tasks.</EmptyLine>
+            ) : (
+              <ul className="space-y-1.5">
+                {overdue.slice(0, 5).map((t) => (
+                  <TaskRow key={t.id} task={t} workspaceId={workspaceId} tone="red" />
+                ))}
+              </ul>
+            )}
+          </WidgetCard>
+
+          <WidgetCard title="Completed this week" icon={CheckCircle2} accent="green" count={completedThisWeek.length} loading={isLoading}>
+            <p className="text-xs text-muted-foreground">Wins logged since Monday. Keep the streak going.</p>
+          </WidgetCard>
+
+          <WidgetCard title="In progress" icon={TrendingUp} accent="blue" count={inProgress.length} loading={isLoading}>
+            <p className="text-xs text-muted-foreground">Active tasks on your plate right now.</p>
+          </WidgetCard>
+
+          <Card className="p-5 md:col-span-2 lg:col-span-2">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-foreground">This week&rsquo;s completion</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Tasks you finished vs. tasks touched this week.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-6">
+              <CompletionRing pct={completionPct} />
+              <div className="space-y-1.5">
+                <LegendDot color="hsl(var(--brand-700))" label={`${weekDone} completed`} />
+                <LegendDot color="hsl(var(--muted))" label={`${Math.max(weekTotal - weekDone, 0)} remaining`} />
+                <div className="text-xs text-muted-foreground pt-1">
+                  {weekTotal === 0 ? 'No activity logged this week yet.' : `Based on ${weekTotal} tracked task${weekTotal === 1 ? '' : 's'}.`}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-5 md:col-span-2 lg:col-span-2 row-span-2">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-foreground">My assigned tasks</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Your next 10 open tasks, sorted by due date.</p>
+              </div>
+              <span className="text-xs font-medium rounded-full bg-brand-100 text-accent px-2 py-0.5">{myAssigned.length}</span>
+            </div>
+            {myAssigned.length === 0 ? (
+              <EmptyLine>Nothing assigned to you yet.</EmptyLine>
+            ) : (
+              <ul className="divide-y divide-border">
+                {myAssigned.map((t) => (
+                  <li key={t.id} className="py-2 first:pt-0 last:pb-0">
+                    <TaskRow task={t} workspaceId={workspaceId} verbose />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card className="p-5 md:col-span-2 lg:col-span-2">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Activity className="h-4 w-4 text-accent" />
+                <h2 className="font-display text-lg font-semibold text-foreground">Recent activity</h2>
+              </div>
+            </div>
+            {recent.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">No recent activity yet. Updates to tasks will show up here.</div>
+            ) : (
+              <ul className="space-y-2">
+                {recent.map((t) => (
+                  <li key={t.id} className="flex items-start gap-3 text-sm">
+                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-brand-700 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                        params={{
+                          workspaceId,
+                          spaceId: (t as Task & ListRef).spaceId,
+                          projectId: (t as Task & ListRef).projectId,
+                          listId: t.listId,
+                        }}
+                        className="font-medium truncate hover:text-accent transition-colors block"
+                      >
+                        {t.title}
+                      </Link>
+                      <div className="text-xs text-muted-foreground">
+                        {(t.assignees ?? [])[0]?.user?.displayName ?? 'Someone'}
+                        {' · '}
+                        {t.updatedAt ? formatDistanceToNowStrict(new Date(t.updatedAt), { addSuffix: true }) : 'recently'}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
       )}
     </div>
   )
 }
 
-function WidgetCard({
-  title,
-  icon: Icon,
-  accent,
-  count,
-  loading,
-  children,
-}: {
-  title: string
-  icon: typeof CheckCircle2
-  accent: 'brand' | 'red' | 'green' | 'blue'
-  count: number
-  loading?: boolean
-  children: React.ReactNode
-}) {
+function WidgetCard({ title, icon: Icon, accent, count, loading, children }: any) {
   const accentClasses = {
     brand: 'bg-brand-100 text-accent',
     red: 'bg-red-100 text-red-700',
     green: 'bg-emerald-100 text-emerald-700',
     blue: 'bg-blue-100 text-blue-700',
-  }[accent]
-
-  const borderAccent = {
-    brand: '',
-    red: 'border-l-4 border-l-red-500',
-    green: 'border-l-4 border-l-emerald-500',
-    blue: 'border-l-4 border-l-blue-500',
-  }[accent]
+  }[accent as 'brand']
 
   return (
-    <Card className={`p-4 ${borderAccent}`}>
+    <Card className="p-4">
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm font-medium text-foreground">{title}</span>
         </div>
-        <span
-          className={`text-xs font-semibold rounded-full px-2 py-0.5 ${accentClasses}`}
-        >
-          {loading ? '…' : count}
-        </span>
+        <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${accentClasses}`}>{loading ? '…' : count}</span>
       </div>
-      <div className="font-display text-3xl font-semibold text-foreground mb-2">
-        {loading ? '—' : count}
-      </div>
+      <div className="font-display text-3xl font-semibold text-foreground mb-2">{loading ? '—' : count}</div>
       {children}
     </Card>
   )
 }
 
-function TaskRow({
-  task,
-  workspaceId,
-  tone,
-  verbose,
-}: {
-  task: Task & Partial<ListRef>
-  workspaceId: string
-  tone?: 'red'
-  verbose?: boolean
-}) {
+function TaskRow({ task, workspaceId, tone, verbose }: any) {
   const due = task.dueDate ? new Date(task.dueDate) : null
-  const canLink = task.spaceId && task.projectId && task.listId
   const content = (
     <div className="flex items-center gap-2 min-w-0">
-      <span
-        className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-          tone === 'red' ? 'bg-red-500' : 'bg-brand-700'
-        }`}
-      />
+      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${tone === 'red' ? 'bg-red-500' : 'bg-brand-700'}`} />
       <span className="truncate text-sm flex-1">{task.title}</span>
-      {verbose && due ? (
-        <span className="text-xs text-muted-foreground shrink-0">
-          {format(due, 'MMM d')}
-        </span>
-      ) : null}
+      {verbose && due ? <span className="text-xs text-muted-foreground shrink-0">{format(due, 'MMM d')}</span> : null}
     </div>
   )
-
-  if (!canLink) {
-    return <div className="py-0.5">{content}</div>
-  }
 
   return (
     <Link
       to="/app/$workspaceId/$spaceId/$projectId/$listId"
-      params={{
-        workspaceId,
-        spaceId: task.spaceId!,
-        projectId: task.projectId!,
-        listId: task.listId,
-      }}
+      params={{ workspaceId, spaceId: task.spaceId!, projectId: task.projectId!, listId: task.listId }}
       className="block hover:text-accent transition-colors"
     >
       {content}
@@ -491,10 +441,7 @@ function EmptyLine({ children }: { children: React.ReactNode }) {
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span
-        className="h-2 w-2 rounded-full"
-        style={{ backgroundColor: color }}
-      />
+      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
       <span className="text-muted-foreground">{label}</span>
     </div>
   )
@@ -505,20 +452,12 @@ function CompletionRing({ pct }: { pct: number }) {
   const stroke = 12
   const radius = (size - stroke) / 2
   const circumference = 2 * Math.PI * radius
-  const clamped = Math.min(Math.max(pct, 0), 100)
-  const dash = (clamped / 100) * circumference
+  const dash = (pct / 100) * circumference
 
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke="hsl(var(--muted))"
-          strokeWidth={stroke}
-          fill="none"
-        />
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke="hsl(var(--muted))" strokeWidth={stroke} fill="none" />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -528,13 +467,10 @@ function CompletionRing({ pct }: { pct: number }) {
           strokeLinecap="round"
           strokeDasharray={`${dash} ${circumference - dash}`}
           fill="none"
-          style={{ transition: 'stroke-dasharray 400ms ease' }}
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="font-display text-2xl font-semibold text-foreground">
-          {clamped}%
-        </span>
+        <span className="font-display text-2xl font-semibold text-foreground">{pct}%</span>
       </div>
     </div>
   )
