@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Card, cn } from '@rundesk/ui'
+import { Button, Card, cn } from '@rundesk/ui'
 import { useState } from 'react'
 import {
   Activity,
   AlertCircle,
+  ArrowLeft,
   CheckCircle2,
   Clock,
   TrendingUp,
@@ -191,7 +192,23 @@ function Dashboard() {
       </header>
 
       {viewMode === 'custom' ? (
-        <DashboardWidgetBuilder />
+        <div className="space-y-4">
+          <Card className="p-4 md:p-5 border-border/70 bg-card/70 backdrop-blur">
+            <div className="flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
+              <div>
+                <h2 className="font-display text-xl font-semibold">Custom dashboard builder</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Build your personal cockpit with draggable metrics, charts, and workload widgets.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setViewMode('overview')}>
+                <ArrowLeft className="h-4 w-4" />
+                Back to overview
+              </Button>
+            </div>
+          </Card>
+          <DashboardWidgetBuilder />
+        </div>
       ) : (
       <>
 

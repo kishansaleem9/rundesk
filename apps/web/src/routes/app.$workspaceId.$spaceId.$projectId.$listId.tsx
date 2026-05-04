@@ -51,13 +51,13 @@ const PRIORITY_COLORS: Record<TaskPriority, string> = {
   low: 'text-gray-400',
 }
 
-const STATUS_META: Record<TaskStatus, { label: string; dot: string; bg: string }> = {
-  backlog: { label: 'Backlog', dot: 'bg-gray-400', bg: 'bg-gray-50' },
-  todo: { label: 'To do', dot: 'bg-slate-500', bg: 'bg-slate-50' },
-  in_progress: { label: 'In progress', dot: 'bg-blue-500', bg: 'bg-blue-50' },
-  in_review: { label: 'In review', dot: 'bg-purple-500', bg: 'bg-purple-50' },
-  done: { label: 'Done', dot: 'bg-emerald-500', bg: 'bg-emerald-50' },
-  cancelled: { label: 'Cancelled', dot: 'bg-red-500', bg: 'bg-red-50' },
+const STATUS_META: Record<TaskStatus, { label: string; dot: string; pill: string }> = {
+  backlog: { label: 'Backlog', dot: 'bg-zinc-400', pill: 'bg-muted/60 text-muted-foreground border-border' },
+  todo: { label: 'To do', dot: 'bg-slate-500', pill: 'bg-slate-500/15 text-slate-700 dark:text-slate-200 border-slate-400/40' },
+  in_progress: { label: 'In progress', dot: 'bg-blue-500', pill: 'bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-400/40' },
+  in_review: { label: 'In review', dot: 'bg-purple-500', pill: 'bg-purple-500/15 text-purple-700 dark:text-purple-200 border-purple-400/40' },
+  done: { label: 'Done', dot: 'bg-emerald-500', pill: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-400/40' },
+  cancelled: { label: 'Cancelled', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-200 border-rose-400/40' },
 }
 
 const STATUS_ORDER: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
@@ -807,7 +807,7 @@ function TableView({
                       }}
                       className={cn(
                         'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium border border-border',
-                        meta.bg,
+                        meta.pill,
                       )}
                     >
                       <span className={cn('h-1.5 w-1.5 rounded-full', meta.dot)} />

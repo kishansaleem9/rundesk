@@ -83,14 +83,14 @@ export function DashboardWidgetBuilder() {
   const filtered = WIDGET_CATALOG.filter((c) => c.name.toLowerCase().includes(paletteFilter.toLowerCase()))
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4">
+    <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-4">
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Badge variant="soft" className="text-[10px] uppercase">{widgets.length} widgets</Badge>
             {editing && <Badge variant="gradient" className="text-[10px] uppercase">Edit mode</Badge>}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <Button variant="outline" size="sm">
               <Sparkles className="h-3.5 w-3.5" /> AI suggest layout
             </Button>
@@ -105,7 +105,8 @@ export function DashboardWidgetBuilder() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 auto-rows-[140px] gap-3">
+        <div className="rounded-xl border border-border/60 bg-card/40 p-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 auto-rows-[140px] gap-3">
           {widgets.map((w) => (
             <WidgetCell key={w.id} widget={w} editing={editing} onRemove={() => removeWidget(w.id)} />
           ))}
@@ -118,10 +119,11 @@ export function DashboardWidgetBuilder() {
             </button>
           )}
         </div>
+        </div>
       </div>
 
       {editing && (
-        <Card variant="glass" className="p-0 overflow-hidden flex flex-col h-fit max-h-[640px] sticky top-4">
+        <Card variant="glass" className="p-0 overflow-hidden flex flex-col h-fit max-h-[640px] xl:sticky xl:top-4">
           <div className="px-4 py-3 border-b border-border/40 flex items-center gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex-1">
               Widget catalog

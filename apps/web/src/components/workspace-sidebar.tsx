@@ -25,11 +25,16 @@ export function WorkspaceSidebar() {
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const workspaceId = params.workspaceId
-  const base = workspaceId ? `/app/${workspaceId}` : '/app'
+  const [lastWorkspaceId, setLastWorkspaceId] = useState<string | null>(null)
+  const baseWorkspaceId = workspaceId ?? lastWorkspaceId
+  const base = baseWorkspaceId ? `/app/${baseWorkspaceId}` : '/app'
   const [visibility, setVisibility] = useState<Partial<Record<HubId, boolean>>>({})
   const [openHub, setOpenHub] = useState<HubId | null>(null)
   const [hoverHub, setHoverHub] = useState<HubId | null>(null)
   const [panelHovered, setPanelHovered] = useState(false)
+  const [draggingDock, setDraggingDock] = useState(false)
+  const [dockPos, setDockPos] = useState<{ x: number; y: number }>({ x: 16, y: 16 })
+  const [viewport, setViewport] = useState({ w: 1400, h: 900 })
   const panelRef = useRef<HTMLDivElement | null>(null)
   const dockRef = useRef<HTMLDivElement | null>(null)
 
@@ -50,6 +55,45 @@ export function WorkspaceSidebar() {
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  useEffect(() => {
+    try {
+      const remembered = localStorage.getItem('rundesk.lastWorkspaceId')
+      if (remembered) setLastWorkspaceId(remembered)
+    } catch {
+      // noop
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!workspaceId) return
+    try {
+      localStorage.setItem('rundesk.lastWorkspaceId', workspaceId)
+      setLastWorkspaceId(workspaceId)
+    } catch {
+      // noop
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('rundesk.dockPos')
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { x?: number; y?: number }
+      if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+        setDockPos({ x: Number(parsed.x), y: Number(parsed.y) })
+      }
+    } catch {
+      // noop
+    }
+  }, [])
+
+  useEffect(() => {
+    const sync = () => setViewport({ w: window.innerWidth, h: window.innerHeight })
+    sync()
+    window.addEventListener('resize', sync)
+    return () => window.removeEventListener('resize', sync)
   }, [])
 
   const activeHub = getActiveHub(pathname, base)
@@ -87,18 +131,32 @@ export function WorkspaceSidebar() {
     return () => document.removeEventListener('mousedown', onPointerDown)
   }, [])
 
+  const panelTop = Math.max(16, dockPos.y - 420)
+  const panelLeft = Math.min(dockPos.x, Math.max(16, viewport.w - 340))
+
   return (
     <>
       <div
         ref={panelRef}
         className={cn(
-          'fixed left-4 bottom-20 z-40 w-[320px] max-w-[calc(100vw-2rem)] max-h-[68vh] overflow-hidden rounded-2xl border border-white/20 bg-card/80 backdrop-blur-xl shadow-2xl transition-all duration-250',
+          'fixed z-40 w-[320px] max-w-[calc(100vw-2rem)] max-h-[68vh] overflow-hidden rounded-2xl border border-white/20 bg-card/85 backdrop-blur-xl shadow-2xl transition-all duration-250',
           openHub ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-4 opacity-0 pointer-events-none',
         )}
+        style={{ left: panelLeft, top: panelTop }}
         onMouseEnter={() => setPanelHovered(true)}
         onMouseLeave={() => setPanelHovered(false)}
       >
         <SidebarHeader hub={openHub ?? activeHub} />
+        <div className="px-3 pt-2 pb-1">
+          <Link
+            to={base}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/15 transition-colors"
+            onClick={() => setOpenHub(null)}
+          >
+            <Home className="h-3 w-3" />
+            Go to Home
+          </Link>
+        </div>
         <div className="px-3 pb-3">
           <Input
             placeholder="Search"
@@ -112,7 +170,40 @@ export function WorkspaceSidebar() {
       </div>
       <div
         ref={dockRef}
-        className="fixed left-4 bottom-4 z-50 flex items-center gap-1.5 rounded-full border border-white/20 bg-card/70 p-1.5 backdrop-blur-xl shadow-[0_20px_50px_-30px_rgba(0,0,0,0.75)]"
+        className={cn(
+          'fixed z-50 flex items-center gap-1.5 rounded-full border border-border/60 bg-card/80 p-1.5 backdrop-blur-xl cursor-grab active:cursor-grabbing',
+          draggingDock && 'select-none',
+        )}
+        style={{ left: dockPos.x, bottom: dockPos.y }}
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement
+          if (target.closest('a')) return
+          e.preventDefault()
+          setDraggingDock(true)
+          const startX = e.clientX
+          const startY = e.clientY
+          const baseX = dockPos.x
+          const baseY = dockPos.y
+          let latest = { x: baseX, y: baseY }
+          const move = (evt: MouseEvent) => {
+            const nextX = Math.min(Math.max(8, baseX + (evt.clientX - startX)), viewport.w - 380)
+            const nextY = Math.min(Math.max(8, baseY - (evt.clientY - startY)), viewport.h - 72)
+            latest = { x: nextX, y: nextY }
+            setDockPos(latest)
+          }
+          const up = () => {
+            setDraggingDock(false)
+            window.removeEventListener('mousemove', move)
+            window.removeEventListener('mouseup', up)
+            try {
+              localStorage.setItem('rundesk.dockPos', JSON.stringify(latest))
+            } catch {
+              // noop
+            }
+          }
+          window.addEventListener('mousemove', move)
+          window.addEventListener('mouseup', up)
+        }}
       >
         {items
           .filter((item) => visibility[item.id] !== false)
@@ -128,7 +219,7 @@ export function WorkspaceSidebar() {
                     {item.label}
                   </div>
                 )}
-                <div className={cn('rounded-full p-[1px] transition-all', isActive && 'bg-brand-gradient shadow-glow')}>
+                <div className="rounded-full p-[1px] transition-all">
                   <Link
                     to={item.to}
                     onClick={() => setOpenHub((cur) => (cur === item.id ? null : item.id))}
@@ -137,8 +228,16 @@ export function WorkspaceSidebar() {
                     className={cn(
                       'h-9 w-9 rounded-full flex items-center justify-center transition-colors',
                       isOpen || isActive
-                        ? 'bg-background text-foreground'
-                        : 'bg-transparent text-muted-foreground hover:bg-accent/15 hover:text-foreground',
+                        ? 'bg-brand-gradient text-white'
+                        : 'bg-transparent hover:bg-accent/15',
+                      item.id === 'home' && !isActive && !isOpen && 'text-blue-500',
+                      item.id === 'ai' && !isActive && !isOpen && 'text-violet-500',
+                      item.id === 'teams' && !isActive && !isOpen && 'text-cyan-500',
+                      item.id === 'docs' && !isActive && !isOpen && 'text-emerald-500',
+                      item.id === 'dashboard' && !isActive && !isOpen && 'text-amber-500',
+                      item.id === 'whiteboards' && !isActive && !isOpen && 'text-pink-500',
+                      item.id === 'forms' && !isActive && !isOpen && 'text-orange-500',
+                      item.id === 'more' && !isActive && !isOpen && 'text-muted-foreground',
                     )}
                   >
                     <Icon className="h-4 w-4" />

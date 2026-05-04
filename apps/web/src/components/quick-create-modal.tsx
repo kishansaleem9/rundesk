@@ -51,7 +51,7 @@ export function QuickCreateModal({ onClose }: { onClose: () => void }) {
 function Backdrop({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center pt-24 px-4"
+      className="fixed inset-0 z-[120] bg-black/40 flex items-start justify-center pt-24 px-4"
       onClick={onClose}
       onKeyDown={(e) => e.key === 'Escape' && onClose()}
     >
