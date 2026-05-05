@@ -28,7 +28,10 @@ import {
   X,
   Trash2,
   ShieldCheck,
+  Loader2,
 } from 'lucide-react'
+import { useAuthStore } from '../store/auth'
+import { api } from '../lib/api'
 
 export const Route = createFileRoute('/sign-up')({
   component: SignUpWizard,
@@ -36,7 +39,11 @@ export const Route = createFileRoute('/sign-up')({
 
 type Step = 0 | 1 | 2 | 3 | 4
 
-type Invitee = { email: string; role: 'admin' | 'manager' | 'member' | 'guest' }
+type Invitee = {
+  email: string
+  orgRole: 'admin' | 'member'
+  workspaceRole: 'workspace_admin' | 'manager' | 'member' | 'guest'
+}
 
 type WizardState = {
   // Step 0 — account
@@ -74,11 +81,49 @@ function SignUpWizard() {
   const next = () => setStep((s) => (Math.min(4, s + 1) as Step))
   const prev = () => setStep((s) => (Math.max(0, s - 1) as Step))
 
-  function finish() {
-    toast.success('Workspace created — welcome to Rundesk', {
-      description: 'You\'ll get a welcome email shortly. Loading your workspace…',
-    })
-    setStep(4)
+  const { setSession } = useAuthStore()
+  const [loading, setLoading] = useState(false)
+
+  async function finish() {
+    setLoading(true)
+    try {
+      const res = await api<{
+        accessToken: string
+        refreshToken: string
+        user: any
+        organizations: any[]
+        workspaces: any[]
+      }>('/auth/signup', {
+        method: 'POST',
+        body: {
+          fullName: state.fullName,
+          email: state.email,
+          password: state.password,
+          organizationName: state.workspaceName,
+          organizationSlug: state.workspaceSlug,
+          industry: state.industry,
+          teamSize: state.teamSize,
+          features: state.features,
+          invites: state.invites,
+        },
+      })
+
+      setSession(res.user, res.accessToken, res.refreshToken, res.organizations, res.workspaces)
+      
+      toast.success('Workspace created — welcome to Rundesk')
+      
+      // Redirect to the newly created workspace
+      const wsId = res.workspaces[0]?.id
+      if (wsId) {
+        window.location.href = `/app/${wsId}`
+      } else {
+        setStep(4)
+      }
+    } catch (err: any) {
+      toast.error('Signup failed', { description: err.message })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const totalSteps = 4 // 0..3 are interactive, 4 is the success screen
@@ -154,10 +199,19 @@ function SignUpWizard() {
                 variant="gradient"
                 size="lg"
                 onClick={step === 3 ? finish : next}
-                disabled={!canAdvance(step, state)}
+                disabled={!canAdvance(step, state) || loading}
               >
-                {step === 3 ? 'Create workspace' : 'Continue'}
-                <ArrowRight className="h-4 w-4" />
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    {step === 3 ? 'Create workspace' : 'Continue'}
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
               </Button>
             </div>
           </div>
@@ -473,11 +527,9 @@ function StepFeatures({
 // ---------------------------------------------------------------------------
 // STEP 3 — Invites
 // ---------------------------------------------------------------------------
-const ROLES: Array<{ value: Invitee['role']; label: string; description: string }> = [
+const ROLES: Array<{ value: Invitee['orgRole']; label: string; description: string }> = [
   { value: 'admin', label: 'Admin', description: 'Full access — manage members, billing, integrations.' },
-  { value: 'manager', label: 'Manager', description: 'Create projects, assign tasks, view all reports.' },
   { value: 'member', label: 'Member', description: 'Default. Create & edit tasks, comment, log time.' },
-  { value: 'guest', label: 'Guest', description: 'Read-only on shared items. No access to settings.' },
 ]
 
 function StepInvites({
@@ -488,7 +540,7 @@ function StepInvites({
   update: (p: Partial<WizardState>) => void
 }) {
   const [emailDraft, setEmailDraft] = useState('')
-  const [roleDraft, setRoleDraft] = useState<Invitee['role']>('member')
+  const [roleDraft, setRoleDraft] = useState<Invitee['orgRole']>('member')
 
   function add() {
     const e = emailDraft.trim()
@@ -500,7 +552,16 @@ function StepInvites({
       toast.warning(`${e} is already on the list`)
       return
     }
-    update({ invites: [...state.invites, { email: e, role: roleDraft }] })
+    update({
+      invites: [
+        ...state.invites,
+        {
+          email: e,
+          orgRole: roleDraft,
+          workspaceRole: (roleDraft === 'admin' ? 'workspace_admin' : roleDraft) as any,
+        },
+      ],
+    })
     setEmailDraft('')
   }
 
@@ -534,7 +595,7 @@ function StepInvites({
         />
         <select
           value={roleDraft}
-          onChange={(e) => setRoleDraft(e.target.value as Invitee['role'])}
+          onChange={(e) => setRoleDraft(e.target.value as Invitee['orgRole'])}
           className="h-10 rounded-md border border-border/80 bg-card px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           {ROLES.map((r) => (
@@ -583,7 +644,7 @@ function StepInvites({
                 <PersonAvatar name={inv.email} size="sm" />
                 <span className="flex-1 truncate text-sm">{inv.email}</span>
                 <Badge variant="soft" className="text-[10px] capitalize">
-                  {inv.role}
+                  {inv.orgRole}
                 </Badge>
                 <Button
                   variant="ghost"

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn } from '@rundesk/ui'
@@ -49,14 +50,24 @@ export function QuickCreateModal({ onClose }: { onClose: () => void }) {
 }
 
 function Backdrop({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    return () => setMounted(false)
+  }, [])
+
+  if (!mounted) return null
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[120] bg-black/40 flex items-start justify-center pt-24 px-4"
+      className="fixed inset-0 z-[9999] bg-black/55 backdrop-blur-[1px] flex items-start justify-center pt-24 px-4"
       onClick={onClose}
       onKeyDown={(e) => e.key === 'Escape' && onClose()}
     >
-      <div onClick={(e) => e.stopPropagation()}>{children}</div>
-    </div>
+      <div className="relative z-[10000]" onClick={(e) => e.stopPropagation()}>{children}</div>
+    </div>,
+    document.body,
   )
 }
 
@@ -128,12 +139,12 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ id: string }>(`/lists/${listId}/tasks`, {
+      api<{ id: string }>(`/tasks`, {
         method: 'POST',
-        body: JSON.stringify({ title }),
+        body: { listId, title, status: 'todo', priority: 'normal' },
       }),
     onSuccess: (task) => {
-      qc.invalidateQueries({ queryKey: ['list-tasks', listId] })
+      qc.invalidateQueries({ queryKey: ['tasks', listId] })
       onClose()
       if (spaceId && projectId && listId) {
         navigate({

@@ -30,6 +30,10 @@ function ProjectShell() {
 
 function ProjectHome() {
   const { workspaceId, spaceId, projectId } = Route.useParams()
+  const qc = useQueryClient()
+  const [showCreateList, setShowCreateList] = useState(false)
+  const [newListName, setNewListName] = useState('')
+  const [newListDescription, setNewListDescription] = useState('')
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects', spaceId],
@@ -40,6 +44,20 @@ function ProjectHome() {
   const { data: lists = [], isLoading } = useQuery({
     queryKey: ['lists', projectId],
     queryFn: () => api<List[]>(`/lists/project/${projectId}`),
+  })
+
+  const createList = useMutation({
+    mutationFn: () =>
+      api<List>(`/lists`, {
+        method: 'POST',
+        body: { projectId, name: newListName.trim(), description: newListDescription.trim() || undefined },
+      }),
+    onSuccess: () => {
+      setShowCreateList(false)
+      setNewListName('')
+      setNewListDescription('')
+      qc.invalidateQueries({ queryKey: ['lists', projectId] })
+    },
   })
 
   return (
@@ -57,10 +75,41 @@ function ProjectHome() {
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-display text-xl font-semibold text-foreground">Lists</h2>
-          <span className="text-xs text-muted-foreground">
-            {lists.length} list{lists.length !== 1 ? 's' : ''}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {lists.length} list{lists.length !== 1 ? 's' : ''}
+            </span>
+            <Button size="sm" onClick={() => setShowCreateList((v) => !v)}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              {showCreateList ? 'Cancel' : 'Add list'}
+            </Button>
+          </div>
         </div>
+
+        {showCreateList && (
+          <Card className="p-4 mb-3 space-y-2">
+            <Input
+              autoFocus
+              value={newListName}
+              onChange={(e) => setNewListName(e.target.value)}
+              placeholder="List name (e.g. Backlog, In Progress, QA)"
+            />
+            <Input
+              value={newListDescription}
+              onChange={(e) => setNewListDescription(e.target.value)}
+              placeholder="Description (optional)"
+            />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => createList.mutate()}
+                disabled={!newListName.trim() || createList.isPending}
+              >
+                {createList.isPending ? 'Creating...' : 'Create list'}
+              </Button>
+            </div>
+          </Card>
+        )}
 
         {isLoading ? (
           <Card className="p-8 text-sm text-muted-foreground text-center">Loading lists…</Card>

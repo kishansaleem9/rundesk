@@ -98,20 +98,31 @@ export class WorkspacesService {
     return { ok: true }
   }
 
-  async create(userId: string, dto: CreateWorkspaceDto) {
+  async create(userId: string, dto: CreateWorkspaceDto & { organizationId?: string }) {
     const requestedSlug = slugify(dto.slug ?? dto.name)
     const finalSlug = await this.reserveUniqueSlug(requestedSlug)
 
     return this.db.transaction(async (tx) => {
-      const [org] = await tx
-        .insert(organizations)
-        .values({ name: dto.name, slug: finalSlug })
-        .returning()
+      let orgId = dto.organizationId
+
+      if (!orgId) {
+        const [org] = await tx
+          .insert(organizations)
+          .values({ name: dto.name, slug: finalSlug })
+          .returning()
+        orgId = org.id
+
+        await tx.insert(organizationMembers).values({
+          organizationId: org.id,
+          userId,
+          role: 'owner',
+        })
+      }
 
       const [workspace] = await tx
         .insert(workspaces)
         .values({
-          organizationId: org.id,
+          organizationId: orgId,
           name: dto.name,
           slug: finalSlug,
           logoUrl: dto.logoUrl,

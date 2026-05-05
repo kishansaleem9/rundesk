@@ -171,6 +171,19 @@ export class TasksService {
     }
   }
 
+  private extractMentionIds(body: string): string[] {
+    const ids = new Set<string>()
+    const patterns = [
+      /<@([0-9a-fA-F-]{36})>/g,
+      /@\[([0-9a-fA-F-]{36})\]/g,
+    ]
+    for (const pattern of patterns) {
+      let match: RegExpExecArray | null
+      while ((match = pattern.exec(body)) !== null) ids.add(match[1])
+    }
+    return [...ids]
+  }
+
   // --- Helpers -------------------------------------------------------------
   private async logActivity(params: {
     taskId: string
@@ -616,9 +629,11 @@ export class TasksService {
 
   async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>) {
     if (!body.trim()) throw new BadRequestException('Comment body cannot be empty')
+    const extracted = this.extractMentionIds(body).map((userId) => ({ userId, offset: 0, length: 0 }))
+    const finalMentions = mentions && mentions.length > 0 ? mentions : extracted
     const [comment] = await this.db
       .insert(taskComments)
-      .values({ taskId, authorId, body, parentCommentId, mentions: mentions ?? null })
+      .values({ taskId, authorId, body, parentCommentId, mentions: finalMentions.length > 0 ? finalMentions : null })
       .returning()
     // Auto-subscribe the author as a watcher
     await this.db.insert(taskWatchers).values({ taskId, userId: authorId }).onConflictDoNothing()
@@ -631,7 +646,7 @@ export class TasksService {
     this.realtime.emitToTask(taskId, { type: 'comment.created', taskId, comment: hydrated })
 
     // Fire comment + mention notifications (best-effort)
-    void this.notifyComment(taskId, authorId, body, mentions ?? [])
+    void this.notifyComment(taskId, authorId, body, finalMentions)
 
     return hydrated
   }

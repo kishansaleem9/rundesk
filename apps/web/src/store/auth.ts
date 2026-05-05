@@ -8,13 +8,37 @@ export type AuthUser = {
   role: string
 }
 
+export type AuthOrg = {
+  id: string
+  name: string
+  slug: string
+  role: string
+}
+
+export type AuthWorkspace = {
+  id: string
+  name: string
+  slug: string
+  role: string
+}
+
 export type AuthState = {
   user: AuthUser | null
+  organizations: AuthOrg[]
+  workspaces: AuthWorkspace[]
   accessToken: string | null
   refreshToken: string | null
-  setSession: (user: AuthUser, accessToken: string, refreshToken: string) => void
+  setSession: (
+    user: AuthUser, 
+    accessToken: string, 
+    refreshToken: string, 
+    organizations?: AuthOrg[], 
+    workspaces?: AuthWorkspace[]
+  ) => void
   setAccessToken: (accessToken: string) => void
   setUser: (user: AuthUser) => void
+  setOrganizations: (orgs: AuthOrg[]) => void
+  setWorkspaces: (workspaces: AuthWorkspace[]) => void
   clear: () => void
   isAuthenticated: () => boolean
 }
@@ -23,13 +47,17 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       user: null,
+      organizations: [],
+      workspaces: [],
       accessToken: null,
       refreshToken: null,
-      setSession: (user, accessToken, refreshToken) =>
-        set({ user, accessToken, refreshToken }),
+      setSession: (user, accessToken, refreshToken, organizations = [], workspaces = []) =>
+        set({ user, accessToken, refreshToken, organizations, workspaces }),
       setAccessToken: (accessToken) => set({ accessToken }),
       setUser: (user) => set({ user }),
-      clear: () => set({ user: null, accessToken: null, refreshToken: null }),
+      setOrganizations: (organizations) => set({ organizations }),
+      setWorkspaces: (workspaces) => set({ workspaces }),
+      clear: () => set({ user: null, accessToken: null, refreshToken: null, organizations: [], workspaces: [] }),
       isAuthenticated: () => !!get().accessToken,
     }),
     {
@@ -37,6 +65,8 @@ export const useAuthStore = create<AuthState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         user: s.user,
+        organizations: s.organizations,
+        workspaces: s.workspaces,
         accessToken: s.accessToken,
         refreshToken: s.refreshToken,
       }),

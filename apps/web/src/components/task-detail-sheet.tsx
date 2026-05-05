@@ -11,9 +11,10 @@ import {
   Textarea,
   cn,
 } from '@rundesk/ui'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { getRealtimeSocket } from '../lib/realtime'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus =
@@ -205,6 +206,7 @@ export function TaskDetailSheet({
   workspaceId?: string
 }) {
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  const qc = useQueryClient()
 
   const enabled = Boolean(taskId && open)
   const detailQuery = useQuery({
@@ -212,6 +214,25 @@ export function TaskDetailSheet({
     queryKey: ['task', taskId],
     queryFn: () => api<TaskDetail>(`/tasks/${taskId}`),
   })
+
+  useEffect(() => {
+    if (!enabled || !taskId) return
+    const socket = getRealtimeSocket()
+    socket.emit('subscribe', { rooms: [`task:${taskId}`] })
+    const onEvent = (event: { type: string; taskId?: string }) => {
+      if (event.taskId !== taskId) return
+      void qc.invalidateQueries({ queryKey: ['task', taskId] })
+      if (event.type.startsWith('comment.') || event.type === 'activity.created') {
+        void qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+        void qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+      }
+    }
+    socket.on('event', onEvent)
+    return () => {
+      socket.off('event', onEvent)
+      socket.emit('unsubscribe', { rooms: [`task:${taskId}`] })
+    }
+  }, [enabled, taskId, qc])
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -290,7 +311,7 @@ export function TaskDetailSheet({
             </div>
 
             <div className="pt-4">
-              {activeTab === 'overview' && <OverviewPanel detail={detailQuery.data} />}
+              {activeTab === 'overview' && <OverviewPanel detail={detailQuery.data} taskId={detailQuery.data.id} workspaceId={workspaceId} />}
               {activeTab === 'fields' && (
                 <CustomFieldsPanel taskId={detailQuery.data.id} workspaceId={workspaceId} />
               )}
@@ -326,7 +347,48 @@ export function TaskDetailSheet({
 // Overview
 // ---------------------------------------------------------------------------
 
-function OverviewPanel({ detail }: { detail: TaskDetail }) {
+function OverviewPanel({
+  detail,
+  taskId,
+  workspaceId,
+}: {
+  detail: TaskDetail
+  taskId: string
+  workspaceId?: string
+}) {
+  const qc = useQueryClient()
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
+    enabled: Boolean(workspaceId),
+  })
+  const pendingInvitesQuery = useQuery({
+    queryKey: ['workspace-invitations', workspaceId],
+    queryFn: () => api<Array<{ id: string; email: string; role: string; status: string; expiresAt: string }>>(`/invitations/workspace/${workspaceId}`),
+    enabled: Boolean(workspaceId),
+  })
+
+  const addAssignee = useMutation({
+    mutationFn: (userId: string) =>
+      api(`/tasks/${taskId}/assignees`, {
+        method: 'POST',
+        body: { userId },
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const removeAssignee = useMutation({
+    mutationFn: (userId: string) => api(`/tasks/${taskId}/assignees/${userId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const assignedIds = new Set((detail.assignees ?? []).map((a) => a.user.id))
+  const availableMembers = (membersQuery.data ?? []).filter((m) => !assignedIds.has(m.userId))
+
   return (
     <div className="space-y-4">
       <section>
@@ -365,13 +427,42 @@ function OverviewPanel({ detail }: { detail: TaskDetail }) {
         {detail.assignees && detail.assignees.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {detail.assignees.map((a) => (
-              <Badge key={a.user.id} variant="secondary">
-                {a.user.displayName ?? a.user.email ?? 'User'}
-              </Badge>
+              <button
+                key={a.user.id}
+                onClick={() => removeAssignee.mutate(a.user.id)}
+                className="inline-flex"
+                title="Remove assignee"
+              >
+                <Badge variant="secondary">
+                  {a.user.displayName ?? a.user.email ?? 'User'} ✕
+                </Badge>
+              </button>
             ))}
           </div>
         ) : (
           <span className="text-sm text-muted-foreground">Unassigned</span>
+        )}
+        {workspaceId && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {availableMembers.slice(0, 8).map((m) => (
+              <button
+                key={m.userId}
+                onClick={() => addAssignee.mutate(m.userId)}
+                className="inline-flex"
+                title={`Assign ${m.displayName || m.email}`}
+              >
+                <Badge variant="outline">+ {m.displayName || m.email}</Badge>
+              </button>
+            ))}
+            {availableMembers.length === 0 && (
+              <span className="text-xs text-muted-foreground">No additional workspace members available</span>
+            )}
+          </div>
+        )}
+        {(pendingInvitesQuery.data?.length ?? 0) > 0 && (
+          <div className="mt-2 text-xs text-muted-foreground">
+            {pendingInvitesQuery.data?.length} invited teammate(s) are pending acceptance and will appear here after joining.
+          </div>
         )}
       </Field>
     </div>

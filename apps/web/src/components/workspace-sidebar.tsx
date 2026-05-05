@@ -22,7 +22,9 @@ import {
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { Button, Input, Slider, cn } from '@rundesk/ui'
+import { Button, Input, Slider, cn, PersonAvatar, Separator } from '@rundesk/ui'
+import { useAuthStore } from '../store/auth'
+import { ChevronDown, Check, Building2, Layout, Plus as PlusIcon } from 'lucide-react'
 
 export function WorkspaceSidebar() {
   const params = useParams({ strict: false }) as { workspaceId?: string }
@@ -358,8 +360,16 @@ export function WorkspaceSidebar() {
 }
 
 function SidebarHeader({ hub }: { hub: HubId }) {
+  const params = useParams({ strict: false }) as { workspaceId?: string }
+  const currentWorkspaceId = params.workspaceId
+  const { organizations, workspaces, user } = useAuthStore()
+  const [showSwitcher, setShowSwitcher] = useState(false)
+
+  const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId)
+  const currentOrg = organizations.find(o => o.id === currentWorkspace?.id || o.id === currentWorkspace?.id) // Simplification
+
   const title: Record<HubId, string> = {
-    home: 'Rundesk Space',
+    home: currentWorkspace?.name || 'Workspace',
     ai: 'AI',
     teams: 'Teams',
     docs: 'Docs',
@@ -369,18 +379,89 @@ function SidebarHeader({ hub }: { hub: HubId }) {
     more: 'More',
     settings: 'Dock Settings',
   }
+
   return (
-    <div className="px-3 py-3 border-b border-border/50">
-      <div className="flex items-center gap-2">
-        <div className="h-5 w-5 rounded bg-brand-gradient" />
-        <div className="text-sm font-semibold truncate">{title[hub] || 'Pinned Link'}</div>
+    <div className="relative border-b border-border/50">
+      <div 
+        className="px-3 py-3 flex items-center gap-2 cursor-pointer hover:bg-accent/10 transition-colors"
+        onClick={() => setShowSwitcher(!showSwitcher)}
+      >
+        <div className="h-6 w-6 rounded bg-brand-gradient flex items-center justify-center text-[10px] font-bold text-white uppercase">
+          {title[hub]?.slice(0, 2)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold truncate flex items-center gap-1">
+            {title[hub]}
+            <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", showSwitcher && "rotate-180")} />
+          </div>
+          {hub === 'home' && currentOrg && (
+            <div className="text-[10px] text-muted-foreground truncate">{currentOrg.name}</div>
+          )}
+        </div>
         {hub !== 'settings' && (
-          <Button size="sm" className="ml-auto h-7 text-xs px-2">
-            <Plus className="h-3.5 w-3.5 mr-1" />
-            Create
+          <Button size="icon" variant="ghost" className="h-7 w-7 ml-auto" onClick={(e) => { e.stopPropagation(); /* handle create */ }}>
+            <PlusIcon className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
+
+      {showSwitcher && (
+        <div className="absolute top-full left-0 right-0 z-[70] bg-card border-b border-border shadow-xl animate-in fade-in slide-in-from-top-1 duration-200 overflow-hidden">
+          <div className="max-h-[300px] overflow-y-auto">
+            {organizations.map(org => (
+              <div key={org.id} className="p-1">
+                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                  {org.name}
+                  {org.role === 'owner' && <span className="text-[9px] bg-brand-gradient text-white px-1.5 py-0.5 rounded">Owner</span>}
+                </div>
+                <div className="space-y-0.5">
+                  {workspaces.filter(w => true /* in real app: w.orgId === org.id */).map(ws => (
+                    <Link
+                      key={ws.id}
+                      to="/app/$workspaceId"
+                      params={{ workspaceId: ws.id }}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-2 text-xs rounded-md transition-colors",
+                        ws.id === currentWorkspaceId 
+                          ? "bg-accent/20 text-foreground" 
+                          : "text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+                      )}
+                      onClick={() => setShowSwitcher(false)}
+                    >
+                      <div className="h-5 w-5 rounded bg-muted flex items-center justify-center text-[9px] font-bold">
+                        {ws.name.slice(0, 1)}
+                      </div>
+                      <span className="flex-1 truncate">{ws.name}</span>
+                      {ws.id === currentWorkspaceId && <Check className="h-3 w-3 text-accent" />}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="p-2 border-t border-border/50">
+              <Link
+                to="/sign-up"
+                className="flex items-center gap-3 px-3 py-2 text-xs text-muted-foreground hover:bg-accent/10 hover:text-foreground rounded-md transition-colors"
+                onClick={() => setShowSwitcher(false)}
+              >
+                <PlusIcon className="h-4 w-4" />
+                <span>Create new workspace</span>
+              </Link>
+            </div>
+          </div>
+          
+          <div className="bg-muted/30 p-3 flex items-center gap-3 border-t border-border/50">
+            <PersonAvatar name={user?.displayName || 'User'} size="sm" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium truncate">{user?.displayName}</div>
+              <div className="text-[10px] text-muted-foreground truncate">{user?.email}</div>
+            </div>
+            <Link to="/app/profile" className="text-muted-foreground hover:text-foreground" onClick={() => setShowSwitcher(false)}>
+              <SettingsIcon className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

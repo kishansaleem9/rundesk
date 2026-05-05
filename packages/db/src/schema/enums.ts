@@ -20,6 +20,20 @@ export const oauthProviderEnum = pgEnum('oauth_provider', [
   'microsoft',
 ])
 
+export const orgRoleEnum = pgEnum('org_role', [
+  'owner',
+  'admin',
+  'billing',
+  'member',
+])
+
+export const invitationStatusEnum = pgEnum('invitation_status', [
+  'pending',
+  'accepted',
+  'revoked',
+  'expired',
+])
+
 export const taskPriorityEnum = pgEnum('task_priority', [
   'urgent',
   'high',

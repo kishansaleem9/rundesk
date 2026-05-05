@@ -5,18 +5,34 @@ import {
   chatChannelMembers,
   chatMessages,
   chatMessageReactions,
+  workspaceMembers,
   users,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
+import { NotificationsService } from '../notifications/notifications.service'
 
 @Injectable()
 export class ChatService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private realtime: RealtimeGateway,
+    private notifications: NotificationsService,
   ) {}
+
+  private extractMentionIds(body: string): string[] {
+    const ids = new Set<string>()
+    const patterns = [
+      /<@([0-9a-fA-F-]{36})>/g,
+      /@\[([0-9a-fA-F-]{36})\]/g,
+    ]
+    for (const pattern of patterns) {
+      let match: RegExpExecArray | null
+      while ((match = pattern.exec(body)) !== null) ids.add(match[1])
+    }
+    return [...ids]
+  }
 
   async listChannels(workspaceId: string, userId: string) {
     const rows = await this.db
@@ -38,9 +54,93 @@ export class ChatService {
       .where(eq(chatChannelMembers.userId, userId))
 
     const memberSet = new Set(memberships.map((m) => m.channelId))
-    return rows
+    const visible = rows
       .filter((c) => !c.isPrivate || memberSet.has(c.id))
       .map((c) => ({ ...c, joined: memberSet.has(c.id) }))
+
+    const dmChannels = visible.filter((c) => c.isDm)
+    if (dmChannels.length === 0) return visible
+
+    const dmIds = dmChannels.map((c) => c.id)
+    const members = await this.db
+      .select({
+        channelId: chatChannelMembers.channelId,
+        userId: chatChannelMembers.userId,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(chatChannelMembers)
+      .leftJoin(users, eq(users.id, chatChannelMembers.userId))
+      .where(or(...dmIds.map((id) => eq(chatChannelMembers.channelId, id))))
+
+    return visible.map((channel) => {
+      if (!channel.isDm) return channel
+      const peer = members.find((m) => m.channelId === channel.id && m.userId !== userId)
+      return {
+        ...channel,
+        dmPeerId: peer?.userId,
+        dmPeerName: peer?.displayName ?? null,
+        dmPeerAvatarUrl: peer?.avatarUrl ?? null,
+      }
+    })
+  }
+
+  async ensureDmChannel(workspaceId: string, currentUserId: string, peerUserId: string) {
+    if (currentUserId === peerUserId) throw new ForbiddenException('Cannot create a DM with yourself')
+
+    const [meMembership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, currentUserId)))
+      .limit(1)
+    const [peerMembership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, peerUserId)))
+      .limit(1)
+    if (!meMembership || !peerMembership) {
+      throw new ForbiddenException('Both users must belong to this workspace')
+    }
+
+    const dmChannels = await this.db
+      .select({ id: chatChannels.id })
+      .from(chatChannels)
+      .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatChannels.isDm, true), isNull(chatChannels.archivedAt)))
+
+    for (const channel of dmChannels) {
+      const members = await this.db
+        .select({ userId: chatChannelMembers.userId })
+        .from(chatChannelMembers)
+        .where(eq(chatChannelMembers.channelId, channel.id))
+      const ids = new Set(members.map((m) => m.userId))
+      if (ids.size === 2 && ids.has(currentUserId) && ids.has(peerUserId)) return channel
+    }
+
+    const [row] = await this.db
+      .insert(chatChannels)
+      .values({
+        workspaceId,
+        name: `dm-${currentUserId.slice(0, 8)}-${peerUserId.slice(0, 8)}`,
+        isPrivate: true,
+        isDm: true,
+        createdById: currentUserId,
+      })
+      .returning()
+
+    await this.db
+      .insert(chatChannelMembers)
+      .values([
+        { channelId: row.id, userId: currentUserId },
+        { channelId: row.id, userId: peerUserId },
+      ])
+      .onConflictDoNothing()
+
+    this.realtime.emitToWorkspace(workspaceId, {
+      type: 'chat.channel.created',
+      workspaceId,
+      channel: row,
+    })
+    return row
   }
 
   async createChannel(data: {
@@ -67,9 +167,9 @@ export class ChatService {
       .values({ channelId: row.id, userId: data.createdById })
       .onConflictDoNothing()
     this.realtime.emitToWorkspace(data.workspaceId, {
-      type: 'doc.updated',
-      docId: row.id,
-      patch: { chat: 'channel.created' },
+      type: 'chat.channel.created',
+      workspaceId: data.workspaceId,
+      channel: row,
     })
     return row
   }
@@ -120,11 +220,19 @@ export class ChatService {
     authorId: string
     body: string
     parentMessageId?: string | null
+    mentions?: Array<{ userId: string; offset?: number; length?: number }>
   }) {
     const body = data.body.trim()
     if (!body) throw new ForbiddenException('Message body required')
     const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, data.channelId))
     if (!channel) throw new NotFoundException('Channel not found')
+
+    const parsedMentionIds = this.extractMentionIds(body)
+    const mentionIds = new Set([
+      ...(data.mentions ?? []).map((m) => m.userId),
+      ...parsedMentionIds,
+    ])
+    const normalizedMentions = [...mentionIds].map((userId) => ({ userId, offset: 0, length: 0 }))
 
     const [row] = await this.db
       .insert(chatMessages)
@@ -133,6 +241,7 @@ export class ChatService {
         authorId: data.authorId,
         body,
         parentMessageId: data.parentMessageId ?? null,
+        mentions: normalizedMentions.length > 0 ? normalizedMentions : null,
       })
       .returning()
 
@@ -140,10 +249,34 @@ export class ChatService {
     const enriched = { ...row, authorName: author?.displayName, authorAvatarUrl: author?.avatarUrl }
 
     this.realtime.emitToWorkspace(channel.workspaceId, {
-      type: 'doc.updated',
-      docId: data.channelId,
-      patch: { chat: 'message.created', message: enriched },
+      type: 'chat.message.created',
+      workspaceId: channel.workspaceId,
+      channelId: data.channelId,
+      message: enriched,
     })
+
+    if (mentionIds.size > 0) {
+      const memberRows = await this.db
+        .select({ userId: workspaceMembers.userId })
+        .from(workspaceMembers)
+        .where(eq(workspaceMembers.workspaceId, channel.workspaceId))
+      const workspaceMemberIds = new Set(memberRows.map((m) => m.userId))
+
+      for (const userId of mentionIds) {
+        if (userId === data.authorId) continue
+        if (!workspaceMemberIds.has(userId)) continue
+        void this.notifications.create({
+          userId,
+          workspaceId: channel.workspaceId,
+          actorId: data.authorId,
+          type: 'task_mentioned',
+          title: `You were mentioned in #${channel.name}`,
+          body: body.slice(0, 180),
+          target: { entityType: 'chat_message', entityId: row.id, url: `/app/${channel.workspaceId}/chat` },
+          emailContext: { taskTitle: `#${channel.name}`, workspaceName: 'Workspace' },
+        })
+      }
+    }
 
     return enriched
   }
@@ -157,6 +290,16 @@ export class ChatService {
       .set({ body: body.trim(), editedAt: new Date() })
       .where(eq(chatMessages.id, messageId))
       .returning()
+    const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, row.channelId))
+    if (channel) {
+      this.realtime.emitToWorkspace(channel.workspaceId, {
+        type: 'chat.message.updated',
+        workspaceId: channel.workspaceId,
+        channelId: row.channelId,
+        messageId,
+        patch: { body: row.body, editedAt: row.editedAt },
+      })
+    }
     return row
   }
 
@@ -164,11 +307,24 @@ export class ChatService {
     const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!existing) throw new NotFoundException('Message not found')
     if (existing.authorId !== userId) throw new ForbiddenException('Not your message')
+    const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, existing.channelId))
     await this.db.delete(chatMessages).where(eq(chatMessages.id, messageId))
+    if (channel) {
+      this.realtime.emitToWorkspace(channel.workspaceId, {
+        type: 'chat.message.deleted',
+        workspaceId: channel.workspaceId,
+        channelId: existing.channelId,
+        messageId,
+      })
+    }
     return { ok: true }
   }
 
   async toggleReaction(messageId: string, userId: string, emoji: string) {
+    const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    const [channel] = message
+      ? await this.db.select().from(chatChannels).where(eq(chatChannels.id, message.channelId))
+      : []
     const [existing] = await this.db
       .select()
       .from(chatMessageReactions)
@@ -181,9 +337,25 @@ export class ChatService {
       )
     if (existing) {
       await this.db.delete(chatMessageReactions).where(eq(chatMessageReactions.id, existing.id))
+      if (channel && message) {
+        this.realtime.emitToWorkspace(channel.workspaceId, {
+          type: 'chat.reaction.toggled',
+          workspaceId: channel.workspaceId,
+          channelId: message.channelId,
+          messageId,
+        })
+      }
       return { ok: true, removed: true }
     }
     await this.db.insert(chatMessageReactions).values({ messageId, userId, emoji })
+    if (channel && message) {
+      this.realtime.emitToWorkspace(channel.workspaceId, {
+        type: 'chat.reaction.toggled',
+        workspaceId: channel.workspaceId,
+        channelId: message.channelId,
+        messageId,
+      })
+    }
     return { ok: true, added: true }
   }
 

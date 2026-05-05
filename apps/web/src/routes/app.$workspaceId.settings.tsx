@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, Label, cn } from '@rundesk/ui'
+import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
 import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
@@ -34,6 +34,14 @@ const ROLES = [
   { value: 'member', label: 'Member' },
   { value: 'guest', label: 'Guest' },
 ]
+
+type Invitation = {
+  id: string
+  email: string
+  role: string
+  status: 'pending' | 'accepted' | 'expired'
+  expiresAt: string
+}
 
 const TABS = [
   { id: 'general', label: 'General', icon: Building2 },
@@ -174,32 +182,50 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
 
 function MembersTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
+  
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<Member[]>(`/workspaces/${workspaceId}/members`),
   })
+
+  const invitesQuery = useQuery({
+    queryKey: ['workspace-invitations', workspaceId],
+    queryFn: () => api<Invitation[]>(`/invitations/workspace/${workspaceId}`),
+  })
+
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteRole, setInviteRole] = useState('member')
 
   const invite = useMutation({
     mutationFn: () =>
-      api(`/workspaces/${workspaceId}/members`, {
+      api(`/invitations`, {
         method: 'POST',
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: { email: inviteEmail, workspaceId, role: inviteRole },
       }),
     onSuccess: () => {
       setInviteEmail('')
-      qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] })
+      toast.success('Invitation sent!')
+      qc.invalidateQueries({ queryKey: ['workspace-invitations', workspaceId] })
     },
   })
+
+  const cancelInvite = useMutation({
+    mutationFn: (id: string) => api(`/invitations/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      toast.success('Invitation cancelled')
+      qc.invalidateQueries({ queryKey: ['workspace-invitations', workspaceId] })
+    },
+  })
+
   const updateRole = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: string }) =>
       api(`/workspaces/${workspaceId}/members/${userId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ role }),
+        body: { role },
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] }),
   })
+
   const remove = useMutation({
     mutationFn: (userId: string) =>
       api(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
@@ -207,12 +233,18 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
   })
 
   return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <h2 className="font-semibold text-sm mb-2 flex items-center gap-2">
-          <UserPlus className="h-4 w-4" />
-          Invite a member
-        </h2>
+    <div className="space-y-6">
+      <Card className="p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent">
+            <UserPlus className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-sm">Invite a teammate</h2>
+            <p className="text-xs text-muted-foreground">They'll get an email to join this workspace.</p>
+          </div>
+        </div>
+
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -221,7 +253,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
           }}
         >
           <Input
-            placeholder="email@company.com"
+            placeholder="teammate@company.com"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             className="flex-1"
@@ -230,27 +262,60 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
           <select
             value={inviteRole}
             onChange={(e) => setInviteRole(e.target.value)}
-            className="px-2 rounded-md border border-border bg-card text-sm"
+            className="px-3 rounded-md border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
             {ROLES.map((r) => (
               <option key={r.value} value={r.value}>{r.label}</option>
             ))}
           </select>
-          <Button size="sm" type="submit" disabled={!inviteEmail.includes('@') || invite.isPending}>
-            {invite.isPending ? 'Adding…' : 'Add'}
+          <Button type="submit" disabled={!inviteEmail.includes('@') || invite.isPending}>
+            {invite.isPending ? 'Sending...' : 'Invite'}
           </Button>
         </form>
+        
         {invite.error instanceof ApiError && (
           <p className="text-xs text-destructive mt-2">{invite.error.message}</p>
         )}
-        <p className="text-[11px] text-muted-foreground mt-2">
-          User must already have a Rundesk account. Email-based invitations with auto-account-creation are coming soon.
-        </p>
       </Card>
 
+      {/* Pending Invitations */}
+      {(invitesQuery.data?.length ?? 0) > 0 && (
+        <Card className="overflow-hidden border-amber-500/20">
+          <div className="px-4 py-3 bg-amber-500/5 border-b border-amber-500/10 flex items-center justify-between">
+            <h2 className="font-semibold text-sm text-amber-700 dark:text-amber-400">
+              Pending Invitations · {invitesQuery.data?.length}
+            </h2>
+          </div>
+          <ul className="divide-y divide-border">
+            {invitesQuery.data?.map((inv) => (
+              <li key={inv.id} className="px-4 py-3 flex items-center gap-3">
+                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                  {inv.email.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">{inv.email}</div>
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    {inv.role} · Expires {new Date(inv.expiresAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => cancelInvite.mutate(inv.id)}
+                  disabled={cancelInvite.isPending}
+                >
+                  Cancel
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       <Card className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-border">
-          <h2 className="font-semibold text-sm">Members · {membersQuery.data?.length ?? 0}</h2>
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h2 className="font-semibold text-sm">Active Members · {membersQuery.data?.length ?? 0}</h2>
         </div>
         <ul className="divide-y divide-border">
           {(membersQuery.data ?? []).map((m) => (

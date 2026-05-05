@@ -4,6 +4,8 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { AuthModule } from './modules/auth/auth.module'
 import { UsersModule } from './modules/users/users.module'
 import { WorkspacesModule } from './modules/workspaces/workspaces.module'
+import { OrganizationsModule } from './modules/organizations/organizations.module'
+import { InvitationsModule } from './modules/invitations/invitations.module'
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module'
 import { SpacesModule } from './modules/spaces/spaces.module'
 import { ProjectsModule } from './modules/projects/projects.module'
@@ -51,6 +53,8 @@ import { DatabaseModule } from './common/database/database.module'
     HealthModule,
     UsersModule,
     AuthModule,
+    OrganizationsModule,
+    InvitationsModule,
     WorkspacesModule,
     FeatureFlagsModule,
     SpacesModule,

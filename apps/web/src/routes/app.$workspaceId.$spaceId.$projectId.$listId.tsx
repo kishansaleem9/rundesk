@@ -90,8 +90,8 @@ function ListDetail() {
         void qc.invalidateQueries({ queryKey: ['tasks', listId] })
         if (event.taskId) {
           void qc.invalidateQueries({ queryKey: ['task', event.taskId] })
-          void qc.invalidateQueries({ queryKey: ['task-comments', event.taskId] })
-          void qc.invalidateQueries({ queryKey: ['task-activity', event.taskId] })
+          void qc.invalidateQueries({ queryKey: ['task', event.taskId, 'comments'] })
+          void qc.invalidateQueries({ queryKey: ['task', event.taskId, 'activity'] })
         }
       }
     }

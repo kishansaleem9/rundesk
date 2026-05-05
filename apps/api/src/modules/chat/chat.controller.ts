@@ -36,6 +36,16 @@ export class ChatController {
     })
   }
 
+  @Post('workspaces/:workspaceId/chat/dms')
+  @UseGuards(WorkspaceMemberGuard)
+  createDm(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { peerUserId: string },
+  ) {
+    return this.chat.ensureDmChannel(workspaceId, user.id, body.peerUserId)
+  }
+
   @Post('chat/channels/:channelId/join')
   join(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.joinChannel(channelId, user.id)
@@ -59,13 +69,14 @@ export class ChatController {
   post(
     @Param('channelId') channelId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { body: string; parentMessageId?: string | null },
+    @Body() body: { body: string; parentMessageId?: string | null; mentions?: Array<{ userId: string; offset?: number; length?: number }> },
   ) {
     return this.chat.postMessage({
       channelId,
       authorId: user.id,
       body: body.body,
       parentMessageId: body.parentMessageId,
+      mentions: body.mentions,
     })
   }
 

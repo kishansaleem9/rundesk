@@ -1,6 +1,6 @@
-import { pgTable, text, timestamp, boolean, uuid } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, unique } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
-import { userRoleEnum } from './enums'
+import { userRoleEnum, orgRoleEnum } from './enums'
 import { users } from './users'
 import { featureFlags } from './feature-flags'
 
@@ -12,6 +12,24 @@ export const organizations = pgTable('organizations', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const organizationMembers = pgTable(
+  'organization_members',
+  {
+    id:             uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId:         uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role:           orgRoleEnum('role').notNull().default('member'),
+    joinedAt:       timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqueOrgUser: unique('uq_organization_members_org_user').on(t.organizationId, t.userId),
+  }),
+)
 
 export const workspaces = pgTable('workspaces', {
   id:             uuid('id').primaryKey().defaultRandom(),
@@ -26,16 +44,34 @@ export const workspaces = pgTable('workspaces', {
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
-export const workspaceMembers = pgTable('workspace_members', {
-  id:          uuid('id').primaryKey().defaultRandom(),
-  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  role:        userRoleEnum('role').notNull().default('member'),
-  joinedAt:    timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const workspaceMembers = pgTable(
+  'workspace_members',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    role:        userRoleEnum('role').notNull().default('member'),
+    joinedAt:    timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqueWorkspaceUser: unique('uq_workspace_members_workspace_user').on(t.workspaceId, t.userId),
+  }),
+)
 
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   workspaces: many(workspaces),
+  members:    many(organizationMembers),
+}))
+
+export const organizationMembersRelations = relations(organizationMembers, ({ one }) => ({
+  organization: one(organizations, {
+    fields:     [organizationMembers.organizationId],
+    references: [organizations.id],
+  }),
+  user:         one(users, {
+    fields:     [organizationMembers.userId],
+    references: [users.id],
+  }),
 }))
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({

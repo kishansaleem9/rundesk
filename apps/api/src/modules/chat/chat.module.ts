@@ -3,9 +3,10 @@ import { ChatService } from './chat.service'
 import { ChatController } from './chat.controller'
 import { RealtimeModule } from '../realtime/realtime.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { NotificationsModule } from '../notifications/notifications.module'
 
 @Module({
-  imports: [RealtimeModule],
+  imports: [RealtimeModule, NotificationsModule],
   providers: [ChatService, WorkspaceMemberGuard],
   controllers: [ChatController],
   exports: [ChatService],

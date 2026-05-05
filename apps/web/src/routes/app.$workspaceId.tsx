@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet, useMatches } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
-import { Card, EmptyState as EmptyStateCard, Button, Badge, PersonAvatar } from '@rundesk/ui'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Card, EmptyState as EmptyStateCard, Button, Badge } from '@rundesk/ui'
 import {
   ArrowRight,
   CheckCircle2,
@@ -8,9 +8,9 @@ import {
   Folder,
   TrendingUp,
   Plus,
-  Sparkles,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useState } from 'react'
 
 type Space = {
   id: string
@@ -39,10 +39,26 @@ function WorkspaceShell() {
 
 function WorkspaceHome() {
   const { workspaceId } = Route.useParams()
+  const qc = useQueryClient()
+  const [creatingSpace, setCreatingSpace] = useState(false)
+  const [newSpaceName, setNewSpaceName] = useState('')
 
   const { data: spaces = [] } = useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
+  })
+
+  const createSpace = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>(`/spaces`, {
+        method: 'POST',
+        body: JSON.stringify({ workspaceId, name: newSpaceName.trim() }),
+      }),
+    onSuccess: () => {
+      setCreatingSpace(false)
+      setNewSpaceName('')
+      qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+    },
   })
 
   return (
@@ -66,9 +82,9 @@ function WorkspaceHome() {
       </header>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
-        <StatCard label="Open tasks" value="12" icon={CheckCircle2} hint="Across all lists" trend="+3" />
-        <StatCard label="Due this week" value="5" icon={Clock} hint="Assigned to you" trend="-2" />
-        <StatCard label="Completed" value="18" icon={TrendingUp} hint="Last 7 days" trend="+8" />
+        <StatCard label="Open tasks" value="0" icon={CheckCircle2} hint="Across all lists" />
+        <StatCard label="Due this week" value="0" icon={Clock} hint="Assigned to you" />
+        <StatCard label="Completed" value="0" icon={TrendingUp} hint="Last 7 days" />
         <StatCard
           label="Spaces"
           value={spaces.length.toString()}
@@ -89,11 +105,51 @@ function WorkspaceHome() {
           <EmptyStateCard
             icon={<Folder className="h-6 w-6" />}
             title="No spaces yet"
-            description="Spaces organise your work by team or department. Create one from the left sidebar."
+            description="Spaces organize your work by team or department. Create your first one now."
             action={
-              <Button variant="outline" size="sm">
-                <Plus className="h-4 w-4" /> Learn about spaces
-              </Button>
+              <div className="flex items-center gap-2">
+                {!creatingSpace ? (
+                  <Button variant="outline" size="sm" onClick={() => setCreatingSpace(true)}>
+                    <Plus className="h-4 w-4" /> Create first space
+                  </Button>
+                ) : (
+                  <>
+                    <input
+                      autoFocus
+                      value={newSpaceName}
+                      onChange={(e) => setNewSpaceName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setCreatingSpace(false)
+                          setNewSpaceName('')
+                        }
+                        if (e.key === 'Enter' && newSpaceName.trim()) {
+                          createSpace.mutate()
+                        }
+                      }}
+                      placeholder="Space name..."
+                      className="h-9 w-44 rounded-md border border-border bg-card px-3 text-sm"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => createSpace.mutate()}
+                      disabled={!newSpaceName.trim() || createSpace.isPending}
+                    >
+                      {createSpace.isPending ? 'Creating…' : 'Create'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setCreatingSpace(false)
+                        setNewSpaceName('')
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
             }
           />
         ) : (
@@ -211,34 +267,10 @@ function SpaceCard({
   )
 }
 
-// Mocked activity feed — feels alive without a backend dep.
 function ActivityFeed() {
-  const items = [
-    { who: 'Hamda Tahir', what: 'completed task', target: 'Wire up Slack incoming webhook', when: '12m ago', kind: 'done' as const },
-    { who: 'Afzaal Ali', what: 'commented on', target: 'Sprint 2 plan', when: '1h ago', kind: 'comment' as const },
-    { who: 'Iqra Khalid', what: 'created project', target: 'Q3 — Marketing site refresh', when: '3h ago', kind: 'create' as const },
-    { who: 'Rundesk AI', what: 'suggested 4 tasks for', target: 'Onboarding revamp', when: 'Yesterday', kind: 'ai' as const },
-  ]
   return (
-    <Card variant="glass" className="divide-y divide-border/30 overflow-hidden">
-      {items.map((it, i) => (
-        <div key={i} className="flex items-center gap-3 px-4 py-3">
-          <PersonAvatar name={it.who} size="sm" />
-          <div className="flex-1 min-w-0 text-sm">
-            <span className="font-medium">{it.who}</span>{' '}
-            <span className="text-muted-foreground">{it.what}</span>{' '}
-            <span className="text-foreground">{it.target}</span>
-          </div>
-          {it.kind === 'ai' && (
-            <Badge variant="gradient" className="text-[10px] shrink-0">
-              <Sparkles className="h-3 w-3" /> AI
-            </Badge>
-          )}
-          <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-            {it.when}
-          </span>
-        </div>
-      ))}
+    <Card variant="glass" className="p-6 text-sm text-muted-foreground">
+      No recent activity yet. Activity will appear here when your team starts creating tasks, comments, and updates.
     </Card>
   )
 }
