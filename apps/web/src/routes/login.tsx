@@ -19,16 +19,23 @@ type LoginResponse = {
   accessToken: string
   refreshToken: string
   user: { id: string; email: string; displayName: string; role: string }
+  organizations: Array<{ id: string; name: string; slug: string; role: string }>
   workspaces: Array<{ id: string; name: string; slug: string; role: string }>
 }
 
 function LoginPage() {
   const navigate = useNavigate()
-  const setSession = useAuthStore((s) => s.setSession)
+  const { setSession } = useAuthStore()
+  const searchParams = new URLSearchParams(window.location.search)
+  const resetToken = searchParams.get('token') ?? ''
+  const mode = searchParams.get('mode') === 'forgot' ? 'forgot' : resetToken ? 'reset' : 'login'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const showSeededLogins =
     import.meta.env.DEV ||
     String(import.meta.env.VITE_SHOW_SEEDED_LOGINS).toLowerCase() === 'true'
@@ -40,9 +47,11 @@ function LoginPage() {
     try {
       const data = await api<LoginResponse>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: { email, password },
       })
-      setSession(data.user, data.accessToken, data.refreshToken)
+      
+      setSession(data.user, data.accessToken, data.refreshToken, data.organizations, data.workspaces)
+      
       if (data.user.role === 'super_admin') {
         navigate({ to: '/app/admin' })
       } else {
@@ -50,6 +59,59 @@ function LoginPage() {
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Login failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    setNotice(null)
+    try {
+      await api('/auth/forgot-password', {
+        method: 'POST',
+        body: { email },
+        skipAuth: true,
+      })
+      setNotice('If this account exists, we sent a reset link to your email.')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not send reset link')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleResetSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!resetToken) {
+      setError('Missing reset token')
+      return
+    }
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    setLoading(true)
+    setError(null)
+    setNotice(null)
+    try {
+      await api('/auth/reset-password', {
+        method: 'POST',
+        body: { token: resetToken, password: newPassword },
+        skipAuth: true,
+      })
+      setNotice('Password updated. You can sign in now.')
+      window.history.replaceState({}, '', '/login')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not reset password')
     } finally {
       setLoading(false)
     }
@@ -111,7 +173,11 @@ function LoginPage() {
                 Welcome back
               </h2>
               <p className="text-sm text-muted-foreground">
-                Sign in to keep work flowing.
+                {mode === 'forgot'
+                  ? 'We will email a password reset link.'
+                  : mode === 'reset'
+                    ? 'Create a new password for your account.'
+                    : 'Sign in to keep work flowing.'}
               </p>
             </header>
 
@@ -133,7 +199,16 @@ function LoginPage() {
               <Separator className="flex-1" />
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form
+              onSubmit={
+                mode === 'forgot'
+                  ? handleForgotSubmit
+                  : mode === 'reset'
+                    ? handleResetSubmit
+                    : handleSubmit
+              }
+              className="space-y-4"
+            >
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
@@ -145,40 +220,89 @@ function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
+                  disabled={mode === 'reset'}
                 />
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
-                  <Link
-                    to="/login"
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Forgot?
-                  </Link>
+              {mode === 'login' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    <a
+                      href="/login?mode=forgot"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Forgot?
+                    </a>
+                  </div>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    leadingIcon={<Lock className="h-4 w-4" />}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                  />
                 </div>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  leadingIcon={<Lock className="h-4 w-4" />}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                />
-              </div>
+              )}
+
+              {mode === 'reset' && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="newPassword">New password</Label>
+                    <Input
+                      id="newPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      leadingIcon={<Lock className="h-4 w-4" />}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Minimum 8 characters"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword">Confirm password</Label>
+                    <Input
+                      id="confirmPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      leadingIcon={<Lock className="h-4 w-4" />}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Repeat password"
+                    />
+                  </div>
+                </>
+              )}
 
               {error && (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive" role="alert">
                   {error}
                 </div>
               )}
+              {notice && (
+                <div className="rounded-lg border border-border/70 bg-card/40 px-3 py-2 text-xs text-muted-foreground" role="status">
+                  {notice}
+                </div>
+              )}
 
               <Button type="submit" variant="gradient" size="lg" className="w-full" disabled={loading}>
-                {loading ? 'Signing in…' : 'Sign in'}
-                {!loading && <ArrowRight className="h-4 w-4" />}
+                {loading
+                  ? mode === 'login'
+                    ? 'Signing in…'
+                    : mode === 'forgot'
+                      ? 'Sending…'
+                      : 'Updating…'
+                  : mode === 'login'
+                    ? 'Sign in'
+                    : mode === 'forgot'
+                      ? 'Send reset link'
+                      : 'Update password'}
+                {!loading && mode === 'login' && <ArrowRight className="h-4 w-4" />}
               </Button>
 
               {showSeededLogins && (
@@ -195,13 +319,21 @@ function LoginPage() {
             </form>
 
             <p className="text-center text-sm text-muted-foreground">
-              New to Rundesk?{' '}
-              <Link
-                to="/sign-up"
-                className="font-medium text-foreground underline-offset-4 hover:underline"
-              >
-                Create your workspace
-              </Link>
+              {mode === 'login' ? (
+                <>
+                  New to Rundesk?{' '}
+                  <Link
+                    to="/sign-up"
+                    className="font-medium text-foreground underline-offset-4 hover:underline"
+                  >
+                    Create your workspace
+                  </Link>
+                </>
+              ) : (
+                <a href="/login" className="font-medium text-foreground underline-offset-4 hover:underline">
+                  Back to login
+                </a>
+              )}
             </p>
           </div>
         </div>

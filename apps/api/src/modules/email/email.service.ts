@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Resend } from 'resend'
 
@@ -7,15 +7,107 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name)
   private readonly client: Resend | null = null
   private readonly from: string
+  private readonly nodeEnv: string
 
   constructor(private config: ConfigService) {
     const apiKey = this.config.get<string>('RESEND_API_KEY')
-    this.from = this.config.get<string>('EMAIL_FROM') ?? 'noreply@rundesk.internal'
+    this.nodeEnv = this.config.get<string>('NODE_ENV') ?? 'development'
+    const configuredFrom = this.config.get<string>('EMAIL_FROM') ?? 'noreply@rundesk.internal'
+    const looksLikePersonalInbox = /@(gmail|yahoo|outlook|hotmail)\./i.test(configuredFrom)
+    if (looksLikePersonalInbox && this.nodeEnv !== 'production') {
+      this.from = 'onboarding@resend.dev'
+      this.logger.warn(
+        `EMAIL_FROM "${configuredFrom}" is not suitable for Resend dev delivery. Falling back to ${this.from}.`,
+      )
+    } else {
+      this.from = configuredFrom
+    }
     if (apiKey) {
       this.client = new Resend(apiKey)
     } else {
       this.logger.warn('RESEND_API_KEY not set — email delivery is disabled')
     }
+  }
+
+  private esc(s: string): string {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    })[c]!)
+  }
+
+  /** Send an invitation email */
+  async sendInvitationEmail(opts: {
+    to: string
+    inviter: string
+    orgName: string
+    claimUrl: string
+    expiresAt: Date
+  }) {
+    const expiry = opts.expiresAt.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    })
+
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] ${opts.inviter} invited you to join ${opts.orgName}`,
+      html: this.layout({
+        heading: 'You were invited to Rundesk',
+        body: `
+          <p>Hi there,</p>
+          <p><strong>${this.esc(opts.inviter)}</strong> has invited you to collaborate on 
+             <strong>${this.esc(opts.orgName)}</strong> using Rundesk.</p>
+          <p style="font-size: 13px; color: #6b7280;">This invitation will expire on ${expiry}.</p>
+        `,
+        ctaUrl: opts.claimUrl,
+        ctaLabel: 'Accept Invitation',
+      }),
+    })
+  }
+
+  /** Send a plain test email for provider verification */
+  async sendTestEmail(opts: { to: string; subject?: string; html?: string }) {
+    return this.send({
+      to: opts.to,
+      subject: opts.subject ?? 'Hello World',
+      html:
+        opts.html ??
+        '<p>Congrats on sending your <strong>first email</strong>!</p>',
+    })
+  }
+
+  /** Send a password reset email */
+  async sendPasswordResetEmail(opts: {
+    to: string
+    recipientName?: string
+    resetUrl: string
+    expiresAt: Date
+  }) {
+    const expiry = opts.expiresAt.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    })
+
+    return this.send({
+      to: opts.to,
+      subject: '[Rundesk] Reset your password',
+      html: this.layout({
+        heading: 'Reset your password',
+        body: `
+          <p>Hi ${this.esc(opts.recipientName || 'there')},</p>
+          <p>We received a request to reset your Rundesk password.</p>
+          <p style="font-size: 13px; color: #6b7280;">This link will expire on ${expiry}.</p>
+        `,
+        ctaUrl: opts.resetUrl,
+        ctaLabel: 'Reset password',
+      }),
+    })
   }
 
   /** Send a task-assigned email */
@@ -33,9 +125,9 @@ export class EmailService {
       html: this.layout({
         heading: 'You were assigned a task',
         body: `
-          <p>Hi ${opts.recipientName},</p>
-          <p><strong>${opts.actorName}</strong> assigned you the task
-             <strong>${opts.taskTitle}</strong> in <em>${opts.workspaceName}</em>.</p>
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          <p><strong>${this.esc(opts.actorName)}</strong> assigned you the task
+             <strong>${this.esc(opts.taskTitle)}</strong> in <em>${this.esc(opts.workspaceName)}</em>.</p>
         `,
         ctaUrl: opts.taskUrl,
         ctaLabel: 'Open task',
@@ -57,11 +149,11 @@ export class EmailService {
       to: opts.to,
       subject: `[Rundesk] ${opts.actorName} mentioned you ${opts.context}`,
       html: this.layout({
-        heading: `${opts.actorName} mentioned you`,
+        heading: `${this.esc(opts.actorName)} mentioned you`,
         body: `
-          <p>Hi ${opts.recipientName},</p>
-          <p><strong>${opts.actorName}</strong> mentioned you ${opts.context} on
-             <strong>${opts.taskTitle}</strong> in <em>${opts.workspaceName}</em>.</p>
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          <p><strong>${this.esc(opts.actorName)}</strong> mentioned you ${this.esc(opts.context)} on
+             <strong>${this.esc(opts.taskTitle)}</strong> in <em>${this.esc(opts.workspaceName)}</em>.</p>
         `,
         ctaUrl: opts.taskUrl,
         ctaLabel: 'View thread',
@@ -84,9 +176,9 @@ export class EmailService {
       html: this.layout({
         heading: `Task due ${opts.dueDateLabel}`,
         body: `
-          <p>Hi ${opts.recipientName},</p>
-          <p>Your task <strong>${opts.taskTitle}</strong> in
-             <em>${opts.workspaceName}</em> is due <strong>${opts.dueDateLabel}</strong>.</p>
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          <p>Your task <strong>${this.esc(opts.taskTitle)}</strong> in
+             <em>${this.esc(opts.workspaceName)}</em> is due <strong>${this.esc(opts.dueDateLabel)}</strong>.</p>
         `,
         ctaUrl: opts.taskUrl,
         ctaLabel: 'View task',
@@ -108,9 +200,9 @@ export class EmailService {
       html: this.layout({
         heading: 'Overdue task',
         body: `
-          <p>Hi ${opts.recipientName},</p>
-          <p>Your task <strong>${opts.taskTitle}</strong> in
-             <em>${opts.workspaceName}</em> is <strong>overdue</strong>.</p>
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          <p>Your task <strong>${this.esc(opts.taskTitle)}</strong> in
+             <em>${this.esc(opts.workspaceName)}</em> is <strong>overdue</strong>.</p>
         `,
         ctaUrl: opts.taskUrl,
         ctaLabel: 'View task',
@@ -135,12 +227,12 @@ export class EmailService {
       html: this.layout({
         heading: `New comment on "${opts.taskTitle}"`,
         body: `
-          <p>Hi ${opts.recipientName},</p>
-          <p><strong>${opts.actorName}</strong> commented on
-             <strong>${opts.taskTitle}</strong> in <em>${opts.workspaceName}</em>:</p>
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          <p><strong>${this.esc(opts.actorName)}</strong> commented on
+             <strong>${this.esc(opts.taskTitle)}</strong> in <em>${this.esc(opts.workspaceName)}</em>:</p>
           <blockquote style="border-left:3px solid #6f96d1;margin:12px 0;padding:8px 16px;
                              color:#374151;background:#f3f7fd;border-radius:0 6px 6px 0;">
-            ${opts.commentSnippet}
+            ${this.esc(opts.commentSnippet)}
           </blockquote>
         `,
         ctaUrl: opts.taskUrl,
@@ -154,18 +246,31 @@ export class EmailService {
   // ---------------------------------------------------------------------------
 
   private async send(opts: { to: string; subject: string; html: string }) {
-    if (!this.client) return   // silently no-op when key not configured
+    if (!this.client) {
+      this.logger.log(`[DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}`)
+      return
+    }
 
     try {
-      await this.client.emails.send({
+      const result = await this.client.emails.send({
         from: this.from,
         to: opts.to,
         subject: opts.subject,
         html: opts.html,
       })
+      const anyResult = result as any
+      if (anyResult?.error) {
+        this.logger.error(
+          `Resend rejected email to ${opts.to}: ${JSON.stringify(anyResult.error)}`,
+        )
+        throw new InternalServerErrorException('Email provider rejected the message')
+      }
+      this.logger.log(`[EMAIL SENT] To: ${opts.to} | Subject: ${opts.subject}`)
     } catch (err) {
-      // Never let email failures propagate — log and move on
-      this.logger.error(`Failed to send email to ${opts.to}: ${(err as Error).message}`)
+      this.logger.error(
+        `Failed to send email to ${opts.to}: ${(err as Error).message}`,
+      )
+      throw new InternalServerErrorException('Unable to send email right now')
     }
   }
 

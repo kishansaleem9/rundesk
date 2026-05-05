@@ -6,6 +6,7 @@ import { LocalAuthGuard } from './guards/local-auth.guard'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { RegisterDto } from './dto/register.dto'
+import { SignupDto } from './dto/signup.dto'
 import { LoginDto } from './dto/login.dto'
 
 function sessionMeta(req: FastifyRequest) {
@@ -20,8 +21,14 @@ function sessionMeta(req: FastifyRequest) {
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Post('signup')
+  @ApiOperation({ summary: 'Atomic organization signup with initial workspace and optional invites' })
+  async signup(@Body() dto: SignupDto, @Req() req: FastifyRequest) {
+    return this.authService.signUp(dto, sessionMeta(req))
+  }
+
   @Post('register')
-  @ApiOperation({ summary: 'Register a new user (creates a personal workspace)' })
+  @ApiOperation({ summary: 'Register a new user (creates a personal workspace) - DEPRECATED: use /signup' })
   async register(@Body() dto: RegisterDto, @Req() req: FastifyRequest) {
     return this.authService.register(dto, sessionMeta(req))
   }
@@ -40,6 +47,20 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token (rotates the refresh token)' })
   async refresh(@Body() body: { refreshToken: string }, @Req() req: FastifyRequest) {
     return this.authService.refresh(body.refreshToken, sessionMeta(req))
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request a password reset link' })
+  async forgotPassword(@Body() body: { email: string }) {
+    return this.authService.requestPasswordReset(body.email)
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password with a valid reset token' })
+  async resetPassword(@Body() body: { token: string; password: string }) {
+    return this.authService.resetPassword(body.token, body.password)
   }
 
   @Post('logout')

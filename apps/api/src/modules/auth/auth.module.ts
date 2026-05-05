@@ -8,6 +8,7 @@ import { JwtStrategy } from './strategies/jwt.strategy'
 import { LocalStrategy } from './strategies/local.strategy'
 import { UsersModule } from '../users/users.module'
 import { WorkspacesModule } from '../workspaces/workspaces.module'
+import { EmailModule } from '../email/email.module'
 import { WorkspaceMemberGuard } from './guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from './guards/workspace-admin.guard'
 
@@ -15,6 +16,7 @@ import { WorkspaceAdminGuard } from './guards/workspace-admin.guard'
   imports: [
     UsersModule,
     WorkspacesModule,
+    EmailModule,
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
