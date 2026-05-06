@@ -6,7 +6,7 @@
     "dev": "ts-node-dev --respawn --transpile-only --exit-child -r tsconfig-paths/register src/main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
-    "lint": "eslint src --ext .ts",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src --ext .ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -48,6 +48,7 @@
     "@types/node": "^22.15.3",
     "@types/passport-jwt": "^4.0.1",
     "@types/passport-local": "^1.0.38",
+    "eslint": "^9.39.4",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "tsconfig-paths": "^4.2.0",
