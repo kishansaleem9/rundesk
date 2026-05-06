@@ -246,8 +246,8 @@ function Dashboard() {
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
               <Card className="w-full max-w-md p-6">
                 <h3 className="font-display text-xl font-semibold mb-4">Save Dashboard Preset</h3>
+                <label className="block text-sm font-medium mb-2 text-foreground">Preset Name</label>
                 <Input
-                  label="Preset Name"
                   placeholder="My Weekly Focus"
                   value={newPresetName}
                   onChange={(e) => setNewPresetName(e.target.value)}

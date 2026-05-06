@@ -19,6 +19,7 @@ export type AuthWorkspace = {
   id: string
   name: string
   slug: string
+  organizationId: string
   role: string
 }
 

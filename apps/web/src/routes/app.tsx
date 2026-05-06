@@ -32,6 +32,7 @@ function AppShell() {
 
   return (
     <div className="h-screen flex bg-background overflow-hidden">
+      <WorkspaceSidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <WorkspaceAnnouncementBanner />
         <AppTopbar onCommandOpen={() => setCmdOpen(true)} />
@@ -39,7 +40,6 @@ function AppShell() {
           <Outlet />
         </main>
       </div>
-      <WorkspaceSidebar />
       <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
     </div>
   )

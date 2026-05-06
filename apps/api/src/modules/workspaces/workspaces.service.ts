@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { organizations, workspaces, workspaceMembers, users } from '@rundesk/db'
+import { organizationMembers, organizations, workspaces, workspaceMembers, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'

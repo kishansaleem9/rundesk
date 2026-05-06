@@ -1,12 +1,21 @@
 import { useState, useEffect } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 
 export const Route = createFileRoute('/app/$workspaceId/settings')({
+  beforeLoad: ({ params }) => {
+    const workspaceId = (params as any)?.workspaceId as string | undefined
+    const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      workspaceId ?? '',
+    )
+    if (!ok) {
+      throw redirect({ to: '/app/profile' })
+    }
+  },
   component: SettingsPage,
 })
 
@@ -51,9 +60,30 @@ const TABS = [
   { id: 'labels', label: 'Labels', icon: Tag },
 ] as const
 
+function isUuidLike(value?: string): value is string {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
 function SettingsPage() {
+  const navigate = useNavigate()
   const { workspaceId } = Route.useParams()
+  const validWorkspaceId = isUuidLike(workspaceId) ? workspaceId : null
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('general')
+
+  useEffect(() => {
+    if (!validWorkspaceId) {
+      navigate({ to: '/app/profile' })
+    }
+  }, [navigate, validWorkspaceId])
+
+  if (!validWorkspaceId) {
+    return (
+      <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+        Redirecting to profile...
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col">
@@ -95,11 +125,11 @@ function SettingsPage() {
           </nav>
 
           <div>
-            {tab === 'general' && <GeneralTab workspaceId={workspaceId} />}
-            {tab === 'members' && <MembersTab workspaceId={workspaceId} />}
-            {tab === 'integrations' && <IntegrationsTab />}
-            {tab === 'security' && <SecurityTab />}
-            {tab === 'labels' && <LabelsTab workspaceId={workspaceId} />}
+            {tab === 'general' && <GeneralTab workspaceId={validWorkspaceId} />}
+            {tab === 'members' && <MembersTab workspaceId={validWorkspaceId} />}
+            {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
+            {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
+            {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
           </div>
         </div>
       </div>
@@ -217,6 +247,20 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
     },
   })
 
+  const resendInvite = useMutation({
+    mutationFn: (id: string) => api(`/invitations/${id}/resend`, { method: 'POST' }),
+    onSuccess: () => toast.success('Invitation resent'),
+  })
+
+  const copyLink = useMutation({
+    mutationFn: async (id: string) => {
+      const data = await api<{ claimUrl: string }>(`/invitations/${id}/link`)
+      await navigator.clipboard.writeText(data.claimUrl)
+      return data.claimUrl
+    },
+    onSuccess: () => toast.success('Invite link copied'),
+  })
+
   const updateRole = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: string }) =>
       api(`/workspaces/${workspaceId}/members/${userId}`, {
@@ -301,6 +345,28 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="text-xs"
+                  onClick={() => copyLink.mutate(inv.id)}
+                  disabled={copyLink.isPending}
+                  title="Copy invitation link"
+                >
+                  <Link2 className="h-3.5 w-3.5 mr-1" />
+                  Copy link
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => resendInvite.mutate(inv.id)}
+                  disabled={resendInvite.isPending}
+                  title="Resend invitation email"
+                >
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                  Resend
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   className="text-xs text-muted-foreground hover:text-destructive"
                   onClick={() => cancelInvite.mutate(inv.id)}
                   disabled={cancelInvite.isPending}
@@ -356,8 +422,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
   )
 }
 
-function IntegrationsTab() {
-  const { workspaceId } = Route.useParams()
+function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const [showWebhookForm, setShowWebhookForm] = useState(false)
   const [whName, setWhName] = useState('')
@@ -645,8 +710,7 @@ function IntegrationsTab() {
   )
 }
 
-function SecurityTab() {
-  const { workspaceId } = Route.useParams()
+function SecurityTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyScope, setNewKeyScope] = useState('read_write')

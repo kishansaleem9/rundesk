@@ -3,15 +3,15 @@ import { IsString, IsNotEmpty, IsArray, IsOptional, IsBoolean, IsUUID } from 'cl
 export class CreateDashboardPresetDto {
   @IsUUID()
   @IsNotEmpty()
-  workspaceId: string
+  workspaceId!: string
 
   @IsString()
   @IsNotEmpty()
-  name: string
+  name!: string
 
   @IsArray()
   @IsNotEmpty()
-  layout: any[]
+  layout!: any[]
 
   @IsBoolean()
   @IsOptional()

@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Delete, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, Delete, UseGuards, ParseUUIDPipe } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService } from './workspaces.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 
@@ -25,45 +27,51 @@ export class WorkspacesController {
   }
 
   @Get(':workspaceId')
+  @UseGuards(WorkspaceMemberGuard)
   @ApiOperation({ summary: 'Get a workspace by id (must be a member)' })
-  async getOne(@Param('workspaceId') workspaceId: string) {
+  async getOne(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.workspacesService.findById(workspaceId)
   }
 
   @Patch(':workspaceId')
+  @UseGuards(WorkspaceAdminGuard)
   async update(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { name?: string; logoUrl?: string | null; primaryColor?: string | null; customDomain?: string | null },
   ) {
     return this.workspacesService.update(workspaceId, body)
   }
 
   @Get(':workspaceId/members')
-  async listMembers(@Param('workspaceId') workspaceId: string) {
+  @UseGuards(WorkspaceMemberGuard)
+  async listMembers(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.workspacesService.listMembers(workspaceId)
   }
 
   @Post(':workspaceId/members')
+  @UseGuards(WorkspaceAdminGuard)
   async addMember(
-    @Param('workspaceId') workspaceId: string,
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { email: string; role?: string },
   ) {
     return this.workspacesService.addMember(workspaceId, body.email, body.role)
   }
 
   @Patch(':workspaceId/members/:userId')
+  @UseGuards(WorkspaceAdminGuard)
   async updateMember(
-    @Param('workspaceId') workspaceId: string,
-    @Param('userId') userId: string,
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() body: { role: string },
   ) {
     return this.workspacesService.updateMemberRole(workspaceId, userId, body.role)
   }
 
   @Delete(':workspaceId/members/:userId')
+  @UseGuards(WorkspaceAdminGuard)
   async removeMember(
-    @Param('workspaceId') workspaceId: string,
-    @Param('userId') userId: string,
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
   ) {
     return this.workspacesService.removeMember(workspaceId, userId)
   }

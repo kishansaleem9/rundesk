@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { eq, and } from 'drizzle-orm'
-import { organizations, organizationMembers, workspaces, users } from '@rundesk/db'
+import { organizations, organizationMembers, workspaceMembers, workspaces, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 

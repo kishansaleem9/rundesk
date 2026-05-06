@@ -20,7 +20,7 @@ type LoginResponse = {
   refreshToken: string
   user: { id: string; email: string; displayName: string; role: string }
   organizations: Array<{ id: string; name: string; slug: string; role: string }>
-  workspaces: Array<{ id: string; name: string; slug: string; role: string }>
+  workspaces: Array<{ id: string; name: string; slug: string; organizationId: string; role: string }>
 }
 
 function LoginPage() {
@@ -28,6 +28,7 @@ function LoginPage() {
   const { setSession } = useAuthStore()
   const searchParams = new URLSearchParams(window.location.search)
   const resetToken = searchParams.get('token') ?? ''
+  const nextUrl = searchParams.get('next') ?? ''
   const mode = searchParams.get('mode') === 'forgot' ? 'forgot' : resetToken ? 'reset' : 'login'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -51,8 +52,10 @@ function LoginPage() {
       })
       
       setSession(data.user, data.accessToken, data.refreshToken, data.organizations, data.workspaces)
-      
-      if (data.user.role === 'super_admin') {
+
+      if (nextUrl && nextUrl.startsWith('/')) {
+        window.location.href = nextUrl
+      } else if (data.user.role === 'super_admin') {
         navigate({ to: '/app/admin' })
       } else {
         navigate({ to: '/app' })

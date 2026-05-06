@@ -15,6 +15,11 @@ export class InvitationsService {
     private config: ConfigService,
   ) {}
 
+  private claimUrlForToken(token: string) {
+    const appUrl = this.config.get('APP_URL', 'http://localhost:5173')
+    return `${appUrl}/accept-invite?token=${token}`
+  }
+
   async listPending(organizationId: string) {
     return this.db
       .select()
@@ -43,8 +48,7 @@ export class InvitationsService {
       .returning()
 
     const inviter = await this.db.select().from(users).where(eq(users.id, invitedById)).limit(1)
-    const appUrl = this.config.get('APP_URL', 'http://localhost:5173')
-    const claimUrl = `${appUrl}/accept-invite?token=${token}`
+    const claimUrl = this.claimUrlForToken(token)
 
     await this.emailService.sendInvitationEmail({
       to: dto.email,
@@ -55,6 +59,41 @@ export class InvitationsService {
     })
 
     return invite
+  }
+
+  async getClaimUrlById(invitationId: string) {
+    const [invite] = await this.db.select().from(invitations).where(eq(invitations.id, invitationId)).limit(1)
+    if (!invite) throw new NotFoundException('Invitation not found')
+    return { claimUrl: this.claimUrlForToken(invite.token) }
+  }
+
+  async resend(invitationId: string) {
+    const [row] = await this.db
+      .select({
+        invite: invitations,
+        org: organizations,
+        inviter: users,
+      })
+      .from(invitations)
+      .innerJoin(organizations, eq(organizations.id, invitations.organizationId))
+      .innerJoin(users, eq(users.id, invitations.invitedByUserId))
+      .where(eq(invitations.id, invitationId))
+      .limit(1)
+
+    if (!row) throw new NotFoundException('Invitation not found')
+    if (row.invite.status !== 'pending') throw new GoneException('Invitation is not pending')
+    if (row.invite.expiresAt < new Date()) throw new GoneException('Invitation expired')
+
+    const claimUrl = this.claimUrlForToken(row.invite.token)
+    await this.emailService.sendInvitationEmail({
+      to: row.invite.email,
+      inviter: row.inviter.displayName || 'A teammate',
+      orgName: row.org.name,
+      claimUrl,
+      expiresAt: row.invite.expiresAt,
+    })
+
+    return { ok: true }
   }
 
   async listPendingForWorkspace(workspaceId: string) {
@@ -161,6 +200,12 @@ export class InvitationsService {
           })
           .returning()
         userId = newUser.id
+      } else {
+        const [currentUser] = await tx.select().from(users).where(eq(users.id, userId)).limit(1)
+        if (!currentUser) throw new ForbiddenException('Authenticated user not found')
+        if (currentUser.email.toLowerCase() !== invite.email.toLowerCase()) {
+          throw new ForbiddenException('This invitation belongs to a different email address')
+        }
       }
 
       // Create org membership

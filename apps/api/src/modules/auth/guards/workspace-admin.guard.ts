@@ -52,8 +52,8 @@ export class WorkspaceAdminGuard implements CanActivate {
       .limit(1)
 
     if (!member) throw new NotFoundException('Workspace not found')
-    if (member.role !== 'workspace_admin' && member.role !== 'super_admin') {
-      throw new ForbiddenException('Admin role required')
+    if (!['workspace_admin', 'manager', 'super_admin'].includes(member.role)) {
+      throw new ForbiddenException('Workspace admin or manager role required')
     }
 
     req.workspaceMember = member

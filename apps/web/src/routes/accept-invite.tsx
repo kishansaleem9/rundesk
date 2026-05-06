@@ -22,7 +22,10 @@ import {
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 
-export const Route = createFileRoute('/accept-invite' as any)({
+export const Route = createFileRoute('/accept-invite')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    token: typeof search.token === 'string' ? search.token : '',
+  }),
   component: AcceptInvite,
 })
 
@@ -39,12 +42,12 @@ type ClaimResponse = {
   refreshToken: string
   user: { id: string; email: string; displayName: string; role: string }
   organizations: Array<{ id: string; name: string; slug: string; role: string }>
-  workspaces: Array<{ id: string; name: string; slug: string; role: string }>
+  workspaces: Array<{ id: string; name: string; slug: string; organizationId: string; role: string }>
 }
 
 function AcceptInvite() {
   const navigate = useNavigate()
-  const { token } = Route.useSearch() as { token: string }
+  const { token } = Route.useSearch()
   const [loading, setLoading] = useState(true)
   const [claiming, setClaiming] = useState(false)
   const [invite, setInvite] = useState<InvitePreview | null>(null)
@@ -79,7 +82,7 @@ function AcceptInvite() {
   async function handleClaim() {
     if (!invite?.requiresAccountCreation && !isAuthenticated()) {
       toast.info('Please sign in first to accept this invite')
-      navigate({ to: '/login' })
+      window.location.href = `/login?next=${encodeURIComponent(`/accept-invite?token=${token}`)}`
       return
     }
 
