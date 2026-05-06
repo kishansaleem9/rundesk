@@ -46,6 +46,17 @@ export class ChatController {
     return this.chat.ensureDmChannel(workspaceId, user.id, body.peerUserId)
   }
 
+  @Get('workspaces/:workspaceId/chat/members/:memberUserId/activity')
+  @UseGuards(WorkspaceMemberGuard)
+  getMemberActivity(
+    @Param('workspaceId') workspaceId: string,
+    @Param('memberUserId') memberUserId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('limit') limit?: string,
+  ) {
+    return this.chat.getMemberActivity(workspaceId, user.id, memberUserId, limit ? Number(limit) : 30)
+  }
+
   @Post('chat/channels/:channelId/join')
   join(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.joinChannel(channelId, user.id)
@@ -59,10 +70,11 @@ export class ChatController {
   @Get('chat/channels/:channelId/messages')
   listMessages(
     @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Query('limit') limit?: string,
     @Query('before') before?: string,
   ) {
-    return this.chat.listMessages(channelId, { limit: limit ? Number(limit) : undefined, before })
+    return this.chat.listMessages(channelId, user.id, { limit: limit ? Number(limit) : undefined, before })
   }
 
   @Post('chat/channels/:channelId/messages')
@@ -87,6 +99,23 @@ export class ChatController {
     @Body() body: { body: string },
   ) {
     return this.chat.editMessage(messageId, user.id, body.body)
+  }
+
+  @Get('chat/messages/:messageId')
+  getMessage(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.chat.getMessageById(messageId, user.id)
+  }
+
+  @Get('chat/messages/:messageId/thread')
+  getThread(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('limit') limit?: string,
+  ) {
+    return this.chat.getThread(messageId, user.id, limit ? Number(limit) : 100)
   }
 
   @Delete('chat/messages/:messageId')

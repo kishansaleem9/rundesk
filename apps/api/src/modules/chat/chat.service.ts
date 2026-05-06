@@ -34,6 +34,29 @@ export class ChatService {
     return [...ids]
   }
 
+  private async assertChannelAccess(channelId: string, userId: string) {
+    const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, channelId)).limit(1)
+    if (!channel) throw new NotFoundException('Channel not found')
+
+    const [membership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, channel.workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    if (!membership) throw new ForbiddenException('Workspace membership required')
+
+    if (channel.isPrivate || channel.isDm) {
+      const [channelMembership] = await this.db
+        .select({ userId: chatChannelMembers.userId })
+        .from(chatChannelMembers)
+        .where(and(eq(chatChannelMembers.channelId, channelId), eq(chatChannelMembers.userId, userId)))
+        .limit(1)
+      if (!channelMembership) throw new ForbiddenException('Channel membership required')
+    }
+
+    return channel
+  }
+
   async listChannels(workspaceId: string, userId: string) {
     const rows = await this.db
       .select({
@@ -175,6 +198,7 @@ export class ChatService {
   }
 
   async joinChannel(channelId: string, userId: string) {
+    await this.assertChannelAccess(channelId, userId)
     await this.db
       .insert(chatChannelMembers)
       .values({ channelId, userId })
@@ -183,13 +207,15 @@ export class ChatService {
   }
 
   async leaveChannel(channelId: string, userId: string) {
+    await this.assertChannelAccess(channelId, userId)
     await this.db
       .delete(chatChannelMembers)
       .where(and(eq(chatChannelMembers.channelId, channelId), eq(chatChannelMembers.userId, userId)))
     return { ok: true }
   }
 
-  async listMessages(channelId: string, opts: { limit?: number; before?: string } = {}) {
+  async listMessages(channelId: string, userId: string, opts: { limit?: number; before?: string } = {}) {
+    await this.assertChannelAccess(channelId, userId)
     const limit = Math.min(opts.limit ?? 50, 200)
     const where = opts.before
       ? and(eq(chatMessages.channelId, channelId), isNull(chatMessages.parentMessageId))
@@ -212,7 +238,142 @@ export class ChatService {
       .where(where)
       .orderBy(desc(chatMessages.createdAt))
       .limit(limit)
-    return rows.reverse()
+    const ordered = rows.reverse()
+    if (ordered.length === 0) return ordered
+
+    const messageIds = ordered.map((m) => m.id)
+    const reactionRows = await this.db
+      .select({
+        messageId: chatMessageReactions.messageId,
+        emoji: chatMessageReactions.emoji,
+        userId: chatMessageReactions.userId,
+      })
+      .from(chatMessageReactions)
+      .where(or(...messageIds.map((id) => eq(chatMessageReactions.messageId, id))))
+
+    const grouped = new Map<string, Map<string, Set<string>>>()
+    for (const reaction of reactionRows) {
+      const byEmoji = grouped.get(reaction.messageId) ?? new Map<string, Set<string>>()
+      const users = byEmoji.get(reaction.emoji) ?? new Set<string>()
+      users.add(reaction.userId)
+      byEmoji.set(reaction.emoji, users)
+      grouped.set(reaction.messageId, byEmoji)
+    }
+
+    return ordered.map((message) => {
+      const byEmoji = grouped.get(message.id)
+      const reactions =
+        byEmoji
+          ? [...byEmoji.entries()].map(([emoji, users]) => ({
+              emoji,
+              count: users.size,
+              reacted: users.has(userId),
+            }))
+          : []
+      return { ...message, reactions }
+    })
+  }
+
+  async getMemberActivity(workspaceId: string, requesterId: string, memberUserId: string, limit = 30) {
+    const [requesterMembership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, requesterId)))
+      .limit(1)
+    if (!requesterMembership) throw new ForbiddenException('Workspace membership required')
+
+    const [memberMembership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, memberUserId)))
+      .limit(1)
+    if (!memberMembership) return []
+
+    return this.db
+      .select({
+        id: chatMessages.id,
+        channelId: chatMessages.channelId,
+        channelName: chatChannels.name,
+        body: chatMessages.body,
+        parentMessageId: chatMessages.parentMessageId,
+        createdAt: chatMessages.createdAt,
+      })
+      .from(chatMessages)
+      .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+      .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatMessages.authorId, memberUserId)))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(Math.min(Math.max(limit, 1), 100))
+  }
+
+  async getMessageById(messageId: string, userId: string) {
+    const [row] = await this.db
+      .select({
+        id: chatMessages.id,
+        channelId: chatMessages.channelId,
+        authorId: chatMessages.authorId,
+        body: chatMessages.body,
+        mentions: chatMessages.mentions,
+        parentMessageId: chatMessages.parentMessageId,
+        editedAt: chatMessages.editedAt,
+        pinnedAt: chatMessages.pinnedAt,
+        createdAt: chatMessages.createdAt,
+        authorName: users.displayName,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(chatMessages)
+      .leftJoin(users, eq(users.id, chatMessages.authorId))
+      .where(eq(chatMessages.id, messageId))
+      .limit(1)
+    if (!row) throw new NotFoundException('Message not found')
+
+    await this.assertChannelAccess(row.channelId, userId)
+
+    const reactionRows = await this.db
+      .select({
+        emoji: chatMessageReactions.emoji,
+        userId: chatMessageReactions.userId,
+      })
+      .from(chatMessageReactions)
+      .where(eq(chatMessageReactions.messageId, messageId))
+
+    const grouped = new Map<string, Set<string>>()
+    for (const reaction of reactionRows) {
+      const usersForEmoji = grouped.get(reaction.emoji) ?? new Set<string>()
+      usersForEmoji.add(reaction.userId)
+      grouped.set(reaction.emoji, usersForEmoji)
+    }
+    const reactions = [...grouped.entries()].map(([emoji, usersForEmoji]) => ({
+      emoji,
+      count: usersForEmoji.size,
+      reacted: usersForEmoji.has(userId),
+    }))
+
+    return { ...row, reactions }
+  }
+
+  async getThread(messageId: string, userId: string, limit = 100) {
+    const parent = await this.getMessageById(messageId, userId)
+    const rows = await this.db
+      .select({
+        id: chatMessages.id,
+        channelId: chatMessages.channelId,
+        authorId: chatMessages.authorId,
+        body: chatMessages.body,
+        mentions: chatMessages.mentions,
+        parentMessageId: chatMessages.parentMessageId,
+        editedAt: chatMessages.editedAt,
+        pinnedAt: chatMessages.pinnedAt,
+        createdAt: chatMessages.createdAt,
+        authorName: users.displayName,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(chatMessages)
+      .leftJoin(users, eq(users.id, chatMessages.authorId))
+      .where(eq(chatMessages.parentMessageId, parent.id))
+      .orderBy(asc(chatMessages.createdAt))
+      .limit(Math.min(Math.max(limit, 1), 200))
+
+    return { parent, replies: rows }
   }
 
   async postMessage(data: {
@@ -222,6 +383,7 @@ export class ChatService {
     parentMessageId?: string | null
     mentions?: Array<{ userId: string; offset?: number; length?: number }>
   }) {
+    await this.assertChannelAccess(data.channelId, data.authorId)
     const body = data.body.trim()
     if (!body) throw new ForbiddenException('Message body required')
     const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, data.channelId))
@@ -246,7 +408,7 @@ export class ChatService {
       .returning()
 
     const [author] = await this.db.select({ displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users).where(eq(users.id, data.authorId))
-    const enriched = { ...row, authorName: author?.displayName, authorAvatarUrl: author?.avatarUrl }
+    const enriched = { ...row, authorName: author?.displayName, authorAvatarUrl: author?.avatarUrl, reactions: [] as Array<{ emoji: string; count: number; reacted: boolean }> }
 
     this.realtime.emitToWorkspace(channel.workspaceId, {
       type: 'chat.message.created',
@@ -284,6 +446,7 @@ export class ChatService {
   async editMessage(messageId: string, userId: string, body: string) {
     const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!existing) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(existing.channelId, userId)
     if (existing.authorId !== userId) throw new ForbiddenException('Not your message')
     const [row] = await this.db
       .update(chatMessages)
@@ -306,6 +469,7 @@ export class ChatService {
   async deleteMessage(messageId: string, userId: string) {
     const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!existing) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(existing.channelId, userId)
     if (existing.authorId !== userId) throw new ForbiddenException('Not your message')
     const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, existing.channelId))
     await this.db.delete(chatMessages).where(eq(chatMessages.id, messageId))
@@ -322,6 +486,8 @@ export class ChatService {
 
   async toggleReaction(messageId: string, userId: string, emoji: string) {
     const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!message) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(message.channelId, userId)
     const [channel] = message
       ? await this.db.select().from(chatChannels).where(eq(chatChannels.id, message.channelId))
       : []

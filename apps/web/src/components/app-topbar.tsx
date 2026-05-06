@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -40,12 +40,18 @@ import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { api, ApiError } from '../lib/api'
 import { QuickCreateModal } from './quick-create-modal'
+import { getRealtimeSocket } from '../lib/realtime'
 
 type Workspace = { id: string; name: string; slug: string }
 type WorkspaceEntry = { workspace: Workspace; role: string }
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
 type List = { id: string; name: string }
+
+function isUuidLike(value?: string): value is string {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
 
 export function AppTopbar({
   onCommandOpen,
@@ -78,7 +84,7 @@ export function AppTopbar({
       <QuickCreateButton />
       <ThemeToggle />
       <NotificationsBell />
-      <UserMenu />
+      <UserMenu workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
     </header>
   )
 }
@@ -255,6 +261,50 @@ function NotificationsBell() {
   const [open, setOpen] = useState(false)
   const qc = useQueryClient()
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const socket = getRealtimeSocket()
+    const beep = () => {
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.type = 'sine'
+        osc.frequency.value = 920
+        gain.gain.value = 0.03
+        osc.start()
+        osc.stop(ctx.currentTime + 0.08)
+      } catch {
+        // ignored
+      }
+    }
+    const onEvent = (event: { type?: string; notification?: { title?: string; body?: string } }) => {
+      if (event.type !== 'notification.created') return
+      qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
+      qc.invalidateQueries({ queryKey: ['notifications', 'recent'] })
+      beep()
+      if ('Notification' in window && Notification.permission === 'granted') {
+        void new Notification(event.notification?.title ?? 'New notification', {
+          body: event.notification?.body ?? '',
+        })
+      }
+    }
+    socket.on('event', onEvent)
+    return () => {
+      socket.off('event', onEvent)
+    }
+  }, [qc])
+
+  useEffect(() => {
+    if (!open) return
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission === 'default') {
+      void Notification.requestPermission()
+    }
+  }, [open])
+
   const countQuery = useQuery({
     queryKey: ['notifications-unread-count'],
     queryFn: () => api<{ count: number }>('/notifications/unread-count'),
@@ -364,7 +414,7 @@ function NotificationsBell() {
 // ---------------------------------------------------------------------------
 // User menu
 // ---------------------------------------------------------------------------
-function UserMenu() {
+function UserMenu({ workspaceId }: { workspaceId?: string }) {
   const user = useAuthStore((s) => s.user)
   const refreshToken = useAuthStore((s) => s.refreshToken)
   const clear = useAuthStore((s) => s.clear)
@@ -385,8 +435,6 @@ function UserMenu() {
       navigate({ to: '/login' })
     }
   }
-
-  const wsIdFromUrl = (window.location.pathname.match(/\/app\/([^/]+)/) ?? [])[1]
 
   return (
     <DropdownMenu>
@@ -416,10 +464,10 @@ function UserMenu() {
           <UserIcon className="h-4 w-4 text-muted-foreground" />
           Profile
         </DropdownMenuItem>
-        {wsIdFromUrl && (
+        {workspaceId && (
           <DropdownMenuItem
             onSelect={() =>
-              navigate({ to: '/app/$workspaceId/settings', params: { workspaceId: wsIdFromUrl } })
+              navigate({ to: '/app/$workspaceId/settings', params: { workspaceId } })
             }
           >
             <SettingsIcon className="h-4 w-4 text-muted-foreground" />
