@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { useEffect, useMemo, useState } from 'react'
@@ -16,6 +16,7 @@ type TaskAssignee = {
   userId: string
   user?: { displayName?: string | null }
 }
+type WorkspaceMember = { userId: string; displayName: string; email: string }
 
 type TaskItem = {
   id: string
@@ -68,9 +69,14 @@ function ListDetail() {
   const qc = useQueryClient()
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table'>('list')
+  const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
+  const [sortBy, setSortBy] = useState<'created' | 'due' | 'priority'>('created')
+  const [groupBy, setGroupBy] = useState<'status' | 'priority'>('status')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
+  const [saveAsName, setSaveAsName] = useState('')
+  const locationSearch = useRouterState({ select: (s) => (s.location as any).searchStr as string })
 
   const { data: tasks = [], isLoading, refetch } = useQuery({
     queryKey: ['tasks', listId],
@@ -80,6 +86,14 @@ function ListDetail() {
     queryKey: ['project-fields', workspaceId, projectId],
     queryFn: () =>
       api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`),
+  })
+  const { data: savedViews = [] } = useQuery({
+    queryKey: ['list-views', listId],
+    queryFn: () => api<Array<{ id: string; name: string; type: 'list' | 'board' | 'calendar' | 'gantt' | 'table'; config?: any }>>(`/lists/${listId}/views`),
+  })
+  const { data: workspaceMembers = [] } = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`),
   })
 
   useEffect(() => {
@@ -123,6 +137,28 @@ function ListDetail() {
     }
   }
 
+  const visibleTasks = useMemo(() => {
+    let next = [...tasks]
+    if (statusFilter !== 'all') {
+      next = next.filter((t) => t.status === statusFilter)
+    }
+    next.sort((a, b) => {
+      if (sortBy === 'due') {
+        const aDate = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER
+        const bDate = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER
+        return aDate - bDate
+      }
+      if (sortBy === 'priority') {
+        const weight: Record<TaskPriority, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
+        return weight[a.priority] - weight[b.priority]
+      }
+      const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0
+      const bDate = b.createdAt ? new Date(b.createdAt).getTime() : 0
+      return bDate - aDate
+    })
+    return next
+  }, [tasks, statusFilter, sortBy])
+
   const tasksByStatus = useMemo(() => {
     const map: Record<TaskStatus, TaskItem[]> = {
       backlog: [],
@@ -132,20 +168,25 @@ function ListDetail() {
       done: [],
       cancelled: [],
     }
-    for (const task of tasks) map[task.status].push(task)
+    for (const task of visibleTasks) map[task.status].push(task)
     return map
-  }, [tasks])
+  }, [visibleTasks])
 
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskItem[]>()
-    for (const task of tasks) {
+    for (const task of visibleTasks) {
       const key = task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : 'No due date'
       const arr = map.get(key) ?? []
       arr.push(task)
       map.set(key, arr)
     }
     return Array.from(map.entries())
-  }, [tasks])
+  }, [visibleTasks])
+
+  useEffect(() => {
+    const nextTaskId = new URLSearchParams(locationSearch ?? '').get('task')
+    if (nextTaskId) setSelectedTaskId(nextTaskId)
+  }, [locationSearch])
 
   const calendarDays = useMemo(() => {
     const monthStart = startOfMonth(calendarMonth)
@@ -206,11 +247,11 @@ function ListDetail() {
 
   return (
     <div className="flex-1 flex flex-col">
-      <div className="border-b border-border bg-card">
-        <div className="px-3 sm:px-6 pt-4 pb-0 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+      <div className="border-b border-border/70 bg-card">
+        <div className="px-3 sm:px-5 pt-3 pb-0 flex flex-col sm:flex-row sm:items-end justify-between gap-2.5">
           <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-            <h1 className="font-display text-2xl font-semibold truncate text-foreground">Tasks</h1>
-            <span className="text-sm text-muted-foreground">{tasks.length} task{tasks.length !== 1 ? 's' : ''}</span>
+            <h1 className="font-display text-xl font-semibold truncate text-foreground">Tasks</h1>
+            <span className="text-xs text-muted-foreground">{visibleTasks.length} task{visibleTasks.length !== 1 ? 's' : ''}</span>
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <Input
@@ -218,17 +259,17 @@ function ListDetail() {
               value={newTaskTitle}
               onChange={(e) => setNewTaskTitle(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateTask()}
-              className="h-8 w-full sm:w-56"
+              className="h-7.5 w-full sm:w-56"
             />
             <Button size="sm" onClick={handleCreateTask}>Add</Button>
           </div>
         </div>
-        <div className="px-3 sm:px-6 mt-3 flex items-center gap-1 border-b-0 overflow-x-auto">
+        <div className="px-3 sm:px-5 mt-2.5 flex items-center gap-1 border-b-0 overflow-x-auto">
           {viewTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveView(tab.id)}
-              className={`relative px-3 py-2 text-sm font-medium transition-colors ${
+              className={`relative px-2.5 py-1.5 text-xs font-medium transition-colors ${
                 activeView === tab.id
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground'
@@ -240,22 +281,97 @@ function ListDetail() {
               )}
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2 pb-1 text-xs text-muted-foreground">
-            <button className="px-2 py-1 hover:text-foreground">Filter</button>
-            <button className="px-2 py-1 hover:text-foreground">Sort</button>
-            <button className="px-2 py-1 hover:text-foreground">Group</button>
+          <div className="ml-auto flex items-center gap-1.5 pb-1 text-xs text-muted-foreground">
+            <select
+              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'all' | TaskStatus)}
+            >
+              <option value="all">All statuses</option>
+              {STATUS_ORDER.map((status) => (
+                <option key={status} value={status}>
+                  {STATUS_META[status].label}
+                </option>
+              ))}
+            </select>
+            <select
+              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'created' | 'due' | 'priority')}
+            >
+              <option value="created">Sort: Newest</option>
+              <option value="due">Sort: Due date</option>
+              <option value="priority">Sort: Priority</option>
+            </select>
+            <select
+              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as 'status' | 'priority')}
+            >
+              <option value="status">Group: Status</option>
+              <option value="priority">Group: Priority</option>
+            </select>
+            <select
+              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
+              value=""
+              onChange={(e) => {
+                const selectedId = e.target.value
+                const view = savedViews.find((v) => v.id === selectedId)
+                if (!view) return
+                const cfg = view.config ?? {}
+                setActiveView(view.type === 'gantt' ? 'list' : view.type)
+                setStatusFilter((cfg.statusFilter as 'all' | TaskStatus) ?? 'all')
+                setSortBy((cfg.sortBy as 'created' | 'due' | 'priority') ?? 'created')
+                setGroupBy((cfg.groupBy as 'status' | 'priority') ?? 'status')
+              }}
+            >
+              <option value="">Load view</option>
+              {savedViews.map((view) => (
+                <option key={view.id} value={view.id}>
+                  {view.name}
+                </option>
+              ))}
+            </select>
+            <Input
+              value={saveAsName}
+              onChange={(e) => setSaveAsName(e.target.value)}
+              placeholder="Save as..."
+              className="h-7 w-32"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={async () => {
+                const name = saveAsName.trim()
+                if (!name) return
+                await api(`/lists/${listId}/views`, {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    name,
+                    type: activeView,
+                    config: { statusFilter, sortBy, groupBy },
+                  }),
+                })
+                setSaveAsName('')
+                await qc.invalidateQueries({ queryKey: ['list-views', listId] })
+              }}
+            >
+              Save
+            </Button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-3 sm:p-6">
+      <div className="flex-1 overflow-auto p-3 sm:p-5">
         {isLoading ? (
           <div className="text-muted-foreground">Loading tasks...</div>
-        ) : tasks.length === 0 ? (
+        ) : visibleTasks.length === 0 ? (
           <div className="text-muted-foreground">No tasks yet. Create one to get started!</div>
         ) : activeView === 'list' ? (
           <GroupedListView
-            tasks={tasks}
+            tasks={visibleTasks}
+            groupBy={groupBy}
             onOpenTask={(id) => setSelectedTaskId(id)}
             onToggleDone={async (task) => {
               const nextStatus: TaskStatus = task.status === 'done' ? 'todo' : 'done'
@@ -296,10 +412,11 @@ function ListDetail() {
           </DndContext>
         ) : activeView === 'table' ? (
           <TableView
-            tasks={tasks}
+            tasks={visibleTasks}
             workspaceId={workspaceId}
             projectId={projectId}
             projectFields={projectFields}
+            workspaceMembers={workspaceMembers}
             onOpenTask={(id) => setSelectedTaskId(id)}
             onPatchTask={async (id, patch) => {
               await api(`/tasks/${id}`, {
@@ -315,6 +432,7 @@ function ListDetail() {
               })
               await refetch()
             }}
+            onRefresh={refetch}
           />
         ) : (
           <Card className="p-4">
@@ -368,15 +486,42 @@ function ListDetail() {
 
 function GroupedListView({
   tasks,
+  groupBy,
   onOpenTask,
   onToggleDone,
   onAddTask,
 }: {
   tasks: TaskItem[]
+  groupBy: 'status' | 'priority'
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onAddTask: (status: TaskStatus, title: string) => Promise<void> | void
 }) {
+  if (groupBy === 'priority') {
+    const priorityGroups: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
+    return (
+      <div className="space-y-4">
+        {priorityGroups.map((priority) => {
+          const groupTasks = tasks.filter((task) => task.priority === priority)
+          return (
+            <Card key={priority} className="p-3">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium capitalize">
+                <Flag className={cn('h-4 w-4', PRIORITY_COLORS[priority])} />
+                {priority} ({groupTasks.length})
+              </div>
+              <div className="space-y-2">
+                {groupTasks.map((task) => (
+                  <TaskRow key={task.id} task={task} onOpenTask={onOpenTask} onToggleDone={onToggleDone} />
+                ))}
+                {groupTasks.length === 0 && <div className="text-xs text-muted-foreground">No tasks</div>}
+              </div>
+            </Card>
+          )
+        })}
+      </div>
+    )
+  }
+
   const grouped = useMemo(() => {
     const map: Record<TaskStatus, TaskItem[]> = {
       backlog: [],
@@ -584,17 +729,21 @@ function TableView({
   workspaceId,
   projectId,
   projectFields,
+  workspaceMembers,
   onOpenTask,
   onPatchTask,
   onAddTask,
+  onRefresh,
 }: {
   tasks: TaskItem[]
   workspaceId: string
   projectId: string
   projectFields: CustomFieldDef[]
+  workspaceMembers: WorkspaceMember[]
   onOpenTask: (taskId: string) => void
   onPatchTask: (taskId: string, patch: TaskPatch) => Promise<void> | void
   onAddTask: (title: string) => Promise<void> | void
+  onRefresh: () => Promise<unknown>
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
@@ -602,6 +751,7 @@ function TableView({
   const [statusOpenFor, setStatusOpenFor] = useState<string | null>(null)
   const [priorityOpenFor, setPriorityOpenFor] = useState<string | null>(null)
   const [dateOpenFor, setDateOpenFor] = useState<string | null>(null)
+  const [assigneeOpenFor, setAssigneeOpenFor] = useState<string | null>(null)
   const [customOpen, setCustomOpen] = useState<{ taskId: string; fieldId: string } | null>(null)
   const [addActive, setAddActive] = useState(false)
   const [addDraft, setAddDraft] = useState('')
@@ -897,27 +1047,75 @@ function TableView({
                   </div>
 
                   {/* Assignees */}
-                  <div className="w-28 px-3 flex items-center">
-                    {assignees.length === 0 ? (
-                      <span className="text-muted-foreground text-xs">—</span>
-                    ) : (
-                      <div className="flex -space-x-1">
-                        {assignees.slice(0, 3).map((a) => {
-                          const label = a.user?.displayName?.[0]?.toUpperCase() ?? '?'
-                          return (
-                            <div
-                              key={a.userId}
-                              className="h-5 w-5 rounded-full bg-brand-300 text-foreground text-[10px] font-semibold flex items-center justify-center ring-2 ring-card"
-                              title={a.user?.displayName ?? ''}
-                            >
-                              {label}
+                  <div className="w-28 px-3 flex items-center relative">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setAssigneeOpenFor((cur) => (cur === task.id ? null : task.id))
+                        setStatusOpenFor(null)
+                        setPriorityOpenFor(null)
+                        setDateOpenFor(null)
+                      }}
+                      className="w-full text-left"
+                    >
+                      {assignees.length === 0 ? (
+                        <span className="text-muted-foreground text-xs">Assign</span>
+                      ) : (
+                        <div className="flex -space-x-1">
+                          {assignees.slice(0, 3).map((a) => {
+                            const label = a.user?.displayName?.[0]?.toUpperCase() ?? '?'
+                            return (
+                              <div
+                                key={a.userId}
+                                className="h-5 w-5 rounded-full bg-brand-300 text-foreground text-[10px] font-semibold flex items-center justify-center ring-2 ring-card"
+                                title={a.user?.displayName ?? ''}
+                              >
+                                {label}
+                              </div>
+                            )
+                          })}
+                          {assignees.length > 3 && (
+                            <div className="h-5 w-5 rounded-full bg-muted text-muted-foreground text-[10px] font-semibold flex items-center justify-center ring-2 ring-card">
+                              +{assignees.length - 3}
                             </div>
+                          )}
+                        </div>
+                      )}
+                    </button>
+                    {assigneeOpenFor === task.id && (
+                      <div
+                        className="absolute top-full left-3 mt-1 z-20 w-56 rounded-md border border-border bg-card shadow-lg py-1 max-h-56 overflow-auto"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {workspaceMembers.map((member) => {
+                          const isAssigned = assignees.some((a) => a.userId === member.userId)
+                          return (
+                            <button
+                              key={member.userId}
+                              type="button"
+                              className="w-full flex items-center justify-between px-2 py-1.5 text-xs hover:bg-muted text-left"
+                              onClick={async () => {
+                                if (isAssigned) {
+                                  await api(`/tasks/${task.id}/assignees/${member.userId}`, { method: 'DELETE' })
+                                } else {
+                                  await api(`/tasks/${task.id}/assignees`, {
+                                    method: 'POST',
+                                    body: JSON.stringify({ userId: member.userId }),
+                                  })
+                                }
+                                await onRefresh()
+                              }}
+                            >
+                              <span className="truncate">{member.displayName || member.email}</span>
+                              <span className={cn('text-[10px]', isAssigned ? 'text-emerald-600' : 'text-muted-foreground')}>
+                                {isAssigned ? 'Assigned' : 'Add'}
+                              </span>
+                            </button>
                           )
                         })}
-                        {assignees.length > 3 && (
-                          <div className="h-5 w-5 rounded-full bg-muted text-muted-foreground text-[10px] font-semibold flex items-center justify-center ring-2 ring-card">
-                            +{assignees.length - 3}
-                          </div>
+                        {workspaceMembers.length === 0 && (
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground">No members available</div>
                         )}
                       </div>
                     )}

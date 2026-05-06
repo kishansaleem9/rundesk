@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import {
   Badge,
   Button,
@@ -26,6 +27,9 @@ type TaskStatus =
   | 'cancelled'
 
 type UserLite = { id: string; displayName?: string | null; email?: string | null }
+type WorkspaceMemberLite = { userId: string; displayName: string; email: string }
+type MentionTaskLite = { id: string; title: string; projectName?: string; listName?: string }
+type MentionDocLite = { id: string; title: string; updatedAt?: string }
 
 type Subtask = {
   id: string
@@ -35,7 +39,14 @@ type Subtask = {
   isArchived?: boolean
 }
 
-type ChecklistItem = { id: string; content: string; isDone: boolean }
+type TaskPickerItem = {
+  id: string
+  title: string
+  listName?: string
+  projectName?: string
+}
+
+type ChecklistItem = { id: string; content: string; isDone: boolean; dueDate?: string | null }
 type Checklist = { id: string; title: string; items: ChecklistItem[] }
 
 type Watcher = {
@@ -60,6 +71,7 @@ type Attachment = {
 
 type TaskDetail = {
   id: string
+  listId: string
   title: string
   description: string | null
   status: TaskStatus
@@ -79,6 +91,7 @@ type TaskComment = {
   id: string
   body: string
   createdAt: string
+  parentCommentId?: string | null
   author?: UserLite | null
   reactions?: Array<{ emoji: string; userId: string }>
 }
@@ -179,6 +192,13 @@ function formatBytes(bytes?: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function prettifyMentions(body: string, namesById: Record<string, string>): string {
+  let next = body
+  next = next.replace(/@\[(?<id>[0-9a-fA-F-]{36})\]/g, (_, id: string) => `@${namesById[id] ?? 'teammate'}`)
+  next = next.replace(/<@(?<id>[0-9a-fA-F-]{36})>/g, (_, id: string) => `@${namesById[id] ?? 'teammate'}`)
+  return next
+}
+
 function formatDuration(ms?: number | null): string {
   if (!ms) return '—'
   const seconds = Math.floor(ms / 1000)
@@ -207,6 +227,15 @@ export function TaskDetailSheet({
 }) {
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const fallbackWorkspaceId = useMemo(() => {
+    if (workspaceId) return workspaceId
+    if (typeof window === 'undefined') return undefined
+    const parts = window.location.pathname.split('/')
+    const appIdx = parts.findIndex((p) => p === 'app')
+    if (appIdx >= 0 && parts[appIdx + 1]) return parts[appIdx + 1]
+    return undefined
+  }, [workspaceId])
 
   const enabled = Boolean(taskId && open)
   const detailQuery = useQuery({
@@ -311,26 +340,48 @@ export function TaskDetailSheet({
             </div>
 
             <div className="pt-4">
-              {activeTab === 'overview' && <OverviewPanel detail={detailQuery.data} taskId={detailQuery.data.id} workspaceId={workspaceId} />}
+              {activeTab === 'overview' && (
+                <OverviewPanel detail={detailQuery.data} taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
+              )}
               {activeTab === 'fields' && (
-                <CustomFieldsPanel taskId={detailQuery.data.id} workspaceId={workspaceId} />
+                <CustomFieldsPanel taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
               )}
               {activeTab === 'subtasks' && (
-                <SubtasksPanel taskId={detailQuery.data.id} inline={detailQuery.data.subtasks ?? []} />
+                <SubtasksPanel
+                  taskId={detailQuery.data.id}
+                  parentListId={detailQuery.data.listId}
+                  inline={detailQuery.data.subtasks ?? []}
+                />
               )}
               {activeTab === 'checklists' && (
                 <ChecklistsPanel taskId={detailQuery.data.id} checklists={detailQuery.data.checklists ?? []} />
               )}
               {activeTab === 'watchers' && (
-                <WatchersPanel taskId={detailQuery.data.id} inline={detailQuery.data.watchers ?? []} />
+                <WatchersPanel
+                  taskId={detailQuery.data.id}
+                  workspaceId={fallbackWorkspaceId}
+                  inline={detailQuery.data.watchers ?? []}
+                />
               )}
               {activeTab === 'dependencies' && (
-                <DependenciesPanel taskId={detailQuery.data.id} inline={detailQuery.data.dependencies ?? []} />
+                <DependenciesPanel
+                  taskId={detailQuery.data.id}
+                  workspaceId={fallbackWorkspaceId}
+                  inline={detailQuery.data.dependencies ?? []}
+                  onOpenTask={(relatedTaskId) =>
+                    navigate({
+                      to: '.',
+                      search: (prev: Record<string, unknown>) => ({ ...prev, task: relatedTaskId }),
+                    } as any)
+                  }
+                />
               )}
               {activeTab === 'attachments' && (
                 <AttachmentsPanel taskId={detailQuery.data.id} inline={detailQuery.data.attachments ?? []} />
               )}
-              {activeTab === 'comments' && <CommentsPanel taskId={detailQuery.data.id} />}
+              {activeTab === 'comments' && (
+                <CommentsPanel taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
+              )}
               {activeTab === 'activity' && <ActivityPanel taskId={detailQuery.data.id} />}
               {activeTab === 'time' && <TimePanel taskId={detailQuery.data.id} />}
             </div>
@@ -482,9 +533,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // Subtasks
 // ---------------------------------------------------------------------------
 
-function SubtasksPanel({ taskId, inline }: { taskId: string; inline: Subtask[] }) {
+function SubtasksPanel({
+  taskId,
+  parentListId,
+  inline,
+}: {
+  taskId: string
+  parentListId: string
+  inline: Subtask[]
+}) {
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
+  const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('')
 
   // Probe a dedicated endpoint first; fall back to inline subtasks from getTask.
   const probe = useQuery({
@@ -516,10 +577,30 @@ function SubtasksPanel({ taskId, inline }: { taskId: string; inline: Subtask[] }
     mutationFn: () =>
       api(`/tasks`, {
         method: 'POST',
-        body: JSON.stringify({ title, parentTaskId: taskId, listId: undefined }),
+        body: JSON.stringify({ title, parentTaskId: taskId, listId: parentListId }),
       }),
     onSuccess: async () => {
       setTitle('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const renameSubtask = useMutation({
+    mutationFn: ({ id, nextTitle }: { id: string; nextTitle: string }) =>
+      api(`/tasks/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: nextTitle }),
+      }),
+    onSuccess: async () => {
+      setEditingSubtaskId(null)
+      setEditingSubtaskTitle('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const deleteSubtask = useMutation({
+    mutationFn: (id: string) => api(`/tasks/${id}`, { method: 'DELETE' }),
+    onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
   })
@@ -541,17 +622,56 @@ function SubtasksPanel({ taskId, inline }: { taskId: string; inline: Subtask[] }
                 onChange={(e) => toggleDone.mutate({ id: s.id, done: e.target.checked })}
                 className="h-4 w-4 rounded border-border"
               />
-              <span
-                className={cn(
-                  'flex-1 text-sm truncate',
-                  s.status === 'done' && 'line-through text-muted-foreground',
-                )}
-              >
-                {s.title}
-              </span>
+              {editingSubtaskId === s.id ? (
+                <div className="flex-1 flex items-center gap-2">
+                  <Input
+                    value={editingSubtaskTitle}
+                    onChange={(e) => setEditingSubtaskTitle(e.target.value)}
+                    className="h-8"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => renameSubtask.mutate({ id: s.id, nextTitle: editingSubtaskTitle.trim() })}
+                    disabled={!editingSubtaskTitle.trim() || renameSubtask.isPending}
+                  >
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditingSubtaskId(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <span
+                  className={cn(
+                    'flex-1 text-sm truncate',
+                    s.status === 'done' && 'line-through text-muted-foreground',
+                  )}
+                >
+                  {s.title}
+                </span>
+              )}
               <Badge variant="outline" className={cn('capitalize text-xs', priorityColor(s.priority))}>
                 {s.priority}
               </Badge>
+              {editingSubtaskId !== s.id && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setEditingSubtaskId(s.id)
+                    setEditingSubtaskTitle(s.title)
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+              <button
+                type="button"
+                className="text-xs text-rose-500 hover:text-rose-600"
+                onClick={() => deleteSubtask.mutate(s.id)}
+              >
+                Delete
+              </button>
             </li>
           ))}
         </ul>
@@ -575,7 +695,7 @@ function SubtasksPanel({ taskId, inline }: { taskId: string; inline: Subtask[] }
       </form>
       {create.isError ? (
         <NotWiredNote>
-          Couldn&apos;t create subtask — parent list context may be required.
+          Couldn&apos;t create subtask. Please retry.
         </NotWiredNote>
       ) : null}
     </div>
@@ -595,6 +715,11 @@ function ChecklistsPanel({
 }) {
   const qc = useQueryClient()
   const [itemText, setItemText] = useState('')
+  const [itemDueDate, setItemDueDate] = useState('')
+  const [editingChecklistId, setEditingChecklistId] = useState<string | null>(null)
+  const [editingChecklistTitle, setEditingChecklistTitle] = useState('')
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [editingItemContent, setEditingItemContent] = useState('')
   const firstChecklist = useMemo(() => checklists[0] ?? null, [checklists])
 
   const createChecklist = useMutation({
@@ -612,11 +737,32 @@ function ChecklistsPanel({
       const checklist = firstChecklist ?? (await createChecklist.mutateAsync())
       return api(`/tasks/${taskId}/checklists/${checklist.id}/items`, {
         method: 'POST',
-        body: JSON.stringify({ content: itemText }),
+        body: JSON.stringify({ content: itemText, dueDate: itemDueDate || null }),
       })
     },
     onSuccess: async () => {
       setItemText('')
+      setItemDueDate('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const renameChecklist = useMutation({
+    mutationFn: ({ checklistId, title }: { checklistId: string; title: string }) =>
+      api(`/tasks/${taskId}/checklists/${checklistId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      }),
+    onSuccess: async () => {
+      setEditingChecklistId(null)
+      setEditingChecklistTitle('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const deleteChecklist = useMutation({
+    mutationFn: (checklistId: string) => api(`/tasks/${taskId}/checklists/${checklistId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
   })
@@ -631,6 +777,36 @@ function ChecklistsPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
   })
+  const updateItemMeta = useMutation({
+    mutationFn: ({ itemId, dueDate }: { itemId: string; dueDate: string | null }) =>
+      api(`/tasks/${taskId}/checklists/items/${itemId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ dueDate }),
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const deleteItem = useMutation({
+    mutationFn: (itemId: string) => api(`/tasks/${taskId}/checklists/items/${itemId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const editItem = useMutation({
+    mutationFn: ({ itemId, content }: { itemId: string; content: string }) =>
+      api(`/tasks/${taskId}/checklists/items/${itemId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ content }),
+      }),
+    onSuccess: async () => {
+      setEditingItemId(null)
+      setEditingItemContent('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
 
   return (
     <div className="space-y-3">
@@ -639,7 +815,48 @@ function ChecklistsPanel({
       ) : (
         checklists.map((cl) => (
           <div key={cl.id} className="rounded-md border border-border">
-            <div className="border-b border-border px-3 py-2 text-sm font-medium">{cl.title}</div>
+            <div className="border-b border-border px-3 py-2 flex items-center gap-2">
+              {editingChecklistId === cl.id ? (
+                <>
+                  <Input
+                    value={editingChecklistTitle}
+                    onChange={(e) => setEditingChecklistTitle(e.target.value)}
+                    className="h-8"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => renameChecklist.mutate({ checklistId: cl.id, title: editingChecklistTitle.trim() })}
+                    disabled={!editingChecklistTitle.trim() || renameChecklist.isPending}
+                  >
+                    Save
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditingChecklistId(null)}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="text-sm font-medium flex-1">{cl.title}</div>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setEditingChecklistId(cl.id)
+                      setEditingChecklistTitle(cl.title)
+                    }}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-rose-500 hover:text-rose-600"
+                    onClick={() => deleteChecklist.mutate(cl.id)}
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
+            </div>
             <ul className="divide-y divide-border">
               {cl.items.length === 0 ? (
                 <li className="px-3 py-2 text-xs text-muted-foreground">No items</li>
@@ -657,14 +874,63 @@ function ChecklistsPanel({
                       }
                       className="h-4 w-4 rounded border-border"
                     />
-                    <span
-                      className={cn(
-                        'text-sm',
-                        item.isDone && 'line-through text-muted-foreground',
-                      )}
+                    {editingItemId === item.id ? (
+                      <div className="flex-1 flex items-center gap-2">
+                        <Input
+                          value={editingItemContent}
+                          onChange={(e) => setEditingItemContent(e.target.value)}
+                          className="h-8"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => editItem.mutate({ itemId: item.id, content: editingItemContent.trim() })}
+                          disabled={!editingItemContent.trim() || editItem.isPending}
+                        >
+                          Save
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditingItemId(null)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <span
+                        className={cn(
+                          'text-sm flex-1',
+                          item.isDone && 'line-through text-muted-foreground',
+                        )}
+                      >
+                        {item.content}
+                      </span>
+                    )}
+                    {editingItemId !== item.id && (
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setEditingItemId(item.id)
+                          setEditingItemContent(item.content)
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    <Input
+                      type="date"
+                      value={item.dueDate ? item.dueDate.slice(0, 10) : ''}
+                      onChange={(e) => updateItemMeta.mutate({ itemId: item.id, dueDate: e.target.value || null })}
+                      className="h-7 w-[145px]"
+                    />
+                    <button
+                      type="button"
+                      className="text-xs text-rose-500 hover:text-rose-600"
+                      onClick={() => deleteItem.mutate(item.id)}
                     >
-                      {item.content}
-                    </span>
+                      Delete
+                    </button>
                   </li>
                 ))
               )}
@@ -685,6 +951,12 @@ function ChecklistsPanel({
           onChange={(e) => setItemText(e.target.value)}
           placeholder="+ Add checklist item"
         />
+        <Input
+          type="date"
+          value={itemDueDate}
+          onChange={(e) => setItemDueDate(e.target.value)}
+          className="w-[155px]"
+        />
         <Button type="submit" disabled={!itemText.trim() || addItem.isPending} size="sm">
           Add
         </Button>
@@ -697,12 +969,31 @@ function ChecklistsPanel({
 // Watchers
 // ---------------------------------------------------------------------------
 
-function WatchersPanel({ taskId, inline }: { taskId: string; inline: Watcher[] }) {
+function WatchersPanel({
+  taskId,
+  workspaceId,
+  inline,
+}: {
+  taskId: string
+  workspaceId?: string
+  inline: Watcher[]
+}) {
   const qc = useQueryClient()
   const currentUser = useAuthStore((s) => s.user)
+  const [selectedUserId, setSelectedUserId] = useState('')
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<WorkspaceMemberLite[]>(`/workspaces/${workspaceId}/members`),
+    enabled: !!workspaceId,
+  })
   const isWatching = useMemo(
     () => (currentUser ? inline.some((w) => w.userId === currentUser.id) : false),
     [inline, currentUser],
+  )
+  const watcherIds = useMemo(() => new Set(inline.map((w) => w.userId)), [inline])
+  const addableMembers = useMemo(
+    () => (membersQuery.data ?? []).filter((m) => !watcherIds.has(m.userId)),
+    [membersQuery.data, watcherIds],
   )
 
   const toggle = useMutation({
@@ -716,6 +1007,23 @@ function WatchersPanel({ taskId, inline }: { taskId: string; inline: Watcher[] }
         body: JSON.stringify({ userId: currentUser.id }),
       })
     },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+  const addWatcher = useMutation({
+    mutationFn: (userId: string) =>
+      api(`/tasks/${taskId}/watchers`, {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      }),
+    onSuccess: async () => {
+      setSelectedUserId('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+  const removeWatcher = useMutation({
+    mutationFn: (userId: string) => api(`/tasks/${taskId}/watchers/${userId}`, { method: 'DELETE' }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
@@ -736,6 +1044,29 @@ function WatchersPanel({ taskId, inline }: { taskId: string; inline: Watcher[] }
           {isWatching ? 'Unwatch' : 'Watch task'}
         </Button>
       </div>
+      {workspaceId && (
+        <div className="flex items-center gap-2 rounded-md border border-border p-2">
+          <select
+            value={selectedUserId}
+            onChange={(e) => setSelectedUserId(e.target.value)}
+            className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+          >
+            <option value="">Add teammate as watcher…</option>
+            {addableMembers.map((member) => (
+              <option key={member.userId} value={member.userId}>
+                {member.displayName || member.email}
+              </option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            onClick={() => addWatcher.mutate(selectedUserId)}
+            disabled={!selectedUserId || addWatcher.isPending}
+          >
+            Add
+          </Button>
+        </div>
+      )}
 
       {inline.length === 0 ? (
         <EmptyState title="Nobody is watching yet" hint="Watchers get notified on updates." />
@@ -754,6 +1085,13 @@ function WatchersPanel({ taskId, inline }: { taskId: string; inline: Watcher[] }
                   <div className="text-xs text-muted-foreground truncate">{w.user.email}</div>
                 ) : null}
               </div>
+              <button
+                type="button"
+                className="text-xs text-rose-500 hover:text-rose-600"
+                onClick={() => removeWatcher.mutate(w.userId)}
+              >
+                Remove
+              </button>
             </li>
           ))}
         </ul>
@@ -766,10 +1104,43 @@ function WatchersPanel({ taskId, inline }: { taskId: string; inline: Watcher[] }
 // Dependencies
 // ---------------------------------------------------------------------------
 
-function DependenciesPanel({ taskId, inline }: { taskId: string; inline: Dependency[] }) {
+function DependenciesPanel({
+  taskId,
+  workspaceId,
+  inline,
+  onOpenTask,
+}: {
+  taskId: string
+  workspaceId?: string
+  inline: Dependency[]
+  onOpenTask: (relatedTaskId: string) => void
+}) {
   const qc = useQueryClient()
   const [relatedId, setRelatedId] = useState('')
   const [type, setType] = useState<'blocks' | 'blocked_by' | 'related_to'>('blocks')
+  const [taskSearch, setTaskSearch] = useState('')
+  const tasksQuery = useQuery({
+    queryKey: ['dependency-task-picker', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; title: string; listName?: string; projectName?: string }>>(
+        `/tasks/workspace/${workspaceId}?limit=1000`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const taskOptions = useMemo<TaskPickerItem[]>(
+    () => (tasksQuery.data ?? []).filter((task) => task.id !== taskId),
+    [tasksQuery.data, taskId],
+  )
+  const filteredTaskOptions = useMemo(() => {
+    const q = taskSearch.trim().toLowerCase()
+    if (!q) return taskOptions
+    return taskOptions.filter(
+      (task) =>
+        task.title.toLowerCase().includes(q) ||
+        task.projectName?.toLowerCase().includes(q) ||
+        task.listName?.toLowerCase().includes(q),
+    )
+  }, [taskOptions, taskSearch])
 
   const add = useMutation({
     mutationFn: () =>
@@ -797,10 +1168,10 @@ function DependenciesPanel({ taskId, inline }: { taskId: string; inline: Depende
 
   return (
     <div className="space-y-4">
-      <DepGroup label="Blocking" items={blocking} onRemove={(id) => remove.mutate(id)} />
-      <DepGroup label="Waiting on" items={waitingOn} onRemove={(id) => remove.mutate(id)} />
+      <DepGroup label="Blocking" items={blocking} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
+      <DepGroup label="Waiting on" items={waitingOn} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
       {related.length > 0 ? (
-        <DepGroup label="Related" items={related} onRemove={(id) => remove.mutate(id)} />
+        <DepGroup label="Related" items={related} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
       ) : null}
 
       <form
@@ -824,6 +1195,28 @@ function DependenciesPanel({ taskId, inline }: { taskId: string; inline: Depende
           onChange={(e) => setRelatedId(e.target.value)}
           placeholder="Related task ID"
         />
+        {workspaceId && taskOptions.length > 0 && (
+          <div className="min-w-[260px] space-y-1">
+            <Input
+              value={taskSearch}
+              onChange={(e) => setTaskSearch(e.target.value)}
+              placeholder="Search task…"
+              className="h-8"
+            />
+            <select
+              value={relatedId}
+              onChange={(e) => setRelatedId(e.target.value)}
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm w-full"
+            >
+              <option value="">Pick task…</option>
+              {filteredTaskOptions.slice(0, 200).map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.title} {task.projectName ? `(${task.projectName})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <Button type="submit" size="sm" disabled={!relatedId.trim() || add.isPending}>
           Add
         </Button>
@@ -836,10 +1229,12 @@ function DepGroup({
   label,
   items,
   onRemove,
+  onOpenTask,
 }: {
   label: string
   items: Dependency[]
   onRemove: (depId: string) => void
+  onOpenTask?: (relatedTaskId: string) => void
 }) {
   return (
     <section>
@@ -857,6 +1252,15 @@ function DepGroup({
               <Badge variant="secondary" className="capitalize">
                 {d.related.status.replace('_', ' ')}
               </Badge>
+              {onOpenTask && (
+                <button
+                  type="button"
+                  onClick={() => onOpenTask(d.related.id)}
+                  className="text-xs text-accent hover:underline"
+                >
+                  Open
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onRemove(d.dep.id)}
@@ -883,6 +1287,9 @@ function AttachmentsPanel({
   taskId: string
   inline: Attachment[]
 }) {
+  const qc = useQueryClient()
+  const [linkUrl, setLinkUrl] = useState('')
+  const [fileName, setFileName] = useState('')
   // Probe the dedicated endpoint; fall back to inline list if 404.
   const probe = useQuery({
     queryKey: ['task', taskId, 'attachments'],
@@ -898,6 +1305,33 @@ function AttachmentsPanel({
 
   const attachments = probe.data ?? inline
   const uploadWired = probe.data !== null && probe.data !== undefined
+  const addAttachment = useMutation({
+    mutationFn: () =>
+      api(`/tasks/${taskId}/attachments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          fileName: fileName.trim() || linkUrl.trim().split('/').pop() || 'Attachment',
+          url: linkUrl.trim(),
+          contentType: 'text/url',
+          sizeBytes: 0,
+        }),
+      }),
+    onSuccess: async () => {
+      setLinkUrl('')
+      setFileName('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    },
+  })
+  const removeAttachment = useMutation({
+    mutationFn: (attachmentId: string) => api(`/tasks/${taskId}/attachments/${attachmentId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    },
+  })
 
   return (
     <div className="space-y-3">
@@ -912,6 +1346,30 @@ function AttachmentsPanel({
           <div className="mt-2 text-xs">Upload endpoint not wired yet.</div>
         ) : null}
       </div>
+      {uploadWired && (
+        <div className="rounded-md border border-border bg-card p-3 space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">Attach by link</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            <Input
+              value={fileName}
+              onChange={(e) => setFileName(e.target.value)}
+              placeholder="File name (optional)"
+              className="h-8"
+            />
+            <Input
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://..."
+              className="h-8 md:col-span-2"
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => addAttachment.mutate()} disabled={!linkUrl.trim() || addAttachment.isPending}>
+              Add attachment
+            </Button>
+          </div>
+        </div>
+      )}
 
       {attachments.length === 0 ? (
         <EmptyState title="No files attached" hint="Drop files above to get started." />
@@ -932,6 +1390,20 @@ function AttachmentsPanel({
                   {a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
                 </div>
               </div>
+              {a.url ? (
+                <a href={a.url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">
+                  Open
+                </a>
+              ) : null}
+              {uploadWired && (
+                <button
+                  type="button"
+                  className="text-xs text-rose-500 hover:text-rose-600"
+                  onClick={() => removeAttachment.mutate(a.id)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -944,9 +1416,45 @@ function AttachmentsPanel({
 // Comments
 // ---------------------------------------------------------------------------
 
-function CommentsPanel({ taskId }: { taskId: string }) {
+function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: string }) {
   const qc = useQueryClient()
   const [text, setText] = useState('')
+  const [replyTo, setReplyTo] = useState<string | null>(null)
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
+  const [editingBody, setEditingBody] = useState('')
+  const [selectedMentionUserIds, setSelectedMentionUserIds] = useState<string[]>([])
+  const [mentionTab, setMentionTab] = useState<'people' | 'tasks' | 'docs'>('people')
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const mentionQuery = text.slice(text.lastIndexOf('@') + 1).toLowerCase()
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<WorkspaceMemberLite[]>(`/workspaces/${workspaceId}/members`),
+    enabled: !!workspaceId,
+  })
+  const mentionTasksQuery = useQuery({
+    queryKey: ['mention-tasks', workspaceId],
+    queryFn: () => api<MentionTaskLite[]>(`/tasks/workspace/${workspaceId}?limit=200`),
+    enabled: !!workspaceId && mentionTab === 'tasks',
+  })
+  const mentionDocsQuery = useQuery({
+    queryKey: ['mention-docs', workspaceId],
+    queryFn: () => api<MentionDocLite[]>(`/workspaces/${workspaceId}/docs`),
+    enabled: !!workspaceId && mentionTab === 'docs',
+  })
+  const mentionCandidates = (membersQuery.data ?? []).filter((m) =>
+    (m.displayName || m.email).toLowerCase().includes(mentionQuery),
+  )
+  const taskMentionCandidates = (mentionTasksQuery.data ?? []).filter((t) =>
+    `${t.title} ${t.projectName ?? ''} ${t.listName ?? ''}`.toLowerCase().includes(mentionQuery),
+  )
+  const docMentionCandidates = (mentionDocsQuery.data ?? []).filter((d) =>
+    d.title.toLowerCase().includes(mentionQuery),
+  )
+  const showMentions = text.includes('@') && text[text.length - 1] !== ' '
+  const namesById = useMemo(
+    () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
+    [membersQuery.data],
+  )
 
   const commentsQuery = useQuery({
     queryKey: ['task', taskId, 'comments'],
@@ -964,12 +1472,36 @@ function CommentsPanel({ taskId }: { taskId: string }) {
     mutationFn: () =>
       api(`/tasks/${taskId}/comments`, {
         method: 'POST',
-        body: JSON.stringify({ body: text }),
+        body: JSON.stringify({
+          body: text,
+          parentCommentId: replyTo ?? undefined,
+          mentions: selectedMentionUserIds.map((userId) => ({ userId, offset: 0, length: 0 })),
+        }),
       }),
     onSuccess: async () => {
       setText('')
+      setReplyTo(null)
+      setSelectedMentionUserIds([])
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    },
+  })
+  const update = useMutation({
+    mutationFn: ({ commentId, body }: { commentId: string; body: string }) =>
+      api(`/tasks/${taskId}/comments/${commentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ body }),
+      }),
+    onSuccess: async () => {
+      setEditingCommentId(null)
+      setEditingBody('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+    },
+  })
+  const remove = useMutation({
+    mutationFn: (commentId: string) => api(`/tasks/${taskId}/comments/${commentId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
     },
   })
 
@@ -989,6 +1521,43 @@ function CommentsPanel({ taskId }: { taskId: string }) {
   }
 
   const comments = commentsQuery.data ?? []
+  const roots = comments.filter((c) => !c.parentCommentId)
+  const repliesByParent = comments.reduce((acc, comment) => {
+    if (!comment.parentCommentId) return acc
+    const arr = acc.get(comment.parentCommentId) ?? []
+    arr.push(comment)
+    acc.set(comment.parentCommentId, arr)
+    return acc
+  }, new Map<string, TaskComment[]>())
+  const parentPreview = replyTo ? comments.find((c) => c.id === replyTo) ?? null : null
+  const activeMention = mentionCandidates[mentionIndex] ?? null
+
+  const insertMention = (member: WorkspaceMemberLite) => {
+    const at = text.lastIndexOf('@')
+    const prefix = at >= 0 ? text.slice(0, at) : text
+    const display = member.displayName || member.email
+    setText(`${prefix}@${display} `)
+    setSelectedMentionUserIds((prev) => (prev.includes(member.userId) ? prev : [...prev, member.userId]))
+    setMentionIndex(0)
+  }
+  const insertTaskMention = (task: MentionTaskLite) => {
+    const at = text.lastIndexOf('@')
+    const prefix = at >= 0 ? text.slice(0, at) : text
+    setText(`${prefix}#${task.title} `)
+    setMentionIndex(0)
+  }
+  const insertDocMention = (doc: MentionDocLite) => {
+    const at = text.lastIndexOf('@')
+    const prefix = at >= 0 ? text.slice(0, at) : text
+    setText(`${prefix}Doc:${doc.title} `)
+    setMentionIndex(0)
+  }
+  const activeCandidates =
+    mentionTab === 'people'
+      ? mentionCandidates
+      : mentionTab === 'tasks'
+        ? taskMentionCandidates
+        : docMentionCandidates
 
   return (
     <div className="space-y-3">
@@ -996,44 +1565,293 @@ function CommentsPanel({ taskId }: { taskId: string }) {
         <EmptyState title="No comments yet" hint="Be the first to leave a note." />
       ) : (
         <ul className="space-y-2">
-          {comments.map((c) => (
-            <li key={c.id} className="rounded-md border border-border p-3 hover:bg-muted/30 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium">
-                  {c.author?.displayName ?? c.author?.email ?? 'User'}
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  {new Date(c.createdAt).toLocaleString()}
-                </span>
-              </div>
-              <div className="mt-1 text-sm whitespace-pre-wrap">{c.body}</div>
-              <div className="mt-2 flex gap-1">
-                {['👍', '🎉', '❤️'].map((emoji) => (
+          {roots.map((c) => {
+            const replies = repliesByParent.get(c.id) ?? []
+            return (
+              <li key={c.id} className="rounded-md border border-border p-3 hover:bg-muted/30 transition-colors space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium">
+                    {c.author?.displayName ?? c.author?.email ?? 'User'}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(c.createdAt).toLocaleString()}
+                  </span>
+                </div>
+                <div className="mt-1 text-sm whitespace-pre-wrap">{prettifyMentions(c.body, namesById)}</div>
+                <div className="mt-2 flex gap-2">
                   <button
-                    key={emoji}
                     type="button"
-                    onClick={() => react.mutate({ commentId: c.id, emoji })}
-                    className="rounded border border-border px-1.5 py-0.5 text-xs hover:bg-muted"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setReplyTo(c.id)}
                   >
-                    {emoji}
-                    {c.reactions?.filter((r) => r.emoji === emoji).length
-                      ? ` ${c.reactions.filter((r) => r.emoji === emoji).length}`
-                      : ''}
+                    Reply
                   </button>
-                ))}
-              </div>
-            </li>
-          ))}
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setEditingCommentId(c.id)
+                      setEditingBody(c.body)
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-rose-500 hover:text-rose-600"
+                    onClick={() => remove.mutate(c.id)}
+                  >
+                    Delete
+                  </button>
+                  {replies.length > 0 && (
+                    <span className="text-xs text-accent ml-auto">{replies.length} repl{replies.length === 1 ? 'y' : 'ies'}</span>
+                  )}
+                </div>
+                {editingCommentId === c.id && (
+                  <div className="mt-2 space-y-2">
+                    <Textarea rows={2} value={editingBody} onChange={(e) => setEditingBody(e.target.value)} />
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setEditingCommentId(null)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => update.mutate({ commentId: c.id, body: editingBody })}
+                        disabled={!editingBody.trim() || update.isPending}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                <div className="mt-2 flex gap-1">
+                  {['👍', '🎉', '❤️'].map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => react.mutate({ commentId: c.id, emoji })}
+                      className="rounded border border-border px-1.5 py-0.5 text-xs hover:bg-muted"
+                    >
+                      {emoji}
+                      {c.reactions?.filter((r) => r.emoji === emoji).length
+                        ? ` ${c.reactions.filter((r) => r.emoji === emoji).length}`
+                        : ''}
+                    </button>
+                  ))}
+                </div>
+                {replies.length > 0 && (
+                  <ul className="mt-2 space-y-1.5 border-l border-border pl-3">
+                    {replies.map((reply) => (
+                      <li key={reply.id} className="rounded border border-border/70 p-2 bg-card/50">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium">
+                            {reply.author?.displayName ?? reply.author?.email ?? 'User'}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(reply.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-sm whitespace-pre-wrap">{prettifyMentions(reply.body, namesById)}</div>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => setReplyTo(reply.id)}
+                          >
+                            Reply
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              setEditingCommentId(reply.id)
+                              setEditingBody(reply.body)
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="text-xs text-rose-500 hover:text-rose-600"
+                            onClick={() => remove.mutate(reply.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                        {editingCommentId === reply.id && (
+                          <div className="mt-2 space-y-2">
+                            <Textarea rows={2} value={editingBody} onChange={(e) => setEditingBody(e.target.value)} />
+                            <div className="flex justify-end gap-2">
+                              <Button size="sm" variant="ghost" onClick={() => setEditingCommentId(null)}>
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() => update.mutate({ commentId: reply.id, body: editingBody })}
+                                disabled={!editingBody.trim() || update.isPending}
+                              >
+                                Save
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        <div className="mt-2 flex gap-1">
+                          {['👍', '🎉', '❤️'].map((emoji) => (
+                            <button
+                              key={`${reply.id}-${emoji}`}
+                              type="button"
+                              onClick={() => react.mutate({ commentId: reply.id, emoji })}
+                              className="rounded border border-border px-1.5 py-0.5 text-xs hover:bg-muted"
+                            >
+                              {emoji}
+                              {reply.reactions?.filter((r) => r.emoji === emoji).length
+                                ? ` ${reply.reactions.filter((r) => r.emoji === emoji).length}`
+                                : ''}
+                            </button>
+                          ))}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
 
       <div className="border-t border-border pt-3">
+        {replyTo && (
+          <div className="mb-2 flex items-center justify-between rounded border border-border bg-muted/30 px-2 py-1 text-xs">
+            <span className="truncate">
+              Replying to {parentPreview?.author?.displayName ?? parentPreview?.author?.email ?? 'comment'}: {parentPreview?.body ?? ''}
+            </span>
+            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setReplyTo(null)}>
+              Cancel
+            </button>
+          </div>
+        )}
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Write a comment… use @ to mention"
           rows={3}
+          onKeyDown={(e) => {
+            if (!showMentions || activeCandidates.length === 0) return
+            if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              setMentionIndex((prev) => (prev + 1) % activeCandidates.length)
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              setMentionIndex((prev) => (prev - 1 + activeCandidates.length) % activeCandidates.length)
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              if (mentionTab === 'people' && activeMention) insertMention(activeMention)
+              if (mentionTab === 'tasks' && taskMentionCandidates[mentionIndex]) insertTaskMention(taskMentionCandidates[mentionIndex])
+              if (mentionTab === 'docs' && docMentionCandidates[mentionIndex]) insertDocMention(docMentionCandidates[mentionIndex])
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              setText((prev) => prev.replace(/@[^ ]*$/, ''))
+              setMentionIndex(0)
+            }
+          }}
         />
+        {showMentions && mentionCandidates.length > 0 && (
+          <div className="mt-2 rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+            <div className="px-2 pt-2 pb-1 border-b border-border/70 flex items-center gap-1">
+              {([
+                ['people', 'People'],
+                ['tasks', 'Tasks'],
+                ['docs', 'Docs'],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setMentionTab(id)
+                    setMentionIndex(0)
+                  }}
+                  className={cn(
+                    'px-2 py-1 rounded text-[11px]',
+                    mentionTab === id ? 'bg-accent/15 text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {mentionTab === 'people' && (
+              <div className="max-h-40 overflow-auto">
+                {mentionCandidates.slice(0, 8).map((member, idx) => (
+                  <button
+                    key={member.userId}
+                    type="button"
+                    className={cn(
+                      'w-full px-2.5 py-2 text-left text-xs flex items-center gap-2',
+                      idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70',
+                    )}
+                    onMouseEnter={() => setMentionIndex(idx)}
+                    onClick={() => insertMention(member)}
+                  >
+                    <div className="h-6 w-6 rounded-full bg-brand-100 text-foreground text-[10px] font-semibold flex items-center justify-center">
+                      {(member.displayName || member.email)[0]?.toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground truncate">{member.displayName || member.email}</div>
+                      <div className="text-muted-foreground truncate">{member.email}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {mentionTab === 'tasks' && (
+              <div className="max-h-40 overflow-auto">
+                {taskMentionCandidates.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">No matching tasks.</div>
+                ) : (
+                  taskMentionCandidates.slice(0, 8).map((task, idx) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      className={cn(
+                        'w-full px-2.5 py-2 text-left text-xs',
+                        idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70',
+                      )}
+                      onMouseEnter={() => setMentionIndex(idx)}
+                      onClick={() => insertTaskMention(task)}
+                    >
+                      <div className="font-medium text-foreground truncate">#{task.title}</div>
+                      <div className="text-muted-foreground truncate">{task.projectName ?? task.listName ?? 'Task'}</div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            {mentionTab === 'docs' && (
+              <div className="max-h-40 overflow-auto">
+                {docMentionCandidates.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">No matching docs.</div>
+                ) : (
+                  docMentionCandidates.slice(0, 8).map((doc, idx) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      className={cn(
+                        'w-full px-2.5 py-2 text-left text-xs',
+                        idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70',
+                      )}
+                      onMouseEnter={() => setMentionIndex(idx)}
+                      onClick={() => insertDocMention(doc)}
+                    >
+                      <div className="font-medium text-foreground truncate">Doc:{doc.title}</div>
+                      <div className="text-muted-foreground truncate">{doc.updatedAt ? new Date(doc.updatedAt).toLocaleDateString() : 'Document'}</div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <div className="mt-2 flex justify-end">
           <Button
             size="sm"
@@ -1070,6 +1888,20 @@ function ActivityPanel({ taskId }: { taskId: string }) {
   }
 
   const entries = activityQuery.data ?? []
+  const actionLabel = (action: string) =>
+    action
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  const iconForAction = (action: string) => {
+    if (action.includes('assigned')) return '👤'
+    if (action.includes('comment')) return '💬'
+    if (action.includes('status')) return '🔁'
+    if (action.includes('attachment')) return '📎'
+    if (action.includes('checklist')) return '☑️'
+    if (action.includes('created')) return '✨'
+    if (action.includes('deleted')) return '🗑️'
+    return '•'
+  }
 
   if (entries.length === 0) {
     return <EmptyState title="No activity yet" hint="Changes will show up here." />
@@ -1081,10 +1913,11 @@ function ActivityPanel({ taskId }: { taskId: string }) {
         <li key={a.id} className="relative">
           <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-brand-700" />
           <div className="text-sm">
+            <span className="mr-1">{iconForAction(a.action)}</span>
             <span className="font-medium">
               {a.actor?.displayName ?? a.actor?.email ?? 'System'}
             </span>{' '}
-            <span className="text-muted-foreground">{a.action}</span>
+            <span className="text-muted-foreground">{actionLabel(a.action)}</span>
           </div>
           <div className="text-xs text-muted-foreground">
             {new Date(a.createdAt).toLocaleString()}
@@ -1101,6 +1934,12 @@ function ActivityPanel({ taskId }: { taskId: string }) {
 
 function TimePanel({ taskId }: { taskId: string }) {
   const qc = useQueryClient()
+  const [manualStart, setManualStart] = useState('')
+  const [manualEnd, setManualEnd] = useState('')
+  const [manualDescription, setManualDescription] = useState('')
+  const [quickMinutes, setQuickMinutes] = useState('')
+  const [startDescription, setStartDescription] = useState('')
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
   const entriesQuery = useQuery({
     queryKey: ['task', taskId, 'time'],
@@ -1118,14 +1957,20 @@ function TimePanel({ taskId }: { taskId: string }) {
     () => entriesQuery.data?.find((e) => e.endedAt === null) ?? null,
     [entriesQuery.data],
   )
+  useEffect(() => {
+    if (!running) return
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [running])
 
   const start = useMutation({
     mutationFn: () =>
       api(`/tasks/${taskId}/time-entries/start`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ description: startDescription.trim() || undefined }),
       }),
     onSuccess: async () => {
+      setStartDescription('')
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'time'] })
     },
   })
@@ -1141,11 +1986,65 @@ function TimePanel({ taskId }: { taskId: string }) {
     },
   })
 
+  const addManual = useMutation({
+    mutationFn: () =>
+      api(`/tasks/${taskId}/time-entries/manual`, {
+        method: 'POST',
+        body: JSON.stringify({
+          startedAt: new Date(manualStart).toISOString(),
+          endedAt: new Date(manualEnd).toISOString(),
+          description: manualDescription.trim() || undefined,
+          isBillable: false,
+        }),
+      }),
+    onSuccess: async () => {
+      setManualStart('')
+      setManualEnd('')
+      setManualDescription('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'time'] })
+    },
+  })
+
+  const addQuickDuration = useMutation({
+    mutationFn: () => {
+      const mins = Number(quickMinutes)
+      const now = Date.now()
+      const startedAt = new Date(now - Math.max(1, mins) * 60_000)
+      const endedAt = new Date(now)
+      return api(`/tasks/${taskId}/time-entries/manual`, {
+        method: 'POST',
+        body: JSON.stringify({
+          startedAt: startedAt.toISOString(),
+          endedAt: endedAt.toISOString(),
+          description: manualDescription.trim() || `Quick log (${mins}m)`,
+          isBillable: false,
+        }),
+      })
+    },
+    onSuccess: async () => {
+      setQuickMinutes('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'time'] })
+    },
+  })
+
   if (entriesQuery.data === null) {
     return <NotWiredNote>Time tracking is not available.</NotWiredNote>
   }
 
   const entries = entriesQuery.data ?? []
+  const totalTrackedMs = useMemo(() => {
+    return entries.reduce((sum, entry) => {
+      if (typeof entry.duration === 'number' && entry.duration > 0) return sum + entry.duration
+      if (!entry.endedAt) return sum
+      return sum + Math.max(0, new Date(entry.endedAt).getTime() - new Date(entry.startedAt).getTime())
+    }, 0)
+  }, [entries])
+  const manualRangeValid =
+    !!manualStart &&
+    !!manualEnd &&
+    !Number.isNaN(new Date(manualStart).getTime()) &&
+    !Number.isNaN(new Date(manualEnd).getTime()) &&
+    new Date(manualEnd).getTime() > new Date(manualStart).getTime()
 
   return (
     <div className="space-y-3">
@@ -1155,7 +2054,7 @@ function TimePanel({ taskId }: { taskId: string }) {
             <>
               <span className="font-medium">Timer running</span>{' '}
               <span className="text-muted-foreground">
-                since {new Date(running.startedAt).toLocaleTimeString()}
+                since {new Date(running.startedAt).toLocaleTimeString()} · elapsed {formatDuration(nowMs - new Date(running.startedAt).getTime())}
               </span>
             </>
           ) : (
@@ -1167,10 +2066,22 @@ function TimePanel({ taskId }: { taskId: string }) {
             Stop
           </Button>
         ) : (
-          <Button size="sm" onClick={() => start.mutate()} disabled={start.isPending}>
-            Start timer
-          </Button>
+          <div className="flex items-center gap-2">
+            <Input
+              value={startDescription}
+              onChange={(e) => setStartDescription(e.target.value)}
+              placeholder="What are you working on?"
+              className="h-8 w-[220px]"
+            />
+            <Button size="sm" onClick={() => start.mutate()} disabled={start.isPending}>
+              Start timer
+            </Button>
+          </div>
         )}
+      </div>
+      <div className="rounded-md border border-border/70 bg-card px-3 py-2 text-sm flex items-center justify-between">
+        <span className="text-muted-foreground">Total tracked</span>
+        <span className="font-mono font-medium">{formatDuration(totalTrackedMs)}</span>
       </div>
 
       {entries.length === 0 ? (
@@ -1200,6 +2111,65 @@ function TimePanel({ taskId }: { taskId: string }) {
           ))}
         </ul>
       )}
+      <div className="rounded-md border border-border p-3 space-y-2">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">Add manual entry</div>
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <div className="text-[11px] text-muted-foreground mb-1">Quick log (minutes)</div>
+            <Input
+              type="number"
+              min={1}
+              value={quickMinutes}
+              onChange={(e) => setQuickMinutes(e.target.value)}
+              placeholder="e.g. 30"
+            />
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => addQuickDuration.mutate()}
+            disabled={!quickMinutes || Number(quickMinutes) <= 0 || addQuickDuration.isPending}
+          >
+            Add minutes
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <Input
+            type="datetime-local"
+            value={manualStart}
+            onChange={(e) => setManualStart(e.target.value)}
+          />
+          <Input
+            type="datetime-local"
+            value={manualEnd}
+            onChange={(e) => setManualEnd(e.target.value)}
+          />
+        </div>
+        <Input
+          value={manualDescription}
+          onChange={(e) => setManualDescription(e.target.value)}
+          placeholder="Description (optional)"
+        />
+        {!manualRangeValid && (manualStart || manualEnd) && (
+          <div className="text-xs text-amber-600">
+            End time must be after start time.
+          </div>
+        )}
+        {addManual.isError && (
+          <div className="text-xs text-rose-600">
+            Couldn&apos;t add manual entry. Please verify dates and try again.
+          </div>
+        )}
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            onClick={() => addManual.mutate()}
+            disabled={!manualRangeValid || addManual.isPending}
+          >
+            Add time entry
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

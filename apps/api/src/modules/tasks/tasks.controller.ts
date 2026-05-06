@@ -29,6 +29,24 @@ export class TasksController {
     return this.tasks.getTimelineForWorkspace(workspaceId)
   }
 
+  @Get('workspace/:workspaceId')
+  @UseGuards(WorkspaceMemberGuard)
+  async getWorkspaceTasks(
+    @Param('workspaceId') workspaceId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.tasks.getTasksForWorkspace(workspaceId, limit ? Number(limit) : 500)
+  }
+
+  @Get('workspace/:workspaceId/members/:userId')
+  @UseGuards(WorkspaceMemberGuard)
+  async getMemberTasks(
+    @Param('workspaceId') workspaceId: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.tasks.getTasksForMember(workspaceId, userId)
+  }
+
   @Get('list/:listId')
   async getByList(
     @Param('listId') listId: string,
@@ -44,6 +62,11 @@ export class TasksController {
   @Get(':taskId')
   async getOne(@Param('taskId') taskId: string) {
     return this.tasks.getTask(taskId)
+  }
+
+  @Get(':taskId/navigation')
+  async getTaskNavigation(@Param('taskId') taskId: string) {
+    return this.tasks.getTaskNavigation(taskId)
   }
 
   @Post()
@@ -172,5 +195,29 @@ export class TasksController {
     @Param('userId') userId: string,
   ) {
     return this.tasks.removeWatcher(taskId, userId)
+  }
+
+  // --- Attachments ---------------------------------------------------------
+  @Get(':taskId/attachments')
+  async listAttachments(@Param('taskId') taskId: string) {
+    return this.tasks.listAttachments(taskId)
+  }
+
+  @Post(':taskId/attachments')
+  async addAttachment(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { fileName: string; url: string; contentType?: string; sizeBytes?: number },
+  ) {
+    return this.tasks.addAttachment(taskId, user.id, body)
+  }
+
+  @Delete(':taskId/attachments/:attachmentId')
+  async removeAttachment(
+    @Param('taskId') taskId: string,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.tasks.removeAttachment(taskId, attachmentId, user.id)
   }
 }

@@ -126,10 +126,11 @@ export class TasksService {
 
   private async resolveWorkspaceForList(listId: string): Promise<{
     workspaceId: string
+    spaceId: string
     projectId: string
   } | null> {
     const [row] = await this.db
-      .select({ workspaceId: spaces.workspaceId, projectId: lists.projectId })
+      .select({ workspaceId: spaces.workspaceId, spaceId: spaces.id, projectId: lists.projectId })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -147,8 +148,8 @@ export class TasksService {
     return row?.name ?? 'Rundesk'
   }
 
-  private buildTaskUrl(workspaceId: string, taskId: string): string {
-    return `/app/${workspaceId}/tasks/${taskId}`
+  private buildTaskUrl(workspaceId: string, spaceId: string, projectId: string, listId: string, taskId: string): string {
+    return `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`
   }
 
   private async indexTaskInSearch(taskId: string) {
@@ -320,6 +321,56 @@ export class TasksService {
     return rows.filter((r) => r.startDate || r.dueDate)
   }
 
+  async getTasksForMember(workspaceId: string, userId: string) {
+    return this.db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+        updatedAt: tasks.updatedAt,
+        listId: lists.id,
+        listName: lists.name,
+        projectId: projects.id,
+        projectName: projects.name,
+        spaceId: spaces.id,
+        spaceName: spaces.name,
+      })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(taskAssignees.userId, userId), eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .orderBy(desc(tasks.updatedAt))
+      .limit(100)
+  }
+
+  async getTasksForWorkspace(workspaceId: string, limit = 500) {
+    return this.db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        priority: tasks.priority,
+        listId: lists.id,
+        listName: lists.name,
+        projectId: projects.id,
+        projectName: projects.name,
+        spaceId: spaces.id,
+        spaceName: spaces.name,
+        updatedAt: tasks.updatedAt,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .orderBy(desc(tasks.updatedAt))
+      .limit(Math.min(Math.max(limit, 1), 1000))
+  }
+
   async getTasksByList(
     listId: string,
     opts: { includeSubtasks?: boolean; includeArchived?: boolean } = {},
@@ -404,6 +455,69 @@ export class TasksService {
       dependencies: dependencyRows,
       attachments: attachmentRows,
     }
+  }
+
+  async listAttachments(taskId: string) {
+    const rows = await this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId))
+    return rows.map((row) => ({
+      id: row.id,
+      fileName: row.fileName,
+      fileSize: row.sizeBytes,
+      mimeType: row.contentType,
+      uploadedBy: row.uploadedById,
+      createdAt: row.createdAt,
+      url: row.storageKey,
+    }))
+  }
+
+  async addAttachment(
+    taskId: string,
+    actorId: string,
+    data: { fileName: string; url: string; contentType?: string; sizeBytes?: number },
+  ) {
+    const [task] = await this.db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    if (!task) throw new NotFoundException('Task not found')
+    const [row] = await this.db
+      .insert(taskAttachments)
+      .values({
+        taskId,
+        uploadedById: actorId,
+        fileName: data.fileName,
+        contentType: data.contentType ?? 'application/octet-stream',
+        sizeBytes: data.sizeBytes ?? 0,
+        storageKey: data.url,
+      })
+      .returning()
+    await this.logActivity({
+      taskId,
+      actorId,
+      action: 'attachment_added',
+      meta: { attachmentId: row.id, fileName: row.fileName },
+    })
+    return {
+      id: row.id,
+      fileName: row.fileName,
+      fileSize: row.sizeBytes,
+      mimeType: row.contentType,
+      uploadedBy: row.uploadedById,
+      createdAt: row.createdAt,
+      url: row.storageKey,
+    }
+  }
+
+  async removeAttachment(taskId: string, attachmentId: string, actorId: string) {
+    const [row] = await this.db
+      .delete(taskAttachments)
+      .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, taskId)))
+      .returning()
+    if (!row) throw new NotFoundException('Attachment not found')
+    await this.logActivity({
+      taskId,
+      actorId,
+      action: 'attachment_removed',
+      meta: { attachmentId },
+    })
+    return { ok: true }
   }
 
   async updateTask(
@@ -573,7 +687,7 @@ export class TasksService {
             actorId,
             type: 'task_assigned',
             title: `You were assigned "${taskRow.title}"`,
-            target: { entityType: 'task', entityId: taskId, url: this.buildTaskUrl(ctx.workspaceId, taskId) },
+            target: { entityType: 'task', entityId: taskId, url: this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, taskRow.listId, taskId) },
             emailContext: { taskTitle: taskRow.title, workspaceName },
           })
         }
@@ -665,7 +779,7 @@ export class TasksService {
       if (!ctx) return
 
       const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
-      const taskUrl = this.buildTaskUrl(ctx.workspaceId, taskId)
+      const taskUrl = this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, taskRow.listId, taskId)
       // Trim to 200 chars for the email snippet
       const commentSnippet = body.replace(/<[^>]+>/g, '').slice(0, 200)
 
@@ -985,5 +1099,24 @@ export class TasksService {
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(tasks.id, taskId))
     return row[0] ?? null
+  }
+
+  async getTaskNavigation(taskId: string) {
+    const ctx = await this.resolveTaskContext(taskId)
+    if (!ctx) throw new NotFoundException('Task not found')
+    return {
+      workspaceId: ctx.space.workspaceId,
+      spaceId: ctx.space.id,
+      projectId: ctx.project.id,
+      listId: ctx.list.id,
+      taskId: ctx.task.id,
+      url: this.buildTaskUrl(
+        ctx.space.workspaceId,
+        ctx.space.id,
+        ctx.project.id,
+        ctx.list.id,
+        ctx.task.id,
+      ),
+    }
   }
 }
