@@ -79,9 +79,19 @@ export class NotificationsService {
     return this.db
       .select()
       .from(notifications)
+      .leftJoin(users, eq(users.id, notifications.actorId))
       .where(where)
       .orderBy(desc(notifications.createdAt))
       .limit(opts.limit ?? 50)
+      .then((rows) =>
+        rows.map((row: any) => ({
+          ...(row.notifications ?? row),
+          actor:
+            row.users && row.users.id
+              ? { id: row.users.id, displayName: row.users.displayName, email: row.users.email }
+              : null,
+        })),
+      )
   }
 
   async markRead(userId: string, notificationId: string) {

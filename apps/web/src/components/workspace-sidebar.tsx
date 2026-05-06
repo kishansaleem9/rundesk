@@ -1,98 +1,124 @@
-import { Link, useParams, useRouterState } from '@tanstack/react-router'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
-  Bot,
-  Briefcase,
-  ChartNoAxesCombined,
-  ClipboardList,
-  Ellipsis,
-  FileText,
-  FolderOpen,
-  Frame,
-  Hash,
+  ChevronDown,
+  Check,
   Home,
   Inbox,
-  LayoutDashboard,
   MessageCircle,
+  FolderOpen,
+  Settings,
   Plus,
-  Search,
-  Settings as SettingsIcon,
+  Bot,
+  FileText,
+  LayoutDashboard,
+  Frame,
+  ClipboardList,
+  Zap,
+  BarChart3,
+  GitBranch,
+  Layers,
+  PlugZap,
   Star,
-  Users,
+  Clock3,
+  ArrowUp,
+  ArrowDown,
+  X,
 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { Button, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
-import { Button, Input, Slider, cn, PersonAvatar, Separator } from '@rundesk/ui'
 import { useAuthStore } from '../store/auth'
-import { ChevronDown, Check, Building2, Layout, Plus as PlusIcon } from 'lucide-react'
+
+function isUuidLike(value: string | undefined): value is string {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function navIconForLabel(label: string) {
+  const key = label.toLowerCase()
+  if (key.includes('inbox')) return Inbox
+  if (key.includes('team') || key.includes('chat')) return MessageCircle
+  if (key.includes('doc')) return FileText
+  if (key.includes('dashboard')) return LayoutDashboard
+  if (key.includes('ai')) return Bot
+  if (key.includes('whiteboard')) return Frame
+  if (key.includes('form')) return ClipboardList
+  if (key.includes('automation')) return Zap
+  if (key.includes('workload')) return BarChart3
+  if (key.includes('timeline')) return GitBranch
+  if (key.includes('template')) return Layers
+  if (key.includes('integration')) return PlugZap
+  if (key.includes('setting')) return Settings
+  return Home
+}
 
 export function WorkspaceSidebar() {
+  const navigate = useNavigate()
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const workspaceId = params.workspaceId
-  const [lastWorkspaceId, setLastWorkspaceId] = useState<string | null>(null)
-  const baseWorkspaceId = workspaceId ?? lastWorkspaceId
-  const base = baseWorkspaceId ? `/app/${baseWorkspaceId}` : '/app'
-  const [visibility, setVisibility] = useState<Partial<Record<HubId, boolean>>>({})
-  const [openHub, setOpenHub] = useState<HubId | null>(null)
-  const [hoverHub, setHoverHub] = useState<HubId | null>(null)
-  const [panelHovered, setPanelHovered] = useState(false)
+  const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : undefined
+  const [openSwitcher, setOpenSwitcher] = useState(false)
+  const [spacesExpanded, setSpacesExpanded] = useState(true)
+  const [favoritesExpanded, setFavoritesExpanded] = useState(true)
+  const [browseExpanded, setBrowseExpanded] = useState(true)
+  const [recentsExpanded, setRecentsExpanded] = useState(true)
+  const [dockPos, setDockPos] = useState({ x: 16, y: 16 })
   const [draggingDock, setDraggingDock] = useState(false)
-  const [dockPos, setDockPos] = useState<{ x: number; y: number }>({ x: 16, y: 16 })
+  const [showDockSettings, setShowDockSettings] = useState(false)
   const [viewport, setViewport] = useState({ w: 1400, h: 900 })
-  const panelRef = useRef<HTMLDivElement | null>(null)
   const dockRef = useRef<HTMLDivElement | null>(null)
+  const { organizations, workspaces } = useAuthStore()
+  const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>({})
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
+  const [recentItems, setRecentItems] = useState<Array<{ label: string; path: string }>>([])
+  const [favoriteItems, setFavoriteItems] = useState<Array<{ label: string; path: string }>>([])
 
-  useEffect(() => {
-    const read = () => {
-      try {
-        const raw = localStorage.getItem('rundesk.sidebarVisibility')
-        if (!raw) return
-        const parsed = JSON.parse(raw) as { visibility?: Partial<Record<HubId, boolean>> }
-        if (parsed.visibility) setVisibility(parsed.visibility)
-      } catch {
-        // ignore invalid local storage payloads
-      }
-    }
-    read()
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key || e.key === 'rundesk.sidebarVisibility') read()
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  const currentWorkspace = workspaceId ? workspaces.find((w) => w.id === workspaceId) : undefined
+  const currentOrg = currentWorkspace ? organizations.find((o) => o.id === currentWorkspace.organizationId) : undefined
 
-  useEffect(() => {
-    try {
-      const remembered = localStorage.getItem('rundesk.lastWorkspaceId')
-      if (remembered) setLastWorkspaceId(remembered)
-    } catch {
-      // noop
-    }
-  }, [])
-
-  useEffect(() => {
+  const spacesQuery = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
+    enabled: !!workspaceId,
+  })
+  const spaceTreeQuery = useQuery({
+    queryKey: ['space-tree', workspaceId],
+    enabled: !!workspaceId,
+    queryFn: async () => {
+      const spaces = await api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`)
+      const projectGroups = await Promise.all(
+        spaces.map(async (space) => {
+          const projects = await api<Array<{ id: string; name: string }>>(`/projects/space/${space.id}`)
+          return Promise.all(
+            projects.map(async (project) => {
+              const lists = await api<Array<{ id: string; name: string }>>(`/lists/project/${project.id}`)
+              return { ...project, lists }
+            }),
+          ).then((projectsWithLists) => ({ ...space, projects: projectsWithLists }))
+        }),
+      )
+      return projectGroups
+    },
+  })
+  const dockConfigQuery = useQuery({
+    queryKey: ['user-dock-config', workspaceId],
+    queryFn: () => api<any>(`/dashboards/dock/${workspaceId}`),
+    enabled: !!workspaceId,
+  })
+  const appearance = dockConfigQuery.data?.appearance ?? {
+    size: 'md',
+    opacity: 0.9,
+    orientation: 'horizontal',
+  }
+  const updateDockConfig = async (patch: { appearance?: { size?: string; opacity?: number; orientation?: string } }) => {
     if (!workspaceId) return
-    try {
-      localStorage.setItem('rundesk.lastWorkspaceId', workspaceId)
-      setLastWorkspaceId(workspaceId)
-    } catch {
-      // noop
-    }
-  }, [workspaceId])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('rundesk.dockPos')
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { x?: number; y?: number }
-      if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
-        setDockPos({ x: Number(parsed.x), y: Number(parsed.y) })
-      }
-    } catch {
-      // noop
-    }
-  }, [])
+    await api(`/dashboards/dock/${workspaceId}`, {
+      method: 'POST',
+      body: patch,
+    })
+    await dockConfigQuery.refetch()
+  }
 
   useEffect(() => {
     const sync = () => setViewport({ w: window.innerWidth, h: window.innerHeight })
@@ -101,723 +127,599 @@ export function WorkspaceSidebar() {
     return () => window.removeEventListener('resize', sync)
   }, [])
 
-  const { data: dockConfig, refetch: refetchDock } = useQuery({
-    queryKey: ['user-dock-config', baseWorkspaceId],
-    queryFn: () => api<any>(`/dashboards/dock/${baseWorkspaceId}`),
-    enabled: !!baseWorkspaceId,
-  })
-
-  const appearance = dockConfig?.appearance ?? { size: 'md', opacity: 0.8, theme: 'system', orientation: 'horizontal' }
-  const pinnedLinks = dockConfig?.pinnedLinks ?? []
-
-  const activeHub = getActiveHub(pathname, base)
-  const items = useMemo<Array<{ id: HubId; label: string; to: string; icon: typeof Home }>>(
-    () => [
-      { id: 'home', label: 'Home', to: base, icon: Home },
-      { id: 'ai', label: 'AI', to: `${base}/ai`, icon: Bot },
-      { id: 'teams', label: 'Teams', to: `${base}/chat`, icon: Users },
-      { id: 'docs', label: 'Docs', to: `${base}/docs`, icon: FileText },
-      { id: 'dashboard', label: 'Dashboards', to: `${base}/dashboard`, icon: LayoutDashboard },
-      ...pinnedLinks.map((link: any) => ({
-        id: `pinned-${link.id}` as HubId,
-        label: link.label,
-        to: link.to,
-        icon: Home, // Fallback icon, could be dynamic
-      })),
-      { id: 'more', label: 'More', to: `${base}/integrations`, icon: Ellipsis },
-      { id: 'settings', label: 'Dock Settings', to: '#', icon: SettingsIcon },
-    ],
-    [base, pinnedLinks, appearance.orientation],
-  )
-
   useEffect(() => {
-    setOpenHub(null)
-  }, [pathname])
-
-  useEffect(() => {
-    if (!openHub || panelHovered) return
-    const timer = window.setTimeout(() => setOpenHub(null), 4500)
-    return () => window.clearTimeout(timer)
-  }, [openHub, panelHovered])
-
-  useEffect(() => {
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node
-      if (panelRef.current?.contains(target) || dockRef.current?.contains(target)) return
-      setOpenHub(null)
+    if (!workspaceId) return
+    const key = `rundesk.navFavorites.${workspaceId}`
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Array<{ label: string; path: string }>
+        if (Array.isArray(parsed)) {
+          setFavoriteItems(parsed.slice(0, 12))
+          return
+        }
+      }
+    } catch {
+      // ignore invalid favorites payload
     }
-    document.addEventListener('mousedown', onPointerDown)
-    return () => document.removeEventListener('mousedown', onPointerDown)
+    // sensible defaults until user customizes
+    setFavoriteItems([
+      { label: 'Inbox', path: `/app/${workspaceId}/inbox` },
+      { label: 'Teams', path: `/app/${workspaceId}/chat` },
+      { label: 'Docs', path: `/app/${workspaceId}/docs` },
+      { label: 'Dashboards', path: `/app/${workspaceId}/dashboard` },
+    ])
+  }, [workspaceId])
+
+  const toggleFavorite = (item: { label: string; path: string }) => {
+    if (!workspaceId) return
+    const key = `rundesk.navFavorites.${workspaceId}`
+    setFavoriteItems((prev) => {
+      const exists = prev.some((f) => f.path === item.path)
+      const next = exists ? prev.filter((f) => f.path !== item.path) : [item, ...prev].slice(0, 12)
+      try {
+        localStorage.setItem(key, JSON.stringify(next))
+      } catch {
+        // ignore storage errors
+      }
+      return next
+    })
+  }
+  const persistFavorites = (next: Array<{ label: string; path: string }>) => {
+    if (!workspaceId) return
+    try {
+      localStorage.setItem(`rundesk.navFavorites.${workspaceId}`, JSON.stringify(next))
+    } catch {
+      // ignore storage errors
+    }
+  }
+  const moveFavorite = (index: number, dir: -1 | 1) => {
+    setFavoriteItems((prev) => {
+      const nextIndex = index + dir
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev
+      const next = [...prev]
+      const [item] = next.splice(index, 1)
+      next.splice(nextIndex, 0, item)
+      persistFavorites(next)
+      return next
+    })
+  }
+  const removeFavorite = (path: string) => {
+    setFavoriteItems((prev) => {
+      const next = prev.filter((f) => f.path !== path)
+      persistFavorites(next)
+      return next
+    })
+  }
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('rundesk.navRecents')
+      if (!raw) return
+      const parsed = JSON.parse(raw) as Array<{ label: string; path: string }>
+      if (Array.isArray(parsed)) setRecentItems(parsed.slice(0, 8))
+    } catch {
+      // ignore invalid cached nav recents
+    }
   }, [])
 
   useEffect(() => {
-    const onReset = () => {
-      const defaultPos = { x: 16, y: 16 }
-      setDockPos(defaultPos)
+    if (!workspaceId) return
+    const navMap: Array<{ startsWith: string; label: string }> = [
+      { startsWith: `/app/${workspaceId}/chat`, label: 'Teams' },
+      { startsWith: `/app/${workspaceId}/docs`, label: 'Docs' },
+      { startsWith: `/app/${workspaceId}/ai`, label: 'AI' },
+      { startsWith: `/app/${workspaceId}/dashboard`, label: 'Dashboards' },
+      { startsWith: `/app/${workspaceId}/whiteboards`, label: 'Whiteboards' },
+      { startsWith: `/app/${workspaceId}/forms`, label: 'Forms' },
+      { startsWith: `/app/${workspaceId}/workload`, label: 'Workload' },
+      { startsWith: `/app/${workspaceId}/timeline`, label: 'Timeline' },
+      { startsWith: `/app/${workspaceId}/templates`, label: 'Templates' },
+      { startsWith: `/app/${workspaceId}/integrations`, label: 'Integrations' },
+    ]
+    const hit = navMap.find((item) => pathname.startsWith(item.startsWith))
+    if (!hit) return
+    setRecentItems((prev) => {
+      const next = [{ label: hit.label, path: pathname }, ...prev.filter((p) => p.path !== pathname)].slice(0, 8)
       try {
-        localStorage.setItem('rundesk.dockPos', JSON.stringify(defaultPos))
+        localStorage.setItem('rundesk.navRecents', JSON.stringify(next))
       } catch {
-        // noop
+        // ignore storage failure
       }
-    }
-    window.addEventListener('rundesk:reset-dock', onReset)
-    return () => window.removeEventListener('rundesk:reset-dock', onReset)
-  }, [])
+      return next
+    })
+  }, [pathname, workspaceId])
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && openHub) {
-        setOpenHub(null)
+    try {
+      const raw = localStorage.getItem('rundesk.floatingDockPos')
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { x?: number; y?: number }
+      if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+        setDockPos({ x: Number(parsed.x), y: Number(parsed.y) })
       }
+    } catch {
+      // ignore corrupted local storage payloads
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [openHub])
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    const target = e.target as HTMLElement
-    if (target.closest('a')) return
-    setDraggingDock(true)
-    const touch = e.touches[0]
-    const startX = touch.clientX
-    const startY = touch.clientY
-    const baseX = dockPos.x
-    const baseY = dockPos.y
-    
-    const move = (evt: TouchEvent) => {
-      const t = evt.touches[0]
-      const nextX = Math.min(Math.max(8, baseX + (t.clientX - startX)), viewport.w - 380)
-      const nextY = Math.min(Math.max(8, baseY - (t.clientY - startY)), viewport.h - 72)
-      setDockPos({ x: nextX, y: nextY })
-    }
-    
-    const end = (evt: TouchEvent) => {
-      setDraggingDock(false)
-      document.removeEventListener('touchmove', move)
-      document.removeEventListener('touchend', end)
-      try {
-        const t = evt.changedTouches[0]
-        const finalX = Math.min(Math.max(8, baseX + (t.clientX - startX)), viewport.w - 380)
-        const finalY = Math.min(Math.max(8, baseY - (t.clientY - startY)), viewport.h - 72)
-        localStorage.setItem('rundesk.dockPos', JSON.stringify({ x: finalX, y: finalY }))
-      } catch {
-        // noop
-      }
-    }
-    
-    document.addEventListener('touchmove', move, { passive: false })
-    document.addEventListener('touchend', end)
-  }
-
-  const isBottomHalf = dockPos.y < viewport.h / 2
-  const panelLeft = Math.min(dockPos.x, Math.max(16, viewport.w - 340))
-  const panelStyle: React.CSSProperties = isBottomHalf
-    ? { left: panelLeft, bottom: dockPos.y + 70 }
-    : { left: panelLeft, top: viewport.h - dockPos.y + 10 }
+  }, [])
 
   return (
-    <>
-      <div
-        ref={panelRef}
-        className={cn(
-          'fixed z-[60] w-[320px] max-w-[calc(100vw-2rem)] max-h-[68vh] overflow-hidden rounded-2xl border border-white/20 bg-card/95 backdrop-blur-2xl shadow-2xl transition-all duration-300',
-          openHub ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-4 opacity-0 pointer-events-none',
-        )}
-        style={panelStyle}
-        onMouseEnter={() => setPanelHovered(true)}
-        onMouseLeave={() => setPanelHovered(false)}
-      >
-        <SidebarHeader hub={openHub ?? activeHub} />
-        {openHub !== 'settings' && (
-          <>
-            <div className="px-3 pt-2 pb-1">
-              <Link
-                to={base}
-                className="inline-flex items-center gap-1.5 rounded-md border border-border/70 px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/15 transition-colors"
-                onClick={() => setOpenHub(null)}
-              >
-                <Home className="h-3 w-3" />
-                Go to Home
-              </Link>
+    <aside className="w-72 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col">
+      <div className="border-b border-border/60 p-3">
+        <button
+          className="w-full rounded-lg border border-border/60 bg-card px-3 py-2 text-left hover:bg-accent/10 transition-colors"
+          onClick={() => setOpenSwitcher((v) => !v)}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{currentWorkspace?.name ?? 'Workspace'}</p>
+              <p className="truncate text-xs text-muted-foreground">{currentOrg?.name ?? 'Select workspace'}</p>
             </div>
-            <div className="px-3 pb-3">
-              <Input
-                placeholder="Search"
-                leadingIcon={<Search className="h-3.5 w-3.5" />}
-                className="h-8 bg-background/60 border-border/70 text-xs"
-              />
-            </div>
-          </>
-        )}
-        <nav className="overflow-y-auto px-2 pb-3 text-[13px] max-h-[46vh]">
-          <HubPanel
-            hub={openHub ?? activeHub}
-            visibility={visibility}
-            workspaceId={baseWorkspaceId!}
-            dockConfig={dockConfig}
-            refetchDock={refetchDock}
-          />
-        </nav>
-      </div>
-      <div
-        ref={dockRef}
-        className={cn(
-          'fixed z-50 flex items-center rounded-full border border-border/60 bg-card/80 backdrop-blur-xl cursor-grab active:cursor-grabbing shadow-2xl transition-all duration-300',
-          draggingDock && 'select-none',
-          appearance.orientation === 'vertical' ? 'flex-col' : 'flex-row',
-          appearance.size === 'sm' ? 'p-1 gap-1' : appearance.size === 'lg' ? 'p-2 gap-2' : 'p-1.5 gap-1.5',
-        )}
-        style={{
-          left: dockPos.x,
-          bottom: dockPos.y,
-          opacity: appearance.opacity,
-        }}
-        onTouchStart={handleTouchStart}
-        onMouseDown={(e) => {
-          const target = e.target as HTMLElement
-          if (target.closest('a')) return
-          e.preventDefault()
-          setDraggingDock(true)
-          const startX = e.clientX
-          const startY = e.clientY
-          const baseX = dockPos.x
-          const baseY = dockPos.y
-          let latest = { x: baseX, y: baseY }
-          const move = (evt: MouseEvent) => {
-            const nextX = Math.min(Math.max(8, baseX + (evt.clientX - startX)), viewport.w - 380)
-            const nextY = Math.min(Math.max(8, baseY - (evt.clientY - startY)), viewport.h - 72)
-            latest = { x: nextX, y: nextY }
-            setDockPos(latest)
-          }
-          const up = () => {
-            setDraggingDock(false)
-            window.removeEventListener('mousemove', move)
-            window.removeEventListener('mouseup', up)
-            try {
-              localStorage.setItem('rundesk.dockPos', JSON.stringify(latest))
-            } catch {
-              // noop
-            }
-          }
-          window.addEventListener('mousemove', move)
-          window.addEventListener('mouseup', up)
-        }}
-      >
-        {items
-          .filter((item) => visibility[item.id] !== false)
-          .map((item) => {
-            const Icon = item.icon
-            const isActive = activeHub === item.id
-            const isOpen = openHub === item.id
-            const showLabel = hoverHub === item.id
-            return (
-              <div key={item.id} className="relative">
-                {showLabel && (
-                  <div className={cn(
-                    "absolute whitespace-nowrap rounded-md border border-white/20 bg-card/90 px-2 py-1 text-[11px] text-foreground shadow-lg z-[70]",
-                    appearance.orientation === 'vertical' 
-                      ? "left-full top-1/2 -translate-y-1/2 ml-3" 
-                      : "bottom-full left-1/2 -translate-x-1/2 mb-2"
-                  )}>
-                    {item.label}
-                  </div>
-                )}
-                <div className="rounded-full p-[1px] transition-all">
-                  <Link
-                    to={item.to}
-                    onClick={() => setOpenHub((cur) => (cur === item.id ? null : item.id))}
-                    onMouseEnter={() => setHoverHub(item.id)}
-                    onMouseLeave={() => setHoverHub(null)}
-                    className={cn(
-                      'rounded-full flex items-center justify-center transition-all',
-                      appearance.size === 'sm' ? 'h-7 w-7' : appearance.size === 'lg' ? 'h-11 w-11' : 'h-9 w-9',
-                      isOpen || isActive
-                        ? 'bg-brand-gradient text-white'
-                        : 'bg-transparent hover:bg-accent/15',
-                      item.id === 'home' && !isActive && !isOpen && 'text-blue-500',
-                      item.id === 'ai' && !isActive && !isOpen && 'text-violet-500',
-                      item.id === 'teams' && !isActive && !isOpen && 'text-cyan-500',
-                      item.id === 'docs' && !isActive && !isOpen && 'text-emerald-500',
-                      item.id === 'dashboard' && !isActive && !isOpen && 'text-amber-500',
-                      item.id === 'whiteboards' && !isActive && !isOpen && 'text-pink-500',
-                      item.id === 'forms' && !isActive && !isOpen && 'text-orange-500',
-                      item.id === 'more' && !isActive && !isOpen && 'text-muted-foreground',
-                      item.id === 'settings' && !isActive && !isOpen && 'text-slate-500',
-                    )}
-                  >
-                    <Icon className={cn(
-                      'transition-all',
-                      appearance.size === 'sm' ? 'h-3.5 w-3.5' : appearance.size === 'lg' ? 'h-5 w-5' : 'h-4 w-4'
-                    )} />
-                  </Link>
-                </div>
-              </div>
-            )
-          })}
-      </div>
-    </>
-  )
-}
-
-function SidebarHeader({ hub }: { hub: HubId }) {
-  const params = useParams({ strict: false }) as { workspaceId?: string }
-  const currentWorkspaceId = params.workspaceId
-  const { organizations, workspaces, user } = useAuthStore()
-  const [showSwitcher, setShowSwitcher] = useState(false)
-
-  const currentWorkspace = workspaces.find(w => w.id === currentWorkspaceId)
-  const currentOrg = organizations.find(o => o.id === currentWorkspace?.id || o.id === currentWorkspace?.id) // Simplification
-
-  const title: Record<HubId, string> = {
-    home: currentWorkspace?.name || 'Workspace',
-    ai: 'AI',
-    teams: 'Teams',
-    docs: 'Docs',
-    dashboard: 'Dashboards',
-    whiteboards: 'Whiteboards',
-    forms: 'Forms',
-    more: 'More',
-    settings: 'Dock Settings',
-  }
-
-  return (
-    <div className="relative border-b border-border/50">
-      <div 
-        className="px-3 py-3 flex items-center gap-2 cursor-pointer hover:bg-accent/10 transition-colors"
-        onClick={() => setShowSwitcher(!showSwitcher)}
-      >
-        <div className="h-6 w-6 rounded bg-brand-gradient flex items-center justify-center text-[10px] font-bold text-white uppercase">
-          {title[hub]?.slice(0, 2)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold truncate flex items-center gap-1">
-            {title[hub]}
-            <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", showSwitcher && "rotate-180")} />
+            <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', openSwitcher && 'rotate-180')} />
           </div>
-          {hub === 'home' && currentOrg && (
-            <div className="text-[10px] text-muted-foreground truncate">{currentOrg.name}</div>
-          )}
-        </div>
-        {hub !== 'settings' && (
-          <Button size="icon" variant="ghost" className="h-7 w-7 ml-auto" onClick={(e) => { e.stopPropagation(); /* handle create */ }}>
-            <PlusIcon className="h-3.5 w-3.5" />
-          </Button>
-        )}
-      </div>
-
-      {showSwitcher && (
-        <div className="absolute top-full left-0 right-0 z-[70] bg-card border-b border-border shadow-xl animate-in fade-in slide-in-from-top-1 duration-200 overflow-hidden">
-          <div className="max-h-[300px] overflow-y-auto">
-            {organizations.map(org => (
-              <div key={org.id} className="p-1">
-                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                  {org.name}
-                  {org.role === 'owner' && <span className="text-[9px] bg-brand-gradient text-white px-1.5 py-0.5 rounded">Owner</span>}
-                </div>
-                <div className="space-y-0.5">
-                  {workspaces.filter(w => true /* in real app: w.orgId === org.id */).map(ws => (
-                    <Link
+        </button>
+        {openSwitcher && (
+          <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-border/60 bg-card p-1">
+            {organizations.map((org) => {
+              const orgWorkspaces = workspaces.filter((w) => w.organizationId === org.id)
+              return (
+                <div key={org.id} className="mb-1 last:mb-0">
+                  <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">{org.name}</div>
+                  {orgWorkspaces.map((ws) => (
+                    <button
                       key={ws.id}
-                      to="/app/$workspaceId"
-                      params={{ workspaceId: ws.id }}
                       className={cn(
-                        "flex items-center gap-3 px-3 py-2 text-xs rounded-md transition-colors",
-                        ws.id === currentWorkspaceId 
-                          ? "bg-accent/20 text-foreground" 
-                          : "text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+                        'w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/10 flex items-center justify-between',
+                        ws.id === workspaceId && 'bg-accent/15 text-foreground',
                       )}
-                      onClick={() => setShowSwitcher(false)}
+                      onClick={() => {
+                        setOpenSwitcher(false)
+                        navigate({ to: '/app/$workspaceId', params: { workspaceId: ws.id } })
+                      }}
                     >
-                      <div className="h-5 w-5 rounded bg-muted flex items-center justify-center text-[9px] font-bold">
-                        {ws.name.slice(0, 1)}
-                      </div>
-                      <span className="flex-1 truncate">{ws.name}</span>
-                      {ws.id === currentWorkspaceId && <Check className="h-3 w-3 text-accent" />}
-                    </Link>
+                      <span className="truncate">{ws.name}</span>
+                      {ws.id === workspaceId && <Check className="h-3 w-3" />}
+                    </button>
                   ))}
                 </div>
-              </div>
-            ))}
-            <div className="p-2 border-t border-border/50">
-              <Link
-                to="/sign-up"
-                className="flex items-center gap-3 px-3 py-2 text-xs text-muted-foreground hover:bg-accent/10 hover:text-foreground rounded-md transition-colors"
-                onClick={() => setShowSwitcher(false)}
-              >
-                <PlusIcon className="h-4 w-4" />
-                <span>Create new workspace</span>
-              </Link>
-            </div>
-          </div>
-          
-          <div className="bg-muted/30 p-3 flex items-center gap-3 border-t border-border/50">
-            <PersonAvatar name={user?.displayName || 'User'} size="sm" />
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate">{user?.displayName}</div>
-              <div className="text-[10px] text-muted-foreground truncate">{user?.email}</div>
-            </div>
-            <Link to="/app/profile" className="text-muted-foreground hover:text-foreground" onClick={() => setShowSwitcher(false)}>
-              <SettingsIcon className="h-4 w-4" />
-            </Link>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-type HubId = 'home' | 'ai' | 'teams' | 'docs' | 'dashboard' | 'whiteboards' | 'forms' | 'more' | 'settings' | string
-
-function getActiveHub(pathname: string, base: string): HubId {
-  if (pathname.startsWith(`${base}/ai`)) return 'ai'
-  if (pathname.startsWith(`${base}/chat`)) return 'teams'
-  if (pathname.startsWith(`${base}/docs`)) return 'docs'
-  if (pathname.startsWith(`${base}/dashboard`)) return 'dashboard'
-  if (pathname.startsWith(`${base}/whiteboards`)) return 'whiteboards'
-  if (pathname.startsWith(`${base}/forms`)) return 'forms'
-  if (pathname.startsWith(`${base}/integrations`)) return 'more'
-  return 'home'
-}
-
-function HubPanel({
-  hub,
-  visibility,
-  workspaceId,
-  dockConfig,
-  refetchDock,
-}: {
-  hub: HubId
-  visibility: Partial<Record<HubId, boolean>>
-  workspaceId: string
-  dockConfig: any
-  refetchDock: () => void
-}) {
-  if (hub === 'settings') {
-    const appearance = dockConfig?.appearance ?? { size: 'md', opacity: 0.8, theme: 'system', orientation: 'horizontal' }
-    const pinnedLinks = dockConfig?.pinnedLinks ?? []
-
-    const update = async (patch: any) => {
-      await api(`/dashboards/dock/${workspaceId}`, {
-        method: 'POST',
-        body: patch,
-      })
-      refetchDock()
-    }
-
-    return (
-      <div className="space-y-6 p-4">
-        <Section title="Appearance">
-          <div className="space-y-4 px-2 py-1">
-            <div className="space-y-2">
-              <span className="text-[11px] text-muted-foreground">Orientation</span>
-              <div className="flex gap-2">
-                {['horizontal', 'vertical'].map((o) => (
-                  <Button
-                    key={o}
-                    size="sm"
-                    variant={appearance.orientation === o ? 'gradient' : 'outline'}
-                    className="flex-1 h-7 text-[10px]"
-                    onClick={() => update({ appearance: { ...appearance, orientation: o } })}
-                  >
-                    {o.toUpperCase()}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-[11px] text-muted-foreground">
-                <span>Opacity</span>
-                <span>{Math.round(appearance.opacity * 100)}%</span>
-              </div>
-              <Slider
-                value={[appearance.opacity * 100]}
-                min={20}
-                max={100}
-                step={1}
-                onValueChange={([v]) => update({ appearance: { ...appearance, opacity: v / 100 } })}
-              />
-            </div>
-            <div className="space-y-2">
-              <span className="text-[11px] text-muted-foreground">Size</span>
-              <div className="flex gap-2">
-                {['sm', 'md', 'lg'].map((s) => (
-                  <Button
-                    key={s}
-                    size="sm"
-                    variant={appearance.size === s ? 'gradient' : 'outline'}
-                    className="flex-1 h-7 text-[10px]"
-                    onClick={() => update({ appearance: { ...appearance, size: s } })}
-                  >
-                    {s.toUpperCase()}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </Section>
-        <Section title="Pinned Links">
-          <div className="space-y-2">
-            {pinnedLinks.map((link: any, i: number) => (
-              <div key={i} className="flex items-center gap-2 group">
-                <SidebarItem icon={Home} label={link.label} />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                  onClick={() => {
-                    const next = [...pinnedLinks]
-                    next.splice(i, 1)
-                    update({ pinnedLinks: next })
-                  }}
-                >
-                  <Ellipsis className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full h-8 text-xs border-dashed"
-              onClick={() => {
-                const label = prompt('Link label?')
-                const to = prompt('Link URL (relative or absolute)?')
-                if (label && to) {
-                  update({ pinnedLinks: [...pinnedLinks, { id: Math.random().toString(36).slice(2), label, to }] })
-                }
-              }}
-            >
+              )
+            })}
+            <Button size="sm" variant="outline" className="w-full mt-1" onClick={() => navigate({ to: '/sign-up' })}>
               <Plus className="h-3.5 w-3.5 mr-1" />
-              Add pinned link
+              New workspace
             </Button>
           </div>
-        </Section>
+        )}
       </div>
-    )
-  }
-  if (visibility[hub] === false) {
-    return (
-      <Section title="Disabled by Super Admin">
-        <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-[11px] text-muted-foreground">
-          This hub is disabled for your organization.
-        </div>
-      </Section>
-    )
-  }
-  if (hub === 'ai') {
-    return (
-      <>
-        <Section title="AI">
-          <SidebarItem icon={Bot} label="Ask or Create" />
-        </Section>
-        <Section title="Super Agents">
-          <SidebarItem icon={Briefcase} label="Create Agent" />
-          <SidebarItem icon={Users} label="All Agents" />
-          <SidebarItem icon={Users} label="My Agents" />
-          <SidebarItem icon={ChartNoAxesCombined} label="Activity" />
-        </Section>
-        <Section title="Recent Super Agents">
-          <SidebarItem icon={Users} label="Onboarding Assistant" />
-        </Section>
-        <Section title="Recent Chats">
-          <SidebarItem icon={MessageCircle} label="My Assigned Tasks" active />
-        </Section>
-      </>
-    )
-  }
 
-  if (hub === 'docs') {
-    return (
-      <>
-        <Section title="Docs">
-          <SidebarItem icon={FileText} label="All Docs" />
-          <SidebarItem icon={FileText} label="My Docs" />
-          <SidebarItem icon={Users} label="Shared with me" />
-          <SidebarItem icon={FolderOpen} label="Private" />
-          <SidebarItem icon={ClipboardList} label="Meeting Notes" />
-          <SidebarItem icon={Inbox} label="Archived" />
-        </Section>
-        <Section title="Favorites">
-          <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-[11px] text-muted-foreground">
-            Star a Doc to see it here
+      {workspaceId && (
+        <div className="p-2 space-y-2">
+          <NavLink to="/app/$workspaceId" params={{ workspaceId }} icon={Home} label="Home" />
+
+          <div className="pt-1">
+            <button
+              className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
+              onClick={() => setFavoritesExpanded((v) => !v)}
+            >
+              <span>Favorites</span>
+              <ChevronDown className={cn('h-3 w-3 transition-transform', favoritesExpanded && 'rotate-180')} />
+            </button>
+            {favoritesExpanded && (
+              <div className="space-y-1">
+                {favoriteItems.length === 0 ? (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">No favorites yet. Star from Recents.</div>
+                ) : (
+                  favoriteItems.map((item, idx) => {
+                    const Icon = navIconForLabel(item.label)
+                    return (
+                      <div key={item.path} className="group flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-accent/10">
+                        <Link
+                          to={item.path as any}
+                          className="flex items-center gap-2 rounded-md px-1 py-1 text-[13px] text-muted-foreground hover:text-foreground flex-1 min-w-0"
+                        >
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate flex-1">{item.label}</span>
+                        </Link>
+                        <button
+                          className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 opacity-0 group-hover:opacity-100"
+                          onClick={() => moveFavorite(idx, -1)}
+                          title="Move up"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5 mx-auto" />
+                        </button>
+                        <button
+                          className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 opacity-0 group-hover:opacity-100"
+                          onClick={() => moveFavorite(idx, 1)}
+                          title="Move down"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5 mx-auto" />
+                        </button>
+                        <button
+                          className="h-6 w-6 rounded text-muted-foreground hover:text-rose-500 hover:bg-accent/15 opacity-0 group-hover:opacity-100"
+                          onClick={() => removeFavorite(item.path)}
+                          title="Remove favorite"
+                        >
+                          <X className="h-3.5 w-3.5 mx-auto" />
+                        </button>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
           </div>
-        </Section>
-        <Section title="Recent Pages">
-          <SidebarItem icon={FileText} label="Page 1" />
-        </Section>
-      </>
-    )
-  }
 
-  if (hub === 'dashboard') {
-    return (
-      <>
-        <Section title="Dashboards">
-          <SidebarItem icon={LayoutDashboard} label="All Dashboards" />
-          <SidebarItem icon={LayoutDashboard} label="My Dashboards" />
-          <SidebarItem icon={Users} label="Shared with me" />
-          <SidebarItem icon={FolderOpen} label="Private" />
-        </Section>
-        <Section title="Favorites">
-          <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-[11px] text-muted-foreground">
-            Star a Dashboard to see it here
+          <div className="pt-1">
+            <button
+              className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
+              onClick={() => setRecentsExpanded((v) => !v)}
+            >
+              <span>Recents</span>
+              <ChevronDown className={cn('h-3 w-3 transition-transform', recentsExpanded && 'rotate-180')} />
+            </button>
+            {recentsExpanded && (
+              <div className="space-y-1">
+                {recentItems.length === 0 ? (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">No recent pages yet.</div>
+                ) : (
+                  recentItems.map((item) => (
+                    <div key={item.path} className="flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-accent/10">
+                      <Link
+                        to={item.path as any}
+                        className="flex items-center gap-2 rounded-md px-1 py-1 text-[13px] text-muted-foreground hover:text-foreground flex-1 min-w-0"
+                      >
+                        <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                      <button
+                        className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 flex items-center justify-center"
+                        onClick={() => toggleFavorite(item)}
+                        title={favoriteItems.some((f) => f.path === item.path) ? 'Remove favorite' : 'Add to favorites'}
+                      >
+                        <Star className={cn('h-3.5 w-3.5', favoriteItems.some((f) => f.path === item.path) && 'text-amber-400')} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
-        </Section>
-      </>
-    )
-  }
 
-  if (hub === 'whiteboards') {
-    return (
-      <>
-        <Section title="Whiteboards">
-          <SidebarItem icon={Frame} label="All Whiteboards" />
-          <SidebarItem icon={Frame} label="My Whiteboards" />
-        </Section>
-        <Section title="Favorites">
-          <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-[11px] text-muted-foreground">
-            Star a Whiteboard to see it here
-          </div>
-        </Section>
-      </>
-    )
-  }
-
-  if (hub === 'forms') {
-    return (
-      <>
-        <Section title="Forms">
-          <SidebarItem icon={ClipboardList} label="All Forms" />
-          <SidebarItem icon={ClipboardList} label="My Forms" />
-        </Section>
-        <Section title="Favorites">
-          <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-[11px] text-muted-foreground">
-            Star a Form to see it here
-          </div>
-        </Section>
-      </>
-    )
-  }
-
-  if (hub === 'teams') {
-    return (
-      <>
-        <Section title="Teams">
-          <SidebarItem icon={Users} label="All Teams" />
-          <SidebarItem icon={Users} label="All People" />
-          <SidebarItem icon={ChartNoAxesCombined} label="Analytics" />
-        </Section>
-        <Section title="My Teams">
-          <div className="rounded-lg border border-border/60 bg-muted/30 p-3 text-[11px] text-muted-foreground">
-            Once you join or create a Team you will see it here
-          </div>
-        </Section>
-      </>
-    )
-  }
-
-  if (hub === 'more') {
-    return (
-      <Section title="More">
-        <SidebarItem icon={Bot} label="Integrations" />
-        <SidebarItem icon={Frame} label="Whiteboards" />
-        <SidebarItem icon={ClipboardList} label="Forms" />
-      </Section>
-    )
-  }
-
-  return (
-    <>
-      <Section title="Home">
-        <SidebarItem icon={Inbox} label="Inbox" active />
-        <SidebarItem icon={MessageCircle} label="Replies" />
-        <SidebarItem icon={FileText} label="Assigned Comments" />
-        <SidebarItem icon={ClipboardList} label="My Tasks" />
-        <SidebarItem icon={Ellipsis} label="More" />
-      </Section>
-
-      <Section title="Favorites">
-        <SidebarItem icon={Star} label="Welcome" />
-      </Section>
-
-      <Section title="Channels">
-        <SidebarItem icon={Hash} label="# Welcome" />
-        <SidebarItem icon={Hash} label="# General - Rundesk Space" />
-        <SidebarItem icon={Plus} label="Add Channel" muted />
-      </Section>
-
-      <Section title="Direct Messages">
-        <SidebarItem icon={Users} label="Onboarding Assistant" />
-        <SidebarItem icon={Users} label="mafzaalali177@gmail.com" />
-        <SidebarItem icon={Users} label="M Afzaal Ali - You" />
-        <SidebarItem icon={Plus} label="New message" muted />
-      </Section>
-
-      <Section title="Spaces" action={<Plus className="h-3 w-3" />}>
-        <SidebarItem icon={FolderOpen} label="All Tasks - Rundesk Space" />
-        <SidebarItem icon={FolderOpen} label="Team Space" />
-        <div className="ml-7 space-y-1 text-xs text-muted-foreground">
-          <div className="flex items-center justify-between rounded px-2 py-1 hover:bg-accent/15">
-            <span>Project 1</span>
-            <span>3</span>
-          </div>
-          <div className="flex items-center justify-between rounded px-2 py-1 hover:bg-accent/15">
-            <span>Project 2</span>
-            <span>3</span>
-          </div>
-          <div className="flex items-center justify-between rounded px-2 py-1 hover:bg-accent/15">
-            <span>Get Started with ClickUp</span>
-            <span>8</span>
+          <div className="pt-1">
+            <button
+              className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
+              onClick={() => setBrowseExpanded((v) => !v)}
+            >
+              <span>Browse</span>
+              <ChevronDown className={cn('h-3 w-3 transition-transform', browseExpanded && 'rotate-180')} />
+            </button>
+            {browseExpanded && (
+              <div className="space-y-1">
+                <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label="AI" compact />
+                <NavLink to="/app/$workspaceId/whiteboards" params={{ workspaceId }} icon={Frame} label="Whiteboards" compact />
+                <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label="Forms" compact />
+                <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label="Automations" compact />
+                <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label="Workload" compact />
+                <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label="Timeline" compact />
+                <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label="Templates" compact />
+                <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label="Integrations" compact />
+                <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label="Settings" compact />
+              </div>
+            )}
           </div>
         </div>
-      </Section>
-    </>
+      )}
+
+      <div className="px-2 pt-1 pb-2 border-t border-border/60">
+        <button
+          className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
+          onClick={() => setSpacesExpanded((v) => !v)}
+        >
+          <span>Spaces</span>
+          <ChevronDown className={cn('h-3 w-3 transition-transform', spacesExpanded && 'rotate-180')} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto px-2 pb-3">
+        {spacesExpanded && workspaceId && (
+          <div className="space-y-1">
+            <div className="px-2 py-1 rounded-md border border-dashed border-border/70 bg-card/40 text-[11px] text-muted-foreground flex items-center gap-1.5">
+              <Star className="h-3.5 w-3.5" />
+              Star lists/projects to pin them here
+            </div>
+            <div className="px-2 py-1 rounded-md border border-dashed border-border/70 bg-card/40 text-[11px] text-muted-foreground flex items-center gap-1.5">
+              <Clock3 className="h-3.5 w-3.5" />
+              Recent items will appear as you navigate
+            </div>
+            {spaceTreeQuery.data?.map((space) => (
+              <div key={space.id} className="space-y-0.5">
+                <button
+                  className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                  onClick={() => setExpandedSpaces((prev) => ({ ...prev, [space.id]: !prev[space.id] }))}
+                >
+                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expandedSpaces[space.id] && 'rotate-180')} />
+                  <FolderOpen className="h-4 w-4 shrink-0" />
+                  <Link
+                    to="/app/$workspaceId/$spaceId"
+                    params={{ workspaceId, spaceId: space.id }}
+                    className="truncate hover:text-foreground"
+                  >
+                    {space.name}
+                  </Link>
+                </button>
+                {expandedSpaces[space.id] && (
+                  <div className="ml-6 space-y-0.5">
+                    {space.projects.map((project) => (
+                      <div key={project.id} className="space-y-0.5">
+                        <button
+                          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                          onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
+                        >
+                          <ChevronDown
+                            className={cn('h-3 w-3 transition-transform', expandedProjects[project.id] && 'rotate-180')}
+                          />
+                          <Link
+                            to="/app/$workspaceId/$spaceId/$projectId"
+                            params={{ workspaceId, spaceId: space.id, projectId: project.id }}
+                            className="truncate hover:text-foreground"
+                          >
+                            {project.name}
+                          </Link>
+                        </button>
+                        {expandedProjects[project.id] && (
+                          <div className="ml-5 space-y-0.5">
+                            {project.lists.map((list) => (
+                              <Link
+                                key={list.id}
+                                to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                                params={{ workspaceId, spaceId: space.id, projectId: project.id, listId: list.id }}
+                                className="flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                              >
+                                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+                                <span className="truncate">{list.name}</span>
+                              </Link>
+                            ))}
+                            {project.lists.length === 0 && (
+                              <div className="px-2 py-1 text-[11px] text-muted-foreground">No lists yet</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {space.projects.length === 0 && (
+                      <div className="px-2 py-1 text-[11px] text-muted-foreground">No projects yet</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+            {spaceTreeQuery.isLoading && <p className="px-2 py-1 text-xs text-muted-foreground">Loading spaces...</p>}
+            {!spaceTreeQuery.isLoading && (spacesQuery.data?.length ?? 0) === 0 && (
+              <p className="px-2 py-1 text-xs text-muted-foreground">No spaces yet. Create one from home.</p>
+            )}
+          </div>
+        )}
+      </div>
+      {false && workspaceId && (
+        <>
+          <div
+            ref={dockRef}
+            className={cn(
+              'fixed z-50 hidden xl:flex rounded-full border border-border/70 bg-card/85 backdrop-blur shadow-lg',
+              appearance.orientation === 'vertical' ? 'flex-col p-1.5 gap-1' : 'flex-row px-2 py-1.5 gap-1',
+              draggingDock && 'cursor-grabbing',
+            )}
+            style={{
+              left: dockPos.x,
+              bottom: dockPos.y,
+              opacity: appearance.opacity,
+            }}
+            onMouseDown={(e) => {
+              const target = e.target as HTMLElement
+              if (target.closest('a') || target.closest('button')) return
+              e.preventDefault()
+              setDraggingDock(true)
+              const startX = e.clientX
+              const startY = e.clientY
+              const baseX = dockPos.x
+              const baseY = dockPos.y
+              let latest = { x: baseX, y: baseY }
+              const move = (evt: MouseEvent) => {
+                const nextX = Math.min(Math.max(8, baseX + (evt.clientX - startX)), viewport.w - 320)
+                const nextY = Math.min(Math.max(8, baseY - (evt.clientY - startY)), viewport.h - 70)
+                latest = { x: nextX, y: nextY }
+                setDockPos(latest)
+              }
+              const up = () => {
+                setDraggingDock(false)
+                window.removeEventListener('mousemove', move)
+                window.removeEventListener('mouseup', up)
+                try {
+                  localStorage.setItem('rundesk.floatingDockPos', JSON.stringify(latest))
+                } catch {
+                  // ignore storage failures
+                }
+              }
+              window.addEventListener('mousemove', move)
+              window.addEventListener('mouseup', up)
+            }}
+          >
+            <DockLink to="/app/$workspaceId" params={{ workspaceId: workspaceId! }} icon={Home} label="Home" />
+            <DockLink to="/app/$workspaceId/inbox" params={{ workspaceId: workspaceId! }} icon={Inbox} label="Inbox" />
+            <DockLink to="/app/$workspaceId/chat" params={{ workspaceId: workspaceId! }} icon={MessageCircle} label="Teams" />
+            <DockLink to="/app/$workspaceId/ai" params={{ workspaceId: workspaceId! }} icon={Bot} label="AI" />
+            <DockLink to="/app/$workspaceId/docs" params={{ workspaceId: workspaceId! }} icon={FileText} label="Docs" />
+            <DockLink to="/app/$workspaceId/dashboard" params={{ workspaceId: workspaceId! }} icon={LayoutDashboard} label="Dashboards" />
+            <DockLink to="/app/$workspaceId/settings" params={{ workspaceId: workspaceId! }} icon={Settings} label="Settings" />
+            <button
+              className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] text-muted-foreground border border-border/60 ml-1 hover:bg-accent/15"
+              title="Dock settings"
+              onClick={() => setShowDockSettings((v) => !v)}
+            >
+              ⚙
+            </button>
+            <div className="h-7 px-2 rounded-full flex items-center justify-center text-[10px] text-muted-foreground border border-border/60 ml-1">
+              drag
+            </div>
+          </div>
+          {showDockSettings && (
+            <div
+              className="fixed z-[55] hidden xl:block w-72 rounded-xl border border-border/70 bg-card/95 backdrop-blur shadow-xl p-3"
+              style={{ left: dockPos.x, bottom: dockPos.y + 62 }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-semibold">Dock settings</div>
+                <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setShowDockSettings(false)}>
+                  Close
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Orientation</div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant={appearance.orientation === 'horizontal' ? 'gradient' : 'outline'}
+                      className="h-7 flex-1 text-xs"
+                      onClick={() => updateDockConfig({ appearance: { ...appearance, orientation: 'horizontal' } })}
+                    >
+                      Horizontal
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={appearance.orientation === 'vertical' ? 'gradient' : 'outline'}
+                      className="h-7 flex-1 text-xs"
+                      onClick={() => updateDockConfig({ appearance: { ...appearance, orientation: 'vertical' } })}
+                    >
+                      Vertical
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                    <span>Opacity</span>
+                    <span>{Math.round((appearance.opacity ?? 0.9) * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={20}
+                    max={100}
+                    step={1}
+                    value={Math.round((appearance.opacity ?? 0.9) * 100)}
+                    onChange={(e) =>
+                      void updateDockConfig({
+                        appearance: { ...appearance, opacity: Number(e.target.value) / 100 },
+                      })
+                    }
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Size</div>
+                  <div className="flex gap-2">
+                    {(['sm', 'md', 'lg'] as const).map((size) => (
+                      <Button
+                        key={size}
+                        size="sm"
+                        variant={appearance.size === size ? 'gradient' : 'outline'}
+                        className="h-7 flex-1 text-xs uppercase"
+                        onClick={() => updateDockConfig({ appearance: { ...appearance, size } })}
+                      >
+                        {size}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-8 text-xs"
+                  onClick={() => {
+                    const reset = { x: 16, y: 16 }
+                    setDockPos(reset)
+                    localStorage.setItem('rundesk.floatingDockPos', JSON.stringify(reset))
+                  }}
+                >
+                  Reset position
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </aside>
   )
 }
 
-function Section({
-  title,
-  children,
-  action,
-}: {
-  title: string
-  children: React.ReactNode
-  action?: React.ReactNode
-}) {
-  return (
-    <div className="mt-3">
-      <div className="px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-        <span>{title}</span>
-        {action}
-      </div>
-      <div className="space-y-0.5">{children}</div>
-    </div>
-  )
-}
-
-function SidebarItem({
+function NavLink({
+  to,
+  params,
   icon: Icon,
   label,
-  active,
-  muted,
+  compact,
 }: {
+  to:
+    | '/app/$workspaceId'
+    | '/app/$workspaceId/inbox'
+    | '/app/$workspaceId/chat'
+    | '/app/$workspaceId/ai'
+    | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/dashboard'
+    | '/app/$workspaceId/whiteboards'
+    | '/app/$workspaceId/forms'
+    | '/app/$workspaceId/automations'
+    | '/app/$workspaceId/workload'
+    | '/app/$workspaceId/timeline'
+    | '/app/$workspaceId/templates'
+    | '/app/$workspaceId/integrations'
+    | '/app/$workspaceId/settings'
+  params: { workspaceId: string }
   icon: typeof Home
   label: string
-  active?: boolean
-  muted?: boolean
+  compact?: boolean
 }) {
   return (
-    <button
+    <Link
+      to={to}
+      params={params}
       className={cn(
-        'w-full flex items-center gap-2 rounded px-2 py-1.5 text-left transition-colors',
-        active
-          ? 'bg-accent/20 text-foreground'
-          : muted
-            ? 'text-muted-foreground/70 hover:text-foreground hover:bg-accent/15'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent/15',
+        'flex items-center gap-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/10',
+        compact ? 'px-2 py-1.5 text-[13px]' : 'px-2 py-1.5 text-sm',
       )}
+      activeProps={{ className: 'bg-accent/15 text-foreground' }}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
-    </button>
+    </Link>
+  )
+}
+
+function DockLink({
+  to,
+  params,
+  icon: Icon,
+  label,
+}: {
+  to:
+    | '/app/$workspaceId'
+    | '/app/$workspaceId/inbox'
+    | '/app/$workspaceId/chat'
+    | '/app/$workspaceId/ai'
+    | '/app/$workspaceId/docs'
+    | '/app/$workspaceId/dashboard'
+    | '/app/$workspaceId/settings'
+  params: { workspaceId: string }
+  icon: typeof Home
+  label: string
+}) {
+  return (
+    <Link
+      to={to}
+      params={params}
+      title={label}
+      className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/15"
+      activeProps={{ className: 'h-8 w-8 rounded-full flex items-center justify-center text-white bg-brand-gradient' }}
+    >
+      <Icon className="h-4 w-4" />
+    </Link>
   )
 }

@@ -1,26 +1,41 @@
-import { createFileRoute, Link, Outlet, useMatches } from '@tanstack/react-router'
+import { createFileRoute, Link, Outlet, useMatches, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState as EmptyStateCard, Button, Badge } from '@rundesk/ui'
 import {
-  ArrowRight,
-  CheckCircle2,
-  Clock,
-  Folder,
-  TrendingUp,
-  Plus,
+  Bell,
+  MessageCircleReply,
+  UserRoundCheck,
+  CircleCheck,
+  CalendarClock,
+  ListChecks,
+  MoreHorizontal,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { formatDistanceToNowStrict, isToday, isPast } from 'date-fns'
+import { useAuthStore } from '../store/auth'
 
-type Space = {
+type Notification = {
   id: string
-  name: string
-  description?: string | null
-  color?: string | null
-  icon?: string | null
+  type: string
+  title: string
+  body?: string | null
+  readAt?: string | null
+  createdAt: string
+  actor?: { displayName?: string | null } | null
+  target?: { url?: string; entityType?: string; entityId?: string } | null
 }
 
-type Task = { id: string; title: string; status: string; dueDate?: string | null }
+type MemberTask = {
+  id: string
+  title: string
+  status: string
+  dueDate?: string | null
+  listId: string
+  projectId: string
+  spaceId: string
+  listName: string
+}
 
 export const Route = createFileRoute('/app/$workspaceId')({
   component: WorkspaceShell,
@@ -38,239 +53,218 @@ function WorkspaceShell() {
 }
 
 function WorkspaceHome() {
+  const navigate = useNavigate()
   const { workspaceId } = Route.useParams()
+  const user = useAuthStore((s) => s.user)
   const qc = useQueryClient()
-  const [creatingSpace, setCreatingSpace] = useState(false)
-  const [newSpaceName, setNewSpaceName] = useState('')
+  const [section, setSection] = useState<
+    'inbox' | 'replies' | 'assigned-comments' | 'my-tasks' | 'assigned-to-me' | 'today-overdue' | 'personal-list' | 'more'
+  >('inbox')
 
-  const { data: spaces = [] } = useQuery({
-    queryKey: ['spaces', workspaceId],
-    queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
+  const notificationsQuery = useQuery({
+    queryKey: ['notifications', workspaceId],
+    queryFn: async () => {
+      try {
+        return await api<Notification[]>(`/notifications`)
+      } catch {
+        return [] as Notification[]
+      }
+    },
+  })
+  const myTasksQuery = useQuery({
+    queryKey: ['home-my-tasks', workspaceId, user?.id],
+    enabled: !!workspaceId && !!user?.id,
+    queryFn: () => api<MemberTask[]>(`/tasks/workspace/${workspaceId}/members/${user!.id}`),
   })
 
-  const createSpace = useMutation({
-    mutationFn: () =>
-      api<{ id: string }>(`/spaces`, {
-        method: 'POST',
-        body: JSON.stringify({ workspaceId, name: newSpaceName.trim() }),
-      }),
-    onSuccess: () => {
-      setCreatingSpace(false)
-      setNewSpaceName('')
-      qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+  const markRead = useMutation({
+    mutationFn: (id: string) => api(`/notifications/${id}/read`, { method: 'POST' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['notifications', workspaceId] })
+      await qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
     },
   })
 
+  const notifications = notificationsQuery.data ?? []
+  const unread = notifications.filter((n) => !n.readAt)
+  const replies = notifications.filter((n) => ['task_commented', 'comment'].includes(n.type))
+  const assignedComments = notifications.filter((n) => ['task_mentioned', 'mention'].includes(n.type))
+  const myTasks = myTasksQuery.data ?? []
+  const assignedToMe = myTasks.filter((t) => !['done', 'cancelled'].includes(t.status))
+  const todayAndOverdue = myTasks.filter((t) => {
+    if (!t.dueDate) return false
+    const due = new Date(t.dueDate)
+    return isToday(due) || isPast(due)
+  })
+  const personalList = myTasks.filter((t) => t.listName.toLowerCase().includes('personal'))
+
+  const selectedItems = useMemo(() => {
+    switch (section) {
+      case 'inbox':
+        return notifications
+      case 'replies':
+        return replies
+      case 'assigned-comments':
+        return assignedComments
+      default:
+        return []
+    }
+  }, [section, notifications, replies, assignedComments])
+
+  const resolveDestination = async (notif: Notification) => {
+    const raw = notif.target?.url?.trim()
+    if (!raw) return null
+    let path = raw
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      try {
+        const parsed = new URL(raw)
+        path = `${parsed.pathname}${parsed.search}${parsed.hash}`
+      } catch {
+        path = raw
+      }
+    }
+    if (path.startsWith('/app/') && !/\/tasks\/[0-9a-f-]{36}$/i.test(path)) return path
+    const taskIdFromTarget = notif.target?.entityType === 'task' ? notif.target.entityId : null
+    const taskIdFromLegacyPath = path.match(/\/tasks\/([0-9a-f-]{36})$/i)?.[1] ?? null
+    const taskId = taskIdFromTarget ?? taskIdFromLegacyPath
+    if (!taskId) return path.startsWith('/') ? path : null
+    try {
+      const nav = await api<{ url: string }>(`/tasks/${taskId}/navigation`)
+      return nav.url
+    } catch {
+      return workspaceId ? `/app/${workspaceId}` : null
+    }
+  }
+
   return (
-    <div className="relative max-w-6xl mx-auto p-8">
-      {/* Subtle ambient glow */}
-      <div
-        className="pointer-events-none absolute -top-10 left-1/3 h-72 w-72 rounded-full opacity-40 blur-3xl"
-        style={{ background: 'radial-gradient(closest-side, hsl(var(--accent-violet)/.4), transparent)' }}
-      />
-
-      <header className="relative mb-10">
-        <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1.5">
-          Workspace home
-        </div>
-        <h1 className="font-display text-4xl font-semibold mb-1">
-          Welcome back
-        </h1>
-        <p className="text-muted-foreground max-w-xl">
-          Here's a snapshot of your workspace today.
-        </p>
-      </header>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
-        <StatCard label="Open tasks" value="0" icon={CheckCircle2} hint="Across all lists" />
-        <StatCard label="Due this week" value="0" icon={Clock} hint="Assigned to you" />
-        <StatCard label="Completed" value="0" icon={TrendingUp} hint="Last 7 days" />
-        <StatCard
-          label="Spaces"
-          value={spaces.length.toString()}
-          icon={Folder}
-          hint="Active"
-        />
-      </div>
-
-      <section className="mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-2xl font-semibold">Your spaces</h2>
-          <Badge variant="soft" className="text-[10px]">
-            {spaces.length} active
-          </Badge>
-        </div>
-
-        {spaces.length === 0 ? (
-          <EmptyStateCard
-            icon={<Folder className="h-6 w-6" />}
-            title="No spaces yet"
-            description="Spaces organize your work by team or department. Create your first one now."
-            action={
-              <div className="flex items-center gap-2">
-                {!creatingSpace ? (
-                  <Button variant="outline" size="sm" onClick={() => setCreatingSpace(true)}>
-                    <Plus className="h-4 w-4" /> Create first space
-                  </Button>
-                ) : (
-                  <>
-                    <input
-                      autoFocus
-                      value={newSpaceName}
-                      onChange={(e) => setNewSpaceName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          setCreatingSpace(false)
-                          setNewSpaceName('')
-                        }
-                        if (e.key === 'Enter' && newSpaceName.trim()) {
-                          createSpace.mutate()
-                        }
-                      }}
-                      placeholder="Space name..."
-                      className="h-9 w-44 rounded-md border border-border bg-card px-3 text-sm"
-                    />
-                    <Button
-                      size="sm"
-                      onClick={() => createSpace.mutate()}
-                      disabled={!newSpaceName.trim() || createSpace.isPending}
-                    >
-                      {createSpace.isPending ? 'Creating…' : 'Create'}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setCreatingSpace(false)
-                        setNewSpaceName('')
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                )}
-              </div>
-            }
-          />
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {spaces.map((space) => (
-              <SpaceCard key={space.id} space={space} workspaceId={workspaceId} />
-            ))}
+    <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-4">
+        <Card variant="glass" className="p-3 h-fit">
+          <h1 className="text-3xl font-display font-semibold mb-3">Home</h1>
+          <div className="space-y-1">
+            <HomeItem icon={Bell} label="Inbox" active={section === 'inbox'} onClick={() => setSection('inbox')} count={unread.length} />
+            <HomeItem icon={MessageCircleReply} label="Replies" active={section === 'replies'} onClick={() => setSection('replies')} count={replies.filter((n) => !n.readAt).length} />
+            <HomeItem icon={UserRoundCheck} label="Assigned Comments" active={section === 'assigned-comments'} onClick={() => setSection('assigned-comments')} count={assignedComments.filter((n) => !n.readAt).length} />
+            <div className="pt-2 pb-1 text-xs uppercase tracking-wider text-muted-foreground">My Tasks</div>
+            <HomeItem icon={CircleCheck} label="Assigned to me" active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} />
+            <HomeItem icon={CalendarClock} label="Today & Overdue" active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} />
+            <HomeItem icon={ListChecks} label="Personal List" active={section === 'personal-list'} onClick={() => setSection('personal-list')} count={personalList.length} />
+            <HomeItem icon={MoreHorizontal} label="More" active={section === 'more'} onClick={() => setSection('more')} />
           </div>
-        )}
-      </section>
+        </Card>
 
-      <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-2xl font-semibold">Recent activity</h2>
-          <Badge variant="info" className="text-[10px]">Live</Badge>
-        </div>
-        <ActivityFeed />
-      </section>
+        <Card variant="glass" className="p-4 min-h-[420px]">
+          {(section === 'inbox' || section === 'replies' || section === 'assigned-comments') && (
+            <div className="space-y-2">
+              {selectedItems.length === 0 ? (
+                <EmptyStateCard
+                  icon={<Bell className="h-6 w-6" />}
+                  title="Nothing here yet"
+                  description="When activity happens, it will show up here."
+                />
+              ) : (
+                selectedItems.map((n) => (
+                  <Card
+                    key={n.id}
+                    variant="glass"
+                    className="p-3 cursor-pointer hover:border-accent/30"
+                    onClick={async () => {
+                      if (!n.readAt) await markRead.mutateAsync(n.id)
+                      const destination = await resolveDestination(n)
+                      if (destination) navigate({ to: destination as any })
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{n.title}</div>
+                        {n.body && <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{n.body}</div>}
+                        <div className="text-[11px] text-muted-foreground mt-1">
+                          {formatDistanceToNowStrict(new Date(n.createdAt), { addSuffix: true })}
+                        </div>
+                      </div>
+                      {(section === 'assigned-comments' || section === 'replies') && !n.readAt && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void markRead.mutateAsync(n.id)
+                          }}
+                        >
+                          Resolve
+                        </Button>
+                      )}
+                    </div>
+                  </Card>
+                ))
+              )}
+            </div>
+          )}
+
+          {(section === 'assigned-to-me' || section === 'today-overdue' || section === 'personal-list') && (
+            <div className="space-y-2">
+              {(section === 'assigned-to-me' ? assignedToMe : section === 'today-overdue' ? todayAndOverdue : personalList).map((t) => (
+                <Link
+                  key={t.id}
+                  to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                  params={{ workspaceId, spaceId: t.spaceId, projectId: t.projectId, listId: t.listId }}
+                  search={{ task: t.id } as any}
+                  className="block"
+                >
+                  <Card variant="glass" className="p-3 hover:border-accent/30">
+                    <div className="text-sm font-medium">{t.title}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{t.listName} · {t.status}</div>
+                  </Card>
+                </Link>
+              ))}
+              {(section === 'assigned-to-me' ? assignedToMe : section === 'today-overdue' ? todayAndOverdue : personalList).length === 0 && (
+                <EmptyStateCard icon={<ListChecks className="h-6 w-6" />} title="No tasks here" description="Tasks that match this section will appear here." />
+              )}
+            </div>
+          )}
+
+          {section === 'more' && (
+            <div className="space-y-2">
+              <Button variant="outline" onClick={() => navigate({ to: '/app/$workspaceId/inbox', params: { workspaceId } })}>
+                Open full Inbox page
+              </Button>
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   )
 }
 
-function StatCard({
-  label,
-  value,
+function HomeItem({
   icon: Icon,
-  hint,
-  trend,
+  label,
+  active,
+  count,
+  onClick,
 }: {
+  icon: typeof Bell
   label: string
-  value: string
-  icon: typeof CheckCircle2
-  hint: string
-  trend?: string
+  active: boolean
+  count?: number
+  onClick: () => void
 }) {
-  const positive = trend?.startsWith('+')
   return (
-    <Card variant="glass" className="relative p-4 group hover:shadow-glow transition-shadow">
-      <div className="flex items-start justify-between mb-3">
-        <span className="text-xs uppercase tracking-wider text-muted-foreground">{label}</span>
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/50 text-muted-foreground">
-          <Icon className="h-3.5 w-3.5" />
-        </span>
-      </div>
-      <div className="flex items-end gap-2">
-        <div className="font-display text-3xl font-semibold tabular-nums">{value}</div>
-        {trend && (
-          <span
-            className={
-              'text-xs font-medium tabular-nums mb-1 ' +
-              (positive ? 'text-success' : 'text-destructive')
-            }
-          >
-            {trend}
-          </span>
-        )}
-      </div>
-      <div className="text-[11px] text-muted-foreground mt-1">{hint}</div>
-    </Card>
-  )
-}
-
-function SpaceCard({
-  space,
-  workspaceId,
-}: {
-  space: Space
-  workspaceId: string
-}) {
-  const { data: tasks } = useQuery({
-    queryKey: ['space-tasks-preview', space.id],
-    queryFn: async () => {
-      const projects = await api<Array<{ id: string }>>(`/projects/space/${space.id}`)
-      if (projects.length === 0) return [] as Task[]
-      const lists = await api<Array<{ id: string }>>(`/lists/project/${projects[0].id}`)
-      if (lists.length === 0) return [] as Task[]
-      return api<Task[]>(`/tasks/list/${lists[0].id}`)
-    },
-  })
-  const openCount = tasks?.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length ?? 0
-
-  return (
-    <Link
-      to="/app/$workspaceId/$spaceId"
-      params={{ workspaceId, spaceId: space.id }}
-      className="block group"
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm ${
+        active ? 'bg-accent/15 text-foreground' : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground'
+      }`}
     >
-      <Card variant="glass" className="p-4 hover:shadow-glow hover:border-accent/40 transition-all h-full">
-        <div className="flex items-start gap-3">
-          <span
-            className="h-10 w-10 rounded-lg shrink-0 flex items-center justify-center text-white font-bold shadow-sm"
-            style={{ background: space.color ?? 'linear-gradient(135deg, hsl(var(--brand-700)), hsl(var(--accent-violet)))' }}
-          >
-            {space.icon ?? space.name.charAt(0).toUpperCase()}
-          </span>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold truncate group-hover:text-accent transition-colors">
-              {space.name}
-            </h3>
-            {space.description && (
-              <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
-                {space.description}
-              </p>
-            )}
-            <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
-              <span>{openCount} open</span>
-              <span className="text-muted-foreground/40">·</span>
-              <span>{tasks?.length ?? 0} total</span>
-            </div>
-          </div>
-          <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
-        </div>
-      </Card>
-    </Link>
-  )
-}
-
-function ActivityFeed() {
-  return (
-    <Card variant="glass" className="p-6 text-sm text-muted-foreground">
-      No recent activity yet. Activity will appear here when your team starts creating tasks, comments, and updates.
-    </Card>
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="truncate">{label}</span>
+      {!!count && (
+        <Badge variant="soft" className="ml-auto text-[10px]">
+          {count}
+        </Badge>
+      )}
+    </button>
   )
 }

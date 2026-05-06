@@ -1,5 +1,5 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
 import { Bell, AtSign, MessageSquare, CheckSquare, UserPlus } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
@@ -17,7 +17,7 @@ type Notification = {
   readAt?: string | null
   createdAt: string
   actor?: { displayName?: string | null } | null
-  targetUrl?: string | null
+  target?: { url?: string; entityType?: string; entityId?: string } | null
 }
 
 const TYPE_META: Record<string, { icon: React.ElementType; color: string; label: string }> = {
@@ -29,6 +29,8 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; label:
 }
 
 function InboxPage() {
+  const navigate = useNavigate()
+  const qc = useQueryClient()
   const { workspaceId } = Route.useParams()
   const notifsQuery = useQuery({
     queryKey: ['notifications', workspaceId],
@@ -44,6 +46,40 @@ function InboxPage() {
   const notifs = notifsQuery.data ?? []
   const unread = notifs.filter((n) => !n.readAt)
   const read = notifs.filter((n) => n.readAt)
+  const markRead = useMutation({
+    mutationFn: (id: string) => api(`/notifications/${id}/read`, { method: 'POST' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['notifications', workspaceId] })
+      await qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
+    },
+  })
+
+  const resolveDestination = async (notif: Notification) => {
+    const raw = notif.target?.url?.trim()
+    if (!raw) return null
+    let path = raw
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      try {
+        const parsed = new URL(raw)
+        path = `${parsed.pathname}${parsed.search}${parsed.hash}`
+      } catch {
+        path = raw
+      }
+    }
+    if (path.startsWith('/app/') && !/\/tasks\/[0-9a-f-]{36}$/i.test(path)) return path
+
+    const taskIdFromTarget = notif.target?.entityType === 'task' ? notif.target.entityId : null
+    const taskIdFromLegacyPath = path.match(/\/tasks\/([0-9a-f-]{36})$/i)?.[1] ?? null
+    const taskId = taskIdFromTarget ?? taskIdFromLegacyPath
+    if (!taskId) return path.startsWith('/') ? path : null
+
+    try {
+      const nav = await api<{ url: string }>(`/tasks/${taskId}/navigation`)
+      return nav.url
+    } catch {
+      return workspaceId ? `/app/${workspaceId}` : null
+    }
+  }
 
   return (
     <div className="h-full flex flex-col">
@@ -84,7 +120,23 @@ function InboxPage() {
                   </h2>
                   <div className="space-y-1">
                     {unread.map((n) => (
-                      <NotificationRow key={n.id} notif={n} unread />
+                      <NotificationRow
+                        key={n.id}
+                        notif={n}
+                        unread
+                        onOpen={async () => {
+                          if (!n.readAt) await markRead.mutateAsync(n.id)
+                          const destination = await resolveDestination(n)
+                          if (destination) navigate({ to: destination as any })
+                        }}
+                        onResolve={
+                          n.type === 'task_commented' || n.type === 'task_mentioned'
+                            ? async () => {
+                                if (!n.readAt) await markRead.mutateAsync(n.id)
+                              }
+                            : undefined
+                        }
+                      />
                     ))}
                   </div>
                 </section>
@@ -96,7 +148,21 @@ function InboxPage() {
                   </h2>
                   <div className="space-y-1">
                     {read.map((n) => (
-                      <NotificationRow key={n.id} notif={n} />
+                      <NotificationRow
+                        key={n.id}
+                        notif={n}
+                        onOpen={async () => {
+                          const destination = await resolveDestination(n)
+                          if (destination) navigate({ to: destination as any })
+                        }}
+                        onResolve={
+                          n.type === 'task_commented' || n.type === 'task_mentioned'
+                            ? async () => {
+                                if (!n.readAt) await markRead.mutateAsync(n.id)
+                              }
+                            : undefined
+                        }
+                      />
                     ))}
                   </div>
                 </section>
@@ -109,12 +175,23 @@ function InboxPage() {
   )
 }
 
-function NotificationRow({ notif, unread = false }: { notif: Notification; unread?: boolean }) {
+function NotificationRow({
+  notif,
+  unread = false,
+  onOpen,
+  onResolve,
+}: {
+  notif: Notification
+  unread?: boolean
+  onOpen?: () => void | Promise<void>
+  onResolve?: () => void | Promise<void>
+}) {
   const meta = TYPE_META[notif.type] ?? { icon: Bell, color: 'text-muted-foreground', label: notif.type }
   const Icon = meta.icon
   return (
     <Card
       variant="glass"
+      onClick={() => void onOpen?.()}
       className={cn(
         'p-3 flex items-start gap-3 hover:border-accent/30 transition-all cursor-pointer',
         unread && 'border-l-2 border-l-accent bg-accent/5',
@@ -143,6 +220,20 @@ function NotificationRow({ notif, unread = false }: { notif: Notification; unrea
         <div className="text-sm text-foreground mt-1 truncate">{notif.title}</div>
         {notif.body && (
           <div className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{notif.body}</div>
+        )}
+        {onResolve && !notif.readAt && (
+          <div className="mt-2">
+            <button
+              type="button"
+              className="inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation()
+                void onResolve()
+              }}
+            >
+              Resolve
+            </button>
+          </div>
         )}
       </div>
     </Card>
