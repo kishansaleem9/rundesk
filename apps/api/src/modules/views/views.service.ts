@@ -19,6 +19,7 @@ export class ViewsService {
   }
 
   async create(data: { listId: string; name: string; type: ViewType; config?: Record<string, unknown>; createdById: string }) {
+    const existing = await this.listByList(data.listId)
     const [row] = await this.db
       .insert(taskViews)
       .values({
@@ -26,6 +27,7 @@ export class ViewsService {
         name: data.name,
         type: data.type,
         config: data.config ?? {},
+        isDefault: existing.length === 0,
         createdById: data.createdById,
       })
       .returning()
@@ -33,6 +35,14 @@ export class ViewsService {
   }
 
   async update(viewId: string, patch: { name?: string; config?: Record<string, unknown>; position?: number; isDefault?: boolean }) {
+    const [existing] = await this.db.select().from(taskViews).where(eq(taskViews.id, viewId)).limit(1)
+    if (!existing) throw new NotFoundException('View not found')
+    if (patch.isDefault === true) {
+      await this.db
+        .update(taskViews)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(eq(taskViews.listId, existing.listId))
+    }
     const [row] = await this.db
       .update(taskViews)
       .set({ ...patch, updatedAt: new Date() })

@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { eq, and, asc, desc, inArray, isNull, sql } from 'drizzle-orm'
 import {
   tasks,
@@ -19,6 +19,7 @@ import {
   projects,
   spaces,
   workspaces,
+  workspaceMembers,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -209,6 +210,42 @@ export class TasksService {
     const [row] = await this.db.select({ listId: tasks.listId }).from(tasks).where(eq(tasks.id, taskId))
     if (!row) throw new NotFoundException('Task not found')
     return row.listId
+  }
+
+  private async assertTaskWriteAccess(taskId: string, actorId: string) {
+    const [ctx] = await this.db
+      .select({
+        taskId: tasks.id,
+        listId: tasks.listId,
+        createdById: tasks.createdById,
+        workspaceId: spaces.workspaceId,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!ctx) throw new NotFoundException('Task not found')
+
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    if (!membership) throw new NotFoundException('Workspace not found')
+
+    if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return ctx
+    if (membership.role === 'guest') throw new ForbiddenException('Guests cannot edit tasks')
+
+    if (ctx.createdById === actorId) return ctx
+    const [assignee] = await this.db
+      .select({ userId: taskAssignees.userId })
+      .from(taskAssignees)
+      .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
+      .limit(1)
+    if (assignee) return ctx
+    throw new ForbiddenException('Only assignees, creators, managers, and workspace admins can edit this task')
   }
 
   // --- Task CRUD -----------------------------------------------------------
@@ -535,6 +572,7 @@ export class TasksService {
       isArchived: boolean
     }>,
   ) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
 
@@ -623,6 +661,7 @@ export class TasksService {
   }
 
   async deleteTask(taskId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
     await this.db.update(tasks).set({ isArchived: true, updatedAt: new Date() }).where(eq(tasks.id, taskId))
@@ -643,6 +682,7 @@ export class TasksService {
   }
 
   async moveTask(taskId: string, actorId: string, targetListId: string, position: number) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
     await this.db
@@ -662,6 +702,7 @@ export class TasksService {
 
   // --- Assignees -----------------------------------------------------------
   async addAssignee(taskId: string, userId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     await this.db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
     await this.db.insert(taskWatchers).values({ taskId, userId }).onConflictDoNothing()
     await this.logActivity({ taskId, actorId, action: 'assigned', meta: { userId } })
@@ -698,6 +739,7 @@ export class TasksService {
   }
 
   async removeAssignee(taskId: string, userId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     await this.db.delete(taskAssignees).where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, userId)))
     await this.logActivity({ taskId, actorId, action: 'unassigned', meta: { userId } })
     return this.getTask(taskId)
@@ -705,12 +747,14 @@ export class TasksService {
 
   // --- Labels --------------------------------------------------------------
   async addLabel(taskId: string, labelId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     await this.db.insert(taskLabelAssignments).values({ taskId, labelId }).onConflictDoNothing()
     await this.logActivity({ taskId, actorId, action: 'label_added', meta: { labelId } })
     return this.getTask(taskId)
   }
 
   async removeLabel(taskId: string, labelId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     await this.db
       .delete(taskLabelAssignments)
       .where(and(eq(taskLabelAssignments.taskId, taskId), eq(taskLabelAssignments.labelId, labelId)))

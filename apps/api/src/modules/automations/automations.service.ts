@@ -4,6 +4,8 @@ import {
   automations,
   automationRuns,
   tasks,
+  taskAssignees,
+  taskWatchers,
   workspaceMembers,
   notifications,
 } from '@rundesk/db'
@@ -123,6 +125,8 @@ export class AutomationsService {
       if (t.type !== triggerType) return false
       // Apply filter constraints
       if (t.filters?.projectId && ctx.projectId && t.filters.projectId !== ctx.projectId) return false
+      if (t.filters?.listId && ctx.listId && t.filters.listId !== ctx.listId) return false
+      if (t.filters?.changedField && ctx.changedField && t.filters.changedField !== ctx.changedField) return false
       if (t.filters?.fromStatus && ctx.oldValue && t.filters.fromStatus !== ctx.oldValue) return false
       if (t.filters?.toStatus && ctx.newValue && t.filters.toStatus !== ctx.newValue) return false
       return true
@@ -238,7 +242,12 @@ export class AutomationsService {
       }
 
       case 'assign_member': {
-        // Handled externally (would need taskAssignees table import)
+        if (!ctx.taskId) break
+        const userId = action.params.userId
+        if (userId && typeof userId === 'string') {
+          await this.db.insert(taskAssignees).values({ taskId: ctx.taskId, userId }).onConflictDoNothing()
+          await this.db.insert(taskWatchers).values({ taskId: ctx.taskId, userId }).onConflictDoNothing()
+        }
         break
       }
 
