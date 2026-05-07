@@ -249,7 +249,7 @@ export function WorkspaceSidebar() {
   }, [])
 
   return (
-    <aside className="w-72 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col">
+    <aside className="w-72 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0">
       <div className="border-b border-border/60 p-3">
         <button
           className="w-full rounded-lg border border-border/60 bg-card px-3 py-2 text-left hover:bg-accent/10 transition-colors"
@@ -297,8 +297,9 @@ export function WorkspaceSidebar() {
         )}
       </div>
 
-      {workspaceId && (
-        <div className="p-2 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {workspaceId && (
+          <div className="p-2 space-y-2">
           <NavLink to="/app/$workspaceId" params={{ workspaceId }} icon={Home} label="Home" />
 
           <div className="pt-1">
@@ -406,32 +407,32 @@ export function WorkspaceSidebar() {
                 <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label="Automations" compact />
                 <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label="Workload" compact />
                 <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label="Timeline" compact />
-                <NavLink to="/app/$workspaceId/goals" params={{ workspaceId }} icon={ClipboardList} label="Goals" compact />
-                <NavLink to="/app/$workspaceId/reports" params={{ workspaceId }} icon={BarChart3} label="Reports" compact />
-                <NavLink to="/app/$workspaceId/time" params={{ workspaceId }} icon={Clock3} label="Time" compact />
+                <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label="Goals" compact />
+                <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label="Reports" compact />
+                <NavLink to={"/app/$workspaceId/time" as any} params={{ workspaceId }} icon={Clock3} label="Time" compact />
                 <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label="Templates" compact />
                 <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label="Integrations" compact />
-                <NavLink to="/app/$workspaceId/mindmaps" params={{ workspaceId }} icon={Frame} label="Mind maps" compact />
-                <NavLink to="/app/$workspaceId/clips" params={{ workspaceId }} icon={MessageCircle} label="Clips" compact />
+                <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label="Mind maps" compact />
+                <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label="Clips" compact />
                 <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label="Settings" compact />
               </div>
             )}
           </div>
-        </div>
-      )}
+          </div>
+        )}
 
-      <div className="px-2 pt-1 pb-2 border-t border-border/60">
-        <button
-          className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
-          onClick={() => setSpacesExpanded((v) => !v)}
-        >
-          <span>Spaces</span>
-          <ChevronDown className={cn('h-3 w-3 transition-transform', spacesExpanded && 'rotate-180')} />
-        </button>
-      </div>
-      <div className="flex-1 overflow-auto px-2 pb-3">
-        {spacesExpanded && workspaceId && (
-          <div className="space-y-1">
+        <div className="px-2 pt-1 pb-2 border-t border-border/60">
+          <button
+            className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
+            onClick={() => setSpacesExpanded((v) => !v)}
+          >
+            <span>Spaces</span>
+            <ChevronDown className={cn('h-3 w-3 transition-transform', spacesExpanded && 'rotate-180')} />
+          </button>
+        </div>
+        <div className="px-2 pb-3">
+          {spacesExpanded && workspaceId && (
+            <div className="space-y-1">
             <div className="px-2 py-1 rounded-md border border-dashed border-border/70 bg-card/40 text-[11px] text-muted-foreground flex items-center gap-1.5">
               <Star className="h-3.5 w-3.5" />
               Star lists/projects to pin them here
@@ -506,8 +507,9 @@ export function WorkspaceSidebar() {
             {!spaceTreeQuery.isLoading && (spacesQuery.data?.length ?? 0) === 0 && (
               <p className="px-2 py-1 text-xs text-muted-foreground">No spaces yet. Create one from home.</p>
             )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
       {false && workspaceId && (
         <>

@@ -1290,6 +1290,7 @@ function AttachmentsPanel({
   const qc = useQueryClient()
   const [linkUrl, setLinkUrl] = useState('')
   const [fileName, setFileName] = useState('')
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   // Probe the dedicated endpoint; fall back to inline list if 404.
   const probe = useQuery({
     queryKey: ['task', taskId, 'attachments'],
@@ -1324,6 +1325,38 @@ function AttachmentsPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
     },
   })
+  const uploadAttachment = useMutation({
+    mutationFn: async () => {
+      if (!selectedFile) return
+      const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
+        method: 'POST',
+        body: {
+          fileName: selectedFile.name,
+          contentType: selectedFile.type || 'application/octet-stream',
+        },
+      })
+      await fetch(presign.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': selectedFile.type || 'application/octet-stream' },
+        body: selectedFile,
+      })
+      await api(`/tasks/${taskId}/attachments`, {
+        method: 'POST',
+        body: {
+          fileName: selectedFile.name,
+          storageKey: presign.storageKey,
+          contentType: selectedFile.type || 'application/octet-stream',
+          sizeBytes: selectedFile.size,
+        },
+      })
+    },
+    onSuccess: async () => {
+      setSelectedFile(null)
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    },
+  })
   const removeAttachment = useMutation({
     mutationFn: (attachmentId: string) => api(`/tasks/${taskId}/attachments/${attachmentId}`, { method: 'DELETE' }),
     onSuccess: async () => {
@@ -1348,6 +1381,21 @@ function AttachmentsPanel({
       </div>
       {uploadWired && (
         <div className="rounded-md border border-border bg-card p-3 space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">Upload file</div>
+          <div className="flex flex-col md:flex-row gap-2 md:items-center">
+            <Input
+              type="file"
+              onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+              className="h-8"
+            />
+            <Button
+              size="sm"
+              onClick={() => uploadAttachment.mutate()}
+              disabled={!selectedFile || uploadAttachment.isPending}
+            >
+              Upload
+            </Button>
+          </div>
           <div className="text-xs font-medium text-muted-foreground">Attach by link</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             <Input
