@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
 import { GanttChart, ZoomIn, ZoomOut } from 'lucide-react'
 import { api } from '../lib/api'
@@ -47,12 +47,23 @@ const STATUS_OPACITY: Record<string, string> = {
 
 function TimelinePage() {
   const { workspaceId } = Route.useParams()
+  const qc = useQueryClient()
   const [zoom, setZoom] = useState<Zoom>('week')
   const [localPatches, setLocalPatches] = useState<Record<string, { startDate?: string | null; dueDate?: string | null }>>({})
 
   const tasksQuery = useQuery({
     queryKey: ['timeline', workspaceId],
     queryFn: () => api<TimelineTask[]>(`/tasks/workspace/${workspaceId}/timeline`),
+  })
+  const persistDates = useMutation({
+    mutationFn: ({ taskId, startDate, dueDate }: { taskId: string; startDate: string | null; dueDate: string | null }) =>
+      api(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        body: { startDate, dueDate },
+      }),
+    onSettled: async () => {
+      await qc.invalidateQueries({ queryKey: ['timeline', workspaceId] })
+    },
   })
 
   const tasks = useMemo(
@@ -110,6 +121,7 @@ function TimelinePage() {
               <GanttChart className="h-4 w-4" />
             </span>
             Timeline
+            <Badge variant="secondary" className="ml-1">Live</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
             All tasks with start or due dates, grouped by project. Drag the area below to scroll.
@@ -188,6 +200,19 @@ function TimelinePage() {
                       dayPx={dayPx}
                       totalWidth={totalWidth}
                       onPatchDates={(next) => setLocalPatches((prev) => ({ ...prev, [task.id]: next }))}
+                      onPersistDates={(next) => {
+                        void persistDates.mutateAsync({
+                          taskId: task.id,
+                          startDate: next.startDate ?? null,
+                          dueDate: next.dueDate ?? null,
+                        }).finally(() => {
+                          setLocalPatches((prev) => {
+                            const copy = { ...prev }
+                            delete copy[task.id]
+                            return copy
+                          })
+                        })
+                      }}
                     />
                   ))}
                 </div>
@@ -269,12 +294,14 @@ function TaskRow({
   dayPx,
   totalWidth,
   onPatchDates,
+  onPersistDates,
 }: {
   task: TimelineTask
   startMs: number
   dayPx: number
   totalWidth: number
   onPatchDates: (next: { startDate?: string | null; dueDate?: string | null }) => void
+  onPersistDates: (next: { startDate?: string | null; dueDate?: string | null }) => void
 }) {
   const start = task.startDate ? new Date(task.startDate).getTime() : null
   const due = task.dueDate ? new Date(task.dueDate).getTime() : null
@@ -320,13 +347,18 @@ function TaskRow({
             const startX = e.clientX
             const baseStart = startOfDay(barStartMs)
             const baseEnd = startOfDay(barEndMs)
+            let finalDiffDays = 0
             const move = (evt: MouseEvent) => {
               const diffDays = Math.round((evt.clientX - startX) / dayPx)
+              finalDiffDays = diffDays
               const nextStart = new Date(baseStart + diffDays * 86400_000).toISOString()
               const nextEnd = new Date(baseEnd + diffDays * 86400_000).toISOString()
               onPatchDates({ startDate: nextStart, dueDate: nextEnd })
             }
             const up = () => {
+              const finalStart = new Date(baseStart + finalDiffDays * 86400_000).toISOString()
+              const finalEnd = new Date(baseEnd + finalDiffDays * 86400_000).toISOString()
+              onPersistDates({ startDate: finalStart, dueDate: finalEnd })
               setIsDragging(false)
               window.removeEventListener('mousemove', move)
               window.removeEventListener('mouseup', up)

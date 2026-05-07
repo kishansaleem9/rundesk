@@ -124,6 +124,7 @@ function IntegrationsMarketplacePage() {
               <Plug className="h-4 w-4" />
             </span>
             Integrations
+            <Badge variant="outline" className="ml-1">Demo</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
             Connect Rundesk to the tools your team already uses. {installed.length} active.

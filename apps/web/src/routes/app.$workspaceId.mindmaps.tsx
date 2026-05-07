@@ -4,6 +4,7 @@ import {
   Card,
   Button,
   Input,
+  Badge,
   cn,
 } from '@rundesk/ui'
 import {
@@ -85,6 +86,7 @@ function MindMapsPage() {
               <Network className="h-4 w-4" />
             </span>
             Mind maps
+            <Badge variant="outline" className="ml-1">Demo</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
             Brainstorm at the speed of thought. Drop nodes, connect them, convert any branch into a task.

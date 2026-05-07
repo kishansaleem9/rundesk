@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Card, cn } from '@rundesk/ui'
+import { Button, Card, Badge, cn } from '@rundesk/ui'
 import { Play, Pause, Clock, DollarSign, Download } from 'lucide-react'
 import { format, startOfWeek, addDays } from 'date-fns'
 import { api } from '../lib/api'
@@ -66,7 +66,10 @@ function TimePage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-            <h1 className="font-display text-2xl font-semibold text-foreground">Time tracking</h1>
+            <h1 className="font-display text-2xl font-semibold text-foreground flex items-center gap-2">
+              Time tracking
+              <Badge variant="secondary">Partial</Badge>
+            </h1>
             <p className="text-sm text-muted-foreground mt-0.5">Log time, build timesheets, invoice billable hours.</p>
           </div>
           <Button variant="outline" size="sm">

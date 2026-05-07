@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { Card, Button, Input, cn } from '@rundesk/ui'
+import { Card, Button, Input, Badge, cn } from '@rundesk/ui'
 import { Frame, Plus, Square, StickyNote, Type } from 'lucide-react'
 
 export const Route = createFileRoute('/app/$workspaceId/whiteboards')({
@@ -50,6 +50,7 @@ function WhiteboardsPage() {
               <Frame className="h-4 w-4" />
             </span>
             Whiteboards
+            <Badge variant="outline" className="ml-1">Demo</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Interactive canvas with draggable items.</p>
         </div>

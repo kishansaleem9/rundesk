@@ -171,6 +171,7 @@ function ClipsPage() {
               <Video className="h-4 w-4" />
             </span>
             Clips
+            <Badge variant="outline" className="ml-1">Demo</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
             Record screen, voice or both. Every clip auto-transcribes and you can attach it to any task.

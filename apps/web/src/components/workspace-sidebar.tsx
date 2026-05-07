@@ -216,6 +216,11 @@ export function WorkspaceSidebar() {
       { startsWith: `/app/${workspaceId}/timeline`, label: 'Timeline' },
       { startsWith: `/app/${workspaceId}/templates`, label: 'Templates' },
       { startsWith: `/app/${workspaceId}/integrations`, label: 'Integrations' },
+      { startsWith: `/app/${workspaceId}/goals`, label: 'Goals' },
+      { startsWith: `/app/${workspaceId}/reports`, label: 'Reports' },
+      { startsWith: `/app/${workspaceId}/time`, label: 'Time' },
+      { startsWith: `/app/${workspaceId}/mindmaps`, label: 'Mind maps' },
+      { startsWith: `/app/${workspaceId}/clips`, label: 'Clips' },
     ]
     const hit = navMap.find((item) => pathname.startsWith(item.startsWith))
     if (!hit) return
@@ -401,8 +406,13 @@ export function WorkspaceSidebar() {
                 <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label="Automations" compact />
                 <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label="Workload" compact />
                 <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label="Timeline" compact />
+                <NavLink to="/app/$workspaceId/goals" params={{ workspaceId }} icon={ClipboardList} label="Goals" compact />
+                <NavLink to="/app/$workspaceId/reports" params={{ workspaceId }} icon={BarChart3} label="Reports" compact />
+                <NavLink to="/app/$workspaceId/time" params={{ workspaceId }} icon={Clock3} label="Time" compact />
                 <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label="Templates" compact />
                 <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label="Integrations" compact />
+                <NavLink to="/app/$workspaceId/mindmaps" params={{ workspaceId }} icon={Frame} label="Mind maps" compact />
+                <NavLink to="/app/$workspaceId/clips" params={{ workspaceId }} icon={MessageCircle} label="Clips" compact />
                 <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label="Settings" compact />
               </div>
             )}

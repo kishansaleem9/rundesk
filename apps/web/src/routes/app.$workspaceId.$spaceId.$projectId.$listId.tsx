@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Circle, CheckCircle2, Plus, Flag, Calendar as CalendarIcon } from 'lucide-react'
 import { api } from '../lib/api'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
@@ -76,6 +76,9 @@ function ListDetail() {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
   const [saveAsName, setSaveAsName] = useState('')
+  const [selectedSavedViewId, setSelectedSavedViewId] = useState<string>('')
+  const [appliedInitialView, setAppliedInitialView] = useState(false)
+  const quickAddRef = useRef<HTMLInputElement | null>(null)
   const locationSearch = useRouterState({ select: (s) => (s.location as any).searchStr as string })
 
   const { data: tasks = [], isLoading, refetch } = useQuery({
@@ -89,7 +92,7 @@ function ListDetail() {
   })
   const { data: savedViews = [] } = useQuery({
     queryKey: ['list-views', listId],
-    queryFn: () => api<Array<{ id: string; name: string; type: 'list' | 'board' | 'calendar' | 'gantt' | 'table'; config?: any }>>(`/lists/${listId}/views`),
+    queryFn: () => api<Array<{ id: string; name: string; type: 'list' | 'board' | 'calendar' | 'gantt' | 'table'; isDefault?: boolean; config?: any }>>(`/lists/${listId}/views`),
   })
   const { data: workspaceMembers = [] } = useQuery({
     queryKey: ['workspace-members', workspaceId],
@@ -188,6 +191,43 @@ function ListDetail() {
     if (nextTaskId) setSelectedTaskId(nextTaskId)
   }, [locationSearch])
 
+  const applyView = (viewId: string) => {
+    const view = savedViews.find((v) => v.id === viewId)
+    if (!view) return
+    const cfg = view.config ?? {}
+    setSelectedSavedViewId(view.id)
+    setActiveView(view.type === 'gantt' ? 'list' : view.type)
+    setStatusFilter((cfg.statusFilter as 'all' | TaskStatus) ?? 'all')
+    setSortBy((cfg.sortBy as 'created' | 'due' | 'priority') ?? 'created')
+    setGroupBy((cfg.groupBy as 'status' | 'priority') ?? 'status')
+  }
+
+  useEffect(() => {
+    if (appliedInitialView || savedViews.length === 0) return
+    const defaultView = savedViews.find((v) => v.isDefault) ?? savedViews[0]
+    if (defaultView) applyView(defaultView.id)
+    setAppliedInitialView(true)
+  }, [appliedInitialView, savedViews])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      if (event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        quickAddRef.current?.focus()
+      }
+      if (event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        const nextOrder: Array<typeof activeView> = ['list', 'board', 'table', 'calendar']
+        const idx = nextOrder.indexOf(activeView)
+        setActiveView(nextOrder[(idx + 1) % nextOrder.length])
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeView])
+
   const calendarDays = useMemo(() => {
     const monthStart = startOfMonth(calendarMonth)
     const monthEnd = endOfMonth(calendarMonth)
@@ -255,6 +295,7 @@ function ListDetail() {
           </div>
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <Input
+              ref={quickAddRef}
               placeholder="Quick add task…"
               value={newTaskTitle}
               onChange={(e) => setNewTaskTitle(e.target.value)}
@@ -313,16 +354,11 @@ function ListDetail() {
             </select>
             <select
               className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
-              value=""
+              value={selectedSavedViewId}
               onChange={(e) => {
                 const selectedId = e.target.value
-                const view = savedViews.find((v) => v.id === selectedId)
-                if (!view) return
-                const cfg = view.config ?? {}
-                setActiveView(view.type === 'gantt' ? 'list' : view.type)
-                setStatusFilter((cfg.statusFilter as 'all' | TaskStatus) ?? 'all')
-                setSortBy((cfg.sortBy as 'created' | 'due' | 'priority') ?? 'created')
-                setGroupBy((cfg.groupBy as 'status' | 'priority') ?? 'status')
+                if (!selectedId) return
+                applyView(selectedId)
               }}
             >
               <option value="">Load view</option>
@@ -350,7 +386,7 @@ function ListDetail() {
                   body: JSON.stringify({
                     name,
                     type: activeView,
-                    config: { statusFilter, sortBy, groupBy },
+                    config: { activeView, statusFilter, sortBy, groupBy },
                   }),
                 })
                 setSaveAsName('')
@@ -359,6 +395,39 @@ function ListDetail() {
             >
               Save
             </Button>
+            {selectedSavedViewId ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  onClick={async () => {
+                    await api(`/views/${selectedSavedViewId}`, {
+                      method: 'PATCH',
+                      body: { config: { activeView, statusFilter, sortBy, groupBy } },
+                    })
+                    await qc.invalidateQueries({ queryKey: ['list-views', listId] })
+                  }}
+                >
+                  Update view
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7"
+                  onClick={async () => {
+                    await api(`/views/${selectedSavedViewId}`, {
+                      method: 'PATCH',
+                      body: { isDefault: true },
+                    })
+                    await qc.invalidateQueries({ queryKey: ['list-views', listId] })
+                  }}
+                >
+                  Set default
+                </Button>
+              </>
+            ) : null}
+            <span className="hidden lg:inline text-[11px] text-muted-foreground pl-1">Shortcuts: C quick-add, V cycle view</span>
           </div>
         </div>
       </div>

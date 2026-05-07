@@ -62,6 +62,7 @@ const ACTION_OPTIONS = [
   { value: 'set_priority', label: 'Set task priority', paramLabel: 'Priority', paramKey: 'priority' },
   { value: 'send_notification', label: 'Send notification', paramLabel: 'Message', paramKey: 'message' },
   { value: 'create_subtask', label: 'Create a subtask', paramLabel: 'Subtask title', paramKey: 'title' },
+  { value: 'assign_member', label: 'Assign member', paramLabel: 'User ID', paramKey: 'userId' },
 ]
 
 const RECIPES = [
