@@ -1,31 +1,32 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { Resend } from 'resend'
+import nodemailer, { type Transporter } from 'nodemailer'
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name)
-  private readonly client: Resend | null = null
+  private readonly transport: Transporter | null = null
   private readonly from: string
   private readonly nodeEnv: string
 
   constructor(private config: ConfigService) {
-    const apiKey = this.config.get<string>('RESEND_API_KEY')
     this.nodeEnv = this.config.get<string>('NODE_ENV') ?? 'development'
-    const configuredFrom = this.config.get<string>('EMAIL_FROM') ?? 'noreply@rundesk.internal'
-    const looksLikePersonalInbox = /@(gmail|yahoo|outlook|hotmail)\./i.test(configuredFrom)
-    if (looksLikePersonalInbox && this.nodeEnv !== 'production') {
-      this.from = 'onboarding@resend.dev'
-      this.logger.warn(
-        `EMAIL_FROM "${configuredFrom}" is not suitable for Resend dev delivery. Falling back to ${this.from}.`,
-      )
+    const smtpHost = this.config.get<string>('SMTP_HOST')
+    const smtpPort = Number(this.config.get<string>('SMTP_PORT') ?? 587)
+    const smtpUser = this.config.get<string>('SMTP_USER')
+    const smtpPass = this.config.get<string>('SMTP_PASS')
+    const smtpSecure = (this.config.get<string>('SMTP_SECURE') ?? 'false').toLowerCase() === 'true'
+
+    this.from = this.config.get<string>('SMTP_FROM') ?? this.config.get<string>('EMAIL_FROM') ?? 'noreply@rundesk.internal'
+    if (smtpHost && smtpUser && smtpPass) {
+      this.transport = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        auth: { user: smtpUser, pass: smtpPass },
+      })
     } else {
-      this.from = configuredFrom
-    }
-    if (apiKey) {
-      this.client = new Resend(apiKey)
-    } else {
-      this.logger.warn('RESEND_API_KEY not set — email delivery is disabled')
+      this.logger.warn('SMTP is not fully configured (SMTP_HOST/SMTP_USER/SMTP_PASS). Email delivery is disabled.')
     }
   }
 
@@ -241,30 +242,47 @@ export class EmailService {
     })
   }
 
+  /** Send a clip share notification */
+  async sendClipSharedEmail(opts: {
+    to: string
+    actorEmail: string
+    clipName: string
+    clipUrl: string
+    expiresAt: Date
+  }) {
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] ${opts.actorEmail} shared a clip with you`,
+      html: this.layout({
+        heading: 'A clip was shared with you',
+        body: `
+          <p><strong>${this.esc(opts.actorEmail)}</strong> shared a clip with you:</p>
+          <p><strong>${this.esc(opts.clipName)}</strong></p>
+          <p style="font-size: 13px; color: #6b7280;">This secure link expires on ${opts.expiresAt.toLocaleString()}.</p>
+        `,
+        ctaUrl: opts.clipUrl,
+        ctaLabel: 'Open clip',
+      }),
+    })
+  }
+
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
 
   private async send(opts: { to: string; subject: string; html: string }) {
-    if (!this.client) {
+    if (!this.transport) {
       this.logger.log(`[DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}`)
       return
     }
 
     try {
-      const result = await this.client.emails.send({
+      await this.transport.sendMail({
         from: this.from,
         to: opts.to,
         subject: opts.subject,
         html: opts.html,
       })
-      const anyResult = result as any
-      if (anyResult?.error) {
-        this.logger.error(
-          `Resend rejected email to ${opts.to}: ${JSON.stringify(anyResult.error)}`,
-        )
-        throw new InternalServerErrorException('Email provider rejected the message')
-      }
       this.logger.log(`[EMAIL SENT] To: ${opts.to} | Subject: ${opts.subject}`)
     } catch (err) {
       this.logger.error(

@@ -35,6 +35,8 @@ import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
 import { DashboardsModule } from './modules/dashboards/dashboards.module'
 import { DatabaseModule } from './common/database/database.module'
+import { StorageModule } from './common/storage/storage.module'
+import { ClipsModule } from './modules/clips/clips.module'
 
 @Module({
   imports: [
@@ -48,6 +50,7 @@ import { DatabaseModule } from './common/database/database.module'
     }),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    StorageModule,
     RealtimeModule,
     SearchModule,
     HealthModule,
@@ -81,6 +84,7 @@ import { DatabaseModule } from './common/database/database.module'
     ProjectTemplatesModule,
     CustomFieldsModule,
     DashboardsModule,
+    ClipsModule,
   ],
 })
 export class AppModule {}
