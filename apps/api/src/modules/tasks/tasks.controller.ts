@@ -207,9 +207,21 @@ export class TasksController {
   async addAttachment(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { fileName: string; url: string; contentType?: string; sizeBytes?: number },
+    @Body() body: { fileName: string; url?: string; storageKey?: string; contentType?: string; sizeBytes?: number },
   ) {
     return this.tasks.addAttachment(taskId, user.id, body)
+  }
+
+  @Post(':taskId/attachments/presign')
+  async presignAttachmentUpload(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { fileName: string; contentType?: string },
+  ) {
+    return this.tasks.createAttachmentUploadUrl(taskId, user.id, {
+      fileName: body.fileName,
+      contentType: body.contentType ?? 'application/octet-stream',
+    })
   }
 
   @Delete(':taskId/attachments/:attachmentId')

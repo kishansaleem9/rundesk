@@ -29,6 +29,7 @@ import { AutomationsService } from '../automations/automations.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { R2Service } from '../../common/storage/r2.service'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
@@ -67,6 +68,7 @@ export class TasksService {
     private webhooks: WebhooksService,
     private slack: SlackService,
     private notifications: NotificationsService,
+    private r2: R2Service,
   ) {}
 
   /**
@@ -246,6 +248,26 @@ export class TasksService {
       .limit(1)
     if (assignee) return ctx
     throw new ForbiddenException('Only assignees, creators, managers, and workspace admins can edit this task')
+  }
+
+  private sanitizeFileName(input: string): string {
+    return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
+  }
+
+  async createAttachmentUploadUrl(
+    taskId: string,
+    actorId: string,
+    body: { fileName: string; contentType: string },
+  ) {
+    const ctx = await this.assertTaskWriteAccess(taskId, actorId)
+    if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
+    const fileName = this.sanitizeFileName(body.fileName)
+    const key = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${fileName}`
+    const uploadUrl = await this.r2.presignPutObject(key, body.contentType || 'application/octet-stream', {
+      uploadedby: actorId,
+      taskid: taskId,
+    })
+    return { uploadUrl, storageKey: key }
   }
 
   // --- Task CRUD -----------------------------------------------------------
@@ -496,24 +518,28 @@ export class TasksService {
 
   async listAttachments(taskId: string) {
     const rows = await this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId))
-    return rows.map((row) => ({
+    return Promise.all(rows.map(async (row) => ({
       id: row.id,
       fileName: row.fileName,
       fileSize: row.sizeBytes,
       mimeType: row.contentType,
       uploadedBy: row.uploadedById,
       createdAt: row.createdAt,
-      url: row.storageKey,
-    }))
+      storageKey: row.storageKey,
+      url: this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey,
+    })))
   }
 
   async addAttachment(
     taskId: string,
     actorId: string,
-    data: { fileName: string; url: string; contentType?: string; sizeBytes?: number },
+    data: { fileName: string; url?: string; storageKey?: string; contentType?: string; sizeBytes?: number },
   ) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     const [task] = await this.db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
     if (!task) throw new NotFoundException('Task not found')
+    const storageKey = data.storageKey ?? data.url
+    if (!storageKey) throw new BadRequestException('storageKey is required')
     const [row] = await this.db
       .insert(taskAttachments)
       .values({
@@ -522,7 +548,7 @@ export class TasksService {
         fileName: data.fileName,
         contentType: data.contentType ?? 'application/octet-stream',
         sizeBytes: data.sizeBytes ?? 0,
-        storageKey: data.url,
+        storageKey,
       })
       .returning()
     await this.logActivity({
@@ -538,16 +564,25 @@ export class TasksService {
       mimeType: row.contentType,
       uploadedBy: row.uploadedById,
       createdAt: row.createdAt,
-      url: row.storageKey,
+      storageKey: row.storageKey,
+      url: this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey,
     }
   }
 
   async removeAttachment(taskId: string, attachmentId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     const [row] = await this.db
       .delete(taskAttachments)
       .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, taskId)))
       .returning()
     if (!row) throw new NotFoundException('Attachment not found')
+    if (this.r2.configured) {
+      try {
+        await this.r2.deleteObject(row.storageKey)
+      } catch {
+        // best-effort cleanup
+      }
+    }
     await this.logActivity({
       taskId,
       actorId,
