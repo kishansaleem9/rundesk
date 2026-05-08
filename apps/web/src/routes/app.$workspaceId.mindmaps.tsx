@@ -1,12 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
   Button,
   Input,
   Badge,
   cn,
+  toast,
 } from '@rundesk/ui'
+import { api, ApiError } from '../lib/api'
+import { getRealtimeSocket } from '../lib/realtime'
+import { useAuthStore } from '../store/auth'
 import {
   Plus,
   Network,
@@ -20,16 +25,17 @@ export const Route = createFileRoute('/app/$workspaceId/mindmaps')({
 type MindMap = {
   id: string
   title: string
+  updatedAt?: string
+  data?: {
+    nodes?: MapNode[]
+  }
 }
 type MapNode = { id: string; label: string; x: number; y: number; parentId?: string }
 
-const MOCK_MAPS: MindMap[] = [
-  { id: 'product-vision', title: 'Product vision — Q3 strategy' },
-  { id: 'feature-tree', title: 'Feature tree — what to build next' },
-  { id: 'user-research', title: 'User research findings' },
-]
-
 function MindMapsPage() {
+  const { workspaceId } = Route.useParams()
+  const qc = useQueryClient()
+  const me = useAuthStore((s) => s.user)
   const [active, setActive] = useState<MindMap | null>(null)
   const [query, setQuery] = useState('')
   const [nodes, setNodes] = useState<MapNode[]>([
@@ -40,9 +46,116 @@ function MindMapsPage() {
   ])
   const [selectedNodeId, setSelectedNodeId] = useState<string>('root')
   const [draftLabel, setDraftLabel] = useState('')
-  const filtered = MOCK_MAPS.filter((m) =>
+  const mapsQuery = useQuery({
+    queryKey: ['workspace-canvases', workspaceId, 'mindmap'],
+    queryFn: () => api<MindMap[]>(`/workspaces/${workspaceId}/canvases?type=mindmap`),
+  })
+  const createMap = useMutation({
+    mutationFn: (title: string) =>
+      api<MindMap>(`/workspaces/${workspaceId}/canvases`, {
+        method: 'POST',
+        body: {
+          type: 'mindmap',
+          title,
+          data: { nodes: [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }] as MapNode[] },
+        },
+      }),
+    onSuccess: async (created) => {
+      await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] })
+      setActive(created)
+      setNodes(created.data?.nodes ?? [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }])
+      setSelectedNodeId('root')
+      setDraftLabel('Root Topic')
+    },
+  })
+  const updateMap = useMutation({
+    mutationFn: (payload: { id: string; title?: string; data?: unknown }) =>
+      api(`/workspaces/${workspaceId}/canvases/${payload.id}`, {
+        method: 'PATCH',
+        body: {
+          ...payload,
+          expectedUpdatedAt: active?.updatedAt,
+        },
+      }),
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        toast('Mind map updated by teammate', {
+          description: 'Latest version was loaded. Please retry your last edit.',
+        })
+      }
+      await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] })
+    },
+  })
+  const maps = mapsQuery.data ?? []
+  const filtered = maps.filter((m) =>
     m.title.toLowerCase().includes(query.toLowerCase()),
   )
+
+  useEffect(() => {
+    if (!active) return
+    const latest = maps.find((m) => m.id === active.id)
+    if (!latest) return
+    const fromServer = latest.data?.nodes
+    if (Array.isArray(fromServer) && fromServer.length > 0) {
+      setNodes(fromServer)
+      const selected = fromServer.find((n) => n.id === selectedNodeId)
+      setDraftLabel(selected?.label ?? fromServer[0]?.label ?? '')
+    }
+  }, [active?.id, maps])
+
+  useEffect(() => {
+    if (!active) return
+    const timer = window.setTimeout(() => {
+      updateMap.mutate({
+        id: active.id,
+        data: { nodes },
+      })
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [active?.id, nodes])
+
+  useEffect(() => {
+    const socket = getRealtimeSocket()
+    socket.emit('subscribe', { rooms: [`workspace:${workspaceId}`] })
+    const onEvent = (event: {
+      type: string
+      workspaceId?: string
+      canvas?: MindMap
+      canvasId?: string
+      patch?: Partial<MindMap>
+      actorId?: string
+    }) => {
+      if (event.workspaceId !== workspaceId) return
+      if (event.actorId && event.actorId === me?.id) return
+      if (event.type === 'canvas.created' && event.canvas?.id) {
+        qc.setQueryData<MindMap[] | undefined>(
+          ['workspace-canvases', workspaceId, 'mindmap'],
+          (prev) => {
+            if (!prev) return [event.canvas!]
+            if (prev.some((m) => m.id === event.canvas!.id)) return prev
+            return [event.canvas!, ...prev]
+          },
+        )
+      }
+      if (event.type === 'canvas.updated' && event.canvasId) {
+        qc.setQueryData<MindMap[] | undefined>(
+          ['workspace-canvases', workspaceId, 'mindmap'],
+          (prev) =>
+            prev?.map((m) => (m.id === event.canvasId ? { ...m, ...(event.patch ?? {}) } : m)) ?? prev,
+        )
+      }
+      if (event.type === 'canvas.deleted' && event.canvasId) {
+        qc.setQueryData<MindMap[] | undefined>(
+          ['workspace-canvases', workspaceId, 'mindmap'],
+          (prev) => prev?.filter((m) => m.id !== event.canvasId) ?? prev,
+        )
+      }
+    }
+    socket.on('event', onEvent)
+    return () => {
+      socket.off('event', onEvent)
+    }
+  }, [workspaceId, qc, me?.id])
 
   if (active) {
     return (
@@ -86,13 +199,17 @@ function MindMapsPage() {
               <Network className="h-4 w-4" />
             </span>
             Mind maps
-            <Badge variant="outline" className="ml-1">Demo</Badge>
+            <Badge variant="secondary" className="ml-1">Live</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
             Brainstorm at the speed of thought. Drop nodes, connect them, convert any branch into a task.
           </p>
         </div>
-        <Button variant="gradient" size="lg">
+        <Button
+          variant="gradient"
+          size="lg"
+          onClick={() => createMap.mutate(`Mind map ${new Date().toLocaleString()}`)}
+        >
           <Plus className="h-4 w-4" /> New mind map
         </Button>
       </header>
@@ -106,12 +223,24 @@ function MindMapsPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {mapsQuery.isLoading ? (
+          <Card className="p-4 text-sm text-muted-foreground">Loading maps...</Card>
+        ) : null}
         {filtered.map((m) => (
           <Card
             key={m.id}
             variant="glass"
             className="cursor-pointer p-0 overflow-hidden transition-all hover:shadow-glow hover:border-accent/40"
-            onClick={() => setActive(m)}
+            onClick={() => {
+              setActive(m)
+              const initialNodes = m.data?.nodes ?? [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }]
+              setNodes(initialNodes)
+              const root = initialNodes[0]
+              if (root) {
+                setSelectedNodeId(root.id)
+                setDraftLabel(root.label)
+              }
+            }}
           >
             <div className="relative h-40 bg-card/30 overflow-hidden">
               <MapPreview />

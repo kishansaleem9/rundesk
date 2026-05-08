@@ -1,7 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { Card, Button, Input, Badge, cn } from '@rundesk/ui'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Card, Button, Input, Badge, cn, toast } from '@rundesk/ui'
 import { Frame, Plus, Square, StickyNote, Type } from 'lucide-react'
+import { api, ApiError } from '../lib/api'
+import { getRealtimeSocket } from '../lib/realtime'
+import { useAuthStore } from '../store/auth'
 
 export const Route = createFileRoute('/app/$workspaceId/whiteboards')({
   component: WhiteboardsPage,
@@ -10,6 +14,10 @@ export const Route = createFileRoute('/app/$workspaceId/whiteboards')({
 type Whiteboard = {
   id: string
   title: string
+  updatedAt?: string
+  data?: {
+    items?: BoardItem[]
+  }
 }
 type BoardItem = {
   id: string
@@ -22,24 +30,133 @@ type BoardItem = {
   color?: string
 }
 
-const MOCK_BOARDS: Whiteboard[] = [
-  { id: 'board-1', title: 'Roadmap planning board' },
-  { id: 'board-2', title: 'Sprint retrospective board' },
-]
-
 function WhiteboardsPage() {
+  const { workspaceId } = Route.useParams()
+  const qc = useQueryClient()
+  const me = useAuthStore((s) => s.user)
   const [query, setQuery] = useState('')
-  const [activeBoardId, setActiveBoardId] = useState<string>(MOCK_BOARDS[0].id)
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null)
   const [items, setItems] = useState<BoardItem[]>([
     { id: 'n1', type: 'note', x: 80, y: 110, w: 180, h: 120, content: 'Launch checklist', color: '#fde68a' },
     { id: 'n2', type: 'shape', x: 380, y: 180, w: 190, h: 90, content: 'API sync', color: '#bfdbfe' },
     { id: 'n3', type: 'text', x: 660, y: 120, w: 170, h: 48, content: 'Customer journey', color: '#ddd6fe' },
   ])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const boardsQuery = useQuery({
+    queryKey: ['workspace-canvases', workspaceId, 'whiteboard'],
+    queryFn: () => api<Whiteboard[]>(`/workspaces/${workspaceId}/canvases?type=whiteboard`),
+  })
+  const createBoard = useMutation({
+    mutationFn: (title: string) =>
+      api<Whiteboard>(`/workspaces/${workspaceId}/canvases`, {
+        method: 'POST',
+        body: {
+          type: 'whiteboard',
+          title,
+          data: { items: [] as BoardItem[] },
+        },
+      }),
+    onSuccess: async (created) => {
+      await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'whiteboard'] })
+      setActiveBoardId(created.id)
+      setItems([])
+    },
+  })
+  const updateBoard = useMutation({
+    mutationFn: (payload: { id: string; title?: string; data?: unknown }) =>
+      api(`/workspaces/${workspaceId}/canvases/${payload.id}`, {
+        method: 'PATCH',
+        body: {
+          title: payload.title,
+          data: payload.data,
+          expectedUpdatedAt: activeBoard?.updatedAt,
+        },
+      }),
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        toast('Board updated by teammate', {
+          description: 'Latest version was loaded. Please apply your change again.',
+        })
+      }
+      await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'whiteboard'] })
+    },
+  })
+  const boards = boardsQuery.data ?? []
   const filtered = useMemo(
-    () => MOCK_BOARDS.filter((b) => b.title.toLowerCase().includes(query.toLowerCase())),
-    [query],
+    () => boards.filter((b) => b.title.toLowerCase().includes(query.toLowerCase())),
+    [query, boards],
   )
+  const activeBoard = boards.find((b) => b.id === activeBoardId) ?? null
+
+  useEffect(() => {
+    if (!activeBoardId && boards.length > 0) {
+      setActiveBoardId(boards[0].id)
+    }
+  }, [activeBoardId, boards])
+
+  useEffect(() => {
+    if (!activeBoard) return
+    const next = activeBoard.data?.items
+    if (Array.isArray(next)) {
+      setItems(next)
+    } else {
+      setItems([])
+    }
+  }, [activeBoard?.id])
+
+  useEffect(() => {
+    if (!activeBoardId) return
+    const timer = window.setTimeout(() => {
+      updateBoard.mutate({
+        id: activeBoardId,
+        data: { items },
+      })
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [activeBoardId, items])
+
+  useEffect(() => {
+    const socket = getRealtimeSocket()
+    socket.emit('subscribe', { rooms: [`workspace:${workspaceId}`] })
+    const onEvent = (event: {
+      type: string
+      workspaceId?: string
+      canvas?: Whiteboard
+      canvasId?: string
+      patch?: Partial<Whiteboard>
+      actorId?: string
+    }) => {
+      if (event.workspaceId !== workspaceId) return
+      if (event.actorId && event.actorId === me?.id) return
+      if (event.type === 'canvas.created' && event.canvas?.id) {
+        qc.setQueryData<Whiteboard[] | undefined>(
+          ['workspace-canvases', workspaceId, 'whiteboard'],
+          (prev) => {
+            if (!prev) return [event.canvas!]
+            if (prev.some((b) => b.id === event.canvas!.id)) return prev
+            return [event.canvas!, ...prev]
+          },
+        )
+      }
+      if (event.type === 'canvas.updated' && event.canvasId) {
+        qc.setQueryData<Whiteboard[] | undefined>(
+          ['workspace-canvases', workspaceId, 'whiteboard'],
+          (prev) =>
+            prev?.map((b) => (b.id === event.canvasId ? { ...b, ...(event.patch ?? {}) } : b)) ?? prev,
+        )
+      }
+      if (event.type === 'canvas.deleted' && event.canvasId) {
+        qc.setQueryData<Whiteboard[] | undefined>(
+          ['workspace-canvases', workspaceId, 'whiteboard'],
+          (prev) => prev?.filter((b) => b.id !== event.canvasId) ?? prev,
+        )
+      }
+    }
+    socket.on('event', onEvent)
+    return () => {
+      socket.off('event', onEvent)
+    }
+  }, [workspaceId, qc, me?.id])
 
   return (
     <div className="p-6 h-full flex flex-col gap-4">
@@ -50,11 +167,18 @@ function WhiteboardsPage() {
               <Frame className="h-4 w-4" />
             </span>
             Whiteboards
-            <Badge variant="outline" className="ml-1">Demo</Badge>
+            <Badge variant="secondary" className="ml-1">Live</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1">Interactive canvas with draggable items.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="gradient"
+            onClick={() => createBoard.mutate(`Whiteboard ${new Date().toLocaleString()}`)}
+          >
+            <Plus className="h-4 w-4" /> New board
+          </Button>
           <Button size="sm" variant="outline" onClick={() => addItem('note')}><StickyNote className="h-4 w-4" /> Note</Button>
           <Button size="sm" variant="outline" onClick={() => addItem('shape')}><Square className="h-4 w-4" /> Shape</Button>
           <Button size="sm" variant="outline" onClick={() => addItem('text')}><Type className="h-4 w-4" /> Text</Button>
@@ -69,6 +193,9 @@ function WhiteboardsPage() {
       </div>
       <div className="flex gap-3 min-h-0 flex-1">
         <Card className="w-72 p-2 space-y-1 overflow-auto">
+          {boardsQuery.isLoading ? (
+            <div className="px-3 py-2 text-xs text-muted-foreground">Loading boards...</div>
+          ) : null}
           {filtered.map((b) => (
             <button
               key={b.id}
@@ -76,7 +203,10 @@ function WhiteboardsPage() {
                 'w-full text-left rounded px-3 py-2 text-sm',
                 b.id === activeBoardId ? 'bg-accent/15 text-foreground' : 'hover:bg-card/60 text-muted-foreground',
               )}
-              onClick={() => setActiveBoardId(b.id)}
+              onClick={() => {
+                setActiveBoardId(b.id)
+                setSelectedId(null)
+              }}
             >
               {b.title}
             </button>
