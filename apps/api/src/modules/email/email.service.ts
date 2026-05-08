@@ -10,14 +10,23 @@ export class EmailService {
   private readonly nodeEnv: string
 
   constructor(private config: ConfigService) {
-    this.nodeEnv = this.config.get<string>('NODE_ENV') ?? 'development'
-    const smtpHost = this.config.get<string>('SMTP_HOST')
-    const smtpPort = Number(this.config.get<string>('SMTP_PORT') ?? 587)
-    const smtpUser = this.config.get<string>('SMTP_USER')
-    const smtpPass = this.config.get<string>('SMTP_PASS')
-    const smtpSecure = (this.config.get<string>('SMTP_SECURE') ?? 'false').toLowerCase() === 'true'
+    const pick = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = this.config.get<string>(key)
+        if (typeof value === 'string' && value.trim().length > 0) return value.trim()
+      }
+      return undefined
+    }
 
-    this.from = this.config.get<string>('SMTP_FROM') ?? this.config.get<string>('EMAIL_FROM') ?? 'noreply@rundesk.internal'
+    this.nodeEnv = this.config.get<string>('NODE_ENV') ?? 'development'
+    const smtpHost = pick('SMTP_HOST', 'MAIL_HOST')
+    const smtpPort = Number(pick('SMTP_PORT', 'MAIL_PORT') ?? 587)
+    const smtpUser = pick('SMTP_USER', 'MAIL_USER', 'MAIL_EMAIL', 'MAIL_USERNAME')
+    const smtpPass = pick('SMTP_PASS', 'MAIL_PASS', 'MAIL_PASSWORD')
+    const smtpSecureRaw = (pick('SMTP_SECURE', 'MAIL_SECURE', 'MAIL_ENCRYPTION') ?? 'false').toLowerCase()
+    const smtpSecure = smtpSecureRaw === 'true' || smtpSecureRaw === 'ssl' || smtpSecureRaw === 'tls'
+
+    this.from = pick('SMTP_FROM', 'MAIL_FROM_ADDRESS', 'EMAIL_FROM') ?? 'noreply@rundesk.internal'
     if (smtpHost && smtpUser && smtpPass) {
       this.transport = nodemailer.createTransport({
         host: smtpHost,
@@ -25,8 +34,13 @@ export class EmailService {
         secure: smtpSecure,
         auth: { user: smtpUser, pass: smtpPass },
       })
+      this.logger.log(
+        `SMTP configured (host=${smtpHost}, port=${smtpPort}, secure=${smtpSecure}, user=${smtpUser.slice(0, 2)}***).`,
+      )
     } else {
-      this.logger.warn('SMTP is not fully configured (SMTP_HOST/SMTP_USER/SMTP_PASS). Email delivery is disabled.')
+      this.logger.warn(
+        'SMTP is not fully configured. Provide SMTP_* keys or MAIL_* fallback keys (host/user/pass). Email delivery is disabled.',
+      )
     }
   }
 

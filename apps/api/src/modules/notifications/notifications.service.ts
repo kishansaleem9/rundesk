@@ -109,36 +109,28 @@ export class NotificationsService {
     }
 
     let row: any = null
-    if (matrix.inApp || (matrix.web && canWebOrMobile) || (matrix.mobile && canWebOrMobile)) {
-      if (matrix.inApp) {
-        ;[row] = await this.db
-          .insert(notifications)
-          .values({
-            userId: data.userId,
-            workspaceId: data.workspaceId ?? null,
-            actorId: data.actorId ?? null,
-            type: data.type,
-            title: data.title,
-            body: data.body,
-            target: data.target,
-          })
-          .returning()
-      }
-
-      // Push real-time event for bell/tray/toast listeners even when in-app feed is disabled.
-      this.realtime.emitToUser(data.userId, {
-        type: 'notification.created',
-        userId: data.userId,
-        notification: row ?? {
-          id: `ephemeral-${Date.now()}`,
+    if (matrix.inApp || matrix.web || matrix.mobile) {
+      ;[row] = await this.db
+        .insert(notifications)
+        .values({
+          userId: data.userId,
+          workspaceId: data.workspaceId ?? null,
+          actorId: data.actorId ?? null,
           type: data.type,
           title: data.title,
           body: data.body,
           target: data.target,
-          createdAt: new Date().toISOString(),
-          readAt: null,
-        },
-      })
+        })
+        .returning()
+
+      if (matrix.inApp || (matrix.web && canWebOrMobile) || (matrix.mobile && canWebOrMobile)) {
+      // Push real-time event for bell/tray/toast listeners even when in-app feed is disabled.
+        this.realtime.emitToUser(data.userId, {
+          type: 'notification.created',
+          userId: data.userId,
+          notification: row,
+        })
+      }
     }
 
     if (matrix.email && !inQuietHours) {

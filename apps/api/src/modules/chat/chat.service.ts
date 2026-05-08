@@ -410,6 +410,20 @@ export class ChatService {
     const [author] = await this.db.select({ displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users).where(eq(users.id, data.authorId))
     const enriched = { ...row, authorName: author?.displayName, authorAvatarUrl: author?.avatarUrl, reactions: [] as Array<{ emoji: string; count: number; reacted: boolean }> }
 
+    let channelLabel = `#${channel.name}`
+    if (channel.isDm) {
+      const dmMembers = await this.db
+        .select({
+          userId: chatChannelMembers.userId,
+          displayName: users.displayName,
+        })
+        .from(chatChannelMembers)
+        .leftJoin(users, eq(users.id, chatChannelMembers.userId))
+        .where(eq(chatChannelMembers.channelId, data.channelId))
+      const peer = dmMembers.find((m) => m.userId !== data.authorId)
+      channelLabel = peer?.displayName ? peer.displayName : 'Direct message'
+    }
+
     this.realtime.emitToWorkspace(channel.workspaceId, {
       type: 'chat.message.created',
       workspaceId: channel.workspaceId,
@@ -432,10 +446,10 @@ export class ChatService {
           workspaceId: channel.workspaceId,
           actorId: data.authorId,
           type: 'task_mentioned',
-          title: `You were mentioned in #${channel.name}`,
+          title: channel.isDm ? `You were mentioned by ${author?.displayName ?? 'a teammate'}` : `You were mentioned in ${channelLabel}`,
           body: body.slice(0, 180),
           target: { entityType: 'chat_message', entityId: row.id, url: `/app/${channel.workspaceId}/chat` },
-          emailContext: { taskTitle: `#${channel.name}`, workspaceName: 'Workspace' },
+          emailContext: { taskTitle: channelLabel, workspaceName: 'Workspace' },
         })
       }
     }
@@ -453,10 +467,10 @@ export class ChatService {
         workspaceId: channel.workspaceId,
         actorId: data.authorId,
         type: 'chat_message',
-        title: `New message in #${channel.name}`,
+        title: channel.isDm ? `New message from ${author?.displayName ?? 'a teammate'}` : `New message in ${channelLabel}`,
         body: body.slice(0, 180),
         target: { entityType: 'chat_message', entityId: row.id, url: `/app/${channel.workspaceId}/chat` },
-        emailContext: { taskTitle: `#${channel.name}`, workspaceName: 'Workspace', commentSnippet: body.slice(0, 180) },
+        emailContext: { taskTitle: channelLabel, workspaceName: 'Workspace', commentSnippet: body.slice(0, 180) },
       })
     }
 
