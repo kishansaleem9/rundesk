@@ -58,8 +58,8 @@ case "$CMD" in
     ;;
   migrate)
     ensure_env
-    echo "▶ Applying schema with drizzle-kit push"
-    docker exec -e CI=1 rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit push --force"
+    echo "▶ Applying schema with drizzle-kit migrate"
+    docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit migrate"
     echo "▶ Running seed (idempotent)"
     docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec tsx src/seed.ts" || true
     echo "✓ Done."
