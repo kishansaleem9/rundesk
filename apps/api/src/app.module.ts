@@ -28,6 +28,7 @@ import { ExportModule } from './modules/export/export.module'
 import { WebhooksModule } from './modules/webhooks/webhooks.module'
 import { SlackModule } from './modules/integrations/slack/slack.module'
 import { ClickUpImportModule } from './modules/integrations/clickup-import/clickup-import.module'
+import { IntegrationConnectionsModule } from './modules/integrations/connections/integration-connections.module'
 import { ProjectTemplatesModule } from './modules/project-templates/project-templates.module'
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module'
 import { SearchModule } from './modules/search/search.module'
@@ -37,6 +38,7 @@ import { DashboardsModule } from './modules/dashboards/dashboards.module'
 import { DatabaseModule } from './common/database/database.module'
 import { StorageModule } from './common/storage/storage.module'
 import { ClipsModule } from './modules/clips/clips.module'
+import { CanvasesModule } from './modules/canvases/canvases.module'
 
 @Module({
   imports: [
@@ -81,10 +83,12 @@ import { ClipsModule } from './modules/clips/clips.module'
     WebhooksModule,
     SlackModule,
     ClickUpImportModule,
+    IntegrationConnectionsModule,
     ProjectTemplatesModule,
     CustomFieldsModule,
     DashboardsModule,
     ClipsModule,
+    CanvasesModule,
   ],
 })
 export class AppModule {}

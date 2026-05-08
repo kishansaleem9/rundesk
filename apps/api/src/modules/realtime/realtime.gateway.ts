@@ -53,6 +53,10 @@ export type RealtimeEvent =
   | { type: 'chat.message.updated'; workspaceId: string; channelId: string; messageId: string; patch: Record<string, unknown> }
   | { type: 'chat.message.deleted'; workspaceId: string; channelId: string; messageId: string }
   | { type: 'chat.reaction.toggled'; workspaceId: string; channelId: string; messageId: string }
+  // Canvas collaboration events
+  | { type: 'canvas.created'; workspaceId: string; canvas: unknown; actorId?: string }
+  | { type: 'canvas.updated'; workspaceId: string; canvasId: string; patch: Record<string, unknown>; actorId?: string }
+  | { type: 'canvas.deleted'; workspaceId: string; canvasId: string; actorId?: string }
 
 @WebSocketGateway({
   namespace: '/realtime',
