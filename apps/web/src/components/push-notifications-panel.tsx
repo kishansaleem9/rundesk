@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
   Button,
@@ -6,28 +7,34 @@ import {
   Switch,
   Label,
   cn,
+  toast,
 } from '@rundesk/ui'
 import { Bell, Smartphone, Globe, Mail, Volume2, Moon, Check } from 'lucide-react'
+import { api } from '../lib/api'
 
 type Channel = 'inApp' | 'web' | 'mobile' | 'email'
-type EventKey = 'mention' | 'assigned' | 'comment' | 'due' | 'status' | 'doc'
+type EventKey = 'mention' | 'assigned' | 'comment' | 'due' | 'status' | 'doc' | 'chat' | 'activity'
 
 const EVENTS: Array<{ key: EventKey; label: string; description: string }> = [
   { key: 'mention', label: '@mentions', description: 'Someone mentions you in a comment, doc, or chat' },
   { key: 'assigned', label: 'Task assigned', description: 'You are added as an assignee' },
   { key: 'comment', label: 'New comment', description: 'On tasks you watch' },
+  { key: 'chat', label: 'Chat messages', description: 'New messages in channels you are in' },
   { key: 'due', label: 'Due-date reminders', description: '24h, 1h, and overdue alerts' },
   { key: 'status', label: 'Status changes', description: 'Done / blocked / in review on watched tasks' },
+  { key: 'activity', label: 'Other task activity', description: 'Title, priority, and other task updates' },
   { key: 'doc', label: 'Doc updates', description: 'Edits to docs you\'re subscribed to' },
 ]
 
 const DEFAULTS: Record<EventKey, Record<Channel, boolean>> = {
-  mention:  { inApp: true, web: true, mobile: true, email: true },
-  assigned: { inApp: true, web: true, mobile: true, email: true },
-  comment:  { inApp: true, web: false, mobile: false, email: false },
-  due:      { inApp: true, web: true, mobile: true, email: true },
-  status:   { inApp: true, web: false, mobile: false, email: false },
-  doc:      { inApp: true, web: false, mobile: false, email: false },
+  mention:  { inApp: true, web: true, mobile: false, email: true },
+  assigned: { inApp: true, web: true, mobile: false, email: true },
+  comment:  { inApp: true, web: true, mobile: false, email: true },
+  due:      { inApp: true, web: true, mobile: false, email: true },
+  status:   { inApp: true, web: true, mobile: false, email: true },
+  doc:      { inApp: true, web: true, mobile: false, email: true },
+  chat:     { inApp: true, web: true, mobile: false, email: true },
+  activity: { inApp: true, web: true, mobile: false, email: true },
 }
 
 const CHANNELS: Array<{ key: Channel; label: string; icon: React.ElementType }> = [
@@ -38,19 +45,89 @@ const CHANNELS: Array<{ key: Channel; label: string; icon: React.ElementType }> 
 ]
 
 export function PushNotificationsPanel() {
-  const [matrix, setMatrix] = useState(DEFAULTS)
-  const [webEnabled, setWebEnabled] = useState(true)
-  const [mobileEnabled, setMobileEnabled] = useState(false)
-  const [dndStart, setDndStart] = useState('21:00')
-  const [dndEnd, setDndEnd] = useState('08:00')
-  const [dndOn, setDndOn] = useState(true)
-  const [muteSounds, setMuteSounds] = useState(false)
+  const qc = useQueryClient()
+  const prefsQuery = useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: () => api<{
+      channels: {
+        webEnabled: boolean
+        mobileEnabled: boolean
+        dndOn: boolean
+        dndStart: string
+        dndEnd: string
+        muteSounds: boolean
+      }
+      events: Record<EventKey, Record<Channel, boolean>>
+    }>('/notifications/preferences'),
+  })
+
+  const prefs = useMemo(
+    () =>
+      prefsQuery.data ?? {
+        channels: {
+          webEnabled: true,
+          mobileEnabled: false,
+          dndOn: false,
+          dndStart: '21:00',
+          dndEnd: '08:00',
+          muteSounds: false,
+        },
+        events: DEFAULTS,
+      },
+    [prefsQuery.data],
+  )
+  const [matrix, setMatrix] = useState<Record<EventKey, Record<Channel, boolean>>>(prefs.events)
+  const [webEnabled, setWebEnabled] = useState(prefs.channels.webEnabled)
+  const [mobileEnabled, setMobileEnabled] = useState(prefs.channels.mobileEnabled)
+  const [dndStart, setDndStart] = useState(prefs.channels.dndStart)
+  const [dndEnd, setDndEnd] = useState(prefs.channels.dndEnd)
+  const [dndOn, setDndOn] = useState(prefs.channels.dndOn)
+  const [muteSounds, setMuteSounds] = useState(prefs.channels.muteSounds)
+
+  useEffect(() => {
+    setMatrix(prefs.events)
+    setWebEnabled(prefs.channels.webEnabled)
+    setMobileEnabled(prefs.channels.mobileEnabled)
+    setDndStart(prefs.channels.dndStart)
+    setDndEnd(prefs.channels.dndEnd)
+    setDndOn(prefs.channels.dndOn)
+    setMuteSounds(prefs.channels.muteSounds)
+  }, [prefs])
 
   function toggle(event: EventKey, channel: Channel) {
     setMatrix((m) => ({
       ...m,
       [event]: { ...m[event], [channel]: !m[event][channel] },
     }))
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      api('/notifications/preferences', {
+        method: 'POST',
+        body: {
+          channels: {
+            webEnabled,
+            mobileEnabled,
+            dndOn,
+            dndStart,
+            dndEnd,
+            muteSounds,
+          },
+          events: matrix,
+        },
+      }),
+    onSuccess: async () => {
+      toast.success('Notification preferences saved')
+      await qc.invalidateQueries({ queryKey: ['notification-preferences'] })
+    },
+    onError: (err: Error) => {
+      toast.error('Failed to save preferences', { description: err.message })
+    },
+  })
+
+  if (prefsQuery.isLoading) {
+    return <Card variant="glass" className="p-5 text-sm text-muted-foreground">Loading notification preferences…</Card>
   }
 
   return (
@@ -72,7 +149,12 @@ export function PushNotificationsPanel() {
             title="Web push"
             description="Notifications when this browser is open"
             checked={webEnabled}
-            onChange={setWebEnabled}
+            onChange={(next) => {
+              setWebEnabled(next)
+              if (next && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+                void Notification.requestPermission()
+              }
+            }}
             badge={webEnabled ? 'Enabled' : 'Off'}
           />
           <ChannelRow
@@ -173,8 +255,21 @@ export function PushNotificationsPanel() {
       </Card>
 
       <div className="flex justify-end gap-2">
-        <Button variant="ghost">Reset to defaults</Button>
-        <Button variant="gradient">
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setMatrix(DEFAULTS)
+            setWebEnabled(true)
+            setMobileEnabled(false)
+            setDndOn(false)
+            setDndStart('21:00')
+            setDndEnd('08:00')
+            setMuteSounds(false)
+          }}
+        >
+          Reset to defaults
+        </Button>
+        <Button variant="gradient" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           <Check className="h-3.5 w-3.5" /> Save preferences
         </Button>
       </div>

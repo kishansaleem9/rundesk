@@ -5,6 +5,7 @@ import { Button, Card, Input, Label, cn } from '@rundesk/ui'
 import { User, Lock, ShieldCheck, Bell, Globe } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { PushNotificationsPanel } from '../components/push-notifications-panel'
 
 export const Route = createFileRoute('/app/profile')({
   component: ProfilePage,
@@ -333,9 +334,5 @@ function TotpCard() {
 }
 
 function NotificationsTab() {
-  return (
-    <Card className="p-6 text-sm text-muted-foreground">
-      Per-channel notification preferences are coming soon. Today: in-app + bell delivers mentions, assignments, and comment replies.
-    </Card>
-  )
+  return <PushNotificationsPanel />
 }

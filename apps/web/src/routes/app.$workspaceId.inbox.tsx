@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
-import { Bell, AtSign, MessageSquare, CheckSquare, UserPlus } from 'lucide-react'
+import { Bell, AtSign, MessageSquare, CheckSquare, UserPlus, RefreshCw } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 
@@ -26,6 +26,9 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; label:
   task_assigned: { icon: UserPlus, color: 'text-emerald-500', label: 'Assigned you' },
   task_completed: { icon: CheckSquare, color: 'text-emerald-600', label: 'Completed' },
   watcher: { icon: Bell, color: 'text-amber-500', label: 'Watching' },
+  chat_message: { icon: MessageSquare, color: 'text-indigo-500', label: 'New message' },
+  task_status_changed: { icon: RefreshCw, color: 'text-cyan-500', label: 'Status changed' },
+  task_updated: { icon: RefreshCw, color: 'text-cyan-500', label: 'Task updated' },
 }
 
 function InboxPage() {

@@ -35,6 +35,7 @@ import {
   PopoverTrigger,
   PopoverContent,
   cn,
+  toast,
 } from '@rundesk/ui'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
@@ -257,11 +258,49 @@ type Notification = {
   actor?: { displayName?: string | null } | null
 }
 
+type NotificationEventKey = 'mention' | 'assigned' | 'comment' | 'due' | 'status' | 'doc' | 'chat' | 'activity'
+type NotificationPreferences = {
+  channels: {
+    webEnabled: boolean
+    mobileEnabled: boolean
+    dndOn: boolean
+    dndStart: string
+    dndEnd: string
+    muteSounds: boolean
+  }
+  events: Record<NotificationEventKey, Record<'inApp' | 'web' | 'mobile' | 'email', boolean>>
+}
+
 function NotificationsBell() {
   const [open, setOpen] = useState(false)
   const qc = useQueryClient()
+  const prefsQuery = useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: () => api<NotificationPreferences>('/notifications/preferences'),
+    staleTime: 30_000,
+  })
 
   useEffect(() => {
+    const toMinutes = (hhmm?: string) => {
+      if (!hhmm) return null
+      const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
+      if (!match) return null
+      const h = Number(match[1])
+      const m = Number(match[2])
+      if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) return null
+      return h * 60 + m
+    }
+    const isQuietHours = (prefs?: NotificationPreferences) => {
+      if (!prefs?.channels?.dndOn) return false
+      const start = toMinutes(prefs.channels.dndStart)
+      const end = toMinutes(prefs.channels.dndEnd)
+      if (start === null || end === null) return false
+      const now = new Date()
+      const current = now.getHours() * 60 + now.getMinutes()
+      if (start === end) return true
+      if (start < end) return current >= start && current < end
+      return current >= start || current < end
+    }
     if (typeof window === 'undefined') return
     const socket = getRealtimeSocket()
     const beep = () => {
@@ -280,12 +319,45 @@ function NotificationsBell() {
         // ignored
       }
     }
-    const onEvent = (event: { type?: string; notification?: { title?: string; body?: string } }) => {
+    const mapTypeToEventKey = (type?: string): NotificationEventKey => {
+      switch (type) {
+        case 'task_mentioned':
+          return 'mention'
+        case 'task_assigned':
+          return 'assigned'
+        case 'task_commented':
+          return 'comment'
+        case 'task_due_soon':
+        case 'task_overdue':
+          return 'due'
+        case 'task_status_changed':
+          return 'status'
+        case 'doc_mentioned':
+        case 'doc_commented':
+          return 'doc'
+        case 'chat_message':
+          return 'chat'
+        default:
+          return 'activity'
+      }
+    }
+    const onEvent = (event: { type?: string; notification?: { title?: string; body?: string; type?: string } }) => {
       if (event.type !== 'notification.created') return
       qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
       qc.invalidateQueries({ queryKey: ['notifications', 'recent'] })
-      beep()
-      if ('Notification' in window && Notification.permission === 'granted') {
+      const prefs = prefsQuery.data
+      const eventKey = mapTypeToEventKey(event.notification?.type)
+      const matrix = prefs?.events?.[eventKey]
+      const quiet = isQuietHours(prefs)
+      const allowWeb = !!prefs?.channels?.webEnabled && (matrix?.web ?? true) && !quiet
+      const allowSound = !prefs?.channels?.muteSounds && allowWeb
+      if (allowSound) beep()
+      if (allowWeb) {
+        toast(event.notification?.title ?? 'New notification', {
+          description: event.notification?.body ?? '',
+        })
+      }
+      if (allowWeb && 'Notification' in window && Notification.permission === 'granted') {
         void new Notification(event.notification?.title ?? 'New notification', {
           body: event.notification?.body ?? '',
         })
@@ -295,7 +367,7 @@ function NotificationsBell() {
     return () => {
       socket.off('event', onEvent)
     }
-  }, [qc])
+  }, [qc, prefsQuery.data])
 
   useEffect(() => {
     if (!open) return
