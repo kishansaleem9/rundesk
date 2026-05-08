@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Headers, Post, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -43,6 +43,33 @@ export class NotificationsController {
     },
   ) {
     return this.notifications.updatePreferences(user.id, body)
+  }
+
+  @Get('web-push/public-key')
+  webPushPublicKey() {
+    return this.notifications.getWebPushPublicKey()
+  }
+
+  @Post('web-push/subscribe')
+  subscribeWebPush(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: {
+      subscription: {
+        endpoint: string
+        keys?: { p256dh?: string; auth?: string }
+      }
+    },
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.notifications.subscribeWebPush(user.id, body.subscription, userAgent)
+  }
+
+  @Post('web-push/unsubscribe')
+  unsubscribeWebPush(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { endpoint: string },
+  ) {
+    return this.notifications.unsubscribeWebPush(user.id, body.endpoint)
   }
 
   @Post(':notificationId/read')

@@ -903,7 +903,7 @@ export class TasksService {
     const rows = await this.db.query.taskComments.findMany({
       where: eq(taskComments.taskId, taskId),
       orderBy: asc(taskComments.createdAt),
-      with: { author: true, reactions: true },
+      with: { author: true, reactions: true, assignee: true, resolver: true },
     })
     return rows
   }
@@ -922,7 +922,7 @@ export class TasksService {
     await this.logActivity({ taskId, actorId: authorId, action: 'commented', meta: { commentId: comment.id } })
     const hydrated = await this.db.query.taskComments.findFirst({
       where: eq(taskComments.id, comment.id),
-      with: { author: true, reactions: true },
+      with: { author: true, reactions: true, assignee: true, resolver: true },
     })
     this.realtime.emitToTask(taskId, { type: 'comment.created', taskId, comment: hydrated })
 
@@ -1020,6 +1020,80 @@ export class TasksService {
       taskId: existing.taskId,
       commentId,
       patch: { body, editedAt: updated.editedAt },
+    })
+    return updated
+  }
+
+  async assignComment(commentId: string, actorId: string, userId: string | null) {
+    const [existing] = await this.db.select().from(taskComments).where(eq(taskComments.id, commentId))
+    if (!existing) throw new NotFoundException('Comment not found')
+
+    const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, existing.taskId)).limit(1)
+    if (!taskRow) throw new NotFoundException('Task not found')
+    await this.assertTaskWriteAccess(taskRow.id, actorId)
+
+    const [updated] = await this.db
+      .update(taskComments)
+      .set({ assignedToUserId: userId, editedAt: new Date() })
+      .where(eq(taskComments.id, commentId))
+      .returning()
+    this.realtime.emitToTask(existing.taskId, {
+      type: 'comment.updated',
+      taskId: existing.taskId,
+      commentId,
+      patch: { assignedToUserId: updated.assignedToUserId, editedAt: updated.editedAt },
+    })
+
+    if (userId && userId !== actorId) {
+      const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+      if (ctx) {
+        const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+        void this.notifications.create({
+          userId,
+          workspaceId: ctx.workspaceId,
+          actorId,
+          type: 'task_assigned',
+          title: `You were assigned a comment in "${taskRow.title}"`,
+          target: {
+            entityType: 'task',
+            entityId: taskRow.id,
+            url: this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, taskRow.listId, taskRow.id),
+          },
+          emailContext: { taskTitle: taskRow.title, workspaceName },
+        })
+      }
+    }
+
+    return updated
+  }
+
+  async resolveComment(commentId: string, actorId: string, resolved: boolean) {
+    const [existing] = await this.db.select().from(taskComments).where(eq(taskComments.id, commentId))
+    if (!existing) throw new NotFoundException('Comment not found')
+
+    const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, existing.taskId)).limit(1)
+    if (!taskRow) throw new NotFoundException('Task not found')
+    await this.assertTaskWriteAccess(taskRow.id, actorId)
+
+    const [updated] = await this.db
+      .update(taskComments)
+      .set({
+        resolvedAt: resolved ? new Date() : null,
+        resolvedByUserId: resolved ? actorId : null,
+        editedAt: new Date(),
+      })
+      .where(eq(taskComments.id, commentId))
+      .returning()
+
+    this.realtime.emitToTask(existing.taskId, {
+      type: 'comment.updated',
+      taskId: existing.taskId,
+      commentId,
+      patch: {
+        resolvedAt: updated.resolvedAt,
+        resolvedByUserId: updated.resolvedByUserId,
+        editedAt: updated.editedAt,
+      },
     })
     return updated
   }

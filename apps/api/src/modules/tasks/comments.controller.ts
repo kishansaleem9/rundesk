@@ -48,4 +48,22 @@ export class TaskCommentsController {
   ) {
     return this.tasks.toggleReaction(commentId, user.id, body.emoji)
   }
+
+  @Post(':commentId/assign')
+  assign(
+    @Param('commentId') commentId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { userId: string | null },
+  ) {
+    return this.tasks.assignComment(commentId, user.id, body.userId)
+  }
+
+  @Post(':commentId/resolve')
+  resolve(
+    @Param('commentId') commentId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { resolved: boolean },
+  ) {
+    return this.tasks.resolveComment(commentId, user.id, body.resolved)
+  }
 }

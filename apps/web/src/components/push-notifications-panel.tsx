@@ -126,6 +126,48 @@ export function PushNotificationsPanel() {
     },
   })
 
+  const webPushKeyQuery = useQuery({
+    queryKey: ['web-push-public-key'],
+    queryFn: () => api<{ publicKey: string | null; enabled: boolean }>('/notifications/web-push/public-key'),
+  })
+
+  const subscribeWebPush = useMutation({
+    mutationFn: async () => {
+      if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) return
+      const key = webPushKeyQuery.data?.publicKey
+      if (!key) return
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') throw new Error('Notification permission not granted')
+      const reg = await navigator.serviceWorker.register('/push-sw.js')
+      let subscription = await reg.pushManager.getSubscription()
+      if (!subscription) {
+        subscription = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(key) as unknown as BufferSource,
+        })
+      }
+      await api('/notifications/web-push/subscribe', {
+        method: 'POST',
+        body: { subscription: subscription.toJSON() },
+      })
+    },
+  })
+
+  const unsubscribeWebPush = useMutation({
+    mutationFn: async () => {
+      if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
+      const reg = await navigator.serviceWorker.getRegistration('/push-sw.js')
+      const subscription = await reg?.pushManager.getSubscription()
+      if (subscription) {
+        await api('/notifications/web-push/unsubscribe', {
+          method: 'POST',
+          body: { endpoint: subscription.endpoint },
+        })
+        await subscription.unsubscribe()
+      }
+    },
+  })
+
   if (prefsQuery.isLoading) {
     return <Card variant="glass" className="p-5 text-sm text-muted-foreground">Loading notification preferences…</Card>
   }
@@ -151,8 +193,12 @@ export function PushNotificationsPanel() {
             checked={webEnabled}
             onChange={(next) => {
               setWebEnabled(next)
-              if (next && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-                void Notification.requestPermission()
+              if (next) {
+                void subscribeWebPush.mutateAsync().catch((err: Error) => {
+                  toast.error('Could not enable web push', { description: err.message })
+                })
+              } else {
+                void unsubscribeWebPush.mutateAsync().catch(() => undefined)
               }
             }}
             badge={webEnabled ? 'Enabled' : 'Off'}
@@ -318,4 +364,15 @@ function ChannelRow({
       </div>
     </div>
   )
+}
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const outputArray = new Uint8Array(rawData.length)
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i)
+  }
+  return outputArray
 }

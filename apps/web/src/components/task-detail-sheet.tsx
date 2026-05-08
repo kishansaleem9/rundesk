@@ -92,7 +92,12 @@ type TaskComment = {
   body: string
   createdAt: string
   parentCommentId?: string | null
+  assignedToUserId?: string | null
+  resolvedByUserId?: string | null
+  resolvedAt?: string | null
   author?: UserLite | null
+  assignee?: UserLite | null
+  resolver?: UserLite | null
   reactions?: Array<{ emoji: string; userId: string }>
 }
 
@@ -1563,6 +1568,26 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
     },
   })
+  const assign = useMutation({
+    mutationFn: ({ commentId, userId }: { commentId: string; userId: string | null }) =>
+      api(`/tasks/${taskId}/comments/${commentId}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+    },
+  })
+  const resolveComment = useMutation({
+    mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
+      api(`/tasks/${taskId}/comments/${commentId}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ resolved }),
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+    },
+  })
 
   if (commentsQuery.data === null) {
     return <NotWiredNote>Comments endpoint is not available.</NotWiredNote>
@@ -1626,6 +1651,16 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                   </span>
                 </div>
                 <div className="mt-1 text-sm whitespace-pre-wrap">{prettifyMentions(c.body, namesById)}</div>
+                <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                  {c.assignee?.displayName && (
+                    <Badge variant="outline" className="text-[10px]">Assigned: {c.assignee.displayName}</Badge>
+                  )}
+                  {c.resolvedAt && (
+                    <Badge variant="success" className="text-[10px]">
+                      Resolved{c.resolver?.displayName ? ` by ${c.resolver.displayName}` : ''}
+                    </Badge>
+                  )}
+                </div>
                 <div className="mt-2 flex gap-2">
                   <button
                     type="button"
@@ -1651,6 +1686,27 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                   >
                     Delete
                   </button>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => resolveComment.mutate({ commentId: c.id, resolved: !Boolean(c.resolvedAt) })}
+                  >
+                    {c.resolvedAt ? 'Reopen' : 'Resolve'}
+                  </button>
+                  {workspaceId && (
+                    <select
+                      className="h-6 rounded border border-border bg-background px-1 text-[10px]"
+                      value={c.assignedToUserId ?? ''}
+                      onChange={(e) => assign.mutate({ commentId: c.id, userId: e.target.value || null })}
+                    >
+                      <option value="">Assign…</option>
+                      {(membersQuery.data ?? []).map((member) => (
+                        <option key={member.userId} value={member.userId}>
+                          {member.displayName || member.email}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   {replies.length > 0 && (
                     <span className="text-xs text-accent ml-auto">{replies.length} repl{replies.length === 1 ? 'y' : 'ies'}</span>
                   )}

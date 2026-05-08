@@ -1,11 +1,12 @@
 import { Injectable, Inject } from '@nestjs/common'
 import { eq, and, isNull, desc, sql } from 'drizzle-orm'
-import { notifications, users } from '@rundesk/db'
+import { notifications, users, webPushSubscriptions } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
+import webpush from 'web-push'
 
 type NotificationType =
   | 'task_assigned'
@@ -72,6 +73,8 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
 @Injectable()
 export class NotificationsService {
   private readonly appUrl: string
+  private readonly webPushPublicKey: string | null
+  private readonly webPushEnabled: boolean
 
   constructor(
     @Inject(DB_TOKEN) private db: Db,
@@ -80,6 +83,14 @@ export class NotificationsService {
     private config: ConfigService,
   ) {
     this.appUrl = this.config.get<string>('APP_URL') ?? 'http://localhost:5173'
+    const subject = this.config.get<string>('WEB_PUSH_SUBJECT') ?? 'mailto:admin@rundesk.internal'
+    const publicKey = this.config.get<string>('WEB_PUSH_PUBLIC_KEY') ?? null
+    const privateKey = this.config.get<string>('WEB_PUSH_PRIVATE_KEY') ?? null
+    this.webPushPublicKey = publicKey
+    this.webPushEnabled = !!(publicKey && privateKey)
+    if (this.webPushEnabled && publicKey && privateKey) {
+      webpush.setVapidDetails(subject, publicKey, privateKey)
+    }
   }
 
   async create(data: {
@@ -137,8 +148,55 @@ export class NotificationsService {
       // Best-effort email — do not await, never throws
       this.sendEmail(data).catch(() => undefined)
     }
+    if (matrix.web && !inQuietHours) {
+      this.sendWebPush(data.userId, {
+        title: data.title,
+        body: data.body,
+        url: data.target?.url ? (data.target.url.startsWith('http') ? data.target.url : `${this.appUrl}${data.target.url}`) : this.appUrl,
+      }).catch(() => undefined)
+    }
 
     return row
+  }
+
+  async getWebPushPublicKey() {
+    return { publicKey: this.webPushPublicKey, enabled: this.webPushEnabled }
+  }
+
+  async subscribeWebPush(userId: string, subscription: {
+    endpoint: string
+    keys?: { p256dh?: string; auth?: string }
+  }, userAgent?: string) {
+    if (!subscription.endpoint || !subscription.keys?.p256dh || !subscription.keys?.auth) {
+      return { ok: false, reason: 'invalid_subscription' as const }
+    }
+    await this.db
+      .insert(webPushSubscriptions)
+      .values({
+        userId,
+        endpoint: subscription.endpoint,
+        p256dh: subscription.keys.p256dh,
+        auth: subscription.keys.auth,
+        userAgent: userAgent ?? null,
+      })
+      .onConflictDoUpdate({
+        target: webPushSubscriptions.endpoint,
+        set: {
+          userId,
+          p256dh: subscription.keys.p256dh,
+          auth: subscription.keys.auth,
+          userAgent: userAgent ?? null,
+          updatedAt: new Date(),
+        },
+      })
+    return { ok: true }
+  }
+
+  async unsubscribeWebPush(userId: string, endpoint: string) {
+    await this.db
+      .delete(webPushSubscriptions)
+      .where(and(eq(webPushSubscriptions.userId, userId), eq(webPushSubscriptions.endpoint, endpoint)))
+    return { ok: true }
   }
 
   async getPreferences(userId: string): Promise<NotificationPreferences> {
@@ -431,5 +489,40 @@ export class NotificationsService {
       const d = new Date()
       return d.getHours() * 60 + d.getMinutes()
     }
+  }
+
+  private async sendWebPush(userId: string, payload: { title: string; body?: string; url?: string }) {
+    if (!this.webPushEnabled) return
+    const rows = await this.db
+      .select()
+      .from(webPushSubscriptions)
+      .where(eq(webPushSubscriptions.userId, userId))
+    if (rows.length === 0) return
+
+    const message = JSON.stringify({
+      title: payload.title,
+      body: payload.body ?? '',
+      url: payload.url ?? this.appUrl,
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      tag: `rundesk-${Date.now()}`,
+    })
+
+    await Promise.all(rows.map(async (row) => {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: row.endpoint,
+            keys: { p256dh: row.p256dh, auth: row.auth },
+          },
+          message,
+        )
+      } catch (err: any) {
+        const status = Number(err?.statusCode ?? 0)
+        if (status === 404 || status === 410) {
+          await this.db.delete(webPushSubscriptions).where(eq(webPushSubscriptions.id, row.id))
+        }
+      }
+    }))
   }
 }

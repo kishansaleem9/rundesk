@@ -8,6 +8,9 @@ export const taskComments = pgTable('task_comments', {
   id:              uuid('id').primaryKey().defaultRandom(),
   taskId:          uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   authorId:        uuid('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  assignedToUserId: uuid('assigned_to_user_id').references(() => users.id, { onDelete: 'set null' }),
+  resolvedByUserId: uuid('resolved_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+  resolvedAt:      timestamp('resolved_at', { withTimezone: true }),
   parentCommentId: uuid('parent_comment_id').references((): AnyPgColumn => taskComments.id, { onDelete: 'cascade' }),
   body:            text('body').notNull(),
   // Structured mentions: [{ userId: '...', offset: 12, length: 8 }]
@@ -27,6 +30,8 @@ export const taskCommentReactions = pgTable('task_comment_reactions', {
 export const taskCommentsRelations = relations(taskComments, ({ one, many }) => ({
   task:      one(tasks,        { fields: [taskComments.taskId], references: [tasks.id] }),
   author:    one(users,        { fields: [taskComments.authorId], references: [users.id] }),
+  assignee:  one(users,        { fields: [taskComments.assignedToUserId], references: [users.id] }),
+  resolver:  one(users,        { fields: [taskComments.resolvedByUserId], references: [users.id] }),
   parent:    one(taskComments, { fields: [taskComments.parentCommentId], references: [taskComments.id], relationName: 'replies' }),
   replies:   many(taskComments, { relationName: 'replies' }),
   reactions: many(taskCommentReactions),
