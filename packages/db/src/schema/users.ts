@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, jsonb } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { userRoleEnum, oauthProviderEnum } from './enums'
 import { workspaceMembers } from './workspaces'
@@ -15,6 +15,26 @@ export const users = pgTable('users', {
   passwordHash:  text('password_hash'),
   emailVerified: boolean('email_verified').notNull().default(false),
   isActive:      boolean('is_active').notNull().default(true),
+  notificationPreferences: jsonb('notification_preferences').notNull().default({
+    channels: {
+      webEnabled: true,
+      mobileEnabled: false,
+      dndOn: false,
+      dndStart: '21:00',
+      dndEnd: '08:00',
+      muteSounds: false,
+    },
+    events: {
+      mention: { inApp: true, web: true, mobile: false, email: true },
+      assigned: { inApp: true, web: true, mobile: false, email: true },
+      comment: { inApp: true, web: true, mobile: false, email: true },
+      due: { inApp: true, web: true, mobile: false, email: true },
+      status: { inApp: true, web: true, mobile: false, email: true },
+      doc: { inApp: true, web: true, mobile: false, email: true },
+      chat: { inApp: true, web: true, mobile: false, email: true },
+      activity: { inApp: true, web: true, mobile: false, email: true },
+    },
+  }),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

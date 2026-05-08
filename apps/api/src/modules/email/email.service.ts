@@ -266,6 +266,39 @@ export class EmailService {
     })
   }
 
+  /** Send a generic activity notification email */
+  async sendActivity(opts: {
+    to: string
+    recipientName: string
+    actorName: string
+    title: string
+    body?: string
+    taskUrl: string
+    workspaceName: string
+  }) {
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] ${opts.title}`,
+      html: this.layout({
+        heading: 'New activity',
+        body: `
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          <p><strong>${this.esc(opts.actorName)}</strong> triggered a new activity in <em>${this.esc(opts.workspaceName)}</em>:</p>
+          <p><strong>${this.esc(opts.title)}</strong></p>
+          ${
+            opts.body
+              ? `<blockquote style="border-left:3px solid #6f96d1;margin:12px 0;padding:8px 16px;color:#374151;background:#f3f7fd;border-radius:0 6px 6px 0;">
+                   ${this.esc(opts.body)}
+                 </blockquote>`
+              : ''
+          }
+        `,
+        ctaUrl: opts.taskUrl,
+        ctaLabel: 'Open in Rundesk',
+      }),
+    })
+  }
+
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------

@@ -440,6 +440,26 @@ export class ChatService {
       }
     }
 
+    // Notify channel members about new messages (except author and already-mentioned users).
+    const memberRows = await this.db
+      .select({ userId: chatChannelMembers.userId })
+      .from(chatChannelMembers)
+      .where(eq(chatChannelMembers.channelId, data.channelId))
+    const notifiedIds = new Set([...mentionIds, data.authorId])
+    for (const { userId } of memberRows) {
+      if (notifiedIds.has(userId)) continue
+      void this.notifications.create({
+        userId,
+        workspaceId: channel.workspaceId,
+        actorId: data.authorId,
+        type: 'chat_message',
+        title: `New message in #${channel.name}`,
+        body: body.slice(0, 180),
+        target: { entityType: 'chat_message', entityId: row.id, url: `/app/${channel.workspaceId}/chat` },
+        emailContext: { taskTitle: `#${channel.name}`, workspaceName: 'Workspace', commentSnippet: body.slice(0, 180) },
+      })
+    }
+
     return enriched
   }
 

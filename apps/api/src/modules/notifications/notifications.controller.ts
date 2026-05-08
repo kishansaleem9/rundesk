@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -20,6 +20,29 @@ export class NotificationsController {
   @Get('unread-count')
   unreadCount(@CurrentUser() user: CurrentUserPayload) {
     return this.notifications.unreadCount(user.id)
+  }
+
+  @Get('preferences')
+  getPreferences(@CurrentUser() user: CurrentUserPayload) {
+    return this.notifications.getPreferences(user.id)
+  }
+
+  @Post('preferences')
+  updatePreferences(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: {
+      channels?: {
+        webEnabled?: boolean
+        mobileEnabled?: boolean
+        dndOn?: boolean
+        dndStart?: string
+        dndEnd?: string
+        muteSounds?: boolean
+      }
+      events?: Record<string, Partial<Record<'inApp' | 'web' | 'mobile' | 'email', boolean>>>
+    },
+  ) {
+    return this.notifications.updatePreferences(user.id, body)
   }
 
   @Post(':notificationId/read')

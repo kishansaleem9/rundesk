@@ -14,8 +14,60 @@ type NotificationType =
   | 'task_due_soon'
   | 'task_overdue'
   | 'task_status_changed'
+  | 'task_updated'
+  | 'chat_message'
   | 'doc_mentioned'
   | 'doc_commented'
+
+type NotificationEventKey =
+  | 'mention'
+  | 'assigned'
+  | 'comment'
+  | 'due'
+  | 'status'
+  | 'doc'
+  | 'chat'
+  | 'activity'
+
+type NotificationChannelMatrix = Record<'inApp' | 'web' | 'mobile' | 'email', boolean>
+
+type NotificationPreferences = {
+  channels: {
+    webEnabled: boolean
+    mobileEnabled: boolean
+    dndOn: boolean
+    dndStart: string
+    dndEnd: string
+    muteSounds: boolean
+  }
+  events: Record<NotificationEventKey, NotificationChannelMatrix>
+}
+
+type NotificationPreferencesPatch = {
+  channels?: Partial<NotificationPreferences['channels']>
+  events?: Partial<Record<NotificationEventKey, Partial<NotificationChannelMatrix>>>
+}
+
+const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  channels: {
+    webEnabled: true,
+    mobileEnabled: false,
+    dndOn: false,
+    dndStart: '21:00',
+    dndEnd: '08:00',
+    muteSounds: false,
+  },
+  events: {
+    mention: { inApp: true, web: true, mobile: false, email: true },
+    assigned: { inApp: true, web: true, mobile: false, email: true },
+    comment: { inApp: true, web: true, mobile: false, email: true },
+    due: { inApp: true, web: true, mobile: false, email: true },
+    status: { inApp: true, web: true, mobile: false, email: true },
+    doc: { inApp: true, web: true, mobile: false, email: true },
+    chat: { inApp: true, web: true, mobile: false, email: true },
+    activity: { inApp: true, web: true, mobile: false, email: true },
+  },
+}
 
 @Injectable()
 export class NotificationsService {
@@ -46,30 +98,69 @@ export class NotificationsService {
       dueDateLabel?: string
     }
   }) {
-    const [row] = await this.db
-      .insert(notifications)
-      .values({
+    const { prefs, timezone } = await this.getUserNotificationContext(data.userId)
+    const eventKey = this.mapTypeToEventKey(data.type)
+    const matrix = prefs.events[eventKey]
+    const inQuietHours = this.isInQuietHours(prefs, timezone)
+    const canWebOrMobile = !inQuietHours
+
+    if (!matrix.inApp && !matrix.web && !matrix.email && !matrix.mobile) {
+      return null
+    }
+
+    let row: any = null
+    if (matrix.inApp || (matrix.web && canWebOrMobile) || (matrix.mobile && canWebOrMobile)) {
+      if (matrix.inApp) {
+        ;[row] = await this.db
+          .insert(notifications)
+          .values({
+            userId: data.userId,
+            workspaceId: data.workspaceId ?? null,
+            actorId: data.actorId ?? null,
+            type: data.type,
+            title: data.title,
+            body: data.body,
+            target: data.target,
+          })
+          .returning()
+      }
+
+      // Push real-time event for bell/tray/toast listeners even when in-app feed is disabled.
+      this.realtime.emitToUser(data.userId, {
+        type: 'notification.created',
         userId: data.userId,
-        workspaceId: data.workspaceId ?? null,
-        actorId: data.actorId ?? null,
-        type: data.type,
-        title: data.title,
-        body: data.body,
-        target: data.target,
+        notification: row ?? {
+          id: `ephemeral-${Date.now()}`,
+          type: data.type,
+          title: data.title,
+          body: data.body,
+          target: data.target,
+          createdAt: new Date().toISOString(),
+          readAt: null,
+        },
       })
-      .returning()
+    }
 
-    // Push real-time notification
-    this.realtime.emitToUser(data.userId, {
-      type: 'notification.created',
-      userId: data.userId,
-      notification: row,
-    })
-
-    // Best-effort email — do not await, never throws
-    this.sendEmail(data).catch(() => undefined)
+    if (matrix.email && !inQuietHours) {
+      // Best-effort email — do not await, never throws
+      this.sendEmail(data).catch(() => undefined)
+    }
 
     return row
+  }
+
+  async getPreferences(userId: string): Promise<NotificationPreferences> {
+    return this.getUserPreferences(userId)
+  }
+
+  async updatePreferences(userId: string, patch: NotificationPreferencesPatch) {
+    const merged = this.mergePreferences(DEFAULT_NOTIFICATION_PREFERENCES, patch)
+    const [row] = await this.db
+      .update(users)
+      .set({ notificationPreferences: merged, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning({ notificationPreferences: users.notificationPreferences })
+    return (row?.notificationPreferences as NotificationPreferences | undefined) ?? merged
   }
 
   list(userId: string, opts: { unreadOnly?: boolean; limit?: number } = {}) {
@@ -207,9 +298,146 @@ export class NotificationsService {
         })
         break
 
-      default:
-        // No email template for status changes, doc events, etc. yet
+      case 'task_status_changed':
+      case 'task_updated':
+      case 'chat_message':
+      case 'doc_mentioned':
+      case 'doc_commented':
+        await this.email.sendActivity({
+          to: recipient.email,
+          recipientName: recipient.displayName,
+          actorName,
+          title: data.title,
+          body: data.body,
+          taskUrl,
+          workspaceName,
+        })
         break
+
+      default:
+        await this.email.sendActivity({
+          to: recipient.email,
+          recipientName: recipient.displayName,
+          actorName,
+          title: data.title,
+          body: data.body,
+          taskUrl,
+          workspaceName,
+        })
+        break
+    }
+  }
+
+  private mapTypeToEventKey(type: NotificationType): NotificationEventKey {
+    switch (type) {
+      case 'task_mentioned':
+        return 'mention'
+      case 'task_assigned':
+        return 'assigned'
+      case 'task_commented':
+        return 'comment'
+      case 'task_due_soon':
+      case 'task_overdue':
+        return 'due'
+      case 'task_status_changed':
+        return 'status'
+      case 'doc_mentioned':
+      case 'doc_commented':
+        return 'doc'
+      case 'chat_message':
+        return 'chat'
+      case 'task_updated':
+      default:
+        return 'activity'
+    }
+  }
+
+  private mergePreferences(
+    base: NotificationPreferences,
+    patch?: NotificationPreferencesPatch | Partial<NotificationPreferences>,
+  ): NotificationPreferences {
+    if (!patch) return base
+    return {
+      channels: {
+        ...base.channels,
+        ...(patch.channels ?? {}),
+      },
+      events: {
+        mention: { ...base.events.mention, ...(patch.events?.mention ?? {}) },
+        assigned: { ...base.events.assigned, ...(patch.events?.assigned ?? {}) },
+        comment: { ...base.events.comment, ...(patch.events?.comment ?? {}) },
+        due: { ...base.events.due, ...(patch.events?.due ?? {}) },
+        status: { ...base.events.status, ...(patch.events?.status ?? {}) },
+        doc: { ...base.events.doc, ...(patch.events?.doc ?? {}) },
+        chat: { ...base.events.chat, ...(patch.events?.chat ?? {}) },
+        activity: { ...base.events.activity, ...(patch.events?.activity ?? {}) },
+      },
+    }
+  }
+
+  private async getUserPreferences(userId: string): Promise<NotificationPreferences> {
+    const [row] = await this.db
+      .select({ notificationPreferences: users.notificationPreferences })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+    const saved = row?.notificationPreferences as Partial<NotificationPreferences> | undefined
+    return this.mergePreferences(DEFAULT_NOTIFICATION_PREFERENCES, saved)
+  }
+
+  private async getUserNotificationContext(userId: string): Promise<{
+    prefs: NotificationPreferences
+    timezone: string
+  }> {
+    const [row] = await this.db
+      .select({
+        notificationPreferences: users.notificationPreferences,
+        timezone: users.timezone,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+    const saved = row?.notificationPreferences as Partial<NotificationPreferences> | undefined
+    return {
+      prefs: this.mergePreferences(DEFAULT_NOTIFICATION_PREFERENCES, saved),
+      timezone: row?.timezone || 'UTC',
+    }
+  }
+
+  private isInQuietHours(prefs: NotificationPreferences, timezone: string): boolean {
+    if (!prefs.channels.dndOn) return false
+    const start = this.toMinutes(prefs.channels.dndStart)
+    const end = this.toMinutes(prefs.channels.dndEnd)
+    if (start === null || end === null) return false
+    const current = this.currentMinutesInTimezone(timezone)
+    if (start === end) return true
+    if (start < end) return current >= start && current < end
+    return current >= start || current < end
+  }
+
+  private toMinutes(hhmm: string): number | null {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
+    if (!match) return null
+    const h = Number(match[1])
+    const m = Number(match[2])
+    if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) return null
+    return h * 60 + m
+  }
+
+  private currentMinutesInTimezone(timezone: string): number {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).formatToParts(new Date())
+      const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0')
+      const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0')
+      return hour * 60 + minute
+    } catch {
+      const d = new Date()
+      return d.getHours() * 60 + d.getMinutes()
     }
   }
 }

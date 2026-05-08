@@ -155,6 +155,75 @@ export class TasksService {
     return `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`
   }
 
+  private async notifyTaskUpdate(params: {
+    taskId: string
+    actorId: string
+    workspaceId: string
+    workspaceName: string
+    taskTitle: string
+    taskUrl: string
+    patch: Partial<{
+      title: string
+      description: string | null
+      priority: TaskPriority
+      status: TaskStatus
+      startDate: Date | null
+      dueDate: Date | null
+      position: number
+      timeEstimate: number | null
+      isArchived: boolean
+    }>
+    before: {
+      status: TaskStatus
+      priority: TaskPriority
+      title: string
+      dueDate: Date | null
+      description: string | null
+    }
+  }) {
+    const watcherRows = await this.db
+      .select({ userId: taskWatchers.userId })
+      .from(taskWatchers)
+      .where(eq(taskWatchers.taskId, params.taskId))
+
+    const watcherIds = [...new Set(watcherRows.map((w) => w.userId))]
+      .filter((id) => id !== params.actorId)
+
+    if (watcherIds.length === 0) return
+
+    const changedBits: string[] = []
+    if (params.patch.status && params.patch.status !== params.before.status) changedBits.push(`status to ${params.patch.status}`)
+    if (params.patch.priority && params.patch.priority !== params.before.priority) changedBits.push(`priority to ${params.patch.priority}`)
+    if ('dueDate' in params.patch && (params.patch.dueDate?.getTime() ?? null) !== (params.before.dueDate?.getTime() ?? null)) {
+      changedBits.push(params.patch.dueDate ? 'due date' : 'due date cleared')
+    }
+    if (params.patch.title && params.patch.title !== params.before.title) changedBits.push('title')
+    if ('description' in params.patch && params.patch.description !== params.before.description) changedBits.push('description')
+
+    if (changedBits.length === 0) return
+
+    const notificationType = params.patch.status && params.patch.status !== params.before.status
+      ? 'task_status_changed' as const
+      : 'task_updated' as const
+
+    const body = changedBits.length === 1
+      ? `Updated ${changedBits[0]}.`
+      : `Updated ${changedBits.slice(0, 3).join(', ')}${changedBits.length > 3 ? ', and more' : ''}.`
+
+    for (const userId of watcherIds) {
+      void this.notifications.create({
+        userId,
+        workspaceId: params.workspaceId,
+        actorId: params.actorId,
+        type: notificationType,
+        title: `"${params.taskTitle}" was updated`,
+        body,
+        target: { entityType: 'task', entityId: params.taskId, url: params.taskUrl },
+        emailContext: { taskTitle: params.taskTitle, workspaceName: params.workspaceName },
+      })
+    }
+  }
+
   private async indexTaskInSearch(taskId: string) {
     try {
       const ctx = await this.resolveTaskContext(taskId)
@@ -668,6 +737,7 @@ export class TasksService {
     const ctx = await this.resolveWorkspaceForList(after.listId)
     if (ctx) {
       const hydrated = await this.getTask(taskId)
+      if (!hydrated) throw new NotFoundException('Task not found')
       if (patch.status && patch.status !== before.status) {
         void this.fireTaskEvent('task.status_changed', ctx.workspaceId, {
           task: hydrated,
@@ -683,6 +753,24 @@ export class TasksService {
           newValue: patch.status,
         })
       }
+      const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+      const taskUrl = this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, after.listId, taskId)
+      void this.notifyTaskUpdate({
+        taskId,
+        actorId,
+        workspaceId: ctx.workspaceId,
+        workspaceName,
+        taskTitle: hydrated.title,
+        taskUrl,
+        patch,
+        before: {
+          status: before.status,
+          priority: before.priority,
+          title: before.title,
+          dueDate: before.dueDate,
+          description: before.description,
+        },
+      })
       void this.fireTaskEvent('task.updated', ctx.workspaceId, { task: hydrated, patch }, {
         taskId,
         userId: actorId,
