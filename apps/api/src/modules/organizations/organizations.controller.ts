@@ -1,10 +1,11 @@
-import { Controller, Get, Patch, Body, Param, UseGuards, Delete, Post } from '@nestjs/common'
+import { Controller, Get, Patch, Body, Param, UseGuards, Delete, Post, ForbiddenException } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { OrganizationMemberGuard } from '../auth/guards/organization-member.guard'
 import { OrganizationAdminGuard } from '../auth/guards/organization-admin.guard'
 import { OrganizationsService } from './organizations.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import type { CurrentUserPayload } from '../tasks/types'
 
 @ApiTags('organizations')
 @ApiBearerAuth()
@@ -12,6 +13,13 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 @Controller('organizations')
 export class OrganizationsController {
   constructor(private readonly organizationsService: OrganizationsService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'List all organizations (super admin)' })
+  async list(@CurrentUser() user: CurrentUserPayload) {
+    if (user.role !== 'super_admin') throw new ForbiddenException('Super admin access required')
+    return this.organizationsService.listAll()
+  }
 
   @Get(':organizationId')
   @UseGuards(OrganizationMemberGuard)

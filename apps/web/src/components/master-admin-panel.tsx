@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 import { Badge, Button, Card, Input, Switch, Textarea } from '@rundesk/ui'
 import {
   Building2,
@@ -12,22 +13,17 @@ import {
   Shield,
   Users,
 } from 'lucide-react'
+import { api } from '../lib/api'
 
 type Org = {
   id: string
   name: string
-  plan: 'Starter' | 'Growth' | 'Enterprise'
+  slug: string
   users: number
-  status: 'active' | 'past_due' | 'trial'
-  mrr: number
-  renewsOn: string
+  workspaces: number
+  status: 'active'
+  createdAt: string
 }
-
-const ORGS: Org[] = [
-  { id: 'org_1', name: 'Acme Inc', plan: 'Enterprise', users: 184, status: 'active', mrr: 7900, renewsOn: '2026-06-01' },
-  { id: 'org_2', name: 'Northstar Labs', plan: 'Growth', users: 47, status: 'active', mrr: 1490, renewsOn: '2026-05-20' },
-  { id: 'org_3', name: 'BrightOps', plan: 'Starter', users: 13, status: 'past_due', mrr: 290, renewsOn: '2026-05-04' },
-]
 
 const ALL_FEATURES = [
   { key: 'ai', label: 'AI Hub', desc: 'Show AI section in sidebar' },
@@ -57,25 +53,50 @@ function defaultFeatures(): FeatureState {
 export function MasterAdminPanel() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const [selectedOrgId, setSelectedOrgId] = useState(ORGS[0].id)
+  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null)
   const [seatDelta, setSeatDelta] = useState('0')
   const [internalNote, setInternalNote] = useState('')
   const [impersonatedOrgId, setImpersonatedOrgId] = useState<string | null>(null)
-  const [featureByOrg, setFeatureByOrg] = useState<Record<string, FeatureState>>(() =>
-    Object.fromEntries(ORGS.map((o) => [o.id, defaultFeatures()])),
-  )
+  const orgsQuery = useQuery({
+    queryKey: ['admin-organizations'],
+    queryFn: async () => {
+      const rows = await api<Array<{
+        id: string
+        name: string
+        slug: string
+        membersCount: number
+        workspacesCount: number
+        createdAt: string
+      }>>('/organizations')
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        users: row.membersCount ?? 0,
+        workspaces: row.workspacesCount ?? 0,
+        status: 'active' as const,
+        createdAt: row.createdAt,
+      }))
+    },
+  })
+  const orgs = orgsQuery.data ?? []
+  const selectedOrg = useMemo(() => {
+    if (orgs.length === 0) return null
+    return orgs.find((o) => o.id === selectedOrgId) ?? orgs[0]
+  }, [orgs, selectedOrgId])
+  const [featureByOrg, setFeatureByOrg] = useState<Record<string, FeatureState>>(() => ({}))
 
   const filtered = useMemo(
     () =>
-      ORGS.filter((o) =>
-        `${o.name} ${o.plan} ${o.status}`.toLowerCase().includes(query.toLowerCase()),
+      orgs.filter((o) =>
+        `${o.name} ${o.slug} ${o.status}`.toLowerCase().includes(query.toLowerCase()),
       ),
-    [query],
+    [query, orgs],
   )
-  const selectedOrg = ORGS.find((o) => o.id === selectedOrgId) ?? ORGS[0]
-  const featureState = featureByOrg[selectedOrg.id] ?? defaultFeatures()
+  const featureState = selectedOrg ? (featureByOrg[selectedOrg.id] ?? defaultFeatures()) : defaultFeatures()
 
   const setFeature = (key: FeatureKey, enabled: boolean) => {
+    if (!selectedOrg) return
     setFeatureByOrg((prev) => ({
       ...prev,
       [selectedOrg.id]: { ...(prev[selectedOrg.id] ?? defaultFeatures()), [key]: enabled },
@@ -83,6 +104,7 @@ export function MasterAdminPanel() {
   }
 
   const pushToSidebarPreview = () => {
+    if (!selectedOrg) return
     const payload = {
       orgId: selectedOrg.id,
       visibility: featureState,
@@ -93,6 +115,7 @@ export function MasterAdminPanel() {
   }
 
   const impersonateOrg = () => {
+    if (!selectedOrg) return
     localStorage.setItem(
       'rundesk.superAdminImpersonation',
       JSON.stringify({
@@ -115,7 +138,7 @@ export function MasterAdminPanel() {
         </p>
         {impersonatedOrgId && (
           <div className="text-xs text-success">
-            Impersonation mode active for {ORGS.find((o) => o.id === impersonatedOrgId)?.name}
+            Impersonation mode active for {orgs.find((o) => o.id === impersonatedOrgId)?.name}
           </div>
         )}
       </header>
@@ -133,12 +156,18 @@ export function MasterAdminPanel() {
             onChange={(e) => setQuery(e.target.value)}
           />
           <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
+            {orgsQuery.isLoading && (
+              <div className="text-xs text-muted-foreground px-1 py-2">Loading organizations...</div>
+            )}
+            {orgsQuery.isError && (
+              <div className="text-xs text-destructive px-1 py-2">Failed to load organizations.</div>
+            )}
             {filtered.map((org) => (
               <button
                 key={org.id}
                 onClick={() => setSelectedOrgId(org.id)}
                 className={`w-full rounded-md border px-3 py-2.5 text-left transition-colors ${
-                  org.id === selectedOrg.id
+                  org.id === selectedOrg?.id
                     ? 'border-brand-500 bg-accent/10'
                     : 'border-border hover:bg-card/60'
                 }`}
@@ -150,19 +179,28 @@ export function MasterAdminPanel() {
                   </Badge>
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {org.plan} · {org.users} users · ${org.mrr.toLocaleString()}/mo
+                  {org.users} users · {org.workspaces} workspaces
                 </div>
               </button>
             ))}
+            {!orgsQuery.isLoading && filtered.length === 0 && (
+              <div className="text-xs text-muted-foreground px-1 py-2">No organizations found.</div>
+            )}
           </div>
         </Card>
 
         <div className="space-y-5">
+          {!selectedOrg ? (
+            <Card className="p-6 text-sm text-muted-foreground">
+              No organizations available.
+            </Card>
+          ) : (
+            <>
           <Card className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
             <Metric icon={Users} label="Seats" value={selectedOrg.users.toString()} />
-            <Metric icon={CreditCard} label="Plan" value={selectedOrg.plan} />
-            <Metric icon={Receipt} label="MRR" value={`$${selectedOrg.mrr.toLocaleString()}`} />
-            <Metric icon={Shield} label="Renewal" value={selectedOrg.renewsOn} />
+            <Metric icon={CreditCard} label="Status" value={selectedOrg.status} />
+            <Metric icon={Receipt} label="Slug" value={selectedOrg.slug} />
+            <Metric icon={Shield} label="Created" value={new Date(selectedOrg.createdAt).toLocaleDateString()} />
           </Card>
           <div className="flex items-center gap-2">
             <Button variant="gradient" onClick={impersonateOrg}>
@@ -264,6 +302,8 @@ export function MasterAdminPanel() {
               </p>
             </Card>
           </div>
+          </>
+          )}
         </div>
       </div>
     </div>

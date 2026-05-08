@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, sql } from 'drizzle-orm'
 import { organizations, organizationMembers, workspaceMembers, workspaces, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -11,6 +11,32 @@ export class OrganizationsService {
   async findById(id: string) {
     const [org] = await this.db.select().from(organizations).where(eq(organizations.id, id))
     return org ?? null
+  }
+
+  async listAll() {
+    const rows = await this.db
+      .select({
+        id: organizations.id,
+        name: organizations.name,
+        slug: organizations.slug,
+        logoUrl: organizations.logoUrl,
+        createdAt: organizations.createdAt,
+        updatedAt: organizations.updatedAt,
+        membersCount: sql<number>`count(distinct ${organizationMembers.userId})::int`,
+        workspacesCount: sql<number>`count(distinct ${workspaces.id})::int`,
+      })
+      .from(organizations)
+      .leftJoin(organizationMembers, eq(organizationMembers.organizationId, organizations.id))
+      .leftJoin(workspaces, eq(workspaces.organizationId, organizations.id))
+      .groupBy(
+        organizations.id,
+        organizations.name,
+        organizations.slug,
+        organizations.logoUrl,
+        organizations.createdAt,
+        organizations.updatedAt,
+      )
+    return rows
   }
 
   async update(id: string, patch: { name?: string; logoUrl?: string | null }) {
