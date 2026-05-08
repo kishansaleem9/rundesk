@@ -9,6 +9,41 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+required_table_missing() {
+  docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
+    "SELECT to_regclass('public.organization_members') IS NULL;" | tr -d '[:space:]'
+}
+
+required_constraint_missing() {
+  docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
+    "SELECT NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='uq_workspace_members_workspace_user');" | tr -d '[:space:]'
+}
+
+reinit_database_schema() {
+  echo "⚠️  Schema drift detected. Reinitializing DB schema (destructive reset)."
+  docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -v ON_ERROR_STOP=1 -c \
+    "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
+  echo "▶ Applying schema baseline with drizzle-kit push"
+  docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit push --force"
+}
+
+apply_schema() {
+  echo "▶ Applying schema with drizzle-kit migrate"
+  if ! docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit migrate"; then
+    reinit_database_schema
+    return
+  fi
+
+  local missing_table
+  local missing_constraint
+  missing_table="$(required_table_missing)"
+  missing_constraint="$(required_constraint_missing)"
+
+  if [ "$missing_table" = "t" ] || [ "$missing_constraint" = "t" ]; then
+    reinit_database_schema
+  fi
+}
+
 echo "▶ Starting one-command production deploy"
 echo "▶ Pulling latest from git"
 git pull
@@ -34,8 +69,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-echo "▶ Applying schema with drizzle-kit migrate"
-docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit migrate"
+apply_schema
 
 echo "▶ Running seed (idempotent)"
 docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec tsx src/seed.ts" || true

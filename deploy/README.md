@@ -79,5 +79,6 @@ deploy/
   at the server yet, or port 80 isn't reachable. Check with `dig +short rundesk.theaura.agency`.
 - **`502 Bad Gateway`** — API container is down. Check `./deploy/deploy.sh logs`.
 - **Migration failures** — deploy uses non-interactive `drizzle-kit migrate`. If a constraint is being added, ensure the migration includes any necessary data cleanup (e.g. dedupes) before the constraint.
+- **Schema drift in old environments** — deploy scripts now auto-detect missing core tables/constraints and perform a full `public` schema reset + re-apply baseline schema + seed to self-heal.
 - **`docker compose` not found** — install the v2 plugin:
   `curl -SL https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose`
