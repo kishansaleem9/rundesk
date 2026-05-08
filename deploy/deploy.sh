@@ -39,10 +39,27 @@ reinit_database_schema() {
   docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit push --force"
 }
 
+should_allow_schema_reset() {
+  [ "${ALLOW_SCHEMA_RESET:-false}" = "true" ]
+}
+
+handle_schema_drift_or_failure() {
+  local reason="$1"
+  echo "⚠️  $reason"
+  if should_allow_schema_reset; then
+    reinit_database_schema
+    return
+  fi
+  echo "❌ Refusing destructive schema reset because ALLOW_SCHEMA_RESET is not true."
+  echo "   Set ALLOW_SCHEMA_RESET=true only if you explicitly want to drop/recreate schema."
+  echo "   Current DB is preserved. Exiting deploy so issue can be investigated safely."
+  exit 1
+}
+
 apply_schema() {
   echo "▶ Applying schema with drizzle-kit migrate"
   if ! docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit migrate"; then
-    reinit_database_schema
+    handle_schema_drift_or_failure "drizzle-kit migrate failed."
     return
   fi
 
@@ -51,7 +68,7 @@ apply_schema() {
   missing_table="$(required_table_missing)"
   missing_constraint="$(required_constraint_missing)"
   if [ "$missing_table" = "t" ] || [ "$missing_constraint" = "t" ]; then
-    reinit_database_schema
+    handle_schema_drift_or_failure "required schema objects are missing after migrate."
   fi
 }
 
