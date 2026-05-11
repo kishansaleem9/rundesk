@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import {
   Sparkles,
@@ -36,6 +36,7 @@ type ExtractedTask = {
   dueDate?: string | null
   priority: string
 }
+type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 
 function AiPage() {
   const { workspaceId } = Route.useParams()
@@ -238,14 +239,203 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
   const [notes, setNotes] = useState('')
   const [tasks, setTasks] = useState<ExtractedTask[] | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [saving, setSaving] = useState(false)
+  const [savedCount, setSavedCount] = useState(0)
+  const [targetListId, setTargetListId] = useState('')
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [failedItems, setFailedItems] = useState<Array<{ title: string; reason: string }>>([])
+  const [assigneeOverrides, setAssigneeOverrides] = useState<Record<number, string>>({})
+  const [bulkAssigneeOverride, setBulkAssigneeOverride] = useState('')
+  const [dueDateOverrides, setDueDateOverrides] = useState<Record<number, string>>({})
+  const [bulkDueDateOverride, setBulkDueDateOverride] = useState('')
+  const [priorityOverrides, setPriorityOverrides] = useState<Record<number, TaskPriority>>({})
+  const [bulkPriorityOverride, setBulkPriorityOverride] = useState<TaskPriority>('normal')
+  const storageKeyBase = `ai-meeting-notes-defaults:${workspaceId}`
+  const [defaultsHydrated, setDefaultsHydrated] = useState(false)
+  const membersQuery = useQuery({
+    queryKey: ['ai-meeting-notes-members', workspaceId],
+    queryFn: () =>
+      api<Array<{ userId: string; displayName: string; email: string }>>(
+        `/workspaces/${workspaceId}/members`,
+      ),
+  })
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const savedListId = window.localStorage.getItem(`${storageKeyBase}:target-list-id`) ?? ''
+    const savedBulkAssignee = window.localStorage.getItem(`${storageKeyBase}:bulk-assignee-id`) ?? ''
+    const savedBulkDueDate = window.localStorage.getItem(`${storageKeyBase}:bulk-due-date`) ?? ''
+    const savedBulkPriority = window.localStorage.getItem(`${storageKeyBase}:bulk-priority`) as TaskPriority | null
+    if (savedListId) setTargetListId(savedListId)
+    if (savedBulkAssignee) setBulkAssigneeOverride(savedBulkAssignee)
+    if (savedBulkDueDate) setBulkDueDateOverride(savedBulkDueDate)
+    if (savedBulkPriority === 'urgent' || savedBulkPriority === 'high' || savedBulkPriority === 'normal' || savedBulkPriority === 'low') {
+      setBulkPriorityOverride(savedBulkPriority)
+    }
+    setDefaultsHydrated(true)
+  }, [storageKeyBase])
+  useEffect(() => {
+    if (typeof window === 'undefined' || !defaultsHydrated) return
+    if (targetListId) window.localStorage.setItem(`${storageKeyBase}:target-list-id`, targetListId)
+    else window.localStorage.removeItem(`${storageKeyBase}:target-list-id`)
+  }, [storageKeyBase, targetListId, defaultsHydrated])
+  useEffect(() => {
+    if (typeof window === 'undefined' || !defaultsHydrated) return
+    if (bulkAssigneeOverride) window.localStorage.setItem(`${storageKeyBase}:bulk-assignee-id`, bulkAssigneeOverride)
+    else window.localStorage.removeItem(`${storageKeyBase}:bulk-assignee-id`)
+  }, [storageKeyBase, bulkAssigneeOverride, defaultsHydrated])
+  useEffect(() => {
+    if (typeof window === 'undefined' || !defaultsHydrated) return
+    if (bulkDueDateOverride) window.localStorage.setItem(`${storageKeyBase}:bulk-due-date`, bulkDueDateOverride)
+    else window.localStorage.removeItem(`${storageKeyBase}:bulk-due-date`)
+  }, [storageKeyBase, bulkDueDateOverride, defaultsHydrated])
+  useEffect(() => {
+    if (typeof window === 'undefined' || !defaultsHydrated) return
+    window.localStorage.setItem(`${storageKeyBase}:bulk-priority`, bulkPriorityOverride)
+  }, [storageKeyBase, bulkPriorityOverride, defaultsHydrated])
+  const normalizeAssignee = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ')
+  const resolveAssignee = (name?: string | null): { userId: string; displayName: string } | undefined => {
+    if (!name?.trim()) return undefined
+    const needle = normalizeAssignee(name)
+    const members = membersQuery.data ?? []
+    const exact = members.find(
+      (member) =>
+        normalizeAssignee(member.displayName) === needle ||
+        normalizeAssignee(member.email.split('@')[0] ?? '') === needle,
+    )
+    if (exact) return { userId: exact.userId, displayName: exact.displayName || exact.email }
+    const partial = members.filter(
+      (member) =>
+        normalizeAssignee(member.displayName).includes(needle) ||
+        needle.includes(normalizeAssignee(member.displayName)),
+    )
+    if (partial.length === 1) {
+      return { userId: partial[0].userId, displayName: partial[0].displayName || partial[0].email }
+    }
+    return undefined
+  }
+
+  const listOptionsQuery = useQuery({
+    queryKey: ['ai-meeting-notes-lists', workspaceId],
+    queryFn: async () => {
+      const spaces = await api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`)
+      const projectsPerSpace = await Promise.all(
+        spaces.map(async (space) => ({
+          space,
+          projects: await api<Array<{ id: string; name: string }>>(`/projects/space/${space.id}`),
+        })),
+      )
+      const options: Array<{ value: string; label: string }> = []
+      for (const group of projectsPerSpace) {
+        const listsPerProject = await Promise.all(
+          group.projects.map(async (project) => ({
+            project,
+            lists: await api<Array<{ id: string; name: string }>>(`/lists/project/${project.id}`),
+          })),
+        )
+        for (const projectGroup of listsPerProject) {
+          for (const list of projectGroup.lists) {
+            options.push({
+              value: list.id,
+              label: `${group.space.name} / ${projectGroup.project.name} / ${list.name}`,
+            })
+          }
+        }
+      }
+      return options
+    },
+  })
 
   const extract = useMutation({
     mutationFn: () => api<ExtractedTask[]>('/ai/meeting-notes', { method: 'POST', body: { notes } }),
     onSuccess: (data) => {
       setTasks(data)
       setSelected(new Set(data.map((_, i) => i)))
+      setSavedCount(0)
+      setFailedItems([])
+      setSaveError(null)
+      setAssigneeOverrides({})
+      setBulkAssigneeOverride('')
+      setDueDateOverrides({})
+      setBulkDueDateOverride('')
+      setPriorityOverrides({})
     },
   })
+
+  async function saveSelectedTasks() {
+    if (!tasks || selected.size === 0) return
+    if (!targetListId) {
+      setSaveError('Select a destination list before saving tasks.')
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    setFailedItems([])
+    try {
+      const selectedIndexes = [...selected]
+      let successCount = 0
+      const failures: Array<{ title: string; reason: string }> = []
+      const failedIndexes = new Set<number>()
+      for (const idx of selectedIndexes) {
+        const task = tasks[idx]
+        if (!task) continue
+        try {
+          const assigneeId = assigneeOverrides[idx] || resolveAssignee(task.assigneeName)?.userId
+          const dueDate = dueDateOverrides[idx] || task.dueDate || null
+          const priority = priorityOverrides[idx] ?? (task.priority as TaskPriority)
+          await api('/tasks', {
+            method: 'POST',
+            body: {
+              listId: targetListId,
+              title: task.title,
+              description: task.description || null,
+              priority,
+              dueDate,
+              assigneeIds: assigneeId ? [assigneeId] : undefined,
+            },
+          })
+          successCount += 1
+        } catch (error) {
+          failedIndexes.add(idx)
+          failures.push({
+            title: task.title,
+            reason: error instanceof Error ? error.message : 'Task creation failed',
+          })
+        }
+      }
+      if (failures.length > 0) {
+        setFailedItems(failures)
+        setSaveError(`${failures.length} task${failures.length === 1 ? '' : 's'} failed to save.`)
+      }
+      setSavedCount(successCount)
+      setSelected(failedIndexes)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const selectedIndexes = [...selected]
+  const selectedTasks = selectedIndexes.map((idx) => (tasks ? tasks[idx] : undefined)).filter(Boolean)
+  const previewSummary = selectedTasks.reduce(
+    (acc, task, index) => {
+      const originalIndex = selectedIndexes[index]
+      const hasManualAssignee = Boolean(assigneeOverrides[originalIndex])
+      const hasAutoAssignee = !hasManualAssignee && Boolean(resolveAssignee(task?.assigneeName)?.userId)
+      if (hasManualAssignee) acc.manualAssignee += 1
+      else if (hasAutoAssignee) acc.autoAssignee += 1
+      else acc.unassigned += 1
+
+      if (Boolean(dueDateOverrides[originalIndex])) acc.dueOverride += 1
+      if (Boolean(priorityOverrides[originalIndex])) acc.priorityOverride += 1
+      return acc
+    },
+    {
+      manualAssignee: 0,
+      autoAssignee: 0,
+      unassigned: 0,
+      dueOverride: 0,
+      priorityOverride: 0,
+    },
+  )
 
   return (
     <div className="p-6 max-w-2xl overflow-auto h-full space-y-4">
@@ -283,6 +473,193 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
 
       {tasks && tasks.length > 0 && (
         <div className="space-y-3">
+          {selected.size > 0 && (
+            <div className="space-y-3">
+              <Card className="p-3">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                  Save preview
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <p>Selected: <span className="font-medium text-foreground">{selected.size}</span></p>
+                  <p>Manual assignee: <span className="font-medium text-foreground">{previewSummary.manualAssignee}</span></p>
+                  <p>Auto assignee: <span className="font-medium text-foreground">{previewSummary.autoAssignee}</span></p>
+                  <p>Unassigned: <span className="font-medium text-foreground">{previewSummary.unassigned}</span></p>
+                  <p>Due overrides: <span className="font-medium text-foreground">{previewSummary.dueOverride}</span></p>
+                  <p>Priority overrides: <span className="font-medium text-foreground">{previewSummary.priorityOverride}</span></p>
+                </div>
+              </Card>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Bulk assignee override for selected</p>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    value={bulkAssigneeOverride}
+                    onChange={(e) => setBulkAssigneeOverride(e.target.value)}
+                  >
+                    <option value="">Choose member</option>
+                    {(membersQuery.data ?? []).map((member) => (
+                      <option key={member.userId} value={member.userId}>
+                        {member.displayName || member.email}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!bulkAssigneeOverride}
+                    onClick={() => {
+                      if (!bulkAssigneeOverride) return
+                      setAssigneeOverrides((prev) => {
+                        const next = { ...prev }
+                        for (const idx of selected) {
+                          next[idx] = bulkAssigneeOverride
+                        }
+                        return next
+                      })
+                    }}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setAssigneeOverrides((prev) => {
+                        const next = { ...prev }
+                        for (const idx of selected) {
+                          delete next[idx]
+                        }
+                        return next
+                      })
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Bulk due date override for selected</p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="date"
+                    value={bulkDueDateOverride}
+                    onChange={(e) => setBulkDueDateOverride(e.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!bulkDueDateOverride}
+                    onClick={() => {
+                      if (!bulkDueDateOverride) return
+                      setDueDateOverrides((prev) => {
+                        const next = { ...prev }
+                        for (const idx of selected) {
+                          next[idx] = bulkDueDateOverride
+                        }
+                        return next
+                      })
+                    }}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setDueDateOverrides((prev) => {
+                        const next = { ...prev }
+                        for (const idx of selected) {
+                          delete next[idx]
+                        }
+                        return next
+                      })
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">Bulk priority override for selected</p>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    value={bulkPriorityOverride}
+                    onChange={(e) => setBulkPriorityOverride(e.target.value as TaskPriority)}
+                  >
+                    <option value="urgent">Urgent</option>
+                    <option value="high">High</option>
+                    <option value="normal">Normal</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setPriorityOverrides((prev) => {
+                        const next = { ...prev }
+                        for (const idx of selected) next[idx] = bulkPriorityOverride
+                        return next
+                      })
+                    }
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setPriorityOverrides((prev) => {
+                        const next = { ...prev }
+                        for (const idx of selected) delete next[idx]
+                        return next
+                      })
+                    }
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Destination list</p>
+              <select
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                value={targetListId}
+                onChange={(e) => setTargetListId(e.target.value)}
+              >
+                <option value="">Select destination list</option>
+                {(listOptionsQuery.data ?? []).map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                This selection is remembered for future meeting-note saves in this workspace.
+              </p>
+              <div className="pt-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setTargetListId('')
+                    setBulkAssigneeOverride('')
+                    setBulkDueDateOverride('')
+                    setBulkPriorityOverride('normal')
+                    if (typeof window !== 'undefined') {
+                      window.localStorage.removeItem(`${storageKeyBase}:target-list-id`)
+                      window.localStorage.removeItem(`${storageKeyBase}:bulk-assignee-id`)
+                      window.localStorage.removeItem(`${storageKeyBase}:bulk-due-date`)
+                      window.localStorage.removeItem(`${storageKeyBase}:bulk-priority`)
+                    }
+                  }}
+                >
+                  Reset defaults
+                </Button>
+              </div>
+          </div>
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">{tasks.length} action items found</p>
             <Button
@@ -318,8 +695,71 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                 <div className="flex-1">
                   <p className="font-medium text-sm">{task.title}</p>
                   {task.assigneeName && (
-                    <p className="text-xs text-muted-foreground">Assigned to: {task.assigneeName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Assigned to: {task.assigneeName}
+                      {resolveAssignee(task.assigneeName) ? (
+                        <span className="ml-1 text-emerald-600 dark:text-emerald-400">
+                          → {resolveAssignee(task.assigneeName)?.displayName}
+                        </span>
+                      ) : (
+                        <span className="ml-1 text-amber-700 dark:text-amber-300">
+                          (unmatched)
+                        </span>
+                      )}
+                    </p>
                   )}
+                  <div className="mt-1">
+                    <label className="text-[11px] text-muted-foreground block mb-1">Assignee override</label>
+                    <select
+                      className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
+                      value={assigneeOverrides[i] ?? ''}
+                      onChange={(e) =>
+                        setAssigneeOverrides((prev) => ({
+                          ...prev,
+                          [i]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Auto (use extracted/matched)</option>
+                      {(membersQuery.data ?? []).map((member) => (
+                        <option key={member.userId} value={member.userId}>
+                          {member.displayName || member.email}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="mt-1">
+                    <label className="text-[11px] text-muted-foreground block mb-1">Due date override</label>
+                    <Input
+                      type="date"
+                      value={dueDateOverrides[i] ?? ''}
+                      onChange={(e) =>
+                        setDueDateOverrides((prev) => ({
+                          ...prev,
+                          [i]: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="mt-1">
+                    <label className="text-[11px] text-muted-foreground block mb-1">Priority override</label>
+                    <select
+                      className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
+                      value={priorityOverrides[i] ?? ''}
+                      onChange={(e) =>
+                        setPriorityOverrides((prev) => ({
+                          ...prev,
+                          [i]: e.target.value as TaskPriority,
+                        }))
+                      }
+                    >
+                      <option value="">Auto ({task.priority})</option>
+                      <option value="urgent">Urgent</option>
+                      <option value="high">High</option>
+                      <option value="normal">Normal</option>
+                      <option value="low">Low</option>
+                    </select>
+                  </div>
                   {task.dueDate && (
                     <p className="text-xs text-muted-foreground">Due: {task.dueDate}</p>
                   )}
@@ -339,9 +779,40 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
             </Card>
           ))}
           {selected.size > 0 && (
-            <Button>
-              Save {selected.size} task{selected.size !== 1 ? 's' : ''}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={saveSelectedTasks} disabled={saving || !targetListId}>
+                {saving ? (
+                  <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> Saving…</>
+                ) : (
+                  `Save ${selected.size} task${selected.size !== 1 ? 's' : ''}`
+                )}
+              </Button>
+              {!targetListId && (
+                <span className="text-xs text-amber-700 dark:text-amber-300">
+                  Select a destination list to enable saving.
+                </span>
+              )}
+              {savedCount > 0 && (
+                <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                  Saved {savedCount} task{savedCount !== 1 ? 's' : ''}.
+                </span>
+              )}
+            </div>
+          )}
+          {saveError && (
+            <Card className="p-3 border-destructive/40 bg-destructive/5 text-sm text-destructive">
+              {saveError}
+            </Card>
+          )}
+          {failedItems.length > 0 && (
+            <Card className="p-3 space-y-1">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Failed items</p>
+              {failedItems.map((item, idx) => (
+                <p key={`${item.title}-${idx}`} className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{item.title}</span>: {item.reason}
+                </p>
+              ))}
+            </Card>
           )}
         </div>
       )}
