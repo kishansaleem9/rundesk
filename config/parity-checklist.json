@@ -1,0 +1,106 @@
+{
+  "version": "2026-05-11",
+  "owner": "platform",
+  "tracks": [
+    {
+      "id": "task-core",
+      "title": "Task Core Depth",
+      "items": [
+        "bulk-edit-status-priority-assignee",
+        "dependency-lifecycle-and-graph",
+        "recurring-task-rules",
+        "activity-audit-coverage"
+      ]
+    },
+    {
+      "id": "views-workload-timeline",
+      "title": "Views, Workload, Timeline",
+      "items": [
+        "workload-backend-capacity-data",
+        "timeline-date-drag-persist",
+        "view-save-and-defaults",
+        "cross-project-filtering"
+      ]
+    },
+    {
+      "id": "time-suite",
+      "title": "Time Tracking Suite",
+      "items": [
+        "active-timer-state",
+        "timesheet-rollups",
+        "time-reports-endpoint",
+        "csv-export"
+      ]
+    },
+    {
+      "id": "docs-collab",
+      "title": "Docs Collaboration",
+      "items": [
+        "optimistic-concurrency-on-save",
+        "realtime-doc-refresh",
+        "revision-safe-updates",
+        "search-index-refresh"
+      ]
+    },
+    {
+      "id": "integrations",
+      "title": "Integrations",
+      "items": [
+        "oauth-provider-state",
+        "slack-webhook-health",
+        "connection-list-consistency",
+        "unsupported-provider-guardrails"
+      ]
+    },
+    {
+      "id": "automation-webhooks",
+      "title": "Automation and Webhooks",
+      "items": [
+        "automation-run-reliability",
+        "webhook-retry-policy",
+        "delivery-audit-log",
+        "event-filter-enforcement"
+      ]
+    },
+    {
+      "id": "reports-dashboards",
+      "title": "Reports and Dashboards",
+      "items": [
+        "workspace-overview-metrics",
+        "workload-report",
+        "time-analytics",
+        "goals-sprints-widgets"
+      ]
+    },
+    {
+      "id": "forms",
+      "title": "Forms and Intake",
+      "items": [
+        "required-field-validation",
+        "task-mapping",
+        "submission-audit",
+        "form-lifecycle"
+      ]
+    },
+    {
+      "id": "permissions-governance",
+      "title": "Permissions and Governance",
+      "items": [
+        "workspace-role-enforcement",
+        "feature-flag-governance",
+        "admin-only-controls",
+        "security-event-logging"
+      ]
+    },
+    {
+      "id": "qa-release",
+      "title": "QA and Release Hardening",
+      "items": [
+        "smoke-suite-pass",
+        "api-test-suite-pass",
+        "lint-typecheck-pass",
+        "migration-order-check"
+      ]
+    }
+  ]
+}
