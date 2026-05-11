@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, eq, desc, sql } from 'drizzle-orm'
-import { forms, formFields, formSubmissions, lists, workspaces, tasks, users } from '@rundesk/db'
+import { forms, formFields, formSubmissions, tasks } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
@@ -244,10 +244,35 @@ export class FormsService {
   ) {
     const formWithFields = await this.getFormBySlug(slug)
 
-    // Validate required fields
+    // Validate required fields and basic field-shape constraints.
     for (const field of formWithFields.fields) {
-      if (field.isRequired && (data[field.id] === undefined || data[field.id] === '')) {
+      const value = data[field.id]
+      if (field.isRequired && (value === undefined || value === '')) {
         throw new BadRequestException(`Field "${field.label}" is required`)
+      }
+      if (value === undefined || value === '') continue
+
+      if (field.type === 'email' && typeof value === 'string') {
+        const emailLike = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+        if (!emailLike) throw new BadRequestException(`Field "${field.label}" must be a valid email`)
+      }
+      if (field.type === 'number' && typeof value === 'string') {
+        if (Number.isNaN(Number(value))) throw new BadRequestException(`Field "${field.label}" must be numeric`)
+      }
+      if (field.type === 'date' && typeof value === 'string') {
+        if (Number.isNaN(Date.parse(value))) throw new BadRequestException(`Field "${field.label}" must be a valid date`)
+      }
+      if ((field.type === 'dropdown' || field.type === 'multi_select') && field.options?.length) {
+        const allowed = new Set((field.options as Array<{ value: string }>).map((option) => option.value))
+        if (Array.isArray(value)) {
+          for (const v of value) {
+            if (!allowed.has(v)) {
+              throw new BadRequestException(`Field "${field.label}" has an invalid option`)
+            }
+          }
+        } else if (!allowed.has(value)) {
+          throw new BadRequestException(`Field "${field.label}" has an invalid option`)
+        }
       }
     }
 

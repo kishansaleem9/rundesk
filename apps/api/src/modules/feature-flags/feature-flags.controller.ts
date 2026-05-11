@@ -22,6 +22,12 @@ export class FeatureFlagsController {
     })
   }
 
+  @Get('workspace/:workspaceId')
+  @Roles('super_admin', 'workspace_admin')
+  async listWorkspaceOverrides(@Param('workspaceId') workspaceId: string) {
+    return this.featureFlagsService.listOverrides(workspaceId)
+  }
+
   @Put(':flagKey')
   @Roles('super_admin', 'workspace_admin')
   @HttpCode(HttpStatus.OK)

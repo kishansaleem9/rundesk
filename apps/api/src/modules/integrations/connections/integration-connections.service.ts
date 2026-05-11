@@ -38,6 +38,17 @@ export class IntegrationConnectionsService {
     }))
   }
 
+  listSupportedProviders() {
+    return [
+      'github',
+      'gitlab',
+      'gcal',
+      'google-drive',
+      'outlook',
+      'onedrive',
+    ] as const
+  }
+
   async getOAuthStartUrl(workspaceId: string, userId: string, providerRaw: string) {
     const provider = this.assertProvider(providerRaw)
     const cfg = this.getProviderConfig(provider)

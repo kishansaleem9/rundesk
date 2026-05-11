@@ -1,6 +1,7 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ConflictException } from '@nestjs/common'
 import { eq, and, asc, isNull } from 'drizzle-orm'
 import { docs } from '@rundesk/db'
+import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -60,6 +61,21 @@ export class DocsService {
     return row
   }
 
+  private async assertDocAccess(docId: string, userId: string) {
+    const [row] = await this.db.select().from(docs).where(eq(docs.id, docId))
+    if (!row) throw new NotFoundException('Doc not found')
+    const [membership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, row.workspaceId), eq(workspaceMembers.userId, userId)))
+    if (!membership) throw new NotFoundException('Doc not found')
+    return row
+  }
+
+  async getForUser(docId: string, userId: string) {
+    return this.assertDocAccess(docId, userId)
+  }
+
   async create(data: {
     workspaceId: string
     spaceId?: string | null
@@ -88,6 +104,7 @@ export class DocsService {
 
   async update(
     docId: string,
+    userId: string,
     patch: {
       title?: string
       icon?: string | null
@@ -97,9 +114,24 @@ export class DocsService {
       spaceId?: string | null
       position?: number
       isArchived?: boolean
+      expectedUpdatedAt?: string
     },
   ) {
+    await this.assertDocAccess(docId, userId)
+    if (patch.expectedUpdatedAt) {
+      const [current] = await this.db
+        .select({ updatedAt: docs.updatedAt })
+        .from(docs)
+        .where(eq(docs.id, docId))
+      if (!current) throw new NotFoundException('Doc not found')
+      const expected = new Date(patch.expectedUpdatedAt).getTime()
+      const actual = current.updatedAt ? new Date(current.updatedAt).getTime() : NaN
+      if (!Number.isFinite(expected) || expected !== actual) {
+        throw new ConflictException('Doc was updated by a teammate. Refresh and retry your save.')
+      }
+    }
     const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
+    delete set.expectedUpdatedAt
     if (patch.content) set.plaintext = extractPlaintext(patch.content)
     const [row] = await this.db.update(docs).set(set).where(eq(docs.id, docId)).returning()
     if (!row) throw new NotFoundException('Doc not found')
@@ -110,6 +142,14 @@ export class DocsService {
   }
 
   async delete(docId: string) {
+    const [row] = await this.db.update(docs).set({ isArchived: true, updatedAt: new Date() }).where(eq(docs.id, docId)).returning()
+    if (!row) throw new NotFoundException('Doc not found')
+    this.realtime.emitToWorkspace(row.workspaceId, { type: 'doc.updated', docId, patch: { archived: true } })
+    return { ok: true }
+  }
+
+  async deleteForUser(docId: string, userId: string) {
+    await this.assertDocAccess(docId, userId)
     const [row] = await this.db.update(docs).set({ isArchived: true, updatedAt: new Date() }).where(eq(docs.id, docId)).returning()
     if (!row) throw new NotFoundException('Doc not found')
     this.realtime.emitToWorkspace(row.workspaceId, { type: 'doc.updated', docId, patch: { archived: true } })

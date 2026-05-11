@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common'
-import { eq, and, isNull } from 'drizzle-orm'
+import { eq, isNull } from 'drizzle-orm'
 import { featureFlags } from '@rundesk/db'
 import { DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
@@ -88,5 +88,21 @@ export class FeatureFlagsService {
       set: { enabled, updatedBy, updatedAt: new Date() },
     })
     this.invalidateCache(scopeId ?? undefined, workspaceId ?? undefined)
+  }
+
+  async listOverrides(workspaceId?: string | null) {
+    const rows = await this.db
+      .select()
+      .from(featureFlags)
+      .where(
+        workspaceId
+          ? eq(featureFlags.workspaceId, workspaceId)
+          : isNull(featureFlags.workspaceId),
+      )
+    return rows.sort((a, b) => {
+      const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+      const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+      return bt - at
+    })
   }
 }

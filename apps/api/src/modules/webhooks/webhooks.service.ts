@@ -120,15 +120,15 @@ export class WebhooksService {
     let success = false
 
     try {
-      const res = await fetch(hook.url, {
+      const res = await this.postWithRetry(hook.url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Rundesk-Event': event,
+          'X-Rundesk-Delivery-Id': crypto.randomUUID(),
           ...(signature ? { 'X-Rundesk-Signature': signature } : {}),
         },
         body,
-        signal: AbortSignal.timeout(10_000),
       })
       statusCode = res.status
       responseBody = await res.text().catch(() => '')
@@ -165,5 +165,33 @@ export class WebhooksService {
     const hook = await this.assertOwnership(workspaceId, webhookId)
     await this.deliver(hook, 'webhook.test', { message: 'Test delivery from Rundesk' })
     return { ok: true }
+  }
+
+  private async postWithRetry(
+    url: string,
+    init: {
+      method: 'POST'
+      headers: Record<string, string>
+      body: string
+    },
+  ) {
+    let attempt = 0
+    let lastErr: unknown
+    const maxAttempts = 3
+    while (attempt < maxAttempts) {
+      try {
+        return await fetch(url, {
+          ...init,
+          signal: AbortSignal.timeout(10_000),
+        })
+      } catch (err) {
+        lastErr = err
+        attempt++
+        if (attempt >= maxAttempts) break
+        const backoffMs = 250 * attempt
+        await new Promise((resolve) => setTimeout(resolve, backoffMs))
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('Webhook delivery failed after retries')
   }
 }

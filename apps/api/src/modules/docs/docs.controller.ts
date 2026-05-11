@@ -44,13 +44,14 @@ export class DocsController {
   }
 
   @Get('docs/:docId')
-  get(@Param('docId') docId: string) {
-    return this.docs.get(docId)
+  get(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.getForUser(docId, user.id)
   }
 
   @Patch('docs/:docId')
   update(
     @Param('docId') docId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Body() body: {
       title?: string
       icon?: string | null
@@ -60,13 +61,14 @@ export class DocsController {
       spaceId?: string | null
       position?: number
       isArchived?: boolean
+      expectedUpdatedAt?: string
     },
   ) {
-    return this.docs.update(docId, body)
+    return this.docs.update(docId, user.id, body)
   }
 
   @Delete('docs/:docId')
-  remove(@Param('docId') docId: string) {
-    return this.docs.delete(docId)
+  remove(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.deleteForUser(docId, user.id)
   }
 }

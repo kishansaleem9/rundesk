@@ -21,6 +21,14 @@ export class IntegrationConnectionsController {
   }
 
   @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
+  @Get('workspaces/:workspaceId/integrations/connections/providers')
+  @ApiOperation({ summary: 'List OAuth providers supported by backend' })
+  providers() {
+    return this.svc.listSupportedProviders()
+  }
+
+  @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard)
   @Post('workspaces/:workspaceId/integrations/connections/:provider/oauth/start')
   @ApiOperation({ summary: 'Create OAuth authorization URL for a provider' })

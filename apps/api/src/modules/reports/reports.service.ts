@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common'
-import { and, eq, gte, lte, sql, desc, count, sum, isNotNull } from 'drizzle-orm'
+import { and, eq, gte, sql, desc } from 'drizzle-orm'
 import {
   tasks,
   taskAssignees,
@@ -239,5 +239,76 @@ export class ReportsService {
       avgProgress,
       total: rows.length,
     }
+  }
+
+  async getWorkload(workspaceId: string, days = 14) {
+    const horizon = Math.min(Math.max(days, 1), 90)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(end.getDate() + horizon - 1)
+    end.setHours(23, 59, 59, 999)
+
+    const members = await this.db
+      .select({
+        userId: users.id,
+        name: users.displayName,
+      })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+
+    const assignments = await this.db
+      .select({
+        userId: taskAssignees.userId,
+        timeEstimate: tasks.timeEstimate,
+        startDate: tasks.startDate,
+        dueDate: tasks.dueDate,
+        status: tasks.status,
+      })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.status} != 'done'`))
+
+    const dayCount = horizon
+    const perUser = new Map<string, number[]>()
+    for (const member of members) {
+      perUser.set(member.userId, Array.from({ length: dayCount }, () => 0))
+    }
+
+    const toDayStart = (value: Date) => {
+      const next = new Date(value)
+      next.setHours(0, 0, 0, 0)
+      return next
+    }
+
+    for (const assignment of assignments) {
+      const dailyLoads = perUser.get(assignment.userId)
+      if (!dailyLoads) continue
+
+      const estimateHours = Math.max(0.5, Math.round(((assignment.timeEstimate ?? 4 * 3600) / 3600) * 10) / 10)
+      const rawStart = assignment.startDate ? toDayStart(new Date(assignment.startDate)) : start
+      const rawEnd = assignment.dueDate ? toDayStart(new Date(assignment.dueDate)) : rawStart
+      const rangeStart = rawStart < start ? start : rawStart
+      const rangeEnd = rawEnd > end ? end : rawEnd
+      const spanDays = Math.max(1, Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / 86400000) + 1)
+      const perDay = estimateHours / spanDays
+
+      for (let offset = 0; offset < dayCount; offset++) {
+        const current = new Date(start)
+        current.setDate(current.getDate() + offset)
+        const within = current >= rangeStart && current <= rangeEnd
+        if (within) dailyLoads[offset] += perDay
+      }
+    }
+
+    return members.map((member) => ({
+      name: member.name ?? 'Unknown',
+      capacity: 8,
+      dailyLoads: (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10),
+    }))
   }
 }

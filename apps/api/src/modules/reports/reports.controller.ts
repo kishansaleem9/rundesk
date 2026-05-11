@@ -55,4 +55,13 @@ export class ReportsController {
   goals(@Param('workspaceId') workspaceId: string) {
     return this.reports.getGoalsProgress(workspaceId)
   }
+
+  @Get('workload')
+  @ApiOperation({ summary: 'Team workload and capacity heatmap report' })
+  workload(
+    @Param('workspaceId') workspaceId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.reports.getWorkload(workspaceId, days ? parseInt(days, 10) : 14)
+  }
 }
