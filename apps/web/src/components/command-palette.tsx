@@ -145,7 +145,7 @@ export function CommandPalette({
           <CommandGroup heading="Quick actions">
             <CommandItem onSelect={() => createTask.mutate()} value={`__create__${query}`}>
               <Plus className="text-accent" />
-              Create task <span className="font-medium text-foreground">"{query.trim()}"</span>
+              Create task <span className="font-medium text-foreground">&quot;{query.trim()}&quot;</span>
               <CommandShortcut>↵</CommandShortcut>
             </CommandItem>
           </CommandGroup>

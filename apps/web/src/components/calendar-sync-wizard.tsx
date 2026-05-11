@@ -119,7 +119,7 @@ export function CalendarSyncWizard({
               <Sparkles className="h-3.5 w-3.5 text-accent shrink-0 mt-0.5" />
               <span>
                 Rundesk will create a dedicated calendar named{' '}
-                <span className="font-mono">Rundesk · Main Workspace</span> so it's easy to toggle off.
+                <span className="font-mono">Rundesk · Main Workspace</span> so it&apos;s easy to toggle off.
               </span>
             </div>
           </div>

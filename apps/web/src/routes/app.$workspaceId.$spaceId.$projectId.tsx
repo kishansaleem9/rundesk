@@ -268,7 +268,7 @@ function CustomFieldsSection({
         <Card className="p-4 text-sm text-muted-foreground">Loading…</Card>
       ) : fields.length === 0 ? (
         <Card className="p-4 text-sm text-muted-foreground">
-          No custom fields yet. Add fields like "Estimated cost", "Risk level", or "Sprint" to
+          No custom fields yet. Add fields like &quot;Estimated cost&quot;, &quot;Risk level&quot;, or &quot;Sprint&quot; to
           tailor tasks for this project.
         </Card>
       ) : (

@@ -102,7 +102,7 @@ function InboxPage() {
           )}
         </div>
         <p className="text-sm text-muted-foreground mt-0.5 max-w-xl">
-          Mentions, comments, and updates across every workspace you're part of.
+          Mentions, comments, and updates across every workspace you&apos;re part of.
         </p>
       </header>
 
@@ -111,7 +111,7 @@ function InboxPage() {
           {notifs.length === 0 ? (
             <EmptyState
               icon={<Bell className="h-6 w-6" />}
-              title="You're all caught up"
+              title="You&apos;re all caught up"
               description="Mentions, task assignments and replies will land here. Take a breath."
             />
           ) : (

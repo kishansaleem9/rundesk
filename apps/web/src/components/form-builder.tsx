@@ -303,7 +303,7 @@ export function FormBuilder({
                   onChange={(e) => updateField(activeField.id, { mappedTo: e.target.value || undefined })}
                   className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm"
                 >
-                  <option value="">— Don't map —</option>
+                  <option value="">— Don&apos;t map —</option>
                   {TASK_FIELD_OPTIONS.map((o) => (
                     <option key={o} value={o}>
                       {o}

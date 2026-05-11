@@ -246,10 +246,10 @@ function StepAccount({
     <div className="space-y-6">
       <header className="space-y-1.5">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Let's get you set up
+          Let&apos;s get you set up
         </h1>
         <p className="text-sm text-muted-foreground">
-          Start with the basics — we'll have your workspace ready in under two minutes.
+          Start with the basics — we&apos;ll have your workspace ready in under two minutes.
         </p>
       </header>
 
@@ -365,7 +365,7 @@ function StepWorkspace({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label>What's your industry?</Label>
+            <Label>What&apos;s your industry?</Label>
             <RadioGroup
               value={state.industry}
               onValueChange={(v) => update({ industry: v })}
@@ -476,7 +476,7 @@ function StepFeatures({
           What does your team need?
         </h1>
         <p className="text-sm text-muted-foreground">
-          Pick what you'll use — we'll turn the rest off so the workspace stays uncluttered.
+          Pick what you&apos;ll use — we&apos;ll turn the rest off so the workspace stays uncluttered.
           You can always change this later in Admin → Features.
         </p>
       </header>

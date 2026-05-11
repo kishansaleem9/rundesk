@@ -72,7 +72,7 @@ function ImportPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Import from ClickUp</h1>
         <p className="text-muted-foreground mt-1">
-          Upload a CSV exported from ClickUp and we'll recreate your spaces, lists, and tasks here.
+          Upload a CSV exported from ClickUp and we&apos;ll recreate your spaces, lists, and tasks here.
         </p>
       </div>
 

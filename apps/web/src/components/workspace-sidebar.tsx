@@ -511,7 +511,7 @@ export function WorkspaceSidebar() {
           )}
         </div>
       </div>
-      {false && workspaceId && (
+      {workspaceId && (
         <>
           <div
             ref={dockRef}

@@ -101,7 +101,7 @@ export function EmailToTaskPanel({
 
       <div className="rounded-md border border-border/40 bg-card/30 p-3 text-xs text-muted-foreground">
         <strong className="text-foreground">Tip:</strong> Emails from people outside your workspace land
-        as <span className="font-medium text-foreground">unassigned</span> with the sender's email saved
+        as <span className="font-medium text-foreground">unassigned</span> with the sender&apos;s email saved
         in the description.
       </div>
 

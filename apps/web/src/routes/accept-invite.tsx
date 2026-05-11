@@ -147,7 +147,7 @@ function AcceptInvite() {
             </div>
             <div className="space-y-1.5">
               <h1 className="font-display text-2xl font-semibold tracking-tight">
-                You're invited!
+                You&apos;re invited!
               </h1>
               <p className="text-sm text-muted-foreground">
                 <strong>{invite.inviterName}</strong> invited you to join <strong>{invite.orgName}</strong> on Rundesk.

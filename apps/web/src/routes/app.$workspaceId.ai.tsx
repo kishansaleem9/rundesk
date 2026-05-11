@@ -303,7 +303,8 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
               className={cn('p-3 cursor-pointer', selected.has(i) && 'border-brand-500 bg-brand-200/10')}
               onClick={() => {
                 const next = new Set(selected)
-                next.has(i) ? next.delete(i) : next.add(i)
+                if (next.has(i)) next.delete(i)
+                else next.add(i)
                 setSelected(next)
               }}
             >

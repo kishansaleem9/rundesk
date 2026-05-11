@@ -95,7 +95,7 @@ function PublicFormPage() {
           <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
           <h2 className="text-lg font-semibold">Form not found</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            This form doesn't exist or has been disabled.
+            This form doesn&apos;t exist or has been disabled.
           </p>
         </div>
       </div>

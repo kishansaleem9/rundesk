@@ -444,7 +444,7 @@ function NotificationsBell() {
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-gradient-soft text-white shadow-glow">
                 <InboxIcon className="h-5 w-5" />
               </div>
-              <p className="text-sm font-medium">You're all caught up</p>
+              <p className="text-sm font-medium">You&apos;re all caught up</p>
               <p className="text-xs text-muted-foreground max-w-[220px]">
                 Mentions, comment replies and assignments will land here.
               </p>

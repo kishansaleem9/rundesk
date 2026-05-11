@@ -63,7 +63,7 @@ export function PwaInstallPrompt() {
       {!isOnline && (
         <div className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-amber-950 text-xs font-medium px-3 py-1.5 flex items-center justify-center gap-2 shadow">
           <WifiOff className="h-3.5 w-3.5" />
-          You're offline — recently viewed data still works.
+          You&apos;re offline — recently viewed data still works.
         </div>
       )}
 

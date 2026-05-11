@@ -52,7 +52,7 @@ export function RecurringTaskDialog({
             Make recurring
           </DialogTitle>
           <DialogDescription>
-            We'll auto-create the next instance when this task is completed.
+            We&apos;ll auto-create the next instance when this task is completed.
           </DialogDescription>
         </DialogHeader>
 

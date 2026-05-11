@@ -193,7 +193,7 @@ function IpAllowlistDialog({
                 <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0 mt-0.5" />
                 <span>
                   Your current IP <span className="font-mono font-medium">203.0.113.42</span> is allowed —
-                  if it isn't, you'll be locked out.
+                  if it isn&apos;t, you&apos;ll be locked out.
                 </span>
               </div>
 

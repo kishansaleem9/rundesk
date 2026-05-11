@@ -261,7 +261,7 @@ export function VersionHistoryDialog({
               Snapshot from {VERSIONS.find((v) => v.id === active)?.timestamp}.
             </p>
             <h3>Summary</h3>
-            <p>One paragraph on what's changing and why.</p>
+            <p>One paragraph on what&apos;s changing and why.</p>
             <h3>Test plan</h3>
             <ul>
               <li>Unit tests cover the new branches</li>

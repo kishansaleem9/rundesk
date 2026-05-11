@@ -102,7 +102,9 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
                 accumulated += parsed.delta
                 setStreamBuffer(accumulated)
               }
-            } catch {}
+            } catch {
+              // Ignore malformed stream frames and continue.
+            }
           }
         }
       }
@@ -175,7 +177,7 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
                 <Bot className="h-3.5 w-3.5 text-white" />
               </div>
               <div className="bg-muted rounded-xl rounded-tl-sm px-3 py-2 text-sm max-w-xs">
-                Hi! I'm Rundesk AI. I can help you manage tasks, summarize projects, draft content, and more.
+                Hi! I&apos;m Rundesk AI. I can help you manage tasks, summarize projects, draft content, and more.
               </div>
             </div>
             <div className="space-y-2">

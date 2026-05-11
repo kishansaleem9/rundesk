@@ -566,6 +566,28 @@ function GroupedListView({
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onAddTask: (status: TaskStatus, title: string) => Promise<void> | void
 }) {
+  const grouped = useMemo(() => {
+    const map: Record<TaskStatus, TaskItem[]> = {
+      backlog: [],
+      todo: [],
+      in_progress: [],
+      in_review: [],
+      done: [],
+      cancelled: [],
+    }
+    for (const t of tasks) map[t.status].push(t)
+    return map
+  }, [tasks])
+
+  const [collapsed, setCollapsed] = useState<Record<TaskStatus, boolean>>({
+    backlog: false,
+    todo: false,
+    in_progress: false,
+    in_review: false,
+    done: true,
+    cancelled: true,
+  })
+
   if (groupBy === 'priority') {
     const priorityGroups: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
     return (
@@ -590,28 +612,6 @@ function GroupedListView({
       </div>
     )
   }
-
-  const grouped = useMemo(() => {
-    const map: Record<TaskStatus, TaskItem[]> = {
-      backlog: [],
-      todo: [],
-      in_progress: [],
-      in_review: [],
-      done: [],
-      cancelled: [],
-    }
-    for (const t of tasks) map[t.status].push(t)
-    return map
-  }, [tasks])
-
-  const [collapsed, setCollapsed] = useState<Record<TaskStatus, boolean>>({
-    backlog: false,
-    todo: false,
-    in_progress: false,
-    in_review: false,
-    done: true,
-    cancelled: true,
-  })
 
   return (
     <div className="space-y-5">
