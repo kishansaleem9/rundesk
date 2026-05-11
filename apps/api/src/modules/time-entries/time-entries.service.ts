@@ -1,12 +1,32 @@
-import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { eq, and, desc, isNull, gte, sql } from 'drizzle-orm'
-import { timeEntries, tasks, lists, projects, spaces } from '@rundesk/db'
+import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
+import { eq, and, desc, isNull, gte, inArray } from 'drizzle-orm'
+import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
 @Injectable()
 export class TimeEntriesService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
+
+  async canModerateApprovals(workspaceId: string, userId: string) {
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return membership?.role === 'workspace_admin'
+  }
+
+  private normalizeWeekStart(weekStart: string): string {
+    const parsed = new Date(`${weekStart}T00:00:00.000Z`)
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException('Invalid week start date')
+    }
+    const day = parsed.getUTCDay()
+    const distanceToMonday = (day + 6) % 7
+    parsed.setUTCDate(parsed.getUTCDate() - distanceToMonday)
+    return parsed.toISOString().slice(0, 10)
+  }
 
   async listForWorkspace(workspaceId: string, opts: { userId?: string; since?: Date } = {}) {
     const where = and(
@@ -26,9 +46,11 @@ export class TimeEntriesService {
         isBillable: timeEntries.isBillable,
         createdAt: timeEntries.createdAt,
         taskTitle: tasks.title,
+        userName: users.displayName,
       })
       .from(timeEntries)
       .leftJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .leftJoin(users, eq(users.id, timeEntries.userId))
       .leftJoin(lists, eq(lists.id, tasks.listId))
       .leftJoin(projects, eq(projects.id, lists.projectId))
       .leftJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -42,6 +64,172 @@ export class TimeEntriesService {
       billable: r.isBillable,
       loggedAt: r.startedAt,
     }))
+  }
+
+  async listApprovals(workspaceId: string, status?: 'pending' | 'approved' | 'rejected') {
+    const since = new Date()
+    since.setUTCDate(since.getUTCDate() - 90)
+
+    const rows = await this.db
+      .select({
+        userId: timeEntries.userId,
+        userName: users.displayName,
+        startedAt: timeEntries.startedAt,
+        durationSec: timeEntries.durationSec,
+        isBillable: timeEntries.isBillable,
+        description: timeEntries.description,
+        projectName: projects.name,
+      })
+      .from(timeEntries)
+      .leftJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .leftJoin(users, eq(users.id, timeEntries.userId))
+      .leftJoin(lists, eq(lists.id, tasks.listId))
+      .leftJoin(projects, eq(projects.id, lists.projectId))
+      .leftJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(timeEntries.startedAt, since)))
+      .orderBy(desc(timeEntries.startedAt))
+
+    const approvals = await this.db
+      .select()
+      .from(timeApprovals)
+      .where(eq(timeApprovals.workspaceId, workspaceId))
+    const reviewerIds = [...new Set(approvals.map((item) => item.approvedById).filter((id): id is string => Boolean(id)))]
+    const reviewerRows =
+      reviewerIds.length > 0
+        ? await this.db
+            .select({
+              id: users.id,
+              displayName: users.displayName,
+              email: users.email,
+            })
+            .from(users)
+            .where(inArray(users.id, reviewerIds))
+        : []
+    const reviewerById = new Map(
+      reviewerRows.map((row) => [row.id, { name: row.displayName ?? null, email: row.email ?? null }]),
+    )
+
+    const approvalByKey = new Map<string, (typeof approvals)[number]>(
+      approvals.map((item) => [`${item.userId}:${item.weekStart}`, item]),
+    )
+    const sheets = new Map<
+      string,
+      {
+        id: string
+        userId: string
+        name: string
+        weekStart: string
+        weekOf: string
+        total: number
+        billable: number
+        status: 'pending' | 'approved' | 'rejected'
+        approvedAt?: Date | null
+        approvedById?: string | null
+        reviewerName?: string | null
+        reviewerEmail?: string | null
+        rejectionReason?: string
+        entries: Array<{ project: string; hours: number; billable: boolean; note?: string }>
+      }
+    >()
+
+    for (const row of rows) {
+      const startedAt = new Date(row.startedAt)
+      const weekStart = this.normalizeWeekStart(startedAt.toISOString().slice(0, 10))
+      const key = `${row.userId}:${weekStart}`
+      const approval = approvalByKey.get(key)
+      const start = new Date(`${weekStart}T00:00:00.000Z`)
+      const end = new Date(start)
+      end.setUTCDate(end.getUTCDate() + 6)
+      const reviewer = approval?.approvedById ? reviewerById.get(approval.approvedById) : undefined
+      if (!sheets.has(key)) {
+        sheets.set(key, {
+          id: key,
+          userId: row.userId,
+          name: row.userName ?? 'Member',
+          weekStart,
+          weekOf: `${start.toLocaleDateString()} — ${end.toLocaleDateString()}`,
+          total: 0,
+          billable: 0,
+          status: (approval?.status as 'pending' | 'approved' | 'rejected') ?? 'pending',
+          approvedAt: approval?.approvedAt ?? null,
+          approvedById: approval?.approvedById ?? null,
+          reviewerName: reviewer?.name ?? null,
+          reviewerEmail: reviewer?.email ?? null,
+          rejectionReason: approval?.rejectionReason ?? undefined,
+          entries: [],
+        })
+      }
+      const sheet = sheets.get(key)!
+      const hours = (row.durationSec ?? 0) / 3600
+      sheet.total += hours
+      if (row.isBillable) sheet.billable += hours
+      sheet.entries.push({
+        project: row.projectName ?? 'Project',
+        hours: Number(hours.toFixed(2)),
+        billable: row.isBillable,
+        note: row.description ?? undefined,
+      })
+    }
+
+    const allSheets = [...sheets.values()]
+      .map((sheet) => ({
+        ...sheet,
+        total: Number(sheet.total.toFixed(1)),
+        billable: Number(sheet.billable.toFixed(1)),
+      }))
+      .sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1))
+
+    return status ? allSheets.filter((sheet) => sheet.status === status) : allSheets
+  }
+
+  async setApprovalStatus(
+    workspaceId: string,
+    userId: string,
+    weekStart: string,
+    actorId: string,
+    input: { status: 'approved' | 'rejected'; reason?: string | null },
+  ) {
+    const normalizedWeekStart = this.normalizeWeekStart(weekStart)
+    const [existing] = await this.db
+      .select()
+      .from(timeApprovals)
+      .where(
+        and(
+          eq(timeApprovals.workspaceId, workspaceId),
+          eq(timeApprovals.userId, userId),
+          eq(timeApprovals.weekStart, normalizedWeekStart),
+        ),
+      )
+      .limit(1)
+
+    if (existing) {
+      const [updated] = await this.db
+        .update(timeApprovals)
+        .set({
+          status: input.status,
+          rejectionReason: input.status === 'rejected' ? input.reason ?? null : null,
+          approvedById: actorId,
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(timeApprovals.id, existing.id))
+        .returning()
+      return updated
+    }
+
+    const [created] = await this.db
+      .insert(timeApprovals)
+      .values({
+        workspaceId,
+        userId,
+        weekStart: normalizedWeekStart,
+        status: input.status,
+        rejectionReason: input.status === 'rejected' ? input.reason ?? null : null,
+        approvedById: actorId,
+        approvedAt: new Date(),
+      })
+      .returning()
+    return created
   }
 
   async getRunning(userId: string) {

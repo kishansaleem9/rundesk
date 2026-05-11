@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
   Button,
@@ -19,8 +20,18 @@ import {
   ClipboardCheck,
   AlertTriangle,
 } from 'lucide-react'
+import { api, ApiError } from '../lib/api'
 
 export const Route = createFileRoute('/app/$workspaceId/time/approvals')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    tab: search.tab === 'history' ? 'history' : 'pending',
+    historyFilter:
+      search.historyFilter === 'approved' ||
+      search.historyFilter === 'rejected' ||
+      search.historyFilter === 'this_week'
+        ? search.historyFilter
+        : 'all',
+  }),
   component: TimeApprovalsPage,
 })
 
@@ -31,83 +42,173 @@ type Timesheet = {
   total: number // hours
   billable: number
   status: 'pending' | 'approved' | 'rejected'
+  approvedAt?: string | null
+  approvedById?: string | null
+  reviewerName?: string | null
+  reviewerEmail?: string | null
   rejectionReason?: string
   entries: Array<{ project: string; hours: number; billable: boolean; note?: string }>
 }
+function parseSheetId(id: string): { userId: string; weekStart: string } | null {
+  const split = id.split(':')
+  if (split.length !== 2) return null
+  return { userId: split[0], weekStart: split[1] }
+}
 
-const MOCK: Timesheet[] = [
-  {
-    id: 't1',
-    name: 'Hamda Tahir',
-    weekOf: 'Apr 22 — Apr 28',
-    total: 38.5,
-    billable: 32,
-    status: 'pending',
-    entries: [
-      { project: 'v1.0 launch · onboarding', hours: 18, billable: true },
-      { project: 'AI agent rollout · prompts', hours: 9, billable: true },
-      { project: 'Migration playbook · docs', hours: 5, billable: true },
-      { project: 'Internal — pairing & reviews', hours: 6.5, billable: false },
-    ],
-  },
-  {
-    id: 't2',
-    name: 'Iqra Khalid',
-    weekOf: 'Apr 22 — Apr 28',
-    total: 42,
-    billable: 40,
-    status: 'pending',
-    entries: [
-      { project: 'v1.0 launch · workload view', hours: 22, billable: true, note: 'Custom heat-map + tooltips' },
-      { project: 'v1.0 launch · onboarding', hours: 12, billable: true },
-      { project: 'Design system polish', hours: 6, billable: true },
-      { project: 'Internal — design review', hours: 2, billable: false },
-    ],
-  },
-  {
-    id: 't3',
-    name: 'Mali Acme',
-    weekOf: 'Apr 22 — Apr 28',
-    total: 39,
-    billable: 36,
-    status: 'pending',
-    entries: [
-      { project: 'AI agent rollout · backend', hours: 24, billable: true },
-      { project: 'v1.0 launch · authz', hours: 12, billable: true },
-      { project: 'Internal — code review', hours: 3, billable: false },
-    ],
-  },
-  {
-    id: 't4',
-    name: 'Sara Idris',
-    weekOf: 'Apr 15 — Apr 21',
-    total: 40,
-    billable: 38,
-    status: 'approved',
-    entries: [{ project: 'v1.0 launch', hours: 38, billable: true }, { project: 'Internal', hours: 2, billable: false }],
-  },
-  {
-    id: 't5',
-    name: 'Bilal Khan',
-    weekOf: 'Apr 15 — Apr 21',
-    total: 42,
-    billable: 28,
-    status: 'rejected',
-    rejectionReason: 'Please split internal time more granularly — needs project tags.',
-    entries: [{ project: 'Internal', hours: 14, billable: false }, { project: 'v1.0 launch', hours: 28, billable: true }],
-  },
-]
+function isCurrentWeek(weekOfLabel: string) {
+  const [, endRaw] = weekOfLabel.split(' — ')
+  if (!endRaw) return false
+  const end = new Date(endRaw)
+  if (Number.isNaN(end.getTime())) return false
+  const now = new Date()
+  return end >= now
+}
+
+function historyFilterLabel(filter: 'all' | 'approved' | 'rejected' | 'this_week') {
+  if (filter === 'all') return 'All'
+  if (filter === 'approved') return 'Approved'
+  if (filter === 'rejected') return 'Rejected'
+  return 'This week'
+}
+
+type ApprovalsTab = 'pending' | 'history'
+type ApprovalsHistoryFilter = 'all' | 'approved' | 'rejected' | 'this_week'
 
 function TimeApprovalsPage() {
-  const [tab, setTab] = useState<'pending' | 'history'>('pending')
+  const { workspaceId } = Route.useParams()
+  const search = Route.useSearch() as { tab: ApprovalsTab; historyFilter: ApprovalsHistoryFilter }
+  const navigate = useNavigate()
+  const historyFilterStorageKey = `rundesk.time-approvals.history-filter.${workspaceId}`
+  const qc = useQueryClient()
+  const [tab, setTab] = useState<ApprovalsTab>(search.tab)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [expanded, setExpanded] = useState<Set<string>>(new Set([MOCK[0].id]))
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [rejecting, setRejecting] = useState<string | null>(null)
   const [reason, setReason] = useState('')
+  const [accessDenied, setAccessDenied] = useState(false)
+  const [historyFilter, setHistoryFilter] = useState<ApprovalsHistoryFilter>(
+    search.historyFilter,
+  )
 
-  const pending = MOCK.filter((m) => m.status === 'pending')
-  const history = MOCK.filter((m) => m.status !== 'pending')
-  const list = tab === 'pending' ? pending : history
+  const approvalsQuery = useQuery({
+    queryKey: ['time-approvals', workspaceId],
+    queryFn: async () => {
+      try {
+        setAccessDenied(false)
+        return await api<{ canModerate: boolean; items: Timesheet[] }>(
+          `/workspaces/${workspaceId}/time-approvals`,
+        )
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) {
+          setAccessDenied(true)
+        }
+        return { canModerate: false, items: [] as Timesheet[] }
+      }
+    },
+  })
+  const canModerateApprovals = approvalsQuery.data?.canModerate ?? false
+  const allSheets = approvalsQuery.data?.items ?? []
+  const pending = allSheets.filter((m) => m.status === 'pending')
+  const history = allSheets.filter((m) => m.status !== 'pending')
+  const historyCounts = useMemo(
+    () => ({
+      all: history.length,
+      approved: history.filter((sheet) => sheet.status === 'approved').length,
+      rejected: history.filter((sheet) => sheet.status === 'rejected').length,
+      this_week: history.filter((sheet) => isCurrentWeek(sheet.weekOf)).length,
+    }),
+    [history],
+  )
+  const filteredHistory = history.filter((sheet) => {
+    if (historyFilter === 'all') return true
+    if (historyFilter === 'approved') return sheet.status === 'approved'
+    if (historyFilter === 'rejected') return sheet.status === 'rejected'
+    return isCurrentWeek(sheet.weekOf)
+  })
+  const list = tab === 'pending' ? pending : filteredHistory
+
+  useEffect(() => {
+    setTab(search.tab)
+  }, [search.tab])
+
+  useEffect(() => {
+    setHistoryFilter(search.historyFilter)
+  }, [search.historyFilter])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (search.historyFilter !== 'all') return
+    const raw = window.localStorage.getItem(historyFilterStorageKey)
+    if (!raw) return
+    if (raw === 'all' || raw === 'approved' || raw === 'rejected' || raw === 'this_week') {
+      setHistoryFilter(raw)
+    }
+  }, [historyFilterStorageKey, search.historyFilter])
+
+  useEffect(() => {
+    if (tab === search.tab && historyFilter === search.historyFilter) return
+    navigate({
+      to: '/app/$workspaceId/time/approvals',
+      params: { workspaceId },
+      search: { tab, historyFilter },
+      replace: true,
+    })
+  }, [historyFilter, navigate, search.historyFilter, search.tab, tab, workspaceId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(historyFilterStorageKey, historyFilter)
+  }, [historyFilter, historyFilterStorageKey])
+
+  useEffect(() => {
+    if (pending.length === 0) {
+      setExpanded(new Set())
+      return
+    }
+    setExpanded(new Set([pending[0].id]))
+  }, [pending.length])
+
+  const approveMutation = useMutation({
+    mutationFn: async ({ userId, weekStart }: { userId: string; weekStart: string }) =>
+      api(`/workspaces/${workspaceId}/time-approvals/${userId}/${weekStart}/approve`, { method: 'POST' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['time-approvals', workspaceId] })
+    },
+  })
+  const rejectMutation = useMutation({
+    mutationFn: async ({ userId, weekStart, rejectReason }: { userId: string; weekStart: string; rejectReason: string }) =>
+      api(`/workspaces/${workspaceId}/time-approvals/${userId}/${weekStart}/reject`, {
+        method: 'POST',
+        body: { reason: rejectReason },
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['time-approvals', workspaceId] })
+    },
+  })
+
+  const selectedIds = useMemo(() => [...selected], [selected])
+  const selectedTimesheets = useMemo(() => list.filter((item) => selected.has(item.id)), [list, selected])
+
+  const approveSelected = async () => {
+    const targets = selectedTimesheets
+      .map((item) => parseSheetId(item.id))
+      .filter((item): item is { userId: string; weekStart: string } => Boolean(item))
+    if (targets.length === 0) return
+    await Promise.all(targets.map((target) => approveMutation.mutateAsync(target)))
+    setSelected(new Set())
+  }
+  const rejectSelected = async () => {
+    const trimmed = reason.trim()
+    if (!trimmed) return
+    const targets = selectedTimesheets
+      .map((item) => parseSheetId(item.id))
+      .filter((item): item is { userId: string; weekStart: string } => Boolean(item))
+    if (targets.length === 0) return
+    await Promise.all(targets.map((target) => rejectMutation.mutateAsync({ ...target, rejectReason: trimmed })))
+    setSelected(new Set())
+    setReason('')
+    setRejecting(null)
+  }
 
   function toggleSelect(id: string) {
     setSelected((s) => {
@@ -137,9 +238,14 @@ function TimeApprovalsPage() {
             <ClipboardCheck className="h-4 w-4" />
           </span>
           Approvals
+          <Badge variant={canModerateApprovals ? 'success' : 'secondary'} className="ml-1 text-[10px] uppercase">
+            {canModerateApprovals ? 'Admin reviewer' : 'Read-only'}
+          </Badge>
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Review and approve weekly timesheets from your team.
+          {canModerateApprovals
+            ? 'Review and approve weekly timesheets from your team.'
+            : 'View weekly timesheets. Approval actions are available to workspace admins.'}
         </p>
       </header>
 
@@ -168,25 +274,84 @@ function TimeApprovalsPage() {
             History ({history.length})
           </button>
         </div>
-        {tab === 'pending' && selected.size > 0 && (
+        {tab === 'history' ? (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1">
+              {[
+                { id: 'all', label: 'All' },
+                { id: 'approved', label: 'Approved' },
+                { id: 'rejected', label: 'Rejected' },
+                { id: 'this_week', label: 'This week' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setHistoryFilter(item.id as typeof historyFilter)}
+                  className={cn(
+                    'text-xs px-3 py-1.5 rounded-md font-medium transition-all',
+                    historyFilter === item.id
+                      ? 'bg-brand-gradient text-white shadow-sm'
+                      : 'hover:bg-card/60 text-muted-foreground',
+                  )}
+                >
+                  {item.label} ({historyCounts[item.id as keyof typeof historyCounts]})
+                </button>
+              ))}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setHistoryFilter('all')
+                if (typeof window !== 'undefined') {
+                  window.localStorage.removeItem(historyFilterStorageKey)
+                }
+              }}
+              disabled={historyFilter === 'all'}
+            >
+              Reset
+            </Button>
+          </div>
+        ) : null}
+        {tab === 'pending' && canModerateApprovals && selected.size > 0 && (
           <div className="flex items-center gap-2 animate-fade-in">
             <span className="text-xs text-muted-foreground">{selected.size} selected</span>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => setRejecting('bulk')}>
               <X className="h-3.5 w-3.5" /> Reject
             </Button>
-            <Button variant="gradient" size="sm">
+            <Button variant="gradient" size="sm" onClick={approveSelected} disabled={approveMutation.isPending}>
               <CheckCheck className="h-3.5 w-3.5" /> Approve all
             </Button>
           </div>
         )}
       </div>
+      {!canModerateApprovals && pending.length > 0 ? (
+        <Card className="p-3 border-border/60 bg-card/40 text-xs text-muted-foreground">
+          You can review submitted timesheets here, but only workspace admins can approve or reject entries.
+        </Card>
+      ) : null}
 
       {list.length === 0 ? (
-        <EmptyState
-          icon={<ClipboardCheck className="h-6 w-6" />}
-          title="No timesheets to review"
-          description={tab === 'pending' ? 'You\'re caught up. New submissions land here.' : 'Once you process timesheets, they\'ll appear here.'}
-        />
+        tab === 'history' && history.length > 0 ? (
+          <EmptyState
+            icon={<ClipboardCheck className="h-6 w-6" />}
+            title="No results for this filter"
+            description={`No timesheets match "${historyFilterLabel(historyFilter)}" right now.`}
+          />
+        ) : (
+        accessDenied || !canModerateApprovals ? (
+          <EmptyState
+            icon={<ClipboardCheck className="h-6 w-6" />}
+            title="Approvals require admin access"
+            description="Ask a workspace admin to review and moderate submitted timesheets."
+          />
+        ) : (
+          <EmptyState
+            icon={<ClipboardCheck className="h-6 w-6" />}
+            title="No timesheets to review"
+            description={tab === 'pending' ? 'You\'re caught up. New submissions land here.' : 'Once you process timesheets, they\'ll appear here.'}
+          />
+        )
+        )
       ) : (
         <div className="space-y-2.5">
           {list.map((t) => (
@@ -195,7 +360,7 @@ function TimeApprovalsPage() {
                 className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-card/40 transition-colors"
                 onClick={() => toggleExpand(t.id)}
               >
-                {tab === 'pending' && (
+                {tab === 'pending' && canModerateApprovals && (
                   <input
                     type="checkbox"
                     checked={selected.has(t.id)}
@@ -229,13 +394,31 @@ function TimeApprovalsPage() {
                     <span className="text-foreground tabular-nums">{t.total}h</span>
                     <span className="text-success tabular-nums">{t.billable}h billable</span>
                   </div>
+                  {t.status !== 'pending' && (t.approvedAt || t.approvedById) ? (
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      Last reviewed
+                      {t.approvedAt ? ` ${new Date(t.approvedAt).toLocaleString()}` : ''}
+                      {t.approvedById
+                        ? ` by ${t.reviewerName || t.reviewerEmail || t.approvedById}`
+                        : ''}
+                    </div>
+                  ) : null}
                 </div>
-                {tab === 'pending' && (
+                {tab === 'pending' && canModerateApprovals && (
                   <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <Button variant="ghost" size="sm" onClick={() => setRejecting(t.id)}>
                       <X className="h-3.5 w-3.5" /> Reject
                     </Button>
-                    <Button variant="gradient" size="sm">
+                    <Button
+                      variant="gradient"
+                      size="sm"
+                      onClick={async () => {
+                        const parsed = parseSheetId(t.id)
+                        if (!parsed) return
+                        await approveMutation.mutateAsync(parsed)
+                      }}
+                      disabled={approveMutation.isPending}
+                    >
                       <Check className="h-3.5 w-3.5" /> Approve
                     </Button>
                   </div>
@@ -249,6 +432,15 @@ function TimeApprovalsPage() {
 
               {expanded.has(t.id) && (
                 <div className="border-t border-border/30 bg-card/20 p-4 space-y-2 animate-fade-in">
+                  {(t.approvedAt || t.approvedById) && (
+                    <div className="rounded-md border border-border/40 bg-card/40 p-2.5 text-xs text-muted-foreground">
+                      Reviewed
+                      {t.approvedAt ? ` at ${new Date(t.approvedAt).toLocaleString()}` : ''}
+                      {t.approvedById
+                        ? ` by ${t.reviewerName || t.reviewerEmail || t.approvedById}`
+                        : ''}
+                    </div>
+                  )}
                   {t.rejectionReason && (
                     <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs">
                       <span className="font-medium text-destructive">Rejection reason: </span>
@@ -270,7 +462,7 @@ function TimeApprovalsPage() {
                     ))}
                   </ul>
 
-                  {rejecting === t.id && (
+                  {(rejecting === t.id || rejecting === 'bulk') && (
                     <div className="rounded-md border border-border/40 bg-card/40 p-3 mt-3 space-y-2">
                       <Textarea
                         value={reason}
@@ -282,8 +474,23 @@ function TimeApprovalsPage() {
                         <Button variant="ghost" size="sm" onClick={() => { setRejecting(null); setReason('') }}>
                           Cancel
                         </Button>
-                        <Button variant="destructive" size="sm">
-                          Send rejection
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={async () => {
+                            if (rejecting === 'bulk') {
+                              await rejectSelected()
+                              return
+                            }
+                            const parsed = parseSheetId(t.id)
+                            if (!parsed || !reason.trim()) return
+                            await rejectMutation.mutateAsync({ ...parsed, rejectReason: reason.trim() })
+                            setRejecting(null)
+                            setReason('')
+                          }}
+                          disabled={rejectMutation.isPending || reason.trim().length === 0}
+                        >
+                          {rejectMutation.isPending ? 'Sending…' : 'Send rejection'}
                         </Button>
                       </div>
                     </div>
