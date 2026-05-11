@@ -1132,6 +1132,58 @@ function DependenciesPanel({
       ),
     enabled: !!workspaceId,
   })
+  const graphQuery = useQuery({
+    queryKey: ['task', taskId, 'dependency-graph'],
+    queryFn: () =>
+      api<{
+        rootTaskId: string
+        nodes: Array<{
+          id: string
+          title: string
+          status: TaskStatus
+          priority: TaskPriority
+          isArchived: boolean
+        }>
+        edges: Array<{
+          taskId: string
+          relatedTaskId: string
+          type: 'blocks' | 'blocked_by' | 'related_to'
+        }>
+        metrics: {
+          nodeCount: number
+          edgeCount: number
+          blockedByOpenCount: number
+          blocksOpenCount: number
+          longestBlockedByChainDepth: number
+          longestBlocksChainDepth: number
+        }
+      }>(`/tasks/${taskId}/dependencies/graph?depth=3`),
+  })
+  const graphModel = useMemo(() => {
+    if (!graphQuery.data) return null
+    const byId = new Map(graphQuery.data.nodes.map((node) => [node.id, node]))
+    const upstream = new Set<string>()
+    const downstream = new Set<string>()
+    const relatedIds = new Set<string>()
+    for (const edge of graphQuery.data.edges) {
+      if (edge.type === 'related_to') {
+        if (edge.taskId === taskId) relatedIds.add(edge.relatedTaskId)
+        if (edge.relatedTaskId === taskId) relatedIds.add(edge.taskId)
+        continue
+      }
+      const blocker = edge.type === 'blocks' ? edge.taskId : edge.relatedTaskId
+      const blocked = edge.type === 'blocks' ? edge.relatedTaskId : edge.taskId
+      if (blocked === taskId) upstream.add(blocker)
+      if (blocker === taskId) downstream.add(blocked)
+    }
+    return {
+      byId,
+      upstream: [...upstream].map((id) => byId.get(id)).filter(Boolean),
+      downstream: [...downstream].map((id) => byId.get(id)).filter(Boolean),
+      related: [...relatedIds].map((id) => byId.get(id)).filter(Boolean),
+      edges: graphQuery.data.edges,
+    }
+  }, [graphQuery.data, taskId])
   const taskOptions = useMemo<TaskPickerItem[]>(
     () => (tasksQuery.data ?? []).filter((task) => task.id !== taskId),
     [tasksQuery.data, taskId],
@@ -1177,6 +1229,49 @@ function DependenciesPanel({
       <DepGroup label="Waiting on" items={waitingOn} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
       {related.length > 0 ? (
         <DepGroup label="Related" items={related} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
+      ) : null}
+      {graphQuery.data ? (
+        <div className="rounded-md border border-border bg-card p-3 space-y-3">
+          <div className="text-xs font-medium text-muted-foreground mb-2">Dependency graph insights</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+            <div>Nodes: <span className="font-medium text-foreground">{graphQuery.data.metrics.nodeCount}</span></div>
+            <div>Edges: <span className="font-medium text-foreground">{graphQuery.data.metrics.edgeCount}</span></div>
+            <div>Open blockers: <span className="font-medium text-foreground">{graphQuery.data.metrics.blockedByOpenCount}</span></div>
+            <div>Blocking open tasks: <span className="font-medium text-foreground">{graphQuery.data.metrics.blocksOpenCount}</span></div>
+            <div>Upstream chain depth: <span className="font-medium text-foreground">{graphQuery.data.metrics.longestBlockedByChainDepth}</span></div>
+            <div>Downstream chain depth: <span className="font-medium text-foreground">{graphQuery.data.metrics.longestBlocksChainDepth}</span></div>
+          </div>
+          {graphModel ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <GraphColumn
+                title="Blocking this task"
+                hint="Upstream blockers"
+                nodes={graphModel.upstream}
+                onOpenTask={onOpenTask}
+              />
+              <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Current task</div>
+                <div className="text-sm font-medium">{taskId}</div>
+              </div>
+              <GraphColumn
+                title="Blocked by this task"
+                hint="Downstream impact"
+                nodes={graphModel.downstream}
+                onOpenTask={onOpenTask}
+              />
+              {graphModel.related.length > 0 ? (
+                <div className="md:col-span-3">
+                  <GraphColumn
+                    title="Related links"
+                    hint="Non-blocking references"
+                    nodes={graphModel.related}
+                    onOpenTask={onOpenTask}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       <form
@@ -1226,6 +1321,51 @@ function DependenciesPanel({
           Add
         </Button>
       </form>
+    </div>
+  )
+}
+
+function GraphColumn({
+  title,
+  hint,
+  nodes,
+  onOpenTask,
+}: {
+  title: string
+  hint: string
+  nodes: Array<{
+    id: string
+    title: string
+    status: TaskStatus
+    priority: TaskPriority
+    isArchived: boolean
+  } | undefined>
+  onOpenTask: (relatedTaskId: string) => void
+}) {
+  const items = nodes.filter((node): node is NonNullable<typeof node> => Boolean(node))
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{title}</div>
+      <div className="text-[11px] text-muted-foreground mb-2">{hint}</div>
+      {items.length === 0 ? (
+        <div className="text-xs text-muted-foreground">None</div>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((node) => (
+            <button
+              key={node.id}
+              type="button"
+              onClick={() => onOpenTask(node.id)}
+              className="w-full text-left rounded border border-border bg-card px-2 py-1.5 hover:border-accent/40"
+            >
+              <div className="text-xs font-medium truncate">{node.title}</div>
+              <div className="text-[11px] text-muted-foreground truncate">
+                {node.status} · {node.priority}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -1381,7 +1521,7 @@ function AttachmentsPanel({
       >
         Drag and drop files here to upload
         {!uploadWired ? (
-          <div className="mt-2 text-xs">Upload endpoint not wired yet.</div>
+          <div className="mt-2 text-xs">File uploads are unavailable for this task source.</div>
         ) : null}
       </div>
       {uploadWired && (
@@ -1689,7 +1829,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                   <button
                     type="button"
                     className="text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => resolveComment.mutate({ commentId: c.id, resolved: !Boolean(c.resolvedAt) })}
+                    onClick={() => resolveComment.mutate({ commentId: c.id, resolved: !c.resolvedAt })}
                   >
                     {c.resolvedAt ? 'Reopen' : 'Resolve'}
                   </button>
@@ -2131,10 +2271,6 @@ function TimePanel({ taskId }: { taskId: string }) {
     },
   })
 
-  if (entriesQuery.data === null) {
-    return <NotWiredNote>Time tracking is not available.</NotWiredNote>
-  }
-
   const entries = entriesQuery.data ?? []
   const totalTrackedMs = useMemo(() => {
     return entries.reduce((sum, entry) => {
@@ -2143,6 +2279,9 @@ function TimePanel({ taskId }: { taskId: string }) {
       return sum + Math.max(0, new Date(entry.endedAt).getTime() - new Date(entry.startedAt).getTime())
     }, 0)
   }, [entries])
+  if (entriesQuery.data === null) {
+    return <NotWiredNote>Time tracking is not available.</NotWiredNote>
+  }
   const manualRangeValid =
     !!manualStart &&
     !!manualEnd &&

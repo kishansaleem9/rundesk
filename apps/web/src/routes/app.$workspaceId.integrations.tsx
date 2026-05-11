@@ -13,6 +13,7 @@ import {
   DialogTitle,
   DialogDescription,
   cn,
+  toast,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
 import {
@@ -90,15 +91,18 @@ function IntegrationsMarketplacePage() {
   const qc = useQueryClient()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<typeof CATEGORIES[number]['id']>('all')
-  const [connected, setConnected] = useState<Record<string, boolean>>(
-    Object.fromEntries(INTEGRATIONS.map((i) => [i.id, Boolean(i.installed)])),
-  )
   const [activeIntegration, setActiveIntegration] = useState<Integration | null>(null)
-  const [oauthLoading, setOauthLoading] = useState(false)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [slackWebhookUrl, setSlackWebhookUrl] = useState('')
   const [slackChannelName, setSlackChannelName] = useState('')
-  const oauthProviders = new Set(['github', 'gitlab', 'gcal', 'google-drive', 'outlook', 'onedrive'])
+  const providersQuery = useQuery({
+    queryKey: ['integration-provider-catalog', workspaceId],
+    queryFn: () =>
+      api<string[]>(
+        `/workspaces/${workspaceId}/integrations/connections/providers`,
+      ),
+  })
+  const oauthProviders = useMemo(() => new Set(providersQuery.data ?? ['github', 'gitlab', 'gcal', 'google-drive', 'outlook', 'onedrive']), [providersQuery.data])
   const oauthStatus = useMemo(() => {
     if (typeof window === 'undefined') return null
     const params = new URLSearchParams(window.location.search)
@@ -181,7 +185,7 @@ function IntegrationsMarketplacePage() {
     if (filter === 'installed') {
       if (i.id === 'slack') return Boolean(slackQuery.data?.isEnabled)
       if (oauthProviders.has(i.id)) return Boolean(serverConnected.get(i.id))
-      return connected[i.id]
+      return false
     }
     if (filter !== 'all' && i.category !== filter) return false
     return (
@@ -193,8 +197,10 @@ function IntegrationsMarketplacePage() {
   const installed = INTEGRATIONS.filter((i) => {
     if (i.id === 'slack') return Boolean(slackQuery.data?.isEnabled)
     if (oauthProviders.has(i.id)) return Boolean(serverConnected.get(i.id))
-    return Boolean(connected[i.id])
+    return false
   })
+  const isSupportedIntegration = (integration: Integration) =>
+    integration.id === 'slack' || oauthProviders.has(integration.id) || Boolean(integration.comingSoon)
 
   const runConnectFlow = async () => {
     if (!activeIntegration) return
@@ -212,10 +218,6 @@ function IntegrationsMarketplacePage() {
       }
       return
     }
-    setOauthLoading(true)
-    await new Promise((resolve) => setTimeout(resolve, 900))
-    setConnected((prev) => ({ ...prev, [activeIntegration.id]: true }))
-    setOauthLoading(false)
     setActiveIntegration(null)
   }
 
@@ -240,7 +242,7 @@ function IntegrationsMarketplacePage() {
               <Plug className="h-4 w-4" />
             </span>
             Integrations
-            <Badge variant="secondary" className="ml-1">Partial</Badge>
+            <Badge variant="secondary" className="ml-1">Live</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
             Connect Rundesk to the tools your team already uses. {installed.length} active.
@@ -284,7 +286,7 @@ function IntegrationsMarketplacePage() {
                   ? Boolean(slackQuery.data?.isEnabled)
                   : oauthProviders.has(integration.id)
                   ? Boolean(serverConnected.get(integration.id))
-                  : Boolean(connected[integration.id])
+                  : false
               }
               isLoading={
                 startOAuth.isPending || disconnectOAuth.isPending
@@ -292,6 +294,7 @@ function IntegrationsMarketplacePage() {
                   : false
               }
               onToggle={(next) => {
+                if (!isSupportedIntegration(integration)) return
                 if (integration.id === 'slack') {
                   if (next) {
                     setActiveIntegration(integration)
@@ -318,9 +321,9 @@ function IntegrationsMarketplacePage() {
                   }
                   return
                 }
-                setConnected((prev) => ({ ...prev, [integration.id]: next }))
               }}
             onOpenConnect={() => setActiveIntegration(integration)}
+            supported={isSupportedIntegration(integration)}
           />
         ))}
       </div>
@@ -334,7 +337,7 @@ function IntegrationsMarketplacePage() {
                 ? 'Provide Slack incoming webhook details for workspace notifications.'
                 : oauthProviders.has(activeIntegration?.id ?? '')
                 ? 'You will be redirected to the provider OAuth screen and returned after authorization.'
-                : 'This provider is still simulated in UI-only mode.'}
+                : 'This provider is not available in your current backend integration catalog.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -356,11 +359,6 @@ function IntegrationsMarketplacePage() {
                   </p>
                 ) : null}
               </>
-            ) : !oauthProviders.has(activeIntegration?.id ?? '') ? (
-              <>
-                <Input placeholder="Workspace / Team ID" />
-                <Input placeholder="Default channel / project (optional)" />
-              </>
             ) : null}
             <div className="flex items-center justify-end gap-2">
               <Button variant="outline" onClick={() => setActiveIntegration(null)}>
@@ -368,9 +366,13 @@ function IntegrationsMarketplacePage() {
               </Button>
               <Button
                 onClick={runConnectFlow}
-                disabled={oauthLoading || startOAuth.isPending || connectSlack.isPending}
+                disabled={
+                  startOAuth.isPending ||
+                  connectSlack.isPending ||
+                  !(activeIntegration && isSupportedIntegration(activeIntegration))
+                }
               >
-                {oauthLoading || startOAuth.isPending || connectSlack.isPending ? 'Connecting…' : 'Authorize & Connect'}
+                {startOAuth.isPending || connectSlack.isPending ? 'Connecting…' : 'Authorize & Connect'}
               </Button>
             </div>
           </div>
@@ -386,12 +388,14 @@ function IntegrationCard({
   isLoading,
   onToggle,
   onOpenConnect,
+  supported,
 }: {
   integration: Integration
   connected: boolean
   isLoading?: boolean
   onToggle: (next: boolean) => void
   onOpenConnect: () => void
+  supported: boolean
 }) {
   return (
     <Card variant="glass" className="p-4 group transition-all hover:border-accent/40">
@@ -411,6 +415,8 @@ function IntegrationCard({
               )}
               {integration.comingSoon ? (
                 <Badge variant="soft" className="text-[9px] uppercase">Soon</Badge>
+              ) : !supported ? (
+                <Badge variant="secondary" className="text-[9px] uppercase">Unavailable</Badge>
               ) : connected ? (
                 <Badge variant="success" className="text-[9px] uppercase">
                   <CheckCircle2 className="h-2.5 w-2.5" /> Connected
@@ -425,13 +431,13 @@ function IntegrationCard({
             <Switch
               checked={connected}
               onCheckedChange={onToggle}
-              disabled={integration.comingSoon || isLoading}
+              disabled={integration.comingSoon || isLoading || !supported}
             />
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs"
-              disabled={integration.comingSoon || isLoading}
+              disabled={integration.comingSoon || isLoading || !supported}
               onClick={onOpenConnect}
             >
               {connected ? 'Configure' : 'Connect'}

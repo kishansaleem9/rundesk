@@ -155,9 +155,24 @@ function GeneralTab({ profile }: { profile: Profile }) {
 }
 
 function SecurityTab() {
+  const qc = useQueryClient()
+  const refreshToken = useAuthStore((s) => s.refreshToken)
+  const clear = useAuthStore((s) => s.clear)
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
+  const sessionsQuery = useQuery({
+    queryKey: ['auth-sessions', refreshToken],
+    queryFn: () => api<Array<{
+      id: string
+      userAgent?: string | null
+      ipAddress?: string | null
+      isRevoked: boolean
+      isCurrent: boolean
+      createdAt: string
+      expiresAt: string
+    }>>(`/auth/sessions${refreshToken ? `?currentRefreshToken=${encodeURIComponent(refreshToken)}` : ''}`),
+  })
   const change = useMutation({
     mutationFn: () =>
       api('/users/me/change-password', {
@@ -172,6 +187,22 @@ function SecurityTab() {
   })
 
   const valid = current.length >= 1 && next.length >= 8 && next === confirm
+  const revokeSession = useMutation({
+    mutationFn: (sessionId: string) => api(`/auth/sessions/${sessionId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['auth-sessions'] })
+    },
+  })
+  const revokeOthers = useMutation({
+    mutationFn: () =>
+      api('/auth/sessions/revoke-others', {
+        method: 'POST',
+        body: { currentRefreshToken: refreshToken ?? undefined },
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['auth-sessions'] })
+    },
+  })
 
   return (
     <div className="space-y-5">
@@ -193,7 +224,7 @@ function SecurityTab() {
             <Label>Confirm new password</Label>
             <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
             {next && confirm && next !== confirm && (
-              <p className="text-xs text-destructive">Passwords don't match.</p>
+              <p className="text-xs text-destructive">Passwords don&apos;t match.</p>
             )}
           </div>
           <div className="flex items-center justify-between pt-2 border-t border-border">
@@ -218,10 +249,53 @@ function SecurityTab() {
               Active sessions
             </h2>
             <p className="text-sm text-muted-foreground">
-              See where you're signed in and sign out of other devices.
+              See where you&apos;re signed in and sign out of other devices.
             </p>
           </div>
-          <Button variant="outline" size="sm" disabled>Manage (coming soon)</Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => revokeOthers.mutate()}
+            disabled={revokeOthers.isPending || !sessionsQuery.data?.some((s) => !s.isCurrent && !s.isRevoked)}
+          >
+            {revokeOthers.isPending ? 'Revoking…' : 'Sign out other devices'}
+          </Button>
+        </div>
+        <div className="mt-4 space-y-2">
+          {sessionsQuery.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading sessions...</p>
+          ) : (sessionsQuery.data ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active sessions found.</p>
+          ) : (
+            (sessionsQuery.data ?? []).map((session) => (
+              <div key={session.id} className="flex items-center gap-3 border border-border rounded-md p-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">
+                    {session.userAgent || 'Unknown device'} {session.isCurrent ? '(current)' : ''}
+                  </div>
+                  <div className="text-xs text-muted-foreground truncate">
+                    {session.ipAddress || 'Unknown IP'} · {new Date(session.createdAt).toLocaleString()}
+                  </div>
+                </div>
+                {session.isRevoked ? (
+                  <span className="text-xs text-muted-foreground">Revoked</span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive"
+                    onClick={async () => {
+                      await revokeSession.mutateAsync(session.id)
+                      if (session.isCurrent) clear()
+                    }}
+                    disabled={revokeSession.isPending}
+                  >
+                    Revoke
+                  </Button>
+                )}
+              </div>
+            ))
+          )}
         </div>
       </Card>
     </div>
@@ -299,7 +373,7 @@ function TotpCard() {
         <div className="mt-4 space-y-3 border-t border-border pt-4">
           <p className="text-sm font-medium">Scan with your authenticator app:</p>
           <img src={setupData.qrCodeUrl} alt="TOTP QR code" className="h-40 w-40 border border-border rounded" />
-          <p className="text-xs text-muted-foreground">Can't scan? Enter this code manually: <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{setupData.secret}</code></p>
+          <p className="text-xs text-muted-foreground">Can&apos;t scan? Enter this code manually: <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{setupData.secret}</code></p>
           <div className="flex gap-2">
             <Input
               value={code}

@@ -34,20 +34,14 @@ function SprintsPage() {
 
   const sprintsQuery = useQuery({
     queryKey: ['sprints', workspaceId],
-    queryFn: async () => {
-      try {
-        return await api<Sprint[]>(`/workspaces/${workspaceId}/sprints`)
-      } catch {
-        return [] as Sprint[]
-      }
-    },
+    queryFn: () => api<Sprint[]>(`/workspaces/${workspaceId}/sprints`),
   })
 
   const createSprint = useMutation({
     mutationFn: async () =>
       api<Sprint>(`/workspaces/${workspaceId}/sprints`, {
         method: 'POST',
-        body: JSON.stringify(form),
+        body: form,
       }),
     onSuccess: async () => {
       setForm({ name: '', goal: '', startDate: '', endDate: '' })
@@ -57,7 +51,6 @@ function SprintsPage() {
   })
 
   const sprints = sprintsQuery.data ?? []
-  const backendMissing = !sprintsQuery.isLoading && sprintsQuery.isError
   const active = sprints.find((s) => s.status === 'active')
 
   return (
@@ -78,15 +71,6 @@ function SprintsPage() {
       </header>
 
       <div className="flex-1 overflow-auto p-6 space-y-6">
-        {backendMissing && (
-          <Card className="p-4 border-dashed">
-            <p className="text-sm text-muted-foreground">
-              Sprints backend is not wired yet — <code>/workspaces/:id/sprints</code> needs to be implemented.
-              The UI is ready.
-            </p>
-          </Card>
-        )}
-
         {active && (
           <section>
             <h2 className="font-display text-lg font-semibold text-foreground mb-3">Active sprint</h2>
@@ -131,7 +115,7 @@ function SprintsPage() {
 
         <section>
           <h2 className="font-display text-lg font-semibold text-foreground mb-3">All sprints</h2>
-          {sprints.length === 0 && !backendMissing ? (
+          {sprints.length === 0 ? (
             <Card className="p-10 text-center">
               <Zap className="h-10 w-10 text-brand-500 mx-auto mb-2" />
               <h3 className="font-display text-lg font-semibold text-foreground mb-1">No sprints yet</h3>

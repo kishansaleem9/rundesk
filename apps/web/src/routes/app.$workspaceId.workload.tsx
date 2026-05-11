@@ -18,24 +18,6 @@ export const Route = createFileRoute('/app/$workspaceId/workload')({
   component: WorkloadPage,
 })
 
-// Mocked workload data — replace with /reports/workload endpoint.
-const PEOPLE = [
-  { name: 'Afzaal Ali', capacity: 8, role: 'Lead' },
-  { name: 'Hamda Tahir', capacity: 7, role: 'Reviewer' },
-  { name: 'Iqra Khalid', capacity: 8, role: 'Designer' },
-  { name: 'Mali Acme', capacity: 6, role: 'Engineer' },
-  { name: 'Sara Idris', capacity: 8, role: 'Engineer' },
-  { name: 'Bilal Khan', capacity: 5, role: 'PM' },
-]
-
-function seededLoad(name: string, dayIdx: number): number {
-  // Deterministic pseudo-random based on name + day
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h << 5) - h + name.charCodeAt(i)
-  h = (h ^ (dayIdx * 2654435761)) >>> 0
-  return (h % 110) / 10 // 0..11h
-}
-
 function WorkloadPage() {
   const { workspaceId } = Route.useParams()
   const [view, setView] = useState<'7d' | '14d' | '30d'>('14d')
@@ -60,19 +42,14 @@ function WorkloadPage() {
     return arr
   }, [days])
   const people = useMemo(() => {
-    if (workloadQuery.data && workloadQuery.data.length > 0) {
-      return workloadQuery.data.map((p) => ({
-        name: p.name,
-        role: p.role ?? 'Member',
-        capacity: p.capacity || 8,
-        dailyLoads: p.dailyLoads,
-      }))
-    }
-    return PEOPLE.map((p) => ({
-      ...p,
-      dailyLoads: Array.from({ length: days }, (_, i) => seededLoad(p.name, i)),
+    if (!workloadQuery.data) return []
+    return workloadQuery.data.map((p) => ({
+      name: p.name,
+      role: p.role ?? 'Member',
+      capacity: p.capacity || 8,
+      dailyLoads: p.dailyLoads,
     }))
-  }, [workloadQuery.data, days])
+  }, [workloadQuery.data])
   const overloadedCount = people.filter((p) => p.dailyLoads.some((load) => load > p.capacity)).length
 
   return (

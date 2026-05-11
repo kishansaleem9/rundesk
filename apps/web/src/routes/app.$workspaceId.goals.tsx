@@ -35,25 +35,19 @@ function GoalsPage() {
 
   const goalsQuery = useQuery({
     queryKey: ['goals', workspaceId],
-    queryFn: async () => {
-      try {
-        return await api<Goal[]>(`/workspaces/${workspaceId}/goals`)
-      } catch {
-        return [] as Goal[]
-      }
-    },
+    queryFn: () => api<Goal[]>(`/workspaces/${workspaceId}/goals`),
   })
 
   const createGoal = useMutation({
     mutationFn: async () =>
       api<Goal>(`/workspaces/${workspaceId}/goals`, {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           title: newTitle.trim(),
           targetType: 'percentage',
           status: 'on_track',
           progress: 0,
-        }),
+        },
       }),
     onSuccess: async () => {
       setNewTitle('')
@@ -63,8 +57,6 @@ function GoalsPage() {
   })
 
   const goals = goalsQuery.data ?? []
-  const backendMissing = !goalsQuery.isLoading && goalsQuery.isError
-
   return (
     <div className="h-full flex flex-col">
       <header className="px-6 py-4 border-b border-border bg-card">
@@ -83,14 +75,6 @@ function GoalsPage() {
       </header>
 
       <div className="flex-1 overflow-auto p-6 space-y-6">
-        {backendMissing && (
-          <Card className="p-4 border-dashed">
-            <div className="text-sm text-muted-foreground">
-              Goals backend is not wired yet — saving this page will fail silently until <code>/workspaces/:id/goals</code> is implemented. The UI is ready.
-            </div>
-          </Card>
-        )}
-
         {creating && (
           <Card className="p-4">
             <div className="space-y-3">
@@ -125,7 +109,7 @@ function GoalsPage() {
             <span className="text-xs text-muted-foreground tabular-nums">{goals.length} goals</span>
           </div>
 
-          {goals.length === 0 && !backendMissing ? (
+          {goals.length === 0 ? (
             <Card className="p-10 text-center">
               <Target className="h-10 w-10 text-brand-500 mx-auto mb-2" />
               <h3 className="font-display text-lg font-semibold text-foreground mb-1">No goals yet</h3>

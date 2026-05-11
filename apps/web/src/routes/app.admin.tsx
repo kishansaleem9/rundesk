@@ -22,9 +22,9 @@ const navItems: NavItem[] = [
   { label: 'Features', icon: ShieldCheck, to: '/app/admin/features', description: 'Toggle every feature' },
   { label: 'Announcements', icon: Megaphone, to: '/app/admin/announcements', description: 'Workspace banners' },
   { label: 'Audit log', icon: ScrollText, to: '/app/admin/audit', description: 'See who changed what' },
-  { label: 'Users', icon: Users, disabled: true, description: 'Coming soon' },
-  { label: 'Webhooks', icon: Webhook, disabled: true, description: 'Coming soon' },
-  { label: 'Settings', icon: Settings, disabled: true, description: 'Coming soon' },
+  { label: 'Users', icon: Users, to: '/app/admin/users', description: 'Manage workspace members' },
+  { label: 'Webhooks', icon: Webhook, to: '/app/admin/webhooks', description: 'Manage outbound webhooks' },
+  { label: 'Settings', icon: Settings, to: '/app/admin/settings', description: 'Workspace-level controls' },
 ]
 
 function AdminShell() {

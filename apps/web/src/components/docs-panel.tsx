@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, Badge } from '@rundesk/ui'
+import { Button, Card, Input, toast } from '@rundesk/ui'
 import { Download, Plus, Slash } from 'lucide-react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 
 type Doc = {
@@ -23,7 +23,6 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const [newDocName, setNewDocName] = useState('')
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
-  const [cursorPills, setCursorPills] = useState<Array<{ id: string; name: string; x: number; y: number }>>([])
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
@@ -85,23 +84,6 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     }
   }, [selectedDocId, qc, workspaceId])
 
-  useEffect(() => {
-    const demoUsers = ['Afzaal', 'Hamda', 'Iqra']
-    const timer = setInterval(() => {
-      const box = editorWrapRef.current?.getBoundingClientRect()
-      if (!box) return
-      setCursorPills(
-        demoUsers.map((name, idx) => ({
-          id: `${idx}`,
-          name,
-          x: 60 + Math.random() * Math.max(120, box.width - 180),
-          y: 40 + Math.random() * Math.max(120, box.height - 120),
-        })),
-      )
-    }, 2200)
-    return () => clearInterval(timer)
-  }, [])
-
   const createDoc = useMutation({
     mutationFn: async () =>
       api<Doc>(`/workspaces/${workspaceId}/docs`, {
@@ -121,8 +103,16 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       const content = editor.getJSON()
       return api(`/docs/${selectedDocId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, expectedUpdatedAt: activeDoc?.updatedAt }),
       })
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        toast('Doc updated by teammate', {
+          description: 'Latest content was loaded. Re-apply your change and save again.',
+        })
+      }
+      await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
@@ -315,16 +305,6 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               )}
             </div>
           )}
-          {activeDoc && cursorPills.map((pill) => (
-            <div
-              key={pill.id}
-              className="absolute z-20 pointer-events-none"
-              style={{ left: pill.x, top: pill.y }}
-            >
-              <div className="h-4 w-0.5 bg-brand-500" />
-              <Badge variant="gradient" className="text-[9px]">{pill.name}</Badge>
-            </div>
-          ))}
         </div>
       </div>
     </Card>

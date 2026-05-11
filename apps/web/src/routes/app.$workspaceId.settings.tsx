@@ -285,7 +285,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
           </div>
           <div>
             <h2 className="font-semibold text-sm">Invite a teammate</h2>
-            <p className="text-xs text-muted-foreground">They'll get an email to join this workspace.</p>
+            <p className="text-xs text-muted-foreground">They&apos;ll get an email to join this workspace.</p>
           </div>
         </div>
 
@@ -686,9 +686,11 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
                 v1.1
               </span>
             </div>
-            <Button size="sm" variant="outline" className="mt-3 w-full" disabled>
-              Coming soon
-            </Button>
+            <a href={`/app/${workspaceId}/integrations`}>
+              <Button size="sm" variant="outline" className="mt-3 w-full">
+                Manage integration
+              </Button>
+            </a>
           </Card>
         ))}
       </div>
@@ -768,7 +770,7 @@ function SecurityTab({ workspaceId }: { workspaceId: string }) {
 
         {revealedKey && (
           <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-md">
-            <p className="text-xs font-medium text-emerald-700 mb-1">Key created — copy it now, it won't be shown again:</p>
+            <p className="text-xs font-medium text-emerald-700 mb-1">Key created — copy it now, it won&apos;t be shown again:</p>
             <code className="text-xs font-mono break-all">{revealedKey}</code>
             <button className="text-xs text-emerald-700 hover:underline ml-2" onClick={() => navigator.clipboard.writeText(revealedKey)}>Copy</button>
             <button className="text-xs text-muted-foreground hover:underline ml-2" onClick={() => setRevealedKey(null)}>Dismiss</button>
