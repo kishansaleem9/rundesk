@@ -27,6 +27,8 @@ type TaskItem = {
   dueDate?: string | null
   createdAt?: string | null
   assignees?: TaskAssignee[]
+  openBlockerCount?: number
+  blocksOpenCount?: number
 }
 
 type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
@@ -695,6 +697,20 @@ function TaskRow({
         >
           {task.title}
         </div>
+        {(task.openBlockerCount ?? 0) > 0 || (task.blocksOpenCount ?? 0) > 0 ? (
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            {(task.openBlockerCount ?? 0) > 0 ? (
+              <span className="rounded-full border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-700 dark:text-amber-300">
+                blocked by {task.openBlockerCount}
+              </span>
+            ) : null}
+            {(task.blocksOpenCount ?? 0) > 0 ? (
+              <span className="rounded-full border border-blue-400/40 bg-blue-500/10 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">
+                blocks {task.blocksOpenCount}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <Flag className={cn('h-3.5 w-3.5 shrink-0', PRIORITY_COLORS[task.priority])} />
@@ -1461,6 +1477,11 @@ function BoardTaskCard({
     >
       <div className="font-medium text-sm">{task.title}</div>
       <div className="text-xs text-muted-foreground">{task.priority}</div>
+      {(task.openBlockerCount ?? 0) > 0 ? (
+        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
+          blocked by {task.openBlockerCount}
+        </div>
+      ) : null}
     </button>
   )
 }

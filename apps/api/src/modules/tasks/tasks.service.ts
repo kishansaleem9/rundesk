@@ -626,7 +626,62 @@ export class TasksService {
       arr.push(lr.label)
       byTask.set(lr.taskId, arr)
     }
-    return rows.map((r) => ({ ...r, labels: byTask.get(r.id) ?? [] }))
+    const dependencyRows = taskIds.length
+      ? await this.db
+          .select({
+            taskId: taskDependencies.taskId,
+            relatedTaskId: taskDependencies.relatedTaskId,
+            type: taskDependencies.type,
+            relatedStatus: tasks.status,
+            relatedArchived: tasks.isArchived,
+          })
+          .from(taskDependencies)
+          .innerJoin(tasks, eq(tasks.id, taskDependencies.relatedTaskId))
+          .where(inArray(taskDependencies.taskId, taskIds))
+      : []
+    const reverseDependencyRows = taskIds.length
+      ? await this.db
+          .select({
+            taskId: taskDependencies.relatedTaskId,
+            relatedTaskId: taskDependencies.taskId,
+            type: taskDependencies.type,
+            relatedStatus: tasks.status,
+            relatedArchived: tasks.isArchived,
+          })
+          .from(taskDependencies)
+          .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
+          .where(inArray(taskDependencies.relatedTaskId, taskIds))
+      : []
+
+    const openBlockerCount = new Map<string, number>()
+    const blocksOpenCount = new Map<string, number>()
+    const isOpenRelated = (status: TaskStatus, archived: boolean) =>
+      !archived && status !== 'done' && status !== 'cancelled'
+    for (const dep of dependencyRows) {
+      if (!isOpenRelated(dep.relatedStatus as TaskStatus, dep.relatedArchived)) continue
+      if (dep.type === 'blocked_by') {
+        openBlockerCount.set(dep.taskId, (openBlockerCount.get(dep.taskId) ?? 0) + 1)
+      }
+      if (dep.type === 'blocks') {
+        blocksOpenCount.set(dep.taskId, (blocksOpenCount.get(dep.taskId) ?? 0) + 1)
+      }
+    }
+    for (const dep of reverseDependencyRows) {
+      if (!isOpenRelated(dep.relatedStatus as TaskStatus, dep.relatedArchived)) continue
+      if (dep.type === 'blocks') {
+        openBlockerCount.set(dep.taskId, (openBlockerCount.get(dep.taskId) ?? 0) + 1)
+      }
+      if (dep.type === 'blocked_by') {
+        blocksOpenCount.set(dep.taskId, (blocksOpenCount.get(dep.taskId) ?? 0) + 1)
+      }
+    }
+
+    return rows.map((r) => ({
+      ...r,
+      labels: byTask.get(r.id) ?? [],
+      openBlockerCount: openBlockerCount.get(r.id) ?? 0,
+      blocksOpenCount: blocksOpenCount.get(r.id) ?? 0,
+    }))
   }
 
   async getTask(taskId: string) {
