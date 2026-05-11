@@ -37,8 +37,17 @@ export const formFields = pgTable('form_fields', {
   helpText:     text('help_text'),
   isRequired:   boolean('is_required').notNull().default(false),
   position:     integer('position').notNull().default(0),
-  // options JSON for dropdown/multi_select: [{ label, value }]
-  options:      jsonb('options').$type<{ label: string; value: string }[]>(),
+  // options JSON:
+  // - legacy: [{ label, value }] for dropdown/multi_select
+  // - advanced: { choices: [{ label, value }], visibilityRules: [{ fieldId, operator, value }] }
+  options:      jsonb('options').$type<
+    | { label: string; value: string }[]
+    | {
+      choices?: { label: string; value: string }[]
+      visibilityMode?: 'all' | 'any'
+      visibilityRules?: Array<{ fieldId: string; operator: 'equals' | 'not_equals' | 'contains' | 'not_contains'; value: string }>
+    }
+  >(),
   // taskField maps this form field to a task property: title | description | priority | assigneeEmail | dueDate | customField:<id>
   taskField:    text('task_field'),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

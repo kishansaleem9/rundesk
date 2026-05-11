@@ -17,6 +17,8 @@ type FormField = {
   helpText?: string | null
   isRequired: boolean
   options?: { label: string; value: string }[] | null
+  visibilityMode?: 'all' | 'any'
+  visibilityRules?: Array<{ fieldId: string; operator: 'equals' | 'not_equals' | 'contains' | 'not_contains'; value: string }>
 }
 
 type PublicForm = {
@@ -57,9 +59,26 @@ function PublicFormPage() {
     onSuccess: (result) => setSubmitted(result),
   })
 
+  const isFieldVisible = (field: FormField): boolean => {
+    const rules = field.visibilityRules ?? []
+    if (rules.length === 0) return true
+    const mode = field.visibilityMode ?? 'all'
+    const matcher = mode === 'any' ? 'some' : 'every'
+    return rules[matcher]((rule) => {
+      const source = formData[rule.fieldId]
+      const sourceText = Array.isArray(source) ? source.join(',') : source ?? ''
+      const sourceArr = Array.isArray(source) ? source : typeof source === 'string' && source ? source.split(',') : []
+      if (rule.operator === 'equals') return sourceText === rule.value
+      if (rule.operator === 'not_equals') return sourceText !== rule.value
+      if (rule.operator === 'contains') return sourceArr.includes(rule.value) || sourceText.includes(rule.value)
+      return !sourceArr.includes(rule.value) && !sourceText.includes(rule.value)
+    })
+  }
+
   function validate(): boolean {
     const errs: Record<string, string> = {}
     for (const field of formQuery.data?.fields ?? []) {
+      if (!isFieldVisible(field)) continue
       const val = formData[field.id]
       if (field.isRequired && (!val || (Array.isArray(val) ? val.length === 0 : val.trim() === ''))) {
         errs[field.id] = 'This field is required'
@@ -161,7 +180,7 @@ function PublicFormPage() {
             {form.fields.length > 0 && <hr className="border-border" />}
 
             {/* Dynamic fields */}
-            {form.fields.map((field) => (
+            {form.fields.filter(isFieldVisible).map((field) => (
               <FormFieldRenderer
                 key={field.id}
                 field={field}

@@ -105,6 +105,8 @@ export class WorkspaceFormsController {
       isRequired?: boolean
       position?: number
       options?: { label: string; value: string }[]
+      visibilityMode?: 'all' | 'any'
+      visibilityRules?: Array<{ fieldId: string; operator: 'equals' | 'not_equals' | 'contains' | 'not_contains'; value: string }>
       taskField?: string
     },
   ) {
@@ -130,6 +132,22 @@ export class WorkspaceFormsController {
   @Get(':formId/submissions')
   listSubmissions(@Param('formId') formId: string) {
     return this.formsService.listSubmissions(formId)
+  }
+
+  @Post(':formId/submissions/:submissionId/retry-routing')
+  retrySubmissionRouting(
+    @Param('formId') formId: string,
+    @Param('submissionId') submissionId: string,
+  ) {
+    return this.formsService.retrySubmissionRouting(formId, submissionId)
+  }
+
+  @Delete(':formId/submissions/:submissionId/retry-history')
+  clearSubmissionRetryHistory(
+    @Param('formId') formId: string,
+    @Param('submissionId') submissionId: string,
+  ) {
+    return this.formsService.clearSubmissionRetryHistory(formId, submissionId)
   }
 }
 
