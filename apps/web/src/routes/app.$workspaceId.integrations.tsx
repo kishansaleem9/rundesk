@@ -38,6 +38,7 @@ type Integration = {
   // simple wordmark/letter for the card
   logo: string
 }
+type ConnectionHealth = 'healthy' | 'expiring' | 'expired' | 'disconnected'
 
 const INTEGRATIONS: Integration[] = [
   { id: 'slack', name: 'Slack', description: 'Get task updates in any channel, create tasks from messages.', category: 'comms', popular: true, installed: true, brandColor: '#4A154B', logo: 'S' },
@@ -52,7 +53,7 @@ const INTEGRATIONS: Integration[] = [
   { id: 'github', name: 'GitHub', description: 'Link commits/PRs/issues. PR state badge on tasks.', category: 'dev', popular: true, brandColor: '#181717', logo: 'G' },
   { id: 'gitlab', name: 'GitLab', description: 'Same as GitHub — works with self-managed instances.', category: 'dev', brandColor: '#FC6D26', logo: 'G' },
   { id: 'sentry', name: 'Sentry', description: 'Auto-create tasks from production errors.', category: 'dev', brandColor: '#362D59', logo: 'S' },
-  { id: 'linear', name: 'Linear', description: 'Two-way sync issues between Linear and Rundesk.', category: 'dev', comingSoon: true, brandColor: '#5E6AD2', logo: 'L' },
+  { id: 'linear', name: 'Linear', description: 'Two-way sync issues between Linear and Rundesk.', category: 'dev', brandColor: '#5E6AD2', logo: 'L' },
 
   { id: 'gcal', name: 'Google Calendar', description: 'Two-way sync due dates as calendar events.', category: 'calendar', popular: true, installed: true, brandColor: '#4285F4', logo: 'C' },
   { id: 'outlook', name: 'Outlook Calendar', description: 'Sync due dates with your Microsoft calendar.', category: 'calendar', brandColor: '#0078D4', logo: 'O' },
@@ -64,7 +65,7 @@ const INTEGRATIONS: Integration[] = [
 
   { id: 'stripe', name: 'Stripe', description: 'Track billable client work and create invoices from time logs.', category: 'crm', brandColor: '#635BFF', logo: 'S' },
   { id: 'hubspot', name: 'HubSpot', description: 'Sync deals and contacts as Rundesk tasks.', category: 'crm', brandColor: '#FF7A59', logo: 'H' },
-  { id: 'salesforce', name: 'Salesforce', description: 'Bidirectional opportunity sync.', category: 'crm', comingSoon: true, brandColor: '#00A1E0', logo: 'S' },
+  { id: 'salesforce', name: 'Salesforce', description: 'Bidirectional opportunity sync.', category: 'crm', brandColor: '#00A1E0', logo: 'S' },
 
   { id: 'zapier', name: 'Zapier', description: '5,000+ apps — wire Rundesk into your existing stack.', category: 'dev', popular: true, brandColor: '#FF4F00', logo: 'Z' },
   { id: 'make', name: 'Make (Integromat)', description: 'Visual workflow automation between Rundesk and the web.', category: 'dev', brandColor: '#6D00CC', logo: 'M' },
@@ -102,7 +103,24 @@ function IntegrationsMarketplacePage() {
         `/workspaces/${workspaceId}/integrations/connections/providers`,
       ),
   })
-  const oauthProviders = useMemo(() => new Set(providersQuery.data ?? ['github', 'gitlab', 'gcal', 'google-drive', 'outlook', 'onedrive']), [providersQuery.data])
+  const providerStatusQuery = useQuery({
+    queryKey: ['integration-provider-status', workspaceId],
+    queryFn: () =>
+      api<Array<{ provider: string; available: boolean; reason?: string }>>(
+        `/workspaces/${workspaceId}/integrations/connections/providers/status`,
+      ),
+  })
+  const oauthProviders = useMemo(
+    () => new Set(providersQuery.data ?? ['github', 'gitlab', 'gcal', 'google-drive', 'outlook', 'onedrive', 'linear', 'salesforce']),
+    [providersQuery.data],
+  )
+  const providerAvailability = useMemo(() => {
+    const map = new Map<string, { available: boolean; reason?: string }>()
+    for (const row of providerStatusQuery.data ?? []) {
+      map.set(row.provider, { available: row.available, reason: row.reason })
+    }
+    return map
+  }, [providerStatusQuery.data])
   const oauthStatus = useMemo(() => {
     if (typeof window === 'undefined') return null
     const params = new URLSearchParams(window.location.search)
@@ -127,8 +145,22 @@ function IntegrationsMarketplacePage() {
   const connectionsQuery = useQuery({
     queryKey: ['integration-connections', workspaceId],
     queryFn: () =>
-      api<Array<{ provider: string; status: string }>>(
+      api<Array<{
+        provider: string
+        status: string
+        health?: ConnectionHealth
+        externalAccountEmail?: string | null
+        tokenExpiresAt?: string | null
+        updatedAt?: string
+      }>>(
         `/workspaces/${workspaceId}/integrations/connections`,
+      ),
+  })
+  const accessRequestsQuery = useQuery({
+    queryKey: ['integration-access-requests', workspaceId],
+    queryFn: () =>
+      api<Array<{ provider: string; status: 'pending' | 'approved' | 'rejected'; note?: string | null; updatedAt?: string }>>(
+        `/workspaces/${workspaceId}/integrations/connections/access-requests`,
       ),
   })
   const startOAuth = useMutation({
@@ -173,6 +205,16 @@ function IntegrationsMarketplacePage() {
       await qc.invalidateQueries({ queryKey: ['slack', workspaceId] })
     },
   })
+  const requestAccess = useMutation({
+    mutationFn: (provider: string) =>
+      api(`/workspaces/${workspaceId}/integrations/connections/access-requests?provider=${encodeURIComponent(provider)}`, {
+        method: 'POST',
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['integration-access-requests', workspaceId] })
+      toast.success('Access request submitted to workspace admins.')
+    },
+  })
   const serverConnected = useMemo(() => {
     const map = new Map<string, boolean>()
     for (const row of connectionsQuery.data ?? []) {
@@ -180,6 +222,35 @@ function IntegrationsMarketplacePage() {
     }
     return map
   }, [connectionsQuery.data])
+  const connectionByProvider = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        status: string
+        health: ConnectionHealth
+        externalAccountEmail?: string | null
+        tokenExpiresAt?: string | null
+        updatedAt?: string
+      }
+    >()
+    for (const row of connectionsQuery.data ?? []) {
+      map.set(row.provider, {
+        status: row.status,
+        health: row.health ?? (row.status === 'connected' ? 'healthy' : 'disconnected'),
+        externalAccountEmail: row.externalAccountEmail,
+        tokenExpiresAt: row.tokenExpiresAt,
+        updatedAt: row.updatedAt,
+      })
+    }
+    return map
+  }, [connectionsQuery.data])
+  const accessRequestByProvider = useMemo(() => {
+    const map = new Map<string, { status: 'pending' | 'approved' | 'rejected'; note?: string | null; updatedAt?: string }>()
+    for (const row of accessRequestsQuery.data ?? []) {
+      map.set(row.provider, { status: row.status, note: row.note, updatedAt: row.updatedAt })
+    }
+    return map
+  }, [accessRequestsQuery.data])
 
   const filtered = INTEGRATIONS.filter((i) => {
     if (filter === 'installed') {
@@ -201,6 +272,10 @@ function IntegrationsMarketplacePage() {
   })
   const isSupportedIntegration = (integration: Integration) =>
     integration.id === 'slack' || oauthProviders.has(integration.id) || Boolean(integration.comingSoon)
+  const isProviderReady = (integration: Integration) =>
+    integration.id === 'slack' || !oauthProviders.has(integration.id)
+      ? true
+      : (providerAvailability.get(integration.id)?.available ?? true)
 
   const runConnectFlow = async () => {
     if (!activeIntegration) return
@@ -210,6 +285,11 @@ function IntegrationsMarketplacePage() {
       return
     }
     if (oauthProviders.has(activeIntegration.id)) {
+      const readiness = providerAvailability.get(activeIntegration.id)
+      if (readiness && !readiness.available) {
+        toast.error(readiness.reason ?? 'Provider setup is incomplete on backend.')
+        return
+      }
       setActiveProvider(activeIntegration.id)
       try {
         await startOAuth.mutateAsync(activeIntegration.id)
@@ -324,6 +404,11 @@ function IntegrationsMarketplacePage() {
               }}
             onOpenConnect={() => setActiveIntegration(integration)}
             supported={isSupportedIntegration(integration)}
+            connection={connectionByProvider.get(integration.id)}
+            setupReason={oauthProviders.has(integration.id) ? providerAvailability.get(integration.id)?.reason : undefined}
+            providerReady={isProviderReady(integration)}
+            accessRequest={accessRequestByProvider.get(integration.id)}
+            onRequestAccess={() => requestAccess.mutate(integration.id)}
           />
         ))}
       </div>
@@ -335,6 +420,8 @@ function IntegrationsMarketplacePage() {
             <DialogDescription>
               {activeIntegration?.id === 'slack'
                 ? 'Provide Slack incoming webhook details for workspace notifications.'
+                : oauthProviders.has(activeIntegration?.id ?? '') && providerAvailability.get(activeIntegration?.id ?? '')?.available === false
+                ? providerAvailability.get(activeIntegration?.id ?? '')?.reason ?? 'Provider setup is required on backend before connecting.'
                 : oauthProviders.has(activeIntegration?.id ?? '')
                 ? 'You will be redirected to the provider OAuth screen and returned after authorization.'
                 : 'This provider is not available in your current backend integration catalog.'}
@@ -369,7 +456,7 @@ function IntegrationsMarketplacePage() {
                 disabled={
                   startOAuth.isPending ||
                   connectSlack.isPending ||
-                  !(activeIntegration && isSupportedIntegration(activeIntegration))
+                  !(activeIntegration && isSupportedIntegration(activeIntegration) && isProviderReady(activeIntegration))
                 }
               >
                 {startOAuth.isPending || connectSlack.isPending ? 'Connecting…' : 'Authorize & Connect'}
@@ -389,6 +476,11 @@ function IntegrationCard({
   onToggle,
   onOpenConnect,
   supported,
+  connection,
+  setupReason,
+  providerReady,
+  accessRequest,
+  onRequestAccess,
 }: {
   integration: Integration
   connected: boolean
@@ -396,6 +488,17 @@ function IntegrationCard({
   onToggle: (next: boolean) => void
   onOpenConnect: () => void
   supported: boolean
+  providerReady: boolean
+  setupReason?: string
+  accessRequest?: { status: 'pending' | 'approved' | 'rejected'; note?: string | null; updatedAt?: string }
+  onRequestAccess: () => void
+  connection?: {
+    status: string
+    health: ConnectionHealth
+    externalAccountEmail?: string | null
+    tokenExpiresAt?: string | null
+    updatedAt?: string
+  }
 }) {
   return (
     <Card variant="glass" className="p-4 group transition-all hover:border-accent/40">
@@ -415,8 +518,20 @@ function IntegrationCard({
               )}
               {integration.comingSoon ? (
                 <Badge variant="soft" className="text-[9px] uppercase">Soon</Badge>
+              ) : !supported && accessRequest?.status === 'rejected' ? (
+                <Badge variant="destructive" className="text-[9px] uppercase">Rejected</Badge>
+              ) : !supported && accessRequest?.status === 'approved' ? (
+                <Badge variant="success" className="text-[9px] uppercase">Approved</Badge>
+              ) : !supported && accessRequest?.status === 'pending' ? (
+                <Badge variant="info" className="text-[9px] uppercase">Requested</Badge>
               ) : !supported ? (
                 <Badge variant="secondary" className="text-[9px] uppercase">Unavailable</Badge>
+              ) : !providerReady ? (
+                <Badge variant="warning" className="text-[9px] uppercase">Setup required</Badge>
+              ) : connection?.health === 'expired' ? (
+                <Badge variant="destructive" className="text-[9px] uppercase">Expired</Badge>
+              ) : connection?.health === 'expiring' ? (
+                <Badge variant="warning" className="text-[9px] uppercase">Expiring</Badge>
               ) : connected ? (
                 <Badge variant="success" className="text-[9px] uppercase">
                   <CheckCircle2 className="h-2.5 w-2.5" /> Connected
@@ -427,20 +542,66 @@ function IntegrationCard({
           <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
             {integration.description}
           </p>
+          {supported && !providerReady && setupReason && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
+              {setupReason}
+            </p>
+          )}
+          {supported && connection?.externalAccountEmail && (
+            <p className="text-[11px] text-muted-foreground mt-1 truncate">
+              Account: {connection.externalAccountEmail}
+            </p>
+          )}
+          {supported && connection?.tokenExpiresAt && (
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Token expires: {new Date(connection.tokenExpiresAt).toLocaleString()}
+            </p>
+          )}
+          {!supported && accessRequest?.note ? (
+            <p className="text-[11px] text-muted-foreground mt-1 truncate">
+              Admin note: {accessRequest.note}
+            </p>
+          ) : null}
+          {!supported && accessRequest?.updatedAt ? (
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Decision updated: {new Date(accessRequest.updatedAt).toLocaleString()}
+            </p>
+          ) : null}
           <div className="mt-3 flex items-center justify-between">
             <Switch
               checked={connected}
               onCheckedChange={onToggle}
-              disabled={integration.comingSoon || isLoading || !supported}
+              disabled={integration.comingSoon || isLoading || !supported || !providerReady}
             />
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs"
-              disabled={integration.comingSoon || isLoading || !supported}
-              onClick={onOpenConnect}
+              disabled={
+                integration.comingSoon ||
+                isLoading ||
+                (!supported &&
+                  (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
+              }
+              onClick={() => {
+                if (!supported && !integration.comingSoon) {
+                  onRequestAccess()
+                  return
+                }
+                onOpenConnect()
+              }}
             >
-              {connected ? 'Configure' : 'Connect'}
+              {!supported && !integration.comingSoon
+                ? accessRequest?.status === 'rejected'
+                  ? 'Request again'
+                  : accessRequest?.status === 'approved'
+                  ? 'Approved'
+                  : accessRequest?.status === 'pending'
+                  ? 'Requested'
+                  : 'Request access'
+                : connected
+                ? 'Configure'
+                : 'Connect'}
             </Button>
           </div>
         </div>

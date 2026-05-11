@@ -39,6 +39,7 @@ import { DatabaseModule } from './common/database/database.module'
 import { StorageModule } from './common/storage/storage.module'
 import { ClipsModule } from './modules/clips/clips.module'
 import { CanvasesModule } from './modules/canvases/canvases.module'
+import { AnnouncementsModule } from './modules/announcements/announcements.module'
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { CanvasesModule } from './modules/canvases/canvases.module'
     DashboardsModule,
     ClipsModule,
     CanvasesModule,
+    AnnouncementsModule,
   ],
 })
 export class AppModule {}

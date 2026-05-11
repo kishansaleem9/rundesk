@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
   Badge,
@@ -11,6 +12,7 @@ import {
   cn,
 } from '@rundesk/ui'
 import { Megaphone, Plus, Trash2, Sparkles, AlertTriangle, Pause } from 'lucide-react'
+import { api } from '../lib/api'
 
 export const Route = createFileRoute('/app/admin/announcements')({
   component: AnnouncementsAdminPage,
@@ -28,31 +30,40 @@ type Item = {
   dismisses: number
 }
 
-const MOCK: Item[] = [
-  {
-    id: 'a1',
-    title: 'New: Workload + AI Insights are live',
-    body: 'See per-person capacity, project health and contribution analytics.',
-    tone: 'celebrate',
-    active: true,
-    expires: '2026-05-12',
-    views: 142,
-    dismisses: 38,
-  },
-  {
-    id: 'a2',
-    title: 'Scheduled maintenance — Sat May 3, 9pm UTC',
-    body: 'API will be unavailable for ~10 minutes during the upgrade.',
-    tone: 'warn',
-    active: false,
-    expires: '2026-05-04',
-    views: 0,
-    dismisses: 0,
-  },
-]
-
 function AnnouncementsAdminPage() {
-  const [items, setItems] = useState<Item[]>(MOCK)
+  const qc = useQueryClient()
+  const workspacesQuery = useQuery({
+    queryKey: ['announcement-admin-workspaces'],
+    queryFn: () => api<Array<{ id: string; name: string }>>('/workspaces'),
+  })
+  const workspaceId = workspacesQuery.data?.[0]?.id ?? ''
+  const announcementsQuery = useQuery({
+    queryKey: ['admin-announcements', workspaceId],
+    enabled: workspaceId.length > 0,
+    queryFn: async () => {
+      const rows = await api<Array<{
+        id: string
+        title: string
+        body: string
+        tone: Tone
+        isActive: boolean
+        expiresAt: string | null
+        views: number
+        dismisses: number
+      }>>(`/workspaces/${workspaceId}/announcements`)
+      return rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        tone: row.tone,
+        active: row.isActive,
+        expires: row.expiresAt ? row.expiresAt.slice(0, 10) : '',
+        views: row.views,
+        dismisses: row.dismisses,
+      })) as Item[]
+    },
+  })
+  const items = announcementsQuery.data ?? []
   const [draft, setDraft] = useState({
     title: '',
     body: '',
@@ -60,22 +71,40 @@ function AnnouncementsAdminPage() {
     expires: '',
   })
 
+  const createAnnouncement = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/announcements`, {
+        method: 'POST',
+        body: {
+          title: draft.title,
+          body: draft.body,
+          tone: draft.tone,
+          expiresAt: draft.expires || null,
+          isActive: true,
+        },
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['admin-announcements', workspaceId] })
+      setDraft({ title: '', body: '', tone: 'celebrate', expires: '' })
+    },
+  })
+  const updateAnnouncement = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<{ isActive: boolean }> }) =>
+      api(`/workspaces/${workspaceId}/announcements/${id}`, { method: 'PATCH', body: patch }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['admin-announcements', workspaceId] })
+    },
+  })
+  const deleteAnnouncement = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/announcements/${id}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['admin-announcements', workspaceId] })
+    },
+  })
+
   function add() {
     if (!draft.title.trim()) return
-    setItems((arr) => [
-      {
-        id: crypto.randomUUID(),
-        title: draft.title,
-        body: draft.body,
-        tone: draft.tone,
-        active: true,
-        expires: draft.expires || '2026-12-31',
-        views: 0,
-        dismisses: 0,
-      },
-      ...arr,
-    ])
-    setDraft({ title: '', body: '', tone: 'celebrate', expires: '' })
+    createAnnouncement.mutate()
   }
 
   return (
@@ -193,13 +222,13 @@ function AnnouncementsAdminPage() {
                   <Switch
                     checked={item.active}
                     onCheckedChange={(v) =>
-                      setItems((arr) => arr.map((it) => (it.id === item.id ? { ...it, active: v } : it)))
+                      updateAnnouncement.mutate({ id: item.id, patch: { isActive: v } })
                     }
                   />
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => setItems((arr) => arr.filter((it) => it.id !== item.id))}
+                    onClick={() => deleteAnnouncement.mutate(item.id)}
                   >
                     <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>

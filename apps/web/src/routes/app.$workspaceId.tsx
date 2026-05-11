@@ -36,6 +36,12 @@ type MemberTask = {
   spaceId: string
   listName: string
 }
+type WorkspaceAnnouncement = {
+  id: string
+  title: string
+  body: string
+  tone: 'info' | 'celebrate' | 'warn'
+}
 
 export const Route = createFileRoute('/app/$workspaceId')({
   component: WorkspaceShell,
@@ -76,6 +82,17 @@ function WorkspaceHome() {
     enabled: !!workspaceId && !!user?.id,
     queryFn: () => api<MemberTask[]>(`/tasks/workspace/${workspaceId}/members/${user!.id}`),
   })
+  const announcementsQuery = useQuery({
+    queryKey: ['workspace-announcements', workspaceId],
+    enabled: Boolean(workspaceId),
+    queryFn: async () => {
+      try {
+        return await api<WorkspaceAnnouncement[]>(`/workspaces/${workspaceId}/announcements/active`)
+      } catch {
+        return [] as WorkspaceAnnouncement[]
+      }
+    },
+  })
 
   const markRead = useMutation({
     mutationFn: (id: string) => api(`/notifications/${id}/read`, { method: 'POST' }),
@@ -97,6 +114,7 @@ function WorkspaceHome() {
     return isToday(due) || isPast(due)
   })
   const personalList = myTasks.filter((t) => t.listName.toLowerCase().includes('personal'))
+  const visibleAnnouncement = (announcementsQuery.data ?? [])[0]
 
   const selectedItems = useMemo(() => {
     switch (section) {
@@ -138,6 +156,50 @@ function WorkspaceHome() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-6">
+      {visibleAnnouncement && (
+        <Card
+          variant="glass"
+          className={`mb-4 p-3 border ${
+            visibleAnnouncement.tone === 'warn'
+              ? 'border-warning/40'
+              : visibleAnnouncement.tone === 'celebrate'
+                ? 'border-emerald-500/30'
+                : 'border-accent/30'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold">{visibleAnnouncement.title}</div>
+              {visibleAnnouncement.body && (
+                <div className="text-xs text-muted-foreground mt-1">{visibleAnnouncement.body}</div>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void api(`/workspaces/${workspaceId}/announcements/${visibleAnnouncement.id}/view`, { method: 'POST' })
+                }}
+              >
+                Mark seen
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void api(`/workspaces/${workspaceId}/announcements/${visibleAnnouncement.id}/dismiss`, { method: 'POST' })
+                    .finally(() => {
+                      void announcementsQuery.refetch()
+                    })
+                }}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-4">
         <Card variant="glass" className="p-3 h-fit">
           <h1 className="text-3xl font-display font-semibold mb-3">Home</h1>

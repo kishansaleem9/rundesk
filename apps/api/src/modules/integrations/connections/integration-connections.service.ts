@@ -1,14 +1,24 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Db } from '@rundesk/db'
 import {
+  integrationAccessRequests,
+  users,
   workspaceIntegrationConnections,
   workspaceMembers,
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 
-type Provider = 'github' | 'gitlab' | 'gcal' | 'google-drive' | 'outlook' | 'onedrive'
+type Provider =
+  | 'github'
+  | 'gitlab'
+  | 'gcal'
+  | 'google-drive'
+  | 'outlook'
+  | 'onedrive'
+  | 'linear'
+  | 'salesforce'
 type ProviderConfig = {
   provider: Provider
   authUrl: string
@@ -17,6 +27,11 @@ type ProviderConfig = {
   clientSecret: string
   scopes: string[]
   extraAuthParams?: Record<string, string>
+}
+type ProviderAvailability = {
+  provider: Provider
+  available: boolean
+  reason?: string
 }
 
 @Injectable()
@@ -31,8 +46,17 @@ export class IntegrationConnectionsService {
     return rows.map((row) => ({
       provider: row.provider,
       status: row.status,
+      health:
+        row.status !== 'connected'
+          ? 'disconnected'
+          : row.tokenExpiresAt && row.tokenExpiresAt.getTime() <= Date.now()
+            ? 'expired'
+            : row.tokenExpiresAt && row.tokenExpiresAt.getTime() - Date.now() <= 3 * 24 * 60 * 60 * 1000
+              ? 'expiring'
+              : 'healthy',
       scopes: row.scopes,
       externalAccountEmail: row.externalAccountEmail,
+      tokenExpiresAt: row.tokenExpiresAt,
       connectedAt: row.createdAt,
       updatedAt: row.updatedAt,
     }))
@@ -46,7 +70,23 @@ export class IntegrationConnectionsService {
       'google-drive',
       'outlook',
       'onedrive',
+      'linear',
+      'salesforce',
     ] as const
+  }
+
+  listProviderAvailability(): ProviderAvailability[] {
+    return this.listSupportedProviders().map((provider) => {
+      const missing = this.getMissingProviderEnv(provider)
+      if (missing.length === 0) {
+        return { provider, available: true }
+      }
+      return {
+        provider,
+        available: false,
+        reason: `Missing backend configuration: ${missing.join(', ')}`,
+      }
+    })
   }
 
   async getOAuthStartUrl(workspaceId: string, userId: string, providerRaw: string) {
@@ -144,6 +184,93 @@ export class IntegrationConnectionsService {
     return { ok: true }
   }
 
+  async listAccessRequests(workspaceId: string) {
+    const rows = await this.db
+      .select({
+        provider: integrationAccessRequests.provider,
+        status: integrationAccessRequests.status,
+        note: integrationAccessRequests.note,
+        requestedById: integrationAccessRequests.requestedById,
+        createdAt: integrationAccessRequests.createdAt,
+        updatedAt: integrationAccessRequests.updatedAt,
+        requesterName: users.displayName,
+        requesterEmail: users.email,
+      })
+      .from(integrationAccessRequests)
+      .leftJoin(users, eq(users.id, integrationAccessRequests.requestedById))
+      .where(eq(integrationAccessRequests.workspaceId, workspaceId))
+      .orderBy(desc(integrationAccessRequests.updatedAt))
+    return rows
+  }
+
+  async requestAccess(workspaceId: string, userId: string, provider: string, note?: string) {
+    const [existing] = await this.db
+      .select()
+      .from(integrationAccessRequests)
+      .where(
+        and(
+          eq(integrationAccessRequests.workspaceId, workspaceId),
+          eq(integrationAccessRequests.provider, provider),
+        ),
+      )
+      .limit(1)
+    if (existing) {
+      const [updated] = await this.db
+        .update(integrationAccessRequests)
+        .set({
+          status: 'pending',
+          note: note?.trim() || existing.note,
+          requestedById: userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(integrationAccessRequests.id, existing.id))
+        .returning()
+      return updated
+    }
+    const [created] = await this.db
+      .insert(integrationAccessRequests)
+      .values({
+        workspaceId,
+        provider,
+        requestedById: userId,
+        status: 'pending',
+        note: note?.trim() || null,
+      })
+      .returning()
+    return created
+  }
+
+  async setAccessRequestStatus(
+    workspaceId: string,
+    provider: string,
+    status: 'pending' | 'approved' | 'rejected',
+    note?: string,
+  ) {
+    const [existing] = await this.db
+      .select()
+      .from(integrationAccessRequests)
+      .where(
+        and(
+          eq(integrationAccessRequests.workspaceId, workspaceId),
+          eq(integrationAccessRequests.provider, provider),
+        ),
+      )
+      .limit(1)
+    if (!existing) {
+      throw new BadRequestException('Access request not found')
+    }
+    const [updated] = await this.db
+      .update(integrationAccessRequests)
+      .set({
+        status,
+        note: note?.trim() || existing.note,
+        updatedAt: new Date(),
+      })
+      .where(eq(integrationAccessRequests.id, existing.id))
+      .returning()
+    return updated
+  }
+
   private assertProvider(providerRaw: string): Provider {
     if (
       providerRaw === 'github' ||
@@ -151,7 +278,9 @@ export class IntegrationConnectionsService {
       providerRaw === 'gcal' ||
       providerRaw === 'google-drive' ||
       providerRaw === 'outlook' ||
-      providerRaw === 'onedrive'
+      providerRaw === 'onedrive' ||
+      providerRaw === 'linear' ||
+      providerRaw === 'salesforce'
     ) {
       return providerRaw
     }
@@ -219,6 +348,26 @@ export class IntegrationConnectionsService {
             : ['openid', 'email', 'profile', 'offline_access', 'Files.ReadWrite'],
       }
     }
+    if (provider === 'linear') {
+      return {
+        provider,
+        authUrl: process.env.LINEAR_AUTH_URL ?? 'https://linear.app/oauth/authorize',
+        tokenUrl: process.env.LINEAR_TOKEN_URL ?? 'https://api.linear.app/oauth/token',
+        clientId: process.env.LINEAR_CLIENT_ID ?? '',
+        clientSecret: process.env.LINEAR_CLIENT_SECRET ?? '',
+        scopes: ['read', 'write'],
+      }
+    }
+    if (provider === 'salesforce') {
+      return {
+        provider,
+        authUrl: process.env.SALESFORCE_AUTH_URL ?? 'https://login.salesforce.com/services/oauth2/authorize',
+        tokenUrl: process.env.SALESFORCE_TOKEN_URL ?? 'https://login.salesforce.com/services/oauth2/token',
+        clientId: process.env.SALESFORCE_CLIENT_ID ?? '',
+        clientSecret: process.env.SALESFORCE_CLIENT_SECRET ?? '',
+        scopes: ['api', 'refresh_token'],
+      }
+    }
 
     const scopes =
       provider === 'gcal'
@@ -237,6 +386,25 @@ export class IntegrationConnectionsService {
         prompt: 'consent',
       },
     }
+  }
+
+  private getMissingProviderEnv(provider: Provider): string[] {
+    if (provider === 'github') {
+      return ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'].filter((k) => !process.env[k])
+    }
+    if (provider === 'gitlab') {
+      return ['GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET'].filter((k) => !process.env[k])
+    }
+    if (provider === 'outlook' || provider === 'onedrive') {
+      return ['MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'].filter((k) => !process.env[k])
+    }
+    if (provider === 'linear') {
+      return ['LINEAR_CLIENT_ID', 'LINEAR_CLIENT_SECRET'].filter((k) => !process.env[k])
+    }
+    if (provider === 'salesforce') {
+      return ['SALESFORCE_CLIENT_ID', 'SALESFORCE_CLIENT_SECRET'].filter((k) => !process.env[k])
+    }
+    return ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'].filter((k) => !process.env[k])
   }
 
   private getStateSecret() {
@@ -364,6 +532,55 @@ export class IntegrationConnectionsService {
         id: me.id,
         email: me.mail ?? me.userPrincipalName ?? null,
         metadata: { displayName: me.displayName ?? null },
+      }
+    }
+    if (provider === 'linear') {
+      const viewerRes = await fetch(process.env.LINEAR_GRAPHQL_URL ?? 'https://api.linear.app/graphql', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: 'query ViewerProfile { viewer { id email name } }',
+        }),
+        signal: AbortSignal.timeout(20_000),
+      })
+      if (!viewerRes.ok) throw new BadRequestException('Failed to fetch Linear profile')
+      const viewerBody = (await viewerRes.json()) as {
+        data?: { viewer?: { id?: string; email?: string | null; name?: string | null } }
+      }
+      const viewer = viewerBody.data?.viewer
+      if (!viewer?.id) throw new BadRequestException('Linear profile payload missing id')
+      return {
+        id: viewer.id,
+        email: viewer.email ?? null,
+        metadata: { name: viewer.name ?? null },
+      }
+    }
+    if (provider === 'salesforce') {
+      const userInfoRes = await fetch(
+        process.env.SALESFORCE_USERINFO_URL ?? 'https://login.salesforce.com/services/oauth2/userinfo',
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          signal: AbortSignal.timeout(20_000),
+        },
+      )
+      if (!userInfoRes.ok) throw new BadRequestException('Failed to fetch Salesforce profile')
+      const userInfo = (await userInfoRes.json()) as {
+        user_id?: string
+        email?: string | null
+        preferred_username?: string | null
+        name?: string | null
+      }
+      const userId = userInfo.user_id
+      if (!userId) throw new BadRequestException('Salesforce profile payload missing user_id')
+      return {
+        id: userId,
+        email: userInfo.email ?? userInfo.preferred_username ?? null,
+        metadata: { name: userInfo.name ?? null },
       }
     }
 

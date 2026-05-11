@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet, useMatches, useNavigate } from '@tanstack/react-router'
 import { Badge, Button } from '@rundesk/ui'
-import { ShieldCheck, ScrollText, Users, Settings, Webhook, Megaphone, Crown, LogOut } from 'lucide-react'
+import { ShieldCheck, ScrollText, Users, Settings, Webhook, Megaphone, Crown, LogOut, Plug } from 'lucide-react'
 import { MasterAdminPanel } from '../components/master-admin-panel'
 import { useAuthStore } from '../store/auth'
 import { api, ApiError } from '../lib/api'
@@ -24,6 +24,7 @@ const navItems: NavItem[] = [
   { label: 'Audit log', icon: ScrollText, to: '/app/admin/audit', description: 'See who changed what' },
   { label: 'Users', icon: Users, to: '/app/admin/users', description: 'Manage workspace members' },
   { label: 'Webhooks', icon: Webhook, to: '/app/admin/webhooks', description: 'Manage outbound webhooks' },
+  { label: 'Integrations', icon: Plug, to: '/app/admin/integrations', description: 'Review provider access requests' },
   { label: 'Settings', icon: Settings, to: '/app/admin/settings', description: 'Workspace-level controls' },
 ]
 
