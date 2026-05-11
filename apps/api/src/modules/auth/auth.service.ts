@@ -254,6 +254,58 @@ export class AuthService {
       .where(eq(sessions.refreshToken, refreshToken))
   }
 
+  async listSessions(userId: string, currentRefreshToken?: string | null) {
+    const rows = await this.db
+      .select({
+        id: sessions.id,
+        userAgent: sessions.userAgent,
+        ipAddress: sessions.ipAddress,
+        isRevoked: sessions.isRevoked,
+        expiresAt: sessions.expiresAt,
+        createdAt: sessions.createdAt,
+        refreshToken: sessions.refreshToken,
+      })
+      .from(sessions)
+      .where(eq(sessions.userId, userId))
+
+    return rows
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .map((row) => ({
+        id: row.id,
+        userAgent: row.userAgent,
+        ipAddress: row.ipAddress,
+        isRevoked: row.isRevoked,
+        expiresAt: row.expiresAt,
+        createdAt: row.createdAt,
+        isCurrent: Boolean(currentRefreshToken) && row.refreshToken === currentRefreshToken,
+      }))
+  }
+
+  async revokeSession(userId: string, sessionId: string) {
+    const [session] = await this.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+      .limit(1)
+    if (!session) throw new UnauthorizedException('Session not found')
+    await this.db.update(sessions).set({ isRevoked: true }).where(eq(sessions.id, session.id))
+    return { revoked: true }
+  }
+
+  async revokeOtherSessions(userId: string, currentRefreshToken?: string | null) {
+    const userSessions = await this.db
+      .select({ id: sessions.id, refreshToken: sessions.refreshToken })
+      .from(sessions)
+      .where(eq(sessions.userId, userId))
+    const idsToRevoke = userSessions
+      .filter((s) => !currentRefreshToken || s.refreshToken !== currentRefreshToken)
+      .map((s) => s.id)
+    for (const id of idsToRevoke) {
+      await this.db.update(sessions).set({ isRevoked: true }).where(eq(sessions.id, id))
+    }
+    return { revoked: idsToRevoke.length }
+  }
+
   async requestPasswordReset(email: string) {
     const normalizedEmail = email.toLowerCase().trim()
     const user = await this.usersService.findByEmail(normalizedEmail)

@@ -57,6 +57,13 @@ type ActivityAction =
   | 'moved'
 
 type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
+type RecurrenceRule = {
+  mode: 'daily' | 'weekly' | 'monthly'
+  interval?: number
+  weekdays?: number[]
+  dayOfMonth?: number
+  skipWeekends?: boolean
+}
 
 @Injectable()
 export class TasksService {
@@ -323,6 +330,91 @@ export class TasksService {
     return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
   }
 
+  private clampRecurrenceInterval(interval?: number): number {
+    if (!interval || !Number.isFinite(interval)) return 1
+    return Math.min(Math.max(Math.floor(interval), 1), 52)
+  }
+
+  private shiftByRecurrenceRule(input: Date | null | undefined, rule: RecurrenceRule): Date | undefined {
+    if (!input) return undefined
+    const source = new Date(input)
+    const interval = this.clampRecurrenceInterval(rule.interval)
+
+    if (rule.mode === 'daily') {
+      const next = new Date(source)
+      next.setDate(next.getDate() + interval)
+      if (rule.skipWeekends) {
+        while (next.getDay() === 0 || next.getDay() === 6) next.setDate(next.getDate() + 1)
+      }
+      return next
+    }
+
+    if (rule.mode === 'weekly') {
+      const allowed = (rule.weekdays ?? []).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+      const weekdays = allowed.length > 0 ? allowed : [source.getDay()]
+      const next = new Date(source)
+      for (let i = 0; i < 370; i++) {
+        next.setDate(next.getDate() + 1)
+        const diffDays = Math.floor((next.getTime() - source.getTime()) / (24 * 60 * 60 * 1000))
+        const weekIndex = Math.floor(diffDays / 7)
+        if ((weekIndex % interval) === 0 && weekdays.includes(next.getDay())) return next
+      }
+      return undefined
+    }
+
+    // monthly
+    const targetDay = Math.min(Math.max(Math.floor(rule.dayOfMonth ?? source.getDate()), 1), 31)
+    const next = new Date(source)
+    next.setDate(1)
+    next.setMonth(next.getMonth() + interval)
+    const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
+    next.setDate(Math.min(targetDay, lastDay))
+    return next
+  }
+
+  private async getOpenBlockers(taskId: string) {
+    const directBlockedBy = await this.db
+      .select({ blockerTaskId: taskDependencies.relatedTaskId })
+      .from(taskDependencies)
+      .where(and(eq(taskDependencies.taskId, taskId), eq(taskDependencies.type, 'blocked_by')))
+    const reverseBlocks = await this.db
+      .select({ blockerTaskId: taskDependencies.taskId })
+      .from(taskDependencies)
+      .where(and(eq(taskDependencies.relatedTaskId, taskId), eq(taskDependencies.type, 'blocks')))
+    const blockerIds = [...new Set([...directBlockedBy, ...reverseBlocks].map((r) => r.blockerTaskId))]
+    if (blockerIds.length === 0) return []
+    const blockerTasks = await this.db
+      .select({ id: tasks.id, status: tasks.status, title: tasks.title })
+      .from(tasks)
+      .where(inArray(tasks.id, blockerIds))
+    return blockerTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled')
+  }
+
+  private async hasBlockingPath(fromTaskId: string, toTaskId: string): Promise<boolean> {
+    if (fromTaskId === toTaskId) return true
+    const visited = new Set<string>()
+    let frontier = [fromTaskId]
+    while (frontier.length > 0) {
+      const current = frontier.filter((id) => !visited.has(id))
+      frontier = []
+      if (current.length === 0) break
+      for (const node of current) visited.add(node)
+
+      const forwardBlocks = await this.db
+        .select({ nextId: taskDependencies.relatedTaskId })
+        .from(taskDependencies)
+        .where(and(inArray(taskDependencies.taskId, current), eq(taskDependencies.type, 'blocks')))
+      const reverseBlockedBy = await this.db
+        .select({ nextId: taskDependencies.taskId })
+        .from(taskDependencies)
+        .where(and(inArray(taskDependencies.relatedTaskId, current), eq(taskDependencies.type, 'blocked_by')))
+      const nextNodes = [...forwardBlocks, ...reverseBlockedBy].map((r) => r.nextId)
+      if (nextNodes.includes(toTaskId)) return true
+      frontier = nextNodes
+    }
+    return false
+  }
+
   async createAttachmentUploadUrl(
     taskId: string,
     actorId: string,
@@ -421,7 +513,7 @@ export class TasksService {
    */
   async getTimelineForWorkspace(
     workspaceId: string,
-    opts: { from?: Date; to?: Date } = {},
+    _opts: { from?: Date; to?: Date } = {},
   ) {
     const rows = await this.db
       .select({
@@ -679,6 +771,14 @@ export class TasksService {
     await this.assertTaskWriteAccess(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
+    if (patch.status && ['in_progress', 'in_review', 'done'].includes(patch.status)) {
+      const blockers = await this.getOpenBlockers(taskId)
+      if (blockers.length > 0) {
+        throw new BadRequestException(
+          `Task is blocked by open dependencies: ${blockers.map((b) => `${b.title} (${b.id})`).join(', ')}`,
+        )
+      }
+    }
 
     const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
     if (patch.status === 'done' && before.status !== 'done') set.completedAt = new Date()
@@ -781,6 +881,199 @@ export class TasksService {
     }
 
     return this.getTask(taskId)
+  }
+
+  async bulkUpdateTasks(
+    taskIds: string[],
+    actorId: string,
+    patch: Partial<{
+      priority: TaskPriority
+      status: TaskStatus
+      startDate: Date | null
+      dueDate: Date | null
+      timeEstimate: number | null
+      isArchived: boolean
+      assigneeIdsAdd: string[]
+      assigneeIdsRemove: string[]
+      labelIdsAdd: string[]
+      labelIdsRemove: string[]
+      dependenciesAdd: Array<{
+        relatedTaskId: string
+        type: DependencyType
+      }>
+      dependenciesRemove: Array<{
+        relatedTaskId: string
+        type: DependencyType
+      }>
+    }>,
+  ) {
+    const uniqueTaskIds = [...new Set(taskIds)].filter(Boolean)
+    if (uniqueTaskIds.length === 0) {
+      throw new BadRequestException('taskIds are required')
+    }
+    if (uniqueTaskIds.length > 200) {
+      throw new BadRequestException('Bulk updates are limited to 200 tasks at a time')
+    }
+    if (Object.keys(patch).length === 0) {
+      throw new BadRequestException('patch is required')
+    }
+
+    const fieldPatch: Partial<{
+      priority: TaskPriority
+      status: TaskStatus
+      startDate: Date | null
+      dueDate: Date | null
+      timeEstimate: number | null
+      isArchived: boolean
+    }> = {}
+    if ('priority' in patch) fieldPatch.priority = patch.priority
+    if ('status' in patch) fieldPatch.status = patch.status
+    if ('startDate' in patch) fieldPatch.startDate = patch.startDate
+    if ('dueDate' in patch) fieldPatch.dueDate = patch.dueDate
+    if ('timeEstimate' in patch) fieldPatch.timeEstimate = patch.timeEstimate
+    if ('isArchived' in patch) fieldPatch.isArchived = patch.isArchived
+    const assigneeIdsAdd = [...new Set(patch.assigneeIdsAdd ?? [])].filter(Boolean)
+    const assigneeIdsRemove = [...new Set(patch.assigneeIdsRemove ?? [])].filter(Boolean)
+    const labelIdsAdd = [...new Set(patch.labelIdsAdd ?? [])].filter(Boolean)
+    const labelIdsRemove = [...new Set(patch.labelIdsRemove ?? [])].filter(Boolean)
+    const dependenciesAdd = patch.dependenciesAdd ?? []
+    const dependenciesRemove = patch.dependenciesRemove ?? []
+    const hasRelationshipOps =
+      assigneeIdsAdd.length > 0 ||
+      assigneeIdsRemove.length > 0 ||
+      labelIdsAdd.length > 0 ||
+      labelIdsRemove.length > 0 ||
+      dependenciesAdd.length > 0 ||
+      dependenciesRemove.length > 0
+    if (Object.keys(fieldPatch).length === 0 && !hasRelationshipOps) {
+      throw new BadRequestException('patch did not include any supported bulk operation')
+    }
+
+    const updated = []
+    const failed: Array<{ taskId: string; reason: string }> = []
+    for (const taskId of uniqueTaskIds) {
+      try {
+        let next = null
+        if (Object.keys(fieldPatch).length > 0) {
+          next = await this.updateTask(taskId, actorId, fieldPatch)
+        } else {
+          await this.assertTaskWriteAccess(taskId, actorId)
+        }
+        for (const userId of assigneeIdsAdd) {
+          await this.addAssignee(taskId, userId, actorId)
+        }
+        for (const userId of assigneeIdsRemove) {
+          await this.removeAssignee(taskId, userId, actorId)
+        }
+        for (const labelId of labelIdsAdd) {
+          await this.addLabel(taskId, labelId, actorId)
+        }
+        for (const labelId of labelIdsRemove) {
+          await this.removeLabel(taskId, labelId, actorId)
+        }
+        for (const dep of dependenciesAdd) {
+          await this.addDependency(taskId, dep.relatedTaskId, dep.type, actorId)
+        }
+        for (const dep of dependenciesRemove) {
+          const [existing] = await this.db
+            .select({ id: taskDependencies.id })
+            .from(taskDependencies)
+            .where(
+              and(
+                eq(taskDependencies.taskId, taskId),
+                eq(taskDependencies.relatedTaskId, dep.relatedTaskId),
+                eq(taskDependencies.type, dep.type),
+              ),
+            )
+            .limit(1)
+          if (existing) {
+            await this.removeDependency(existing.id, actorId)
+          }
+        }
+        if (!next || hasRelationshipOps) {
+          next = await this.getTask(taskId)
+        }
+        updated.push(next)
+      } catch (err) {
+        failed.push({
+          taskId,
+          reason: err instanceof Error ? err.message : 'unknown error',
+        })
+      }
+    }
+
+    return {
+      requested: uniqueTaskIds.length,
+      updatedCount: updated.length,
+      failedCount: failed.length,
+      updated,
+      failed,
+    }
+  }
+
+  async createNextRecurringOccurrence(
+    taskId: string,
+    actorId: string,
+    cadenceDays: number | null,
+    recurrenceRule: RecurrenceRule | null = null,
+    preserveAssignees = true,
+  ) {
+    if (!recurrenceRule && (!Number.isFinite(cadenceDays) || (cadenceDays ?? 0) <= 0 || (cadenceDays ?? 0) > 365)) {
+      throw new BadRequestException('cadenceDays must be between 1 and 365 when recurrenceRule is not provided')
+    }
+
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const source = await this.getTask(taskId)
+    if (!source) throw new NotFoundException('Task not found')
+
+    const shift = (input: Date | null | undefined) =>
+      recurrenceRule
+        ? this.shiftByRecurrenceRule(input, recurrenceRule)
+        : (() => {
+            if (!input || !cadenceDays) return undefined
+            const date = new Date(input)
+            date.setDate(date.getDate() + cadenceDays)
+            return date
+          })()
+
+    let assigneeIds: string[] | undefined
+    if (preserveAssignees) {
+      assigneeIds = (source.assignees ?? []).map((assignee) => assignee.userId)
+    }
+
+    const created = await this.createTask({
+      listId: source.listId,
+      title: source.title,
+      description: source.description ?? undefined,
+      priority: source.priority,
+      status: source.status === 'done' ? 'todo' : source.status,
+      startDate: shift(source.startDate),
+      dueDate: shift(source.dueDate),
+      timeEstimate: source.timeEstimate ?? undefined,
+      createdById: actorId,
+      assigneeIds,
+      parentTaskId: source.parentTaskId ?? undefined,
+    })
+    if (!created) throw new NotFoundException('Failed to create recurring task')
+
+    await this.logActivity({
+      taskId,
+      actorId,
+      action: 'updated',
+      meta: {
+        recurringNextTaskId: created.id,
+        cadenceDays: cadenceDays ?? null,
+        recurrenceRule,
+      },
+    })
+
+    return {
+      sourceTaskId: taskId,
+      nextTaskId: created.id,
+      cadenceDays: cadenceDays ?? null,
+      recurrenceRule,
+      task: created,
+    }
   }
 
   async deleteTask(taskId: string, actorId: string) {
@@ -1225,8 +1518,108 @@ export class TasksService {
   }
 
   // --- Dependencies --------------------------------------------------------
+  async getDependencyGraph(taskId: string, depth = 2) {
+    const normalizedDepth = Math.min(Math.max(Math.floor(depth || 1), 1), 6)
+    const visited = new Set<string>([taskId])
+    const edges = new Map<string, { taskId: string; relatedTaskId: string; type: DependencyType }>()
+    let frontier = [taskId]
+
+    for (let i = 0; i < normalizedDepth && frontier.length > 0; i++) {
+      const outgoing = await this.db
+        .select({ taskId: taskDependencies.taskId, relatedTaskId: taskDependencies.relatedTaskId, type: taskDependencies.type })
+        .from(taskDependencies)
+        .where(inArray(taskDependencies.taskId, frontier))
+      const incoming = await this.db
+        .select({ taskId: taskDependencies.taskId, relatedTaskId: taskDependencies.relatedTaskId, type: taskDependencies.type })
+        .from(taskDependencies)
+        .where(inArray(taskDependencies.relatedTaskId, frontier))
+      const combined = [...outgoing, ...incoming]
+      const nextFrontier: string[] = []
+      for (const edge of combined) {
+        edges.set(`${edge.taskId}:${edge.relatedTaskId}:${edge.type}`, edge)
+        if (!visited.has(edge.taskId)) {
+          visited.add(edge.taskId)
+          nextFrontier.push(edge.taskId)
+        }
+        if (!visited.has(edge.relatedTaskId)) {
+          visited.add(edge.relatedTaskId)
+          nextFrontier.push(edge.relatedTaskId)
+        }
+      }
+      frontier = nextFrontier
+    }
+
+    const nodeIds = [...visited]
+    const rows = await this.db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+        isArchived: tasks.isArchived,
+      })
+      .from(tasks)
+      .where(inArray(tasks.id, nodeIds))
+
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    const isOpen = (id: string) => {
+      const node = byId.get(id)
+      if (!node) return false
+      return !node.isArchived && node.status !== 'done' && node.status !== 'cancelled'
+    }
+
+    const blocksAdj = new Map<string, string[]>() // blocker -> blocked
+    const blockedByAdj = new Map<string, string[]>() // blocked -> blocker
+    for (const edge of edges.values()) {
+      const pair =
+        edge.type === 'blocks'
+          ? { blocker: edge.taskId, blocked: edge.relatedTaskId }
+          : edge.type === 'blocked_by'
+          ? { blocker: edge.relatedTaskId, blocked: edge.taskId }
+          : null
+      if (!pair) continue
+      blocksAdj.set(pair.blocker, [...(blocksAdj.get(pair.blocker) ?? []), pair.blocked])
+      blockedByAdj.set(pair.blocked, [...(blockedByAdj.get(pair.blocked) ?? []), pair.blocker])
+    }
+
+    const rootBlockedByOpen = (blockedByAdj.get(taskId) ?? []).filter(isOpen).length
+    const rootBlocksOpen = (blocksAdj.get(taskId) ?? []).filter(isOpen).length
+    const dfsDepth = (startId: string, adj: Map<string, string[]>, seen: Set<string>): number => {
+      if (seen.has(startId)) return 0
+      seen.add(startId)
+      let best = 0
+      for (const nextId of adj.get(startId) ?? []) {
+        if (!isOpen(nextId)) continue
+        best = Math.max(best, 1 + dfsDepth(nextId, adj, new Set(seen)))
+      }
+      return best
+    }
+
+    return {
+      rootTaskId: taskId,
+      depth: normalizedDepth,
+      metrics: {
+        nodeCount: rows.length,
+        edgeCount: edges.size,
+        blockedByOpenCount: rootBlockedByOpen,
+        blocksOpenCount: rootBlocksOpen,
+        longestBlockedByChainDepth: dfsDepth(taskId, blockedByAdj, new Set<string>()),
+        longestBlocksChainDepth: dfsDepth(taskId, blocksAdj, new Set<string>()),
+      },
+      nodes: rows,
+      edges: [...edges.values()],
+    }
+  }
+
   async addDependency(taskId: string, relatedTaskId: string, type: DependencyType, actorId: string) {
     if (taskId === relatedTaskId) throw new BadRequestException('A task cannot depend on itself')
+    if (type === 'blocks' || type === 'blocked_by') {
+      const blocker = type === 'blocks' ? taskId : relatedTaskId
+      const blocked = type === 'blocks' ? relatedTaskId : taskId
+      const cycle = await this.hasBlockingPath(blocked, blocker)
+      if (cycle) throw new BadRequestException('Dependency would create a blocking cycle')
+    }
     const [created] = await this.db
       .insert(taskDependencies)
       .values({ taskId, relatedTaskId, type, createdById: actorId })

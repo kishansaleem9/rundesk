@@ -128,6 +128,66 @@ export class TasksController {
     return this.tasks.updateTask(taskId, user.id, patch)
   }
 
+  @Patch('bulk/update')
+  async bulkUpdate(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body()
+    body: {
+      taskIds: string[]
+      patch: Partial<{
+        priority: 'urgent' | 'high' | 'normal' | 'low'
+        status: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
+        startDate: string | null
+        dueDate: string | null
+        timeEstimate: number | null
+        isArchived: boolean
+        assigneeIdsAdd: string[]
+        assigneeIdsRemove: string[]
+        labelIdsAdd: string[]
+        labelIdsRemove: string[]
+        dependenciesAdd: Array<{
+          relatedTaskId: string
+          type: 'blocks' | 'blocked_by' | 'related_to'
+        }>
+        dependenciesRemove: Array<{
+          relatedTaskId: string
+          type: 'blocks' | 'blocked_by' | 'related_to'
+        }>
+      }>
+    },
+  ) {
+    const patch: Record<string, unknown> = { ...body.patch }
+    if ('startDate' in body.patch) patch.startDate = body.patch.startDate ? new Date(body.patch.startDate) : null
+    if ('dueDate' in body.patch) patch.dueDate = body.patch.dueDate ? new Date(body.patch.dueDate) : null
+    return this.tasks.bulkUpdateTasks(body.taskIds, user.id, patch)
+  }
+
+  @Post(':taskId/recurring/next')
+  async createNextRecurring(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body()
+    body: {
+      cadenceDays?: number
+      recurrenceRule?: {
+        mode: 'daily' | 'weekly' | 'monthly'
+        interval?: number
+        weekdays?: number[]
+        dayOfMonth?: number
+        skipWeekends?: boolean
+      }
+      preserveAssignees?: boolean
+    },
+  ) {
+    return this.tasks.createNextRecurringOccurrence(
+      taskId,
+      user.id,
+      body.cadenceDays ?? null,
+      body.recurrenceRule ?? null,
+      body.preserveAssignees ?? true,
+    )
+  }
+
   @Post(':taskId/move')
   async move(
     @Param('taskId') taskId: string,

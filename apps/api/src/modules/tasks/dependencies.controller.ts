@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Param, Body, UseGuards } from '@nestjs/common'
+import { Controller, Post, Delete, Param, Body, UseGuards, Get, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -11,6 +11,11 @@ import type { CurrentUserPayload } from './types'
 @UseGuards(JwtAuthGuard)
 export class TaskDependenciesController {
   constructor(private tasks: TasksService) {}
+
+  @Get('graph')
+  graph(@Param('taskId') taskId: string, @Query('depth') depth?: string) {
+    return this.tasks.getDependencyGraph(taskId, depth ? Number(depth) : 2)
+  }
 
   @Post()
   add(

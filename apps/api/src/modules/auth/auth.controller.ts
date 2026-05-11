@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus, Get } from '@nestjs/common'
+import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus, Get, Query, Delete, Param } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger'
 import type { FastifyRequest } from 'fastify'
 import { AuthService } from './auth.service'
@@ -78,5 +78,29 @@ export class AuthController {
   @ApiOperation({ summary: 'Get the current authenticated user payload' })
   async me(@CurrentUser() user: any) {
     return user
+  }
+
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List current user sessions' })
+  sessions(@CurrentUser() user: any, @Query('currentRefreshToken') currentRefreshToken?: string) {
+    return this.authService.listSessions(user.id, currentRefreshToken)
+  }
+
+  @Post('sessions/revoke-others')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke all sessions except current one' })
+  revokeOthers(@CurrentUser() user: any, @Body() body: { currentRefreshToken?: string }) {
+    return this.authService.revokeOtherSessions(user.id, body.currentRefreshToken)
+  }
+
+  @Delete('sessions/:sessionId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Revoke a single user session' })
+  revokeSession(@CurrentUser() user: any, @Param('sessionId') sessionId: string) {
+    return this.authService.revokeSession(user.id, sessionId)
   }
 }
