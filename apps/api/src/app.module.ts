@@ -45,6 +45,7 @@ import { WorkspaceGroupsModule } from './modules/workspace-groups/workspace-grou
 import { CalendarSyncModule } from './modules/calendar-sync/calendar-sync.module'
 import { EmailToTaskModule } from './modules/email-to-task/email-to-task.module'
 import { CustomRolesModule } from './modules/custom-roles/custom-roles.module'
+import { TaskTemplatesModule } from './modules/task-templates/task-templates.module'
 
 @Module({
   imports: [
@@ -101,6 +102,7 @@ import { CustomRolesModule } from './modules/custom-roles/custom-roles.module'
     CalendarSyncModule,
     EmailToTaskModule,
     CustomRolesModule,
+    TaskTemplatesModule,
   ],
 })
 export class AppModule {}
