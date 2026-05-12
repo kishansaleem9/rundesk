@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
+import { GroupsTab } from '../components/groups-tab'
 
 export const Route = createFileRoute('/app/$workspaceId/settings')({
   beforeLoad: ({ params }) => {
@@ -57,6 +58,7 @@ type Invitation = {
 const TABS = [
   { id: 'general', label: 'General', icon: Building2 },
   { id: 'members', label: 'Members', icon: Users },
+  { id: 'groups', label: 'Groups', icon: Users2 },
   { id: 'integrations', label: 'Integrations', icon: Plug },
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'sso', label: 'SSO & SCIM', icon: KeyRound },
@@ -130,6 +132,7 @@ function SettingsPage() {
           <div>
             {tab === 'general' && <GeneralTab workspaceId={validWorkspaceId} />}
             {tab === 'members' && <MembersTab workspaceId={validWorkspaceId} />}
+            {tab === 'groups' && <GroupsTab workspaceId={validWorkspaceId} />}
             {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
             {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
             {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
