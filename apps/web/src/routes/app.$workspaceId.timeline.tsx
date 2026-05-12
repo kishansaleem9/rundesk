@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
-import { GanttChart, ZoomIn, ZoomOut } from 'lucide-react'
+import { GanttChart } from 'lucide-react'
 import { api } from '../lib/api'
 
 export const Route = createFileRoute('/app/$workspaceId/timeline')({
@@ -50,6 +50,7 @@ function TimelinePage() {
   const qc = useQueryClient()
   const [zoom, setZoom] = useState<Zoom>('week')
   const [localPatches, setLocalPatches] = useState<Record<string, { startDate?: string | null; dueDate?: string | null }>>({})
+  const [projectFilter, setProjectFilter] = useState<string>('all')
 
   const tasksQuery = useQuery({
     queryKey: ['timeline', workspaceId],
@@ -66,7 +67,7 @@ function TimelinePage() {
     },
   })
 
-  const tasks = useMemo(
+  const allTasks = useMemo(
     () =>
       (tasksQuery.data ?? []).map((task) => {
         const patch = localPatches[task.id]
@@ -74,6 +75,21 @@ function TimelinePage() {
       }),
     [tasksQuery.data, localPatches],
   )
+
+  const projectOptions = useMemo(() => {
+    const seen = new Map<string, { id: string; label: string }>()
+    for (const t of allTasks) {
+      if (!seen.has(t.projectId)) {
+        seen.set(t.projectId, { id: t.projectId, label: `${t.spaceName} · ${t.projectName}` })
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label))
+  }, [allTasks])
+
+  const tasks = useMemo(() => {
+    if (projectFilter === 'all') return allTasks
+    return allTasks.filter((t) => t.projectId === projectFilter)
+  }, [allTasks, projectFilter])
   const dayPx = DAY_PX[zoom]
 
   const { startMs, days } = useMemo(() => {
@@ -127,21 +143,38 @@ function TimelinePage() {
             All tasks with start or due dates, grouped by project. Drag the area below to scroll.
           </p>
         </div>
-        <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1 backdrop-blur-sm shrink-0">
-          {(['day', 'week', 'month'] as const).map((z) => (
-            <button
-              key={z}
-              onClick={() => setZoom(z)}
-              className={cn(
-                'text-xs px-3 py-1.5 rounded-md transition-all capitalize font-medium',
-                zoom === z
-                  ? 'bg-brand-gradient text-white shadow-sm'
-                  : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
-              )}
+        <div className="flex items-center gap-2 shrink-0">
+          {projectOptions.length > 1 && (
+            <select
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
+              className="text-xs h-8 px-2.5 rounded-md border border-border/60 bg-card/60 text-foreground backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+              title="Filter by project"
             >
-              {z}
-            </button>
-          ))}
+              <option value="all">All projects</option>
+              {projectOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1 backdrop-blur-sm">
+            {(['day', 'week', 'month'] as const).map((z) => (
+              <button
+                key={z}
+                onClick={() => setZoom(z)}
+                className={cn(
+                  'text-xs px-3 py-1.5 rounded-md transition-all capitalize font-medium',
+                  zoom === z
+                    ? 'bg-brand-gradient text-white shadow-sm'
+                    : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {z}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -335,7 +368,7 @@ function TaskRow({
       <div className="relative h-12" style={{ width: totalWidth }}>
         <div
           className={cn(
-            'absolute top-1/2 -translate-y-1/2 h-7 rounded-md text-[11px] text-white px-2.5 flex items-center font-medium overflow-hidden shadow-md ring-1 ring-white/10',
+            'group/bar absolute top-1/2 -translate-y-1/2 h-7 rounded-md text-[11px] text-white px-2.5 flex items-center font-medium shadow-md ring-1 ring-white/10',
             PRIORITY_BG[task.priority] ?? 'bg-brand-gradient',
             STATUS_OPACITY[task.status] ?? '',
             isDragging && 'ring-2 ring-white/70',
@@ -343,6 +376,9 @@ function TaskRow({
           style={{ left, width }}
           title={`${task.title} · ${task.startDate ?? '?'} → ${task.dueDate ?? '?'}`}
           onMouseDown={(e) => {
+            if (e.button !== 0) return
+            const target = e.target as HTMLElement
+            if (target.dataset.handle) return
             setIsDragging(true)
             const startX = e.clientX
             const baseStart = startOfDay(barStartMs)
@@ -367,7 +403,65 @@ function TaskRow({
             window.addEventListener('mouseup', up)
           }}
         >
-          <span className="truncate">{task.title}</span>
+          {/* Left resize handle — adjusts start date */}
+          <div
+            data-handle="start"
+            className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 bg-white/30 rounded-l-md transition-opacity"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              if (e.button !== 0) return
+              setIsDragging(true)
+              const startX = e.clientX
+              const baseStart = startOfDay(barStartMs)
+              const baseEnd = startOfDay(barEndMs)
+              let finalDiffDays = 0
+              const move = (evt: MouseEvent) => {
+                const diffDays = Math.round((evt.clientX - startX) / dayPx)
+                finalDiffDays = diffDays
+                const nextStartMs = Math.min(baseStart + diffDays * 86400_000, baseEnd)
+                onPatchDates({ startDate: new Date(nextStartMs).toISOString(), dueDate: task.dueDate })
+              }
+              const up = () => {
+                const finalStartMs = Math.min(baseStart + finalDiffDays * 86400_000, baseEnd)
+                onPersistDates({ startDate: new Date(finalStartMs).toISOString(), dueDate: task.dueDate })
+                setIsDragging(false)
+                window.removeEventListener('mousemove', move)
+                window.removeEventListener('mouseup', up)
+              }
+              window.addEventListener('mousemove', move)
+              window.addEventListener('mouseup', up)
+            }}
+          />
+          <span className="truncate flex-1">{task.title}</span>
+          {/* Right resize handle — adjusts due date */}
+          <div
+            data-handle="end"
+            className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover/bar:opacity-100 bg-white/30 rounded-r-md transition-opacity"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              if (e.button !== 0) return
+              setIsDragging(true)
+              const startX = e.clientX
+              const baseStart = startOfDay(barStartMs)
+              const baseEnd = startOfDay(barEndMs)
+              let finalDiffDays = 0
+              const move = (evt: MouseEvent) => {
+                const diffDays = Math.round((evt.clientX - startX) / dayPx)
+                finalDiffDays = diffDays
+                const nextEndMs = Math.max(baseEnd + diffDays * 86400_000, baseStart)
+                onPatchDates({ startDate: task.startDate, dueDate: new Date(nextEndMs).toISOString() })
+              }
+              const up = () => {
+                const finalEndMs = Math.max(baseEnd + finalDiffDays * 86400_000, baseStart)
+                onPersistDates({ startDate: task.startDate, dueDate: new Date(finalEndMs).toISOString() })
+                setIsDragging(false)
+                window.removeEventListener('mousemove', move)
+                window.removeEventListener('mouseup', up)
+              }
+              window.addEventListener('mousemove', move)
+              window.addEventListener('mouseup', up)
+            }}
+          />
         </div>
         {task.dueDate && (
           <div
