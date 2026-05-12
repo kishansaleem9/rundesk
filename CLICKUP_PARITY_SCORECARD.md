@@ -40,23 +40,38 @@ This scorecard classifies current parity by feature area:
 |---|---|---:|---|
 | Members/invites/roles/settings baseline | Functional | High | `apps/api/src/modules/workspaces`, `apps/api/src/modules/invitations`, `apps/web/src/routes/app.$workspaceId.settings.tsx` |
 | Workspace admin guarding | Functional | High | `apps/api/src/modules/auth/guards/workspace-admin.guard.ts` |
-| Granular task-level write permissions | Partial | Medium | Service-level role checks are being expanded in tasks service |
-| Enterprise governance depth (SSO/SCIM/audit maturity) | Missing | Low | Limited evidence in API modules |
+| Granular task-level write permissions | Functional | Medium | `assertTaskWriteAccess` enforces admin/manager allow-all, guest deny-all, member allow-on-creator-or-assignee in `tasks.service.ts` |
+| Enterprise governance depth (SSO/SCIM/audit maturity) | Missing | Low | Audit-log trail is comprehensive; SSO/SCIM modules not yet present |
 
 ## Automation, Integrations, and Advanced Surfaces
 
 | Capability | Status | Confidence | Evidence |
 |---|---|---:|---|
-| Automations engine (trigger/action/runs) | Partial | High | `apps/api/src/modules/automations/automations.service.ts`, `app.$workspaceId.automations.tsx` |
-| Integrations marketplace | UI-only | High | `apps/web/src/routes/app.$workspaceId.integrations.tsx` shows local OAuth simulation |
-| Whiteboards | UI-only | High | `apps/web/src/routes/app.$workspaceId.whiteboards.tsx` uses `MOCK_BOARDS` and local state |
-| Mind maps | UI-only | High | `apps/web/src/routes/app.$workspaceId.mindmaps.tsx` uses `MOCK_MAPS` and local state |
-| Clips | UI-only | High | `apps/web/src/routes/app.$workspaceId.clips.tsx` uses local recordings/list |
-| Goals / Forms / Time / Reports | Partial | Medium | Route + API presence with mixed feature completeness |
+| Automations engine (trigger/action/runs) | Functional | High | Per-run logging, trigger filters, action handlers in `automations.service.ts`; runs page lists outcomes |
+| Outbound webhooks (delivery, retry, audit) | Functional | High | `webhooks.service.ts` retries 5xx with exponential backoff (3 attempts), 4xx terminal, attempts persisted on `webhook_deliveries` |
+| Integrations marketplace | Functional | High | `integrations.tsx` reads `/integrations/connections/*` providers, status, Slack health, and OAuth-real connection list |
+| Whiteboards | Functional | High | `whiteboards.tsx` reads/writes `/workspaces/:id/canvases?type=whiteboard` with optimistic concurrency |
+| Mind maps | Functional | High | `mindmaps.tsx` reads/writes `/workspaces/:id/canvases?type=mindmap` with optimistic concurrency |
+| Clips | Functional | High | `clips.tsx` posts to `/workspaces/:id/clips`, uses presigned uploads, share routing; covered by `clips.service.test.ts` |
+| Goals / Forms / Time / Reports | Functional | Medium | Goals/Sprints widgets backed by `/reports/goals`, `/reports/sprints`; forms have submission ops; time approvals shipped |
+
+## Collaboration (extended)
+
+| Capability | Status | Confidence | Evidence |
+|---|---|---:|---|
+| Doc comments with selection ranges + resolution | Functional | High | `doc_comments` schema + realtime fan-out + notifications for author/reply/@mention recipients |
 
 ## Current Estimated Parity
 
-- Functional parity: `~72-78%`
-- Partial parity: `~10-15%`
-- UI-only/demo parity: `~8-12%`
-- UI/UX parity vs ClickUp patterns: `~55-65%`
+- Functional parity: `~85-90%`
+- Partial parity: `~5-8%`
+- UI-only/demo parity: `~0-2%`
+- Missing (enterprise depth: SSO/SCIM): `~5-7%`
+- UI/UX parity vs ClickUp patterns: `~60-70%`
+
+## Known remaining gaps
+
+- **Enterprise SSO/SCIM**: no SAML/OIDC/SCIM provisioning modules. Workspace audit log + 2FA + API keys are in place, but enterprise identity federation is not yet wired.
+- **Pre-existing lint warnings**: 49 non-blocking `react-hooks/exhaustive-deps` style warnings remain across older surfaces. No errors.
+- **Documentation surface depth**: docs comments now match ClickUp parity for threading and resolution; inline mention picker UI (Tiptap mention extension wiring in the Tiptap toolbar) is the next polish step but the backend already resolves mentions three ways.
+- **Whiteboard/Mindmap fidelity**: storage + realtime sync are live, but advanced authoring tools (shape libraries, snap-to-grid, collaborator cursors) are still feature-gated.
