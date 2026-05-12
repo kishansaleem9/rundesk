@@ -40,6 +40,7 @@ import { StorageModule } from './common/storage/storage.module'
 import { ClipsModule } from './modules/clips/clips.module'
 import { CanvasesModule } from './modules/canvases/canvases.module'
 import { AnnouncementsModule } from './modules/announcements/announcements.module'
+import { SsoModule } from './modules/sso/sso.module'
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { AnnouncementsModule } from './modules/announcements/announcements.modul
     ClipsModule,
     CanvasesModule,
     AnnouncementsModule,
+    SsoModule,
   ],
 })
 export class AppModule {}
