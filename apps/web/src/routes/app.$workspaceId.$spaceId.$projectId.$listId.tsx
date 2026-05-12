@@ -16,6 +16,7 @@ import {
 import { api } from '../lib/api'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { ListStatusesManager } from '../components/list-statuses-manager'
+import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
 import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, endOfMonth, endOfWeek, format, formatDistanceToNowStrict, isSameMonth, isToday, startOfMonth, startOfWeek } from 'date-fns'
@@ -175,6 +176,7 @@ function ListDetail() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [statusManagerOpen, setStatusManagerOpen] = useState(false)
+  const [emailAliasOpen, setEmailAliasOpen] = useState(false)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
   const [saveAsName, setSaveAsName] = useState('')
@@ -541,6 +543,15 @@ function ListDetail() {
             >
               Statuses
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => setEmailAliasOpen(true)}
+              title="Email-to-task address for this list"
+            >
+              Email
+            </Button>
             <span className="hidden lg:inline text-[11px] text-muted-foreground pl-1">Shortcuts: C quick-add, V cycle view</span>
           </div>
         </div>
@@ -695,6 +706,7 @@ function ListDetail() {
       />
       <TaskDetailSheet taskId={selectedTaskId} open={Boolean(selectedTaskId)} onOpenChange={(next) => !next && setSelectedTaskId(null)} workspaceId={workspaceId} />
       <ListStatusesManager listId={listId} open={statusManagerOpen} onOpenChange={setStatusManagerOpen} />
+      <ListEmailAliasPanel listId={listId} open={emailAliasOpen} onOpenChange={setEmailAliasOpen} />
     </div>
     </ListStatusesContext.Provider>
   )
