@@ -18,6 +18,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
+import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
 
 type Doc = {
   id: string
@@ -69,12 +70,43 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     [docsQuery.data, selectedDocId],
   )
 
+  const mentionExtension = useMemo(
+    () =>
+      createMentionExtension({
+        fetchMembers: async (query: string): Promise<MentionMember[]> => {
+          try {
+            const members = await api<
+              Array<{ userId: string; email: string; displayName: string; avatarUrl?: string | null }>
+            >(`/workspaces/${workspaceId}/members`, { method: 'GET' })
+            const filter = query.toLowerCase().trim()
+            const filtered = filter
+              ? members.filter(
+                  (m) =>
+                    m.email.toLowerCase().includes(filter) ||
+                    (m.displayName ?? '').toLowerCase().includes(filter),
+                )
+              : members
+            return filtered.map((m) => ({
+              id: m.userId,
+              email: m.email,
+              displayName: m.displayName ?? m.email,
+              avatarUrl: m.avatarUrl ?? null,
+            }))
+          } catch {
+            return []
+          }
+        },
+      }),
+    [workspaceId],
+  )
+
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Placeholder.configure({ placeholder: 'Write your doc...' }),
+      Placeholder.configure({ placeholder: 'Write your doc... type @ to mention' }),
       TaskList,
       TaskItem.configure({ nested: true }),
+      mentionExtension,
     ],
     content: activeDoc?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
     immediatelyRender: false,
