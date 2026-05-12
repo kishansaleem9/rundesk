@@ -1,5 +1,4 @@
-import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
-import { useRouterState } from '@tanstack/react-router'
+import { createFileRoute, Outlet, redirect, useRouterState } from '@tanstack/react-router'
 import { useState } from 'react'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
@@ -17,9 +16,11 @@ export const Route = createFileRoute('/app')({
 function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const isSuperAdmin = pathname.startsWith('/app/admin')
+  // The /app/admin subtree renders its own chrome, so skip the workspace
+  // sidebar / topbar / command palette to avoid double-stacking shells.
+  const isAdminRoute = pathname.startsWith('/app/admin')
 
-  if (isSuperAdmin) {
+  if (isAdminRoute) {
     return (
       <div className="h-screen flex bg-background overflow-hidden">
         <div className="flex-1 min-w-0 overflow-auto">
