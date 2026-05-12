@@ -634,20 +634,44 @@ export class TasksService {
       .limit(100)
   }
 
-  async getTasksForWorkspace(workspaceId: string, limit = 500) {
-    return this.db
+  /**
+   * Flat list of every task in a workspace with denormalised
+   * space/project/list context. Used by the dashboard, timeline, and
+   * any other view that previously had to fan out
+   * spaces → projects → lists → tasks (N+1+N+M+L+T HTTP requests).
+   *
+   * Returns up to `limit` rows ordered by updatedAt desc. When
+   * `includeAssignees` is true (default true), each row carries a
+   * compact `assignees` array — fetched in one extra batched query
+   * keyed on the returned task ids — so the client can filter
+   * "tasks assigned to me" without another round trip.
+   */
+  async getTasksForWorkspace(
+    workspaceId: string,
+    limit = 500,
+    opts: { includeAssignees?: boolean } = {},
+  ) {
+    const { includeAssignees = true } = opts
+    const safeLimit = Math.min(Math.max(limit, 1), 1000)
+
+    const rows = await this.db
       .select({
-        id: tasks.id,
-        title: tasks.title,
-        status: tasks.status,
-        priority: tasks.priority,
-        listId: lists.id,
-        listName: lists.name,
-        projectId: projects.id,
-        projectName: projects.name,
-        spaceId: spaces.id,
-        spaceName: spaces.name,
-        updatedAt: tasks.updatedAt,
+        id:             tasks.id,
+        title:          tasks.title,
+        status:         tasks.status,
+        statusCategory: tasks.statusCategory,
+        priority:       tasks.priority,
+        listId:         lists.id,
+        listName:       lists.name,
+        projectId:      projects.id,
+        projectName:    projects.name,
+        spaceId:        spaces.id,
+        spaceName:      spaces.name,
+        startDate:      tasks.startDate,
+        dueDate:        tasks.dueDate,
+        completedAt:    tasks.completedAt,
+        createdAt:      tasks.createdAt,
+        updatedAt:      tasks.updatedAt,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -655,7 +679,37 @@ export class TasksService {
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
       .orderBy(desc(tasks.updatedAt))
-      .limit(Math.min(Math.max(limit, 1), 1000))
+      .limit(safeLimit)
+
+    type AssigneeRef = {
+      userId: string
+      displayName: string | null
+      avatarUrl: string | null
+    }
+    const empty: AssigneeRef[] = []
+
+    if (!includeAssignees || rows.length === 0) {
+      return rows.map((r) => ({ ...r, assignees: empty }))
+    }
+
+    const assigneeRows = await this.db
+      .select({
+        taskId:      taskAssignees.taskId,
+        userId:      taskAssignees.userId,
+        displayName: users.displayName,
+        avatarUrl:   users.avatarUrl,
+      })
+      .from(taskAssignees)
+      .innerJoin(users, eq(users.id, taskAssignees.userId))
+      .where(inArray(taskAssignees.taskId, rows.map((r) => r.id)))
+
+    const byTask = new Map<string, AssigneeRef[]>()
+    for (const a of assigneeRows) {
+      const list = byTask.get(a.taskId) ?? []
+      list.push({ userId: a.userId, displayName: a.displayName, avatarUrl: a.avatarUrl })
+      byTask.set(a.taskId, list)
+    }
+    return rows.map((r) => ({ ...r, assignees: byTask.get(r.id) ?? empty }))
   }
 
   async getTasksByList(

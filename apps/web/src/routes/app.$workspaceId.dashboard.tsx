@@ -16,38 +16,43 @@ import { useAuthStore } from '../store/auth'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
 import { DemoDataEmptyState } from '../components/demo-data-empty-state'
 
-type TaskStatus =
-  | 'backlog'
-  | 'todo'
-  | 'in_progress'
-  | 'in_review'
-  | 'done'
-  | 'cancelled'
-
 type TaskAssignee = {
   userId: string
-  user?: { displayName?: string | null } | null
+  displayName?: string | null
+  avatarUrl?: string | null
 }
 
+/**
+ * Flat task row returned by `GET /tasks/workspace/:id`. The endpoint
+ * denormalises space/project/list ids in a single indexed query so the
+ * dashboard no longer needs to fan out (previously: spaces → projects
+ * → lists → tasks = O(spaces+projects+lists) HTTP requests).
+ *
+ * `status` is a free-form key into the list's custom statuses;
+ * `statusCategory` is the canonical bucket the dashboard uses for
+ * "active" / "done" classification.
+ */
 type Task = {
   id: string
   listId: string
   title: string
-  status: TaskStatus
+  status: string
+  statusCategory: 'open' | 'in_progress' | 'closed'
   priority?: 'urgent' | 'high' | 'normal' | 'low'
+  spaceId: string
+  spaceName: string
+  projectId: string
+  projectName: string
+  listName: string
+  startDate?: string | null
   dueDate?: string | null
   completedAt?: string | null
   updatedAt?: string | null
   createdAt?: string | null
-  assignees?: TaskAssignee[] | null
+  assignees: TaskAssignee[]
 }
 
 type Workspace = { id: string; name: string }
-type Space = { id: string; name: string; color?: string | null }
-type Project = { id: string; name: string; spaceId: string }
-type TaskList = { id: string; name: string; projectId: string }
-
-type ListRef = { listId: string; spaceId: string; projectId: string }
 
 export const Route = createFileRoute('/app/$workspaceId/dashboard')({
   component: Dashboard,
@@ -83,39 +88,10 @@ function Dashboard() {
 
   const activePreset = presets.find((p) => p.id === activePresetId) || presets.find((p) => p.isDefault) || presets[0]
 
-  // Fan out: spaces -> projects -> lists -> tasks
+  // Single denormalised query — see Task type comment above.
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['dashboard-tasks', workspaceId],
-    queryFn: async () => {
-      const spaces = await api<Space[]>(`/spaces/workspace/${workspaceId}`)
-      if (spaces.length === 0) return [] as Array<Task & ListRef>
-
-      const projectGroups = await Promise.all(
-        spaces.map(async (s) => {
-          const projects = await api<Project[]>(`/projects/space/${s.id}`)
-          return projects.map((p) => ({ spaceId: s.id, project: p }))
-        }),
-      )
-      const projects = projectGroups.flat()
-      if (projects.length === 0) return [] as Array<Task & ListRef>
-
-      const listGroups = await Promise.all(
-        projects.map(async ({ spaceId, project }) => {
-          const lists = await api<TaskList[]>(`/lists/project/${project.id}`)
-          return lists.map((l) => ({ spaceId, projectId: project.id, list: l }))
-        }),
-      )
-      const lists = listGroups.flat()
-      if (lists.length === 0) return [] as Array<Task & ListRef>
-
-      const taskGroups = await Promise.all(
-        lists.map(async ({ spaceId, projectId, list }) => {
-          const ts = await api<Task[]>(`/tasks/list/${list.id}`)
-          return ts.map((t) => ({ ...t, spaceId, projectId, listId: list.id }))
-        }),
-      )
-      return taskGroups.flat()
-    },
+    queryFn: () => api<Task[]>(`/tasks/workspace/${workspaceId}?limit=500`),
   })
 
   const now = new Date()
@@ -125,7 +101,10 @@ function Dashboard() {
     (t.assignees ?? []).some((a) => a.userId === userId),
   )
 
-  const isActive = (t: Task) => t.status !== 'done' && t.status !== 'cancelled'
+  // Custom statuses replaced the old enum — bucket by the canonical
+  // `statusCategory` so dashboards work regardless of how a workspace
+  // has renamed its statuses.
+  const isActive = (t: Task) => t.statusCategory !== 'closed'
 
   const dueToday = mine
     .filter((t) => t.dueDate && isToday(new Date(t.dueDate)) && isActive(t))
@@ -141,12 +120,12 @@ function Dashboard() {
 
   const completedThisWeek = mine.filter(
     (t) =>
-      t.status === 'done' &&
+      t.statusCategory === 'closed' &&
       t.completedAt &&
       isAfter(new Date(t.completedAt), weekStart),
   )
 
-  const inProgress = mine.filter((t) => t.status === 'in_progress')
+  const inProgress = mine.filter((t) => t.statusCategory === 'in_progress')
 
   const weekTotal = mine.filter((t) => {
     const ref = t.updatedAt ?? t.createdAt
@@ -367,8 +346,8 @@ function Dashboard() {
                         to="/app/$workspaceId/$spaceId/$projectId/$listId"
                         params={{
                           workspaceId,
-                          spaceId: (t as Task & ListRef).spaceId,
-                          projectId: (t as Task & ListRef).projectId,
+                          spaceId: t.spaceId,
+                          projectId: t.projectId,
                           listId: t.listId,
                         }}
                         className="font-medium truncate hover:text-accent transition-colors block"
@@ -376,7 +355,7 @@ function Dashboard() {
                         {t.title}
                       </Link>
                       <div className="text-xs text-muted-foreground">
-                        {(t.assignees ?? [])[0]?.user?.displayName ?? 'Someone'}
+                        {t.assignees[0]?.displayName ?? 'Someone'}
                         {' · '}
                         {t.updatedAt ? formatDistanceToNowStrict(new Date(t.updatedAt), { addSuffix: true }) : 'recently'}
                       </div>
