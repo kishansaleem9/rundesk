@@ -68,10 +68,10 @@ This scorecard classifies current parity by feature area:
 
 ## Current Estimated Parity
 
-- Functional parity: `~98-99%`
-- Partial parity: `~1-2%` (Calendar OAuth without two-way event sync)
-- UI-only/demo parity: `~0-1%`
-- Missing: `<1%` (single-task templates deferred; custom roles)
+- Functional parity: `~99%`
+- Partial parity: `~1%`
+- UI-only/demo parity: `~0%`
+- Missing: `<1%` (email-to-task, single-task templates deferred, custom roles)
 - UI/UX parity vs ClickUp patterns: `~75-82%` (bulk-action bar, public doc share, keyboard-shortcuts overlay closed since last pass)
 
 ## Known remaining gaps
@@ -81,7 +81,7 @@ This scorecard classifies current parity by feature area:
 | Gap | Severity | Effort to close |
 |---|---|---|
 | ~~**Custom statuses per List**~~ | ~~High~~ | **Closed** in `0020_custom_list_statuses.sql` + `list-statuses.service.ts` + `ListStatusesManager` dialog. |
-| **Bidirectional Google Calendar / Outlook sync** | Medium | Medium — OAuth scope and `gcal` provider already wired in `integration-connections.service.ts`, but no event push/pull logic; needs a sync worker + iCal feed |
+| ~~**Bidirectional Google Calendar / Outlook sync**~~ | ~~Medium~~ | **Closed** in `0021_calendar_sync.sql` + `CalendarSyncService` (Google + Outlook push/pull with token refresh) + per-user `/ical/:token.ics` subscription feed + `CalendarSyncWizard` panel from the integrations route. tasks.service hooks fire push on create/update/archive/delete. |
 | **Email-to-task (inbound mailbox)** | Medium | Medium — needs an inbound SMTP webhook or provider (Postmark/Mailgun) and a parser that creates tasks with reply-to threading |
 | **Single-task templates** | Low | Low — existing `project_templates` table already covers most use cases via "starter project"; ClickUp adds a separate save-as-task-template flow. Deferred until users ask. |
 | **Custom roles & permissions** | Low | Medium — current roles are fixed (`admin`/`manager`/`member`/`guest`); ClickUp adds custom roles you can scope. |

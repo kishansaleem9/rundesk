@@ -20,7 +20,9 @@ import {
   Search,
   Plug,
   CheckCircle2,
+  Calendar,
 } from 'lucide-react'
+import { CalendarSyncWizard } from '../components/calendar-sync-wizard'
 
 export const Route = createFileRoute('/app/$workspaceId/integrations')({
   component: IntegrationsMarketplacePage,
@@ -96,6 +98,7 @@ function IntegrationsMarketplacePage() {
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [slackWebhookUrl, setSlackWebhookUrl] = useState('')
   const [slackChannelName, setSlackChannelName] = useState('')
+  const [calendarSyncOpen, setCalendarSyncOpen] = useState(false)
   const providersQuery = useQuery({
     queryKey: ['integration-provider-catalog', workspaceId],
     queryFn: () =>
@@ -328,7 +331,15 @@ function IntegrationsMarketplacePage() {
             Connect Rundesk to the tools your team already uses. {installed.length} active.
           </p>
         </div>
+        <Button variant="outline" size="sm" onClick={() => setCalendarSyncOpen(true)}>
+          <Calendar className="h-3.5 w-3.5 mr-1" /> Calendar sync
+        </Button>
       </header>
+      <CalendarSyncWizard
+        open={calendarSyncOpen}
+        onOpenChange={setCalendarSyncOpen}
+        workspaceId={workspaceId}
+      />
 
       <div className="flex flex-col md:flex-row md:items-center gap-3">
         <Input
