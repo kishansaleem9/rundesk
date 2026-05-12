@@ -1,6 +1,6 @@
-import { Injectable, Inject, NotFoundException, ConflictException } from '@nestjs/common'
-import { eq, and, asc, isNull } from 'drizzle-orm'
-import { docs } from '@rundesk/db'
+import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common'
+import { eq, and, asc, isNull, desc, inArray } from 'drizzle-orm'
+import { docs, docComments, users } from '@rundesk/db'
 import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -153,6 +153,135 @@ export class DocsService {
     const [row] = await this.db.update(docs).set({ isArchived: true, updatedAt: new Date() }).where(eq(docs.id, docId)).returning()
     if (!row) throw new NotFoundException('Doc not found')
     this.realtime.emitToWorkspace(row.workspaceId, { type: 'doc.updated', docId, patch: { archived: true } })
+    return { ok: true }
+  }
+
+  // ─── Comments ───────────────────────────────────────────────────────────────
+
+  async listComments(docId: string, userId: string, opts: { includeResolved?: boolean } = {}) {
+    const doc = await this.assertDocAccess(docId, userId)
+    const rows = await this.db
+      .select({
+        id: docComments.id,
+        docId: docComments.docId,
+        workspaceId: docComments.workspaceId,
+        authorId: docComments.authorId,
+        parentCommentId: docComments.parentCommentId,
+        body: docComments.body,
+        selection: docComments.selection,
+        isResolved: docComments.isResolved,
+        resolvedById: docComments.resolvedById,
+        resolvedAt: docComments.resolvedAt,
+        createdAt: docComments.createdAt,
+        updatedAt: docComments.updatedAt,
+        authorName: users.displayName,
+        authorEmail: users.email,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(docComments)
+      .leftJoin(users, eq(users.id, docComments.authorId))
+      .where(eq(docComments.docId, docId))
+      .orderBy(asc(docComments.createdAt))
+    const filtered = opts.includeResolved === false ? rows.filter((r) => !r.isResolved) : rows
+    return { docId: doc.id, workspaceId: doc.workspaceId, comments: filtered }
+  }
+
+  async createComment(
+    docId: string,
+    userId: string,
+    body: { body: string; parentCommentId?: string | null; selection?: { from: number; to: number; quote?: string } | null },
+  ) {
+    const doc = await this.assertDocAccess(docId, userId)
+    const trimmed = body.body?.trim()
+    if (!trimmed) throw new ConflictException('Comment body is required')
+    if (body.parentCommentId) {
+      const [parent] = await this.db
+        .select({ id: docComments.id, docId: docComments.docId })
+        .from(docComments)
+        .where(eq(docComments.id, body.parentCommentId))
+        .limit(1)
+      if (!parent || parent.docId !== docId) {
+        throw new NotFoundException('Parent comment not found')
+      }
+    }
+    const [created] = await this.db
+      .insert(docComments)
+      .values({
+        docId,
+        workspaceId: doc.workspaceId,
+        authorId: userId,
+        parentCommentId: body.parentCommentId ?? null,
+        body: trimmed,
+        selection: body.selection ?? null,
+      })
+      .returning()
+    this.realtime.emitToDoc(docId, {
+      type: 'doc.comment.created',
+      docId,
+      commentId: created.id,
+      parentCommentId: created.parentCommentId,
+    })
+    return created
+  }
+
+  async updateComment(commentId: string, userId: string, patch: { body?: string }) {
+    const [existing] = await this.db.select().from(docComments).where(eq(docComments.id, commentId)).limit(1)
+    if (!existing) throw new NotFoundException('Comment not found')
+    await this.assertDocAccess(existing.docId, userId)
+    if (existing.authorId && existing.authorId !== userId) {
+      throw new ForbiddenException('Only the author can edit this comment')
+    }
+    const trimmed = patch.body?.trim()
+    if (!trimmed) throw new ConflictException('Comment body is required')
+    const [updated] = await this.db
+      .update(docComments)
+      .set({ body: trimmed, updatedAt: new Date() })
+      .where(eq(docComments.id, commentId))
+      .returning()
+    this.realtime.emitToDoc(existing.docId, {
+      type: 'doc.comment.updated',
+      docId: existing.docId,
+      commentId,
+    })
+    return updated
+  }
+
+  async setCommentResolution(commentId: string, userId: string, resolved: boolean) {
+    const [existing] = await this.db.select().from(docComments).where(eq(docComments.id, commentId)).limit(1)
+    if (!existing) throw new NotFoundException('Comment not found')
+    await this.assertDocAccess(existing.docId, userId)
+    const [updated] = await this.db
+      .update(docComments)
+      .set({
+        isResolved: resolved,
+        resolvedById: resolved ? userId : null,
+        resolvedAt: resolved ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(docComments.id, commentId))
+      .returning()
+    this.realtime.emitToDoc(existing.docId, {
+      type: 'doc.comment.resolution_changed',
+      docId: existing.docId,
+      commentId,
+      isResolved: resolved,
+    })
+    return updated
+  }
+
+  async deleteComment(commentId: string, userId: string) {
+    const [existing] = await this.db.select().from(docComments).where(eq(docComments.id, commentId)).limit(1)
+    if (!existing) throw new NotFoundException('Comment not found')
+    await this.assertDocAccess(existing.docId, userId)
+    if (existing.authorId && existing.authorId !== userId) {
+      throw new ForbiddenException('Only the author can delete this comment')
+    }
+    await this.db.delete(docComments).where(eq(docComments.id, commentId))
+    this.realtime.emitToDoc(existing.docId, {
+      type: 'doc.comment.removed',
+      docId: existing.docId,
+      commentId,
+    })
     return { ok: true }
   }
 }

@@ -71,4 +71,49 @@ export class DocsController {
   remove(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.docs.deleteForUser(docId, user.id)
   }
+
+  // ─── Comments ──────────────────────────────────────────────────────────────
+
+  @Get('docs/:docId/comments')
+  listComments(
+    @Param('docId') docId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('includeResolved') includeResolved?: string,
+  ) {
+    return this.docs.listComments(docId, user.id, {
+      includeResolved: includeResolved !== 'false',
+    })
+  }
+
+  @Post('docs/:docId/comments')
+  createComment(
+    @Param('docId') docId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { body: string; parentCommentId?: string | null; selection?: { from: number; to: number; quote?: string } | null },
+  ) {
+    return this.docs.createComment(docId, user.id, body)
+  }
+
+  @Patch('docs/comments/:commentId')
+  updateComment(
+    @Param('commentId') commentId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { body?: string },
+  ) {
+    return this.docs.updateComment(commentId, user.id, body)
+  }
+
+  @Post('docs/comments/:commentId/resolve')
+  resolveComment(
+    @Param('commentId') commentId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { resolved?: boolean },
+  ) {
+    return this.docs.setCommentResolution(commentId, user.id, body.resolved !== false)
+  }
+
+  @Delete('docs/comments/:commentId')
+  removeComment(@Param('commentId') commentId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.deleteComment(commentId, user.id)
+  }
 }

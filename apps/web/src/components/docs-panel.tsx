@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, toast } from '@rundesk/ui'
-import { Download, Plus, Slash } from 'lucide-react'
+import {
+  Check,
+  CheckCircle2,
+  Download,
+  MessageCircle,
+  MessagesSquare,
+  Plus,
+  Slash,
+  Trash2,
+} from 'lucide-react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -17,12 +26,31 @@ type Doc = {
   updatedAt: string
 }
 
+type DocComment = {
+  id: string
+  docId: string
+  workspaceId: string
+  authorId: string | null
+  parentCommentId: string | null
+  body: string
+  selection: { from: number; to: number; quote?: string } | null
+  isResolved: boolean
+  resolvedById: string | null
+  resolvedAt: string | null
+  createdAt: string
+  updatedAt: string
+  authorName?: string | null
+  authorEmail?: string | null
+  authorAvatarUrl?: string | null
+}
+
 export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const [newDocName, setNewDocName] = useState('')
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
+  const [commentsOpen, setCommentsOpen] = useState(false)
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
@@ -73,8 +101,12 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     const socket = getRealtimeSocket()
     socket.emit('subscribe', { rooms: [`doc:${selectedDocId}`] })
     const onEvent = (event: { type: string; docId?: string }) => {
-      if (event.type === 'doc.updated' && event.docId) {
+      if (!event.docId) return
+      if (event.type === 'doc.updated') {
         void qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
+      }
+      if (event.type.startsWith('doc.comment.')) {
+        void qc.invalidateQueries({ queryKey: ['doc-comments', event.docId] })
       }
     }
     socket.on('event', onEvent)
@@ -155,7 +187,12 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   ].filter((item) => item.label.toLowerCase().includes(slashFilter.toLowerCase()))
 
   return (
-    <Card variant="glass" className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-0 h-[640px] overflow-hidden p-0">
+    <Card
+      variant="glass"
+      className={`grid grid-cols-1 ${
+        commentsOpen ? 'md:grid-cols-[240px_1fr_300px]' : 'md:grid-cols-[240px_1fr]'
+      } gap-0 h-[640px] overflow-hidden p-0`}
+    >
       {/* Sidebar */}
       <div className="border-b md:border-b-0 md:border-r border-border/60 bg-card/30 flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
@@ -271,6 +308,15 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               </Button>
               <Button
                 size="sm"
+                variant={commentsOpen ? 'secondary' : 'ghost'}
+                onClick={() => setCommentsOpen((v) => !v)}
+                disabled={!activeDoc}
+                title={commentsOpen ? 'Hide comments' : 'Show comments'}
+              >
+                <MessagesSquare className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
                 variant="gradient"
                 onClick={() => saveDoc.mutate()}
                 disabled={saveDoc.isPending}
@@ -307,6 +353,257 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           )}
         </div>
       </div>
+
+      {commentsOpen && activeDoc && (
+        <DocCommentsPane docId={activeDoc.id} />
+      )}
     </Card>
+  )
+}
+
+function DocCommentsPane({ docId }: { docId: string }) {
+  const qc = useQueryClient()
+  const [showResolved, setShowResolved] = useState(false)
+  const [newBody, setNewBody] = useState('')
+  const [replyParentId, setReplyParentId] = useState<string | null>(null)
+  const [replyBody, setReplyBody] = useState('')
+
+  const commentsQuery = useQuery({
+    queryKey: ['doc-comments', docId, { showResolved }],
+    queryFn: () =>
+      api<{ comments: DocComment[] }>(
+        `/docs/${docId}/comments?includeResolved=${showResolved ? 'true' : 'false'}`,
+      ),
+  })
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['doc-comments', docId] })
+
+  const createComment = useMutation({
+    mutationFn: (body: { body: string; parentCommentId?: string | null }) =>
+      api(`/docs/${docId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: async () => {
+      setNewBody('')
+      setReplyBody('')
+      setReplyParentId(null)
+      await invalidate()
+    },
+    onError: (error) => {
+      if (error instanceof ApiError) toast.error(error.message)
+    },
+  })
+
+  const resolveComment = useMutation({
+    mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
+      api(`/docs/comments/${commentId}/resolve`, {
+        method: 'POST',
+        body: JSON.stringify({ resolved }),
+      }),
+    onSuccess: invalidate,
+  })
+
+  const deleteComment = useMutation({
+    mutationFn: (commentId: string) => api(`/docs/comments/${commentId}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+  })
+
+  const grouped = useMemo(() => {
+    const all = commentsQuery.data?.comments ?? []
+    const roots: DocComment[] = []
+    const replies = new Map<string, DocComment[]>()
+    for (const c of all) {
+      if (!c.parentCommentId) roots.push(c)
+      else {
+        const arr = replies.get(c.parentCommentId) ?? []
+        arr.push(c)
+        replies.set(c.parentCommentId, arr)
+      }
+    }
+    return { roots, replies }
+  }, [commentsQuery.data])
+
+  return (
+    <aside className="border-t md:border-t-0 md:border-l border-border/60 bg-card/30 flex flex-col">
+      <header className="flex items-center justify-between px-4 py-3 border-b border-border/60">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+          <MessageCircle className="h-3 w-3" /> Comments
+        </span>
+        <button
+          onClick={() => setShowResolved((v) => !v)}
+          className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+        >
+          {showResolved ? 'Hide resolved' : 'Show resolved'}
+        </button>
+      </header>
+      <div className="flex-1 overflow-auto px-3 py-3 space-y-3">
+        {commentsQuery.isLoading && (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        )}
+        {!commentsQuery.isLoading && grouped.roots.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No comments yet. Start a thread below.
+          </p>
+        )}
+        {grouped.roots.map((c) => (
+          <article
+            key={c.id}
+            className={`rounded-md border border-border/60 bg-card/60 p-2.5 space-y-2 ${
+              c.isResolved ? 'opacity-70' : ''
+            }`}
+          >
+            <CommentBody
+              comment={c}
+              onResolveToggle={() =>
+                resolveComment.mutate({ commentId: c.id, resolved: !c.isResolved })
+              }
+              onDelete={() => deleteComment.mutate(c.id)}
+            />
+            {(grouped.replies.get(c.id) ?? []).map((reply) => (
+              <div key={reply.id} className="ml-3 pl-2 border-l border-border/60">
+                <CommentBody
+                  comment={reply}
+                  onResolveToggle={() =>
+                    resolveComment.mutate({ commentId: reply.id, resolved: !reply.isResolved })
+                  }
+                  onDelete={() => deleteComment.mutate(reply.id)}
+                />
+              </div>
+            ))}
+            {replyParentId === c.id ? (
+              <form
+                className="space-y-1.5"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (replyBody.trim()) {
+                    createComment.mutate({ body: replyBody, parentCommentId: c.id })
+                  }
+                }}
+              >
+                <textarea
+                  value={replyBody}
+                  onChange={(e) => setReplyBody(e.target.value)}
+                  rows={2}
+                  className="w-full text-xs px-2 py-1.5 rounded border border-border bg-card focus:outline-none focus:ring-1 focus:ring-ring"
+                  placeholder="Write a reply…"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-1.5">
+                  <button
+                    type="button"
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setReplyParentId(null)
+                      setReplyBody('')
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <Button type="submit" size="sm" disabled={!replyBody.trim() || createComment.isPending}>
+                    Reply
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setReplyParentId(c.id)
+                  setReplyBody('')
+                }}
+                className="text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                Reply
+              </button>
+            )}
+          </article>
+        ))}
+      </div>
+      <form
+        className="border-t border-border/60 p-3 space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (newBody.trim()) createComment.mutate({ body: newBody })
+        }}
+      >
+        <textarea
+          value={newBody}
+          onChange={(e) => setNewBody(e.target.value)}
+          rows={2}
+          placeholder="Add a comment…"
+          className="w-full text-xs px-2 py-1.5 rounded border border-border bg-card focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="gradient"
+          className="w-full"
+          disabled={!newBody.trim() || createComment.isPending}
+        >
+          {createComment.isPending ? 'Posting…' : 'Post comment'}
+        </Button>
+      </form>
+    </aside>
+  )
+}
+
+function CommentBody({
+  comment,
+  onResolveToggle,
+  onDelete,
+}: {
+  comment: DocComment
+  onResolveToggle: () => void
+  onDelete: () => void
+}) {
+  const initials = (comment.authorName ?? comment.authorEmail ?? 'U').slice(0, 1).toUpperCase()
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-start gap-2">
+        <div className="h-6 w-6 rounded-full bg-accent/15 text-foreground flex items-center justify-center text-[10px] font-semibold shrink-0">
+          {initials}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium truncate">
+              {comment.authorName ?? comment.authorEmail ?? 'Member'}
+            </p>
+            <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+              {new Date(comment.createdAt).toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          </div>
+          {comment.selection?.quote && (
+            <blockquote className="mt-1 text-[11px] text-muted-foreground border-l-2 border-accent/40 pl-2 italic line-clamp-2">
+              {comment.selection.quote}
+            </blockquote>
+          )}
+          <p className="text-xs whitespace-pre-wrap mt-1">{comment.body}</p>
+          <div className="flex items-center gap-2 mt-1.5">
+            <button
+              onClick={onResolveToggle}
+              className={`text-[10px] uppercase tracking-widest flex items-center gap-1 ${
+                comment.isResolved ? 'text-emerald-600' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {comment.isResolved ? <CheckCircle2 className="h-3 w-3" /> : <Check className="h-3 w-3" />}
+              {comment.isResolved ? 'Resolved' : 'Resolve'}
+            </button>
+            <button
+              onClick={onDelete}
+              className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-destructive flex items-center gap-1"
+            >
+              <Trash2 className="h-3 w-3" />
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

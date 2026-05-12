@@ -42,6 +42,10 @@ export type RealtimeEvent =
   | { type: 'watchers.updated'; taskId: string }
   // Doc events
   | { type: 'doc.updated'; docId: string; patch: Record<string, unknown> }
+  | { type: 'doc.comment.created'; docId: string; commentId: string; parentCommentId: string | null }
+  | { type: 'doc.comment.updated'; docId: string; commentId: string }
+  | { type: 'doc.comment.resolution_changed'; docId: string; commentId: string; isResolved: boolean }
+  | { type: 'doc.comment.removed'; docId: string; commentId: string }
   // Presence
   | { type: 'presence.join'; room: RoomKey; user: { id: string; displayName: string } }
   | { type: 'presence.leave'; room: RoomKey; userId: string }
