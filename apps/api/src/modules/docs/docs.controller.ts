@@ -6,6 +6,22 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { DocsService } from './docs.service'
 import type { CurrentUserPayload } from '../tasks/types'
 
+/**
+ * Anonymous public-share endpoint. Lives at the root path so the slug is
+ * stable and shareable as a clean URL. No auth guard so /d/<slug> works
+ * for any visitor with the link.
+ */
+@ApiTags('docs')
+@Controller()
+export class DocsPublicController {
+  constructor(private docs: DocsService) {}
+
+  @Get('public/docs/:slug')
+  getPublic(@Param('slug') slug: string) {
+    return this.docs.getByPublicShare(slug)
+  }
+}
+
 @ApiTags('docs')
 @ApiBearerAuth()
 @Controller()
@@ -70,6 +86,18 @@ export class DocsController {
   @Delete('docs/:docId')
   remove(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.docs.deleteForUser(docId, user.id)
+  }
+
+  // ─── Public share ──────────────────────────────────────────────────────────
+
+  @Post('docs/:docId/share')
+  enableShare(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.enablePublicShare(docId, user.id)
+  }
+
+  @Delete('docs/:docId/share')
+  disableShare(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.disablePublicShare(docId, user.id)
   }
 
   // ─── Comments ──────────────────────────────────────────────────────────────

@@ -5,6 +5,9 @@ import {
   Check,
   CheckCircle2,
   Download,
+  Globe,
+  GlobeLock,
+  Link2,
   MessageCircle,
   MessagesSquare,
   Plus,
@@ -25,6 +28,8 @@ type Doc = {
   title: string
   content: Record<string, unknown>
   updatedAt: string
+  publicShareId?: string | null
+  publicShareEnabledAt?: string | null
 }
 
 type DocComment = {
@@ -273,6 +278,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           </h3>
           {activeDoc && (
             <div className="flex flex-wrap gap-1.5">
+              <ShareDocButton doc={activeDoc} onShareChange={() => docsQuery.refetch()} />
               <Button
                 size="sm"
                 variant="ghost"
@@ -637,5 +643,64 @@ function CommentBody({
         </div>
       </div>
     </div>
+  )
+}
+
+function ShareDocButton({
+  doc,
+  onShareChange,
+}: {
+  doc: Doc
+  onShareChange: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const isShared = Boolean(doc.publicShareId)
+  const shareUrl = isShared ? `${window.location.origin}/d/${doc.publicShareId}` : null
+
+  const toggle = async () => {
+    setBusy(true)
+    try {
+      if (isShared) {
+        await api(`/docs/${doc.id}/share`, { method: 'DELETE' })
+        toast.success('Public share disabled')
+      } else {
+        const result = await api<{ publicShareId: string }>(`/docs/${doc.id}/share`, {
+          method: 'POST',
+        })
+        const url = `${window.location.origin}/d/${result.publicShareId}`
+        await navigator.clipboard.writeText(url).catch(() => undefined)
+        toast.success('Public link copied to clipboard')
+      }
+      onShareChange()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Failed to toggle share')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copy = async () => {
+    if (!shareUrl) return
+    await navigator.clipboard.writeText(shareUrl)
+    toast.success('Public link copied')
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant={isShared ? 'secondary' : 'ghost'}
+        onClick={toggle}
+        disabled={busy}
+        title={isShared ? 'Disable public share' : 'Share doc publicly'}
+      >
+        {isShared ? <Globe className="h-3.5 w-3.5" /> : <GlobeLock className="h-3.5 w-3.5" />}
+      </Button>
+      {isShared && (
+        <Button size="sm" variant="ghost" onClick={copy} title="Copy public link">
+          <Link2 className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </>
   )
 }

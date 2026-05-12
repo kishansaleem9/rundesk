@@ -19,6 +19,10 @@ export const docs = pgTable('docs', {
   plaintext:   text('plaintext').notNull().default(''), // denormalized for search
   position:    integer('position').notNull().default(0),
   isArchived:  boolean('is_archived').notNull().default(false),
+  // Public share: non-null random slug means the doc is readable anonymously
+  // at /d/<slug>. Toggled via POST/DELETE /docs/:id/share.
+  publicShareId:   text('public_share_id').unique(),
+  publicShareEnabledAt: timestamp('public_share_enabled_at', { withTimezone: true }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

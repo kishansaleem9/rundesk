@@ -1,5 +1,6 @@
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common'
-import { eq, and, asc, isNull, desc, inArray } from 'drizzle-orm'
+import { eq, and, asc, isNull, desc, inArray, isNotNull } from 'drizzle-orm'
+import { randomBytes } from 'node:crypto'
 import { docs, docComments, users } from '@rundesk/db'
 import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -156,6 +157,78 @@ export class DocsService {
     if (!row) throw new NotFoundException('Doc not found')
     this.realtime.emitToWorkspace(row.workspaceId, { type: 'doc.updated', docId, patch: { archived: true } })
     return { ok: true }
+  }
+
+  // ─── Public anonymous share ─────────────────────────────────────────────────
+
+  /**
+   * Turn on public read-only sharing for the doc. Returns the slug for the
+   * /d/<slug> route. Idempotent: returns the existing slug if already shared.
+   */
+  async enablePublicShare(docId: string, userId: string) {
+    const doc = await this.assertDocAccess(docId, userId)
+    if (doc.publicShareId) {
+      return { publicShareId: doc.publicShareId, publicShareEnabledAt: doc.publicShareEnabledAt }
+    }
+    const slug = randomBytes(12).toString('base64url')
+    const [row] = await this.db
+      .update(docs)
+      .set({ publicShareId: slug, publicShareEnabledAt: new Date(), updatedAt: new Date() })
+      .where(eq(docs.id, docId))
+      .returning()
+    this.realtime.emitToWorkspace(doc.workspaceId, {
+      type: 'doc.updated',
+      docId,
+      patch: { publicShareId: row.publicShareId },
+    })
+    return { publicShareId: row.publicShareId, publicShareEnabledAt: row.publicShareEnabledAt }
+  }
+
+  async disablePublicShare(docId: string, userId: string) {
+    const doc = await this.assertDocAccess(docId, userId)
+    if (!doc.publicShareId) return { ok: true }
+    await this.db
+      .update(docs)
+      .set({ publicShareId: null, publicShareEnabledAt: null, updatedAt: new Date() })
+      .where(eq(docs.id, docId))
+    this.realtime.emitToWorkspace(doc.workspaceId, {
+      type: 'doc.updated',
+      docId,
+      patch: { publicShareId: null },
+    })
+    return { ok: true }
+  }
+
+  /**
+   * Anonymous lookup by share slug. Returns only the fields safe for public
+   * viewers: title, icon, cover, content, updated_at. Comments, ACL state,
+   * and member identity are deliberately excluded.
+   */
+  async getByPublicShare(slug: string) {
+    if (!slug || slug.length > 64) throw new NotFoundException('Doc not found')
+    const [row] = await this.db
+      .select({
+        id: docs.id,
+        title: docs.title,
+        icon: docs.icon,
+        coverImageUrl: docs.coverImageUrl,
+        content: docs.content,
+        updatedAt: docs.updatedAt,
+        publicShareId: docs.publicShareId,
+        isArchived: docs.isArchived,
+      })
+      .from(docs)
+      .where(and(eq(docs.publicShareId, slug), isNotNull(docs.publicShareId)))
+      .limit(1)
+    if (!row || row.isArchived) throw new NotFoundException('Doc not found')
+    return {
+      id: row.id,
+      title: row.title,
+      icon: row.icon,
+      coverImageUrl: row.coverImageUrl,
+      content: row.content,
+      updatedAt: row.updatedAt,
+    }
   }
 
   // ─── Comments ───────────────────────────────────────────────────────────────
