@@ -6,6 +6,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
+import { NotificationsService } from '../notifications/notifications.service'
 
 type TiptapNode = { type: string; content?: TiptapNode[]; text?: string; attrs?: Record<string, unknown> }
 
@@ -26,6 +27,7 @@ export class DocsService {
     @Inject(DB_TOKEN) private db: Db,
     private realtime: RealtimeGateway,
     private search: SearchService,
+    private notifications: NotificationsService,
   ) {}
 
   private async indexDocInSearch(docId: string) {
@@ -221,7 +223,121 @@ export class DocsService {
       commentId: created.id,
       parentCommentId: created.parentCommentId,
     })
+    void this.notifyDocCommentRecipients(doc, created, userId, trimmed)
     return created
+  }
+
+  /**
+   * Notify the doc creator, the parent comment author (for replies), and any
+   * @-mentioned workspace members. Always best-effort.
+   */
+  private async notifyDocCommentRecipients(
+    doc: typeof docs.$inferSelect,
+    comment: typeof docComments.$inferSelect,
+    actorId: string,
+    bodyText: string,
+  ) {
+    try {
+      const recipients = new Map<string, 'mention' | 'reply' | 'author'>()
+
+      if (doc.createdById && doc.createdById !== actorId) {
+        recipients.set(doc.createdById, 'author')
+      }
+
+      if (comment.parentCommentId) {
+        const [parent] = await this.db
+          .select({ authorId: docComments.authorId })
+          .from(docComments)
+          .where(eq(docComments.id, comment.parentCommentId))
+          .limit(1)
+        if (parent?.authorId && parent.authorId !== actorId) {
+          recipients.set(parent.authorId, 'reply')
+        }
+      }
+
+      const mentionedIds = await this.resolveMentions(doc.workspaceId, bodyText)
+      for (const userId of mentionedIds) {
+        if (userId !== actorId) recipients.set(userId, 'mention')
+      }
+
+      if (recipients.size === 0) return
+
+      const docTitle = doc.title || 'Untitled doc'
+      const snippet = bodyText.slice(0, 240)
+      for (const [userId, kind] of recipients) {
+        const type = kind === 'mention' ? 'doc_mentioned' : 'doc_commented'
+        const title =
+          kind === 'mention'
+            ? `You were mentioned in "${docTitle}"`
+            : kind === 'reply'
+            ? `Reply to your comment on "${docTitle}"`
+            : `New comment on "${docTitle}"`
+        await this.notifications.create({
+          userId,
+          workspaceId: doc.workspaceId,
+          actorId,
+          type,
+          title,
+          body: snippet,
+          target: {
+            entityType: 'doc',
+            entityId: doc.id,
+            url: `/app/${doc.workspaceId}/docs?doc=${doc.id}`,
+          },
+          emailContext: { commentSnippet: snippet },
+        })
+      }
+    } catch (err) {
+      // best-effort; never break the comment write
+      // eslint-disable-next-line no-console
+      console.error('[docs.notifyDocCommentRecipients] failed:', err)
+    }
+  }
+
+  /**
+   * Extract @-mentions from a comment body and resolve them to workspace
+   * member user ids. Mentions match common formats:
+   *   - @[Display Name](user:uuid)
+   *   - @email@example.com
+   *   - bare @username substrings against workspace display names
+   */
+  private async resolveMentions(workspaceId: string, text: string): Promise<string[]> {
+    if (!text || text.length < 2) return []
+    const ids = new Set<string>()
+
+    const refMatches = text.matchAll(/@\[[^\]]+\]\(user:([0-9a-f-]{36})\)/gi)
+    for (const m of refMatches) ids.add(m[1])
+
+    const emailMatches = text.matchAll(/@([\w.+-]+@[\w-]+\.[\w.-]+)/g)
+    const emails = Array.from(emailMatches, (m) => m[1].toLowerCase())
+    if (emails.length > 0) {
+      const rows = await this.db
+        .select({ userId: users.id, email: users.email })
+        .from(users)
+        .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), inArray(users.email, emails)))
+      for (const r of rows) ids.add(r.userId)
+    }
+
+    const nameTokens = Array.from(text.matchAll(/@([a-zA-Z][\w-]{1,40})/g), (m) => m[1].toLowerCase())
+    if (nameTokens.length > 0) {
+      const memberRows = await this.db
+        .select({ userId: users.id, name: users.displayName, email: users.email })
+        .from(users)
+        .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
+        .where(eq(workspaceMembers.workspaceId, workspaceId))
+      for (const token of nameTokens) {
+        for (const row of memberRows) {
+          const normalizedName = (row.name ?? '').toLowerCase().replace(/\s+/g, '')
+          const localPart = (row.email ?? '').split('@')[0].toLowerCase()
+          if (normalizedName.includes(token) || localPart === token) {
+            ids.add(row.userId)
+          }
+        }
+      }
+    }
+
+    return Array.from(ids)
   }
 
   async updateComment(commentId: string, userId: string, patch: { body?: string }) {
