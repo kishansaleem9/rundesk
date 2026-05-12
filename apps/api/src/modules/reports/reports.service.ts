@@ -29,9 +29,14 @@ export class ReportsService {
 
   // ─── Overview / Summary card ──────────────────────────────────────────────
   async getOverview(workspaceId: string) {
-    // Get all tasks in workspace (via spaces → projects → lists → tasks)
     const allTasksQuery = await this.db
-      .select({ id: tasks.id, status: tasks.status, dueDate: tasks.dueDate, completedAt: tasks.completedAt })
+      .select({
+        id: tasks.id,
+        status: tasks.status,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+        completedAt: tasks.completedAt,
+      })
       .from(tasks)
       .innerJoin(lists, eq(tasks.listId, lists.id))
       .innerJoin(projects, eq(lists.projectId, projects.id))
@@ -52,7 +57,14 @@ export class ReportsService {
 
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0
 
-    return { total, completed, overdue, dueToday, completionRate }
+    const byPriority: Record<string, number> = { urgent: 0, high: 0, normal: 0, low: 0 }
+    for (const t of allTasksQuery) {
+      if (t.status === 'done' || t.status === 'cancelled') continue
+      const key = (t.priority ?? 'normal') as keyof typeof byPriority
+      if (key in byPriority) byPriority[key]++
+    }
+
+    return { total, completed, overdue, dueToday, completionRate, byPriority }
   }
 
   // ─── Productivity per member ──────────────────────────────────────────────

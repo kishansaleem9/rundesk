@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Card, cn } from '@rundesk/ui'
@@ -22,10 +22,43 @@ export const Route = createFileRoute('/app/$workspaceId/reports')({
 
 type Tab = 'overview' | 'productivity' | 'completion' | 'time' | 'sprints' | 'goals'
 
+type CsvExport = { filename: string; rows: (string | number)[][] } | null
+
+function csvFor(value: string | number): string {
+  return `"${String(value).replace(/"/g, '""')}"`
+}
+
+function downloadCsv(filename: string, rows: (string | number)[][]) {
+  const csv = rows.map((row) => row.map(csvFor).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function ReportsPage() {
   const { workspaceId } = Route.useParams()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [days, setDays] = useState(30)
+  const [exportPayload, setExportPayload] = useState<CsvExport>(null)
+
+  // Reset the export payload whenever the active tab changes — each tab will
+  // re-register its export shape as soon as its data is ready.
+  useEffect(() => {
+    setExportPayload(null)
+  }, [activeTab, days])
+
+  const registerExport = useCallback((payload: CsvExport) => {
+    setExportPayload(payload)
+  }, [])
+
+  const handleExport = () => {
+    if (!exportPayload) return
+    downloadCsv(exportPayload.filename, exportPayload.rows)
+  }
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
@@ -54,7 +87,14 @@ function ReportsPage() {
               <option value={30}>Last 30 days</option>
               <option value={90}>Last 90 days</option>
             </select>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleExport}
+              disabled={!exportPayload}
+              title={exportPayload ? 'Download current report as CSV' : 'No data to export yet'}
+            >
               <Download className="h-3.5 w-3.5" /> Export CSV
             </Button>
           </div>
@@ -81,16 +121,18 @@ function ReportsPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
-        {activeTab === 'overview' && <OverviewTab workspaceId={workspaceId} />}
-        {activeTab === 'productivity' && <ProductivityTab workspaceId={workspaceId} days={days} />}
-        {activeTab === 'completion' && <CompletionTab workspaceId={workspaceId} days={days} />}
-        {activeTab === 'time' && <TimeTab workspaceId={workspaceId} days={days} />}
-        {activeTab === 'sprints' && <SprintsTab workspaceId={workspaceId} />}
-        {activeTab === 'goals' && <GoalsTab workspaceId={workspaceId} />}
+        {activeTab === 'overview' && <OverviewTab workspaceId={workspaceId} registerExport={registerExport} />}
+        {activeTab === 'productivity' && <ProductivityTab workspaceId={workspaceId} days={days} registerExport={registerExport} />}
+        {activeTab === 'completion' && <CompletionTab workspaceId={workspaceId} days={days} registerExport={registerExport} />}
+        {activeTab === 'time' && <TimeTab workspaceId={workspaceId} days={days} registerExport={registerExport} />}
+        {activeTab === 'sprints' && <SprintsTab workspaceId={workspaceId} registerExport={registerExport} />}
+        {activeTab === 'goals' && <GoalsTab workspaceId={workspaceId} registerExport={registerExport} />}
       </div>
     </div>
   )
 }
+
+type ExportRegistrar = (payload: CsvExport) => void
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 
@@ -135,7 +177,13 @@ function StatCard({
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
-function OverviewTab({ workspaceId }: { workspaceId: string }) {
+function OverviewTab({
+  workspaceId,
+  registerExport,
+}: {
+  workspaceId: string
+  registerExport: ExportRegistrar
+}) {
   const query = useQuery({
     queryKey: ['reports-overview', workspaceId],
     queryFn: () =>
@@ -145,6 +193,20 @@ function OverviewTab({ workspaceId }: { workspaceId: string }) {
   })
 
   const d = query.data
+  useEffect(() => {
+    if (!d) return registerExport(null)
+    registerExport({
+      filename: `workspace-overview-${workspaceId}.csv`,
+      rows: [
+        ['Metric', 'Value'],
+        ['Total tasks', d.total],
+        ['Completed', d.completed],
+        ['Overdue', d.overdue],
+        ['Due today', d.dueToday],
+        ['Completion rate (%)', d.completionRate],
+      ],
+    })
+  }, [d, workspaceId, registerExport])
 
   return (
     <div className="space-y-6">
@@ -175,7 +237,15 @@ function OverviewTab({ workspaceId }: { workspaceId: string }) {
 
 // ─── Productivity ─────────────────────────────────────────────────────────────
 
-function ProductivityTab({ workspaceId, days }: { workspaceId: string; days: number }) {
+function ProductivityTab({
+  workspaceId,
+  days,
+  registerExport,
+}: {
+  workspaceId: string
+  days: number
+  registerExport: ExportRegistrar
+}) {
   type Row = {
     userId: string
     displayName: string
@@ -191,7 +261,24 @@ function ProductivityTab({ workspaceId, days }: { workspaceId: string; days: num
     queryFn: () => api<Row[]>(`/workspaces/${workspaceId}/reports/productivity?days=${days}`),
   })
 
-  const rows = query.data ?? []
+  const rows = useMemo(() => query.data ?? [], [query.data])
+  useEffect(() => {
+    if (rows.length === 0) return registerExport(null)
+    registerExport({
+      filename: `workspace-productivity-${days}d-${workspaceId}.csv`,
+      rows: [
+        ['Member', 'Email', 'Assigned', 'Completed', 'Created', 'Completion rate (%)'],
+        ...rows.map((row) => [
+          row.displayName,
+          row.email,
+          row.totalAssigned,
+          row.tasksCompleted,
+          row.tasksCreated,
+          row.totalAssigned > 0 ? Math.round((row.tasksCompleted / row.totalAssigned) * 100) : 0,
+        ]),
+      ],
+    })
+  }, [rows, days, workspaceId, registerExport])
 
   return (
     <div className="space-y-3">
@@ -253,7 +340,15 @@ function ProductivityTab({ workspaceId, days }: { workspaceId: string; days: num
 
 // ─── Completion ───────────────────────────────────────────────────────────────
 
-function CompletionTab({ workspaceId, days }: { workspaceId: string; days: number }) {
+function CompletionTab({
+  workspaceId,
+  days,
+  registerExport,
+}: {
+  workspaceId: string
+  days: number
+  registerExport: ExportRegistrar
+}) {
   type Data = {
     total: number
     completed: number
@@ -270,6 +365,24 @@ function CompletionTab({ workspaceId, days }: { workspaceId: string; days: numbe
   })
 
   const d = query.data
+  useEffect(() => {
+    if (!d) return registerExport(null)
+    registerExport({
+      filename: `workspace-completion-${days}d-${workspaceId}.csv`,
+      rows: [
+        ['Section', 'Label', 'Value'],
+        ['summary', 'Total tasks', d.total],
+        ['summary', 'Completed', d.completed],
+        ['summary', 'On time', d.onTime],
+        ['summary', 'Late', d.late],
+        ['summary', 'On-time rate (%)', d.onTimeRate],
+        ...d.trend.map((point) => ['trend', point.date, point.count] as (string | number)[]),
+        ...Object.entries(d.statusBreakdown).map(
+          ([status, count]) => ['status', status, count] as (string | number)[],
+        ),
+      ],
+    })
+  }, [d, days, workspaceId, registerExport])
 
   const STATUS_COLORS: Record<string, string> = {
     todo: 'bg-gray-400',
@@ -338,7 +451,15 @@ function CompletionTab({ workspaceId, days }: { workspaceId: string; days: numbe
 
 // ─── Time ─────────────────────────────────────────────────────────────────────
 
-function TimeTab({ workspaceId, days }: { workspaceId: string; days: number }) {
+function TimeTab({
+  workspaceId,
+  days,
+  registerExport,
+}: {
+  workspaceId: string
+  days: number
+  registerExport: ExportRegistrar
+}) {
   type Row = {
     userId: string
     displayName: string
@@ -355,9 +476,25 @@ function TimeTab({ workspaceId, days }: { workspaceId: string; days: number }) {
     queryFn: () => api<Row[]>(`/workspaces/${workspaceId}/reports/time?days=${days}`),
   })
 
-  const rows = query.data ?? []
+  const rows = useMemo(() => query.data ?? [], [query.data])
   const totalHours = rows.reduce((s, r) => s + r.totalHours, 0)
   const billableHours = rows.reduce((s, r) => s + r.billableHours, 0)
+  useEffect(() => {
+    if (rows.length === 0) return registerExport(null)
+    registerExport({
+      filename: `workspace-time-${days}d-${workspaceId}.csv`,
+      rows: [
+        ['Member', 'Email', 'Total hours', 'Billable hours', 'Entries'],
+        ...rows.map((row) => [
+          row.displayName,
+          row.email,
+          row.totalHours,
+          row.billableHours,
+          row.entryCount,
+        ]),
+      ],
+    })
+  }, [rows, days, workspaceId, registerExport])
 
   return (
     <div className="space-y-5">
@@ -405,7 +542,13 @@ function TimeTab({ workspaceId, days }: { workspaceId: string; days: number }) {
 
 // ─── Sprints ──────────────────────────────────────────────────────────────────
 
-function SprintsTab({ workspaceId }: { workspaceId: string }) {
+function SprintsTab({
+  workspaceId,
+  registerExport,
+}: {
+  workspaceId: string
+  registerExport: ExportRegistrar
+}) {
   type SprintRow = {
     sprintId: string
     name: string
@@ -421,7 +564,24 @@ function SprintsTab({ workspaceId }: { workspaceId: string }) {
     queryFn: () => api<SprintRow[]>(`/workspaces/${workspaceId}/reports/sprints`),
   })
 
-  const rows = query.data ?? []
+  const rows = useMemo(() => query.data ?? [], [query.data])
+  useEffect(() => {
+    if (rows.length === 0) return registerExport(null)
+    registerExport({
+      filename: `workspace-sprints-${workspaceId}.csv`,
+      rows: [
+        ['Sprint', 'Status', 'Start', 'End', 'Tasks', 'Points'],
+        ...rows.map((row) => [
+          row.name,
+          row.status,
+          row.startDate ?? '',
+          row.endDate ?? '',
+          row.taskCount,
+          row.plannedPoints,
+        ]),
+      ],
+    })
+  }, [rows, workspaceId, registerExport])
 
   return (
     <div className="space-y-4">
@@ -475,7 +635,13 @@ function SprintsTab({ workspaceId }: { workspaceId: string }) {
 
 // ─── Goals ────────────────────────────────────────────────────────────────────
 
-function GoalsTab({ workspaceId }: { workspaceId: string }) {
+function GoalsTab({
+  workspaceId,
+  registerExport,
+}: {
+  workspaceId: string
+  registerExport: ExportRegistrar
+}) {
   type GoalsData = {
     byStatus: { on_track: number; at_risk: number; off_track: number; completed: number }
     avgProgress: number
@@ -495,6 +661,24 @@ function GoalsTab({ workspaceId }: { workspaceId: string }) {
   })
 
   const d = query.data
+  useEffect(() => {
+    if (!d) return registerExport(null)
+    registerExport({
+      filename: `workspace-goals-${workspaceId}.csv`,
+      rows: [
+        ['Section', 'Label', 'Value'],
+        ['summary', 'Total goals', d.total],
+        ['summary', 'Average progress (%)', d.avgProgress],
+        ['summary', 'On track', d.byStatus.on_track],
+        ['summary', 'At risk', d.byStatus.at_risk],
+        ['summary', 'Off track', d.byStatus.off_track],
+        ['summary', 'Completed', d.byStatus.completed],
+        ...d.goals.map(
+          (goal) => ['goal', goal.title, `${goal.status} · ${goal.progress}%`] as (string | number)[],
+        ),
+      ],
+    })
+  }, [d, workspaceId, registerExport])
   const STATUS_META: Record<string, { label: string; color: string }> = {
     on_track: { label: 'On track', color: 'bg-emerald-100 text-emerald-700' },
     at_risk: { label: 'At risk', color: 'bg-amber-100 text-amber-700' },

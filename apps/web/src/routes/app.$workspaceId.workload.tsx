@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
+  Button,
   Card,
   EmptyState,
   Badge,
@@ -11,7 +12,7 @@ import {
   TooltipContent,
   cn,
 } from '@rundesk/ui'
-import { Users, Calendar, AlertTriangle } from 'lucide-react'
+import { Users, Calendar, AlertTriangle, Download } from 'lucide-react'
 import { api } from '../lib/api'
 
 export const Route = createFileRoute('/app/$workspaceId/workload')({
@@ -62,6 +63,34 @@ function WorkloadPage() {
   }, [workloadQuery.data])
   const overloadedCount = people.filter((p) => p.dailyLoads.some((load) => load > p.capacity)).length
 
+  const exportCsv = () => {
+    if (people.length === 0) return
+    const fmtDate = (d: Date) => d.toISOString().slice(0, 10)
+    const header = ['Member', 'Role', 'Daily capacity (h)', 'Weekly capacity (h)', ...dates.map(fmtDate), 'Total (h)']
+    const rows = people.map((p) => [
+      p.name,
+      p.role,
+      p.capacity,
+      p.weeklyCapacityHours,
+      ...dates.map((_, i) => Number((p.dailyLoads[i] ?? 0).toFixed(1))),
+      Number(p.dailyLoads.reduce((s, v) => s + v, 0).toFixed(1)),
+    ])
+    const escape = (v: string | number) => {
+      const s = String(v ?? '')
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const csv = [header, ...rows].map((row) => row.map(escape).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `workload-${days}d-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="p-6 space-y-5">
       <header className="flex items-start justify-between gap-4">
@@ -79,21 +108,33 @@ function WorkloadPage() {
             Capacity heat-map across your team. Cells turn red when someone is overloaded.
           </p>
         </div>
-        <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1 backdrop-blur-sm shrink-0">
-          {(['7d', '14d', '30d'] as const).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={cn(
-                'text-xs px-3 py-1.5 rounded-md transition-all font-medium',
-                view === v
-                  ? 'bg-brand-gradient text-white shadow-sm'
-                  : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {v.replace('d', ' days')}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={exportCsv}
+            disabled={people.length === 0}
+            className="gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </Button>
+          <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1 backdrop-blur-sm">
+            {(['7d', '14d', '30d'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={cn(
+                  'text-xs px-3 py-1.5 rounded-md transition-all font-medium',
+                  view === v
+                    ? 'bg-brand-gradient text-white shadow-sm'
+                    : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {v.replace('d', ' days')}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
