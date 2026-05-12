@@ -21,6 +21,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
+import { CursorLayer, useCanvasCursors } from '../lib/use-canvas-cursors'
 
 export const Route = createFileRoute('/app/$workspaceId/whiteboards' as any)({
   component: WhiteboardsPage,
@@ -76,6 +77,10 @@ function WhiteboardsPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [snapEnabled, setSnapEnabled] = useState(true)
   const canvasRef = useRef<HTMLDivElement | null>(null)
+  const { remoteCursors, onPointerMove, onPointerLeave } = useCanvasCursors(
+    activeBoardId,
+    canvasRef,
+  )
 
   const boardsQuery = useQuery({
     queryKey: ['workspace-canvases', workspaceId, 'whiteboard'],
@@ -401,7 +406,10 @@ function WhiteboardsPage() {
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedIds([])
           }}
+          onPointerMove={onPointerMove}
+          onPointerLeave={onPointerLeave}
         >
+          <CursorLayer cursors={remoteCursors} />
           {sortedItems.map((item) => (
             <DraggableItem
               key={item.id}

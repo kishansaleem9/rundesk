@@ -18,6 +18,7 @@ import { ConfigService } from '@nestjs/config'
  *   list:{listId}                   - list-level events (task.created, task.updated, task.deleted)
  *   task:{taskId}                   - task-detail events (comments, activity, checklist, watchers)
  *   doc:{docId}                     - per-doc updates (presence, content patches)
+ *   canvas:{canvasId}               - per-canvas presence + collaborator cursors
  *   user:{userId}                   - private user channel (notifications, cross-tab sync)
  */
 export type RoomKey =
@@ -25,6 +26,7 @@ export type RoomKey =
   | `list:${string}`
   | `task:${string}`
   | `doc:${string}`
+  | `canvas:${string}`
   | `user:${string}`
 
 export type RealtimeEvent =
@@ -61,6 +63,16 @@ export type RealtimeEvent =
   | { type: 'canvas.created'; workspaceId: string; canvas: unknown; actorId?: string }
   | { type: 'canvas.updated'; workspaceId: string; canvasId: string; patch: Record<string, unknown>; actorId?: string }
   | { type: 'canvas.deleted'; workspaceId: string; canvasId: string; actorId?: string }
+  | {
+      type: 'canvas.cursor'
+      canvasId: string
+      userId: string
+      displayName: string
+      x: number
+      y: number
+      color?: string
+    }
+  | { type: 'canvas.cursor.leave'; canvasId: string; userId: string }
 
 @WebSocketGateway({
   namespace: '/realtime',
@@ -106,6 +118,22 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   handleDisconnect(client: Socket) {
+    // Broadcast a cursor-leave to every canvas room the socket was in so
+    // remote clients can drop the avatar immediately instead of waiting for
+    // a stale-cursor sweep.
+    const data = client.data as { userId?: string }
+    if (data?.userId) {
+      for (const room of client.rooms) {
+        if (typeof room === 'string' && room.startsWith('canvas:')) {
+          const canvasId = room.slice('canvas:'.length)
+          this.server?.to(room).emit('event', {
+            type: 'canvas.cursor.leave',
+            canvasId,
+            userId: data.userId,
+          } satisfies RealtimeEvent)
+        }
+      }
+    }
     this.logger.debug(`disconnected ${client.id}`)
   }
 
@@ -127,6 +155,51 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!Array.isArray(body?.rooms)) return { ok: false, error: 'rooms must be an array' }
     for (const room of body.rooms) client.leave(room)
     return { ok: true, left: body.rooms }
+  }
+
+  /**
+   * Collaborator cursor broadcast for whiteboards / mind maps. Receives a
+   * raw {canvasId, x, y} payload from the client, stamps it with the
+   * connection's authenticated identity, and fans out to all other sockets
+   * in the canvas room. Sender is excluded so a client never sees its own
+   * cursor reflected back.
+   */
+  @SubscribeMessage('canvas.cursor')
+  handleCanvasCursor(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { canvasId?: string; x?: number; y?: number; color?: string; displayName?: string },
+  ) {
+    const data = client.data as { userId?: string; email?: string }
+    if (!data?.userId || !body?.canvasId || typeof body.x !== 'number' || typeof body.y !== 'number') {
+      return { ok: false }
+    }
+    const event: RealtimeEvent = {
+      type: 'canvas.cursor',
+      canvasId: body.canvasId,
+      userId: data.userId,
+      displayName: body.displayName ?? data.email ?? data.userId,
+      x: body.x,
+      y: body.y,
+      color: body.color,
+    }
+    client.to(`canvas:${body.canvasId}`).emit('event', event)
+    return { ok: true }
+  }
+
+  @SubscribeMessage('canvas.cursor.leave')
+  handleCanvasCursorLeave(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { canvasId?: string },
+  ) {
+    const data = client.data as { userId?: string }
+    if (!data?.userId || !body?.canvasId) return { ok: false }
+    const event: RealtimeEvent = {
+      type: 'canvas.cursor.leave',
+      canvasId: body.canvasId,
+      userId: data.userId,
+    }
+    client.to(`canvas:${body.canvasId}`).emit('event', event)
+    return { ok: true }
   }
 
   // --- Broadcast helpers ----------------------------------------------------

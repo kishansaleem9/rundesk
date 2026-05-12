@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -12,6 +12,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
+import { CursorLayer, useCanvasCursors } from '../lib/use-canvas-cursors'
 import {
   Plus,
   Network,
@@ -378,6 +379,8 @@ function MindMapEditor({
 }) {
   const nodesById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes])
   const selectedNode = nodes.find((n) => n.id === selectedNodeId)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
+  const { remoteCursors, onPointerMove, onPointerLeave } = useCanvasCursors(map.id, canvasRef)
 
   // Keyboard shortcuts: Delete = remove selected branch; Tab = add child
   useEffect(() => {
@@ -458,8 +461,14 @@ function MindMapEditor({
         </div>
       )}
 
-      <div className="relative flex-1 overflow-hidden bg-card/20">
+      <div
+        ref={canvasRef}
+        className="relative flex-1 overflow-hidden bg-card/20"
+        onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
+      >
         <BackgroundDots />
+        <CursorLayer cursors={remoteCursors} />
         <svg className="absolute inset-0 h-full w-full pointer-events-none">
           {nodes
             .filter((n) => n.parentId)
