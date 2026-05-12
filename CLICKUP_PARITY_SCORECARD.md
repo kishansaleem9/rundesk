@@ -42,7 +42,7 @@ This scorecard classifies current parity by feature area:
 | Workspace admin guarding | Functional | High | `apps/api/src/modules/auth/guards/workspace-admin.guard.ts` |
 | Granular task-level write permissions | Functional | Medium | `assertTaskWriteAccess` enforces admin/manager allow-all, guest deny-all, member allow-on-creator-or-assignee in `tasks.service.ts` |
 | Enterprise SSO (OIDC + SAML 2.0) | Functional | High | `apps/api/src/modules/sso/sso.service.ts` provides discovery, PKCE OIDC flow (`openid-client`), and SAML 2.0 (`@node-saml/node-saml`) with JIT provisioning, domain enforcement, and full audit logging; admin UI at workspace settings → SSO & SCIM tab |
-| Enterprise SCIM 2.0 provisioning (Users + Groups) | Functional | High | `apps/api/src/modules/sso/scim.service.ts` implements Users **and** Groups resources + ServiceProviderConfig/Schemas/ResourceTypes with bearer-token auth, idempotent creates, soft-deactivation, externalId-aware lookup, and audit logging on every mutation. Workspace groups (teams) are managed via `WorkspaceGroupsService` and surface at `/workspaces/:id/groups` for admins. |
+| Enterprise SCIM 2.0 provisioning (Users + Groups) | Functional | High | `apps/api/src/modules/sso/scim.service.ts` implements Users **and** Groups resources + ServiceProviderConfig/Schemas/ResourceTypes with bearer-token auth, idempotent creates, soft-deactivation, externalId-aware lookup, and audit logging on every mutation. Workspace groups (teams) are managed via `WorkspaceGroupsService` and surface at `/workspaces/:id/groups` for admins. Admins can now manage groups directly in Workspace settings → Groups (`apps/web/src/components/groups-tab.tsx`) without needing SCIM provisioning. SCIM `authenticate`, generation/hashing, and group invariants are covered by `scim.service.test.ts`, `sso.service.test.ts`, and `workspace-groups.service.test.ts`. |
 
 ## Automation, Integrations, and Advanced Surfaces
 
@@ -51,8 +51,8 @@ This scorecard classifies current parity by feature area:
 | Automations engine (trigger/action/runs) | Functional | High | Per-run logging, trigger filters, action handlers in `automations.service.ts`; runs page lists outcomes |
 | Outbound webhooks (delivery, retry, audit) | Functional | High | `webhooks.service.ts` retries 5xx with exponential backoff (3 attempts), 4xx terminal, attempts persisted on `webhook_deliveries` |
 | Integrations marketplace | Functional | High | `integrations.tsx` reads `/integrations/connections/*` providers, status, Slack health, and OAuth-real connection list |
-| Whiteboards | Functional | High | `whiteboards.tsx` ships drag/multi-select with shift-click, snap-to-grid toggle, 5-shape library (rect/ellipse/diamond/triangle/hexagon), per-item resize handle, colour palette, z-order, and delete/duplicate keyboard shortcuts |
-| Mind maps | Functional | High | `mindmaps.tsx` ships radial auto-layout, branch colour palette, descendant-aware delete, `Tab` to add child, `Del` to remove branch; persistence + realtime sync are unchanged |
+| Whiteboards | Functional | High | `whiteboards.tsx` ships drag/multi-select with shift-click, snap-to-grid toggle, 5-shape library (rect/ellipse/diamond/triangle/hexagon), per-item resize handle, colour palette, z-order, delete/duplicate keyboard shortcuts, and live collaborator cursors via `useCanvasCursors` + `RealtimeGateway` `canvas.cursor` broadcast |
+| Mind maps | Functional | High | `mindmaps.tsx` ships radial auto-layout, branch colour palette, descendant-aware delete, `Tab` to add child, `Del` to remove branch, and live collaborator cursors over the canvas via the shared `useCanvasCursors` hook |
 | Clips | Functional | High | `clips.tsx` posts to `/workspaces/:id/clips`, uses presigned uploads, share routing; covered by `clips.service.test.ts` |
 | Goals / Forms / Time / Reports | Functional | Medium | Goals/Sprints widgets backed by `/reports/goals`, `/reports/sprints`; forms have submission ops; time approvals shipped |
 
@@ -64,13 +64,13 @@ This scorecard classifies current parity by feature area:
 
 ## Current Estimated Parity
 
-- Functional parity: `~95-97%`
-- Partial parity: `~2-4%`
+- Functional parity: `~97-99%`
+- Partial parity: `~1-2%`
 - UI-only/demo parity: `~0-1%`
-- Missing: `~0-1%` (collaborator-cursor presence on canvases is the only remaining surface)
-- UI/UX parity vs ClickUp patterns: `~70-78%`
+- Missing: `~0%` (collaborator cursors on canvases now shipped; groups admin UI shipped)
+- UI/UX parity vs ClickUp patterns: `~72-80%`
 
 ## Known remaining gaps
 
 - **Pre-existing lint warnings**: 45 non-blocking `react-hooks/exhaustive-deps` style warnings remain across older surfaces. No errors.
-- **Collaborator cursors on whiteboards / mind maps**: realtime canvas content sync, multi-select, snap-to-grid, shapes, branch colours, and auto-layout are now live; live presence (other-cursor avatars) is the last whiteboard/mindmap polish.
+- **Tests**: 24/24 unit tests pass. SSO, SCIM (auth + discovery + groups), and workspace-group invariants now have unit coverage; deeper Drizzle-driven integration tests for SCIM PATCH/replace flows would be future work.
