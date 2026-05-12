@@ -44,6 +44,7 @@ import { SsoModule } from './modules/sso/sso.module'
 import { WorkspaceGroupsModule } from './modules/workspace-groups/workspace-groups.module'
 import { CalendarSyncModule } from './modules/calendar-sync/calendar-sync.module'
 import { EmailToTaskModule } from './modules/email-to-task/email-to-task.module'
+import { CustomRolesModule } from './modules/custom-roles/custom-roles.module'
 
 @Module({
   imports: [
@@ -99,6 +100,7 @@ import { EmailToTaskModule } from './modules/email-to-task/email-to-task.module'
     WorkspaceGroupsModule,
     CalendarSyncModule,
     EmailToTaskModule,
+    CustomRolesModule,
   ],
 })
 export class AppModule {}

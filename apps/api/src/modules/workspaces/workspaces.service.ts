@@ -79,6 +79,7 @@ export class WorkspacesService {
     return this.db
       .select({
         userId: users.id,
+        workspaceMemberId: workspaceMembers.id,
         email: users.email,
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,

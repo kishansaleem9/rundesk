@@ -15,6 +15,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { SsoService, type SsoConnectionUpdate } from './sso.service'
 import { AuthService } from '../auth/auth.service'
 import type { SsoProvider } from '@rundesk/db'
@@ -24,7 +25,8 @@ type CurrentUserPayload = { id: string; email: string }
 @ApiTags('sso-admin')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/sso')
-@UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
+@UseGuards(JwtAuthGuard, WorkspaceAdminGuard, PermissionsGuard)
+@RequirePermissions('sso.manage')
 export class SsoAdminController {
   constructor(private sso: SsoService) {}
 

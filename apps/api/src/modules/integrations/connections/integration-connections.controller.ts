@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
+import { PermissionsGuard, RequirePermissions } from '../../custom-roles/permissions.guard'
 
 @ApiTags('integrations:connections')
 @Controller()
@@ -58,7 +59,8 @@ export class IntegrationConnectionsController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard)
+  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard, PermissionsGuard)
+  @RequirePermissions('integrations.access_requests.manage')
   @Patch('workspaces/:workspaceId/integrations/connections/access-requests/:provider')
   @ApiOperation({ summary: 'Update access request status' })
   setAccessRequestStatus(
@@ -71,7 +73,8 @@ export class IntegrationConnectionsController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard)
+  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard, PermissionsGuard)
+  @RequirePermissions('integrations.manage')
   @Post('workspaces/:workspaceId/integrations/connections/:provider/oauth/start')
   @ApiOperation({ summary: 'Create OAuth authorization URL for a provider' })
   oauthStart(
@@ -99,7 +102,8 @@ export class IntegrationConnectionsController {
   }
 
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard)
+  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard, PermissionsGuard)
+  @RequirePermissions('integrations.manage')
   @Delete('workspaces/:workspaceId/integrations/connections/:provider')
   @ApiOperation({ summary: 'Disconnect a provider from workspace' })
   disconnect(

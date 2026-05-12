@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 
 @ApiTags('webhooks')
 @ApiBearerAuth()
@@ -26,7 +27,8 @@ export class WebhooksController {
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @RequirePermissions('webhook.manage')
   @ApiOperation({ summary: 'Create a new webhook (admin only)' })
   create(
     @Param('workspaceId') workspaceId: string,
@@ -37,7 +39,8 @@ export class WebhooksController {
   }
 
   @Patch(':webhookId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @RequirePermissions('webhook.manage')
   update(
     @Param('workspaceId') workspaceId: string,
     @Param('webhookId') webhookId: string,
@@ -47,7 +50,8 @@ export class WebhooksController {
   }
 
   @Delete(':webhookId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @RequirePermissions('webhook.manage')
   delete(
     @Param('workspaceId') workspaceId: string,
     @Param('webhookId') webhookId: string,
