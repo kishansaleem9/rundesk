@@ -66,6 +66,29 @@ export class R2Service {
     return getSignedUrl(this.client!, cmd, { expiresIn: expiresInSeconds })
   }
 
+  /**
+   * Direct server-side upload — used when we can't go through a presigned
+   * URL (e.g. attachments arriving via the inbound-email webhook are
+   * pre-decoded by the email provider, so the API has the bytes in hand).
+   */
+  async putObject(
+    key: string,
+    body: Buffer | Uint8Array,
+    contentType: string,
+    metadata: Record<string, string> = {},
+  ): Promise<void> {
+    this.requireConfigured()
+    await this.client!.send(
+      new PutObjectCommand({
+        Bucket: this.bucketName!,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        Metadata: metadata,
+      }),
+    )
+  }
+
   async getObjectUrl(key: string, expiresInSeconds = 900): Promise<string> {
     this.requireConfigured()
     if (this.publicUrl) {

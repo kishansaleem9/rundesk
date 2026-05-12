@@ -43,6 +43,7 @@ import { AnnouncementsModule } from './modules/announcements/announcements.modul
 import { SsoModule } from './modules/sso/sso.module'
 import { WorkspaceGroupsModule } from './modules/workspace-groups/workspace-groups.module'
 import { CalendarSyncModule } from './modules/calendar-sync/calendar-sync.module'
+import { EmailToTaskModule } from './modules/email-to-task/email-to-task.module'
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { CalendarSyncModule } from './modules/calendar-sync/calendar-sync.module
     SsoModule,
     WorkspaceGroupsModule,
     CalendarSyncModule,
+    EmailToTaskModule,
   ],
 })
 export class AppModule {}
