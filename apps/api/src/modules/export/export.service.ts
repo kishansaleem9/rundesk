@@ -16,10 +16,14 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { SecurityService } from '../security/security.service'
 
 @Injectable()
 export class ExportService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private readonly security: SecurityService,
+  ) {}
 
   async exportWorkspace(workspaceId: string): Promise<{
     workspace: object
@@ -93,6 +97,24 @@ export class ExportService {
       forms: formsData.map((f) => ({ ...f, fields: [] })), // fields loaded separately to keep response lean
       exportedAt: new Date().toISOString(),
     }
+  }
+
+  async logExport(
+    workspaceId: string,
+    actorId: string,
+    format: 'json' | 'csv',
+    scope: string,
+    counts?: Record<string, number>,
+  ) {
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: 'data.exported',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      description: `Exported workspace ${scope} as ${format.toUpperCase()}`,
+      metadata: { format, scope, ...(counts ?? {}) },
+    })
   }
 
   exportToCsv(tasks: any[]): string {

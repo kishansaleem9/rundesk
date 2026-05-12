@@ -3,10 +3,14 @@ import { eq, and, desc, isNull, gte, inArray } from 'drizzle-orm'
 import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { SecurityService } from '../security/security.service'
 
 @Injectable()
 export class TimeEntriesService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private readonly security: SecurityService,
+  ) {}
 
   async canModerateApprovals(workspaceId: string, userId: string) {
     const [membership] = await this.db
@@ -214,6 +218,19 @@ export class TimeEntriesService {
         })
         .where(eq(timeApprovals.id, existing.id))
         .returning()
+      await this.security.logAuditEvent({
+        workspaceId,
+        actorId,
+        action: `timesheet.${input.status}`,
+        resourceType: 'timesheet',
+        resourceId: `${userId}:${normalizedWeekStart}`,
+        description: `Timesheet ${input.status} for week ${normalizedWeekStart}`,
+        metadata: {
+          userId,
+          weekStart: normalizedWeekStart,
+          rejectionReason: input.reason ?? null,
+        },
+      })
       return updated
     }
 
@@ -229,6 +246,19 @@ export class TimeEntriesService {
         approvedAt: new Date(),
       })
       .returning()
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: `timesheet.${input.status}`,
+      resourceType: 'timesheet',
+      resourceId: `${userId}:${normalizedWeekStart}`,
+      description: `Timesheet ${input.status} for week ${normalizedWeekStart}`,
+      metadata: {
+        userId,
+        weekStart: normalizedWeekStart,
+        rejectionReason: input.reason ?? null,
+      },
+    })
     return created
   }
 

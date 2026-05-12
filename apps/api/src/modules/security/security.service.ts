@@ -1,5 +1,5 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common'
-import { and, eq, desc, isNull, or } from 'drizzle-orm'
+import { and, eq, desc, isNull, or, like } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import * as OTPAuth from 'otpauth'
 import * as bcrypt from 'bcryptjs'
@@ -58,6 +58,14 @@ export class SecurityService {
       .set({ verified: true, verifiedAt: new Date(), backupCodes: hashedCodes })
       .where(eq(userTotpSecrets.userId, userId))
 
+    await this.logAuditEvent({
+      actorId: userId,
+      action: '2fa.enabled',
+      resourceType: 'user',
+      resourceId: userId,
+      description: 'Two-factor authentication enabled',
+    })
+
     return { backupCodes: rawCodes }
   }
 
@@ -84,6 +92,13 @@ export class SecurityService {
 
   async disableTotp(userId: string): Promise<void> {
     await this.db.delete(userTotpSecrets).where(eq(userTotpSecrets.userId, userId))
+    await this.logAuditEvent({
+      actorId: userId,
+      action: '2fa.disabled',
+      resourceType: 'user',
+      resourceId: userId,
+      description: 'Two-factor authentication disabled',
+    })
   }
 
   async getTotpStatus(userId: string) {
@@ -128,6 +143,16 @@ export class SecurityService {
         createdAt: apiKeys.createdAt,
       })
 
+    await this.logAuditEvent({
+      workspaceId,
+      actorId: userId,
+      action: 'api_key.created',
+      resourceType: 'api_key',
+      resourceId: key.id,
+      description: `Created API key "${name}"`,
+      metadata: { name, scope, keyPrefix },
+    })
+
     // Return the raw key only this once — never stored in plaintext
     return { ...key, key: raw }
   }
@@ -142,15 +167,33 @@ export class SecurityService {
     return row
   }
 
-  async revokeApiKey(workspaceId: string, keyId: string) {
-    await this.assertApiKeyOwnership(workspaceId, keyId)
+  async revokeApiKey(workspaceId: string, keyId: string, actorId?: string) {
+    const row = await this.assertApiKeyOwnership(workspaceId, keyId)
     await this.db.update(apiKeys).set({ isRevoked: true }).where(eq(apiKeys.id, keyId))
+    await this.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: 'api_key.revoked',
+      resourceType: 'api_key',
+      resourceId: keyId,
+      description: `Revoked API key "${row.name}"`,
+      metadata: { name: row.name, keyPrefix: row.keyPrefix },
+    })
     return { ok: true }
   }
 
-  async deleteApiKey(workspaceId: string, keyId: string) {
-    await this.assertApiKeyOwnership(workspaceId, keyId)
+  async deleteApiKey(workspaceId: string, keyId: string, actorId?: string) {
+    const row = await this.assertApiKeyOwnership(workspaceId, keyId)
     await this.db.delete(apiKeys).where(eq(apiKeys.id, keyId))
+    await this.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: 'api_key.deleted',
+      resourceType: 'api_key',
+      resourceId: keyId,
+      description: `Deleted API key "${row.name}"`,
+      metadata: { name: row.name, keyPrefix: row.keyPrefix },
+    })
     return { ok: true }
   }
 
@@ -173,15 +216,19 @@ export class SecurityService {
 
   async getAuditLogs(
     workspaceId: string,
-    opts: { page?: number; limit?: number; action?: string } = {},
+    opts: { page?: number; limit?: number; action?: string; actionPrefix?: string } = {},
   ) {
     const limit = Math.min(opts.limit ?? 50, 200)
     const offset = ((opts.page ?? 1) - 1) * limit
 
+    const filters = [eq(auditLogs.workspaceId, workspaceId)]
+    if (opts.action) filters.push(eq(auditLogs.action, opts.action))
+    if (opts.actionPrefix) filters.push(like(auditLogs.action, `${opts.actionPrefix}%`))
+
     const rows = await this.db
       .select()
       .from(auditLogs)
-      .where(eq(auditLogs.workspaceId, workspaceId))
+      .where(and(...filters))
       .orderBy(desc(auditLogs.createdAt))
       .limit(limit)
       .offset(offset)

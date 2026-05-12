@@ -9,6 +9,7 @@ import {
   workspaceMembers,
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
+import { SecurityService } from '../../security/security.service'
 
 type Provider =
   | 'github'
@@ -36,7 +37,10 @@ type ProviderAvailability = {
 
 @Injectable()
 export class IntegrationConnectionsService {
-  constructor(@Inject(DB_TOKEN) private readonly db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private readonly db: Db,
+    private readonly security: SecurityService,
+  ) {}
 
   async list(workspaceId: string) {
     const rows = await this.db
@@ -165,13 +169,23 @@ export class IntegrationConnectionsService {
       })
     }
 
+    await this.security.logAuditEvent({
+      workspaceId: payload.workspaceId,
+      actorId: payload.userId,
+      action: 'integration.connected',
+      resourceType: 'integration',
+      resourceId: provider,
+      description: `Connected ${provider}`,
+      metadata: { provider, accountEmail: profile.email ?? null },
+    })
+
     return {
       workspaceId: payload.workspaceId,
       provider,
     }
   }
 
-  async disconnect(workspaceId: string, providerRaw: string) {
+  async disconnect(workspaceId: string, providerRaw: string, actorId?: string) {
     const provider = this.assertProvider(providerRaw)
     await this.db
       .delete(workspaceIntegrationConnections)
@@ -181,6 +195,15 @@ export class IntegrationConnectionsService {
           eq(workspaceIntegrationConnections.provider, provider),
         ),
       )
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: 'integration.disconnected',
+      resourceType: 'integration',
+      resourceId: provider,
+      description: `Disconnected ${provider}`,
+      metadata: { provider },
+    })
     return { ok: true }
   }
 
@@ -225,6 +248,15 @@ export class IntegrationConnectionsService {
         })
         .where(eq(integrationAccessRequests.id, existing.id))
         .returning()
+      await this.security.logAuditEvent({
+        workspaceId,
+        actorId: userId,
+        action: 'integration.access_requested',
+        resourceType: 'integration',
+        resourceId: provider,
+        description: `Resubmitted access request for ${provider}`,
+        metadata: { provider, note: note ?? null },
+      })
       return updated
     }
     const [created] = await this.db
@@ -237,6 +269,15 @@ export class IntegrationConnectionsService {
         note: note?.trim() || null,
       })
       .returning()
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: userId,
+      action: 'integration.access_requested',
+      resourceType: 'integration',
+      resourceId: provider,
+      description: `Requested access to ${provider}`,
+      metadata: { provider, note: note ?? null },
+    })
     return created
   }
 
@@ -245,6 +286,7 @@ export class IntegrationConnectionsService {
     provider: string,
     status: 'pending' | 'approved' | 'rejected',
     note?: string,
+    actorId?: string,
   ) {
     const [existing] = await this.db
       .select()
@@ -268,6 +310,15 @@ export class IntegrationConnectionsService {
       })
       .where(eq(integrationAccessRequests.id, existing.id))
       .returning()
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: `integration.access_${status}`,
+      resourceType: 'integration',
+      resourceId: provider,
+      description: `Admin marked access request as ${status} for ${provider}`,
+      metadata: { provider, note: note ?? null, previousStatus: existing.status },
+    })
     return updated
   }
 

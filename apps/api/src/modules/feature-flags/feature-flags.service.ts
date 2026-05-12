@@ -5,6 +5,7 @@ import { DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { SecurityService } from '../security/security.service'
 
 const CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
 
@@ -13,7 +14,10 @@ export class FeatureFlagsService {
   // In-process cache: key = `${userId}:${workspaceId}` → resolved flags + expiry
   private cache = new Map<string, { flags: Record<string, boolean>; expiresAt: number }>()
 
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private readonly security: SecurityService,
+  ) {}
 
   async isEnabled(flagKey: FlagKey, ctx: Partial<FlagResolutionContext>): Promise<boolean> {
     const resolved = await this.resolveForContext(ctx)
@@ -88,6 +92,15 @@ export class FeatureFlagsService {
       set: { enabled, updatedBy, updatedAt: new Date() },
     })
     this.invalidateCache(scopeId ?? undefined, workspaceId ?? undefined)
+    await this.security.logAuditEvent({
+      workspaceId: workspaceId ?? undefined,
+      actorId: updatedBy,
+      action: 'feature_flag.changed',
+      resourceType: 'feature_flag',
+      resourceId: flagKey,
+      description: `Feature flag "${flagKey}" set to ${enabled ? 'on' : 'off'} (${scope})`,
+      metadata: { flagKey, enabled, scope, scopeId: scopeId ?? null },
+    })
   }
 
   async listOverrides(workspaceId?: string | null) {

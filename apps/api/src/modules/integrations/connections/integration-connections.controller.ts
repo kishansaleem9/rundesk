@@ -65,8 +65,9 @@ export class IntegrationConnectionsController {
     @Param('workspaceId') workspaceId: string,
     @Param('provider') provider: string,
     @Body() body: { status: 'pending' | 'approved' | 'rejected'; note?: string },
+    @CurrentUser() user: any,
   ) {
-    return this.svc.setAccessRequestStatus(workspaceId, provider, body.status, body.note)
+    return this.svc.setAccessRequestStatus(workspaceId, provider, body.status, body.note, user.id)
   }
 
   @ApiBearerAuth()
@@ -101,7 +102,11 @@ export class IntegrationConnectionsController {
   @UseGuards(JwtAuthGuard, WorkspaceMemberGuard, WorkspaceAdminGuard)
   @Delete('workspaces/:workspaceId/integrations/connections/:provider')
   @ApiOperation({ summary: 'Disconnect a provider from workspace' })
-  disconnect(@Param('workspaceId') workspaceId: string, @Param('provider') provider: string) {
-    return this.svc.disconnect(workspaceId, provider)
+  disconnect(
+    @Param('workspaceId') workspaceId: string,
+    @Param('provider') provider: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.svc.disconnect(workspaceId, provider, user.id)
   }
 }

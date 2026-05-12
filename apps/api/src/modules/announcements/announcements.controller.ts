@@ -41,8 +41,9 @@ export class AnnouncementsController {
     @Param('workspaceId') workspaceId: string,
     @Param('announcementId') announcementId: string,
     @Body() body: Partial<{ title: string; body: string; tone: 'info' | 'celebrate' | 'warn'; isActive: boolean; expiresAt: string | null }>,
+    @CurrentUser() user: { id: string },
   ) {
-    return this.announcementsService.update(workspaceId, announcementId, body)
+    return this.announcementsService.update(workspaceId, announcementId, body, user.id)
   }
 
   @Delete(':announcementId')
@@ -50,8 +51,9 @@ export class AnnouncementsController {
   remove(
     @Param('workspaceId') workspaceId: string,
     @Param('announcementId') announcementId: string,
+    @CurrentUser() user: { id: string },
   ) {
-    return this.announcementsService.remove(workspaceId, announcementId)
+    return this.announcementsService.remove(workspaceId, announcementId, user.id)
   }
 
   @Post(':announcementId/view')

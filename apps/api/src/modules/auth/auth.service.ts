@@ -11,6 +11,7 @@ import { UsersService } from '../users/users.service'
 import { WorkspacesService } from '../workspaces/workspaces.service'
 import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
 import { EmailService } from '../email/email.service'
+import { SecurityService } from '../security/security.service'
 import type { RegisterDto } from './dto/register.dto'
 import type { SignupDto } from './dto/signup.dto'
 
@@ -38,6 +39,7 @@ export class AuthService {
     private config: ConfigService,
     private featureFlagsService: FeatureFlagsService,
     private emailService: EmailService,
+    private security: SecurityService,
   ) {}
 
   async validateUser(email: string, password: string) {
@@ -90,6 +92,18 @@ export class AuthService {
       userAgent: meta.userAgent,
       ipAddress: meta.ip,
       expiresAt,
+    })
+
+    await this.security.logAuditEvent({
+      workspaceId: primaryWorkspaceId ?? undefined,
+      actorId: user.id,
+      actorEmail: user.email,
+      action: 'auth.login',
+      resourceType: 'user',
+      resourceId: user.id,
+      description: `Signed in as ${user.email}`,
+      ipAddress: meta.ip,
+      userAgent: meta.userAgent,
     })
 
     const { passwordHash: _discard, ...safeUser } = user

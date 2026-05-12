@@ -4,6 +4,7 @@ import { organizationMembers, organizations, workspaces, workspaceMembers, users
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
+import { SecurityService } from '../security/security.service'
 
 const BASE_SLUG_FALLBACK = 'workspace'
 
@@ -19,7 +20,10 @@ function slugify(input: string): string {
 
 @Injectable()
 export class WorkspacesService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private readonly security: SecurityService,
+  ) {}
 
   async findByMember(userId: string) {
     return this.db
@@ -45,6 +49,7 @@ export class WorkspacesService {
   async update(
     workspaceId: string,
     patch: { name?: string; logoUrl?: string | null; primaryColor?: string | null; customDomain?: string | null },
+    actor?: { id: string; email?: string },
   ) {
     const [row] = await this.db
       .update(workspaces)
@@ -52,6 +57,21 @@ export class WorkspacesService {
       .where(eq(workspaces.id, workspaceId))
       .returning()
     if (!row) throw new NotFoundException('Workspace not found')
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      action: 'workspace.updated',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      description: `Workspace settings updated`,
+      metadata: {
+        name: patch.name ?? null,
+        logoUrl: patch.logoUrl ?? null,
+        primaryColor: patch.primaryColor ?? null,
+        customDomain: patch.customDomain ?? null,
+      },
+    })
     return row
   }
 
@@ -70,7 +90,12 @@ export class WorkspacesService {
       .where(eq(workspaceMembers.workspaceId, workspaceId))
   }
 
-  async addMember(workspaceId: string, email: string, role: string = 'member') {
+  async addMember(
+    workspaceId: string,
+    email: string,
+    role: string = 'member',
+    actor?: { id: string; email?: string },
+  ) {
     const [user] = await this.db.select().from(users).where(eq(users.email, email))
     if (!user) throw new BadRequestException(`No user with email ${email}`)
     const existing = await this.getMembership(workspaceId, user.id)
@@ -80,21 +105,56 @@ export class WorkspacesService {
       userId: user.id,
       role: role as any,
     })
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      action: 'member.invited',
+      resourceType: 'user',
+      resourceId: user.id,
+      description: `Added ${email} to workspace as ${role}`,
+      metadata: { email, role },
+    })
     return { ok: true, userId: user.id }
   }
 
-  async updateMemberRole(workspaceId: string, userId: string, role: string) {
+  async updateMemberRole(
+    workspaceId: string,
+    userId: string,
+    role: string,
+    actor?: { id: string; email?: string },
+  ) {
+    const previous = await this.getMembership(workspaceId, userId)
     await this.db
       .update(workspaceMembers)
       .set({ role: role as any })
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      action: 'role.changed',
+      resourceType: 'user',
+      resourceId: userId,
+      description: `Member role changed to ${role}`,
+      metadata: { from: previous?.role ?? null, to: role },
+    })
     return { ok: true }
   }
 
-  async removeMember(workspaceId: string, userId: string) {
+  async removeMember(workspaceId: string, userId: string, actor?: { id: string; email?: string }) {
     await this.db
       .delete(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      action: 'member.removed',
+      resourceType: 'user',
+      resourceId: userId,
+      description: `Removed member from workspace`,
+    })
     return { ok: true }
   }
 

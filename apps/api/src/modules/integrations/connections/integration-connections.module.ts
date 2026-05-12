@@ -4,9 +4,10 @@ import { IntegrationConnectionsController } from './integration-connections.cont
 import { IntegrationConnectionsService } from './integration-connections.service'
 import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../../auth/guards/workspace-admin.guard'
+import { SecurityModule } from '../../security/security.module'
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, SecurityModule],
   controllers: [IntegrationConnectionsController],
   providers: [IntegrationConnectionsService, WorkspaceMemberGuard, WorkspaceAdminGuard],
   exports: [IntegrationConnectionsService],

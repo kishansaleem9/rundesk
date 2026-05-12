@@ -11,12 +11,14 @@ import { WorkspacesModule } from '../workspaces/workspaces.module'
 import { EmailModule } from '../email/email.module'
 import { WorkspaceMemberGuard } from './guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from './guards/workspace-admin.guard'
+import { SecurityModule } from '../security/security.module'
 
 @Module({
   imports: [
     UsersModule,
     WorkspacesModule,
     EmailModule,
+    SecurityModule,
     PassportModule,
     JwtModule.registerAsync({
       inject: [ConfigService],

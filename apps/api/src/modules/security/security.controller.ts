@@ -71,8 +71,9 @@ export class ApiKeysController {
   revoke(
     @Param('workspaceId') workspaceId: string,
     @Param('keyId') keyId: string,
+    @CurrentUser() user: any,
   ) {
-    return this.svc.revokeApiKey(workspaceId, keyId)
+    return this.svc.revokeApiKey(workspaceId, keyId, user.id)
   }
 
   @Delete(':keyId')
@@ -81,8 +82,9 @@ export class ApiKeysController {
   delete(
     @Param('workspaceId') workspaceId: string,
     @Param('keyId') keyId: string,
+    @CurrentUser() user: any,
   ) {
-    return this.svc.deleteApiKey(workspaceId, keyId)
+    return this.svc.deleteApiKey(workspaceId, keyId, user.id)
   }
 }
 
@@ -101,11 +103,13 @@ export class AuditLogsController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('action') action?: string,
+    @Query('actionPrefix') actionPrefix?: string,
   ) {
     return this.svc.getAuditLogs(workspaceId, {
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 50,
       action,
+      actionPrefix,
     })
   }
 }

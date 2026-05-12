@@ -4,9 +4,10 @@ import { ExportController } from './export.controller'
 import { DatabaseModule } from '../../common/database/database.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { SecurityModule } from '../security/security.module'
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, SecurityModule],
   controllers: [ExportController],
   providers: [ExportService, WorkspaceMemberGuard, WorkspaceAdminGuard],
 })

@@ -38,8 +38,9 @@ export class WorkspacesController {
   async update(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { name?: string; logoUrl?: string | null; primaryColor?: string | null; customDomain?: string | null },
+    @CurrentUser() user: any,
   ) {
-    return this.workspacesService.update(workspaceId, body)
+    return this.workspacesService.update(workspaceId, body, { id: user.id, email: user.email })
   }
 
   @Get(':workspaceId/members')
@@ -53,8 +54,12 @@ export class WorkspacesController {
   async addMember(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { email: string; role?: string },
+    @CurrentUser() user: any,
   ) {
-    return this.workspacesService.addMember(workspaceId, body.email, body.role)
+    return this.workspacesService.addMember(workspaceId, body.email, body.role, {
+      id: user.id,
+      email: user.email,
+    })
   }
 
   @Patch(':workspaceId/members/:userId')
@@ -63,8 +68,12 @@ export class WorkspacesController {
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() body: { role: string },
+    @CurrentUser() user: any,
   ) {
-    return this.workspacesService.updateMemberRole(workspaceId, userId, body.role)
+    return this.workspacesService.updateMemberRole(workspaceId, userId, body.role, {
+      id: user.id,
+      email: user.email,
+    })
   }
 
   @Delete(':workspaceId/members/:userId')
@@ -72,7 +81,11 @@ export class WorkspacesController {
   async removeMember(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
+    @CurrentUser() user: any,
   ) {
-    return this.workspacesService.removeMember(workspaceId, userId)
+    return this.workspacesService.removeMember(workspaceId, userId, {
+      id: user.id,
+      email: user.email,
+    })
   }
 }

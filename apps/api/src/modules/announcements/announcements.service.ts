@@ -3,10 +3,14 @@ import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import { announcementDismissals, announcements } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { SecurityService } from '../security/security.service'
 
 @Injectable()
 export class AnnouncementsService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private readonly security: SecurityService,
+  ) {}
 
   async list(workspaceId: string) {
     return this.db
@@ -54,6 +58,15 @@ export class AnnouncementsService {
         expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
       })
       .returning()
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: userId,
+      action: 'announcement.created',
+      resourceType: 'announcement',
+      resourceId: created.id,
+      description: `Created announcement "${created.title}"`,
+      metadata: { tone: created.tone, isActive: created.isActive },
+    })
     return created
   }
 
@@ -61,6 +74,7 @@ export class AnnouncementsService {
     workspaceId: string,
     announcementId: string,
     patch: Partial<{ title: string; body: string; tone: 'info' | 'celebrate' | 'warn'; isActive: boolean; expiresAt: string | null }>,
+    actorId?: string,
   ) {
     const [updated] = await this.db
       .update(announcements)
@@ -75,15 +89,36 @@ export class AnnouncementsService {
       .where(and(eq(announcements.id, announcementId), eq(announcements.workspaceId, workspaceId)))
       .returning()
     if (!updated) throw new NotFoundException('Announcement not found')
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: 'announcement.updated',
+      resourceType: 'announcement',
+      resourceId: announcementId,
+      description: `Updated announcement "${updated.title}"`,
+      metadata: {
+        title: patch.title ?? null,
+        tone: patch.tone ?? null,
+        isActive: patch.isActive ?? null,
+      },
+    })
     return updated
   }
 
-  async remove(workspaceId: string, announcementId: string) {
+  async remove(workspaceId: string, announcementId: string, actorId?: string) {
     const [deleted] = await this.db
       .delete(announcements)
       .where(and(eq(announcements.id, announcementId), eq(announcements.workspaceId, workspaceId)))
-      .returning({ id: announcements.id })
+      .returning({ id: announcements.id, title: announcements.title })
     if (!deleted) throw new NotFoundException('Announcement not found')
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId,
+      action: 'announcement.removed',
+      resourceType: 'announcement',
+      resourceId: announcementId,
+      description: `Removed announcement "${deleted.title}"`,
+    })
     return { ok: true }
   }
 
