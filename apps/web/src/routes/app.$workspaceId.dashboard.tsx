@@ -14,6 +14,7 @@ import { format, formatDistanceToNowStrict, isAfter, isBefore, isToday, startOfW
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
+import { DemoDataEmptyState } from '../components/demo-data-empty-state'
 
 type TaskStatus =
   | 'backlog'
@@ -170,6 +171,7 @@ function Dashboard() {
     .slice(0, 10)
 
   return (
+    <DemoDataEmptyState workspaceId={workspaceId}>
     <div className="max-w-7xl mx-auto p-8">
       <header className="mb-8">
         <div className="flex items-start justify-between">
@@ -387,6 +389,7 @@ function Dashboard() {
         </div>
       )}
     </div>
+    </DemoDataEmptyState>
   )
 }
 
