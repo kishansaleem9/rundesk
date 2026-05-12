@@ -424,8 +424,8 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
       else if (hasAutoAssignee) acc.autoAssignee += 1
       else acc.unassigned += 1
 
-      if (Boolean(dueDateOverrides[originalIndex])) acc.dueOverride += 1
-      if (Boolean(priorityOverrides[originalIndex])) acc.priorityOverride += 1
+      if (dueDateOverrides[originalIndex]) acc.dueOverride += 1
+      if (priorityOverrides[originalIndex]) acc.priorityOverride += 1
       return acc
     },
     {

@@ -803,6 +803,76 @@ function SubmissionsTab({
   onClearRetryHistory: (submissionId: string) => Promise<void>
   onRefresh: () => Promise<void>
 }) {
+  const storageKeyBase = `form-submissions-ops:${formId}`
+
+  const readFilterFromUrl = (): SubmissionFilter => {
+    if (typeof window === 'undefined') return 'all'
+    const raw = new URLSearchParams(window.location.search).get('submissionsFilter')
+    if (raw === 'success' || raw === 'unmapped' || raw === 'invalid' || raw === 'all') return raw
+    return 'all'
+  }
+  const readPresetFromUrl = (): SubmissionPreset => {
+    if (typeof window === 'undefined') return 'all'
+    const raw = new URLSearchParams(window.location.search).get('submissionsPreset')
+    if (raw === 'needs_routing_fix' || raw === 'no_task_created' || raw === 'successful' || raw === 'all') return raw
+    return 'all'
+  }
+  const readBool = (key: string, fallback: boolean) => {
+    if (typeof window === 'undefined') return fallback
+    const raw = window.localStorage.getItem(key)
+    if (raw === 'true') return true
+    if (raw === 'false') return false
+    return fallback
+  }
+  const readNumber = (key: string, fallback: number) => {
+    if (typeof window === 'undefined') return fallback
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) ? parsed : fallback
+  }
+  const readString = (key: string, fallback: string) => {
+    if (typeof window === 'undefined') return fallback
+    return window.localStorage.getItem(key) ?? fallback
+  }
+
+  const [filter, setFilter] = useState<SubmissionFilter>(() => readFilterFromUrl())
+  const [preset, setPreset] = useState<SubmissionPreset>(() => readPresetFromUrl())
+  const [historyFilter, setHistoryFilter] = useState<SubmissionHistoryFilter>('all')
+  const [bulkFeedback, setBulkFeedback] = useState<string>('')
+  const [clearingHistory, setClearingHistory] = useState(false)
+  const [retryAndClearRunning, setRetryAndClearRunning] = useState(false)
+  const [onlyActionable, setOnlyActionable] = useState(() => readBool(`${storageKeyBase}:only-actionable`, false))
+  const [sessionRetrySuccessCount, setSessionRetrySuccessCount] = useState(() => readNumber(`${storageKeyBase}:retry-success-count`, 0))
+  const [lastBulkRunSummary, setLastBulkRunSummary] = useState<string>(() => readString(`${storageKeyBase}:last-bulk-run`, ''))
+  const [rowRetryState, setRowRetryState] = useState<Record<string, { status: 'idle' | 'retrying' | 'ok' | 'error'; message?: string }>>({})
+  const [retryingRouting, setRetryingRouting] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(`${storageKeyBase}:only-actionable`, String(onlyActionable))
+  }, [onlyActionable, storageKeyBase])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(`${storageKeyBase}:retry-success-count`, String(sessionRetrySuccessCount))
+  }, [sessionRetrySuccessCount, storageKeyBase])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (lastBulkRunSummary) window.localStorage.setItem(`${storageKeyBase}:last-bulk-run`, lastBulkRunSummary)
+    else window.localStorage.removeItem(`${storageKeyBase}:last-bulk-run`)
+  }, [lastBulkRunSummary, storageKeyBase])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (filter === 'all') params.delete('submissionsFilter')
+    else params.set('submissionsFilter', filter)
+    if (preset === 'all') params.delete('submissionsPreset')
+    else params.set('submissionsPreset', preset)
+    const query = params.toString()
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
+    window.history.replaceState(null, '', nextUrl)
+  }, [filter, preset])
+
   if (loading) return <div className="text-muted-foreground text-sm">Loading…</div>
   if (submissions.length === 0) {
     return (
@@ -838,71 +908,6 @@ function SubmissionsTab({
     },
     { success: 0, unmapped: 0, invalid: 0, other: 0 },
   )
-  const readFilterFromUrl = (): SubmissionFilter => {
-    if (typeof window === 'undefined') return 'all'
-    const raw = new URLSearchParams(window.location.search).get('submissionsFilter')
-    if (raw === 'success' || raw === 'unmapped' || raw === 'invalid' || raw === 'all') return raw
-    return 'all'
-  }
-  const readPresetFromUrl = (): SubmissionPreset => {
-    if (typeof window === 'undefined') return 'all'
-    const raw = new URLSearchParams(window.location.search).get('submissionsPreset')
-    if (raw === 'needs_routing_fix' || raw === 'no_task_created' || raw === 'successful' || raw === 'all') return raw
-    return 'all'
-  }
-  const [filter, setFilter] = useState<SubmissionFilter>(() => readFilterFromUrl())
-  const [preset, setPreset] = useState<SubmissionPreset>(() => readPresetFromUrl())
-  const [historyFilter, setHistoryFilter] = useState<SubmissionHistoryFilter>('all')
-  const [bulkFeedback, setBulkFeedback] = useState<string>('')
-  const [clearingHistory, setClearingHistory] = useState(false)
-  const [retryAndClearRunning, setRetryAndClearRunning] = useState(false)
-  const storageKeyBase = `form-submissions-ops:${formId}`
-  const readBool = (key: string, fallback: boolean) => {
-    if (typeof window === 'undefined') return fallback
-    const raw = window.localStorage.getItem(key)
-    if (raw === 'true') return true
-    if (raw === 'false') return false
-    return fallback
-  }
-  const readNumber = (key: string, fallback: number) => {
-    if (typeof window === 'undefined') return fallback
-    const raw = window.localStorage.getItem(key)
-    if (!raw) return fallback
-    const parsed = Number(raw)
-    return Number.isFinite(parsed) ? parsed : fallback
-  }
-  const readString = (key: string, fallback: string) => {
-    if (typeof window === 'undefined') return fallback
-    return window.localStorage.getItem(key) ?? fallback
-  }
-  const [onlyActionable, setOnlyActionable] = useState(() => readBool(`${storageKeyBase}:only-actionable`, false))
-  const [sessionRetrySuccessCount, setSessionRetrySuccessCount] = useState(() => readNumber(`${storageKeyBase}:retry-success-count`, 0))
-  const [lastBulkRunSummary, setLastBulkRunSummary] = useState<string>(() => readString(`${storageKeyBase}:last-bulk-run`, ''))
-  const [rowRetryState, setRowRetryState] = useState<Record<string, { status: 'idle' | 'retrying' | 'ok' | 'error'; message?: string }>>({})
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(`${storageKeyBase}:only-actionable`, String(onlyActionable))
-  }, [onlyActionable, storageKeyBase])
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(`${storageKeyBase}:retry-success-count`, String(sessionRetrySuccessCount))
-  }, [sessionRetrySuccessCount, storageKeyBase])
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (lastBulkRunSummary) window.localStorage.setItem(`${storageKeyBase}:last-bulk-run`, lastBulkRunSummary)
-    else window.localStorage.removeItem(`${storageKeyBase}:last-bulk-run`)
-  }, [lastBulkRunSummary, storageKeyBase])
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params = new URLSearchParams(window.location.search)
-    if (filter === 'all') params.delete('submissionsFilter')
-    else params.set('submissionsFilter', filter)
-    if (preset === 'all') params.delete('submissionsPreset')
-    else params.set('submissionsPreset', preset)
-    const query = params.toString()
-    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
-    window.history.replaceState(null, '', nextUrl)
-  }, [filter, preset])
 
   const hasTargetListRouting = Boolean(routingField)
   const noTaskCreatedCount = submissions.filter((submission) => !submission.createdTaskId).length
@@ -1019,7 +1024,6 @@ function SubmissionsTab({
       `Revalidated ${filteredSubmissions.length} submissions: ${summary.success} success, ${summary.unmapped} unmapped, ${summary.invalid} invalid, ${summary.other} other.`,
     )
   }
-  const [retryingRouting, setRetryingRouting] = useState(false)
   const retryFilteredRouting = async () => {
     const retryCandidates = filteredSubmissions.filter((submission) => !submission.createdTaskId)
     if (retryCandidates.length === 0) {
