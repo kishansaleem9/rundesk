@@ -41,6 +41,7 @@ import { ClipsModule } from './modules/clips/clips.module'
 import { CanvasesModule } from './modules/canvases/canvases.module'
 import { AnnouncementsModule } from './modules/announcements/announcements.module'
 import { SsoModule } from './modules/sso/sso.module'
+import { WorkspaceGroupsModule } from './modules/workspace-groups/workspace-groups.module'
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { SsoModule } from './modules/sso/sso.module'
     CanvasesModule,
     AnnouncementsModule,
     SsoModule,
+    WorkspaceGroupsModule,
   ],
 })
 export class AppModule {}
