@@ -1,8 +1,15 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, integer, index, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { lists } from './lists'
 import { users } from './users'
-import { taskPriorityEnum, taskStatusEnum } from './enums'
+import { taskPriorityEnum } from './enums'
+
+/**
+ * Status workflow buckets. Every per-list custom status (in `list_statuses`)
+ * maps to one of these so reports, automations, and "is this task done?"
+ * checks remain stable as users rename / reorder their pipelines.
+ */
+export type StatusCategory = 'open' | 'in_progress' | 'closed'
 
 export const tasks = pgTable('tasks', {
   id:            uuid('id').primaryKey().defaultRandom(),
@@ -12,7 +19,13 @@ export const tasks = pgTable('tasks', {
   title:         text('title').notNull(),
   description:   text('description'),
   priority:      taskPriorityEnum('priority').notNull().default('normal'),
-  status:        taskStatusEnum('status').notNull().default('todo'),
+  // `status` was a pgEnum (task_status) but is now a free-text key that must
+  // match one of the list's `list_statuses.key` rows. The original 6 enum
+  // values still work as defaults for back-compat.
+  status:        text('status').notNull().default('todo'),
+  // Derived bucket from the list status, denormalised onto the task so we
+  // don't need to join list_statuses on every query.
+  statusCategory: text('status_category').$type<StatusCategory>().notNull().default('open'),
   position:      integer('position').notNull().default(0),
   startDate:     timestamp('start_date', { withTimezone: true }),
   dueDate:       timestamp('due_date', { withTimezone: true }),
@@ -21,7 +34,9 @@ export const tasks = pgTable('tasks', {
   isArchived:    boolean('is_archived').notNull().default(false),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  index('idx_tasks_list_status').on(t.listId, t.status),
+])
 
 export const taskAssignees = pgTable('task_assignees', {
   id:     uuid('id').primaryKey().defaultRandom(),

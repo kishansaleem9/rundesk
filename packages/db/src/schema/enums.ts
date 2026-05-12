@@ -41,15 +41,6 @@ export const taskPriorityEnum = pgEnum('task_priority', [
   'low',
 ])
 
-export const taskStatusEnum = pgEnum('task_status', [
-  'backlog',
-  'todo',
-  'in_progress',
-  'in_review',
-  'done',
-  'cancelled',
-])
-
 export const activityActionEnum = pgEnum('activity_action', [
   'created',
   'updated',
