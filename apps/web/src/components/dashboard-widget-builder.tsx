@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import {
   Card,
@@ -130,7 +130,13 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
         <div className="rounded-xl border border-border/60 bg-card/40 p-3">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 auto-rows-[140px] gap-3">
           {widgets.map((w) => (
-            <WidgetCell key={w.id} widget={w} editing={editing} onRemove={() => removeWidget(w.id)} />
+            <WidgetCell
+              key={w.id}
+              widget={w}
+              workspaceId={workspaceId}
+              editing={editing}
+              onRemove={() => removeWidget(w.id)}
+            />
           ))}
           {editing && (
             <button
@@ -186,10 +192,12 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
 
 function WidgetCell({
   widget,
+  workspaceId,
   editing,
   onRemove,
 }: {
   widget: Widget
+  workspaceId: string
   editing: boolean
   onRemove: () => void
 }) {
@@ -219,23 +227,279 @@ function WidgetCell({
           </button>
         </>
       )}
-      <WidgetPreview widget={widget} icon={Icon} />
+      <WidgetPreview widget={widget} icon={Icon} workspaceId={workspaceId} />
     </Card>
   )
 }
 
-function WidgetPreview({ widget, icon: Icon }: { widget: Widget; icon: React.ElementType }) {
-  if (widget.type === 'tasks-due') return <Tile label="Due today" value="5" hint="Across all lists" Icon={Icon} />
-  if (widget.type === 'overdue') return <Tile label="Overdue" value="2" hint="Reschedule them?" Icon={Icon} tone="warning" />
-  if (widget.type === 'completion') return <Tile label="Completion" value="78%" hint="↑ 12% vs last week" Icon={Icon} tone="success" />
-  if (widget.type === 'time') return <Tile label="This week" value="34h" hint="28h billable" Icon={Icon} />
-  if (widget.type === 'pie-status') return <PieMock />
+function WidgetPreview({
+  widget,
+  icon: Icon,
+  workspaceId,
+}: {
+  widget: Widget
+  icon: React.ElementType
+  workspaceId: string
+}) {
+  if (widget.type === 'tasks-due') return <TasksDueTile Icon={Icon} workspaceId={workspaceId} />
+  if (widget.type === 'overdue') return <OverdueTile Icon={Icon} workspaceId={workspaceId} />
+  if (widget.type === 'completion') return <CompletionTile Icon={Icon} workspaceId={workspaceId} />
+  if (widget.type === 'time') return <TimeTile Icon={Icon} workspaceId={workspaceId} />
+  if (widget.type === 'pie-status') return <PieStatusWidget workspaceId={workspaceId} />
   if (widget.type === 'sprint-burndown') return <BurndownMock />
-  if (widget.type === 'team-load') return <TeamLoadMock />
-  if (widget.type === 'activity') return <ActivityMock />
-  if (widget.type === 'goals') return <GoalsMock />
-  if (widget.type === 'bar-priority') return <BarMock />
+  if (widget.type === 'team-load') return <TeamLoadWidget workspaceId={workspaceId} />
+  if (widget.type === 'activity') return <ActivityWidget />
+  ;
+  if (widget.type === 'goals') return <GoalsWidget workspaceId={workspaceId} />
+  if (widget.type === 'bar-priority') return <BarPriorityWidget workspaceId={workspaceId} />
   return null
+}
+
+function BarPriorityWidget({ workspaceId }: { workspaceId: string }) {
+  type ProjectBreakdown = { byPriority?: Record<string, number> }
+  const q = useQuery({
+    queryKey: ['reports-priority-breakdown', workspaceId],
+    queryFn: () =>
+      api<ProjectBreakdown>(`/workspaces/${workspaceId}/reports/overview`).catch(() => ({ byPriority: {} })),
+  })
+  const breakdown = (q.data?.byPriority ?? {}) as Record<string, number>
+  const entries = [
+    { l: 'Urgent', v: breakdown.urgent ?? 0, c: 'bg-destructive' },
+    { l: 'High', v: breakdown.high ?? 0, c: 'bg-warning' },
+    { l: 'Normal', v: breakdown.normal ?? 0, c: 'bg-accent' },
+    { l: 'Low', v: breakdown.low ?? 0, c: 'bg-muted-foreground' },
+  ]
+  const max = Math.max(1, ...entries.map((b) => b.v))
+  return (
+    <div className="flex flex-col h-full">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">By priority</div>
+      <div className="flex items-end gap-2 mt-2 h-16">
+        {entries.map((b) => (
+          <div key={b.l} className="flex-1 flex flex-col items-center gap-1">
+            <div className="w-full rounded-t flex items-end h-full">
+              <div
+                className={cn('w-full rounded-t', b.c)}
+                style={{ height: `${Math.max(4, (b.v / max) * 100)}%` }}
+              />
+            </div>
+            <span className="text-[9px] text-muted-foreground">
+              {b.l} · {b.v}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TasksDueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const q = useQuery({
+    queryKey: ['reports-overview', workspaceId],
+    queryFn: () =>
+      api<{ dueToday: number; total: number }>(
+        `/workspaces/${workspaceId}/reports/overview`,
+      ),
+  })
+  return (
+    <Tile
+      label="Due today"
+      value={q.data?.dueToday ?? '—'}
+      hint={q.data ? `of ${q.data.total} total` : 'Loading…'}
+      Icon={Icon}
+    />
+  )
+}
+
+function OverdueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const q = useQuery({
+    queryKey: ['reports-overview', workspaceId],
+    queryFn: () =>
+      api<{ overdue: number }>(`/workspaces/${workspaceId}/reports/overview`),
+  })
+  const overdue = q.data?.overdue ?? 0
+  return (
+    <Tile
+      label="Overdue"
+      value={overdue}
+      hint={overdue === 0 ? 'All caught up' : 'Reschedule them?'}
+      Icon={Icon}
+      tone={overdue > 0 ? 'warning' : undefined}
+    />
+  )
+}
+
+function CompletionTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const q = useQuery({
+    queryKey: ['reports-overview', workspaceId],
+    queryFn: () =>
+      api<{ completionRate: number }>(`/workspaces/${workspaceId}/reports/overview`),
+  })
+  return (
+    <Tile
+      label="Completion"
+      value={q.data ? `${q.data.completionRate}%` : '—'}
+      hint="All-time"
+      Icon={Icon}
+      tone="success"
+    />
+  )
+}
+
+function TimeTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const q = useQuery({
+    queryKey: ['reports-time', workspaceId, 7],
+    queryFn: () =>
+      api<Array<{ totalHours: number; billableHours: number }>>(
+        `/workspaces/${workspaceId}/reports/time?days=7`,
+      ),
+  })
+  const totals = (q.data ?? []).reduce(
+    (acc, r) => ({ totalHours: acc.totalHours + r.totalHours, billableHours: acc.billableHours + r.billableHours }),
+    { totalHours: 0, billableHours: 0 },
+  )
+  return (
+    <Tile
+      label="This week"
+      value={`${totals.totalHours.toFixed(0)}h`}
+      hint={`${totals.billableHours.toFixed(0)}h billable`}
+      Icon={Icon}
+    />
+  )
+}
+
+function TeamLoadWidget({ workspaceId }: { workspaceId: string }) {
+  const q = useQuery({
+    queryKey: ['workload-report', workspaceId, 7],
+    queryFn: () =>
+      api<Array<{ name: string; capacity: number; dailyLoads: number[] }>>(
+        `/workspaces/${workspaceId}/reports/workload?days=7`,
+      ),
+  })
+  const team = (q.data ?? []).slice(0, 6).map((p) => {
+    const avgLoad = p.dailyLoads.reduce((s, v) => s + v, 0) / Math.max(1, p.dailyLoads.length)
+    const ratio = Math.round((avgLoad / Math.max(1, p.capacity)) * 100)
+    return { name: p.name || 'Unknown', load: ratio }
+  })
+  return (
+    <div className="flex flex-col h-full">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Team capacity</div>
+      <ul className="flex-1 space-y-1.5">
+        {team.length === 0 && (
+          <li className="text-[11px] text-muted-foreground">No assignments this week</li>
+        )}
+        {team.map((t) => (
+          <li key={t.name} className="flex items-center gap-2 text-[11px]">
+            <span className="w-16 truncate">{t.name.split(' ')[0]}</span>
+            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className={cn(
+                  'h-full rounded-full',
+                  t.load > 100 ? 'bg-destructive' : t.load > 85 ? 'bg-warning' : 'bg-success',
+                )}
+                style={{ width: `${Math.min(110, t.load)}%` }}
+              />
+            </div>
+            <span className="tabular-nums w-9 text-right">{t.load}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function PieStatusWidget({ workspaceId }: { workspaceId: string }) {
+  const q = useQuery({
+    queryKey: ['reports-completion', workspaceId, 30],
+    queryFn: () =>
+      api<{ statusBreakdown: Record<string, number> }>(
+        `/workspaces/${workspaceId}/reports/completion?days=30`,
+      ),
+  })
+  const breakdown = q.data?.statusBreakdown ?? {}
+  const entries = Object.entries(breakdown).filter(([, v]) => v > 0)
+  const total = entries.reduce((s, [, v]) => s + v, 0)
+  const COLORS: Record<string, string> = {
+    done: 'success',
+    in_progress: 'accent-violet',
+    in_review: 'accent',
+    todo: 'warning',
+    backlog: 'muted-foreground',
+    cancelled: 'destructive',
+  }
+  let offset = 0
+  return (
+    <div className="flex flex-col h-full">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">By status (30d)</div>
+      <div className="flex items-center gap-3 flex-1">
+        <svg viewBox="0 0 36 36" className="h-20 w-20 -rotate-90">
+          <circle cx="18" cy="18" r="14" fill="none" stroke="hsl(var(--muted))" strokeWidth="6" />
+          {entries.map(([status, count]) => {
+            const pct = total > 0 ? (count / total) * 100 : 0
+            const dasharray = `${pct} 100`
+            const dashoffset = -offset
+            offset += pct
+            return (
+              <circle
+                key={status}
+                cx="18"
+                cy="18"
+                r="14"
+                fill="none"
+                stroke={`hsl(var(--${COLORS[status] ?? 'muted-foreground'}))`}
+                strokeWidth="6"
+                strokeDasharray={dasharray}
+                strokeDashoffset={dashoffset}
+              />
+            )
+          })}
+        </svg>
+        <ul className="flex-1 text-[10px] space-y-0.5">
+          {entries.slice(0, 4).map(([status, count]) => (
+            <li key={status} className="flex items-center gap-1.5">
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ background: `hsl(var(--${COLORS[status] ?? 'muted-foreground'}))` }}
+              />
+              <span className="capitalize">{status.replace(/_/g, ' ')}</span>
+              <span className="ml-auto tabular-nums">{count}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
+function GoalsWidget({ workspaceId }: { workspaceId: string }) {
+  const q = useQuery({
+    queryKey: ['reports-goals', workspaceId],
+    queryFn: () =>
+      api<{ goals: Array<{ id: string; title: string; progress: number }> }>(
+        `/workspaces/${workspaceId}/reports/goals`,
+      ),
+  })
+  const goals = (q.data?.goals ?? []).slice(0, 3)
+  return (
+    <div className="flex flex-col h-full">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">Goals</div>
+      <div className="space-y-2 flex-1">
+        {goals.length === 0 && (
+          <div className="text-[11px] text-muted-foreground">No goals yet</div>
+        )}
+        {goals.map((g) => (
+          <div key={g.id}>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="truncate">{g.title}</span>
+              <span className="tabular-nums">{g.progress}%</span>
+            </div>
+            <div className="h-1 rounded-full bg-muted">
+              <div className="h-full rounded-full bg-brand-gradient" style={{ width: `${g.progress}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function Tile({ label, value, hint, Icon, tone }: any) {
@@ -255,28 +519,6 @@ function Tile({ label, value, hint, Icon, tone }: any) {
         )}
       >
         {hint}
-      </div>
-    </div>
-  )
-}
-
-function PieMock() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">By status</div>
-      <div className="flex items-center gap-3 flex-1">
-        <svg viewBox="0 0 36 36" className="h-20 w-20 -rotate-90">
-          <circle cx="18" cy="18" r="14" fill="none" stroke="hsl(var(--muted))" strokeWidth="6" />
-          <circle cx="18" cy="18" r="14" fill="none" stroke="hsl(var(--success))" strokeWidth="6" strokeDasharray="35 100" />
-          <circle cx="18" cy="18" r="14" fill="none" stroke="hsl(var(--accent-violet))" strokeWidth="6" strokeDasharray="28 100" strokeDashoffset="-35" />
-          <circle cx="18" cy="18" r="14" fill="none" stroke="hsl(var(--warning))" strokeWidth="6" strokeDasharray="20 100" strokeDashoffset="-63" />
-        </svg>
-        <ul className="flex-1 text-[10px] space-y-0.5">
-          <li className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-success" /> Done <span className="ml-auto tabular-nums">35</span></li>
-          <li className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-accent" /> In progress <span className="ml-auto tabular-nums">28</span></li>
-          <li className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-warning" /> To do <span className="ml-auto tabular-nums">20</span></li>
-          <li className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-muted-foreground" /> Backlog <span className="ml-auto tabular-nums">17</span></li>
-        </ul>
       </div>
     </div>
   )
@@ -325,93 +567,34 @@ function BurndownMock() {
   )
 }
 
-function TeamLoadMock() {
-  const team = [
-    { name: 'Afzaal Ali', load: 95 },
-    { name: 'Hamda Tahir', load: 78 },
-    { name: 'Iqra Khalid', load: 110 },
-    { name: 'Mali Acme', load: 56 },
-    { name: 'Sara Idris', load: 84 },
-  ]
-  return (
-    <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Team capacity</div>
-      <ul className="flex-1 space-y-1.5">
-        {team.map((t) => (
-          <li key={t.name} className="flex items-center gap-2 text-[11px]">
-            <span className="w-16 truncate">{t.name.split(' ')[0]}</span>
-            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={cn(
-                  'h-full rounded-full',
-                  t.load > 100 ? 'bg-destructive' : t.load > 85 ? 'bg-warning' : 'bg-success',
-                )}
-                style={{ width: `${Math.min(110, t.load)}%` }}
-              />
-            </div>
-            <span className="tabular-nums w-9 text-right">{t.load}%</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-function ActivityMock() {
+function ActivityWidget() {
+  const q = useQuery({
+    queryKey: ['notifications', 'feed'],
+    queryFn: () =>
+      api<Array<{ id: string; title: string; body?: string; createdAt: string }>>(
+        `/notifications?unreadOnly=false`,
+      ),
+  })
+  const items = (q.data ?? []).slice(0, 6)
   return (
     <div className="flex flex-col h-full">
       <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">Recent activity</div>
       <ul className="flex-1 space-y-1 text-[11px] overflow-hidden">
-        <li className="truncate"><span className="font-medium">Hamda</span> completed <span className="text-foreground">Workload heat-map</span> · 12m</li>
-        <li className="truncate"><span className="font-medium">Afzaal</span> commented on <span className="text-foreground">Sprint plan</span> · 1h</li>
-        <li className="truncate"><span className="font-medium">Iqra</span> created <span className="text-foreground">Q3 marketing site</span> · 3h</li>
+        {items.length === 0 && (
+          <li className="text-muted-foreground">No recent activity</li>
+        )}
+        {items.map((n) => {
+          const minutes = Math.max(1, Math.round((Date.now() - new Date(n.createdAt).getTime()) / 60000))
+          const ts = minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`
+          return (
+            <li key={n.id} className="truncate">
+              <span className="text-foreground">{n.title}</span>
+              <span className="text-muted-foreground"> · {ts}</span>
+            </li>
+          )
+        })}
       </ul>
     </div>
   )
 }
 
-function GoalsMock() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">Goals</div>
-      <div className="space-y-2 flex-1">
-        {[
-          { name: 'Ship v1.0', pct: 64 },
-          { name: '90% WAU', pct: 72 },
-          { name: 'AI answer rate', pct: 38 },
-        ].map((g) => (
-          <div key={g.name}>
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="truncate">{g.name}</span>
-              <span className="tabular-nums">{g.pct}%</span>
-            </div>
-            <div className="h-1 rounded-full bg-muted">
-              <div className="h-full rounded-full bg-brand-gradient" style={{ width: `${g.pct}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function BarMock() {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">By priority</div>
-      <div className="flex items-end gap-2 mt-2 h-16">
-        {[
-          { l: 'Urgent', v: 28, c: 'bg-destructive' },
-          { l: 'High', v: 64, c: 'bg-warning' },
-          { l: 'Normal', v: 92, c: 'bg-accent' },
-          { l: 'Low', v: 40, c: 'bg-muted-foreground' },
-        ].map((b) => (
-          <div key={b.l} className="flex-1 flex flex-col items-center gap-1">
-            <div className="w-full rounded-t" style={{ height: `${b.v}%` }}><div className={cn('w-full h-full rounded-t', b.c)} /></div>
-            <span className="text-[9px] text-muted-foreground">{b.l}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
