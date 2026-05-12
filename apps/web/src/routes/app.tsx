@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
 import { CommandPalette } from '../components/command-palette'
+import { ShortcutsOverlay } from '../components/shortcuts-overlay'
 
 export const Route = createFileRoute('/app')({
   beforeLoad: ({ context }) => {
@@ -40,6 +41,7 @@ function AppShell() {
         </main>
       </div>
       <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
+      <ShortcutsOverlay />
     </div>
   )
 }
