@@ -18,7 +18,7 @@ This scorecard classifies current parity by feature area:
 | Timeline planning | Functional | High | `apps/web/src/routes/app.$workspaceId.timeline.tsx` persists drag-to-reschedule and edge-resize via `PATCH /tasks/:id`, with project filter |
 | Bulk task actions | Functional | High | Multi-select checkboxes + floating bulk action bar (set status, set priority, archive) on the list view; calls `PATCH /tasks/bulk/update` which is already audit-aware via `tasks.service.bulkUpdateTasks`. `Esc` clears the selection. |
 | Recurring tasks | Functional | Medium | `POST /tasks/:id/recurring/next` with `cadenceDays` or `recurrenceRule` (daily/weekly/monthly) in `tasks.service.ts` |
-| Custom statuses per List | **Missing** | High | Task `status` is a fixed `pgEnum` of 6 values (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `cancelled`). ClickUp's hallmark fully-customisable status pipelines per Space/List are not present. Closing this gap is a schema-rewrite of `task_status_enum` → `list_statuses` join table and touches every status reader. |
+| Custom statuses per List | Functional | High | `list_statuses` table seeded per-list (migration `0020_custom_list_statuses.sql`); `tasks.status` is now a text key validated against the list's status set with a denormalised `status_category` bucket. CRUD + reorder via `GET/POST/PATCH/DELETE /lists/:listId/statuses`. List view, board view, bulk action bar and inline picker render directly from `useOrderedStatuses()`; a `ListStatusesManager` dialog (toolbar "Statuses" button) lets owners add / rename / recolour / recategorise statuses, with a guided "move tasks first" prompt when deleting a status that's still in use. |
 
 ## Views and Reporting
 
@@ -68,10 +68,10 @@ This scorecard classifies current parity by feature area:
 
 ## Current Estimated Parity
 
-- Functional parity: `~96-98%`
-- Partial parity: `~2-3%` (Calendar OAuth without two-way event sync; status-enum prevents fully-custom workflows)
+- Functional parity: `~98-99%`
+- Partial parity: `~1-2%` (Calendar OAuth without two-way event sync)
 - UI-only/demo parity: `~0-1%`
-- Missing: `~1-2%` (see below)
+- Missing: `<1%` (single-task templates deferred; custom roles)
 - UI/UX parity vs ClickUp patterns: `~75-82%` (bulk-action bar, public doc share, keyboard-shortcuts overlay closed since last pass)
 
 ## Known remaining gaps
@@ -80,7 +80,7 @@ This scorecard classifies current parity by feature area:
 
 | Gap | Severity | Effort to close |
 |---|---|---|
-| **Custom statuses per List** | High (foundational ClickUp differentiator) | Big — DB enum → join table migration, plus rewrites at every status reader / board column / automation trigger |
+| ~~**Custom statuses per List**~~ | ~~High~~ | **Closed** in `0020_custom_list_statuses.sql` + `list-statuses.service.ts` + `ListStatusesManager` dialog. |
 | **Bidirectional Google Calendar / Outlook sync** | Medium | Medium — OAuth scope and `gcal` provider already wired in `integration-connections.service.ts`, but no event push/pull logic; needs a sync worker + iCal feed |
 | **Email-to-task (inbound mailbox)** | Medium | Medium — needs an inbound SMTP webhook or provider (Postmark/Mailgun) and a parser that creates tasks with reply-to threading |
 | **Single-task templates** | Low | Low — existing `project_templates` table already covers most use cases via "starter project"; ClickUp adds a separate save-as-task-template flow. Deferred until users ask. |

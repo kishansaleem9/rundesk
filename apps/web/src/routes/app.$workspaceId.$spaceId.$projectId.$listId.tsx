@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   ChevronRight,
@@ -15,12 +15,25 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
+import { ListStatusesManager } from '../components/list-statuses-manager'
 import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, endOfMonth, endOfWeek, format, formatDistanceToNowStrict, isSameMonth, isToday, startOfMonth, startOfWeek } from 'date-fns'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
-type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
+// Status is now a free-text key validated against the list's list_statuses.
+type TaskStatus = string
+type StatusCategory = 'open' | 'in_progress' | 'closed'
+
+type ListStatus = {
+  id: string
+  listId: string
+  key: string
+  name: string
+  color: string
+  category: StatusCategory
+  position: number
+}
 
 type TaskAssignee = {
   userId: string
@@ -34,6 +47,7 @@ type TaskItem = {
   description: string | null
   priority: TaskPriority
   status: TaskStatus
+  statusCategory?: StatusCategory
   dueDate?: string | null
   createdAt?: string | null
   assignees?: TaskAssignee[]
@@ -64,16 +78,90 @@ const PRIORITY_COLORS: Record<TaskPriority, string> = {
   low: 'text-gray-400',
 }
 
-const STATUS_META: Record<TaskStatus, { label: string; dot: string; pill: string }> = {
-  backlog: { label: 'Backlog', dot: 'bg-zinc-400', pill: 'bg-muted/60 text-muted-foreground border-border' },
-  todo: { label: 'To do', dot: 'bg-slate-500', pill: 'bg-slate-500/15 text-slate-700 dark:text-slate-200 border-slate-400/40' },
-  in_progress: { label: 'In progress', dot: 'bg-blue-500', pill: 'bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-400/40' },
-  in_review: { label: 'In review', dot: 'bg-purple-500', pill: 'bg-purple-500/15 text-purple-700 dark:text-purple-200 border-purple-400/40' },
-  done: { label: 'Done', dot: 'bg-emerald-500', pill: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-400/40' },
-  cancelled: { label: 'Cancelled', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-200 border-rose-400/40' },
+type StatusMeta = { label: string; color: string; dot: string; pill: string }
+
+// Fallback meta for the 6 originally-seeded statuses; used when a list
+// hasn't loaded yet or a task references a key that's been deleted.
+const DEFAULT_STATUS_META: Record<string, StatusMeta> = {
+  backlog: { label: 'Backlog', color: '#94a3b8', dot: 'bg-zinc-400', pill: 'bg-muted/60 text-muted-foreground border-border' },
+  todo: { label: 'To do', color: '#64748b', dot: 'bg-slate-500', pill: 'bg-slate-500/15 text-slate-700 dark:text-slate-200 border-slate-400/40' },
+  in_progress: { label: 'In progress', color: '#3b82f6', dot: 'bg-blue-500', pill: 'bg-blue-500/15 text-blue-700 dark:text-blue-200 border-blue-400/40' },
+  in_review: { label: 'In review', color: '#a855f7', dot: 'bg-purple-500', pill: 'bg-purple-500/15 text-purple-700 dark:text-purple-200 border-purple-400/40' },
+  done: { label: 'Done', color: '#10b981', dot: 'bg-emerald-500', pill: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-200 border-emerald-400/40' },
+  cancelled: { label: 'Cancelled', color: '#f43f5e', dot: 'bg-rose-500', pill: 'bg-rose-500/15 text-rose-700 dark:text-rose-200 border-rose-400/40' },
 }
 
-const STATUS_ORDER: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
+const ListStatusesContext = createContext<ListStatus[]>([])
+
+function useListStatuses() {
+  return useContext(ListStatusesContext)
+}
+
+function pillStyleFor(color: string): React.CSSProperties {
+  return {
+    backgroundColor: `${color}26`,
+    color,
+    borderColor: `${color}66`,
+  }
+}
+
+function useStatusMeta(statusKey: string): StatusMeta {
+  const statuses = useListStatuses()
+  const dynamic = statuses.find((s) => s.key === statusKey)
+  if (dynamic) {
+    return {
+      label: dynamic.name,
+      color: dynamic.color,
+      // Dynamic colours don't map cleanly to tailwind classes, so we use
+      // inline style via pillStyleFor() at the call site instead.
+      dot: '',
+      pill: '',
+    }
+  }
+  return DEFAULT_STATUS_META[statusKey] ?? {
+    label: statusKey,
+    color: '#94a3b8',
+    dot: 'bg-zinc-400',
+    pill: 'bg-muted/60 text-muted-foreground border-border',
+  }
+}
+
+function TableStatusLegend() {
+  const ordered = useOrderedStatuses()
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 rounded-lg border border-border bg-card/50 text-[11px] text-muted-foreground">
+      <span className="font-semibold uppercase tracking-wider text-[10px]">Status Legend:</span>
+      {ordered.map((s) => (
+        <div key={s.key} className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
+          <span>{s.name}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function useOrderedStatuses(): ListStatus[] {
+  const statuses = useListStatuses()
+  if (statuses.length === 0) {
+    // Fallback to the legacy default order when the list hasn't loaded yet.
+    return Object.entries(DEFAULT_STATUS_META).map(([key, meta], i) => ({
+      id: key,
+      listId: '',
+      key,
+      name: meta.label,
+      color: meta.color,
+      category:
+        key === 'done' || key === 'cancelled'
+          ? 'closed'
+          : key === 'in_progress' || key === 'in_review'
+          ? 'in_progress'
+          : 'open',
+      position: i,
+    }))
+  }
+  return [...statuses].sort((a, b) => a.position - b.position)
+}
 
 function ListDetail() {
   const { workspaceId, spaceId, projectId, listId } = Route.useParams()
@@ -86,6 +174,7 @@ function ListDetail() {
   const [groupBy, setGroupBy] = useState<'status' | 'priority'>('status')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
+  const [statusManagerOpen, setStatusManagerOpen] = useState(false)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
   const [saveAsName, setSaveAsName] = useState('')
@@ -110,6 +199,10 @@ function ListDetail() {
   const { data: workspaceMembers = [] } = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`),
+  })
+  const { data: listStatuses = [] } = useQuery({
+    queryKey: ['list-statuses', listId],
+    queryFn: () => api<ListStatus[]>(`/lists/${listId}/statuses`),
   })
 
   useEffect(() => {
@@ -141,8 +234,9 @@ function ListDetail() {
         body: JSON.stringify({
           listId,
           title: newTaskTitle,
-          status: 'todo',
           priority: 'normal',
+          // Status intentionally omitted: backend picks the list's first
+          // open status, which may differ from the legacy "todo" default.
         }),
       })
 
@@ -176,17 +270,14 @@ function ListDetail() {
   }, [tasks, statusFilter, sortBy])
 
   const tasksByStatus = useMemo(() => {
-    const map: Record<TaskStatus, TaskItem[]> = {
-      backlog: [],
-      todo: [],
-      in_progress: [],
-      in_review: [],
-      done: [],
-      cancelled: [],
+    const map: Record<string, TaskItem[]> = {}
+    for (const s of listStatuses) map[s.key] = []
+    for (const task of visibleTasks) {
+      if (!map[task.status]) map[task.status] = []
+      map[task.status].push(task)
     }
-    for (const task of visibleTasks) map[task.status].push(task)
     return map
-  }, [visibleTasks])
+  }, [visibleTasks, listStatuses])
 
   const tasksByDate = useMemo(() => {
     const map = new Map<string, TaskItem[]>()
@@ -299,6 +390,7 @@ function ListDetail() {
   ]
 
   return (
+    <ListStatusesContext.Provider value={listStatuses}>
     <div className="flex-1 flex flex-col">
       <div className="border-b border-border/70 bg-card">
         <div className="px-3 sm:px-5 pt-3 pb-0 flex flex-col sm:flex-row sm:items-end justify-between gap-2.5">
@@ -342,9 +434,9 @@ function ListDetail() {
               onChange={(e) => setStatusFilter(e.target.value as 'all' | TaskStatus)}
             >
               <option value="all">All statuses</option>
-              {STATUS_ORDER.map((status) => (
-                <option key={status} value={status}>
-                  {STATUS_META[status].label}
+              {(listStatuses.length ? listStatuses : Object.entries(DEFAULT_STATUS_META).map(([k, m]) => ({ key: k, name: m.label }))).map((status) => (
+                <option key={status.key} value={status.key}>
+                  {status.name}
                 </option>
               ))}
             </select>
@@ -440,6 +532,15 @@ function ListDetail() {
                 </Button>
               </>
             ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              onClick={() => setStatusManagerOpen(true)}
+              title="Manage this list's statuses"
+            >
+              Statuses
+            </Button>
             <span className="hidden lg:inline text-[11px] text-muted-foreground pl-1">Shortcuts: C quick-add, V cycle view</span>
           </div>
         </div>
@@ -472,7 +573,14 @@ function ListDetail() {
             }}
             onOpenTask={(id) => setSelectedTaskId(id)}
             onToggleDone={async (task) => {
-              const nextStatus: TaskStatus = task.status === 'done' ? 'todo' : 'done'
+              // Pick the list's first "closed" status when completing,
+              // and the first "open" status when re-opening, so the toggle
+              // works regardless of how the user has renamed things.
+              const isClosed = task.statusCategory === 'closed' || task.status === 'done'
+              const target = isClosed
+                ? listStatuses.find((s) => s.category === 'open') ?? listStatuses[0]
+                : listStatuses.find((s) => s.category === 'closed') ?? listStatuses[listStatuses.length - 1]
+              const nextStatus = target?.key ?? (isClosed ? 'todo' : 'done')
               await api(`/tasks/${task.id}`, {
                 method: 'PATCH',
                 body: JSON.stringify({ status: nextStatus }),
@@ -490,11 +598,11 @@ function ListDetail() {
         ) : activeView === 'board' ? (
           <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {(Object.keys(tasksByStatus) as TaskStatus[]).map((status) => (
+              {listStatuses.map((s) => (
                 <BoardColumn
-                  key={status}
-                  status={status}
-                  tasks={tasksByStatus[status]}
+                  key={s.key}
+                  status={s.key}
+                  tasks={tasksByStatus[s.key] ?? []}
                   onOpenTask={(taskId) => setSelectedTaskId(taskId)}
                 />
               ))}
@@ -586,7 +694,9 @@ function ListDetail() {
         }}
       />
       <TaskDetailSheet taskId={selectedTaskId} open={Boolean(selectedTaskId)} onOpenChange={(next) => !next && setSelectedTaskId(null)} workspaceId={workspaceId} />
+      <ListStatusesManager listId={listId} open={statusManagerOpen} onOpenChange={setStatusManagerOpen} />
     </div>
+    </ListStatusesContext.Provider>
   )
 }
 
@@ -607,26 +717,23 @@ function GroupedListView({
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onAddTask: (status: TaskStatus, title: string) => Promise<void> | void
 }) {
+  const ordered = useOrderedStatuses()
   const grouped = useMemo(() => {
-    const map: Record<TaskStatus, TaskItem[]> = {
-      backlog: [],
-      todo: [],
-      in_progress: [],
-      in_review: [],
-      done: [],
-      cancelled: [],
+    const map: Record<string, TaskItem[]> = {}
+    for (const s of ordered) map[s.key] = []
+    for (const t of tasks) {
+      if (!map[t.status]) map[t.status] = []
+      map[t.status].push(t)
     }
-    for (const t of tasks) map[t.status].push(t)
     return map
-  }, [tasks])
+  }, [tasks, ordered])
 
-  const [collapsed, setCollapsed] = useState<Record<TaskStatus, boolean>>({
-    backlog: false,
-    todo: false,
-    in_progress: false,
-    in_review: false,
-    done: true,
-    cancelled: true,
+  // Collapse by default: closed-category statuses start collapsed so the
+  // active work is visible first.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    for (const s of ordered) initial[s.key] = s.category === 'closed'
+    return initial
   })
 
   if (groupBy === 'priority') {
@@ -663,11 +770,13 @@ function GroupedListView({
 
   return (
     <div className="space-y-5">
-      {STATUS_ORDER.filter((s) => grouped[s].length > 0 || s === 'todo' || s === 'in_progress').map((status) => {
-        const meta = STATUS_META[status]
-        const groupTasks = grouped[status]
-        const isCollapsed = collapsed[status]
-        return (
+      {ordered
+        .filter((s) => (grouped[s.key]?.length ?? 0) > 0 || s.category === 'open' || s.category === 'in_progress')
+        .map((statusDef) => {
+          const status = statusDef.key
+          const groupTasks = grouped[status] ?? []
+          const isCollapsed = collapsed[status]
+          return (
           <section key={status} className="rounded-lg border border-border bg-card overflow-hidden">
             <header
               className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/40 cursor-pointer select-none"
@@ -678,8 +787,11 @@ function GroupedListView({
               ) : (
                 <ChevronDown className="h-4 w-4 text-muted-foreground" />
               )}
-              <span className={cn('h-2 w-2 rounded-full', meta.dot)} />
-              <h3 className="font-semibold text-sm text-foreground">{meta.label}</h3>
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: statusDef.color }}
+              />
+              <h3 className="font-semibold text-sm text-foreground">{statusDef.name}</h3>
               <span className="text-xs text-muted-foreground tabular-nums">{groupTasks.length}</span>
             </header>
             {!isCollapsed && (
@@ -717,7 +829,10 @@ function TaskRow({
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
 }) {
-  const isDone = task.status === 'done'
+  // statusCategory ('closed') is the post-custom-statuses signal; falling
+  // back to the literal 'done' key keeps existing tasks rendering correctly
+  // while the API/list-statuses caches warm up.
+  const isDone = task.statusCategory === 'closed' || task.status === 'done'
   const assignees = task.assignees ?? []
 
   return (
@@ -826,6 +941,7 @@ function InlineAddTask({
   status: TaskStatus
   onAdd: (title: string) => Promise<void> | void
 }) {
+  const meta = useStatusMeta(status)
   const [value, setValue] = useState('')
   const [active, setActive] = useState(false)
 
@@ -870,7 +986,7 @@ function InlineAddTask({
             setActive(false)
           }
         }}
-        placeholder={`New ${STATUS_META[status].label.toLowerCase()} task…`}
+        placeholder={`New ${meta.label.toLowerCase()} task…`}
         className="h-7 text-sm border-0 shadow-none focus-visible:ring-0 px-0"
       />
     </div>
@@ -933,6 +1049,12 @@ function TableView({
     },
   })
 
+  const listStatusList = useListStatuses()
+  const listStatusByKey = useMemo(
+    () => Object.fromEntries(listStatusList.map((s) => [s.key, s])),
+    [listStatusList],
+  )
+
   const allSelected = tasks.length > 0 && tasks.every((t) => selected.has(t.id))
   const toggleAll = () => {
     setSelected((prev) => {
@@ -985,18 +1107,7 @@ function TableView({
   return (
     <div className="flex flex-col gap-4">
       {/* Legend */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 rounded-lg border border-border bg-card/50 text-[11px] text-muted-foreground">
-        <span className="font-semibold uppercase tracking-wider text-[10px]">Status Legend:</span>
-        {STATUS_ORDER.map((status) => {
-          const meta = STATUS_META[status]
-          return (
-            <div key={status} className="flex items-center gap-1.5">
-              <span className={cn('h-2 w-2 rounded-full', meta.dot)} />
-              <span>{meta.label}</span>
-            </div>
-          )
-        })}
-      </div>
+      <TableStatusLegend />
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         {selectedIds.length > 0 && (
@@ -1053,7 +1164,11 @@ function TableView({
           {/* Rows */}
           <div className="divide-y divide-border">
             {tasks.map((task) => {
-              const meta = STATUS_META[task.status]
+              const dynamicStatus = listStatusByKey[task.status]
+              const fallback = DEFAULT_STATUS_META[task.status]
+              const meta: StatusMeta = dynamicStatus
+                ? { label: dynamicStatus.name, color: dynamicStatus.color, dot: '', pill: '' }
+                : fallback ?? { label: task.status, color: '#94a3b8', dot: 'bg-zinc-400', pill: 'bg-muted/60 text-muted-foreground border-border' }
               const isSelected = selected.has(task.id)
               const isEditing = editingTitleId === task.id
               const assignees = task.assignees ?? []
@@ -1111,7 +1226,7 @@ function TableView({
                       <span
                         className={cn(
                           'truncate font-medium',
-                          task.status === 'done' && 'line-through text-muted-foreground',
+                          (task.statusCategory === 'closed' || task.status === 'done') && 'line-through text-muted-foreground',
                         )}
                       >
                         {task.title}
@@ -1129,12 +1244,10 @@ function TableView({
                         setPriorityOpenFor(null)
                         setDateOpenFor(null)
                       }}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium border border-border',
-                        meta.pill,
-                      )}
+                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium border"
+                      style={pillStyleFor(meta.color)}
                     >
-                      <span className={cn('h-1.5 w-1.5 rounded-full', meta.dot)} />
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
                       {meta.label}
                     </button>
                     {statusOpenFor === task.id && (
@@ -1142,25 +1255,31 @@ function TableView({
                         className="absolute top-full left-3 mt-1 z-20 w-44 rounded-md border border-border bg-card shadow-lg py-1"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {STATUS_ORDER.map((s) => {
-                          const sMeta = STATUS_META[s]
-                          return (
-                            <button
-                              key={s}
-                              type="button"
-                              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-muted text-left"
-                              onClick={async () => {
-                                setStatusOpenFor(null)
-                                if (task.status !== s) {
-                                  await onPatchTask(task.id, { status: s })
-                                }
-                              }}
-                            >
-                              <span className={cn('h-1.5 w-1.5 rounded-full', sMeta.dot)} />
-                              {sMeta.label}
-                            </button>
-                          )
-                        })}
+                        {(listStatusList.length > 0
+                          ? listStatusList
+                          : Object.entries(DEFAULT_STATUS_META).map(([k, m], i) => ({
+                              id: k,
+                              key: k,
+                              name: m.label,
+                              color: m.color,
+                              position: i,
+                            }))
+                        ).map((s) => (
+                          <button
+                            key={s.key}
+                            type="button"
+                            className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-muted text-left"
+                            onClick={async () => {
+                              setStatusOpenFor(null)
+                              if (task.status !== s.key) {
+                                await onPatchTask(task.id, { status: s.key })
+                              }
+                            }}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: s.color }} />
+                            {s.name}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1499,7 +1618,7 @@ function BoardColumn({
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${status}`,
   })
-  const meta = STATUS_META[status]
+  const meta = useStatusMeta(status)
 
   return (
     <div
@@ -1510,7 +1629,7 @@ function BoardColumn({
       )}
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-        <span className={cn('h-2 w-2 rounded-full', meta.dot)} />
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: meta.color }} />
         <h3 className="font-medium text-sm">{meta.label}</h3>
         <span className="text-xs text-muted-foreground tabular-nums">{tasks.length}</span>
       </div>
@@ -1560,7 +1679,6 @@ function BoardTaskCard({
   )
 }
 
-const BULK_STATUSES: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
 const BULK_PRIORITIES: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
 
 function BulkActionBar({
@@ -1574,6 +1692,7 @@ function BulkActionBar({
 }) {
   const [busy, setBusy] = useState(false)
   const count = selectedIds.size
+  const bulkStatuses = useOrderedStatuses()
 
   // Clear selection on Escape for a quick keyboard escape hatch.
   useEffect(() => {
@@ -1619,9 +1738,9 @@ function BulkActionBar({
           aria-label="Set status"
         >
           <option value="">Set status…</option>
-          {BULK_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_META[s].label}
+          {bulkStatuses.map((s) => (
+            <option key={s.key} value={s.key}>
+              {s.name}
             </option>
           ))}
         </select>
