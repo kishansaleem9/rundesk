@@ -16,6 +16,9 @@ This scorecard classifies current parity by feature area:
 | Subtasks and task relationships | Functional | Medium | `apps/api/src/modules/tasks/tasks.service.ts`, `dependencies.controller.ts`, `checklists.controller.ts` |
 | Saved views (list/board/table/calendar) | Functional | High | View CRUD in `apps/api/src/modules/views/views.service.ts`; list route consumes saved views, persists default selection per-list |
 | Timeline planning | Functional | High | `apps/web/src/routes/app.$workspaceId.timeline.tsx` persists drag-to-reschedule and edge-resize via `PATCH /tasks/:id`, with project filter |
+| Bulk task actions | Functional | High | Multi-select checkboxes + floating bulk action bar (set status, set priority, archive) on the list view; calls `PATCH /tasks/bulk/update` which is already audit-aware via `tasks.service.bulkUpdateTasks`. `Esc` clears the selection. |
+| Recurring tasks | Functional | Medium | `POST /tasks/:id/recurring/next` with `cadenceDays` or `recurrenceRule` (daily/weekly/monthly) in `tasks.service.ts` |
+| Custom statuses per List | **Missing** | High | Task `status` is a fixed `pgEnum` of 6 values (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `cancelled`). ClickUp's hallmark fully-customisable status pipelines per Space/List are not present. Closing this gap is a schema-rewrite of `task_status_enum` → `list_statuses` join table and touches every status reader. |
 
 ## Views and Reporting
 
@@ -33,6 +36,7 @@ This scorecard classifies current parity by feature area:
 | Chat channels/DMs/messages/reactions/threads | Functional | High | `apps/api/src/modules/chat`, `apps/web/src/routes/app.$workspaceId.chat.tsx` |
 | Task comments + mention notifications | Functional | High | `apps/api/src/modules/tasks/comments.controller.ts`, `notifications.service.ts` |
 | Docs collaboration depth (doc mentions/comments/threads) | Functional | High | Threaded comments with selection ranges, resolution, realtime sync, and @-mention/reply notifications via `NotificationsService` (`apps/api/src/modules/docs/docs.service.ts`). Inline Tiptap mention picker (`apps/web/src/lib/tiptap-mention.tsx`) suggests workspace members as the user types `@`; selecting a member emits `data-id="<uuid>"` so the backend resolver matches the exact user. |
+| Public read-only doc shares | Functional | High | Toggle in the docs panel issues a 16-char random `public_share_id`; anyone with the link can view `/d/<slug>` (no auth) which renders the Tiptap doc read-only via `DocsPublicController.getPublic`. Revoking the share clears the slug and the public URL 404s. |
 
 ## Workspace Admin and Permissions
 
@@ -64,13 +68,25 @@ This scorecard classifies current parity by feature area:
 
 ## Current Estimated Parity
 
-- Functional parity: `~97-99%`
-- Partial parity: `~1-2%`
+- Functional parity: `~96-98%`
+- Partial parity: `~2-3%` (Calendar OAuth without two-way event sync; status-enum prevents fully-custom workflows)
 - UI-only/demo parity: `~0-1%`
-- Missing: `~0%` (collaborator cursors on canvases now shipped; groups admin UI shipped)
-- UI/UX parity vs ClickUp patterns: `~72-80%`
+- Missing: `~1-2%` (see below)
+- UI/UX parity vs ClickUp patterns: `~75-82%` (bulk-action bar, public doc share, keyboard-shortcuts overlay closed since last pass)
 
 ## Known remaining gaps
 
+### Honest list of what ClickUp has and we don't
+
+| Gap | Severity | Effort to close |
+|---|---|---|
+| **Custom statuses per List** | High (foundational ClickUp differentiator) | Big — DB enum → join table migration, plus rewrites at every status reader / board column / automation trigger |
+| **Bidirectional Google Calendar / Outlook sync** | Medium | Medium — OAuth scope and `gcal` provider already wired in `integration-connections.service.ts`, but no event push/pull logic; needs a sync worker + iCal feed |
+| **Email-to-task (inbound mailbox)** | Medium | Medium — needs an inbound SMTP webhook or provider (Postmark/Mailgun) and a parser that creates tasks with reply-to threading |
+| **Single-task templates** | Low | Low — existing `project_templates` table already covers most use cases via "starter project"; ClickUp adds a separate save-as-task-template flow. Deferred until users ask. |
+| **Custom roles & permissions** | Low | Medium — current roles are fixed (`admin`/`manager`/`member`/`guest`); ClickUp adds custom roles you can scope. |
+
+### Code-quality
+
 - **Pre-existing lint warnings**: 45 non-blocking `react-hooks/exhaustive-deps` style warnings remain across older surfaces. No errors.
-- **Tests**: 24/24 unit tests pass. SSO, SCIM (auth + discovery + groups), and workspace-group invariants now have unit coverage; deeper Drizzle-driven integration tests for SCIM PATCH/replace flows would be future work.
+- **Tests**: 24/24 unit tests pass. SSO, SCIM (auth + discovery + groups), and workspace-group invariants have unit coverage; deeper Drizzle-driven integration tests for SCIM PATCH/replace flows would be future work.
