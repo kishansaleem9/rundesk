@@ -2,7 +2,17 @@ import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-ro
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Circle, CheckCircle2, Plus, Flag, Calendar as CalendarIcon } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CheckCircle2,
+  Plus,
+  Flag,
+  Calendar as CalendarIcon,
+  X as XIcon,
+  Archive,
+} from 'lucide-react'
 import { api } from '../lib/api'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -75,6 +85,7 @@ function ListDetail() {
   const [sortBy, setSortBy] = useState<'created' | 'due' | 'priority'>('created')
   const [groupBy, setGroupBy] = useState<'status' | 'priority'>('status')
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
   const [saveAsName, setSaveAsName] = useState('')
@@ -443,6 +454,22 @@ function ListDetail() {
           <GroupedListView
             tasks={visibleTasks}
             groupBy={groupBy}
+            selectedTaskIds={selectedTaskIds}
+            onToggleSelect={(taskId, additive) => {
+              setSelectedTaskIds((prev) => {
+                const next = new Set(prev)
+                if (additive) {
+                  if (next.has(taskId)) next.delete(taskId)
+                  else next.add(taskId)
+                } else if (next.size === 1 && next.has(taskId)) {
+                  next.clear()
+                } else {
+                  next.clear()
+                  next.add(taskId)
+                }
+                return next
+              })
+            }}
             onOpenTask={(id) => setSelectedTaskId(id)}
             onToggleDone={async (task) => {
               const nextStatus: TaskStatus = task.status === 'done' ? 'todo' : 'done'
@@ -550,6 +577,14 @@ function ListDetail() {
           </Card>
         )}
       </div>
+      <BulkActionBar
+        selectedIds={selectedTaskIds}
+        onClear={() => setSelectedTaskIds(new Set())}
+        onApplied={async () => {
+          setSelectedTaskIds(new Set())
+          await refetch()
+        }}
+      />
       <TaskDetailSheet taskId={selectedTaskId} open={Boolean(selectedTaskId)} onOpenChange={(next) => !next && setSelectedTaskId(null)} workspaceId={workspaceId} />
     </div>
   )
@@ -558,12 +593,16 @@ function ListDetail() {
 function GroupedListView({
   tasks,
   groupBy,
+  selectedTaskIds,
+  onToggleSelect,
   onOpenTask,
   onToggleDone,
   onAddTask,
 }: {
   tasks: TaskItem[]
   groupBy: 'status' | 'priority'
+  selectedTaskIds: Set<string>
+  onToggleSelect: (taskId: string, additive: boolean) => void
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onAddTask: (status: TaskStatus, title: string) => Promise<void> | void
@@ -604,7 +643,14 @@ function GroupedListView({
               </div>
               <div className="space-y-2">
                 {groupTasks.map((task) => (
-                  <TaskRow key={task.id} task={task} onOpenTask={onOpenTask} onToggleDone={onToggleDone} />
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    selected={selectedTaskIds.has(task.id)}
+                    onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
+                    onOpenTask={onOpenTask}
+                    onToggleDone={onToggleDone}
+                  />
                 ))}
                 {groupTasks.length === 0 && <div className="text-xs text-muted-foreground">No tasks</div>}
               </div>
@@ -642,6 +688,8 @@ function GroupedListView({
                   <TaskRow
                     key={task.id}
                     task={task}
+                    selected={selectedTaskIds.has(task.id)}
+                    onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
                   />
@@ -658,10 +706,14 @@ function GroupedListView({
 
 function TaskRow({
   task,
+  selected,
+  onToggleSelect,
   onOpenTask,
   onToggleDone,
 }: {
   task: TaskItem
+  selected: boolean
+  onToggleSelect: (additive: boolean) => void
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
 }) {
@@ -670,9 +722,31 @@ function TaskRow({
 
   return (
     <div
-      className="group flex items-center gap-3 px-3 py-2 hover:bg-muted/60 cursor-pointer"
-      onClick={() => onOpenTask(task.id)}
+      className={cn(
+        'group flex items-center gap-3 px-3 py-2 hover:bg-muted/60 cursor-pointer transition-colors',
+        selected && 'bg-accent/10 hover:bg-accent/15',
+      )}
+      onClick={(e) => {
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          e.preventDefault()
+          onToggleSelect(true)
+          return
+        }
+        onOpenTask(task.id)
+      }}
     >
+      <input
+        type="checkbox"
+        checked={selected}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => onToggleSelect(e.target.checked ? true : false)}
+        className={cn(
+          'h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-border accent-accent',
+          'opacity-0 group-hover:opacity-100 transition-opacity',
+          selected && 'opacity-100',
+        )}
+        aria-label={selected ? 'Deselect task' : 'Select task'}
+      />
       <button
         className="shrink-0 text-muted-foreground hover:text-accent transition-colors"
         onClick={(e) => {
@@ -1483,5 +1557,114 @@ function BoardTaskCard({
         </div>
       ) : null}
     </button>
+  )
+}
+
+const BULK_STATUSES: TaskStatus[] = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
+const BULK_PRIORITIES: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
+
+function BulkActionBar({
+  selectedIds,
+  onClear,
+  onApplied,
+}: {
+  selectedIds: Set<string>
+  onClear: () => void
+  onApplied: () => Promise<void> | void
+}) {
+  const [busy, setBusy] = useState(false)
+  const count = selectedIds.size
+
+  // Clear selection on Escape for a quick keyboard escape hatch.
+  useEffect(() => {
+    if (count === 0) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClear()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [count, onClear])
+
+  if (count === 0) return null
+
+  const apply = async (patch: Record<string, unknown>) => {
+    setBusy(true)
+    try {
+      await api('/tasks/bulk/update', {
+        method: 'PATCH',
+        body: JSON.stringify({ taskIds: Array.from(selectedIds), patch }),
+      })
+      await onApplied()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2">
+      <div className="flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-2 shadow-xl backdrop-blur-sm">
+        <span className="text-sm font-medium tabular-nums pl-1">{count} selected</span>
+        <span className="h-4 w-px bg-border" />
+
+        <select
+          disabled={busy}
+          value=""
+          onChange={(e) => {
+            if (!e.target.value) return
+            const status = e.target.value as TaskStatus
+            void apply({ status })
+            e.target.value = ''
+          }}
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+          aria-label="Set status"
+        >
+          <option value="">Set status…</option>
+          {BULK_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {STATUS_META[s].label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          disabled={busy}
+          value=""
+          onChange={(e) => {
+            if (!e.target.value) return
+            const priority = e.target.value as TaskPriority
+            void apply({ priority })
+            e.target.value = ''
+          }}
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs capitalize"
+          aria-label="Set priority"
+        >
+          <option value="">Set priority…</option>
+          {BULK_PRIORITIES.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => {
+            if (confirm(`Archive ${count} task${count === 1 ? '' : 's'}?`)) {
+              void apply({ isArchived: true })
+            }
+          }}
+          aria-label="Archive selected tasks"
+        >
+          <Archive className="h-3.5 w-3.5 text-red-400" />
+        </Button>
+
+        <span className="h-4 w-px bg-border" />
+        <Button size="sm" variant="ghost" onClick={onClear} aria-label="Clear selection">
+          <XIcon className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
   )
 }
