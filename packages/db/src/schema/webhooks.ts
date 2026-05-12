@@ -30,7 +30,8 @@ export const webhookDeliveries = pgTable('webhook_deliveries', {
   payload:     jsonb('payload'),
   statusCode:  integer('status_code'),
   responseBody: text('response_body'),
-  duration:    integer('duration'),  // ms
+  duration:    integer('duration'),  // ms total across all attempts
+  attempts:    integer('attempts').notNull().default(1),
   success:     boolean('success').notNull().default(false),
   deliveredAt: timestamp('delivered_at', { withTimezone: true }).notNull().defaultNow(),
 })

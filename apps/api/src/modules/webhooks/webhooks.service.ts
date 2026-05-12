@@ -119,35 +119,30 @@ export class WebhooksService {
     let responseBody: string | undefined
     let success = false
 
-    try {
-      const res = await this.postWithRetry(hook.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Rundesk-Event': event,
-          'X-Rundesk-Delivery-Id': crypto.randomUUID(),
-          ...(signature ? { 'X-Rundesk-Signature': signature } : {}),
-        },
-        body,
-      })
-      statusCode = res.status
-      responseBody = await res.text().catch(() => '')
-      success = res.ok
+    const { attempts, lastStatus, lastBody, lastError } = await this.postWithRetry(hook.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Rundesk-Event': event,
+        'X-Rundesk-Delivery-Id': crypto.randomUUID(),
+        ...(signature ? { 'X-Rundesk-Signature': signature } : {}),
+      },
+      body,
+    })
+    statusCode = lastStatus
+    responseBody = lastBody ?? lastError
+    success = typeof lastStatus === 'number' && lastStatus >= 200 && lastStatus < 300
 
-      // Update stats
-      if (success) {
-        await this.db
-          .update(webhooks)
-          .set({ successCount: hook.successCount + 1, lastDeliveredAt: new Date(), updatedAt: new Date() })
-          .where(eq(webhooks.id, hook.id))
-      } else {
-        await this.db
-          .update(webhooks)
-          .set({ failureCount: hook.failureCount + 1, updatedAt: new Date() })
-          .where(eq(webhooks.id, hook.id))
-      }
-    } catch (err: any) {
-      responseBody = err?.message ?? 'Delivery failed'
+    if (success) {
+      await this.db
+        .update(webhooks)
+        .set({ successCount: hook.successCount + 1, lastDeliveredAt: new Date(), updatedAt: new Date() })
+        .where(eq(webhooks.id, hook.id))
+    } else {
+      await this.db
+        .update(webhooks)
+        .set({ failureCount: hook.failureCount + 1, updatedAt: new Date() })
+        .where(eq(webhooks.id, hook.id))
     }
 
     await this.db.insert(webhookDeliveries).values({
@@ -157,6 +152,7 @@ export class WebhooksService {
       statusCode,
       responseBody: responseBody?.slice(0, 1000),
       duration: Date.now() - start,
+      attempts,
       success,
     })
   }
@@ -167,6 +163,11 @@ export class WebhooksService {
     return { ok: true }
   }
 
+  /**
+   * Post with retry. Retries on network errors AND on HTTP 5xx responses with
+   * exponential backoff (250ms, 750ms, 1.5s). 4xx responses are treated as
+   * permanent failures and not retried.
+   */
   private async postWithRetry(
     url: string,
     init: {
@@ -174,24 +175,45 @@ export class WebhooksService {
       headers: Record<string, string>
       body: string
     },
-  ) {
-    let attempt = 0
-    let lastErr: unknown
+  ): Promise<{
+    attempts: number
+    lastStatus?: number
+    lastBody?: string
+    lastError?: string
+  }> {
     const maxAttempts = 3
+    let attempt = 0
+    let lastStatus: number | undefined
+    let lastBody: string | undefined
+    let lastError: string | undefined
+
     while (attempt < maxAttempts) {
+      attempt++
       try {
-        return await fetch(url, {
+        const res = await fetch(url, {
           ...init,
           signal: AbortSignal.timeout(10_000),
         })
-      } catch (err) {
-        lastErr = err
-        attempt++
-        if (attempt >= maxAttempts) break
-        const backoffMs = 250 * attempt
+        lastStatus = res.status
+        lastBody = await res.text().catch(() => '')
+        lastError = undefined
+        // Success — done
+        if (res.ok) return { attempts: attempt, lastStatus, lastBody }
+        // 4xx — permanent failure, do not retry
+        if (res.status >= 400 && res.status < 500) {
+          return { attempts: attempt, lastStatus, lastBody }
+        }
+        // 5xx — fall through to retry
+      } catch (err: any) {
+        lastError = err?.message ?? 'Delivery failed'
+        lastStatus = undefined
+        lastBody = undefined
+      }
+      if (attempt < maxAttempts) {
+        const backoffMs = 250 * Math.pow(3, attempt - 1)
         await new Promise((resolve) => setTimeout(resolve, backoffMs))
       }
     }
-    throw lastErr instanceof Error ? lastErr : new Error('Webhook delivery failed after retries')
+    return { attempts: attempt, lastStatus, lastBody, lastError }
   }
 }
