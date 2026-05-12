@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import {
   Button,
@@ -7,9 +7,13 @@ import {
   LogoWordmark,
   Separator,
 } from '@rundesk/ui'
-import { Mail, Lock, ArrowRight, ShieldCheck } from 'lucide-react'
+import { Mail, Lock, ArrowRight, ShieldCheck, KeyRound } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+
+type SsoLookupResponse = {
+  connection: { workspaceId: string; provider: 'oidc' | 'saml'; displayName: string } | null
+}
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -26,7 +30,10 @@ type LoginResponse = {
 function LoginPage() {
   const navigate = useNavigate()
   const { setSession } = useAuthStore()
-  const searchParams = new URLSearchParams(window.location.search)
+  const searchParams = useMemo(
+    () => new URLSearchParams(window.location.search),
+    [],
+  )
   const resetToken = searchParams.get('token') ?? ''
   const nextUrl = searchParams.get('next') ?? ''
   const mode = searchParams.get('mode') === 'forgot' ? 'forgot' : resetToken ? 'reset' : 'login'
@@ -37,9 +44,46 @@ function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [ssoHint, setSsoHint] = useState<SsoLookupResponse['connection']>(null)
   const showSeededLogins =
     import.meta.env.DEV ||
     String(import.meta.env.VITE_SHOW_SEEDED_LOGINS).toLowerCase() === 'true'
+
+  // Surface SSO errors propagated back from the IdP callback redirect.
+  useEffect(() => {
+    const ssoError = searchParams.get('ssoError')
+    if (ssoError) {
+      setError(ssoError)
+      window.history.replaceState({}, '', '/login')
+    }
+  }, [searchParams])
+
+  // Debounced lookup: ask whether the email domain has SSO enforced.
+  useEffect(() => {
+    if (mode !== 'login' || !email.includes('@')) {
+      setSsoHint(null)
+      return
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api<SsoLookupResponse>(
+          `/auth/sso/lookup?email=${encodeURIComponent(email)}`,
+          { method: 'GET', skipAuth: true },
+        )
+        setSsoHint(res.connection)
+      } catch {
+        setSsoHint(null)
+      }
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [email, mode])
+
+  function startSso() {
+    if (!ssoHint) return
+    const params = new URLSearchParams({ workspaceId: ssoHint.workspaceId })
+    if (nextUrl) params.set('redirectTo', nextUrl)
+    window.location.href = `/api/v1/auth/sso/${ssoHint.provider}/start?${params.toString()}`
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -186,11 +230,23 @@ function LoginPage() {
 
             {/* SSO buttons */}
             <div className="grid gap-2">
-              <Button variant="glass" size="lg" className="w-full justify-center">
+              {ssoHint && (
+                <Button
+                  variant="gradient"
+                  size="lg"
+                  className="w-full justify-center"
+                  onClick={startSso}
+                  type="button"
+                >
+                  <KeyRound className="h-4 w-4" />
+                  Continue with {ssoHint.displayName}
+                </Button>
+              )}
+              <Button variant="glass" size="lg" className="w-full justify-center" type="button" disabled>
                 <GoogleIcon />
                 Continue with Google
               </Button>
-              <Button variant="glass" size="lg" className="w-full justify-center">
+              <Button variant="glass" size="lg" className="w-full justify-center" type="button" disabled>
                 <MicrosoftIcon />
                 Continue with Microsoft
               </Button>
