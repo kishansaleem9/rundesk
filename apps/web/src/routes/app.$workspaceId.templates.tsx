@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
+import { TaskTemplatesSection } from '../components/task-templates-section'
 import {
   Card,
   Button,
@@ -31,6 +32,11 @@ import {
 export const Route = createFileRoute('/app/$workspaceId/templates')({
   component: TemplatesPage,
 })
+
+function isUuidLike(value?: string): value is string {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
 
 type Template = {
   id: string
@@ -151,6 +157,8 @@ const TEMPLATES: Template[] = [
 ]
 
 function TemplatesPage() {
+  const params = Route.useParams() as { workspaceId?: string }
+  const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : null
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'project' | 'task' | 'doc'>('all')
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null)
@@ -215,10 +223,18 @@ function TemplatesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map((t) => (
-          <TemplateCard key={t.id} template={t} onUse={() => setSelectedTemplate(t)} />
-        ))}
+      {workspaceId && <TaskTemplatesSection workspaceId={workspaceId} />}
+
+      <div className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-display text-lg font-semibold">Starter templates</h2>
+          <Badge variant="secondary" className="text-[10px]">Built-in</Badge>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map((t) => (
+            <TemplateCard key={t.id} template={t} onUse={() => setSelectedTemplate(t)} />
+          ))}
+        </div>
       </div>
 
       <Dialog open={Boolean(selectedTemplate)} onOpenChange={(open) => !open && setSelectedTemplate(null)}>

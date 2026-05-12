@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
+import { SaveAsTemplateButton } from './task-templates-section'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus =
@@ -295,9 +296,15 @@ export function TaskDetailSheet({
                   </Badge>
                 )}
               </div>
-              <SheetTitle className="text-2xl font-display leading-tight">
-                {detailQuery.data.title}
-              </SheetTitle>
+              <div className="flex items-start justify-between gap-3">
+                <SheetTitle className="text-2xl font-display leading-tight flex-1">
+                  {detailQuery.data.title}
+                </SheetTitle>
+                <SaveAsTemplateButton
+                  workspaceId={fallbackWorkspaceId}
+                  taskId={detailQuery.data.id}
+                />
+              </div>
               <SheetDescription className="sr-only">Task details</SheetDescription>
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <Badge variant="secondary" className="capitalize">
