@@ -6,9 +6,10 @@ import { SsoAdminController, SsoAuthController } from './sso.controller'
 import { ScimAdminController, ScimController } from './scim.controller'
 import { SecurityModule } from '../security/security.module'
 import { AuthModule } from '../auth/auth.module'
+import { WorkspaceGroupsModule } from '../workspace-groups/workspace-groups.module'
 
 @Module({
-  imports: [ConfigModule, SecurityModule, forwardRef(() => AuthModule)],
+  imports: [ConfigModule, SecurityModule, forwardRef(() => AuthModule), WorkspaceGroupsModule],
   controllers: [SsoAdminController, SsoAuthController, ScimAdminController, ScimController],
   providers: [SsoService, ScimService],
   exports: [SsoService, ScimService],

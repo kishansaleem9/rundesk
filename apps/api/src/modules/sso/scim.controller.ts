@@ -151,6 +151,78 @@ export class ScimController {
     return
   }
 
+  // ─── SCIM 2.0 Groups ──────────────────────────────────────────────────────
+
+  @Get('Groups')
+  async listGroups(
+    @Headers('authorization') authHeader: string | undefined,
+    @Query('startIndex') startIndex?: string,
+    @Query('count') count?: string,
+    @Query('filter') filter?: string,
+  ) {
+    const workspaceId = await this.scim.authenticate(this.extractBearer(authHeader))
+    return this.scim.listGroups(workspaceId, {
+      startIndex: startIndex ? Number(startIndex) : undefined,
+      count: count ? Number(count) : undefined,
+      filter,
+    })
+  }
+
+  @Get('Groups/:id')
+  async getGroup(
+    @Headers('authorization') authHeader: string | undefined,
+    @Param('id') id: string,
+  ) {
+    const workspaceId = await this.scim.authenticate(this.extractBearer(authHeader))
+    return this.scim.getGroup(workspaceId, id)
+  }
+
+  @Post('Groups')
+  @HttpCode(201)
+  async createGroup(
+    @Headers('authorization') authHeader: string | undefined,
+    @Body() body: any,
+    @Res({ passthrough: true }) res: any,
+  ) {
+    const workspaceId = await this.scim.authenticate(this.extractBearer(authHeader))
+    const created = await this.scim.createGroup(workspaceId, null, body)
+    res.code?.(201)
+    return created
+  }
+
+  @Put('Groups/:id')
+  async replaceGroup(
+    @Headers('authorization') authHeader: string | undefined,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    const workspaceId = await this.scim.authenticate(this.extractBearer(authHeader))
+    return this.scim.replaceGroup(workspaceId, id, null, body)
+  }
+
+  @Patch('Groups/:id')
+  async patchGroup(
+    @Headers('authorization') authHeader: string | undefined,
+    @Param('id') id: string,
+    @Body() body: any,
+  ) {
+    const workspaceId = await this.scim.authenticate(this.extractBearer(authHeader))
+    return this.scim.patchGroup(workspaceId, id, null, body)
+  }
+
+  @Delete('Groups/:id')
+  @HttpCode(204)
+  async deleteGroup(
+    @Headers('authorization') authHeader: string | undefined,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: any,
+  ) {
+    const workspaceId = await this.scim.authenticate(this.extractBearer(authHeader))
+    await this.scim.deleteGroup(workspaceId, id, null)
+    res.code?.(204)
+    return
+  }
+
   private extractBearer(headerValue?: string): string | undefined {
     if (!headerValue) return undefined
     const match = headerValue.match(/^Bearer\s+(.+)$/i)

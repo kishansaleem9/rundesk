@@ -11,6 +11,7 @@ import { scimTokens, users, workspaceMembers, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { WorkspaceGroupsService } from '../workspace-groups/workspace-groups.service'
 
 type ScimNameInput = {
   givenName?: string
@@ -39,6 +40,7 @@ export class ScimService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
+    private groups: WorkspaceGroupsService,
   ) {}
 
   // ─── Token management ────────────────────────────────────────────────────
@@ -443,7 +445,7 @@ export class ScimService {
   schemas() {
     return {
       schemas: ['urn:ietf:params:scim:api:messages:2.0:ListResponse'],
-      totalResults: 1,
+      totalResults: 2,
       Resources: [
         {
           id: 'urn:ietf:params:scim:schemas:core:2.0:User',
@@ -455,6 +457,16 @@ export class ScimService {
             { name: 'active', type: 'boolean', required: false, mutability: 'readWrite' },
           ],
         },
+        {
+          id: 'urn:ietf:params:scim:schemas:core:2.0:Group',
+          name: 'Group',
+          description: 'Workspace group (team) provisioning schema',
+          attributes: [
+            { name: 'displayName', type: 'string', required: true, mutability: 'readWrite' },
+            { name: 'externalId', type: 'string', required: false, mutability: 'readWrite' },
+            { name: 'members', type: 'complex', multiValued: true, mutability: 'readWrite' },
+          ],
+        },
       ],
     }
   }
@@ -462,7 +474,7 @@ export class ScimService {
   resourceTypes() {
     return {
       schemas: ['urn:ietf:params:scim:api:messages:2.0:ListResponse'],
-      totalResults: 1,
+      totalResults: 2,
       Resources: [
         {
           schemas: ['urn:ietf:params:scim:schemas:core:2.0:ResourceType'],
@@ -471,8 +483,216 @@ export class ScimService {
           endpoint: '/Users',
           schema: 'urn:ietf:params:scim:schemas:core:2.0:User',
         },
+        {
+          schemas: ['urn:ietf:params:scim:schemas:core:2.0:ResourceType'],
+          id: 'Group',
+          name: 'Group',
+          endpoint: '/Groups',
+          schema: 'urn:ietf:params:scim:schemas:core:2.0:Group',
+        },
       ],
     }
+  }
+
+  // ─── SCIM 2.0 Groups resource ────────────────────────────────────────────
+
+  private toScimGroup(group: {
+    id: string
+    workspaceId: string
+    name: string
+    externalId: string | null
+    createdAt: Date | null
+    updatedAt: Date | null
+    members: Array<{ userId: string; email?: string; displayName?: string | null }>
+  }) {
+    return {
+      schemas: ['urn:ietf:params:scim:schemas:core:2.0:Group'],
+      id: group.id,
+      externalId: group.externalId ?? undefined,
+      displayName: group.name,
+      members: group.members.map((m) => ({
+        value: m.userId,
+        display: m.displayName ?? m.email ?? m.userId,
+        $ref: `/scim/v2/Users/${m.userId}`,
+        type: 'User',
+      })),
+      meta: {
+        resourceType: 'Group',
+        created: group.createdAt?.toISOString?.() ?? new Date(0).toISOString(),
+        lastModified: group.updatedAt?.toISOString?.() ?? new Date(0).toISOString(),
+        location: `/scim/v2/Groups/${group.id}`,
+      },
+    }
+  }
+
+  async listGroups(
+    workspaceId: string,
+    opts: { startIndex?: number; count?: number; filter?: string } = {},
+  ) {
+    const startIndex = Math.max(1, opts.startIndex ?? 1)
+    const count = Math.min(Math.max(opts.count ?? 50, 1), 200)
+
+    // SCIM filter parser (minimal): displayName eq "x" / externalId eq "x"
+    let search: string | undefined
+    if (opts.filter) {
+      const dn = opts.filter.match(/displayName\s+eq\s+"([^"]+)"/i)
+      if (dn) search = dn[1]
+    }
+
+    const all = await this.groups.list(workspaceId, { search })
+    const sliced = all.slice(startIndex - 1, startIndex - 1 + count)
+    return {
+      schemas: ['urn:ietf:params:scim:api:messages:2.0:ListResponse'],
+      totalResults: all.length,
+      startIndex,
+      itemsPerPage: sliced.length,
+      Resources: sliced.map((g) =>
+        this.toScimGroup({
+          id: g.id,
+          workspaceId,
+          name: g.name,
+          externalId: g.externalId,
+          createdAt: g.createdAt as Date | null,
+          updatedAt: g.updatedAt as Date | null,
+          members: g.members.map((m) => ({ userId: m.userId, email: m.email, displayName: m.displayName })),
+        }),
+      ),
+    }
+  }
+
+  async getGroup(workspaceId: string, groupId: string) {
+    const found = await this.groups.findByIdOrExternal(workspaceId, groupId)
+    if (!found) throw new NotFoundException(`Group ${groupId} not found`)
+    const full = await this.groups.get(workspaceId, found.id)
+    return this.toScimGroup({
+      id: full.id,
+      workspaceId,
+      name: full.name,
+      externalId: full.externalId,
+      createdAt: full.createdAt as Date | null,
+      updatedAt: full.updatedAt as Date | null,
+      members: full.members.map((m) => ({ userId: m.userId, email: m.email, displayName: m.displayName })),
+    })
+  }
+
+  async createGroup(
+    workspaceId: string,
+    actorId: string | null,
+    body: {
+      displayName?: string
+      externalId?: string | null
+      members?: Array<{ value?: string }>
+    },
+  ) {
+    if (!body.displayName) throw new BadRequestException('displayName is required')
+    const memberIds = (body.members ?? []).map((m) => m.value).filter((v): v is string => !!v)
+    const created = await this.groups.create(workspaceId, actorId, {
+      name: body.displayName,
+      externalId: body.externalId ?? null,
+      memberIds,
+    })
+    return this.toScimGroup({
+      id: created.id,
+      workspaceId,
+      name: created.name,
+      externalId: created.externalId,
+      createdAt: created.createdAt as Date | null,
+      updatedAt: created.updatedAt as Date | null,
+      members: created.members.map((m) => ({ userId: m.userId, email: m.email, displayName: m.displayName })),
+    })
+  }
+
+  async replaceGroup(
+    workspaceId: string,
+    groupId: string,
+    actorId: string | null,
+    body: {
+      displayName?: string
+      externalId?: string | null
+      members?: Array<{ value?: string }>
+    },
+  ) {
+    const found = await this.groups.findByIdOrExternal(workspaceId, groupId)
+    if (!found) throw new NotFoundException(`Group ${groupId} not found`)
+    await this.groups.update(workspaceId, found.id, actorId, {
+      name: body.displayName,
+      externalId: body.externalId ?? null,
+    })
+    if (body.members !== undefined) {
+      const memberIds = body.members.map((m) => m.value).filter((v): v is string => !!v)
+      await this.groups.replaceMembers(workspaceId, found.id, actorId, memberIds)
+    }
+    return this.getGroup(workspaceId, found.id)
+  }
+
+  async patchGroup(
+    workspaceId: string,
+    groupId: string,
+    actorId: string | null,
+    patch: { Operations?: ScimPatchOp[] },
+  ) {
+    if (!patch.Operations || patch.Operations.length === 0) {
+      throw new BadRequestException('PATCH body must contain Operations')
+    }
+    const found = await this.groups.findByIdOrExternal(workspaceId, groupId)
+    if (!found) throw new NotFoundException(`Group ${groupId} not found`)
+
+    for (const op of patch.Operations) {
+      const opName = op.op.toLowerCase()
+      const path = (op.path ?? '').toLowerCase()
+
+      // Top-level attribute updates
+      if (path === 'displayname' || path === 'externalid') {
+        const field = path === 'displayname' ? 'name' : 'externalId'
+        const value = opName === 'remove' ? null : String(op.value ?? '')
+        await this.groups.update(workspaceId, found.id, actorId, {
+          [field]: value,
+        } as any)
+        continue
+      }
+
+      // Members updates: add/replace/remove
+      if (path === 'members' || path.startsWith('members')) {
+        const incoming = Array.isArray(op.value) ? (op.value as any[]) : op.value ? [op.value] : []
+        const memberIds = incoming
+          .map((m: any) => (typeof m === 'string' ? m : m?.value))
+          .filter((v): v is string => !!v)
+        if (opName === 'add') {
+          await this.groups.addMembers(workspaceId, found.id, actorId, memberIds)
+        } else if (opName === 'replace') {
+          await this.groups.replaceMembers(workspaceId, found.id, actorId, memberIds)
+        } else if (opName === 'remove') {
+          // Path may be `members[value eq "userId"]` — extract userId.
+          const match = path.match(/value\s+eq\s+"([^"]+)"/i)
+          if (match) {
+            await this.groups.removeMember(workspaceId, found.id, actorId, match[1])
+          } else if (memberIds.length > 0) {
+            for (const id of memberIds) {
+              await this.groups.removeMember(workspaceId, found.id, actorId, id)
+            }
+          } else {
+            // No filter, no payload → clear all members
+            await this.groups.replaceMembers(workspaceId, found.id, actorId, [])
+          }
+        }
+        continue
+      }
+
+      // Full-payload replace with no path
+      if (!path && op.value && typeof op.value === 'object') {
+        const obj = op.value as any
+        await this.replaceGroup(workspaceId, found.id, actorId, obj)
+      }
+    }
+
+    return this.getGroup(workspaceId, found.id)
+  }
+
+  async deleteGroup(workspaceId: string, groupId: string, actorId: string | null) {
+    const found = await this.groups.findByIdOrExternal(workspaceId, groupId)
+    if (!found) throw new NotFoundException(`Group ${groupId} not found`)
+    await this.groups.remove(workspaceId, found.id, actorId)
+    return { ok: true }
   }
 
   private hash(raw: string): string {
