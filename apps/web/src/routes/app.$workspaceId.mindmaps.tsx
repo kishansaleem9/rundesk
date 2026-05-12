@@ -16,6 +16,9 @@ import {
   Plus,
   Network,
   GitBranchPlus,
+  Palette,
+  Sparkles,
+  Trash2,
 } from 'lucide-react'
 
 export const Route = createFileRoute('/app/$workspaceId/mindmaps')({
@@ -30,7 +33,24 @@ type MindMap = {
     nodes?: MapNode[]
   }
 }
-type MapNode = { id: string; label: string; x: number; y: number; parentId?: string }
+type MapNode = {
+  id: string
+  label: string
+  x: number
+  y: number
+  parentId?: string
+  /** Optional accent colour for the branch chip. */
+  color?: string
+}
+
+const BRANCH_PALETTE = [
+  '#60a5fa', // blue
+  '#34d399', // green
+  '#fbbf24', // amber
+  '#f472b6', // pink
+  '#a78bfa', // violet
+  '#f87171', // red
+]
 
 function MindMapsPage() {
   const { workspaceId } = Route.useParams()
@@ -176,12 +196,46 @@ function MindMapsPage() {
         onCreateChild={() => {
           const base = nodes.find((n) => n.id === selectedNodeId)
           if (!base) return
-          const id = `n-${Date.now()}`
-          setNodes((prev) => [...prev, { id, label: 'New branch', x: base.x + 160, y: base.y + 40, parentId: base.id }])
+          const id = `n-${crypto.randomUUID()}`
+          // Inherit the branch color so siblings share a hue
+          const inheritedColor = base.color ?? BRANCH_PALETTE[nodes.filter((n) => n.parentId === base.id).length % BRANCH_PALETTE.length]
+          setNodes((prev) => [
+            ...prev,
+            {
+              id,
+              label: 'New branch',
+              x: base.x + 160,
+              y: base.y + 40,
+              parentId: base.id,
+              color: inheritedColor,
+            },
+          ])
         }}
         onLabelChange={(value) => {
           setDraftLabel(value)
           setNodes((prev) => prev.map((n) => (n.id === selectedNodeId ? { ...n, label: value } : n)))
+        }}
+        onSetColor={(color) => {
+          setNodes((prev) => prev.map((n) => (n.id === selectedNodeId ? { ...n, color } : n)))
+        }}
+        onDeleteSelected={() => {
+          if (selectedNodeId === 'root') {
+            toast('Root node cannot be deleted')
+            return
+          }
+          const toRemove = new Set<string>()
+          const stack = [selectedNodeId]
+          while (stack.length > 0) {
+            const id = stack.pop()!
+            toRemove.add(id)
+            for (const n of nodes) if (n.parentId === id) stack.push(n.id)
+          }
+          setNodes((prev) => prev.filter((n) => !toRemove.has(n.id)))
+          setSelectedNodeId('root')
+          setDraftLabel(nodes.find((n) => n.id === 'root')?.label ?? '')
+        }}
+        onAutoLayout={() => {
+          setNodes((prev) => radialLayout(prev))
         }}
       />
     )
@@ -305,6 +359,9 @@ function MindMapEditor({
   onMove,
   onCreateChild,
   onLabelChange,
+  onSetColor,
+  onDeleteSelected,
+  onAutoLayout,
 }: {
   map: MindMap
   nodes: MapNode[]
@@ -315,8 +372,30 @@ function MindMapEditor({
   onMove: (id: string, x: number, y: number) => void
   onCreateChild: () => void
   onLabelChange: (value: string) => void
+  onSetColor: (color: string | undefined) => void
+  onDeleteSelected: () => void
+  onAutoLayout: () => void
 }) {
   const nodesById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes])
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId)
+
+  // Keyboard shortcuts: Delete = remove selected branch; Tab = add child
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault()
+        onDeleteSelected()
+      } else if (e.key === 'Tab') {
+        e.preventDefault()
+        onCreateChild()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onDeleteSelected, onCreateChild])
+
   return (
     <div className="h-full flex flex-col bg-background">
       <header className="flex items-center justify-between gap-4 border-b border-border/40 px-6 py-3">
@@ -326,14 +405,58 @@ function MindMapEditor({
           </Button>
           <div>
             <div className="font-display font-semibold">{map.title}</div>
-            <div className="text-xs text-muted-foreground">{nodes.length} nodes</div>
+            <div className="text-xs text-muted-foreground">
+              {nodes.length} nodes · <kbd className="rounded border px-1 text-[10px]">Tab</kbd> add child · <kbd className="rounded border px-1 text-[10px]">Del</kbd> remove
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Input value={draftLabel} onChange={(e) => onLabelChange(e.target.value)} className="w-56 h-8" placeholder="Node label" />
-          <Button variant="outline" size="sm" onClick={onCreateChild}><GitBranchPlus className="h-3.5 w-3.5" /> Add child</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={draftLabel}
+            onChange={(e) => onLabelChange(e.target.value)}
+            className="w-56 h-8"
+            placeholder="Node label"
+          />
+          <Button variant="outline" size="sm" onClick={onCreateChild}>
+            <GitBranchPlus className="h-3.5 w-3.5" /> Add child
+          </Button>
+          <Button variant="outline" size="sm" onClick={onAutoLayout} title="Radial auto-layout">
+            <Sparkles className="h-3.5 w-3.5" /> Auto-layout
+          </Button>
+          {selectedNodeId !== 'root' && (
+            <Button variant="ghost" size="sm" onClick={onDeleteSelected} title="Delete branch (Del)">
+              <Trash2 className="h-3.5 w-3.5 text-red-400" />
+            </Button>
+          )}
         </div>
       </header>
+
+      {selectedNode && selectedNodeId !== 'root' && (
+        <div className="flex items-center gap-2 border-b border-border/40 px-6 py-2 bg-card/20">
+          <Palette className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Branch colour</span>
+          <button
+            onClick={() => onSetColor(undefined)}
+            className={cn(
+              'h-5 w-5 rounded-full border border-border/60 bg-card transition-transform hover:scale-110',
+              !selectedNode.color && 'ring-2 ring-brand-500',
+            )}
+            aria-label="Reset colour"
+          />
+          {BRANCH_PALETTE.map((c) => (
+            <button
+              key={c}
+              onClick={() => onSetColor(c)}
+              className={cn(
+                'h-5 w-5 rounded-full border border-border/60 transition-transform hover:scale-110',
+                selectedNode.color === c && 'ring-2 ring-brand-500',
+              )}
+              style={{ backgroundColor: c }}
+              aria-label={`Set colour ${c}`}
+            />
+          ))}
+        </div>
+      )}
 
       <div className="relative flex-1 overflow-hidden bg-card/20">
         <BackgroundDots />
@@ -347,9 +470,10 @@ function MindMapEditor({
                 <path
                   key={`${parent.id}-${n.id}`}
                   d={`M ${parent.x} ${parent.y} Q ${(parent.x + n.x) / 2} ${parent.y} ${n.x} ${n.y}`}
-                  stroke="hsl(var(--border))"
+                  stroke={n.color ?? 'hsl(var(--border))'}
                   strokeWidth="2"
                   fill="none"
+                  opacity={n.color ? 0.6 : 1}
                 />
               )
             })}
@@ -366,6 +490,55 @@ function MindMapEditor({
       </div>
     </div>
   )
+}
+
+/**
+ * Radial / sunburst layout. Direct children of root are placed evenly around
+ * a circle; descendants fan out along the parent's angle. Keeps the root
+ * fixed and only rearranges descendants, so previously hand-placed roots
+ * stay where the user put them.
+ */
+function radialLayout(nodes: MapNode[]): MapNode[] {
+  if (nodes.length === 0) return nodes
+  const root = nodes.find((n) => !n.parentId) ?? nodes[0]
+  const byParent = new Map<string, MapNode[]>()
+  for (const n of nodes) {
+    if (!n.parentId) continue
+    if (!byParent.has(n.parentId)) byParent.set(n.parentId, [])
+    byParent.get(n.parentId)!.push(n)
+  }
+
+  const placed = new Map<string, { x: number; y: number }>()
+  placed.set(root.id, { x: root.x, y: root.y })
+
+  type Frame = { node: MapNode; depth: number; startAngle: number; endAngle: number }
+  const stack: Frame[] = [{ node: root, depth: 0, startAngle: 0, endAngle: Math.PI * 2 }]
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!
+    const children = byParent.get(frame.node.id) ?? []
+    if (children.length === 0) continue
+    const sweep = (frame.endAngle - frame.startAngle) / children.length
+    const radius = 130 + frame.depth * 110
+    const parentPos = placed.get(frame.node.id)!
+    children.forEach((child, i) => {
+      const angle = frame.startAngle + sweep * (i + 0.5)
+      const x = parentPos.x + Math.cos(angle) * radius
+      const y = parentPos.y + Math.sin(angle) * radius
+      placed.set(child.id, { x, y })
+      stack.push({
+        node: child,
+        depth: frame.depth + 1,
+        startAngle: frame.startAngle + sweep * i,
+        endAngle: frame.startAngle + sweep * (i + 1),
+      })
+    })
+  }
+
+  return nodes.map((n) => {
+    const pos = placed.get(n.id)
+    return pos ? { ...n, x: pos.x, y: pos.y } : n
+  })
 }
 
 function BackgroundDots() {
@@ -397,10 +570,21 @@ function MapNodeChip({
     <div
       className={cn(
         'absolute -translate-x-1/2 -translate-y-1/2 rounded-lg px-3 py-1.5 text-xs font-medium border shadow-card cursor-grab',
-        isRoot ? 'bg-brand-gradient text-white border-transparent' : 'bg-card border-accent/40 text-foreground',
+        isRoot && 'bg-brand-gradient text-white border-transparent',
+        !isRoot && !node.color && 'bg-card border-accent/40 text-foreground',
         selected && 'ring-2 ring-brand-500',
       )}
-      style={{ left: node.x, top: node.y }}
+      style={{
+        left: node.x,
+        top: node.y,
+        ...(node.color && !isRoot
+          ? {
+              backgroundColor: `${node.color}22`, // 13% opaque
+              borderColor: node.color,
+              color: 'inherit',
+            }
+          : {}),
+      }}
       onMouseDown={(e) => {
         onSelect()
         const startX = e.clientX
@@ -416,7 +600,15 @@ function MapNodeChip({
         window.addEventListener('mouseup', up)
       }}
     >
-      {node.label}
+      <span className="flex items-center gap-1.5">
+        {node.color && !isRoot && (
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: node.color }}
+          />
+        )}
+        {node.label}
+      </span>
     </div>
   )
 }
