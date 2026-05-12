@@ -46,6 +46,7 @@ import { CalendarSyncModule } from './modules/calendar-sync/calendar-sync.module
 import { EmailToTaskModule } from './modules/email-to-task/email-to-task.module'
 import { CustomRolesModule } from './modules/custom-roles/custom-roles.module'
 import { TaskTemplatesModule } from './modules/task-templates/task-templates.module'
+import { SampleDataModule } from './modules/sample-data/sample-data.module'
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { TaskTemplatesModule } from './modules/task-templates/task-templates.mod
     EmailToTaskModule,
     CustomRolesModule,
     TaskTemplatesModule,
+    SampleDataModule,
   ],
 })
 export class AppModule {}
