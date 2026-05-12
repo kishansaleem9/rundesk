@@ -76,6 +76,20 @@ export class WorkspacesController {
     })
   }
 
+  @Patch(':workspaceId/members/:userId/capacity')
+  @UseGuards(WorkspaceAdminGuard)
+  async updateMemberCapacity(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body() body: { weeklyCapacityHours: number },
+    @CurrentUser() user: any,
+  ) {
+    return this.workspacesService.updateMemberCapacity(workspaceId, userId, body.weeklyCapacityHours, {
+      id: user.id,
+      email: user.email,
+    })
+  }
+
   @Delete(':workspaceId/members/:userId')
   @UseGuards(WorkspaceAdminGuard)
   async removeMember(

@@ -25,9 +25,17 @@ function WorkloadPage() {
   const workloadQuery = useQuery({
     queryKey: ['workload-report', workspaceId, days],
     queryFn: () =>
-      api<Array<{ name: string; role?: string; capacity: number; dailyLoads: number[] }>>(
-        `/workspaces/${workspaceId}/reports/workload?days=${days}`,
-      ),
+      api<
+        Array<{
+          userId?: string
+          name: string
+          email?: string | null
+          role?: string
+          capacity: number
+          weeklyCapacityHours?: number
+          dailyLoads: number[]
+        }>
+      >(`/workspaces/${workspaceId}/reports/workload?days=${days}`),
   })
 
   const dates = useMemo(() => {
@@ -44,9 +52,11 @@ function WorkloadPage() {
   const people = useMemo(() => {
     if (!workloadQuery.data) return []
     return workloadQuery.data.map((p) => ({
+      userId: p.userId,
       name: p.name,
       role: p.role ?? 'Member',
       capacity: p.capacity || 8,
+      weeklyCapacityHours: p.weeklyCapacityHours ?? Math.round((p.capacity || 8) * 5),
       dailyLoads: p.dailyLoads,
     }))
   }, [workloadQuery.data])

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid, unique } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, unique, integer } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { userRoleEnum, orgRoleEnum } from './enums'
 import { users } from './users'
@@ -47,11 +47,13 @@ export const workspaces = pgTable('workspaces', {
 export const workspaceMembers = pgTable(
   'workspace_members',
   {
-    id:          uuid('id').primaryKey().defaultRandom(),
-    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-    userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    role:        userRoleEnum('role').notNull().default('member'),
-    joinedAt:    timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    id:                   uuid('id').primaryKey().defaultRandom(),
+    workspaceId:          uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId:               uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    role:                 userRoleEnum('role').notNull().default('member'),
+    // Weekly capacity in hours, used by Workload report.
+    weeklyCapacityHours:  integer('weekly_capacity_hours').notNull().default(40),
+    joinedAt:             timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     uniqueWorkspaceUser: unique('uq_workspace_members_workspace_user').on(t.workspaceId, t.userId),

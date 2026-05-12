@@ -253,6 +253,9 @@ export class ReportsService {
       .select({
         userId: users.id,
         name: users.displayName,
+        email: users.email,
+        role: workspaceMembers.role,
+        weeklyCapacityHours: workspaceMembers.weeklyCapacityHours,
       })
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
@@ -305,10 +308,37 @@ export class ReportsService {
       }
     }
 
-    return members.map((member) => ({
-      name: member.name ?? 'Unknown',
-      capacity: 8,
-      dailyLoads: (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10),
-    }))
+    return members.map((member) => {
+      const weekly = member.weeklyCapacityHours ?? 40
+      // Daily capacity (5-day work week)
+      const dailyCapacity = Math.max(1, Math.round((weekly / 5) * 10) / 10)
+      return {
+        userId: member.userId,
+        name: member.name ?? 'Unknown',
+        email: member.email ?? null,
+        role: humanizeRole(member.role),
+        capacity: dailyCapacity,
+        weeklyCapacityHours: weekly,
+        dailyLoads: (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10),
+      }
+    })
+  }
+}
+
+function humanizeRole(role?: string | null): string {
+  if (!role) return 'Member'
+  switch (role) {
+    case 'workspace_admin':
+      return 'Admin'
+    case 'manager':
+      return 'Manager'
+    case 'guest':
+      return 'Guest'
+    case 'super_admin':
+      return 'Super admin'
+    case 'member':
+      return 'Member'
+    default:
+      return role.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
   }
 }

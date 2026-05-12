@@ -34,6 +34,7 @@ type Member = {
   displayName: string
   avatarUrl?: string | null
   role: string
+  weeklyCapacityHours?: number
   joinedAt: string
 }
 
@@ -270,6 +271,19 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] }),
   })
 
+  const updateCapacity = useMutation({
+    mutationFn: ({ userId, weeklyCapacityHours }: { userId: string; weeklyCapacityHours: number }) =>
+      api(`/workspaces/${workspaceId}/members/${userId}/capacity`, {
+        method: 'PATCH',
+        body: { weeklyCapacityHours },
+      }),
+    onSuccess: () => {
+      toast.success('Capacity updated')
+      qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['workload-report', workspaceId] })
+    },
+  })
+
   const remove = useMutation({
     mutationFn: (userId: string) =>
       api(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
@@ -393,6 +407,13 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                 <div className="text-sm font-medium truncate">{m.displayName}</div>
                 <div className="text-xs text-muted-foreground truncate">{m.email}</div>
               </div>
+              <CapacityInput
+                value={m.weeklyCapacityHours ?? 40}
+                pending={updateCapacity.isPending && updateCapacity.variables?.userId === m.userId}
+                onCommit={(weeklyCapacityHours) =>
+                  updateCapacity.mutate({ userId: m.userId, weeklyCapacityHours })
+                }
+              />
               <select
                 value={m.role}
                 onChange={(e) => updateRole.mutate({ userId: m.userId, role: e.target.value })}
@@ -894,6 +915,46 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
           )}
         </ul>
       </Card>
+    </div>
+  )
+}
+
+function CapacityInput({
+  value,
+  pending,
+  onCommit,
+}: {
+  value: number
+  pending: boolean
+  onCommit: (next: number) => void
+}) {
+  const [local, setLocal] = useState(String(value))
+  useEffect(() => {
+    setLocal(String(value))
+  }, [value])
+  return (
+    <div className="flex items-center gap-1 text-xs">
+      <input
+        type="number"
+        min={0}
+        max={168}
+        step={1}
+        value={local}
+        disabled={pending}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={() => {
+          const next = parseInt(local, 10)
+          if (Number.isFinite(next) && next !== value) onCommit(next)
+          else setLocal(String(value))
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape') setLocal(String(value))
+        }}
+        className="w-14 px-1.5 py-1 rounded border border-border bg-card text-right tabular-nums disabled:opacity-60"
+        title="Weekly capacity in hours"
+      />
+      <span className="text-muted-foreground">h/wk</span>
     </div>
   )
 }

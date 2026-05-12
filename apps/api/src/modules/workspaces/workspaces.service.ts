@@ -83,6 +83,7 @@ export class WorkspacesService {
         displayName: users.displayName,
         avatarUrl: users.avatarUrl,
         role: workspaceMembers.role,
+        weeklyCapacityHours: workspaceMembers.weeklyCapacityHours,
         joinedAt: workspaceMembers.joinedAt,
       })
       .from(workspaceMembers)
@@ -140,6 +141,35 @@ export class WorkspacesService {
       metadata: { from: previous?.role ?? null, to: role },
     })
     return { ok: true }
+  }
+
+  async updateMemberCapacity(
+    workspaceId: string,
+    userId: string,
+    weeklyCapacityHours: number,
+    actor?: { id: string; email?: string },
+  ) {
+    if (!Number.isFinite(weeklyCapacityHours) || weeklyCapacityHours < 0 || weeklyCapacityHours > 168) {
+      throw new BadRequestException('weeklyCapacityHours must be between 0 and 168')
+    }
+    const rounded = Math.round(weeklyCapacityHours)
+    const previous = await this.getMembership(workspaceId, userId)
+    if (!previous) throw new NotFoundException('Member not found')
+    await this.db
+      .update(workspaceMembers)
+      .set({ weeklyCapacityHours: rounded })
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      action: 'member.capacity_updated',
+      resourceType: 'user',
+      resourceId: userId,
+      description: `Weekly capacity set to ${rounded}h`,
+      metadata: { from: previous.weeklyCapacityHours ?? null, to: rounded },
+    })
+    return { ok: true, weeklyCapacityHours: rounded }
   }
 
   async removeMember(workspaceId: string, userId: string, actor?: { id: string; email?: string }) {
