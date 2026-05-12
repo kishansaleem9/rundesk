@@ -115,9 +115,6 @@ export class WebhooksService {
       : undefined
 
     const start = Date.now()
-    let statusCode: number | undefined
-    let responseBody: string | undefined
-    let success = false
 
     const { attempts, lastStatus, lastBody, lastError } = await this.postWithRetry(hook.url, {
       method: 'POST',
@@ -129,9 +126,9 @@ export class WebhooksService {
       },
       body,
     })
-    statusCode = lastStatus
-    responseBody = lastBody ?? lastError
-    success = typeof lastStatus === 'number' && lastStatus >= 200 && lastStatus < 300
+    const statusCode = lastStatus
+    const responseBody = lastBody ?? lastError
+    const success = typeof lastStatus === 'number' && lastStatus >= 200 && lastStatus < 300
 
     if (success) {
       await this.db

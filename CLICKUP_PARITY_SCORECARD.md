@@ -41,7 +41,8 @@ This scorecard classifies current parity by feature area:
 | Members/invites/roles/settings baseline | Functional | High | `apps/api/src/modules/workspaces`, `apps/api/src/modules/invitations`, `apps/web/src/routes/app.$workspaceId.settings.tsx` |
 | Workspace admin guarding | Functional | High | `apps/api/src/modules/auth/guards/workspace-admin.guard.ts` |
 | Granular task-level write permissions | Functional | Medium | `assertTaskWriteAccess` enforces admin/manager allow-all, guest deny-all, member allow-on-creator-or-assignee in `tasks.service.ts` |
-| Enterprise governance depth (SSO/SCIM/audit maturity) | Missing | Low | Audit-log trail is comprehensive; SSO/SCIM modules not yet present |
+| Enterprise SSO (OIDC + SAML 2.0) | Functional | High | `apps/api/src/modules/sso/sso.service.ts` provides discovery, PKCE OIDC flow (`openid-client`), and SAML 2.0 (`@node-saml/node-saml`) with JIT provisioning, domain enforcement, and full audit logging; admin UI at workspace settings → SSO & SCIM tab |
+| Enterprise SCIM 2.0 provisioning | Functional | High | `apps/api/src/modules/sso/scim.service.ts` implements Users + ServiceProviderConfig/Schemas/ResourceTypes with bearer-token auth, idempotent creates, soft-deactivation, and audit logging on every mutation |
 
 ## Automation, Integrations, and Advanced Surfaces
 
@@ -63,15 +64,15 @@ This scorecard classifies current parity by feature area:
 
 ## Current Estimated Parity
 
-- Functional parity: `~85-90%`
-- Partial parity: `~5-8%`
-- UI-only/demo parity: `~0-2%`
-- Missing (enterprise depth: SSO/SCIM): `~5-7%`
-- UI/UX parity vs ClickUp patterns: `~60-70%`
+- Functional parity: `~93-95%`
+- Partial parity: `~3-5%`
+- UI-only/demo parity: `~0-1%`
+- Missing: `~0-2%` (all of the enterprise-identity gap is now closed)
+- UI/UX parity vs ClickUp patterns: `~65-72%`
 
 ## Known remaining gaps
 
-- **Enterprise SSO/SCIM**: no SAML/OIDC/SCIM provisioning modules. Workspace audit log + 2FA + API keys are in place, but enterprise identity federation is not yet wired.
 - **Pre-existing lint warnings**: 49 non-blocking `react-hooks/exhaustive-deps` style warnings remain across older surfaces. No errors.
 - **Documentation surface depth**: docs comments now match ClickUp parity for threading and resolution; inline mention picker UI (Tiptap mention extension wiring in the Tiptap toolbar) is the next polish step but the backend already resolves mentions three ways.
 - **Whiteboard/Mindmap fidelity**: storage + realtime sync are live, but advanced authoring tools (shape libraries, snap-to-grid, collaborator cursors) are still feature-gated.
+- **SCIM Groups**: SCIM 2.0 Users resource is implemented end-to-end; the Groups resource (workspace-level group sync from IdP) is not yet exposed. Most IdP workflows can be modeled via per-workspace SCIM tokens in the meantime.
