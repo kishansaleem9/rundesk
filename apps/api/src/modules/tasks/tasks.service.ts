@@ -16,6 +16,7 @@ import {
   timeEntries,
   users,
   lists,
+  listStatuses,
   projects,
   spaces,
   workspaces,
@@ -32,7 +33,12 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { R2Service } from '../../common/storage/r2.service'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
-type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
+// Custom statuses per List replaced the fixed enum, so we accept any string
+// key. The service validates the key against `list_statuses` for the task's
+// list and looks up the canonical `category` (open/in_progress/closed) to
+// drive completion semantics, blocker checks, and reports.
+type TaskStatus = string
+type StatusCategory = 'open' | 'in_progress' | 'closed'
 
 type ActivityAction =
   | 'created'
@@ -432,6 +438,50 @@ export class TasksService {
   }
 
   // --- Task CRUD -----------------------------------------------------------
+  /**
+   * Resolve a status key against the list's `list_statuses` rows and return
+   * the canonical key + category bucket. Falls back to the list's first
+   * "open" status if no key is provided and to the very first status if
+   * none are marked open. Throws BadRequest if the caller passed a key
+   * that isn't defined for the list.
+   */
+  private async resolveStatusForList(
+    listId: string,
+    requestedKey: string | undefined,
+  ): Promise<{ key: string; category: StatusCategory }> {
+    const rows = await this.db
+      .select({
+        key: listStatuses.key,
+        category: listStatuses.category,
+        position: listStatuses.position,
+      })
+      .from(listStatuses)
+      .where(eq(listStatuses.listId, listId))
+      .orderBy(asc(listStatuses.position))
+
+    if (rows.length === 0) {
+      // Lists migrated from before custom-statuses always have seeded rows,
+      // so falling back to the legacy enum value keeps newly-created lists
+      // (whose statuses haven't been seeded yet) usable.
+      return { key: requestedKey ?? 'todo', category: 'open' }
+    }
+
+    if (requestedKey) {
+      const match = rows.find((r) => r.key === requestedKey)
+      if (!match) {
+        throw new BadRequestException(
+          `Status "${requestedKey}" is not defined for this list. ` +
+            `Available statuses: ${rows.map((r) => r.key).join(', ')}`,
+        )
+      }
+      return { key: match.key, category: match.category as StatusCategory }
+    }
+
+    const firstOpen = rows.find((r) => r.category === 'open')
+    const fallback = firstOpen ?? rows[0]
+    return { key: fallback.key, category: fallback.category as StatusCategory }
+  }
+
   async createTask(data: {
     listId: string
     title: string
@@ -447,6 +497,8 @@ export class TasksService {
     labelIds?: string[]
     createdById: string
   }) {
+    const resolved = await this.resolveStatusForList(data.listId, data.status)
+
     const [task] = await this.db
       .insert(tasks)
       .values({
@@ -456,7 +508,8 @@ export class TasksService {
         title: data.title,
         description: data.description,
         priority: data.priority ?? 'normal',
-        status: data.status ?? 'todo',
+        status: resolved.key,
+        statusCategory: resolved.category,
         position: data.position ?? 0,
         startDate: data.startDate,
         dueDate: data.dueDate,
@@ -826,18 +879,32 @@ export class TasksService {
     await this.assertTaskWriteAccess(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
-    if (patch.status && ['in_progress', 'in_review', 'done'].includes(patch.status)) {
-      const blockers = await this.getOpenBlockers(taskId)
-      if (blockers.length > 0) {
-        throw new BadRequestException(
-          `Task is blocked by open dependencies: ${blockers.map((b) => `${b.title} (${b.id})`).join(', ')}`,
-        )
+
+    // Resolve the requested status to its canonical key + category bucket
+    // so we can drive completion / blocker semantics off `category` rather
+    // than hard-coded enum values.
+    let nextCategory: StatusCategory | undefined
+    if (patch.status !== undefined) {
+      const resolved = await this.resolveStatusForList(before.listId, patch.status)
+      patch.status = resolved.key
+      nextCategory = resolved.category
+      if (nextCategory !== 'open') {
+        const blockers = await this.getOpenBlockers(taskId)
+        if (blockers.length > 0) {
+          throw new BadRequestException(
+            `Task is blocked by open dependencies: ${blockers.map((b) => `${b.title} (${b.id})`).join(', ')}`,
+          )
+        }
       }
     }
 
     const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
-    if (patch.status === 'done' && before.status !== 'done') set.completedAt = new Date()
-    if (patch.status && patch.status !== 'done' && before.status === 'done') set.completedAt = null
+    if (nextCategory) {
+      set.statusCategory = nextCategory
+      const wasClosed = (before.statusCategory as StatusCategory) === 'closed'
+      if (nextCategory === 'closed' && !wasClosed) set.completedAt = new Date()
+      if (nextCategory !== 'closed' && wasClosed) set.completedAt = null
+    }
 
     const [after] = await this.db.update(tasks).set(set).where(eq(tasks.id, taskId)).returning()
 
@@ -1101,7 +1168,13 @@ export class TasksService {
       title: source.title,
       description: source.description ?? undefined,
       priority: source.priority,
-      status: source.status === 'done' ? 'todo' : source.status,
+      // If the source was already closed, fall back to the list's default
+      // open status; otherwise preserve. resolveStatusForList runs again
+      // inside createTask so the value is validated/normalised.
+      status:
+        (source.statusCategory as StatusCategory) === 'closed'
+          ? undefined
+          : source.status,
       startDate: shift(source.startDate),
       dueDate: shift(source.dueDate),
       timeEstimate: source.timeEstimate ?? undefined,
