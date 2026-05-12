@@ -31,6 +31,7 @@ import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { R2Service } from '../../common/storage/r2.service'
+import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Custom statuses per List replaced the fixed enum, so we accept any string
@@ -82,7 +83,17 @@ export class TasksService {
     private slack: SlackService,
     private notifications: NotificationsService,
     private r2: R2Service,
+    private calendarSync: CalendarSyncService,
   ) {}
+
+  /**
+   * Best-effort push of a task to every connected calendar in its workspace.
+   * Swallowed errors keep task writes fast; failures surface via the
+   * connection's status field on the next sync poll.
+   */
+  private fireCalendarPush(taskId: string): void {
+    void this.calendarSync.pushTask(taskId).catch(() => undefined)
+  }
 
   /**
    * Best-effort fan-out of a task event to automations + webhooks.
@@ -557,6 +568,9 @@ export class TasksService {
       })
     }
 
+    // Push to connected calendars if the task has a due date.
+    if (task.dueDate) this.fireCalendarPush(task.id)
+
     return hydrated
   }
 
@@ -999,6 +1013,17 @@ export class TasksService {
         projectId: ctx.projectId,
         listId: after.listId,
       })
+
+      // Sync to connected calendars when any field that drives an event
+      // surface (date / archive / title / description) changed.
+      const calendarRelevant =
+        'dueDate' in patch ||
+        'startDate' in patch ||
+        'isArchived' in patch ||
+        'title' in patch ||
+        'description' in patch
+      if (calendarRelevant) this.fireCalendarPush(taskId)
+
       return hydrated
     }
 
@@ -1222,6 +1247,8 @@ export class TasksService {
         listId: before.listId,
       })
     }
+    // Remove from every connected calendar — fire-and-forget.
+    void this.calendarSync.deleteEverywhere(taskId).catch(() => undefined)
     return { ok: true }
   }
 

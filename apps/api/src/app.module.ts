@@ -42,6 +42,7 @@ import { CanvasesModule } from './modules/canvases/canvases.module'
 import { AnnouncementsModule } from './modules/announcements/announcements.module'
 import { SsoModule } from './modules/sso/sso.module'
 import { WorkspaceGroupsModule } from './modules/workspace-groups/workspace-groups.module'
+import { CalendarSyncModule } from './modules/calendar-sync/calendar-sync.module'
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { WorkspaceGroupsModule } from './modules/workspace-groups/workspace-grou
     AnnouncementsModule,
     SsoModule,
     WorkspaceGroupsModule,
+    CalendarSyncModule,
   ],
 })
 export class AppModule {}
