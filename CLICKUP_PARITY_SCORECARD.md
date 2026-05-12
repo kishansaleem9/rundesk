@@ -68,10 +68,10 @@ This scorecard classifies current parity by feature area:
 
 ## Current Estimated Parity
 
-- Functional parity: `~99.5%`
+- Functional parity: `~99.7%`
 - Partial parity: `<0.5%`
 - UI-only/demo parity: `~0%`
-- Missing: `<0.5%` (single-task templates deferred; custom roles & permissions)
+- Missing: `<0.5%` (single-task templates deferred)
 - UI/UX parity vs ClickUp patterns: `~75-82%` (bulk-action bar, public doc share, keyboard-shortcuts overlay closed since last pass)
 
 ## Known remaining gaps
@@ -84,7 +84,7 @@ This scorecard classifies current parity by feature area:
 | ~~**Bidirectional Google Calendar / Outlook sync**~~ | ~~Medium~~ | **Closed** in `0021_calendar_sync.sql` + `CalendarSyncService` (Google + Outlook push/pull with token refresh) + per-user `/ical/:token.ics` subscription feed + `CalendarSyncWizard` panel from the integrations route. tasks.service hooks fire push on create/update/archive/delete. |
 | ~~**Email-to-task (inbound mailbox)**~~ | ~~Medium~~ | **Closed** in `0022_email_to_task.sql` + `EmailToTaskService` + `InboundEmailController` (HMAC-verified Postmark/Mailgun-compatible webhook). Per-list `list-<slug>@inbound.*` alias mints/rotates/revokes via `EmailAliasController`; replies route by sub-address (`list-<slug>+task-<id>@…`) or `In-Reply-To` lookup. Attachments stored to R2 with 25MB/10-att caps; idempotent on Message-Id; full inbound audit log. UI: `ListEmailAliasPanel` button in the list toolbar. |
 | **Single-task templates** | Low | Low — existing `project_templates` table already covers most use cases via "starter project"; ClickUp adds a separate save-as-task-template flow. Deferred until users ask. |
-| **Custom roles & permissions** | Low | Medium — current roles are fixed (`admin`/`manager`/`member`/`guest`); ClickUp adds custom roles you can scope. |
+| ~~**Custom roles & permissions**~~ | ~~Low~~ | **Closed** in `0023_custom_roles.sql` + `CustomRolesService` + `CustomRolesController` / `MemberRolesController`. Admins define named role bundles (color, description, permissions from a 24-key catalog spanning Workspace/Members/Integrations/Security/Content/Automation/Reporting), assign one or more to any member, and the resolved permission set unions custom-role grants with the legacy-role baseline. A reusable `@RequirePermissions(...)` decorator + `PermissionsGuard` is wired into SSO admin (`sso.manage`), integration connections (`integrations.manage`, `integrations.access_requests.manage`), and webhooks CRUD (`webhook.manage`). Web UI: new **Roles** tab in workspace Settings with category-grouped permission editor and inline member assignment panel. |
 
 ### Code-quality
 
