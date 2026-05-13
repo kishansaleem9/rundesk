@@ -259,7 +259,9 @@ const AppWorkspaceIdClipsRoute = AppWorkspaceIdClipsRouteImport.update({
   id: '/clips',
   path: '/clips',
   getParentRoute: () => AppWorkspaceIdRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.clips.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdChatRoute = AppWorkspaceIdChatRouteImport.update({
   id: '/chat',
   path: '/chat',
