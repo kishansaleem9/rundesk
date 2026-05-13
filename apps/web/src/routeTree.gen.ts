@@ -147,7 +147,9 @@ const AppAdminFeaturesRoute = AppAdminFeaturesRouteImport.update({
   id: '/features',
   path: '/features',
   getParentRoute: () => AppAdminRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.admin.features.lazy').then((d) => d.Route),
+)
 const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
