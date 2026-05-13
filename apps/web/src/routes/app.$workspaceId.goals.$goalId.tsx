@@ -110,7 +110,7 @@ const STATUS_META = {
   completed: { label: 'Completed', color: 'text-success', badge: 'success' as const, icon: CheckCircle2 },
 }
 
-function GoalDetailPage() {
+export function GoalDetailPage() {
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground">

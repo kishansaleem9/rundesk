@@ -23,6 +23,7 @@ import {
 import { api, ApiError } from '../lib/api'
 
 export const Route = createFileRoute('/app/$workspaceId/time/approvals')({
+  component: TimeApprovalsPage,
   validateSearch: (search: Record<string, unknown>) => ({
     tab: search.tab === 'history' ? 'history' : 'pending',
     historyFilter:
@@ -32,7 +33,6 @@ export const Route = createFileRoute('/app/$workspaceId/time/approvals')({
         ? search.historyFilter
         : 'all',
   }),
-  component: TimeApprovalsPage,
 })
 
 type Timesheet = {
@@ -74,7 +74,7 @@ function historyFilterLabel(filter: 'all' | 'approved' | 'rejected' | 'this_week
 type ApprovalsTab = 'pending' | 'history'
 type ApprovalsHistoryFilter = 'all' | 'approved' | 'rejected' | 'this_week'
 
-function TimeApprovalsPage() {
+export function TimeApprovalsPage() {
   const { workspaceId } = Route.useParams()
   const search = Route.useSearch() as { tab: ApprovalsTab; historyFilter: ApprovalsHistoryFilter }
   const navigate = useNavigate()

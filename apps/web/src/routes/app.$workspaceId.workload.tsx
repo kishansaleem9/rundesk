@@ -19,7 +19,7 @@ export const Route = createFileRoute('/app/$workspaceId/workload')({
   component: WorkloadPage,
 })
 
-function WorkloadPage() {
+export function WorkloadPage() {
   const { workspaceId } = Route.useParams()
   const [view, setView] = useState<'7d' | '14d' | '30d'>('14d')
   const days = view === '7d' ? 7 : view === '14d' ? 14 : 30

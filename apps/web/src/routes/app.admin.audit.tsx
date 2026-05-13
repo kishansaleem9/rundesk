@@ -69,7 +69,7 @@ const GROUP_LABELS: Record<ActionGroup, string> = {
   workspace: 'Workspace',
 }
 
-function AuditLogPage() {
+export function AuditLogPage() {
   const user = useAuthStore((s) => s.user)
   // Get the user's current workspace — we use the first workspace for the audit log
   const [search, setSearch] = useState('')

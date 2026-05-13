@@ -27,7 +27,7 @@ const STATUS_META: Record<Goal['status'], { label: string; color: string; icon: 
   completed: { label: 'Completed', color: 'bg-brand-700', icon: CheckCircle2 },
 }
 
-function GoalsPage() {
+export function GoalsPage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const [creating, setCreating] = useState(false)

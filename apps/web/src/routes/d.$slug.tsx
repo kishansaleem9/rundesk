@@ -6,7 +6,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { useEffect } from 'react'
 
-export const Route = createFileRoute('/d/$slug' as any)({
+export const Route = createFileRoute('/d/$slug')({
   component: PublicDocViewer,
 })
 

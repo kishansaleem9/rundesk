@@ -6,7 +6,7 @@ import { useAuthStore } from '../store/auth'
 import { api, ApiError } from '../lib/api'
 import { reconnectRealtime } from '../lib/realtime'
 
-export const Route = createFileRoute('/sso-complete' as any)({
+export const Route = createFileRoute('/sso-complete')({
   component: SsoCompletePage,
 })
 

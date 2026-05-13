@@ -89,7 +89,7 @@ function safeCsv(value: string): string {
   return `"${value.replace(/"/g, '""')}"`
 }
 
-function FormBuilderPage() {
+export function FormBuilderPage() {
   const { workspaceId, formId } = Route.useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()

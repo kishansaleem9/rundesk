@@ -80,7 +80,7 @@ const TASKS = [
   { id: 'RD-8J99', title: 'Public share dialog', assignee: 'Bilal Khan', points: 5, status: 'todo' },
 ] as const
 
-function SprintDetailPage() {
+export function SprintDetailPage() {
   const completedPct = (SPRINT.completedPoints / SPRINT.totalPoints) * 100
   const taskPct = (SPRINT.completedTasks / SPRINT.totalTasks) * 100
   const onTrack = SPRINT.completedPoints >= 21 // ideal at day 7

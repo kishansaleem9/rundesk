@@ -89,7 +89,7 @@ const CATEGORIES: Array<{ id: Integration['category'] | 'all' | 'installed'; lab
   { id: 'ai', label: 'AI' },
 ]
 
-function IntegrationsMarketplacePage() {
+export function IntegrationsMarketplacePage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const [query, setQuery] = useState('')

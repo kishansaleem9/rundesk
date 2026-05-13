@@ -26,7 +26,7 @@ const STATUS_META: Record<Sprint['status'], { label: string; color: string }> = 
   completed: { label: 'Completed', color: 'bg-emerald-500' },
 }
 
-function SprintsPage() {
+export function SprintsPage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const [creating, setCreating] = useState(false)

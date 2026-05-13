@@ -5,7 +5,7 @@ import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Webhook, Plus, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 
-export const Route = createFileRoute('/app/admin/webhooks' as any)({
+export const Route = createFileRoute('/app/admin/webhooks')({
   component: AdminWebhooksPage,
 })
 
@@ -23,7 +23,7 @@ type Hook = {
   failureCount: number
 }
 
-function AdminWebhooksPage() {
+export function AdminWebhooksPage() {
   const qc = useQueryClient()
   const [workspaceId, setWorkspaceId] = useState('')
   const [name, setName] = useState('')

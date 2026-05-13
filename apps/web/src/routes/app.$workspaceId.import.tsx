@@ -28,7 +28,7 @@ type ImportResult = {
   errors: string[]
 }
 
-function ImportPage() {
+export function ImportPage() {
   const { workspaceId } = Route.useParams()
   const [csv, setCsv] = useState<string>('')
   const [filename, setFilename] = useState<string>('')

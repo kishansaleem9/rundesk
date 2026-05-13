@@ -31,7 +31,7 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; label:
   task_updated: { icon: RefreshCw, color: 'text-cyan-500', label: 'Task updated' },
 }
 
-function InboxPage() {
+export function InboxPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { workspaceId } = Route.useParams()

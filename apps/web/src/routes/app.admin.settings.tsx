@@ -7,7 +7,7 @@ import { api } from '../lib/api'
 import { FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
 
-export const Route = createFileRoute('/app/admin/settings' as any)({
+export const Route = createFileRoute('/app/admin/settings')({
   component: AdminSettingsPage,
 })
 
@@ -35,7 +35,7 @@ const WORKSPACE_SCOPED_FLAGS: FlagKey[] = [
   FLAGS.FORMS,
 ]
 
-function AdminSettingsPage() {
+export function AdminSettingsPage() {
   const qc = useQueryClient()
   const [workspaceId, setWorkspaceId] = useState('')
 

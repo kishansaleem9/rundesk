@@ -30,7 +30,7 @@ type Item = {
   dismisses: number
 }
 
-function AnnouncementsAdminPage() {
+export function AnnouncementsAdminPage() {
   const qc = useQueryClient()
   const workspacesQuery = useQuery({
     queryKey: ['announcement-admin-workspaces'],

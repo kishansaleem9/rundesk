@@ -5,7 +5,7 @@ import { Button, Card, Input } from '@rundesk/ui'
 import { Users, Search, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 
-export const Route = createFileRoute('/app/admin/users' as any)({
+export const Route = createFileRoute('/app/admin/users')({
   component: AdminUsersPage,
 })
 
@@ -23,7 +23,7 @@ type Member = {
 
 const ROLES = ['workspace_admin', 'manager', 'member', 'guest']
 
-function AdminUsersPage() {
+export function AdminUsersPage() {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [workspaceId, setWorkspaceId] = useState('')

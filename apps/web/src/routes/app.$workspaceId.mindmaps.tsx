@@ -53,7 +53,7 @@ const BRANCH_PALETTE = [
   '#f87171', // red
 ]
 
-function MindMapsPage() {
+export function MindMapsPage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)

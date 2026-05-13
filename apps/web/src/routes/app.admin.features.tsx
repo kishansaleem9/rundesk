@@ -223,7 +223,7 @@ function Switch({
 // Panel
 // ---------------------------------------------------------------------------
 
-function FeatureFlagsPanel() {
+export function FeatureFlagsPanel() {
   const queryClient = useQueryClient()
   const searchRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')

@@ -90,7 +90,7 @@ const RECIPES = [
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-function AutomationsPage() {
+export function AutomationsPage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const [showBuilder, setShowBuilder] = useState(false)

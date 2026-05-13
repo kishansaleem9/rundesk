@@ -39,7 +39,7 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
   URL.revokeObjectURL(url)
 }
 
-function ReportsPage() {
+export function ReportsPage() {
   const { workspaceId } = Route.useParams()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [days, setDays] = useState(30)

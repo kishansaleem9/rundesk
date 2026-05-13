@@ -32,7 +32,7 @@ type FormSummary = {
   submissionCount: number
 }
 
-function FormsPage() {
+export function FormsPage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const [creating, setCreating] = useState(false)

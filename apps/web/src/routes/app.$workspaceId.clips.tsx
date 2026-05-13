@@ -53,7 +53,7 @@ type WorkspaceMember = {
   email: string
 }
 
-function ClipsPage() {
+export function ClipsPage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const workspaces = useAuthStore((s) => s.workspaces)

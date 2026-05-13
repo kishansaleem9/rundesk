@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SsoCompleteRouteImport } from './routes/sso-complete'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
@@ -17,9 +18,14 @@ import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as SubmitSlugRouteImport } from './routes/submit.$slug'
+import { Route as DSlugRouteImport } from './routes/d.$slug'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppWorkspaceIdRouteImport } from './routes/app.$workspaceId'
+import { Route as AppAdminWebhooksRouteImport } from './routes/app.admin.webhooks'
+import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
+import { Route as AppAdminSettingsRouteImport } from './routes/app.admin.settings'
+import { Route as AppAdminIntegrationsRouteImport } from './routes/app.admin.integrations'
 import { Route as AppAdminFeaturesRouteImport } from './routes/app.admin.features'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppAdminAnnouncementsRouteImport } from './routes/app.admin.announcements'
@@ -52,6 +58,11 @@ import { Route as AppWorkspaceIdFormsFormIdRouteImport } from './routes/app.$wor
 import { Route as AppWorkspaceIdSpaceIdProjectIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdListIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId.$listId'
 
+const SsoCompleteRoute = SsoCompleteRouteImport.update({
+  id: '/sso-complete',
+  path: '/sso-complete',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignUpRoute = SignUpRouteImport.update({
   id: '/sign-up',
   path: '/sign-up',
@@ -92,6 +103,11 @@ const SubmitSlugRoute = SubmitSlugRouteImport.update({
   path: '/submit/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DSlugRoute = DSlugRouteImport.update({
+  id: '/d/$slug',
+  path: '/d/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -106,6 +122,26 @@ const AppWorkspaceIdRoute = AppWorkspaceIdRouteImport.update({
   id: '/$workspaceId',
   path: '/$workspaceId',
   getParentRoute: () => AppRoute,
+} as any)
+const AppAdminWebhooksRoute = AppAdminWebhooksRouteImport.update({
+  id: '/webhooks',
+  path: '/webhooks',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminSettingsRoute = AppAdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppAdminRoute,
+} as any)
+const AppAdminIntegrationsRoute = AppAdminIntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => AppAdminRoute,
 } as any)
 const AppAdminFeaturesRoute = AppAdminFeaturesRouteImport.update({
   id: '/features',
@@ -279,9 +315,11 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
+  '/sso-complete': typeof SsoCompleteRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
+  '/d/$slug': typeof DSlugRoute
   '/submit/$slug': typeof SubmitSlugRoute
   '/app/': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
@@ -309,6 +347,10 @@ export interface FileRoutesByFullPath {
   '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
+  '/app/admin/integrations': typeof AppAdminIntegrationsRoute
+  '/app/admin/settings': typeof AppAdminSettingsRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/webhooks': typeof AppAdminWebhooksRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
@@ -322,9 +364,11 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
+  '/sso-complete': typeof SsoCompleteRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
+  '/d/$slug': typeof DSlugRoute
   '/submit/$slug': typeof SubmitSlugRoute
   '/app': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
@@ -352,6 +396,10 @@ export interface FileRoutesByTo {
   '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
+  '/app/admin/integrations': typeof AppAdminIntegrationsRoute
+  '/app/admin/settings': typeof AppAdminSettingsRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/webhooks': typeof AppAdminWebhooksRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
@@ -367,9 +415,11 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
+  '/sso-complete': typeof SsoCompleteRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/profile': typeof AppProfileRoute
+  '/d/$slug': typeof DSlugRoute
   '/submit/$slug': typeof SubmitSlugRoute
   '/app/': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
@@ -397,6 +447,10 @@ export interface FileRoutesById {
   '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
+  '/app/admin/integrations': typeof AppAdminIntegrationsRoute
+  '/app/admin/settings': typeof AppAdminSettingsRoute
+  '/app/admin/users': typeof AppAdminUsersRoute
+  '/app/admin/webhooks': typeof AppAdminWebhooksRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
@@ -413,9 +467,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/sign-up'
+    | '/sso-complete'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
+    | '/d/$slug'
     | '/submit/$slug'
     | '/app/'
     | '/app/$workspaceId/$spaceId'
@@ -443,6 +499,10 @@ export interface FileRouteTypes {
     | '/app/admin/announcements'
     | '/app/admin/audit'
     | '/app/admin/features'
+    | '/app/admin/integrations'
+    | '/app/admin/settings'
+    | '/app/admin/users'
+    | '/app/admin/webhooks'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/goals/$goalId'
@@ -456,9 +516,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/sign-up'
+    | '/sso-complete'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
+    | '/d/$slug'
     | '/submit/$slug'
     | '/app'
     | '/app/$workspaceId/$spaceId'
@@ -486,6 +548,10 @@ export interface FileRouteTypes {
     | '/app/admin/announcements'
     | '/app/admin/audit'
     | '/app/admin/features'
+    | '/app/admin/integrations'
+    | '/app/admin/settings'
+    | '/app/admin/users'
+    | '/app/admin/webhooks'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/goals/$goalId'
@@ -500,9 +566,11 @@ export interface FileRouteTypes {
     | '/login'
     | '/register'
     | '/sign-up'
+    | '/sso-complete'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/profile'
+    | '/d/$slug'
     | '/submit/$slug'
     | '/app/'
     | '/app/$workspaceId/$spaceId'
@@ -530,6 +598,10 @@ export interface FileRouteTypes {
     | '/app/admin/announcements'
     | '/app/admin/audit'
     | '/app/admin/features'
+    | '/app/admin/integrations'
+    | '/app/admin/settings'
+    | '/app/admin/users'
+    | '/app/admin/webhooks'
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/goals/$goalId'
@@ -545,11 +617,20 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
   SignUpRoute: typeof SignUpRoute
+  SsoCompleteRoute: typeof SsoCompleteRoute
+  DSlugRoute: typeof DSlugRoute
   SubmitSlugRoute: typeof SubmitSlugRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sso-complete': {
+      id: '/sso-complete'
+      path: '/sso-complete'
+      fullPath: '/sso-complete'
+      preLoaderRoute: typeof SsoCompleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-up': {
       id: '/sign-up'
       path: '/sign-up'
@@ -606,6 +687,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SubmitSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/d/$slug': {
+      id: '/d/$slug'
+      path: '/d/$slug'
+      fullPath: '/d/$slug'
+      preLoaderRoute: typeof DSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/app/profile': {
       id: '/app/profile'
       path: '/profile'
@@ -626,6 +714,34 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/$workspaceId'
       preLoaderRoute: typeof AppWorkspaceIdRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/app/admin/webhooks': {
+      id: '/app/admin/webhooks'
+      path: '/webhooks'
+      fullPath: '/app/admin/webhooks'
+      preLoaderRoute: typeof AppAdminWebhooksRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/users': {
+      id: '/app/admin/users'
+      path: '/users'
+      fullPath: '/app/admin/users'
+      preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/settings': {
+      id: '/app/admin/settings'
+      path: '/settings'
+      fullPath: '/app/admin/settings'
+      preLoaderRoute: typeof AppAdminSettingsRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/integrations': {
+      id: '/app/admin/integrations'
+      path: '/integrations'
+      fullPath: '/app/admin/integrations'
+      preLoaderRoute: typeof AppAdminIntegrationsRouteImport
+      parentRoute: typeof AppAdminRoute
     }
     '/app/admin/features': {
       id: '/app/admin/features'
@@ -980,12 +1096,20 @@ interface AppAdminRouteChildren {
   AppAdminAnnouncementsRoute: typeof AppAdminAnnouncementsRoute
   AppAdminAuditRoute: typeof AppAdminAuditRoute
   AppAdminFeaturesRoute: typeof AppAdminFeaturesRoute
+  AppAdminIntegrationsRoute: typeof AppAdminIntegrationsRoute
+  AppAdminSettingsRoute: typeof AppAdminSettingsRoute
+  AppAdminUsersRoute: typeof AppAdminUsersRoute
+  AppAdminWebhooksRoute: typeof AppAdminWebhooksRoute
 }
 
 const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminAnnouncementsRoute: AppAdminAnnouncementsRoute,
   AppAdminAuditRoute: AppAdminAuditRoute,
   AppAdminFeaturesRoute: AppAdminFeaturesRoute,
+  AppAdminIntegrationsRoute: AppAdminIntegrationsRoute,
+  AppAdminSettingsRoute: AppAdminSettingsRoute,
+  AppAdminUsersRoute: AppAdminUsersRoute,
+  AppAdminWebhooksRoute: AppAdminWebhooksRoute,
 }
 
 const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
@@ -1015,6 +1139,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,
   SignUpRoute: SignUpRoute,
+  SsoCompleteRoute: SsoCompleteRoute,
+  DSlugRoute: DSlugRoute,
   SubmitSlugRoute: SubmitSlugRoute,
 }
 export const routeTree = rootRouteImport

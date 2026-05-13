@@ -23,7 +23,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { CursorLayer, useCanvasCursors } from '../lib/use-canvas-cursors'
 
-export const Route = createFileRoute('/app/$workspaceId/whiteboards' as any)({
+export const Route = createFileRoute('/app/$workspaceId/whiteboards')({
   component: WhiteboardsPage,
 })
 
@@ -67,7 +67,7 @@ function snap(value: number, enabled: boolean) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE
 }
 
-function WhiteboardsPage() {
+export function WhiteboardsPage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)

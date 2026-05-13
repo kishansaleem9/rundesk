@@ -58,7 +58,7 @@ const SUGGESTIONS = [
   { icon: TrendingUp, text: '"Onboarding revamp" project health is trending down — recommend a sync.', cta: 'Schedule' },
 ]
 
-function InsightsPage() {
+export function InsightsPage() {
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
       <header>

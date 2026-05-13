@@ -45,7 +45,7 @@ const STATUS_OPACITY: Record<string, string> = {
   backlog: 'opacity-70',
 }
 
-function TimelinePage() {
+export function TimelinePage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const [zoom, setZoom] = useState<Zoom>('week')

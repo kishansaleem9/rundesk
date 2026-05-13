@@ -5,7 +5,7 @@ export const Route = createFileRoute('/app/$workspaceId/docs')({
   component: DocsPage,
 })
 
-function DocsPage() {
+export function DocsPage() {
   const { workspaceId } = Route.useParams()
   return (
     <div className="h-full flex flex-col">

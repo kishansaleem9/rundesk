@@ -38,7 +38,7 @@ type ExtractedTask = {
 }
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 
-function AiPage() {
+export function AiPage() {
   const { workspaceId } = Route.useParams()
   const [activeTab, setActiveTab] = useState<'chat' | 'generate' | 'notes' | 'writing'>('chat')
 

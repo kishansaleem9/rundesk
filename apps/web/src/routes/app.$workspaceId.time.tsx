@@ -49,7 +49,7 @@ function safeCsv(value: string): string {
   return `"${value.replace(/"/g, '""')}"`
 }
 
-function TimePage() {
+export function TimePage() {
   const { workspaceId } = Route.useParams()
   const qc = useQueryClient()
   const [tab, setTab] = useState<'timer' | 'timesheet' | 'reports'>('timesheet')

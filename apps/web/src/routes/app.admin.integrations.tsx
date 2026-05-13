@@ -5,7 +5,7 @@ import { Button, Card, Input } from '@rundesk/ui'
 import { Plug } from 'lucide-react'
 import { api } from '../lib/api'
 
-export const Route = createFileRoute('/app/admin/integrations' as any)({
+export const Route = createFileRoute('/app/admin/integrations')({
   component: AdminIntegrationsPage,
 })
 
@@ -25,7 +25,7 @@ type AccessRequest = {
   updatedAt: string
 }
 
-function AdminIntegrationsPage() {
+export function AdminIntegrationsPage() {
   const qc = useQueryClient()
   const [workspaceId, setWorkspaceId] = useState('')
   const [adminNote, setAdminNote] = useState('')

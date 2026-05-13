@@ -111,7 +111,7 @@ function prettifyMentions(body: string, namesById: Record<string, string>) {
   return next
 }
 
-function ChatPage() {
+export function ChatPage() {
   const { workspaceId } = Route.useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
