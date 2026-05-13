@@ -254,7 +254,9 @@ const AppWorkspaceIdChatRoute = AppWorkspaceIdChatRouteImport.update({
   id: '/chat',
   path: '/chat',
   getParentRoute: () => AppWorkspaceIdRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.chat.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdAutomationsRoute =
   AppWorkspaceIdAutomationsRouteImport.update({
     id: '/automations',
