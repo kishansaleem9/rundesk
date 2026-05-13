@@ -141,7 +141,9 @@ const AppAdminSettingsRoute = AppAdminSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AppAdminRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.admin.settings.lazy').then((d) => d.Route),
+)
 const AppAdminIntegrationsRoute = AppAdminIntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
