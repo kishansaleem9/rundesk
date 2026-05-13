@@ -312,7 +312,11 @@ const AppWorkspaceIdSprintsSprintIdRoute =
     id: '/$sprintId',
     path: '/$sprintId',
     getParentRoute: () => AppWorkspaceIdSprintsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/app.$workspaceId.sprints.$sprintId.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AppWorkspaceIdGoalsGoalIdRoute =
   AppWorkspaceIdGoalsGoalIdRouteImport.update({
     id: '/$goalId',
