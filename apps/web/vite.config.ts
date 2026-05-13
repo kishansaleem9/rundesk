@@ -93,8 +93,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return
-          if (id.includes('/react/') || id.includes('/react-dom/')) return 'vendor-react'
-          if (id.includes('@radix-ui')) return 'vendor-radix'
           if (id.includes('@tanstack/react-router') || id.includes('@tanstack/router-core')) return 'vendor-router'
           if (id.includes('@tanstack/react-query')) return 'vendor-query'
           if (id.includes('@tiptap')) return 'vendor-editor'
