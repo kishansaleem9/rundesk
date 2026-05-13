@@ -112,7 +112,7 @@ const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
   getParentRoute: () => AppRoute,
-} as any)
+} as any).lazy(() => import('./routes/app.profile.lazy').then((d) => d.Route))
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
