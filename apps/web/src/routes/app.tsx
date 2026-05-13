@@ -1,9 +1,13 @@
 import { createFileRoute, Outlet, redirect, useRouterState } from '@tanstack/react-router'
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
-import { CommandPalette } from '../components/command-palette'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
+
+const CommandPalette = lazy(async () => {
+  const mod = await import('../components/command-palette')
+  return { default: mod.CommandPalette }
+})
 
 export const Route = createFileRoute('/app')({
   beforeLoad: ({ context }) => {
@@ -40,7 +44,11 @@ function AppShell() {
           <Outlet />
         </main>
       </div>
-      <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
+      {cmdOpen ? (
+        <Suspense fallback={null}>
+          <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
+        </Suspense>
+      ) : null}
       <ShortcutsOverlay />
     </div>
   )
