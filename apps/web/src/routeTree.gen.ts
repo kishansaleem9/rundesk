@@ -127,7 +127,9 @@ const AppAdminWebhooksRoute = AppAdminWebhooksRouteImport.update({
   id: '/webhooks',
   path: '/webhooks',
   getParentRoute: () => AppAdminRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.admin.webhooks.lazy').then((d) => d.Route),
+)
 const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
