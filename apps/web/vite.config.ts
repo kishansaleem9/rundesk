@@ -92,6 +92,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.includes('/packages/ui/')) return 'app-ui'
           if (!id.includes('node_modules')) return
           if (id.includes('@tanstack/react-router') || id.includes('@tanstack/router-core')) return 'vendor-router'
           if (id.includes('@tanstack/react-query')) return 'vendor-query'
