@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-ro
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   ChevronDown,
   ChevronRight,
@@ -78,6 +79,10 @@ const PRIORITY_COLORS: Record<TaskPriority, string> = {
   normal: 'text-blue-500',
   low: 'text-gray-400',
 }
+const VIRTUALIZE_THRESHOLD = 120
+const TASK_ROW_ESTIMATE_PX = 46
+const BOARD_VIRTUALIZE_THRESHOLD = 80
+const BOARD_CARD_ESTIMATE_PX = 76
 
 type StatusMeta = { label: string; color: string; dot: string; pill: string }
 
@@ -761,16 +766,27 @@ function GroupedListView({
                 {priority} ({groupTasks.length})
               </div>
               <div className="space-y-2">
-                {groupTasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    selected={selectedTaskIds.has(task.id)}
-                    onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
+                {groupTasks.length >= VIRTUALIZE_THRESHOLD ? (
+                  <VirtualizedTaskRows
+                    virtualKey={`priority:${priority}`}
+                    tasks={groupTasks}
+                    selectedTaskIds={selectedTaskIds}
+                    onToggleSelect={onToggleSelect}
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
                   />
-                ))}
+                ) : (
+                  groupTasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      selected={selectedTaskIds.has(task.id)}
+                      onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
+                      onOpenTask={onOpenTask}
+                      onToggleDone={onToggleDone}
+                    />
+                  ))
+                )}
                 {groupTasks.length === 0 && <div className="text-xs text-muted-foreground">No tasks</div>}
               </div>
             </Card>
@@ -808,22 +824,87 @@ function GroupedListView({
             </header>
             {!isCollapsed && (
               <div className="divide-y divide-border">
-                {groupTasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    selected={selectedTaskIds.has(task.id)}
-                    onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
+                {groupTasks.length >= VIRTUALIZE_THRESHOLD ? (
+                  <VirtualizedTaskRows
+                    virtualKey={`status:${status}`}
+                    tasks={groupTasks}
+                    selectedTaskIds={selectedTaskIds}
+                    onToggleSelect={onToggleSelect}
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
                   />
-                ))}
+                ) : (
+                  groupTasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      selected={selectedTaskIds.has(task.id)}
+                      onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
+                      onOpenTask={onOpenTask}
+                      onToggleDone={onToggleDone}
+                    />
+                  ))
+                )}
                 <InlineAddTask status={status} onAdd={(title) => onAddTask(status, title)} />
               </div>
             )}
           </section>
         )
       })}
+    </div>
+  )
+}
+
+function VirtualizedTaskRows({
+  virtualKey,
+  tasks,
+  selectedTaskIds,
+  onToggleSelect,
+  onOpenTask,
+  onToggleDone,
+}: {
+  virtualKey: string
+  tasks: TaskItem[]
+  selectedTaskIds: Set<string>
+  onToggleSelect: (taskId: string, additive: boolean) => void
+  onOpenTask: (taskId: string) => void
+  onToggleDone: (task: TaskItem) => Promise<void> | void
+}) {
+  const parentRef = useRef<HTMLDivElement | null>(null)
+  const rowVirtualizer = useVirtualizer({
+    count: tasks.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => TASK_ROW_ESTIMATE_PX,
+    overscan: 8,
+  })
+
+  return (
+    <div key={virtualKey} ref={parentRef} className="max-h-[60vh] overflow-auto">
+      <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+        {rowVirtualizer.getVirtualItems().map((row) => {
+          const task = tasks[row.index]
+          return (
+            <div
+              key={task.id}
+              ref={rowVirtualizer.measureElement}
+              data-index={row.index}
+              className={cn(
+                'absolute left-0 top-0 w-full border-b border-border',
+                row.index === tasks.length - 1 && 'border-b-0',
+              )}
+              style={{ transform: `translateY(${row.start}px)` }}
+            >
+              <TaskRow
+                task={task}
+                selected={selectedTaskIds.has(task.id)}
+                onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
+                onOpenTask={onOpenTask}
+                onToggleDone={onToggleDone}
+              />
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -1646,9 +1727,13 @@ function BoardColumn({
         <span className="text-xs text-muted-foreground tabular-nums">{tasks.length}</span>
       </div>
       <div className="p-2 space-y-2 flex-1">
-        {tasks.map((task) => (
-          <BoardTaskCard key={task.id} task={task} onOpenTask={onOpenTask} />
-        ))}
+        {tasks.length >= BOARD_VIRTUALIZE_THRESHOLD ? (
+          <VirtualizedBoardCards tasks={tasks} onOpenTask={onOpenTask} />
+        ) : (
+          tasks.map((task) => (
+            <BoardTaskCard key={task.id} task={task} onOpenTask={onOpenTask} />
+          ))
+        )}
         {tasks.length === 0 && (
           <div className="text-xs text-muted-foreground text-center py-4">Drop tasks here</div>
         )}
@@ -1688,6 +1773,43 @@ function BoardTaskCard({
         </div>
       ) : null}
     </button>
+  )
+}
+
+function VirtualizedBoardCards({
+  tasks,
+  onOpenTask,
+}: {
+  tasks: TaskItem[]
+  onOpenTask: (taskId: string) => void
+}) {
+  const parentRef = useRef<HTMLDivElement | null>(null)
+  const cardVirtualizer = useVirtualizer({
+    count: tasks.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => BOARD_CARD_ESTIMATE_PX,
+    overscan: 8,
+  })
+
+  return (
+    <div ref={parentRef} className="max-h-[70vh] overflow-auto">
+      <div className="relative w-full" style={{ height: `${cardVirtualizer.getTotalSize()}px` }}>
+        {cardVirtualizer.getVirtualItems().map((item) => {
+          const task = tasks[item.index]
+          return (
+            <div
+              key={task.id}
+              ref={cardVirtualizer.measureElement}
+              data-index={item.index}
+              className="absolute left-0 top-0 w-full pb-2"
+              style={{ transform: `translateY(${item.start}px)` }}
+            >
+              <BoardTaskCard task={task} onOpenTask={onOpenTask} />
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
