@@ -298,7 +298,11 @@ const AppWorkspaceIdTimeApprovalsRoute =
     id: '/approvals',
     path: '/approvals',
     getParentRoute: () => AppWorkspaceIdTimeRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/app.$workspaceId.time.approvals.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AppWorkspaceIdSprintsSprintIdRoute =
   AppWorkspaceIdSprintsSprintIdRouteImport.update({
     id: '/$sprintId',
