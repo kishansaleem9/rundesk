@@ -251,7 +251,9 @@ const AppWorkspaceIdInboxRoute = AppWorkspaceIdInboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
   getParentRoute: () => AppWorkspaceIdRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.inbox.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdImportRoute = AppWorkspaceIdImportRouteImport.update({
   id: '/import',
   path: '/import',
