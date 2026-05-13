@@ -161,7 +161,9 @@ const AppAdminAnnouncementsRoute = AppAdminAnnouncementsRouteImport.update({
   id: '/announcements',
   path: '/announcements',
   getParentRoute: () => AppAdminRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.admin.announcements.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdWorkloadRoute = AppWorkspaceIdWorkloadRouteImport.update({
   id: '/workload',
   path: '/workload',
