@@ -154,7 +154,9 @@ const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
   getParentRoute: () => AppAdminRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.admin.audit.lazy').then((d) => d.Route),
+)
 const AppAdminAnnouncementsRoute = AppAdminAnnouncementsRouteImport.update({
   id: '/announcements',
   path: '/announcements',
