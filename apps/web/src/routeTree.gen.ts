@@ -168,7 +168,9 @@ const AppWorkspaceIdWhiteboardsRoute =
     id: '/whiteboards',
     path: '/whiteboards',
     getParentRoute: () => AppWorkspaceIdRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/app.$workspaceId.whiteboards.lazy').then((d) => d.Route),
+  )
 const AppWorkspaceIdTimelineRoute = AppWorkspaceIdTimelineRouteImport.update({
   id: '/timeline',
   path: '/timeline',
