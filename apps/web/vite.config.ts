@@ -94,12 +94,17 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('/packages/ui/')) return 'app-ui'
           if (!id.includes('node_modules')) return
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'vendor-react-core'
           if (id.includes('@tanstack/react-router') || id.includes('@tanstack/router-core')) return 'vendor-router'
           if (id.includes('@tanstack/react-query')) return 'vendor-query'
+          if (id.includes('@tanstack/react-virtual')) return 'vendor-virtual'
           if (id.includes('@tiptap')) return 'vendor-editor'
           if (id.includes('@dnd-kit')) return 'vendor-dnd'
           if (id.includes('date-fns') || id.includes('dayjs')) return 'vendor-date'
           if (id.includes('framer-motion')) return 'vendor-motion'
+          if (id.includes('@radix-ui') || id.includes('@floating-ui')) return 'vendor-radix'
+          if (id.includes('zustand') || id.includes('use-sync-external-store')) return 'vendor-state'
+          if (id.includes('clsx') || id.includes('tailwind-merge')) return 'vendor-utils'
           if (id.includes('zod')) return 'vendor-zod'
           if (id.includes('sonner') || id.includes('cmdk')) return 'vendor-ui-runtime'
           if (id.includes('socket.io-client')) return 'vendor-realtime'
