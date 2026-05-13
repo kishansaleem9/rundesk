@@ -241,7 +241,9 @@ const AppWorkspaceIdGoalsRoute = AppWorkspaceIdGoalsRouteImport.update({
   id: '/goals',
   path: '/goals',
   getParentRoute: () => AppWorkspaceIdRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.goals.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdFormsRoute = AppWorkspaceIdFormsRouteImport.update({
   id: '/forms',
   path: '/forms',
