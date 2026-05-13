@@ -13,6 +13,7 @@ import {
   Wand2,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAuthStore } from '../store/auth'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -65,7 +66,7 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
     abortRef.current = controller
 
     try {
-      const token = (await import('../store/auth')).useAuthStore.getState().accessToken
+      const token = useAuthStore.getState().accessToken
       const response = await fetch('/api/v1/ai/chat', {
         method: 'POST',
         headers: {

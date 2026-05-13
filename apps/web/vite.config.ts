@@ -88,4 +88,21 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('@tanstack/react-router') || id.includes('@tanstack/router-core')) return 'vendor-router'
+          if (id.includes('@tanstack/react-query')) return 'vendor-query'
+          if (id.includes('@tiptap')) return 'vendor-editor'
+          if (id.includes('@dnd-kit')) return 'vendor-dnd'
+          if (id.includes('date-fns') || id.includes('dayjs')) return 'vendor-date'
+          if (id.includes('socket.io-client')) return 'vendor-realtime'
+          if (id.includes('lucide-react')) return 'vendor-icons'
+          return 'vendor'
+        },
+      },
+    },
+  },
 })
