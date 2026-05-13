@@ -205,7 +205,9 @@ const AppWorkspaceIdTemplatesRoute = AppWorkspaceIdTemplatesRouteImport.update({
   id: '/templates',
   path: '/templates',
   getParentRoute: () => AppWorkspaceIdRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.templates.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdSprintsRoute = AppWorkspaceIdSprintsRouteImport.update({
   id: '/sprints',
   path: '/sprints',
