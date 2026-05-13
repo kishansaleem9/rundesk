@@ -83,6 +83,8 @@ const VIRTUALIZE_THRESHOLD = 120
 const TASK_ROW_ESTIMATE_PX = 46
 const BOARD_VIRTUALIZE_THRESHOLD = 80
 const BOARD_CARD_ESTIMATE_PX = 76
+const TABLE_VIRTUALIZE_THRESHOLD = 120
+const TABLE_ROW_ESTIMATE_PX = 36
 
 type StatusMeta = { label: string; color: string; dot: string; pill: string }
 
@@ -1123,6 +1125,7 @@ function TableView({
   const [customOpen, setCustomOpen] = useState<{ taskId: string; fieldId: string } | null>(null)
   const [addActive, setAddActive] = useState(false)
   const [addDraft, setAddDraft] = useState('')
+  const tableParentRef = useRef<HTMLDivElement | null>(null)
   const qc = useQueryClient()
 
   const { data: customFieldByTask = {} } = useQuery({
@@ -1192,6 +1195,19 @@ function TableView({
   ] as const
   const customColumns = projectFields.slice(0, 3)
   const selectedIds = Array.from(selected)
+  const useTableVirtualization = tasks.length >= TABLE_VIRTUALIZE_THRESHOLD
+  const tableRowVirtualizer = useVirtualizer({
+    count: useTableVirtualization ? tasks.length : 0,
+    getScrollElement: () => tableParentRef.current,
+    estimateSize: () => TABLE_ROW_ESTIMATE_PX,
+    overscan: 14,
+  })
+  const tableVirtualItems = useTableVirtualization ? tableRowVirtualizer.getVirtualItems() : []
+  const tableTopPadding = useTableVirtualization && tableVirtualItems.length > 0 ? tableVirtualItems[0]!.start : 0
+  const tableBottomPadding =
+    useTableVirtualization && tableVirtualItems.length > 0
+      ? tableRowVirtualizer.getTotalSize() - tableVirtualItems[tableVirtualItems.length - 1]!.end
+      : 0
   const applyBulkPatch = async (patch: TaskPatch) => {
     await Promise.all(selectedIds.map((id) => onPatchTask(id, patch)))
     setSelected(new Set())
@@ -1255,8 +1271,18 @@ function TableView({
           </div>
 
           {/* Rows */}
+          <div
+            ref={useTableVirtualization ? tableParentRef : undefined}
+            className={cn(useTableVirtualization && 'max-h-[70vh] overflow-auto')}
+          >
           <div className="divide-y divide-border">
-            {tasks.map((task) => {
+            {useTableVirtualization && tableTopPadding > 0 ? (
+              <div style={{ height: tableTopPadding }} aria-hidden="true" />
+            ) : null}
+            {(useTableVirtualization
+              ? tableVirtualItems.map((vi) => ({ task: tasks[vi.index]!, key: `virt-${vi.key}` }))
+              : tasks.map((task) => ({ task, key: task.id }))
+            ).map(({ task, key }) => {
               const dynamicStatus = listStatusByKey[task.status]
               const fallback = DEFAULT_STATUS_META[task.status]
               const meta: StatusMeta = dynamicStatus
@@ -1268,7 +1294,7 @@ function TableView({
               const taskCustom = customFieldByTask[task.id] ?? {}
               return (
                 <div
-                  key={task.id}
+                  key={key}
                   className={cn(
                     'group flex items-stretch h-9 text-sm transition-colors hover:bg-muted/60 even:bg-muted/30',
                     isSelected && 'bg-accent/10',
@@ -1582,6 +1608,9 @@ function TableView({
                 </div>
               )
             })}
+            {useTableVirtualization && tableBottomPadding > 0 ? (
+              <div style={{ height: tableBottomPadding }} aria-hidden="true" />
+            ) : null}
 
             {/* Add task row */}
             <div className="flex items-center h-9">
@@ -1617,6 +1646,7 @@ function TableView({
                 </button>
               )}
             </div>
+          </div>
           </div>
         </div>
       </div>
