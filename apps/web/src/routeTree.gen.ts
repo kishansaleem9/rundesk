@@ -267,7 +267,9 @@ const AppWorkspaceIdAiRoute = AppWorkspaceIdAiRouteImport.update({
   id: '/ai',
   path: '/ai',
   getParentRoute: () => AppWorkspaceIdRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.ai.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdSpaceIdRoute = AppWorkspaceIdSpaceIdRouteImport.update({
   id: '/$spaceId',
   path: '/$spaceId',
