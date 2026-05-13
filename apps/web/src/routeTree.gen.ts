@@ -306,7 +306,9 @@ const AppWorkspaceIdFormsFormIdRoute =
     id: '/$formId',
     path: '/$formId',
     getParentRoute: () => AppWorkspaceIdFormsRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/app.$workspaceId.forms.$formId.lazy').then((d) => d.Route),
+  )
 const AppWorkspaceIdSpaceIdProjectIdRoute =
   AppWorkspaceIdSpaceIdProjectIdRouteImport.update({
     id: '/$projectId',
