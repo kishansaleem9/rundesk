@@ -8,6 +8,8 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
+import { createFileRoute } from '@tanstack/react-router'
+
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SsoCompleteRouteImport } from './routes/sso-complete'
 import { Route as SignUpRouteImport } from './routes/sign-up'
@@ -57,6 +59,10 @@ import { Route as AppWorkspaceIdGoalsGoalIdRouteImport } from './routes/app.$wor
 import { Route as AppWorkspaceIdFormsFormIdRouteImport } from './routes/app.$workspaceId.forms.$formId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdListIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId.$listId'
+
+const AppWorkspaceIdFormsIndexLazyRouteImport = createFileRoute(
+  '/app/$workspaceId/forms/',
+)()
 
 const SsoCompleteRoute = SsoCompleteRouteImport.update({
   id: '/sso-complete',
@@ -327,6 +333,14 @@ const AppWorkspaceIdSpaceIdRoute = AppWorkspaceIdSpaceIdRouteImport.update({
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.$spaceId.lazy').then((d) => d.Route),
 )
+const AppWorkspaceIdFormsIndexLazyRoute =
+  AppWorkspaceIdFormsIndexLazyRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AppWorkspaceIdFormsRoute,
+  } as any).lazy(() =>
+    import('./routes/app.$workspaceId.forms.index.lazy').then((d) => d.Route),
+  )
 const AppWorkspaceIdTimeApprovalsRoute =
   AppWorkspaceIdTimeApprovalsRouteImport.update({
     id: '/approvals',
@@ -428,6 +442,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
   '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
   '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
+  '/app/$workspaceId/forms/': typeof AppWorkspaceIdFormsIndexLazyRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRoutesByTo {
@@ -450,7 +465,6 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
   '/app/$workspaceId/docs': typeof AppWorkspaceIdDocsRoute
-  '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsRouteWithChildren
   '/app/$workspaceId/goals': typeof AppWorkspaceIdGoalsRouteWithChildren
   '/app/$workspaceId/import': typeof AppWorkspaceIdImportRoute
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
@@ -477,6 +491,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
   '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
   '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
+  '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsIndexLazyRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRoutesById {
@@ -528,6 +543,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
   '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
   '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
+  '/app/$workspaceId/forms/': typeof AppWorkspaceIdFormsIndexLazyRoute
   '/app/$workspaceId/$spaceId/$projectId/$listId': typeof AppWorkspaceIdSpaceIdProjectIdListIdRoute
 }
 export interface FileRouteTypes {
@@ -580,6 +596,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/goals/$goalId'
     | '/app/$workspaceId/sprints/$sprintId'
     | '/app/$workspaceId/time/approvals'
+    | '/app/$workspaceId/forms/'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -602,7 +619,6 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/docs'
-    | '/app/$workspaceId/forms'
     | '/app/$workspaceId/goals'
     | '/app/$workspaceId/import'
     | '/app/$workspaceId/inbox'
@@ -629,6 +645,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/goals/$goalId'
     | '/app/$workspaceId/sprints/$sprintId'
     | '/app/$workspaceId/time/approvals'
+    | '/app/$workspaceId/forms'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   id:
     | '__root__'
@@ -679,6 +696,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/goals/$goalId'
     | '/app/$workspaceId/sprints/$sprintId'
     | '/app/$workspaceId/time/approvals'
+    | '/app/$workspaceId/forms/'
     | '/app/$workspaceId/$spaceId/$projectId/$listId'
   fileRoutesById: FileRoutesById
 }
@@ -990,6 +1008,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdSpaceIdRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/forms/': {
+      id: '/app/$workspaceId/forms/'
+      path: '/'
+      fullPath: '/app/$workspaceId/forms/'
+      preLoaderRoute: typeof AppWorkspaceIdFormsIndexLazyRouteImport
+      parentRoute: typeof AppWorkspaceIdFormsRoute
+    }
     '/app/$workspaceId/time/approvals': {
       id: '/app/$workspaceId/time/approvals'
       path: '/approvals'
@@ -1066,10 +1091,12 @@ const AppWorkspaceIdSpaceIdRouteWithChildren =
 
 interface AppWorkspaceIdFormsRouteChildren {
   AppWorkspaceIdFormsFormIdRoute: typeof AppWorkspaceIdFormsFormIdRoute
+  AppWorkspaceIdFormsIndexLazyRoute: typeof AppWorkspaceIdFormsIndexLazyRoute
 }
 
 const AppWorkspaceIdFormsRouteChildren: AppWorkspaceIdFormsRouteChildren = {
   AppWorkspaceIdFormsFormIdRoute: AppWorkspaceIdFormsFormIdRoute,
+  AppWorkspaceIdFormsIndexLazyRoute: AppWorkspaceIdFormsIndexLazyRoute,
 }
 
 const AppWorkspaceIdFormsRouteWithChildren =
