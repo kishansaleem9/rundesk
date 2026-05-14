@@ -9,6 +9,11 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+set -a
+# shellcheck disable=SC1091
+source .env
+set +a
+
 required_table_missing() {
   docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
     "SELECT to_regclass('public.organization_members') IS NULL;" | tr -d '[:space:]'
@@ -44,11 +49,40 @@ handle_schema_drift_or_failure() {
   exit 1
 }
 
+drizzle_legacy_baseline_needed() {
+  local count has_users
+  count="$(
+    docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
+      "SELECT COUNT(*)::text FROM drizzle.__drizzle_migrations;" | tr -d '[:space:]'
+  )"
+  has_users="$(
+    docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
+      "SELECT (to_regclass('public.users') IS NOT NULL)::text;" | tr -d '[:space:]'
+  )"
+  [[ "${count}" == "0" && "${has_users}" == "t" ]]
+}
+
+run_drizzle_migrate() {
+  docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit migrate"
+}
+
 apply_schema() {
+  if drizzle_legacy_baseline_needed; then
+    echo "▶ Legacy DB: drizzle journal empty but schema present — inserting baseline hashes 0000–0008"
+    docker exec -i rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -v ON_ERROR_STOP=1 \
+      < deploy/baseline-drizzle-0000-0008.sql
+  fi
+
   echo "▶ Applying schema with drizzle-kit migrate"
-  if ! docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit migrate"; then
-    handle_schema_drift_or_failure "drizzle-kit migrate failed."
-    return
+  if ! run_drizzle_migrate; then
+    echo "⚠ First migrate attempt failed (common on legacy DBs where SQL was applied outside Drizzle). Running hash backfill…"
+  fi
+
+  echo "▶ Syncing Drizzle migration hashes for already-applied SQL (idempotent)"
+  node deploy/drizzle-backfill-missing-hashes.mjs
+
+  if ! run_drizzle_migrate; then
+    handle_schema_drift_or_failure "drizzle-kit migrate failed after journal hash backfill."
   fi
 
   local missing_table
@@ -63,7 +97,7 @@ apply_schema() {
 
 echo "▶ Starting one-command production deploy"
 echo "▶ Pulling latest from git"
-git pull
+git pull --ff-only
 
 echo "▶ Building web SPA → apps/web/dist"
 rm -rf apps/web/dist
