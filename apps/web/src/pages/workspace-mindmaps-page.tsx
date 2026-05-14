@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -53,7 +53,8 @@ export function MindMapsPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/mindmaps' })
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
-  const [active, setActive] = useState<MindMap | null>(null)
+  /** Editor target; map row (incl. updatedAt) always comes from React Query so PATCH versioning stays correct. */
+  const [activeMapId, setActiveMapId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [nodes, setNodes] = useState<MapNode[]>([
     { id: 'root', label: 'Root Topic', x: 520, y: 260 },
@@ -67,6 +68,16 @@ export function MindMapsPage() {
     queryKey: ['workspace-canvases', workspaceId, 'mindmap'],
     queryFn: () => api<MindMap[]>(`/workspaces/${workspaceId}/canvases?type=mindmap`),
   })
+  const maps = mapsQuery.data ?? []
+  const active = useMemo(
+    () => (activeMapId ? maps.find((m) => m.id === activeMapId) ?? null : null),
+    [maps, activeMapId],
+  )
+  const activeRef = useRef(active)
+  activeRef.current = active
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+
   const createMap = useMutation({
     mutationFn: (title: string) =>
       api<MindMap>(`/workspaces/${workspaceId}/canvases`, {
@@ -77,33 +88,57 @@ export function MindMapsPage() {
           data: { nodes: [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }] as MapNode[] },
         },
       }),
-    onSuccess: async (created) => {
-      await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] })
-      setActive(created)
+    onSuccess: (created) => {
+      qc.setQueryData<MindMap[] | undefined>(
+        ['workspace-canvases', workspaceId, 'mindmap'],
+        (prev) => {
+          if (!prev) return [created]
+          if (prev.some((m) => m.id === created.id)) {
+            return prev.map((m) => (m.id === created.id ? created : m))
+          }
+          return [created, ...prev]
+        },
+      )
+      void qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] })
+      setActiveMapId(created.id)
       setNodes(created.data?.nodes ?? [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }])
       setSelectedNodeId('root')
       setDraftLabel('Root Topic')
     },
   })
   const updateMap = useMutation({
-    mutationFn: (payload: { id: string; title?: string; data?: unknown }) =>
-      api(`/workspaces/${workspaceId}/canvases/${payload.id}`, {
+    mutationFn: (payload: {
+      id: string
+      title?: string
+      data?: unknown
+      expectedUpdatedAt?: string | null
+    }) =>
+      api<MindMap>(`/workspaces/${workspaceId}/canvases/${payload.id}`, {
         method: 'PATCH',
         body: {
-          ...payload,
-          expectedUpdatedAt: active?.updatedAt,
+          title: payload.title,
+          data: payload.data,
+          ...(payload.expectedUpdatedAt != null && payload.expectedUpdatedAt !== ''
+            ? { expectedUpdatedAt: payload.expectedUpdatedAt }
+            : {}),
         },
       }),
+    onSuccess: (row) => {
+      qc.setQueryData<MindMap[] | undefined>(
+        ['workspace-canvases', workspaceId, 'mindmap'],
+        (prev) => prev?.map((m) => (m.id === row.id ? { ...m, ...row } : m)) ?? prev,
+      )
+    },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        toast('Mind map updated by teammate', {
+        toast('Mind map version conflict', {
+          id: 'mindmap-canvas-conflict',
           description: 'Latest version was loaded. Please retry your last edit.',
         })
       }
       await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] })
     },
   })
-  const maps = mapsQuery.data ?? []
   const filtered = maps.filter((m) =>
     m.title.toLowerCase().includes(query.toLowerCase()),
   )
@@ -116,20 +151,28 @@ export function MindMapsPage() {
     if (Array.isArray(fromServer) && fromServer.length > 0) {
       setNodes(fromServer)
       const selected = fromServer.find((n) => n.id === selectedNodeId)
-      setDraftLabel(selected?.label ?? fromServer[0]?.label ?? '')
+      if (selected) setDraftLabel(selected.label)
+      else {
+        const root = fromServer[0]
+        setSelectedNodeId(root.id)
+        setDraftLabel(root.label)
+      }
     }
-  }, [active?.id, maps])
+  }, [active?.id, maps, selectedNodeId])
 
   useEffect(() => {
-    if (!active) return
+    if (!activeMapId) return
     const timer = window.setTimeout(() => {
+      const row = activeRef.current
+      if (!row || row.id !== activeMapId) return
       updateMap.mutate({
-        id: active.id,
-        data: { nodes },
+        id: activeMapId,
+        data: { nodes: nodesRef.current },
+        expectedUpdatedAt: row.updatedAt ?? undefined,
       })
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [active?.id, nodes])
+  }, [activeMapId, nodes, updateMap])
 
   useEffect(() => {
     const socket = getRealtimeSocket()
@@ -174,14 +217,38 @@ export function MindMapsPage() {
     }
   }, [workspaceId, qc, me?.id])
 
-  if (active) {
+  const flushMindMapSave = useCallback(async () => {
+    const row = activeRef.current
+    const id = activeMapId
+    if (!row || !id || row.id !== id) return
+    try {
+      await updateMap.mutateAsync({
+        id,
+        data: { nodes: nodesRef.current },
+        expectedUpdatedAt: row.updatedAt ?? undefined,
+      })
+    } catch {
+      /* onError handles toast + invalidate */
+    }
+  }, [activeMapId, updateMap])
+
+  if (activeMapId) {
+    if (!active) {
+      return (
+        <div className="p-6 flex min-h-[40vh] items-center justify-center text-muted-foreground text-sm">
+          Loading map…
+        </div>
+      )
+    }
     return (
       <MindMapEditor
         map={active}
         nodes={nodes}
         selectedNodeId={selectedNodeId}
         draftLabel={draftLabel}
-        onBack={() => setActive(null)}
+        onBack={() => {
+          void flushMindMapSave().finally(() => setActiveMapId(null))
+        }}
         onSelect={(id) => {
           setSelectedNodeId(id)
           const node = nodes.find((n) => n.id === id)
@@ -191,22 +258,25 @@ export function MindMapsPage() {
           setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, x, y } : n)))
         }}
         onCreateChild={() => {
-          const base = nodes.find((n) => n.id === selectedNodeId)
-          if (!base) return
-          const id = `n-${crypto.randomUUID()}`
-          // Inherit the branch color so siblings share a hue
-          const inheritedColor = base.color ?? BRANCH_PALETTE[nodes.filter((n) => n.parentId === base.id).length % BRANCH_PALETTE.length]
-          setNodes((prev) => [
-            ...prev,
-            {
-              id,
-              label: 'New branch',
-              x: base.x + 160,
-              y: base.y + 40,
-              parentId: base.id,
-              color: inheritedColor,
-            },
-          ])
+          setNodes((prev) => {
+            const base = prev.find((n) => n.id === selectedNodeId)
+            if (!base) return prev
+            const id = `n-${crypto.randomUUID()}`
+            const siblingCount = prev.filter((n) => n.parentId === base.id).length
+            const inheritedColor =
+              base.color ?? BRANCH_PALETTE[siblingCount % BRANCH_PALETTE.length]
+            return [
+              ...prev,
+              {
+                id,
+                label: 'New branch',
+                x: base.x + 160,
+                y: base.y + 40,
+                parentId: base.id,
+                color: inheritedColor,
+              },
+            ]
+          })
         }}
         onLabelChange={(value) => {
           setDraftLabel(value)
@@ -220,16 +290,22 @@ export function MindMapsPage() {
             toast('Root node cannot be deleted')
             return
           }
-          const toRemove = new Set<string>()
-          const stack = [selectedNodeId]
-          while (stack.length > 0) {
-            const id = stack.pop()!
-            toRemove.add(id)
-            for (const n of nodes) if (n.parentId === id) stack.push(n.id)
-          }
-          setNodes((prev) => prev.filter((n) => !toRemove.has(n.id)))
-          setSelectedNodeId('root')
-          setDraftLabel(nodes.find((n) => n.id === 'root')?.label ?? '')
+          setNodes((prev) => {
+            const toRemove = new Set<string>()
+            const stack = [selectedNodeId]
+            while (stack.length > 0) {
+              const id = stack.pop()!
+              toRemove.add(id)
+              for (const n of prev) if (n.parentId === id) stack.push(n.id)
+            }
+            const next = prev.filter((n) => !toRemove.has(n.id))
+            const root = next.find((n) => n.id === 'root')
+            queueMicrotask(() => {
+              setSelectedNodeId('root')
+              setDraftLabel(root?.label ?? '')
+            })
+            return next
+          })
         }}
         onAutoLayout={() => {
           setNodes((prev) => radialLayout(prev))
@@ -283,7 +359,7 @@ export function MindMapsPage() {
             variant="glass"
             className="cursor-pointer p-0 overflow-hidden transition-all hover:shadow-glow hover:border-accent/40"
             onClick={() => {
-              setActive(m)
+              setActiveMapId(m.id)
               const initialNodes = m.data?.nodes ?? [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }]
               setNodes(initialNodes)
               const root = initialNodes[0]
