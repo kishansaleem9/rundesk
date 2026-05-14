@@ -105,6 +105,13 @@ export function MindMapsPage() {
       setSelectedNodeId('root')
       setDraftLabel('Root Topic')
     },
+    onError: (error) => {
+      if (error instanceof ApiError) {
+        toast('Could not create mind map', { description: error.message })
+        return
+      }
+      toast('Could not create mind map', { description: 'Something went wrong' })
+    },
   })
   const updateMap = useMutation({
     mutationFn: (payload: {
@@ -348,6 +355,20 @@ export function MindMapsPage() {
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
+
+      {mapsQuery.isError ? (
+        <Card className="p-4 border-destructive/40 bg-destructive/5 max-w-2xl">
+          <div className="font-medium text-destructive">Could not load mind maps</div>
+          <p className="text-sm text-muted-foreground mt-2">
+            {mapsQuery.error instanceof ApiError
+              ? mapsQuery.error.message
+              : 'Request failed'}
+          </p>
+          <Button variant="secondary" className="mt-4" onClick={() => void mapsQuery.refetch()}>
+            Retry
+          </Button>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {mapsQuery.isLoading ? (
