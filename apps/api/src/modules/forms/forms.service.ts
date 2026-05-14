@@ -584,18 +584,51 @@ export class FormsService {
       }
     }
 
-    const createdTaskId = await this.createTaskForSubmission(formWithFields, data, submitterEmail, submitterName)
+    const payload = { ...data } as Record<string, string | string[]>
 
     const [submission] = await this.db
       .insert(formSubmissions)
       .values({
         formId: formWithFields.id,
-        createdTaskId,
+        createdTaskId: null,
         submitterEmail,
         submitterName,
-        data,
+        data: payload,
       })
       .returning()
+
+    let createdTaskId: string | null = null
+    try {
+      const taskId = await this.createTaskForSubmission(
+        formWithFields,
+        payload,
+        submitterEmail,
+        submitterName,
+      )
+      if (taskId) {
+        createdTaskId = taskId
+        await this.db
+          .update(formSubmissions)
+          .set({ createdTaskId })
+          .where(eq(formSubmissions.id, submission.id))
+      }
+    } catch (err) {
+      const message =
+        err instanceof BadRequestException
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Could not create task from this submission'
+      const patched = this.withRetryMeta(payload, {
+        status: 'error',
+        message,
+        at: new Date().toISOString(),
+      })
+      await this.db
+        .update(formSubmissions)
+        .set({ data: patched })
+        .where(eq(formSubmissions.id, submission.id))
+    }
 
     return {
       ok: true,
