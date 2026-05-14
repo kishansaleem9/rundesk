@@ -3,7 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Button, Card, Input } from '@rundesk/ui'
 import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 
 export const Route = createFileRoute('/submit/$slug')({
   component: PublicFormPage,
@@ -201,8 +201,10 @@ function PublicFormPage() {
             </Button>
 
             {submitMutation.isError && (
-              <p className="text-sm text-destructive text-center">
-                Submission failed. Please try again.
+              <p className="text-sm text-destructive text-center" role="alert">
+                {submitMutation.error instanceof ApiError
+                  ? submitMutation.error.message
+                  : 'Submission failed. Please try again.'}
               </p>
             )}
           </Card>
