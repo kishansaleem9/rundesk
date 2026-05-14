@@ -38,6 +38,7 @@ export function FormsPage() {
   const formsQuery = useQuery({
     queryKey: ['forms', workspaceId],
     queryFn: () => api<FormSummary[]>(`/workspaces/${workspaceId}/forms`),
+    refetchOnMount: 'always',
   })
 
   const createForm = useMutation({
@@ -220,7 +221,14 @@ function FormCard({
         >
           {form.isPublic ? 'Public' : 'Internal'}
         </span>
-        <span>{form.submissionCount} submission{form.submissionCount !== 1 ? 's' : ''}</span>
+        <Link
+          to="/app/$workspaceId/forms/$formId"
+          params={{ workspaceId, formId: form.id }}
+          search={{ tab: 'submissions' }}
+          className="hover:text-foreground hover:underline"
+        >
+          {form.submissionCount} submission{form.submissionCount !== 1 ? 's' : ''}
+        </Link>
       </div>
 
       {/* Public link */}
