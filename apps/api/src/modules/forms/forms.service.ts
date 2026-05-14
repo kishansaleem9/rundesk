@@ -288,9 +288,11 @@ export class FormsService {
         isEnabled: forms.isEnabled,
         isArchived: forms.isArchived,
         createdAt: forms.createdAt,
+        // Correlate on outer `forms.id` in SQL text — `${forms.id}` here binds as a single
+        // parameter and breaks per-row counts in PostgreSQL.
         submissionCount: sql<number>`(
-          select count(*) from form_submissions fs where fs.form_id = ${forms.id}
-        )::int`,
+          select count(*)::int from form_submissions fs where fs.form_id = forms.id
+        )`,
       })
       .from(forms)
       .where(
