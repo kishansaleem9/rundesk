@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { useEffect } from 'react'
+import { devServerApiOrigin } from '../lib/dev-api-origin'
 
 export const Route = createFileRoute('/d/$slug')({
   component: PublicDocViewer,
@@ -22,10 +23,7 @@ type PublicDoc = {
 function PublicDocViewer() {
   const { slug } = Route.useParams() as { slug: string }
 
-  const apiOrigin =
-    typeof window !== 'undefined' && window.location.port === '5173'
-      ? `${window.location.protocol}//${window.location.hostname}:3001`
-      : ''
+  const apiOrigin = typeof window !== 'undefined' ? devServerApiOrigin() : ''
 
   const docQuery = useQuery({
     queryKey: ['public-doc', slug],
