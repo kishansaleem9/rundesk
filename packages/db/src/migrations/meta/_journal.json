@@ -71,6 +71,111 @@
       "when": 1900000006000,
       "tag": "0009_workspace_canvases",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1900000007000,
+      "tag": "0010_time_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1900000008000,
+      "tag": "0011_announcements",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1900000009000,
+      "tag": "0012_announcement_dismissals",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1900000010000,
+      "tag": "0013_integration_access_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1900000011000,
+      "tag": "0014_workspace_member_capacity",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1900000012000,
+      "tag": "0015_doc_comments",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1900000013000,
+      "tag": "0016_webhook_delivery_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1900000014000,
+      "tag": "0017_sso_and_scim",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1900000015000,
+      "tag": "0018_workspace_groups",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1900000016000,
+      "tag": "0019_docs_public_share",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1900000017000,
+      "tag": "0020_custom_list_statuses",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1900000018000,
+      "tag": "0021_calendar_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1900000019000,
+      "tag": "0022_email_to_task",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1900000020000,
+      "tag": "0023_custom_roles",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1900000021000,
+      "tag": "0024_task_templates",
+      "breakpoints": true
     }
   ]
 }
