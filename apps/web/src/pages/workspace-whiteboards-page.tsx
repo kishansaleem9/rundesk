@@ -6,6 +6,7 @@ import {
   Circle as CircleIcon,
   Diamond,
   Frame,
+  GripVertical,
   Grid3x3,
   Hexagon,
   MoveDiagonal,
@@ -71,6 +72,8 @@ export function WhiteboardsPage() {
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null)
   const [items, setItems] = useState<BoardItem[]>([])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const selectedIdsRef = useRef<string[]>([])
+  selectedIdsRef.current = selectedIds
   const [snapEnabled, setSnapEnabled] = useState(true)
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const { remoteCursors, onPointerMove, onPointerLeave } = useCanvasCursors(
@@ -214,29 +217,50 @@ export function WhiteboardsPage() {
     }
   }, [workspaceId, qc, me?.id])
 
+  const translateSelected = useCallback(
+    (dx: number, dy: number) => {
+      setItems((prev) => {
+        const ids = selectedIdsRef.current
+        return prev.map((p) =>
+          ids.includes(p.id)
+            ? { ...p, x: snap(p.x + dx, snapEnabled), y: snap(p.y + dy, snapEnabled) }
+            : p,
+        )
+      })
+    },
+    [snapEnabled],
+  )
+
   // Keyboard shortcuts: Delete = remove selected; Cmd+D = duplicate
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (selectedIds.length === 0) return
+      const ids = selectedIdsRef.current
+      if (ids.length === 0) return
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault()
-        setItems((prev) => prev.filter((p) => !selectedIds.includes(p.id)))
+        setItems((prev) => prev.filter((p) => !ids.includes(p.id)))
         setSelectedIds([])
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault()
-        const copies = items
-          .filter((it) => selectedIds.includes(it.id))
-          .map((it) => ({ ...it, id: `${it.type}-${crypto.randomUUID()}`, x: it.x + 20, y: it.y + 20 }))
-        setItems((prev) => [...prev, ...copies])
-        setSelectedIds(copies.map((c) => c.id))
+        setItems((prev) => {
+          const sel = prev.filter((it) => ids.includes(it.id))
+          const copies = sel.map((it) => ({
+            ...it,
+            id: `${it.type}-${crypto.randomUUID()}`,
+            x: it.x + 20,
+            y: it.y + 20,
+          }))
+          setSelectedIds(copies.map((c) => c.id))
+          return [...prev, ...copies]
+        })
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedIds, items])
+  }, [])
 
   function addItem(type: BoardItem['type'], shape?: ShapeKind) {
     const id = `${shape ?? type}-${crypto.randomUUID()}`
@@ -261,27 +285,26 @@ export function WhiteboardsPage() {
   const selectedItem = items.find((it) => selectedIds.length === 1 && it.id === selectedIds[0]) ?? null
 
   const setItemColor = (color: string) => {
-    if (selectedIds.length === 0) return
-    setItems((prev) => prev.map((p) => (selectedIds.includes(p.id) ? { ...p, color } : p)))
+    const ids = selectedIdsRef.current
+    if (ids.length === 0) return
+    setItems((prev) => prev.map((p) => (ids.includes(p.id) ? { ...p, color } : p)))
   }
 
   const bringToFront = () => {
-    if (selectedIds.length === 0) return
-    const maxZ = Math.max(0, ...items.map((p) => p.z ?? 0))
-    setItems((prev) =>
-      prev.map((p) =>
-        selectedIds.includes(p.id) ? { ...p, z: maxZ + 1 } : p,
-      ),
-    )
+    const ids = selectedIdsRef.current
+    if (ids.length === 0) return
+    setItems((prev) => {
+      const maxZ = Math.max(0, ...prev.map((p) => p.z ?? 0))
+      return prev.map((p) => (ids.includes(p.id) ? { ...p, z: maxZ + 1 } : p))
+    })
   }
   const sendToBack = () => {
-    if (selectedIds.length === 0) return
-    const minZ = Math.min(0, ...items.map((p) => p.z ?? 0))
-    setItems((prev) =>
-      prev.map((p) =>
-        selectedIds.includes(p.id) ? { ...p, z: minZ - 1 } : p,
-      ),
-    )
+    const ids = selectedIdsRef.current
+    if (ids.length === 0) return
+    setItems((prev) => {
+      const minZ = Math.min(0, ...prev.map((p) => p.z ?? 0))
+      return prev.map((p) => (ids.includes(p.id) ? { ...p, z: minZ - 1 } : p))
+    })
   }
 
   const sortedItems = useMemo(
@@ -301,7 +324,8 @@ export function WhiteboardsPage() {
             <Badge variant="secondary" className="ml-1">Live</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Drag, resize, multi-select. Snap-to-grid when enabled. <kbd className="rounded border px-1 text-[10px]">Del</kbd> removes, <kbd className="rounded border px-1 text-[10px]">⌘D</kbd> duplicates.
+            Drag from the top grip, resize from the corner. Snap-to-grid when enabled.{' '}
+            <kbd className="rounded border px-1 text-[10px]">Del</kbd> removes, <kbd className="rounded border px-1 text-[10px]">⌘D</kbd> duplicates.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -380,7 +404,8 @@ export function WhiteboardsPage() {
               size="sm"
               variant="ghost"
               onClick={() => {
-                setItems((prev) => prev.filter((p) => !selectedIds.includes(p.id)))
+                const ids = selectedIdsRef.current
+                setItems((prev) => prev.filter((p) => !ids.includes(p.id)))
                 setSelectedIds([])
               }}
               title="Delete (Del)"
@@ -445,15 +470,7 @@ export function WhiteboardsPage() {
                     : [item.id],
                 )
               }}
-              onTranslate={(dx, dy) => {
-                setItems((prev) =>
-                  prev.map((p) =>
-                    selectedIds.includes(p.id)
-                      ? { ...p, x: snap(p.x + dx, snapEnabled), y: snap(p.y + dy, snapEnabled) }
-                      : p,
-                  ),
-                )
-              }}
+              onTranslate={translateSelected}
               onResize={(w, h) => {
                 setItems((prev) =>
                   prev.map((p) =>
@@ -492,7 +509,7 @@ function DraggableItem({
   const [dragging, setDragging] = useState(false)
   const beginDrag = useCallback(
     (e: React.MouseEvent) => {
-      if ((e.target as HTMLElement).dataset.handle === 'resize') return
+      e.preventDefault()
       onSelect(e.shiftKey)
       setDragging(true)
       let lastX = e.clientX
@@ -518,6 +535,7 @@ function DraggableItem({
   const beginResize = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
+      e.preventDefault()
       const startX = e.clientX
       const startY = e.clientY
       const baseW = item.w
@@ -541,7 +559,7 @@ function DraggableItem({
   return (
     <div
       className={cn(
-        'absolute group',
+        'absolute flex flex-col overflow-visible rounded-lg',
         selected && 'ring-2 ring-brand-500',
         dragging && 'cursor-grabbing',
       )}
@@ -553,32 +571,40 @@ function DraggableItem({
         zIndex: item.z ?? 0,
         ...shapeStyles.outer,
       }}
-      onMouseDown={beginDrag}
     >
       <div
-        className="absolute inset-0 rounded-lg shadow-card"
-        style={{ backgroundColor: item.color ?? '#bfdbfe', ...shapeStyles.inner }}
-      />
-      <textarea
-        value={item.content}
-        onChange={(e) => onContentChange(e.target.value)}
-        onMouseDown={(e) => e.stopPropagation()}
-        className={cn(
-          'relative w-full h-full resize-none bg-transparent p-2 text-sm outline-none',
-          item.type === 'text' && 'font-medium',
+        className="flex h-8 shrink-0 cursor-grab select-none items-center gap-1 border-b border-black/10 bg-black/10 px-1.5 touch-none"
+        onMouseDown={beginDrag}
+        title="Drag"
+      >
+        <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground/90" aria-hidden />
+      </div>
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-b-lg">
+        <div
+          className="absolute inset-0 rounded-b-lg shadow-card"
+          style={{ backgroundColor: item.color ?? '#bfdbfe', ...shapeStyles.inner }}
+        />
+        <textarea
+          value={item.content}
+          onChange={(e) => onContentChange(e.target.value)}
+          onMouseDown={(e) => onSelect(e.shiftKey)}
+          className={cn(
+            'relative z-[1] h-full min-h-0 w-full resize-none rounded-b-lg bg-transparent p-2 text-sm outline-none',
+            item.type === 'text' && 'font-medium',
+          )}
+        />
+        {selected && (
+          <button
+            type="button"
+            data-handle="resize"
+            onMouseDown={beginResize}
+            className="absolute -right-1.5 -bottom-1.5 z-[2] h-4 w-4 cursor-nwse-resize rounded-sm border border-brand-500 bg-card shadow touch-none"
+            aria-label="Resize"
+          >
+            <MoveDiagonal className="h-3 w-3 m-0.5 text-brand-500" />
+          </button>
         )}
-      />
-      {selected && (
-        <button
-          type="button"
-          data-handle="resize"
-          onMouseDown={beginResize}
-          className="absolute -right-1.5 -bottom-1.5 h-4 w-4 cursor-nwse-resize rounded-sm border border-brand-500 bg-card shadow"
-          aria-label="Resize"
-        >
-          <MoveDiagonal className="h-3 w-3 m-0.5 text-brand-500" />
-        </button>
-      )}
+      </div>
       {snapEnabled && selected && dragging && (
         <div className="pointer-events-none absolute -top-5 left-0 text-[10px] text-muted-foreground tabular-nums">
           {Math.round(item.x)}, {Math.round(item.y)}
