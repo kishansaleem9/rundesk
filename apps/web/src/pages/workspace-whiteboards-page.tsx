@@ -105,19 +105,36 @@ export function WhiteboardsPage() {
     [boards, activeBoardId],
   )
 
+  const activeBoardRef = useRef(activeBoard)
+  activeBoardRef.current = activeBoard
+
   const updateBoard = useMutation({
-    mutationFn: (payload: { id: string; title?: string; data?: unknown }) =>
-      api(`/workspaces/${workspaceId}/canvases/${payload.id}`, {
+    mutationFn: (payload: {
+      id: string
+      title?: string
+      data?: unknown
+      expectedUpdatedAt?: string | null
+    }) =>
+      api<Whiteboard>(`/workspaces/${workspaceId}/canvases/${payload.id}`, {
         method: 'PATCH',
         body: {
           title: payload.title,
           data: payload.data,
-          expectedUpdatedAt: activeBoard?.updatedAt,
+          ...(payload.expectedUpdatedAt != null && payload.expectedUpdatedAt !== ''
+            ? { expectedUpdatedAt: payload.expectedUpdatedAt }
+            : {}),
         },
       }),
+    onSuccess: (row) => {
+      qc.setQueryData<Whiteboard[] | undefined>(
+        ['workspace-canvases', workspaceId, 'whiteboard'],
+        (prev) => prev?.map((b) => (b.id === row.id ? { ...b, ...row } : b)) ?? prev,
+      )
+    },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        toast('Board updated by teammate', {
+        toast('Board version conflict', {
+          id: 'whiteboard-canvas-conflict',
           description: 'Latest version was loaded. Please apply your change again.',
         })
       }
@@ -142,7 +159,14 @@ export function WhiteboardsPage() {
   useEffect(() => {
     if (!activeBoardId) return
     const timer = window.setTimeout(() => {
-      updateBoard.mutate({ id: activeBoardId, data: { items } })
+      const board = activeBoardRef.current
+      const expected =
+        board && board.id === activeBoardId ? (board.updatedAt ?? undefined) : undefined
+      updateBoard.mutate({
+        id: activeBoardId,
+        data: { items },
+        expectedUpdatedAt: expected,
+      })
     }, 400)
     return () => window.clearTimeout(timer)
   }, [activeBoardId, items, updateBoard])
