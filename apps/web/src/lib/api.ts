@@ -106,7 +106,34 @@ export async function api<T = unknown>(
   }
 
   const text = await res.text()
-  const parsed: Envelope<T> = text ? JSON.parse(text) : { data: null, error: null }
+  let parsed: Envelope<T>
+  if (!text) {
+    parsed = { data: null, error: null }
+  } else {
+    try {
+      const raw = JSON.parse(text)
+      if (
+        raw === null ||
+        typeof raw !== 'object' ||
+        !('data' in raw) ||
+        !('error' in raw)
+      ) {
+        throw new ApiError(
+          res.ok ? 502 : res.status,
+          'Unexpected API response (not JSON from Rundesk API). Check that the Nest server is running and that Vite proxies /api to the correct origin (VITE_DEV_API_ORIGIN, default port 3001).',
+          { status: res.status, snippet: text.slice(0, 240) },
+        )
+      }
+      parsed = raw as Envelope<T>
+    } catch (e) {
+      if (e instanceof ApiError) throw e
+      throw new ApiError(
+        res.ok ? 502 : res.status,
+        `Invalid JSON from API: ${e instanceof Error ? e.message : String(e)}`,
+        { status: res.status, snippet: text.slice(0, 240) },
+      )
+    }
+  }
 
   if (!res.ok || parsed.error) {
     const err = parsed.error ?? { status: res.status, message: res.statusText }
