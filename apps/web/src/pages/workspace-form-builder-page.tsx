@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import {
@@ -87,9 +87,18 @@ function safeCsv(value: string): string {
 
 export function FormBuilderPage() {
   const { workspaceId, formId } = useParams({ from: '/app/$workspaceId/forms/$formId' })
+  const search = useSearch({ from: '/app/$workspaceId/forms/$formId' })
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'builder' | 'settings' | 'submissions'>('builder')
+  const [activeTab, setActiveTab] = useState<'builder' | 'settings' | 'submissions'>(() =>
+    search.tab === 'submissions' || search.tab === 'settings' || search.tab === 'builder' ? search.tab : 'builder',
+  )
+
+  useEffect(() => {
+    if (search.tab === 'submissions' || search.tab === 'settings' || search.tab === 'builder') {
+      setActiveTab(search.tab)
+    }
+  }, [search.tab])
   const [expandedField, setExpandedField] = useState<string | null>(null)
   const [addingField, setAddingField] = useState(false)
   const [newFieldType, setNewFieldType] = useState('short_text')
@@ -105,6 +114,12 @@ export function FormBuilderPage() {
     queryFn: () => api<Submission[]>(`/workspaces/${workspaceId}/forms/${formId}/submissions`),
     enabled: activeTab === 'submissions',
   })
+
+  useEffect(() => {
+    if (activeTab !== 'submissions' || !submissionsQuery.isSuccess) return
+    void qc.invalidateQueries({ queryKey: ['forms', workspaceId] })
+  }, [activeTab, submissionsQuery.isSuccess, submissionsQuery.dataUpdatedAt, workspaceId, qc])
+
   const workspaceListOptionsQuery = useQuery({
     queryKey: ['workspace-list-routing-options', workspaceId],
     queryFn: async () => {
