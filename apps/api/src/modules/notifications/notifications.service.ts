@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common'
-import { eq, and, isNull, desc, sql } from 'drizzle-orm'
+import { eq, and, isNull, desc, sql, inArray } from 'drizzle-orm'
 import { notifications, users, webPushSubscriptions } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -7,6 +7,7 @@ import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 import webpush from 'web-push'
+import { extractMentionUserIds, formatMentionsInText } from '../../common/utils/mentions'
 
 type NotificationType =
   | 'task_assigned'
@@ -107,6 +108,8 @@ export class NotificationsService {
       taskTitle?: string
       commentSnippet?: string
       dueDateLabel?: string
+      /** When set, task_commented emails use the "resolved" template instead of "new comment". */
+      commentVariant?: 'created' | 'resolved'
     }
   }) {
     const { prefs, timezone } = await this.getUserNotificationContext(data.userId)
@@ -119,6 +122,10 @@ export class NotificationsService {
       return null
     }
 
+    const formattedBody = data.body
+      ? await this.formatMentionBody(data.body)
+      : data.body
+
     let row: any = null
     if (matrix.inApp || matrix.web || matrix.mobile) {
       ;[row] = await this.db
@@ -129,7 +136,7 @@ export class NotificationsService {
           actorId: data.actorId ?? null,
           type: data.type,
           title: data.title,
-          body: data.body,
+          body: formattedBody,
           target: data.target,
         })
         .returning()
@@ -146,12 +153,12 @@ export class NotificationsService {
 
     if (matrix.email && !inQuietHours) {
       // Best-effort email — do not await, never throws
-      this.sendEmail(data).catch(() => undefined)
+      this.sendEmail({ ...data, body: formattedBody }).catch(() => undefined)
     }
     if (matrix.web && !inQuietHours) {
       this.sendWebPush(data.userId, {
         title: data.title,
-        body: data.body,
+        body: formattedBody,
         url: data.target?.url ? (data.target.url.startsWith('http') ? data.target.url : `${this.appUrl}${data.target.url}`) : this.appUrl,
       }).catch(() => undefined)
     }
@@ -213,26 +220,59 @@ export class NotificationsService {
     return (row?.notificationPreferences as NotificationPreferences | undefined) ?? merged
   }
 
-  list(userId: string, opts: { unreadOnly?: boolean; limit?: number } = {}) {
+  async list(userId: string, opts: { unreadOnly?: boolean; limit?: number } = {}) {
     const where = opts.unreadOnly
       ? and(eq(notifications.userId, userId), isNull(notifications.readAt))
       : eq(notifications.userId, userId)
-    return this.db
+    const rows = await this.db
       .select()
       .from(notifications)
       .leftJoin(users, eq(users.id, notifications.actorId))
       .where(where)
       .orderBy(desc(notifications.createdAt))
       .limit(opts.limit ?? 50)
-      .then((rows) =>
-        rows.map((row: any) => ({
-          ...(row.notifications ?? row),
-          actor:
-            row.users && row.users.id
-              ? { id: row.users.id, displayName: row.users.displayName, email: row.users.email }
-              : null,
-        })),
-      )
+
+    const mapped = rows.map((row: any) => ({
+      ...(row.notifications ?? row),
+      actor:
+        row.users && row.users.id
+          ? { id: row.users.id, displayName: row.users.displayName, email: row.users.email }
+          : null,
+    }))
+
+    const mentionIds = new Set<string>()
+    for (const n of mapped) {
+      if (typeof n.body === 'string') {
+        for (const id of extractMentionUserIds(n.body)) mentionIds.add(id)
+      }
+    }
+    const namesById = await this.resolveMentionDisplayNames([...mentionIds])
+
+    return mapped.map((n) => ({
+      ...n,
+      body:
+        typeof n.body === 'string' && n.body.length > 0
+          ? formatMentionsInText(n.body, namesById)
+          : n.body,
+    }))
+  }
+
+  private async formatMentionBody(body: string): Promise<string> {
+    const ids = extractMentionUserIds(body)
+    if (ids.length === 0) return body
+    const namesById = await this.resolveMentionDisplayNames(ids)
+    return formatMentionsInText(body, namesById)
+  }
+
+  private async resolveMentionDisplayNames(userIds: string[]): Promise<Record<string, string>> {
+    if (userIds.length === 0) return {}
+    const rows = await this.db
+      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(inArray(users.id, userIds))
+    return Object.fromEntries(
+      rows.map((r) => [r.id, (r.displayName?.trim() || r.email?.trim() || 'teammate') as string]),
+    )
   }
 
   async markRead(userId: string, notificationId: string) {
@@ -316,15 +356,27 @@ export class NotificationsService {
         break
 
       case 'task_commented':
-        await this.email.sendComment({
-          to: recipient.email,
-          recipientName: recipient.displayName,
-          actorName,
-          taskTitle,
-          taskUrl,
-          commentSnippet: ctx.commentSnippet ?? '(view in app)',
-          workspaceName,
-        })
+        if (ctx.commentVariant === 'resolved') {
+          await this.email.sendCommentResolved({
+            to: recipient.email,
+            recipientName: recipient.displayName,
+            actorName,
+            taskTitle,
+            taskUrl,
+            commentSnippet: ctx.commentSnippet ?? '(view in app)',
+            workspaceName,
+          })
+        } else {
+          await this.email.sendComment({
+            to: recipient.email,
+            recipientName: recipient.displayName,
+            actorName,
+            taskTitle,
+            taskUrl,
+            commentSnippet: ctx.commentSnippet ?? '(view in app)',
+            workspaceName,
+          })
+        }
         break
 
       case 'task_due_soon':
