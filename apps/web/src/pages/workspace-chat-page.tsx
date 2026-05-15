@@ -26,6 +26,8 @@ import { format } from 'date-fns'
 import { api } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
+import { MentionText } from '../components/mention-text'
+import { formatMentionsPlain } from '../lib/mentions'
 
 type Channel = {
   id: string
@@ -98,13 +100,6 @@ type MemberActivityItem = {
   body: string
   parentMessageId?: string | null
   createdAt: string
-}
-
-function prettifyMentions(body: string, namesById: Record<string, string>) {
-  let next = body
-  next = next.replace(/@\[(?<id>[0-9a-fA-F-]{36})\]/g, (_, id: string) => `@${namesById[id] ?? 'teammate'}`)
-  next = next.replace(/<@(?<id>[0-9a-fA-F-]{36})>/g, (_, id: string) => `@${namesById[id] ?? 'teammate'}`)
-  return next
 }
 
 export function ChatPage() {
@@ -667,7 +662,7 @@ export function ChatPage() {
                           mine ? 'bg-accent/10 border border-accent/20' : 'bg-card/70 border border-border/60',
                         )}
                       >
-                        {prettifyMentions(m.body, namesById)}
+                        <MentionText text={m.body} namesById={namesById} />
                         {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">(edited)</span>}
                       </div>
                       <div className="absolute right-3 -top-3 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150">
@@ -826,7 +821,10 @@ export function ChatPage() {
         <div className="p-3 border-t border-border/70 bg-card">
           {replyTo && (
             <div className="mb-2 rounded border border-border bg-muted/30 px-2 py-1.5 text-xs flex items-center justify-between">
-              <span className="truncate">Replying to {replyTo.authorName ?? 'message'}: {replyTo.body}</span>
+              <span className="truncate">
+                Replying to {replyTo.authorName ?? 'message'}:{' '}
+                {formatMentionsPlain(replyTo.body, namesById)}
+              </span>
               <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setReplyTo(null)}>
                 Cancel
               </button>
@@ -962,7 +960,7 @@ function PinnedPanel({
           messages.map((m) => (
             <Card key={m.id} className="p-3">
               <div className="text-xs text-muted-foreground">{m.authorName ?? 'Unknown'}</div>
-              <div className="text-sm mt-1 whitespace-pre-wrap">{prettifyMentions(m.body, namesById)}</div>
+              <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
               <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id)}>
                 Open thread
               </button>
@@ -1001,12 +999,12 @@ function ThreadPanel({
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         <Card className="p-3 rounded-xl border-accent/20 bg-accent/5">
           <div className="text-xs text-muted-foreground">{parent.authorName ?? 'Unknown'}</div>
-          <div className="text-sm mt-1 whitespace-pre-wrap">{prettifyMentions(parent.body, namesById)}</div>
+          <MentionText text={parent.body} namesById={namesById} className="text-sm mt-1" />
         </Card>
         {replies.map((reply) => (
           <Card key={reply.id} className="p-3 rounded-xl bg-card/80">
             <div className="text-xs text-muted-foreground">{reply.authorName ?? 'Unknown'}</div>
-            <div className="text-sm mt-1 whitespace-pre-wrap">{prettifyMentions(reply.body, namesById)}</div>
+            <MentionText text={reply.body} namesById={namesById} className="text-sm mt-1" />
           </Card>
         ))}
         {replies.length === 0 && <div className="text-xs text-muted-foreground">No replies yet.</div>}
