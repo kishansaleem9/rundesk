@@ -17,6 +17,8 @@ import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
+import { MentionText } from './mention-text'
+import { formatMentionsPlain } from '../lib/mentions'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus =
@@ -196,13 +198,6 @@ function formatBytes(bytes?: number | null): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function prettifyMentions(body: string, namesById: Record<string, string>): string {
-  let next = body
-  next = next.replace(/@\[(?<id>[0-9a-fA-F-]{36})\]/g, (_, id: string) => `@${namesById[id] ?? 'teammate'}`)
-  next = next.replace(/<@(?<id>[0-9a-fA-F-]{36})>/g, (_, id: string) => `@${namesById[id] ?? 'teammate'}`)
-  return next
 }
 
 function formatDuration(ms?: number | null): string {
@@ -1797,7 +1792,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     {new Date(c.createdAt).toLocaleString()}
                   </span>
                 </div>
-                <div className="mt-1 text-sm whitespace-pre-wrap">{prettifyMentions(c.body, namesById)}</div>
+                <MentionText text={c.body} namesById={namesById} className="mt-1 text-sm" />
                 <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                   {c.assignee?.displayName && (
                     <Badge variant="outline" className="text-[10px]">Assigned: {c.assignee.displayName}</Badge>
@@ -1902,7 +1897,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                             {new Date(reply.createdAt).toLocaleString()}
                           </span>
                         </div>
-                        <div className="mt-1 text-sm whitespace-pre-wrap">{prettifyMentions(reply.body, namesById)}</div>
+                        <MentionText text={reply.body} namesById={namesById} className="mt-1 text-sm" />
                         <div className="mt-2 flex gap-2">
                           <button
                             type="button"
@@ -1975,7 +1970,10 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
         {replyTo && (
           <div className="mb-2 flex items-center justify-between rounded border border-border bg-muted/30 px-2 py-1 text-xs">
             <span className="truncate">
-              Replying to {parentPreview?.author?.displayName ?? parentPreview?.author?.email ?? 'comment'}: {parentPreview?.body ?? ''}
+              Replying to {parentPreview?.author?.displayName ?? parentPreview?.author?.email ?? 'comment'}:{' '}
+              {parentPreview?.body
+                ? formatMentionsPlain(parentPreview.body, namesById)
+                : ''}
             </span>
             <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setReplyTo(null)}>
               Cancel
