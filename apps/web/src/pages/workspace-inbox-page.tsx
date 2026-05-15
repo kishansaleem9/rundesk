@@ -4,6 +4,8 @@ import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
 import { Bell, AtSign, MessageSquare, CheckSquare, UserPlus, RefreshCw } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
+import { MentionText } from '../components/mention-text'
+import { useMentionNames } from '../hooks/use-mention-names'
 
 type Notification = {
   id: string
@@ -42,6 +44,7 @@ export function InboxPage() {
     },
   })
 
+  const { namesById } = useMentionNames(workspaceId)
   const notifs = notifsQuery.data ?? []
   const unread = notifs.filter((n) => !n.readAt)
   const read = notifs.filter((n) => n.readAt)
@@ -122,6 +125,7 @@ export function InboxPage() {
                       <NotificationRow
                         key={n.id}
                         notif={n}
+                        namesById={namesById}
                         unread
                         onOpen={async () => {
                           if (!n.readAt) await markRead.mutateAsync(n.id)
@@ -150,6 +154,7 @@ export function InboxPage() {
                       <NotificationRow
                         key={n.id}
                         notif={n}
+                        namesById={namesById}
                         onOpen={async () => {
                           const destination = await resolveDestination(n)
                           if (destination) navigate({ to: destination as any })
@@ -176,11 +181,13 @@ export function InboxPage() {
 
 function NotificationRow({
   notif,
+  namesById,
   unread = false,
   onOpen,
   onResolve,
 }: {
   notif: Notification
+  namesById: Record<string, string>
   unread?: boolean
   onOpen?: () => void | Promise<void>
   onResolve?: () => void | Promise<void>
@@ -218,7 +225,9 @@ function NotificationRow({
         </div>
         <div className="text-sm text-foreground mt-1 truncate">{notif.title}</div>
         {notif.body && (
-          <div className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{notif.body}</div>
+          <div className="text-sm text-muted-foreground line-clamp-2 mt-0.5">
+            <MentionText text={notif.body} namesById={namesById} className="line-clamp-2" />
+          </div>
         )}
         {onResolve && !notif.readAt && (
           <div className="mt-2">
