@@ -42,6 +42,9 @@ import { useThemeStore } from '../store/theme'
 import { api, ApiError } from '../lib/api'
 import { QuickCreateModal } from './quick-create-modal'
 import { getRealtimeSocket } from '../lib/realtime'
+import { MentionText } from './mention-text'
+import { formatMentionsPlain } from '../lib/mentions'
+import { useMentionNames } from '../hooks/use-mention-names'
 
 type Workspace = { id: string; name: string; slug: string }
 type WorkspaceEntry = { workspace: Workspace; role: string }
@@ -84,7 +87,7 @@ export function AppTopbar({
       <SearchBar onCommandOpen={onCommandOpen} />
       <QuickCreateButton />
       <ThemeToggle />
-      <NotificationsBell />
+      <NotificationsBell workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
       <UserMenu workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
     </header>
   )
@@ -271,9 +274,10 @@ type NotificationPreferences = {
   events: Record<NotificationEventKey, Record<'inApp' | 'web' | 'mobile' | 'email', boolean>>
 }
 
-function NotificationsBell() {
+function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
   const [open, setOpen] = useState(false)
   const qc = useQueryClient()
+  const { namesById } = useMentionNames(workspaceId)
   const prefsQuery = useQuery({
     queryKey: ['notification-preferences'],
     queryFn: () => api<NotificationPreferences>('/notifications/preferences'),
@@ -354,12 +358,16 @@ function NotificationsBell() {
       if (allowSound) beep()
       if (allowWeb) {
         toast(event.notification?.title ?? 'New notification', {
-          description: event.notification?.body ?? '',
+          description: event.notification?.body
+            ? formatMentionsPlain(event.notification.body, namesById)
+            : '',
         })
       }
       if (allowWeb && 'Notification' in window && Notification.permission === 'granted') {
         void new Notification(event.notification?.title ?? 'New notification', {
-          body: event.notification?.body ?? '',
+          body: event.notification?.body
+            ? formatMentionsPlain(event.notification.body, namesById)
+            : '',
         })
       }
     }
@@ -470,7 +478,13 @@ function NotificationsBell() {
                         <span>{formatDistanceToNowStrict(new Date(n.createdAt), { addSuffix: true })}</span>
                       </div>
                       <div className="text-sm truncate">{n.title}</div>
-                      {n.body && <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{n.body}</div>}
+                      {n.body && (
+                        <MentionText
+                          text={n.body}
+                          namesById={namesById}
+                          className="text-xs text-muted-foreground line-clamp-2 mt-0.5"
+                        />
+                      )}
                     </div>
                   </div>
                 </li>
