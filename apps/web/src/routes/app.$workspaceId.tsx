@@ -14,6 +14,8 @@ import { api } from '../lib/api'
 import { useMemo, useState } from 'react'
 import { formatDistanceToNowStrict, isToday, isPast } from 'date-fns'
 import { useAuthStore } from '../store/auth'
+import { MentionText } from '../components/mention-text'
+import { useMentionNames } from '../hooks/use-mention-names'
 
 type Notification = {
   id: string
@@ -102,6 +104,7 @@ function WorkspaceHome() {
     },
   })
 
+  const { namesById } = useMentionNames(workspaceId)
   const notifications = notificationsQuery.data ?? []
   const unread = notifications.filter((n) => !n.readAt)
   const replies = notifications.filter((n) => ['task_commented', 'comment'].includes(n.type))
@@ -239,7 +242,13 @@ function WorkspaceHome() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-sm font-medium truncate">{n.title}</div>
-                        {n.body && <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{n.body}</div>}
+                        {n.body && (
+                          <MentionText
+                            text={n.body}
+                            namesById={namesById}
+                            className="text-xs text-muted-foreground mt-1 line-clamp-2"
+                          />
+                        )}
                         <div className="text-[11px] text-muted-foreground mt-1">
                           {formatDistanceToNowStrict(new Date(n.createdAt), { addSuffix: true })}
                         </div>
