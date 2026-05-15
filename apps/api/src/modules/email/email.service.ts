@@ -226,6 +226,36 @@ export class EmailService {
     })
   }
 
+  /** Send a task-comment-resolved notification */
+  async sendCommentResolved(opts: {
+    to: string
+    recipientName: string
+    actorName: string
+    taskTitle: string
+    taskUrl: string
+    commentSnippet: string
+    workspaceName: string
+  }) {
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] ${opts.actorName} resolved your comment on "${opts.taskTitle}"`,
+      html: this.layout({
+        heading: `Comment resolved on "${opts.taskTitle}"`,
+        body: `
+          <p>Hi ${this.esc(opts.recipientName)},</p>
+          <p><strong>${this.esc(opts.actorName)}</strong> marked your comment as resolved on
+             <strong>${this.esc(opts.taskTitle)}</strong> in <em>${this.esc(opts.workspaceName)}</em>:</p>
+          <blockquote style="border-left:3px solid #6f96d1;margin:12px 0;padding:8px 16px;
+                             color:#374151;background:#f3f7fd;border-radius:0 6px 6px 0;">
+            ${this.esc(opts.commentSnippet)}
+          </blockquote>
+        `,
+        ctaUrl: opts.taskUrl,
+        ctaLabel: 'View task',
+      }),
+    })
+  }
+
   /** Send a task-commented notification */
   async sendComment(opts: {
     to: string
