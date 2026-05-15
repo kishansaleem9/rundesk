@@ -1597,7 +1597,58 @@ export class TasksService {
         editedAt: updated.editedAt,
       },
     })
+
+    if (resolved) {
+      void this.notifyCommentResolved(taskRow, existing, actorId)
+    }
+
     return updated
+  }
+
+  private async notifyCommentResolved(
+    taskRow: { id: string; title: string; listId: string },
+    comment: { id: string; authorId: string; body: string; assignedToUserId?: string | null },
+    actorId: string,
+  ) {
+    try {
+      const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+      if (!ctx) return
+
+      const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+      const taskUrl = this.buildTaskUrl(
+        ctx.workspaceId,
+        ctx.spaceId,
+        ctx.projectId,
+        taskRow.listId,
+        taskRow.id,
+      )
+      const snippet = comment.body.replace(/<[^>]+>/g, '').slice(0, 200)
+      const recipientIds = new Set<string>()
+      if (comment.authorId && comment.authorId !== actorId) recipientIds.add(comment.authorId)
+      if (comment.assignedToUserId && comment.assignedToUserId !== actorId) {
+        recipientIds.add(comment.assignedToUserId)
+      }
+
+      for (const userId of recipientIds) {
+        void this.notifications.create({
+          userId,
+          workspaceId: ctx.workspaceId,
+          actorId,
+          type: 'task_commented',
+          title: `Your comment was resolved on "${taskRow.title}"`,
+          body: snippet,
+          target: { entityType: 'task', entityId: taskRow.id, url: taskUrl },
+          emailContext: {
+            taskTitle: taskRow.title,
+            workspaceName,
+            commentSnippet: snippet,
+            commentVariant: 'resolved',
+          },
+        })
+      }
+    } catch {
+      // Best-effort — never block resolve
+    }
   }
 
   async deleteComment(commentId: string, authorId: string) {
