@@ -22,6 +22,8 @@ import TaskItem from '@tiptap/extension-task-item'
 import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
+import { MentionText } from './mention-text'
+import { useMentionNames } from '../hooks/use-mention-names'
 
 type Doc = {
   id: string
@@ -393,14 +395,15 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       </div>
 
       {commentsOpen && activeDoc && (
-        <DocCommentsPane docId={activeDoc.id} />
+        <DocCommentsPane docId={activeDoc.id} workspaceId={workspaceId} />
       )}
     </Card>
   )
 }
 
-function DocCommentsPane({ docId }: { docId: string }) {
+function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: string }) {
   const qc = useQueryClient()
+  const { namesById } = useMentionNames(workspaceId)
   const [showResolved, setShowResolved] = useState(false)
   const [newBody, setNewBody] = useState('')
   const [replyParentId, setReplyParentId] = useState<string | null>(null)
@@ -493,6 +496,7 @@ function DocCommentsPane({ docId }: { docId: string }) {
           >
             <CommentBody
               comment={c}
+              namesById={namesById}
               onResolveToggle={() =>
                 resolveComment.mutate({ commentId: c.id, resolved: !c.isResolved })
               }
@@ -502,6 +506,7 @@ function DocCommentsPane({ docId }: { docId: string }) {
               <div key={reply.id} className="ml-3 pl-2 border-l border-border/60">
                 <CommentBody
                   comment={reply}
+                  namesById={namesById}
                   onResolveToggle={() =>
                     resolveComment.mutate({ commentId: reply.id, resolved: !reply.isResolved })
                   }
@@ -588,10 +593,12 @@ function DocCommentsPane({ docId }: { docId: string }) {
 
 function CommentBody({
   comment,
+  namesById,
   onResolveToggle,
   onDelete,
 }: {
   comment: DocComment
+  namesById: Record<string, string>
   onResolveToggle: () => void
   onDelete: () => void
 }) {
@@ -621,7 +628,7 @@ function CommentBody({
               {comment.selection.quote}
             </blockquote>
           )}
-          <p className="text-xs whitespace-pre-wrap mt-1">{comment.body}</p>
+          <MentionText text={comment.body} namesById={namesById} className="text-xs mt-1" />
           <div className="flex items-center gap-2 mt-1.5">
             <button
               onClick={onResolveToggle}
