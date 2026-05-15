@@ -455,7 +455,59 @@ export class DocsService {
       commentId,
       isResolved: resolved,
     })
+
+    if (resolved) {
+      void this.notifyDocCommentResolved(existing, userId)
+    }
+
     return updated
+  }
+
+  private async notifyDocCommentResolved(
+    comment: typeof docComments.$inferSelect,
+    actorId: string,
+  ) {
+    try {
+      const [doc] = await this.db.select().from(docs).where(eq(docs.id, comment.docId)).limit(1)
+      if (!doc) return
+
+      const recipientIds = new Set<string>()
+      if (comment.authorId && comment.authorId !== actorId) recipientIds.add(comment.authorId)
+
+      if (comment.parentCommentId) {
+        const [parent] = await this.db
+          .select({ authorId: docComments.authorId })
+          .from(docComments)
+          .where(eq(docComments.id, comment.parentCommentId))
+          .limit(1)
+        if (parent?.authorId && parent.authorId !== actorId) recipientIds.add(parent.authorId)
+      }
+
+      if (recipientIds.size === 0) return
+
+      const docTitle = doc.title || 'Untitled doc'
+      const snippet = comment.body.slice(0, 240)
+      const target = {
+        entityType: 'doc' as const,
+        entityId: doc.id,
+        url: `/app/${doc.workspaceId}/docs?doc=${doc.id}`,
+      }
+
+      for (const userId of recipientIds) {
+        await this.notifications.create({
+          userId,
+          workspaceId: doc.workspaceId,
+          actorId,
+          type: 'doc_commented',
+          title: `Your comment was resolved on "${docTitle}"`,
+          body: snippet,
+          target,
+          emailContext: { commentSnippet: snippet },
+        })
+      }
+    } catch {
+      // Best-effort
+    }
   }
 
   async deleteComment(commentId: string, userId: string) {
