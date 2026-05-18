@@ -86,6 +86,8 @@ export default defineConfig(({ mode }) => {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    // Prevent duplicate React copies across manual chunks (breaks hooks / useState).
+    dedupe: ['react', 'react-dom'],
   },
   server: {
     port: 5173,
@@ -102,21 +104,20 @@ export default defineConfig(({ mode }) => {
         manualChunks(id) {
           if (id.includes('/packages/ui/')) return 'app-ui'
           if (!id.includes('node_modules')) return
-          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'vendor-react-core'
-          if (id.includes('@tanstack/react-router') || id.includes('@tanstack/router-core')) return 'vendor-router'
-          if (id.includes('@tanstack/react-query')) return 'vendor-query'
-          if (id.includes('@tanstack/react-virtual')) return 'vendor-virtual'
-          if (id.includes('@tiptap')) return 'vendor-editor'
-          if (id.includes('@dnd-kit')) return 'vendor-dnd'
+
+          // React core must stay in one chunk; hook-based libs must not pull a second React.
+          if (
+            id.includes('/node_modules/react/') ||
+            id.includes('/node_modules/react-dom/') ||
+            id.includes('/node_modules/scheduler/')
+          ) {
+            return 'vendor-react-core'
+          }
+
           if (id.includes('date-fns') || id.includes('dayjs')) return 'vendor-date'
-          if (id.includes('framer-motion')) return 'vendor-motion'
-          if (id.includes('@radix-ui') || id.includes('@floating-ui')) return 'vendor-radix'
-          if (id.includes('zustand') || id.includes('use-sync-external-store')) return 'vendor-state'
           if (id.includes('clsx') || id.includes('tailwind-merge')) return 'vendor-utils'
           if (id.includes('zod')) return 'vendor-zod'
-          if (id.includes('sonner') || id.includes('cmdk')) return 'vendor-ui-runtime'
           if (id.includes('socket.io-client')) return 'vendor-realtime'
-          if (id.includes('lucide-react')) return 'vendor-icons'
           return 'vendor'
         },
       },
