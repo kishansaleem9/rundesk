@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, cn } from '@rundesk/ui'
+import { Button, Card, Textarea, cn } from '@rundesk/ui'
+import { ChatSidebar } from '../components/chat/chat-sidebar'
+import { ChatHeader } from '../components/chat/chat-header'
+import { ChatComposer } from '../components/chat/chat-composer'
+import {
+  formatDateDivider,
+  formatMessageTime,
+  shouldShowDateDivider,
+  shouldShowMessageHeader,
+} from '../components/chat/chat-utils'
 import {
   Hash,
-  Lock,
-  Plus,
-  Send,
   Users,
-  Star,
-  Pin,
-  MessageSquarePlus,
   Smile,
   Paperclip,
-  AtSign,
   Sparkles,
   ThumbsUp,
   Reply,
@@ -22,12 +24,10 @@ import {
   UserPlus,
   X,
 } from 'lucide-react'
-import { format } from 'date-fns'
 import { api } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
-import { formatMentionsPlain } from '../lib/mentions'
 
 type Channel = {
   id: string
@@ -122,6 +122,7 @@ export function ChatPage() {
   const [profileTab, setProfileTab] = useState<'activity' | 'tasks' | 'comments'>('activity')
   const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
+  const [channelSearch, setChannelSearch] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -403,232 +404,102 @@ export function ChatPage() {
     setThreadParentId(parentId)
   }
 
+  const channelLabel = selectedChannel?.isDm
+    ? selectedChannel.dmPeerName ?? 'DM'
+    : selectedChannel
+      ? `#${selectedChannel.name}`
+      : ''
+
   return (
-    <div className="h-full flex">
-      <aside className="hidden md:flex w-56 border-r border-border/70 bg-card/40 flex-col">
-        <div className="p-3 border-b border-border/70">
-          <h2 className="font-display text-base font-semibold text-foreground">Chat</h2>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2 py-2.5 space-y-3">
-          <section>
-            <div className="px-2 flex items-center justify-between mb-1">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Channels</h3>
-              <button
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => setCreating((v) => !v)}
-                title="Create channel"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
+    <div className="h-full flex bg-background">
+      <ChatSidebar
+        channels={publicChannels}
+        dmChannels={dmChannels}
+        selectedId={selectedId}
+        onSelectChannel={setSelectedId}
+        channelSearch={channelSearch}
+        onChannelSearchChange={setChannelSearch}
+        creating={creating}
+        onToggleCreate={() => setCreating((v) => !v)}
+        newName={newName}
+        onNewNameChange={setNewName}
+        newPrivate={newPrivate}
+        onNewPrivateChange={setNewPrivate}
+        onCreateChannel={() => {
+          if (!newName.trim()) return
+          createChannelMutation.mutate({ name: newName.trim(), isPrivate: newPrivate })
+        }}
+        createPending={createChannelMutation.isPending}
+        startingDm={startingDm}
+        onToggleStartDm={() => setStartingDm((v) => !v)}
+        dmCandidates={dmCandidates}
+        onStartDm={(userId) => createDmMutation.mutate(userId)}
+        startDmPending={createDmMutation.isPending}
+        pendingInvites={pendingInvites}
+        channelsLoading={channelsQuery.isLoading}
+      />
 
-            {creating && (
-              <div className="mb-2 px-1 space-y-1">
-                <Input
-                  autoFocus
-                  placeholder="channel-name"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="h-7 text-xs"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newName.trim()) {
-                      createChannelMutation.mutate({ name: newName.trim(), isPrivate: newPrivate })
-                    } else if (e.key === 'Escape') {
-                      setCreating(false)
-                      setNewName('')
-                    }
-                  }}
-                />
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground px-1">
-                  <input
-                    type="checkbox"
-                    checked={newPrivate}
-                    onChange={(e) => setNewPrivate(e.target.checked)}
-                    className="h-3 w-3"
-                  />
-                  Private
-                </label>
-              </div>
-            )}
+      <div className="flex-1 flex bg-white dark:bg-[#0f1114] min-w-0">
+        <div className="flex-1 flex flex-col min-w-0">
+        <ChatHeader
+          channel={selectedChannel}
+          memberCount={membersQuery.data?.length ?? 0}
+          showPinnedPanel={showPinnedPanel}
+          onTogglePinned={() => setShowPinnedPanel((v) => !v)}
+        />
 
-            <div className="space-y-0.5">
-              {publicChannels.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedId(c.id)}
-                  className={cn(
-                    'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors',
-                    selectedId === c.id
-                      ? 'bg-accent/15 text-foreground font-medium'
-                      : 'text-muted-foreground hover:bg-muted',
-                  )}
-                >
-                  {c.isPrivate ? <Lock className="h-3.5 w-3.5" /> : <Hash className="h-3.5 w-3.5" />}
-                  <span className="truncate flex-1">{c.name}</span>
-                </button>
-              ))}
-              {channels.length === 0 && !channelsQuery.isLoading && (
-                <div className="px-2 py-2 text-xs text-muted-foreground">No channels yet</div>
-              )}
-            </div>
-          </section>
-
-          <section>
-            <div className="px-2 flex items-center justify-between mb-1">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Direct Messages</h3>
-              <button
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => setStartingDm((v) => !v)}
-                title="Start DM"
-              >
-                <MessageSquarePlus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            {startingDm && (
-              <div className="mb-2 px-1 space-y-1">
-                {dmCandidates.length === 0 ? (
-                  <div className="rounded border border-dashed border-border px-2 py-2 text-[11px] text-muted-foreground">
-                    No active teammates yet. {pendingInvites.length > 0 ? `${pendingInvites.length} invite(s) pending acceptance.` : 'Invite members from Workspace Settings to Members.'}
-                  </div>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
+          {rootMessages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
+              <div className="h-14 w-14 rounded-2xl bg-violet-500/10 flex items-center justify-center mb-4">
+                {selectedChannel?.isDm ? (
+                  <Users className="h-7 w-7 text-violet-600 dark:text-violet-300" />
                 ) : (
-                  dmCandidates.map((m) => (
-                    <button
-                      key={m.userId}
-                      onClick={() => createDmMutation.mutate(m.userId)}
-                      disabled={createDmMutation.isPending}
-                      className="w-full rounded border border-border/60 bg-card px-2 py-1.5 text-left hover:border-accent/50 hover:bg-muted/40 disabled:opacity-60"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="relative">
-                          <div className="h-6 w-6 rounded-full bg-brand-300 text-foreground text-[10px] font-semibold flex items-center justify-center">
-                            {(m.displayName || m.email)[0]?.toUpperCase()}
-                          </div>
-                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-card bg-emerald-500" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-xs font-medium text-foreground">{m.displayName || m.email}</div>
-                          <div className="truncate text-[10px] text-muted-foreground">{m.email}</div>
-                        </div>
-                        <span className="text-[10px] text-accent">Message</span>
-                      </div>
-                    </button>
-                  ))
+                  <Hash className="h-7 w-7 text-violet-600 dark:text-violet-300" />
                 )}
               </div>
-            )}
-
-            <div className="space-y-0.5">
-              {dmChannels.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedId(c.id)}
-                  className={cn(
-                    'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left transition-colors',
-                    selectedId === c.id ? 'bg-accent/15 text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
-                  )}
-                >
-                  <div className="h-5 w-5 rounded-full bg-brand-300 text-foreground text-[10px] font-semibold flex items-center justify-center">
-                    {(c.dmPeerName ?? 'D')[0]?.toUpperCase()}
-                  </div>
-                  <span className="truncate flex-1">{c.dmPeerName ?? 'Direct message'}</span>
-                </button>
-              ))}
-              {dmChannels.length === 0 && !channelsQuery.isLoading && (
-                <div className="px-2 py-2 text-xs text-muted-foreground">No DMs yet</div>
-              )}
-            </div>
-
-            {pendingInvites.length > 0 && (
-              <div className="mt-3 px-1 space-y-1">
-                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Invited (pending)</div>
-                {pendingInvites.slice(0, 6).map((inv) => (
-                  <div key={inv.id} className="rounded border border-dashed border-border/70 bg-card/40 px-2 py-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs text-foreground">{inv.email}</span>
-                      <span className="text-[10px] rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">Pending</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      </aside>
-
-      <div className="flex-1 flex bg-background min-w-0">
-        <div className="flex-1 flex flex-col min-w-0">
-        <header className="px-4 h-12 border-b border-border/70 bg-card flex items-center gap-3">
-          {selectedChannel?.isDm ? (
-            <div className="h-6 w-6 rounded-full bg-brand-300 text-foreground text-xs font-semibold flex items-center justify-center">
-              {(selectedChannel.dmPeerName ?? 'D')[0]?.toUpperCase()}
-            </div>
-          ) : (
-            <Hash className="h-4 w-4 text-muted-foreground" />
-          )}
-          <h2 className="font-semibold">
-            {selectedChannel?.isDm ? selectedChannel.dmPeerName ?? 'Direct message' : selectedChannel?.name ?? '…'}
-          </h2>
-          {selectedChannel?.description && (
-            <span className="text-xs text-muted-foreground truncate">{selectedChannel.description}</span>
-          )}
-          <div className="ml-auto flex items-center gap-1">
-            <button
-              className={cn('p-1.5 rounded hover:bg-muted', showPinnedPanel ? 'text-accent' : 'text-muted-foreground')}
-              title="Pinned"
-              onClick={() => setShowPinnedPanel((v) => !v)}
-            >
-              <Pin className="h-4 w-4" />
-            </button>
-            <button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="Members">
-              <Users className="h-4 w-4" />
-            </button>
-            <button className="p-1.5 rounded hover:bg-muted text-muted-foreground" title="Starred">
-              <Star className="h-4 w-4" />
-            </button>
-          </div>
-        </header>
-
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-5 py-2.5 sm:py-3.5">
-          {rootMessages.length === 0 ? (
-            <Card className="p-6 text-center border-dashed mx-auto max-w-md">
-              {selectedChannel?.isDm ? (
-                <Users className="h-8 w-8 text-brand-500 mx-auto mb-2" />
-              ) : (
-                <Hash className="h-8 w-8 text-brand-500 mx-auto mb-2" />
-              )}
-              <h3 className="font-display text-lg font-semibold text-foreground mb-1">
-                {selectedChannel?.isDm ? selectedChannel.dmPeerName ?? 'Direct message' : `#${selectedChannel?.name ?? 'channel'}`}
+              <h3 className="text-[18px] font-semibold text-foreground mb-1">
+                {selectedChannel?.isDm
+                  ? `Message ${selectedChannel.dmPeerName ?? 'teammate'}`
+                  : `Welcome to #${selectedChannel?.name ?? 'channel'}`}
               </h3>
-              <p className="text-sm text-muted-foreground">
-                This is the start of the channel. Say hello.
+              <p className="text-[14px] text-muted-foreground leading-relaxed">
+                This is the beginning of your conversation. Send a message to get started.
               </p>
-            </Card>
+            </div>
           ) : (
-            <div className="space-y-1.5 max-w-4xl mx-auto">
+            <div className="space-y-0 max-w-3xl mx-auto">
               {rootMessages.map((m, i) => {
-                const showAuthor =
-                  i === 0 ||
-                  rootMessages[i - 1].authorId !== m.authorId ||
-                  new Date(m.createdAt).getTime() - new Date(rootMessages[i - 1].createdAt).getTime() > 5 * 60 * 1000
+                const showAuthor = shouldShowMessageHeader(rootMessages, i)
+                const showDate = shouldShowDateDivider(rootMessages, i)
                 const mine = m.authorId === me?.id
                 const replyCount = repliesByParent.get(m.id)?.length ?? 0
                 return (
+                  <div key={m.id} className="contents">
+                    {showDate && (
+                      <div className="flex items-center gap-3 py-4">
+                        <div className="h-px flex-1 bg-border/80" />
+                        <span className="text-[11px] font-medium text-muted-foreground px-2">
+                          {formatDateDivider(m.createdAt)}
+                        </span>
+                        <div className="h-px flex-1 bg-border/80" />
+                      </div>
+                    )}
                   <div
-                    key={m.id}
+                    key={`${m.id}-row`}
                     ref={(el) => {
                       messageRefs.current[m.id] = el
                     }}
                     className={cn(
-                      'relative flex gap-2 group rounded-lg px-2 py-1.5 hover:bg-muted/35 transition-colors',
-                      highlightedMessageId === m.id && 'ring-1 ring-accent/60 bg-accent/5',
+                      'relative flex gap-3 group rounded-md px-2 py-0.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.03] transition-colors',
+                      highlightedMessageId === m.id && 'ring-1 ring-violet-500/40 bg-violet-500/5',
                     )}
                   >
-                    <div className="w-7 shrink-0 mt-0.5">
+                    <div className="w-9 shrink-0">
                       {showAuthor && (
                         <button
                           type="button"
-                          className="h-[26px] w-[26px] rounded-full bg-brand-300 text-foreground text-[10px] font-bold flex items-center justify-center hover:brightness-110"
+                          className="h-9 w-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white text-[11px] font-bold flex items-center justify-center hover:brightness-110"
                           onClick={() => {
                             setProfileUserId(m.authorId)
                             setProfileTab('activity')
@@ -643,7 +514,7 @@ export function ChatPage() {
                         <div className="flex items-center gap-1.5 mb-0.5">
                           <button
                             type="button"
-                            className={cn('text-[13px] font-semibold hover:underline', mine ? 'text-accent' : 'text-foreground')}
+                            className={cn('text-[14px] font-semibold hover:underline', mine ? 'text-violet-600 dark:text-violet-300' : 'text-foreground')}
                             onClick={() => {
                               setProfileUserId(m.authorId)
                               setProfileTab('activity')
@@ -652,21 +523,20 @@ export function ChatPage() {
                             {m.authorName ?? 'Unknown'}
                           </button>
                           <span className="text-[10px] text-muted-foreground/90 tabular-nums">
-                            {format(new Date(m.createdAt), 'h:mm a')}
+                            {formatMessageTime(m.createdAt)}
                           </span>
                         </div>
                       )}
                       <div
                         className={cn(
-                          'text-[13px] whitespace-pre-wrap break-words leading-5 rounded-md px-2 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]',
-                          mine ? 'bg-accent/10 border border-accent/20' : 'bg-card/70 border border-border/60',
+                          'text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90',
                         )}
                       >
                         <MentionText text={m.body} namesById={namesById} />
                         {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">(edited)</span>}
                       </div>
                       <div className="absolute right-3 -top-3 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150">
-                        <div className="relative rounded-md border border-border/80 bg-card/95 backdrop-blur shadow-sm px-1 py-0.5 flex items-center gap-0.5">
+                        <div className="relative rounded-lg border border-border/80 bg-background shadow-md px-1 py-0.5 flex items-center gap-0.5">
                           <button
                             type="button"
                             title="React"
@@ -804,7 +674,7 @@ export function ChatPage() {
                       {replyCount > 0 && (
                         <button
                           type="button"
-                          className="mt-1 text-[11px] text-accent hover:underline"
+                          className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-300 hover:underline"
                           onClick={() => setThreadParentId(m.id)}
                         >
                           View thread ({replyCount})
@@ -812,79 +682,45 @@ export function ChatPage() {
                       )}
                     </div>
                   </div>
+                  </div>
                 )
               })}
             </div>
           )}
         </div>
 
-        <div className="p-3 border-t border-border/70 bg-card">
-          {replyTo && (
-            <div className="mb-2 rounded border border-border bg-muted/30 px-2 py-1.5 text-xs flex items-center justify-between">
-              <span className="truncate">
-                Replying to {replyTo.authorName ?? 'message'}:{' '}
-                {formatMentionsPlain(replyTo.body, namesById)}
-              </span>
-              <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setReplyTo(null)}>
-                Cancel
-              </button>
-            </div>
-          )}
-          {showMentions && mentionCandidates.length > 0 && (
-            <div className="mb-2 max-h-36 overflow-auto rounded border border-border bg-card">
-              {mentionCandidates.slice(0, 6).map((member) => (
-                <button
-                  key={member.userId}
-                  type="button"
-                  className="w-full px-2 py-1.5 text-left text-xs hover:bg-muted"
-                  onClick={() => {
-                    const at = input.lastIndexOf('@')
-                    const prefix = at >= 0 ? input.slice(0, at) : input
-                    const handle = member.displayName?.trim() || member.email
-                    setInput(`${prefix}<@${member.userId}> `)
-                  }}
-                >
-                  <span className="font-medium text-foreground">{member.displayName || member.email}</span>
-                  <span className="ml-2 text-muted-foreground">{member.email}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="rounded-xl border border-border/70 bg-background">
-            <Input
-              placeholder={selectedChannel ? `Write to #${selectedChannel.name}` : 'Select a channel'}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
-              disabled={!selectedId || sendMutation.isPending}
-              className="flex-1 border-0 bg-transparent"
-            />
-            <div className="px-2 py-1.5 border-t border-border/60 flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <button className="h-7 w-7 rounded hover:bg-muted text-muted-foreground flex items-center justify-center">
-                  <Smile className="h-4 w-4" />
-                </button>
-                <button className="h-7 w-7 rounded hover:bg-muted text-muted-foreground flex items-center justify-center">
-                  <Paperclip className="h-4 w-4" />
-                </button>
-                <button className="h-7 w-7 rounded hover:bg-muted text-muted-foreground flex items-center justify-center">
-                  <AtSign className="h-4 w-4" />
-                </button>
+        <ChatComposer
+          channelLabel={channelLabel}
+          value={input}
+          onChange={setInput}
+          onSend={handleSend}
+          disabled={!selectedId}
+          sending={sendMutation.isPending}
+          replyTo={replyTo}
+          replyNamesById={namesById}
+          onCancelReply={() => setReplyTo(null)}
+          mentionMenu={
+            showMentions && mentionCandidates.length > 0 ? (
+              <div className="mb-2 max-h-36 overflow-auto rounded-lg border border-border/80 bg-background shadow-sm">
+                {mentionCandidates.slice(0, 6).map((member) => (
+                  <button
+                    key={member.userId}
+                    type="button"
+                    className="w-full px-3 py-2 text-left text-[13px] hover:bg-violet-500/8"
+                    onClick={() => {
+                      const at = input.lastIndexOf('@')
+                      const prefix = at >= 0 ? input.slice(0, at) : input
+                      setInput(`${prefix}<@${member.userId}> `)
+                    }}
+                  >
+                    <span className="font-medium text-foreground">{member.displayName || member.email}</span>
+                    <span className="ml-2 text-muted-foreground">{member.email}</span>
+                  </button>
+                ))}
               </div>
-              <Button size="sm" onClick={handleSend} disabled={!input.trim() || !selectedId || sendMutation.isPending}>
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          <div className="text-[10px] text-muted-foreground mt-1 px-1">
-            <kbd className="px-1 rounded bg-muted">Enter</kbd> to send · <kbd className="px-1 rounded bg-muted">Shift+Enter</kbd> for new line
-          </div>
-        </div>
+            ) : undefined
+          }
+        />
         </div>
         {threadParent && (
           <ThreadPanel
@@ -989,32 +825,40 @@ function ThreadPanel({
 }) {
   const [draft, setDraft] = useState('')
   return (
-    <aside className="hidden xl:flex w-[380px] border-l border-border bg-card/70 flex-col animate-in slide-in-from-right-4 duration-200">
-      <div className="h-12 border-b border-border px-3 flex items-center justify-between">
-        <div className="text-sm font-semibold">Thread</div>
-        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onClose}>
-          Close
+    <aside className="hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col">
+      <div className="h-[52px] shrink-0 border-b border-border/80 px-4 flex items-center justify-between bg-background">
+        <div className="text-[14px] font-semibold text-foreground">Thread</div>
+        <button
+          type="button"
+          className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+          onClick={onClose}
+        >
+          <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-        <Card className="p-3 rounded-xl border-accent/20 bg-accent/5">
-          <div className="text-xs text-muted-foreground">{parent.authorName ?? 'Unknown'}</div>
-          <MentionText text={parent.body} namesById={namesById} className="text-sm mt-1" />
-        </Card>
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white dark:bg-[#0f1114]">
+        <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
+          <div className="text-[12px] font-semibold text-foreground mb-1">{parent.authorName ?? 'Unknown'}</div>
+          <MentionText text={parent.body} namesById={namesById} className="text-[14px] leading-relaxed" />
+        </div>
         {replies.map((reply) => (
-          <Card key={reply.id} className="p-3 rounded-xl bg-card/80">
-            <div className="text-xs text-muted-foreground">{reply.authorName ?? 'Unknown'}</div>
-            <MentionText text={reply.body} namesById={namesById} className="text-sm mt-1" />
-          </Card>
+          <div key={reply.id} className="rounded-lg border border-border/70 bg-background p-3">
+            <div className="text-[12px] font-semibold text-foreground mb-1">{reply.authorName ?? 'Unknown'}</div>
+            <MentionText text={reply.body} namesById={namesById} className="text-[14px] leading-relaxed" />
+          </div>
         ))}
-        {replies.length === 0 && <div className="text-xs text-muted-foreground">No replies yet.</div>}
+        {replies.length === 0 && (
+          <p className="text-[12px] text-muted-foreground text-center py-6">No replies yet — start the thread.</p>
+        )}
       </div>
-      <div className="border-t border-border p-3">
-        <div className="rounded-xl border border-border/70 bg-background">
-          <Input
+      <div className="shrink-0 border-t border-border/80 p-3 bg-[#fbfbfc] dark:bg-[#16181d]">
+        <div className="rounded-xl border border-border/80 bg-background shadow-sm overflow-hidden">
+          <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Reply in thread..."
+            rows={2}
+            className="min-h-[40px] border-0 bg-transparent resize-none text-[14px] focus-visible:ring-0"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -1024,35 +868,28 @@ function ThreadPanel({
                 setDraft('')
               }
             }}
-            className="border-0 bg-transparent"
           />
-          <div className="px-2 py-1.5 border-t border-border/60 flex items-center justify-between">
-            <div className="flex items-center gap-1">
-              <button className="h-7 w-7 rounded hover:bg-muted text-muted-foreground flex items-center justify-center">
-                <Smile className="h-4 w-4" />
-              </button>
-              <button className="h-7 w-7 rounded hover:bg-muted text-muted-foreground flex items-center justify-center">
-                <Paperclip className="h-4 w-4" />
-              </button>
-            </div>
-          <Button
-            size="sm"
-            onClick={() => {
-              const body = draft.trim()
-              if (!body) return
-              onReply(body)
-              setDraft('')
-            }}
-            disabled={!draft.trim() || pending}
-          >
-            Reply
-          </Button>
+          <div className="px-2 py-1.5 border-t border-border/60 flex justify-end">
+            <Button
+              size="sm"
+              className="h-8 bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => {
+                const body = draft.trim()
+                if (!body) return
+                onReply(body)
+                setDraft('')
+              }}
+              disabled={!draft.trim() || pending}
+            >
+              Reply
+            </Button>
           </div>
         </div>
       </div>
     </aside>
   )
 }
+
 
 function ProfilePanel({
   member,
