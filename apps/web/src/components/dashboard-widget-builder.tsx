@@ -246,7 +246,7 @@ function WidgetPreview({
   if (widget.type === 'completion') return <CompletionTile Icon={Icon} workspaceId={workspaceId} />
   if (widget.type === 'time') return <TimeTile Icon={Icon} workspaceId={workspaceId} />
   if (widget.type === 'pie-status') return <PieStatusWidget workspaceId={workspaceId} />
-  if (widget.type === 'sprint-burndown') return <BurndownMock />
+  if (widget.type === 'sprint-burndown') return <SprintBurndownWidget workspaceId={workspaceId} />
   if (widget.type === 'team-load') return <TeamLoadWidget workspaceId={workspaceId} />
   if (widget.type === 'activity') return <ActivityWidget />
   ;
@@ -524,49 +524,86 @@ function Tile({ label, value, hint, Icon, tone }: any) {
   )
 }
 
-function BurndownMock() {
-  const points = [42, 39, 35, 30, 28, 26, 22, 16, 12, 8, 4, 0]
-  const max = Math.max(...points)
+function SprintBurndownWidget({ workspaceId }: { workspaceId: string }) {
+  const sprintsQ = useQuery({
+    queryKey: ['sprints', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; status: string }>>(`/workspaces/${workspaceId}/sprints`),
+  })
+  const active = sprintsQ.data?.find((s) => s.status === 'active')
+  const detailQ = useQuery({
+    queryKey: ['sprint', active?.id],
+    queryFn: () =>
+      api<{
+        totalPoints: number
+        completedPoints: number
+        burndown: Array<{ ideal: number; actual: number | null }>
+      }>(`/sprints/${active!.id}`),
+    enabled: Boolean(active?.id),
+  })
+
+  const burndown = detailQ.data?.burndown ?? []
+  const remaining = detailQ.data
+    ? Math.max(0, detailQ.data.totalPoints - detailQ.data.completedPoints)
+    : null
+  const points = burndown
+    .map((d) => (d.actual !== null ? d.actual : d.ideal))
+    .filter((v) => v !== null) as number[]
+  const max = Math.max(1, ...points, 1)
+
+  if (!active) {
+    return (
+      <div className="flex flex-col h-full justify-center text-[11px] text-muted-foreground">
+        No active sprint
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Sprint burndown</div>
       <div className="flex items-baseline gap-2">
-        <div className="font-display text-3xl font-semibold tabular-nums">26</div>
-        <div className="text-[10px] text-muted-foreground">/ 42 pts remaining</div>
+        <div className="font-display text-3xl font-semibold tabular-nums">{remaining ?? '—'}</div>
+        <div className="text-[10px] text-muted-foreground">
+          / {detailQ.data?.totalPoints ?? 0} pts remaining
+        </div>
       </div>
-      <svg viewBox="0 0 200 60" className="mt-1 w-full">
-        <defs>
-          <linearGradient id="bdr" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--accent-violet))" stopOpacity="0.5" />
-            <stop offset="100%" stopColor="hsl(var(--accent-violet))" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path
-          d={
-            'M ' +
-            points
-              .map((p, i) => `${(i / (points.length - 1)) * 200},${60 - (p / max) * 50}`)
-              .join(' L ') +
-            ` L 200,60 L 0,60 Z`
-          }
-          fill="url(#bdr)"
-        />
-        <path
-          d={
-            'M ' +
-            points
-              .map((p, i) => `${(i / (points.length - 1)) * 200},${60 - (p / max) * 50}`)
-              .join(' L ')
-          }
-          fill="none"
-          stroke="hsl(var(--accent-violet))"
-          strokeWidth="1.5"
-        />
-      </svg>
+      {points.length > 1 ? (
+        <svg viewBox="0 0 200 60" className="mt-1 w-full">
+          <defs>
+            <linearGradient id="bdr" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="hsl(var(--accent-violet))" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="hsl(var(--accent-violet))" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path
+            d={
+              'M ' +
+              points
+                .map((p, i) => `${(i / (points.length - 1)) * 200},${60 - (p / max) * 50}`)
+                .join(' L ') +
+              ` L 200,60 L 0,60 Z`
+            }
+            fill="url(#bdr)"
+          />
+          <path
+            d={
+              'M ' +
+              points
+                .map((p, i) => `${(i / (points.length - 1)) * 200},${60 - (p / max) * 50}`)
+                .join(' L ')
+            }
+            fill="none"
+            stroke="hsl(var(--accent-violet))"
+            strokeWidth="1.5"
+          />
+        </svg>
+      ) : (
+        <p className="text-[10px] text-muted-foreground mt-2">Add story points to tasks in the sprint.</p>
+      )}
     </div>
   )
 }
-
 function ActivityWidget() {
   const q = useQuery({
     queryKey: ['notifications', 'feed'],

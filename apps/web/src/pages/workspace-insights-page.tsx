@@ -1,3 +1,6 @@
+import { useMemo } from 'react'
+import { useParams } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 import {
   Card,
   Badge,
@@ -18,42 +21,238 @@ import {
   Award,
   Target,
 } from 'lucide-react'
+import { api } from '../lib/api'
+import { useAuthStore } from '../store/auth'
 
-const BRIEFING = {
-  greeting: 'Good morning, Afzaal.',
-  date: new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
-  summary:
-    'Sprint 14 is on pace — 26 of 42 points done. Three tasks slipped past their due date, all on the Onboarding revamp. You have a 1:1 with Hamda at 2pm and the design review at 4pm.',
-  highlights: [
-    { kind: 'win', text: 'Workload heat-map shipped — Hamda merged it overnight.' },
-    { kind: 'risk', text: '"Email-to-task panel" is blocked waiting on Resend keys.' },
-    { kind: 'flag', text: 'Iqra is at 110% capacity this week — consider reassigning RD-7H88.' },
-  ] as const,
+type HealthRow = {
+  project: string
+  score: number
+  delta: string
+  dim: { onTime: number; activity: number; blockers: string; sentiment: string }
 }
 
-const HEALTH = [
-  { project: 'v1.0 launch', score: 86, delta: '+4', dim: { onTime: 92, activity: 88, blockers: 'low', sentiment: 'positive' } },
-  { project: 'AI agent rollout', score: 72, delta: '+1', dim: { onTime: 78, activity: 70, blockers: 'medium', sentiment: 'neutral' } },
-  { project: 'Migration playbook', score: 64, delta: '-3', dim: { onTime: 60, activity: 65, blockers: 'medium', sentiment: 'neutral' } },
-  { project: 'Cost-savings analysis', score: 95, delta: '+2', dim: { onTime: 100, activity: 88, blockers: 'low', sentiment: 'positive' } },
-]
-
-const CONTRIB = [
-  { name: 'Afzaal Ali', tasks: 24, points: 38, onTime: 92, complexity: 'high', collaboration: 12, blockers: 4 },
-  { name: 'Hamda Tahir', tasks: 18, points: 31, onTime: 100, complexity: 'high', collaboration: 9, blockers: 6 },
-  { name: 'Iqra Khalid', tasks: 22, points: 29, onTime: 88, complexity: 'medium', collaboration: 14, blockers: 2 },
-  { name: 'Mali Acme', tasks: 14, points: 22, onTime: 86, complexity: 'medium', collaboration: 7, blockers: 3 },
-  { name: 'Sara Idris', tasks: 16, points: 20, onTime: 94, complexity: 'low', collaboration: 8, blockers: 1 },
-  { name: 'Bilal Khan', tasks: 8, points: 13, onTime: 100, complexity: 'medium', collaboration: 6, blockers: 0 },
-]
-
-const SUGGESTIONS = [
-  { icon: Activity, text: 'Reassign 2 of Iqra\'s tasks to Sara — capacity gap.', cta: 'Show tasks' },
-  { icon: Brain, text: 'Sprint 14 has 3 untouched tasks in 4+ days. Drop or reassign?', cta: 'Review' },
-  { icon: TrendingUp, text: '"Onboarding revamp" project health is trending down — recommend a sync.', cta: 'Schedule' },
-]
-
 export function InsightsPage() {
+  const { workspaceId } = useParams({ from: '/app/$workspaceId/insights' })
+  const user = useAuthStore((s) => s.user)
+  const hour = new Date().getHours()
+  const greeting =
+    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+
+  const overviewQ = useQuery({
+    queryKey: ['reports-overview', workspaceId],
+    queryFn: () =>
+      api<{ total: number; completed: number; overdue: number; dueToday: number; completionRate: number }>(
+        `/workspaces/${workspaceId}/reports/overview`,
+      ),
+  })
+
+  const sprintsQ = useQuery({
+    queryKey: ['sprints', workspaceId],
+    queryFn: () =>
+      api<
+        Array<{
+          id: string
+          name: string
+          status: string
+          totalPoints: number
+          completedPoints: number
+        }>
+      >(`/workspaces/${workspaceId}/sprints`),
+  })
+
+  const productivityQ = useQuery({
+    queryKey: ['reports-productivity', workspaceId],
+    queryFn: () =>
+      api<
+        Array<{
+          displayName: string | null
+          email: string
+          tasksCompleted: number
+          totalAssigned: number
+        }>
+      >(`/workspaces/${workspaceId}/reports/productivity?days=30`),
+  })
+
+  const workloadQ = useQuery({
+    queryKey: ['workload-report', workspaceId, 14],
+    queryFn: () =>
+      api<Array<{ name: string; capacity: number; dailyLoads: number[] }>>(
+        `/workspaces/${workspaceId}/reports/workload?days=14`,
+      ),
+  })
+
+  const tasksQ = useQuery({
+    queryKey: ['insights-tasks', workspaceId],
+    queryFn: () =>
+      api<
+        Array<{
+          projectName: string
+          status: string
+          statusCategory: string
+          dueDate?: string | null
+        }>
+      >(`/tasks/workspace/${workspaceId}?limit=500`),
+  })
+
+  const activeSprint = sprintsQ.data?.find((s) => s.status === 'active')
+  const overview = overviewQ.data
+
+  const briefing = useMemo(() => {
+    const highlights: Array<{ kind: 'win' | 'risk' | 'flag'; text: string }> = []
+    if (overview?.completionRate && overview.completionRate >= 50) {
+      highlights.push({
+        kind: 'win',
+        text: `${overview.completionRate}% of workspace tasks are complete.`,
+      })
+    }
+    if (overview?.overdue && overview.overdue > 0) {
+      highlights.push({
+        kind: 'risk',
+        text: `${overview.overdue} task${overview.overdue === 1 ? '' : 's'} overdue — review due dates.`,
+      })
+    }
+    const overloaded = (workloadQ.data ?? []).filter((p) =>
+      p.dailyLoads.some((load) => load > p.capacity),
+    )
+    if (overloaded[0]) {
+      highlights.push({
+        kind: 'flag',
+        text: `${overloaded[0].name} is over capacity this week — consider rebalancing.`,
+      })
+    }
+
+    let summary = `${overview?.total ?? 0} open tasks across the workspace.`
+    if (activeSprint) {
+      summary = `${activeSprint.name}: ${activeSprint.completedPoints} of ${activeSprint.totalPoints} story points complete.`
+    }
+    if (overview?.dueToday) {
+      summary += ` ${overview.dueToday} due today.`
+    }
+
+    return {
+      greeting: `${greeting}, ${user?.displayName?.split(' ')[0] ?? 'there'}.`,
+      date: new Date().toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+      }),
+      summary,
+      highlights,
+    }
+  }, [greeting, user, overview, activeSprint, workloadQ.data])
+
+  const health: HealthRow[] = useMemo(() => {
+    const byProject = new Map<string, { total: number; done: number; overdue: number }>()
+    for (const t of tasksQ.data ?? []) {
+      const cur = byProject.get(t.projectName) ?? { total: 0, done: 0, overdue: 0 }
+      cur.total += 1
+      if (t.statusCategory === 'closed' || t.status === 'done') cur.done += 1
+      if (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'done') cur.overdue += 1
+      byProject.set(t.projectName, cur)
+    }
+    return [...byProject.entries()]
+      .map(([project, stats]) => {
+        const rate = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0
+        const score = Math.max(0, Math.min(100, rate - stats.overdue * 5))
+        return {
+          project,
+          score,
+          delta: stats.overdue > 0 ? `-${stats.overdue}` : '+0',
+          dim: {
+            onTime: rate,
+            activity: Math.min(100, stats.total * 4),
+            blockers: stats.overdue > 2 ? 'high' : stats.overdue > 0 ? 'medium' : 'low',
+            sentiment: score >= 80 ? 'positive' : score >= 60 ? 'neutral' : 'negative',
+          },
+        }
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+  }, [tasksQ.data])
+
+  const contrib = useMemo(
+    () =>
+      (productivityQ.data ?? [])
+        .filter((r) => r.displayName || r.email)
+        .map((r) => ({
+          name: r.displayName ?? r.email,
+          tasks: r.tasksCompleted,
+          points: r.tasksCompleted,
+          onTime: r.totalAssigned > 0 ? Math.round((r.tasksCompleted / r.totalAssigned) * 100) : 0,
+          complexity: r.tasksCompleted >= 15 ? 'high' : r.tasksCompleted >= 8 ? 'medium' : 'low',
+          collaboration: Math.min(20, r.totalAssigned),
+          blockers: Math.max(0, r.totalAssigned - r.tasksCompleted),
+        }))
+        .sort((a, b) => b.tasks - a.tasks)
+        .slice(0, 8),
+    [productivityQ.data],
+  )
+
+  const suggestions = useMemo(() => {
+    const items: Array<{ icon: typeof Activity; text: string; cta: string }> = []
+    if (overview?.overdue) {
+      items.push({
+        icon: AlertTriangle,
+        text: `Review ${overview.overdue} overdue tasks and reschedule or close them.`,
+        cta: 'View overdue',
+      })
+    }
+    if (activeSprint && activeSprint.completedPoints < activeSprint.totalPoints * 0.5) {
+      items.push({
+        icon: Brain,
+        text: `${activeSprint.name} is under 50% complete — add tasks or adjust scope.`,
+        cta: 'Open sprint',
+      })
+    }
+    const underloaded = (workloadQ.data ?? []).find(
+      (p) => p.dailyLoads.every((l) => l < p.capacity * 0.6),
+    )
+    const overloaded = (workloadQ.data ?? []).find((p) =>
+      p.dailyLoads.some((l) => l > p.capacity),
+    )
+    if (underloaded && overloaded) {
+      items.push({
+        icon: Activity,
+        text: `Move work from ${overloaded.name} to ${underloaded.name} to balance load.`,
+        cta: 'Workload',
+      })
+    }
+    return items.slice(0, 3)
+  }, [overview, activeSprint, workloadQ.data])
+
+  const workloadSuggestions = useMemo(() => {
+    const people = workloadQ.data ?? []
+    const overloaded = people.filter((p) => p.dailyLoads.some((l) => l > p.capacity))
+    const underloaded = people.filter((p) => p.dailyLoads.every((l) => l < p.capacity * 0.7))
+    const pairs: Array<{
+      from: string
+      fromLoad: number
+      to: string
+      toLoad: number
+      taskCount: number
+      reasoning: string
+    }> = []
+    for (const from of overloaded.slice(0, 2)) {
+      const to = underloaded[0]
+      if (!to) break
+      const fromLoad = Math.round(
+        (from.dailyLoads.reduce((a, b) => a + b, 0) / from.dailyLoads.length / from.capacity) * 100,
+      )
+      const toLoad = Math.round(
+        (to.dailyLoads.reduce((a, b) => a + b, 0) / to.dailyLoads.length / to.capacity) * 100,
+      )
+      pairs.push({
+        from: from.name,
+        fromLoad,
+        to: to.name,
+        toLoad,
+        taskCount: 1,
+        reasoning: `${from.name} is above daily capacity; ${to.name} has bandwidth this week.`,
+      })
+    }
+    return pairs
+  }, [workloadQ.data])
+
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
       <header>
@@ -78,15 +277,15 @@ export function InsightsPage() {
           <div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
               <Sun className="h-3.5 w-3.5 text-amber" />
-              {BRIEFING.date}
+              {briefing.date}
               <Badge variant="gradient" className="text-[9px] uppercase ml-1">
                 Daily briefing
               </Badge>
             </div>
-            <h2 className="font-display text-2xl font-semibold mb-2">{BRIEFING.greeting}</h2>
-            <p className="text-sm leading-relaxed text-foreground/90">{BRIEFING.summary}</p>
+            <h2 className="font-display text-2xl font-semibold mb-2">{briefing.greeting}</h2>
+            <p className="text-sm leading-relaxed text-foreground/90">{briefing.summary}</p>
             <ul className="mt-4 space-y-1.5">
-              {BRIEFING.highlights.map((h, i) => (
+              {briefing.highlights.map((h, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm">
                   <span
                     className={cn(
@@ -105,7 +304,7 @@ export function InsightsPage() {
             <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
               AI suggestions
             </div>
-            {SUGGESTIONS.map((s, i) => (
+            {suggestions.map((s, i) => (
               <button
                 key={i}
                 className="group w-full text-left rounded-lg border border-border/40 bg-card/40 p-3 hover:border-accent/40 hover:bg-card/60 transition-all"
@@ -143,9 +342,13 @@ export function InsightsPage() {
           </Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {HEALTH.map((p) => (
-            <HealthCard key={p.project} project={p} />
-          ))}
+          {health.length === 0 ? (
+            <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
+              No project data yet. Create tasks in your spaces to see health scores.
+            </Card>
+          ) : (
+            health.map((p) => <HealthCard key={p.project} project={p} />)
+          )}
         </div>
       </section>
 
@@ -176,7 +379,12 @@ export function InsightsPage() {
             <div className="text-right">Blockers</div>
           </div>
           <ul className="divide-y divide-border/30">
-            {CONTRIB.map((c, i) => (
+            {contrib.length === 0 ? (
+              <li className="px-4 py-6 text-center text-sm text-muted-foreground">
+                No team activity in the last 30 days.
+              </li>
+            ) : (
+            contrib.map((c, i) => (
               <li
                 key={c.name}
                 className="grid grid-cols-[1fr_60px_60px_80px_70px_70px] md:grid-cols-[1fr_80px_80px_120px_90px_90px] items-center px-4 py-3 hover:bg-card/40 transition-colors"
@@ -211,7 +419,7 @@ export function InsightsPage() {
                   </Badge>
                 </div>
               </li>
-            ))}
+            )))}
           </ul>
         </Card>
       </section>
@@ -228,32 +436,12 @@ export function InsightsPage() {
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {[
-            {
-              from: 'Iqra Khalid',
-              fromLoad: 110,
-              to: 'Sara Idris',
-              toLoad: 62,
-              taskCount: 2,
-              reasoning: '110% load on Iqra; Sara has bandwidth and overlapping skills.',
-            },
-            {
-              from: 'Afzaal Ali',
-              fromLoad: 95,
-              to: 'Bilal Khan',
-              toLoad: 48,
-              taskCount: 1,
-              reasoning: 'Sprint planning task could move to Bilal — better domain fit.',
-            },
-            {
-              from: 'Hamda Tahir',
-              fromLoad: 88,
-              to: 'Mali Acme',
-              toLoad: 71,
-              taskCount: 1,
-              reasoning: 'Code review backlog — Mali is closer to the relevant module.',
-            },
-          ].map((s, i) => (
+          {workloadSuggestions.length === 0 ? (
+            <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
+              Team workload looks balanced for the next two weeks.
+            </Card>
+          ) : (
+          workloadSuggestions.map((s, i) => (
             <Card key={i} className="p-3 bg-card/30 hover:border-accent/40 transition-all cursor-pointer">
               <div className="flex items-center gap-2 mb-2">
                 <PersonAvatar name={s.from} size="sm" />
@@ -274,14 +462,14 @@ export function InsightsPage() {
                 <Button variant="gradient" size="sm" className="h-6 text-[10px] flex-1">Apply</Button>
               </div>
             </Card>
-          ))}
+          )))}
         </div>
       </Card>
     </div>
   )
 }
 
-function HealthCard({ project }: { project: typeof HEALTH[number] }) {
+function HealthCard({ project }: { project: HealthRow }) {
   const positive = project.delta.startsWith('+')
   const ringColor =
     project.score >= 85 ? 'hsl(var(--success))'

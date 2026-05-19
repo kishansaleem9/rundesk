@@ -193,11 +193,17 @@ export class ReportsService {
           .where(eq(sprintTasks.sprintId, sprint.id))
 
         // Sum story points from sprint_tasks
-        const storyPoints = await this.db
-          .select({ total: sql<number>`coalesce(sum(story_points), 0)::int` })
+        const [pointsRow] = await this.db
+          .select({
+            planned: sql<number>`coalesce(sum(${sprintTasks.storyPoints}), 0)::float`,
+            completed: sql<number>`coalesce(sum(case when ${tasks.statusCategory} = 'closed' or ${tasks.status} = 'done' then ${sprintTasks.storyPoints} else 0 end), 0)::float`,
+          })
           .from(sprintTasks)
+          .innerJoin(tasks, eq(tasks.id, sprintTasks.taskId))
           .where(eq(sprintTasks.sprintId, sprint.id))
-        const totalPoints = storyPoints[0]?.total ?? 0
+
+        const plannedPoints = Number(pointsRow?.planned ?? 0)
+        const completedPoints = Number(pointsRow?.completed ?? 0)
         return {
           sprintId: sprint.id,
           name: sprint.name,
@@ -205,7 +211,8 @@ export class ReportsService {
           endDate: sprint.endDate,
           status: sprint.status,
           taskCount: taskRows.length,
-          plannedPoints: totalPoints,
+          plannedPoints,
+          completedPoints,
         }
       }),
     )

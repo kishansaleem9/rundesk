@@ -1,6 +1,11 @@
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
+import {
+  TaskListChrome,
+  WorkFilterSelect,
+  WorkViewTabs,
+} from '../components/work/work-ui'
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
@@ -213,6 +218,10 @@ function ListDetail() {
     queryKey: ['list-statuses', listId],
     queryFn: () => api<ListStatus[]>(`/lists/${listId}/statuses`),
   })
+  const { data: listMeta } = useQuery({
+    queryKey: ['list-meta', listId],
+    queryFn: () => api<{ id: string; name: string; description?: string | null }>(`/lists/${listId}`),
+  })
 
   useEffect(() => {
     const socket = getRealtimeSocket()
@@ -398,100 +407,80 @@ function ListDetail() {
     { id: 'calendar', label: 'Calendar' },
   ]
 
+  const statusOptions = listStatuses.length
+    ? listStatuses
+    : Object.entries(DEFAULT_STATUS_META).map(([k, m]) => ({ key: k, name: m.label }))
+
   return (
     <ListStatusesContext.Provider value={listStatuses}>
-    <div className="flex-1 flex flex-col">
-      <div className="border-b border-border/70 bg-card">
-        <div className="px-3 sm:px-5 pt-3 pb-0 flex flex-col sm:flex-row sm:items-end justify-between gap-2.5">
-          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-            <h1 className="font-display text-xl font-semibold truncate text-foreground">Tasks</h1>
-            <span className="text-xs text-muted-foreground">{visibleTasks.length} task{visibleTasks.length !== 1 ? 's' : ''}</span>
-          </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+    <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-[#0f1114]">
+      <TaskListChrome
+        listName={listMeta?.name ?? 'Tasks'}
+        taskCount={visibleTasks.length}
+        quickAdd={
+          <>
             <Input
               ref={quickAddRef}
               placeholder="Quick add task…"
               value={newTaskTitle}
               onChange={(e) => setNewTaskTitle(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateTask()}
-              className="h-7.5 w-full sm:w-56"
+              className="h-8 w-full sm:w-64 text-[13px] border-border/80 focus-visible:ring-violet-500/25"
             />
-            <Button size="sm" onClick={handleCreateTask}>Add</Button>
-          </div>
-        </div>
-        <div className="px-3 sm:px-5 mt-2.5 flex items-center gap-1 border-b-0 overflow-x-auto">
-          {viewTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveView(tab.id)}
-              className={`relative px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                activeView === tab.id
-                  ? 'text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {tab.label}
-              {activeView === tab.id && (
-                <span className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-brand-700 rounded-t" />
-              )}
-            </button>
-          ))}
-          <div className="ml-auto flex items-center gap-1.5 pb-1 text-xs text-muted-foreground">
-            <select
-              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
+            <Button size="sm" className="h-8 bg-violet-600 hover:bg-violet-700 text-white" onClick={handleCreateTask}>
+              Add task
+            </Button>
+          </>
+        }
+        viewTabs={
+          <WorkViewTabs tabs={viewTabs} active={activeView} onChange={setActiveView} />
+        }
+        toolbar={
+          <>
+            <WorkFilterSelect
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'all' | TaskStatus)}
+              onChange={(v) => setStatusFilter(v as 'all' | TaskStatus)}
             >
               <option value="all">All statuses</option>
-              {(listStatuses.length ? listStatuses : Object.entries(DEFAULT_STATUS_META).map(([k, m]) => ({ key: k, name: m.label }))).map((status) => (
+              {statusOptions.map((status) => (
                 <option key={status.key} value={status.key}>
                   {status.name}
                 </option>
               ))}
-            </select>
-            <select
-              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'created' | 'due' | 'priority')}
-            >
-              <option value="created">Sort: Newest</option>
-              <option value="due">Sort: Due date</option>
-              <option value="priority">Sort: Priority</option>
-            </select>
-            <select
-              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
-              value={groupBy}
-              onChange={(e) => setGroupBy(e.target.value as 'status' | 'priority')}
-            >
-              <option value="status">Group: Status</option>
-              <option value="priority">Group: Priority</option>
-            </select>
-            <select
-              className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
+            </WorkFilterSelect>
+            <WorkFilterSelect value={sortBy} onChange={(v) => setSortBy(v as typeof sortBy)}>
+              <option value="created">Newest</option>
+              <option value="due">Due date</option>
+              <option value="priority">Priority</option>
+            </WorkFilterSelect>
+            <WorkFilterSelect value={groupBy} onChange={(v) => setGroupBy(v as typeof groupBy)}>
+              <option value="status">By status</option>
+              <option value="priority">By priority</option>
+            </WorkFilterSelect>
+            <WorkFilterSelect
               value={selectedSavedViewId}
-              onChange={(e) => {
-                const selectedId = e.target.value
-                if (!selectedId) return
-                applyView(selectedId)
+              onChange={(v) => {
+                if (!v) return
+                applyView(v)
               }}
             >
-              <option value="">Load view</option>
+              <option value="">Saved views</option>
               {savedViews.map((view) => (
                 <option key={view.id} value={view.id}>
                   {view.name}
                 </option>
               ))}
-            </select>
+            </WorkFilterSelect>
             <Input
               value={saveAsName}
               onChange={(e) => setSaveAsName(e.target.value)}
-              placeholder="Save as..."
-              className="h-7 w-32"
+              placeholder="View name…"
+              className="h-8 w-28 text-[12px] border-border/80"
             />
             <Button
               size="sm"
               variant="outline"
-              className="h-7"
+              className="h-8 text-[12px]"
               onClick={async () => {
                 const name = saveAsName.trim()
                 if (!name) return
@@ -514,7 +503,7 @@ function ListDetail() {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-7"
+                  className="h-8 text-[12px]"
                   onClick={async () => {
                     await api(`/views/${selectedSavedViewId}`, {
                       method: 'PATCH',
@@ -523,12 +512,12 @@ function ListDetail() {
                     await qc.invalidateQueries({ queryKey: ['list-views', listId] })
                   }}
                 >
-                  Update view
+                  Update
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-7"
+                  className="h-8 text-[12px]"
                   onClick={async () => {
                     await api(`/views/${selectedSavedViewId}`, {
                       method: 'PATCH',
@@ -537,14 +526,14 @@ function ListDetail() {
                     await qc.invalidateQueries({ queryKey: ['list-views', listId] })
                   }}
                 >
-                  Set default
+                  Default
                 </Button>
               </>
             ) : null}
             <Button
               size="sm"
               variant="outline"
-              className="h-7"
+              className="h-8 text-[12px]"
               onClick={() => setStatusManagerOpen(true)}
               title="Manage this list's statuses"
             >
@@ -553,22 +542,32 @@ function ListDetail() {
             <Button
               size="sm"
               variant="outline"
-              className="h-7"
+              className="h-8 text-[12px]"
               onClick={() => setEmailAliasOpen(true)}
               title="Email-to-task address for this list"
             >
               Email
             </Button>
-            <span className="hidden lg:inline text-[11px] text-muted-foreground pl-1">Shortcuts: C quick-add, V cycle view</span>
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      <div className="flex-1 overflow-auto p-3 sm:p-5">
+      <div className="flex-1 overflow-auto p-4 sm:p-6">
         {isLoading ? (
-          <div className="text-muted-foreground">Loading tasks...</div>
+          <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
+            Loading tasks…
+          </div>
         ) : visibleTasks.length === 0 ? (
-          <div className="text-muted-foreground">No tasks yet. Create one to get started!</div>
+          <div className="rounded-xl border border-dashed border-border/80 bg-[#fbfbfc]/60 dark:bg-[#16181d]/40 p-12 text-center">
+            <p className="text-[15px] font-medium text-foreground mb-1">No tasks yet</p>
+            <p className="text-[13px] text-muted-foreground mb-4">
+              Add your first task with the field above, or press{' '}
+              <kbd className="px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono">C</kbd> to quick-add.
+            </p>
+            <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => quickAddRef.current?.focus()}>
+              Create task
+            </Button>
+          </div>
         ) : activeView === 'list' ? (
           <GroupedListView
             tasks={visibleTasks}

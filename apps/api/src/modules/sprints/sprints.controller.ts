@@ -40,6 +40,11 @@ export class SprintsController {
     })
   }
 
+  @Get('sprints/:sprintId')
+  get(@Param('sprintId') sprintId: string) {
+    return this.sprints.getDetail(sprintId)
+  }
+
   @Patch('sprints/:sprintId')
   update(
     @Param('sprintId') sprintId: string,

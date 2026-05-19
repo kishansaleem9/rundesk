@@ -1,9 +1,16 @@
 import { useState } from 'react'
-import { Link, Outlet, useMatches, useParams } from '@tanstack/react-router'
+import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, cn } from '@rundesk/ui'
-import { ArrowRight, List as ListIcon, Plus, Settings, Trash2 } from 'lucide-react'
+import { Button, Input, Card } from '@rundesk/ui'
+import { List as ListIcon, Plus, Settings, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
+import {
+  WorkHubPage,
+  WorkEmptyState,
+  WorkEntityCard,
+  WorkCreateCard,
+  WorkSectionTitle,
+} from '../components/work/work-ui'
 
 type List = {
   id: string
@@ -25,7 +32,9 @@ export function ProjectShell() {
 }
 
 function ProjectHome() {
-  const { workspaceId, spaceId, projectId } = useParams({ from: '/app/$workspaceId/$spaceId/$projectId' })
+  const { workspaceId, spaceId, projectId } = useParams({
+    from: '/app/$workspaceId/$spaceId/$projectId',
+  })
   const qc = useQueryClient()
   const [showCreateList, setShowCreateList] = useState(false)
   const [newListName, setNewListName] = useState('')
@@ -46,7 +55,11 @@ function ProjectHome() {
     mutationFn: () =>
       api<List>(`/lists`, {
         method: 'POST',
-        body: { projectId, name: newListName.trim(), description: newListDescription.trim() || undefined },
+        body: {
+          projectId,
+          name: newListName.trim(),
+          description: newListDescription.trim() || undefined,
+        },
       }),
     onSuccess: () => {
       setShowCreateList(false)
@@ -57,60 +70,76 @@ function ProjectHome() {
   })
 
   return (
-    <div className="max-w-6xl mx-auto p-8">
-      <header className="mb-8">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Project</div>
-        <h1 className="font-display text-3xl font-semibold text-foreground">
-          {project?.name ?? 'Project'}
-        </h1>
-        {project?.description && (
-          <p className="text-muted-foreground mt-1">{project.description}</p>
-        )}
-      </header>
-
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-display text-xl font-semibold text-foreground">Lists</h2>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">
+    <WorkHubPage
+      breadcrumb="Project"
+      title={project?.name ?? 'Project'}
+      description={project?.description}
+      headerAction={
+        <Button
+          size="sm"
+          className="bg-violet-600 hover:bg-violet-700 text-white"
+          onClick={() => setShowCreateList((v) => !v)}
+        >
+          <Plus className="h-3.5 w-3.5 mr-1.5" />
+          {showCreateList ? 'Cancel' : 'Add list'}
+        </Button>
+      }
+    >
+      <section className="mb-10">
+        <WorkSectionTitle
+          action={
+            <span className="text-[12px] text-muted-foreground">
               {lists.length} list{lists.length !== 1 ? 's' : ''}
             </span>
-            <Button size="sm" onClick={() => setShowCreateList((v) => !v)}>
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              {showCreateList ? 'Cancel' : 'Add list'}
-            </Button>
-          </div>
-        </div>
+          }
+        >
+          Lists
+        </WorkSectionTitle>
 
         {showCreateList && (
-          <Card className="p-4 mb-3 space-y-2">
+          <WorkCreateCard onCancel={() => setShowCreateList(false)}>
             <Input
               autoFocus
               value={newListName}
               onChange={(e) => setNewListName(e.target.value)}
               placeholder="List name (e.g. Backlog, In Progress, QA)"
+              className="h-9"
             />
             <Input
               value={newListDescription}
               onChange={(e) => setNewListDescription(e.target.value)}
               placeholder="Description (optional)"
+              className="h-9"
             />
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                onClick={() => createList.mutate()}
-                disabled={!newListName.trim() || createList.isPending}
-              >
-                {createList.isPending ? 'Creating...' : 'Create list'}
-              </Button>
-            </div>
-          </Card>
+            <Button
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => createList.mutate()}
+              disabled={!newListName.trim() || createList.isPending}
+            >
+              {createList.isPending ? 'Creating…' : 'Create list'}
+            </Button>
+          </WorkCreateCard>
         )}
 
         {isLoading ? (
-          <Card className="p-8 text-sm text-muted-foreground text-center">Loading lists…</Card>
+          <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
+            Loading lists…
+          </div>
         ) : lists.length === 0 ? (
-          <EmptyState />
+          <WorkEmptyState
+            icon={ListIcon}
+            title="No lists yet"
+            description="Lists organize tasks by workflow stage. Add a list from the button above or from the sidebar."
+            action={
+              <Button
+                className="bg-violet-600 hover:bg-violet-700 text-white"
+                onClick={() => setShowCreateList(true)}
+              >
+                <Plus className="h-4 w-4 mr-1.5" /> Add list
+              </Button>
+            }
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {lists.map((list) => (
@@ -127,7 +156,7 @@ function ProjectHome() {
       </section>
 
       <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} />
-    </div>
+    </WorkHubPage>
   )
 }
 
@@ -151,25 +180,23 @@ function CustomFieldsSection({
   const [name, setName] = useState('')
   const [type, setType] = useState<CustomFieldDef['type']>('text')
   const [isRequired, setIsRequired] = useState(false)
-  const [optionsText, setOptionsText] = useState('')
+  const [options, setOptions] = useState('')
 
   const fieldsQuery = useQuery({
     queryKey: ['project-fields', workspaceId, projectId],
     queryFn: () =>
-      api<CustomFieldDef[]>(
-        `/workspaces/${workspaceId}/projects/${projectId}/custom-fields`,
-      ),
+      api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`),
   })
 
   const create = useMutation({
     mutationFn: () => {
       const opts =
         type === 'dropdown'
-          ? optionsText
+          ? options
               .split(',')
-              .map((s) => s.trim())
+              .map((o) => o.trim())
               .filter(Boolean)
-              .map((v) => ({ label: v, value: v.toLowerCase().replace(/\s+/g, '_') }))
+              .map((o) => ({ label: o, value: o.toLowerCase().replace(/\s+/g, '_') }))
           : undefined
       return api(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`, {
         method: 'POST',
@@ -181,102 +208,97 @@ function CustomFieldsSection({
       setShowForm(false)
       setName('')
       setIsRequired(false)
-      setOptionsText('')
+      setOptions('')
       setType('text')
     },
   })
 
   const remove = useMutation({
-    mutationFn: (fieldId: string) =>
-      api(`/workspaces/${workspaceId}/custom-fields/${fieldId}`, { method: 'DELETE' }),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ['project-fields', workspaceId, projectId] }),
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/custom-fields/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project-fields', workspaceId, projectId] }),
   })
 
   const fields = fieldsQuery.data ?? []
 
   return (
-    <section className="mt-10">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="font-display text-xl font-semibold text-foreground flex items-center gap-2">
-            <Settings className="h-4 w-4 text-brand-500" />
-            Custom fields
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Fields defined here appear on every task in this project.
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowForm((v) => !v)}>
-          <Plus className="h-3.5 w-3.5 mr-1" /> {showForm ? 'Cancel' : 'Add field'}
-        </Button>
-      </div>
+    <section>
+      <WorkSectionTitle
+        action={
+          <Button size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>
+            <Settings className="h-3.5 w-3.5 mr-1.5" />
+            {showForm ? 'Cancel' : 'Add field'}
+          </Button>
+        }
+      >
+        <span className="flex items-center gap-2">
+          <Settings className="h-4 w-4 text-muted-foreground" />
+          Custom fields
+        </span>
+      </WorkSectionTitle>
+      <p className="text-[13px] text-muted-foreground mb-4 -mt-1">
+        Fields defined here appear on every task in this project.
+      </p>
 
       {showForm && (
-        <Card className="p-4 mb-3 space-y-2">
+        <WorkCreateCard onCancel={() => setShowForm(false)}>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Field name (e.g. Estimated cost, Sprint, Risk level)"
+            placeholder="Field name (e.g. Sprint, Risk level)"
+            className="h-9"
           />
-          <div className="flex items-center gap-2">
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value as CustomFieldDef['type'])}
-              className="text-sm rounded-md border border-input bg-transparent px-2 py-1.5"
-            >
-              <option value="text">Text</option>
-              <option value="number">Number</option>
-              <option value="dropdown">Dropdown</option>
-              <option value="date">Date</option>
-              <option value="checkbox">Checkbox</option>
-              <option value="url">URL</option>
-            </select>
-            <label className="text-xs flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={isRequired}
-                onChange={(e) => setIsRequired(e.target.checked)}
-              />
-              Required
-            </label>
-          </div>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value as CustomFieldDef['type'])}
+            className="h-9 w-full rounded-md border border-border/80 bg-background px-3 text-sm"
+          >
+            <option value="text">Text</option>
+            <option value="number">Number</option>
+            <option value="dropdown">Dropdown</option>
+            <option value="date">Date</option>
+            <option value="checkbox">Checkbox</option>
+            <option value="url">URL</option>
+          </select>
+          <label className="flex items-center gap-2 text-[13px]">
+            <input type="checkbox" checked={isRequired} onChange={(e) => setIsRequired(e.target.checked)} />
+            Required
+          </label>
           {type === 'dropdown' && (
             <Input
-              value={optionsText}
-              onChange={(e) => setOptionsText(e.target.value)}
-              placeholder="Options, comma-separated (e.g. Low, Medium, High)"
+              value={options}
+              onChange={(e) => setOptions(e.target.value)}
+              placeholder="Options, comma-separated"
+              className="h-9"
             />
           )}
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              disabled={!name.trim() || create.isPending}
-              onClick={() => create.mutate()}
-            >
-              {create.isPending ? 'Creating...' : 'Create field'}
-            </Button>
-          </div>
-        </Card>
+          <Button
+            size="sm"
+            className="bg-violet-600 hover:bg-violet-700 text-white"
+            disabled={!name.trim() || create.isPending}
+            onClick={() => create.mutate()}
+          >
+            {create.isPending ? 'Creating…' : 'Create field'}
+          </Button>
+        </WorkCreateCard>
       )}
 
       {fieldsQuery.isLoading ? (
-        <Card className="p-4 text-sm text-muted-foreground">Loading…</Card>
+        <Card className="p-4 text-sm text-muted-foreground border-border/80">Loading…</Card>
       ) : fields.length === 0 ? (
-        <Card className="p-4 text-sm text-muted-foreground">
-          No custom fields yet. Add fields like &quot;Estimated cost&quot;, &quot;Risk level&quot;, or &quot;Sprint&quot; to
-          tailor tasks for this project.
+        <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
+          No custom fields yet. Add fields like &quot;Estimated cost&quot;, &quot;Risk level&quot;, or
+          &quot;Sprint&quot; to tailor tasks for this project.
         </Card>
       ) : (
-        <Card className="divide-y">
+        <Card className="divide-y border-border/80 overflow-hidden">
           {fields.map((f) => (
-            <div key={f.id} className="flex items-center gap-3 p-3">
-              <div className="flex-1">
-                <div className="text-sm font-medium flex items-center gap-2">
+            <div key={f.id} className="flex items-center gap-3 p-3 bg-background">
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] font-medium flex items-center gap-2">
                   {f.name}
-                  {f.isRequired && <span className="text-destructive text-xs">required</span>}
+                  {f.isRequired && <span className="text-destructive text-[11px]">required</span>}
                 </div>
-                <div className="text-xs text-muted-foreground capitalize">
+                <div className="text-[12px] text-muted-foreground capitalize">
                   {f.type}
                   {f.options && f.options.length > 0 && (
                     <> — {f.options.map((o) => o.label).join(', ')}</>
@@ -286,7 +308,7 @@ function CustomFieldsSection({
               <Button
                 size="sm"
                 variant="ghost"
-                className="text-destructive"
+                className="text-destructive hover:text-destructive"
                 onClick={() => remove.mutate(f.id)}
                 disabled={remove.isPending}
               >
@@ -318,60 +340,15 @@ function ListCard({
 
   const total = tasks?.length ?? 0
   const done = tasks?.filter((t) => t.status === 'done').length ?? 0
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0
 
   return (
-    <Link
+    <WorkEntityCard
       to="/app/$workspaceId/$spaceId/$projectId/$listId"
       params={{ workspaceId, spaceId, projectId, listId: list.id }}
-      className="block group"
-    >
-      <Card className="p-4 hover:shadow-md hover:border-brand-500 transition-all">
-        <div className="flex items-start gap-3">
-          <div className="h-10 w-10 rounded-lg shrink-0 flex items-center justify-center bg-accent/15">
-            <ListIcon className="h-5 w-5 text-accent" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold truncate group-hover:text-accent transition-colors">
-              {list.name}
-            </h3>
-            {list.description && (
-              <p className="text-sm text-muted-foreground line-clamp-1 mt-0.5">
-                {list.description}
-              </p>
-            )}
-            <div className="mt-3 flex items-center gap-2">
-              <div className="flex-1 h-1.5 rounded-full bg-surface-100 overflow-hidden">
-                <div
-                  className="h-full bg-brand-500 transition-all"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {done}/{total}
-              </span>
-            </div>
-          </div>
-          <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-      </Card>
-    </Link>
-  )
-}
-
-function EmptyState() {
-  return (
-    <Card className="p-10 text-center">
-      <div className="h-12 w-12 rounded-full bg-accent/15 mx-auto mb-3 flex items-center justify-center">
-        <ListIcon className="h-6 w-6 text-accent" />
-      </div>
-      <h3 className="font-display text-lg font-semibold text-foreground mb-1">
-        No lists yet
-      </h3>
-      <p className="text-sm text-muted-foreground max-w-md mx-auto">
-        Lists hold your tasks. Hover over this project in the sidebar and click{' '}
-        <Plus className="inline h-3 w-3" /> to add one.
-      </p>
-    </Card>
+      icon={<ListIcon className="h-5 w-5" />}
+      title={list.name}
+      subtitle={list.description}
+      progress={{ done, total }}
+    />
   )
 }
