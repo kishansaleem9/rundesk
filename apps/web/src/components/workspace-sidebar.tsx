@@ -35,6 +35,25 @@ function isUuidLike(value: string | undefined): value is string {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
+type NavRecent = { label: string; path: string }
+
+function normalizePath(path: string) {
+  if (path.length > 1 && path.endsWith('/')) return path.slice(0, -1)
+  return path
+}
+
+function pathsEqual(a: string, b: string) {
+  return normalizePath(a) === normalizePath(b)
+}
+
+/** True when pathname matches a nav target (exact for workspace home). */
+function isNavPathActive(pathname: string, targetPath: string, exact = false) {
+  const current = normalizePath(pathname)
+  const target = normalizePath(targetPath)
+  if (exact) return current === target
+  return current === target || current.startsWith(`${target}/`)
+}
+
 function navIconForLabel(label: string) {
   const key = label.toLowerCase()
   if (key.includes('inbox')) return Inbox
@@ -51,6 +70,62 @@ function navIconForLabel(label: string) {
   if (key.includes('integration')) return PlugZap
   if (key.includes('setting')) return Settings
   return Home
+}
+
+function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: string; exact?: boolean }> {
+  const base = `/app/${workspaceId}`
+  return [
+    { label: 'Home', path: base, exact: true },
+    { label: 'Inbox', path: `${base}/inbox` },
+    { label: 'Teams', path: `${base}/chat` },
+    { label: 'Docs', path: `${base}/docs` },
+    { label: 'Dashboards', path: `${base}/dashboard` },
+    { label: 'AI', path: `${base}/ai` },
+    { label: 'Whiteboards', path: `${base}/whiteboards` },
+    { label: 'Forms', path: `${base}/forms` },
+    { label: 'Automations', path: `${base}/automations` },
+    { label: 'Workload', path: `${base}/workload` },
+    { label: 'Timeline', path: `${base}/timeline` },
+    { label: 'Templates', path: `${base}/templates` },
+    { label: 'Integrations', path: `${base}/integrations` },
+    { label: 'Goals', path: `${base}/goals` },
+    { label: 'Reports', path: `${base}/reports` },
+    { label: 'Time', path: `${base}/time` },
+    { label: 'Mind maps', path: `${base}/mindmaps` },
+    { label: 'Clips', path: `${base}/clips` },
+    { label: 'Settings', path: `${base}/settings` },
+  ]
+}
+
+function recentFromPathname(pathname: string, workspaceId: string): NavRecent | null {
+  const current = normalizePath(pathname)
+  const hit = workspaceNavEntries(workspaceId).find((entry) =>
+    isNavPathActive(current, entry.path, entry.exact),
+  )
+  if (hit) return { label: hit.label, path: hit.path }
+
+  // Space / project / list hierarchy
+  const listMatch = current.match(
+    /^\/app\/[^/]+\/([^/]+)\/([^/]+)\/([^/]+)(?:\/([^/]+))?$/,
+  )
+  if (listMatch) {
+    const [, spaceId, projectId, listId] = listMatch
+    return {
+      label: 'Task list',
+      path: `/app/${workspaceId}/${spaceId}/${projectId}/${listId}`,
+    }
+  }
+  const projectMatch = current.match(/^\/app\/[^/]+\/([^/]+)\/([^/]+)$/)
+  if (projectMatch) {
+    const [, spaceId, projectId] = projectMatch
+    return { label: 'Project', path: `/app/${workspaceId}/${spaceId}/${projectId}` }
+  }
+  const spaceMatch = current.match(/^\/app\/[^/]+\/([^/]+)$/)
+  if (spaceMatch) {
+    const [, spaceId] = spaceMatch
+    return { label: 'Space', path: `/app/${workspaceId}/${spaceId}` }
+  }
+  return null
 }
 
 export function WorkspaceSidebar() {
@@ -155,8 +230,10 @@ export function WorkspaceSidebar() {
     if (!workspaceId) return
     const key = `rundesk.navFavorites.${workspaceId}`
     setFavoriteItems((prev) => {
-      const exists = prev.some((f) => f.path === item.path)
-      const next = exists ? prev.filter((f) => f.path !== item.path) : [item, ...prev].slice(0, 12)
+      const exists = prev.some((f) => pathsEqual(f.path, item.path))
+      const next = exists
+        ? prev.filter((f) => !pathsEqual(f.path, item.path))
+        : [item, ...prev.filter((f) => !pathsEqual(f.path, item.path))].slice(0, 12)
       try {
         localStorage.setItem(key, JSON.stringify(next))
       } catch {
@@ -193,41 +270,37 @@ export function WorkspaceSidebar() {
   }
 
   useEffect(() => {
+    if (!workspaceId) return
+    const storageKey = `rundesk.navRecents.${workspaceId}`
     try {
-      const raw = localStorage.getItem('rundesk.navRecents')
+      const raw = localStorage.getItem(storageKey) ?? localStorage.getItem('rundesk.navRecents')
       if (!raw) return
-      const parsed = JSON.parse(raw) as Array<{ label: string; path: string }>
-      if (Array.isArray(parsed)) setRecentItems(parsed.slice(0, 8))
+      const parsed = JSON.parse(raw) as NavRecent[]
+      if (!Array.isArray(parsed)) return
+      const deduped = parsed.filter(
+        (item, index, arr) => arr.findIndex((other) => pathsEqual(other.path, item.path)) === index,
+      )
+      setRecentItems(deduped.slice(0, 8))
+      if (!localStorage.getItem(storageKey)) {
+        localStorage.setItem(storageKey, JSON.stringify(deduped.slice(0, 8)))
+      }
     } catch {
       // ignore invalid cached nav recents
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => {
     if (!workspaceId) return
-    const navMap: Array<{ startsWith: string; label: string }> = [
-      { startsWith: `/app/${workspaceId}/chat`, label: 'Teams' },
-      { startsWith: `/app/${workspaceId}/docs`, label: 'Docs' },
-      { startsWith: `/app/${workspaceId}/ai`, label: 'AI' },
-      { startsWith: `/app/${workspaceId}/dashboard`, label: 'Dashboards' },
-      { startsWith: `/app/${workspaceId}/whiteboards`, label: 'Whiteboards' },
-      { startsWith: `/app/${workspaceId}/forms`, label: 'Forms' },
-      { startsWith: `/app/${workspaceId}/workload`, label: 'Workload' },
-      { startsWith: `/app/${workspaceId}/timeline`, label: 'Timeline' },
-      { startsWith: `/app/${workspaceId}/templates`, label: 'Templates' },
-      { startsWith: `/app/${workspaceId}/integrations`, label: 'Integrations' },
-      { startsWith: `/app/${workspaceId}/goals`, label: 'Goals' },
-      { startsWith: `/app/${workspaceId}/reports`, label: 'Reports' },
-      { startsWith: `/app/${workspaceId}/time`, label: 'Time' },
-      { startsWith: `/app/${workspaceId}/mindmaps`, label: 'Mind maps' },
-      { startsWith: `/app/${workspaceId}/clips`, label: 'Clips' },
-    ]
-    const hit = navMap.find((item) => pathname.startsWith(item.startsWith))
+    const hit = recentFromPathname(pathname, workspaceId)
     if (!hit) return
+    const storageKey = `rundesk.navRecents.${workspaceId}`
     setRecentItems((prev) => {
-      const next = [{ label: hit.label, path: pathname }, ...prev.filter((p) => p.path !== pathname)].slice(0, 8)
+      const next = [
+        hit,
+        ...prev.filter((item) => !pathsEqual(item.path, hit.path)),
+      ].slice(0, 8)
       try {
-        localStorage.setItem('rundesk.navRecents', JSON.stringify(next))
+        localStorage.setItem(storageKey, JSON.stringify(next))
       } catch {
         // ignore storage failure
       }
@@ -317,11 +390,21 @@ export function WorkspaceSidebar() {
                 ) : (
                   favoriteItems.map((item, idx) => {
                     const Icon = navIconForLabel(item.label)
+                    const favoriteActive = isNavPathActive(
+                      pathname,
+                      item.path,
+                      pathsEqual(item.path, `/app/${workspaceId}`),
+                    )
                     return (
                       <div key={item.path} className="group flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-accent/10">
                         <Link
                           to={item.path as any}
-                          className="flex items-center gap-2 rounded-md px-1 py-1 text-[13px] text-muted-foreground hover:text-foreground flex-1 min-w-0"
+                          className={cn(
+                            'flex items-center gap-2 rounded-md px-1 py-1 text-[13px] flex-1 min-w-0',
+                            favoriteActive
+                              ? 'bg-accent/15 text-foreground font-medium'
+                              : 'text-muted-foreground hover:text-foreground',
+                          )}
                         >
                           <Icon className="h-4 w-4 shrink-0" />
                           <span className="truncate flex-1">{item.label}</span>
@@ -368,11 +451,22 @@ export function WorkspaceSidebar() {
                 {recentItems.length === 0 ? (
                   <div className="px-2 py-1 text-xs text-muted-foreground">No recent pages yet.</div>
                 ) : (
-                  recentItems.map((item) => (
+                  recentItems.map((item) => {
+                    const recentActive = isNavPathActive(
+                      pathname,
+                      item.path,
+                      pathsEqual(item.path, `/app/${workspaceId}`),
+                    )
+                    return (
                     <div key={item.path} className="flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-accent/10">
                       <Link
                         to={item.path as any}
-                        className="flex items-center gap-2 rounded-md px-1 py-1 text-[13px] text-muted-foreground hover:text-foreground flex-1 min-w-0"
+                        className={cn(
+                          'flex items-center gap-2 rounded-md px-1 py-1 text-[13px] flex-1 min-w-0',
+                          recentActive
+                            ? 'bg-accent/15 text-foreground font-medium'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
                       >
                         <Clock3 className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{item.label}</span>
@@ -380,12 +474,13 @@ export function WorkspaceSidebar() {
                       <button
                         className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 flex items-center justify-center"
                         onClick={() => toggleFavorite(item)}
-                        title={favoriteItems.some((f) => f.path === item.path) ? 'Remove favorite' : 'Add to favorites'}
+                        title={favoriteItems.some((f) => pathsEqual(f.path, item.path)) ? 'Remove favorite' : 'Add to favorites'}
                       >
-                        <Star className={cn('h-3.5 w-3.5', favoriteItems.some((f) => f.path === item.path) && 'text-amber-400')} />
+                        <Star className={cn('h-3.5 w-3.5', favoriteItems.some((f) => pathsEqual(f.path, item.path)) && 'text-amber-400')} />
                       </button>
                     </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             )}
@@ -478,17 +573,39 @@ export function WorkspaceSidebar() {
                         </button>
                         {expandedProjects[project.id] && (
                           <div className="ml-5 space-y-0.5">
-                            {project.lists.map((list) => (
+                            {project.lists.map((list) => {
+                              const listPath = resolveRoutePath(
+                                '/app/$workspaceId/$spaceId/$projectId/$listId',
+                                {
+                                  workspaceId,
+                                  spaceId: space.id,
+                                  projectId: project.id,
+                                  listId: list.id,
+                                },
+                              )
+                              const listActive = pathsEqual(pathname, listPath)
+                              return (
                               <Link
                                 key={list.id}
                                 to="/app/$workspaceId/$spaceId/$projectId/$listId"
                                 params={{ workspaceId, spaceId: space.id, projectId: project.id, listId: list.id }}
-                                className="flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                                className={cn(
+                                  'flex items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-accent/10',
+                                  listActive
+                                    ? 'text-foreground font-medium bg-accent/15'
+                                    : 'text-muted-foreground hover:text-foreground',
+                                )}
                               >
-                                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50" />
+                                <span
+                                  className={cn(
+                                    'h-1.5 w-1.5 rounded-full',
+                                    listActive ? 'bg-brand-500' : 'bg-muted-foreground/50',
+                                  )}
+                                />
                                 <span className="truncate">{list.name}</span>
                               </Link>
-                            ))}
+                              )
+                            })}
                             {project.lists.length === 0 && (
                               <div className="px-2 py-1 text-[11px] text-muted-foreground">No lists yet</div>
                             )}
@@ -662,6 +779,17 @@ export function WorkspaceSidebar() {
   )
 }
 
+function resolveRoutePath(
+  to: string,
+  params: Record<string, string>,
+) {
+  let path = to
+  for (const [key, value] of Object.entries(params)) {
+    path = path.replace(`$${key}`, value)
+  }
+  return path
+}
+
 function NavLink({
   to,
   params,
@@ -689,15 +817,21 @@ function NavLink({
   label: string
   compact?: boolean
 }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const href = resolveRoutePath(to, params)
+  const isActive = isNavPathActive(pathname, href, to === '/app/$workspaceId')
+
   return (
     <Link
       to={to}
       params={params}
       className={cn(
-        'flex items-center gap-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/10',
+        'flex items-center gap-2 rounded-md hover:bg-accent/10',
         compact ? 'px-2 py-1.5 text-[13px]' : 'px-2 py-1.5 text-sm',
+        isActive
+          ? 'bg-accent/15 text-foreground font-medium'
+          : 'text-muted-foreground hover:text-foreground',
       )}
-      activeProps={{ className: 'bg-accent/15 text-foreground' }}
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
@@ -723,13 +857,21 @@ function DockLink({
   icon: typeof Home
   label: string
 }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const href = resolveRoutePath(to, params)
+  const isActive = isNavPathActive(pathname, href, to === '/app/$workspaceId')
+
   return (
     <Link
       to={to}
       params={params}
       title={label}
-      className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/15"
-      activeProps={{ className: 'h-8 w-8 rounded-full flex items-center justify-center text-white bg-brand-gradient' }}
+      className={cn(
+        'h-8 w-8 rounded-full flex items-center justify-center',
+        isActive
+          ? 'text-white bg-brand-gradient'
+          : 'text-muted-foreground hover:text-foreground hover:bg-accent/15',
+      )}
     >
       <Icon className="h-4 w-4" />
     </Link>
