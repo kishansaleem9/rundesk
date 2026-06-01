@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { SprintsService } from './sprints.service'
+import { CreateSprintDto } from './dto/sprint.dto'
 import type { SprintStatus } from '@rundesk/db'
 
 @ApiTags('sprints')
@@ -22,13 +23,7 @@ export class SprintsController {
   @UseGuards(WorkspaceMemberGuard)
   create(
     @Param('workspaceId') workspaceId: string,
-    @Body() body: {
-      name: string
-      goal?: string
-      startDate: string
-      endDate: string
-      spaceId?: string | null
-    },
+    @Body() body: CreateSprintDto,
   ) {
     return this.sprints.create({
       workspaceId,

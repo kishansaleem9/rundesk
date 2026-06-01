@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
+import { CreateCommentDto } from './dto/comment.dto'
 import type { CurrentUserPayload } from './types'
 
 @ApiTags('tasks')
@@ -21,7 +22,7 @@ export class TaskCommentsController {
   create(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { body: string; parentCommentId?: string; mentions?: Array<{ userId: string; offset: number; length: number }> },
+    @Body() body: CreateCommentDto,
   ) {
     return this.tasks.createComment(taskId, user.id, body.body, body.parentCommentId, body.mentions)
   }

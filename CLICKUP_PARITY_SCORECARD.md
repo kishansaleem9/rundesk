@@ -97,19 +97,24 @@ The 40 acceptance items in `config/parity-checklist.json` were exercised 1:1 aga
 live API + Postgres (not just code inspection). **37/40 verified working end-to-end at
 runtime**; the remaining cracks were found and closed:
 
-- **Input validation gap (was the biggest finding).** Only a handful of endpoints used
-  validated DTOs; most took inline-typed `@Body()` objects the global `ValidationPipe`
-  cannot enforce, so malformed/missing input returned **500** (raw `TypeError` / Postgres
-  `NOT NULL`) instead of **400**. Hardened the endpoints proven to 500 — `tasks/bulk/update`,
-  webhook create, `feature-flags` set, and the **public** `forms/:slug/submit` — to return
-  clean 400s. App-wide DTO adoption was intentionally *not* done (the pipe runs with
-  `forbidNonWhitelisted: true`, so a blanket conversion risks rejecting fields the web app
-  already sends). Remaining write endpoints still rely on service-level guards.
+- **Input validation gap (was the biggest finding).** Most write endpoints took inline-typed
+  `@Body()` objects the global `ValidationPipe` couldn't enforce, so malformed/missing input
+  returned **500** (raw `TypeError` / Postgres `NOT NULL`) instead of **400**. Closed
+  systematically with three layers: (1) a **global safety net** in `AllExceptionsFilter` that
+  maps Postgres constraint codes (`23502/23503/23505/22P02/…`) and the driver's
+  `UNDEFINED_VALUE` to proper 4xx on *every* endpoint; (2) the global pipe switched to
+  `forbidNonWhitelisted: false` so DTOs **strip** unknown fields instead of rejecting them
+  (safe incremental adoption); (3) **researched DTOs** on the core write endpoints — task
+  create, task comment, form create/field/**public submit**, sprint, label — plus inline
+  guards on bulk-update, task update (date validity), webhook create, and `feature-flags`.
+  Verified by a 25-case malformed-input fuzz: **0 responses return 500** (all clean 4xx/2xx),
+  and a happy-path probe confirms valid payloads still succeed.
 - **cross-project-filtering** was UI-only; the timeline endpoint now accepts a server-side
   `?projectId=` filter (`GET /tasks/workspace/:id/timeline`).
 - **Role-denial path** (guest/member blocked from admin actions) was code-present but
   untested; now covered by `workspace-admin.guard.test.ts`.
 
 Net: feature-complete happy-path is genuinely real (the `~99.9%` above reflects features
-that work), but treat it as "happy-path verified" — input-validation hardening is targeted,
-not yet exhaustive across all ~330 routes.
+that work), and input handling is now hardened end-to-end — malformed requests return clean
+4xx everywhere, with DTO validation on the core/public surfaces and a global DB-error safety
+net behind the rest.

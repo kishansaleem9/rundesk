@@ -40,8 +40,8 @@ export class WebhooksService {
     userId: string,
     dto: { name: string; url: string; events: string[]; secret?: string },
   ) {
-    if (!dto?.name?.trim()) throw new BadRequestException('name is required')
-    if (!dto?.url?.trim()) throw new BadRequestException('url is required')
+    if (typeof dto?.name !== 'string' || !dto.name.trim()) throw new BadRequestException('name is required')
+    if (typeof dto?.url !== 'string' || !dto.url.trim()) throw new BadRequestException('url is required')
     try {
       // eslint-disable-next-line no-new
       new URL(dto.url)

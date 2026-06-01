@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { LabelsService } from './labels.service'
+import { CreateLabelDto } from './dto/label.dto'
 
 @ApiTags('labels')
 @ApiBearerAuth()
@@ -21,7 +22,7 @@ export class LabelsController {
   @UseGuards(WorkspaceMemberGuard)
   create(
     @Param('workspaceId') workspaceId: string,
-    @Body() body: { name: string; color: string },
+    @Body() body: CreateLabelDto,
   ) {
     return this.labels.create(workspaceId, body)
   }

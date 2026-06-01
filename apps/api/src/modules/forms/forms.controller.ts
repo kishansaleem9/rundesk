@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { FormsService } from './forms.service'
+import { CreateFormDto, AddFormFieldDto, SubmitFormDto } from './dto/form.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -38,14 +39,7 @@ export class WorkspaceFormsController {
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
-    @Body()
-    body: {
-      title: string
-      description?: string
-      targetListId?: string
-      isPublic?: boolean
-      confirmationMsg?: string
-    },
+    @Body() body: CreateFormDto,
   ) {
     return this.formsService.createForm(workspaceId, user.id, body)
   }
@@ -96,19 +90,7 @@ export class WorkspaceFormsController {
   @Post(':formId/fields')
   addField(
     @Param('formId') formId: string,
-    @Body()
-    body: {
-      type: string
-      label: string
-      placeholder?: string
-      helpText?: string
-      isRequired?: boolean
-      position?: number
-      options?: { label: string; value: string }[]
-      visibilityMode?: 'all' | 'any'
-      visibilityRules?: Array<{ fieldId: string; operator: 'equals' | 'not_equals' | 'contains' | 'not_contains'; value: string }>
-      taskField?: string
-    },
+    @Body() body: AddFormFieldDto,
   ) {
     return this.formsService.addField(formId, body)
   }
@@ -167,13 +149,8 @@ export class PublicFormsController {
   @ApiOperation({ summary: 'Submit a form response (no auth required)' })
   submit(
     @Param('slug') slug: string,
-    @Body()
-    body: {
-      data: Record<string, string | string[]>
-      submitterEmail?: string
-      submitterName?: string
-    },
+    @Body() body: SubmitFormDto,
   ) {
-    return this.formsService.submitForm(slug, body.data, body.submitterEmail, body.submitterName)
+    return this.formsService.submitForm(slug, body.data ?? {}, body.submitterEmail, body.submitterName)
   }
 }

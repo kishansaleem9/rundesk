@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
+import { CreateTaskDto } from './dto/task.dto'
 import type { CurrentUserPayload } from './types'
 
 @ApiTags('tasks')
@@ -76,21 +77,7 @@ export class TasksController {
   @Post()
   async create(
     @CurrentUser() user: CurrentUserPayload,
-    @Body()
-    body: {
-      listId: string
-      title: string
-      description?: string
-      priority?: 'urgent' | 'high' | 'normal' | 'low'
-      status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
-      position?: number
-      startDate?: string
-      dueDate?: string
-      timeEstimate?: number
-      parentTaskId?: string
-      assigneeIds?: string[]
-      labelIds?: string[]
-    },
+    @Body() body: CreateTaskDto,
   ) {
     return this.tasks.createTask({
       listId: body.listId,
@@ -126,9 +113,15 @@ export class TasksController {
       isArchived: boolean
     }>,
   ) {
+    const toDate = (label: string, value: string | null | undefined) => {
+      if (!value) return null
+      const d = new Date(value)
+      if (Number.isNaN(d.getTime())) throw new BadRequestException(`${label} is not a valid date`)
+      return d
+    }
     const patch: Record<string, unknown> = { ...body }
-    if ('startDate' in body) patch.startDate = body.startDate ? new Date(body.startDate) : null
-    if ('dueDate'   in body) patch.dueDate   = body.dueDate   ? new Date(body.dueDate)   : null
+    if ('startDate' in body) patch.startDate = toDate('startDate', body.startDate)
+    if ('dueDate'   in body) patch.dueDate   = toDate('dueDate', body.dueDate)
     return this.tasks.updateTask(taskId, user.id, patch)
   }
 

@@ -18,7 +18,11 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
-    forbidNonWhitelisted: true,
+    // Strip unknown properties instead of rejecting them: DTOs can be added
+    // incrementally without risk of 400-ing requests that carry fields the DTO
+    // hasn't (yet) declared. Combined with whitelist, unknown input is dropped
+    // before it reaches a handler.
+    forbidNonWhitelisted: false,
     transform: true,
   }))
 
