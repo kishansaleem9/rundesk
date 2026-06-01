@@ -18,7 +18,9 @@ pnpm --filter @rundesk/db db:setup
 ```
 
 `db:setup` runs `drizzle-kit push --force` (creates the entire schema from
-`src/schema`) and then seeds an idempotent admin user + demo workspace.
+`src/schema`), records the migration journal as applied (`db:mark-applied`, so a
+later `db:migrate` only runs genuinely-new migrations), and then seeds an
+idempotent admin user + demo workspace.
 
 > Do **not** bootstrap a fresh database with `db:migrate`. The numbered SQL
 > files in `src/migrations` are **incremental patches layered on top of the
@@ -34,12 +36,20 @@ are written defensively (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT
 EXISTS`, `DO $$ … EXCEPTION WHEN duplicate_object … $$`) and are idempotent
 against a schema that already matches `src/schema`.
 
-In production (`deploy/deploy.sh`):
+In production (`deploy/deploy.sh migrate`):
 
-1. The schema is first created with `drizzle-kit push`.
-2. `deploy/baseline-drizzle-0000-0008.sql` inserts the migration hashes for
-   `0000`–`0008` into `drizzle.__drizzle_migrations` so that `drizzle-kit
-   migrate` then only applies `0009+`.
+1. If the database is empty (no `public.users`), it is bootstrapped
+   non-destructively with `drizzle-kit push` followed by `db:mark-applied`
+   (records the whole journal as applied). This needs no `ALLOW_SCHEMA_RESET`.
+2. Otherwise `drizzle-kit migrate` applies any new migrations on top of the
+   existing schema.
+
+`db:mark-applied` computes drizzle-compatible hashes from the journal and
+inserts `(hash, created_at = journal.when)` for every migration. drizzle's
+`migrate` decides what to apply purely by `created_at`, so recording the journal
+makes `migrate` a correct no-op on a freshly-pushed database. The older
+`deploy/baseline-drizzle-0000-0008.sql` shim (hashes for `0000`–`0008` only) is
+superseded by this and kept for reference.
 
 ### Adding a migration
 
@@ -61,9 +71,10 @@ Guardrails (see `docs/integration-branch-workflow.md`):
 
 | Script | Purpose |
 |---|---|
-| `db:setup` | **First-time bootstrap**: `push --force` + seed. |
+| `db:setup` | **First-time bootstrap**: `push --force` + `mark-applied` + seed. |
 | `db:push` | Sync the live DB to `src/schema` (no migration files). |
+| `db:mark-applied` | Record the migration journal as applied in `drizzle.__drizzle_migrations` (idempotent). |
 | `db:generate` | Generate a migration from schema changes. |
-| `db:migrate` | Apply numbered migrations (`0009+`) on top of the push baseline. |
+| `db:migrate` | Apply new migrations on top of an existing (bootstrapped) schema. |
 | `db:seed` | Idempotent seed (admin user + demo workspace). |
 | `db:studio` | Open Drizzle Studio. |

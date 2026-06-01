@@ -56,7 +56,31 @@ handle_schema_drift_or_failure() {
   exit 1
 }
 
+database_is_empty() {
+  docker exec rundesk-postgres pg_isready -U "${POSTGRES_USER:-rundesk}" >/dev/null 2>&1 || return 1
+  local users_missing
+  users_missing="$(docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
+    "SELECT to_regclass('public.users') IS NULL;" | tr -d '[:space:]')"
+  [ "$users_missing" = "t" ]
+}
+
+# First-time bootstrap for an empty database. This is non-destructive (there is
+# nothing to lose) so it does NOT require ALLOW_SCHEMA_RESET. `push` creates the
+# full schema from the TypeScript source of truth, then the migration journal is
+# recorded as applied so a later `migrate` only runs genuinely-new migrations.
+bootstrap_fresh_schema() {
+  echo "▶ Fresh database detected — creating schema with drizzle-kit push"
+  docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit push --force"
+  echo "▶ Recording migration journal as applied (so later 'migrate' only runs new migrations)"
+  docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec tsx src/mark-migrations-applied.ts"
+}
+
 apply_schema() {
+  if database_is_empty; then
+    bootstrap_fresh_schema
+    return
+  fi
+
   echo "▶ Applying schema with drizzle-kit migrate"
   if ! docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit migrate"; then
     handle_schema_drift_or_failure "drizzle-kit migrate failed."
