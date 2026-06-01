@@ -88,5 +88,28 @@ This scorecard classifies current parity by feature area:
 
 ### Code-quality
 
-- **Pre-existing lint warnings**: 45 non-blocking `react-hooks/exhaustive-deps` style warnings remain across older surfaces. No errors.
-- **Tests**: 24/24 unit tests pass. SSO, SCIM (auth + discovery + groups), and workspace-group invariants have unit coverage; deeper Drizzle-driven integration tests for SCIM PATCH/replace flows would be future work.
+- **Lint**: 64 non-blocking warnings (web + api, mostly `react-hooks/exhaustive-deps` and unused vars). 0 errors.
+- **Tests**: 92 API tests pass (incl. SSO, SCIM, workspace-group invariants, and `WorkspaceAdminGuard` role-denial coverage). Deeper Drizzle-driven integration tests for SCIM PATCH/replace flows remain future work.
+
+## Runtime parity audit (2026-06-01)
+
+The 40 acceptance items in `config/parity-checklist.json` were exercised 1:1 against a
+live API + Postgres (not just code inspection). **37/40 verified working end-to-end at
+runtime**; the remaining cracks were found and closed:
+
+- **Input validation gap (was the biggest finding).** Only a handful of endpoints used
+  validated DTOs; most took inline-typed `@Body()` objects the global `ValidationPipe`
+  cannot enforce, so malformed/missing input returned **500** (raw `TypeError` / Postgres
+  `NOT NULL`) instead of **400**. Hardened the endpoints proven to 500 — `tasks/bulk/update`,
+  webhook create, `feature-flags` set, and the **public** `forms/:slug/submit` — to return
+  clean 400s. App-wide DTO adoption was intentionally *not* done (the pipe runs with
+  `forbidNonWhitelisted: true`, so a blanket conversion risks rejecting fields the web app
+  already sends). Remaining write endpoints still rely on service-level guards.
+- **cross-project-filtering** was UI-only; the timeline endpoint now accepts a server-side
+  `?projectId=` filter (`GET /tasks/workspace/:id/timeline`).
+- **Role-denial path** (guest/member blocked from admin actions) was code-present but
+  untested; now covered by `workspace-admin.guard.test.ts`.
+
+Net: feature-complete happy-path is genuinely real (the `~99.9%` above reflects features
+that work), but treat it as "happy-path verified" — input-validation hardening is targeted,
+not yet exhaustive across all ~330 routes.

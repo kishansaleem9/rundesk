@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Body, Param, UseGuards, HttpCode, HttpStatus } from '@nestjs/common'
+import { Controller, Get, Put, Body, Param, UseGuards, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { FeatureFlagsService } from './feature-flags.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -36,6 +36,15 @@ export class FeatureFlagsController {
     @Body() body: { enabled: boolean; scope: 'global' | 'workspace' | 'role' | 'user'; scopeId?: string; workspaceId?: string },
     @CurrentUser() user: any,
   ) {
+    if (typeof body?.enabled !== 'boolean') {
+      throw new BadRequestException('enabled (boolean) is required')
+    }
+    if (!['global', 'workspace', 'role', 'user'].includes(body?.scope)) {
+      throw new BadRequestException('scope must be one of: global, workspace, role, user')
+    }
+    if ((body.scope === 'workspace' && !body.workspaceId) || (body.scope === 'role' && !body.scopeId) || (body.scope === 'user' && !body.scopeId)) {
+      throw new BadRequestException(`scope "${body.scope}" requires the corresponding id`)
+    }
     await this.featureFlagsService.setFlag(
       flagKey,
       body.enabled,

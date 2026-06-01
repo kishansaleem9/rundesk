@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { and, eq, desc } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import { webhooks, webhookDeliveries } from '@rundesk/db'
@@ -40,6 +40,19 @@ export class WebhooksService {
     userId: string,
     dto: { name: string; url: string; events: string[]; secret?: string },
   ) {
+    if (!dto?.name?.trim()) throw new BadRequestException('name is required')
+    if (!dto?.url?.trim()) throw new BadRequestException('url is required')
+    try {
+      // eslint-disable-next-line no-new
+      new URL(dto.url)
+    } catch {
+      throw new BadRequestException('url must be a valid absolute URL')
+    }
+    if (!Array.isArray(dto.events) || dto.events.length === 0) {
+      throw new BadRequestException('events must be a non-empty array')
+    }
+    const unknown = dto.events.filter((e) => !WEBHOOK_EVENTS.includes(e))
+    if (unknown.length) throw new BadRequestException(`Unknown webhook events: ${unknown.join(', ')}`)
     const secret = dto.secret || crypto.randomBytes(20).toString('hex')
     const [row] = await this.db
       .insert(webhooks)

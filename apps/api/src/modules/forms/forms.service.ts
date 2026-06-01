@@ -549,6 +549,13 @@ export class FormsService {
   ) {
     const formWithFields = await this.getFormBySlug(slug)
 
+    // Guard the (public, unauthenticated) payload so malformed input yields a
+    // clean 400 from the validation below rather than a 500 on `data[...]`.
+    if (data !== undefined && data !== null && (typeof data !== 'object' || Array.isArray(data))) {
+      throw new BadRequestException('data must be an object mapping field id -> value')
+    }
+    data = (data && typeof data === 'object' && !Array.isArray(data)) ? data : {}
+
     // Validate required fields and basic field-shape constraints.
     for (const field of formWithFields.fields) {
       const value = data[field.id]

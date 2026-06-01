@@ -580,7 +580,7 @@ export class TasksService {
    */
   async getTimelineForWorkspace(
     workspaceId: string,
-    _opts: { from?: Date; to?: Date } = {},
+    opts: { from?: Date; to?: Date; projectId?: string } = {},
   ) {
     const rows = await this.db
       .select({
@@ -601,7 +601,13 @@ export class TasksService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, false),
+          ...(opts.projectId ? [eq(lists.projectId, opts.projectId)] : []),
+        ),
+      )
       .orderBy(asc(tasks.startDate), asc(tasks.dueDate))
 
     // Only return tasks with at least a due date — the rest can't be plotted.

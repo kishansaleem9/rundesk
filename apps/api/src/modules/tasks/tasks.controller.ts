@@ -8,6 +8,7 @@ import {
   Body,
   Query,
   UseGuards,
+  BadRequestException,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -25,8 +26,11 @@ export class TasksController {
 
   @Get('workspace/:workspaceId/timeline')
   @UseGuards(WorkspaceMemberGuard)
-  async getTimeline(@Param('workspaceId') workspaceId: string) {
-    return this.tasks.getTimelineForWorkspace(workspaceId)
+  async getTimeline(
+    @Param('workspaceId') workspaceId: string,
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.tasks.getTimelineForWorkspace(workspaceId, projectId ? { projectId } : {})
   }
 
   @Get('workspace/:workspaceId')
@@ -156,6 +160,12 @@ export class TasksController {
       }>
     },
   ) {
+    if (!Array.isArray(body?.taskIds) || body.taskIds.length === 0) {
+      throw new BadRequestException('taskIds must be a non-empty array')
+    }
+    if (!body.patch || typeof body.patch !== 'object') {
+      throw new BadRequestException('patch object is required')
+    }
     const patch: Record<string, unknown> = { ...body.patch }
     if ('startDate' in body.patch) patch.startDate = body.patch.startDate ? new Date(body.patch.startDate) : null
     if ('dueDate' in body.patch) patch.dueDate = body.patch.dueDate ? new Date(body.patch.dueDate) : null
