@@ -14,9 +14,9 @@ bind to ports 80/443 itself — only `127.0.0.1:3010` (API).
 curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker
 
-# 2. Clone the repo
+# 2. Clone the repo (use whichever GitHub repo is your source of truth)
 mkdir -p /opt && cd /opt
-git clone git@github.com:mrrjatt/rundesk.git
+git clone git@github.com:<owner>/rundesk.git   # e.g. iamreebskhan/rundesk
 cd rundesk
 
 # 3. Copy and edit the production env
@@ -44,6 +44,38 @@ cd /opt/rundesk
 ```
 
 This pulls latest code, rebuilds web + api, and restarts the api container.
+
+## CI/CD (GitHub Actions)
+
+- `.github/workflows/ci.yml` runs on every push/PR: lint, typecheck, API tests,
+  migration-order check.
+- `.github/workflows/deploy.yml` runs on push to `main`: it SSHes to the
+  production host using the repo secrets `DEPLOY_HOST`, `DEPLOY_USER`,
+  `DEPLOY_SSH_KEY`, then runs `git pull origin main && ./deploy/deploy.sh rebuild`.
+
+## Moving to a different GitHub repo (after duplicating / forking)
+
+GitHub does **not** copy Actions secrets or update the production server when a
+repo is duplicated, so two things must be done by hand or the auto-deploy is a
+no-op (the deploy job fails with `Error: missing server host`):
+
+1. **Add the deploy secrets to the new repo** — *Settings → Secrets and
+   variables → Actions* — set `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` to
+   the same values the old repo used.
+
+2. **Point the server at the new repo** (its `origin` was cloned from the old
+   one, so `deploy.sh rebuild`'s `git pull origin main` would otherwise pull the
+   wrong source):
+   ```bash
+   ssh <DEPLOY_USER>@<DEPLOY_HOST>
+   cd /opt/rundesk
+   git remote set-url origin git@github.com:<new-owner>/rundesk.git
+   git fetch origin && git checkout main && git pull origin main
+   ./deploy/deploy.sh rebuild      # builds web + api, restarts api (no migrations)
+   ```
+   Step 2 alone deploys the current `main` immediately; step 1 makes future
+   pushes auto-deploy. Run `./deploy/deploy.sh migrate` as well only if there are
+   new DB migrations to apply.
 
 ## Other commands
 
