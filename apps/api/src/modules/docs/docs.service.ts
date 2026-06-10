@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common'
 import { eq, and, asc, isNull, desc, inArray, isNotNull } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { docs, docComments, users } from '@rundesk/db'
+import { docs, docComments, docRevisions, users } from '@rundesk/db'
 import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -100,6 +100,7 @@ export class DocsService {
         plaintext: '',
       })
       .returning()
+    await this.snapshotRevision(row, data.createdById)
     this.realtime.emitToWorkspace(data.workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
     void this.indexDocInSearch(row.id)
     return row
@@ -138,10 +139,79 @@ export class DocsService {
     if (patch.content) set.plaintext = extractPlaintext(patch.content)
     const [row] = await this.db.update(docs).set(set).where(eq(docs.id, docId)).returning()
     if (!row) throw new NotFoundException('Doc not found')
+    if (patch.content) await this.snapshotRevision(row, userId)
     this.realtime.emitToDoc(docId, { type: 'doc.updated', docId, patch: set as Record<string, unknown> })
     this.realtime.emitToWorkspace(row.workspaceId, { type: 'doc.updated', docId, patch: { updated: true } })
     if (patch.title || patch.content) void this.indexDocInSearch(docId)
     return row
+  }
+
+  // ─── Version history ───────────────────────────────────────────────────────
+
+  // Snapshot the given doc state. Consecutive saves by the same editor within a
+  // 2-minute window coalesce into the latest snapshot so history stays readable.
+  private async snapshotRevision(
+    doc: { id: string; workspaceId: string; title: string; content: Record<string, unknown>; plaintext: string },
+    editorId: string,
+  ) {
+    const [latest] = await this.db
+      .select({ id: docRevisions.id, editorId: docRevisions.editorId, updatedAt: docRevisions.updatedAt })
+      .from(docRevisions)
+      .where(eq(docRevisions.docId, doc.id))
+      .orderBy(desc(docRevisions.updatedAt))
+      .limit(1)
+    const within = latest?.updatedAt ? Date.now() - new Date(latest.updatedAt).getTime() < 2 * 60 * 1000 : false
+    if (latest && latest.editorId === editorId && within) {
+      await this.db
+        .update(docRevisions)
+        .set({ title: doc.title, content: doc.content, plaintext: doc.plaintext, updatedAt: new Date() })
+        .where(eq(docRevisions.id, latest.id))
+      return
+    }
+    await this.db.insert(docRevisions).values({
+      docId: doc.id,
+      workspaceId: doc.workspaceId,
+      editorId,
+      title: doc.title,
+      content: doc.content,
+      plaintext: doc.plaintext,
+    })
+  }
+
+  async listRevisions(docId: string, userId: string) {
+    await this.assertDocAccess(docId, userId)
+    const rows = await this.db
+      .select({
+        id: docRevisions.id,
+        title: docRevisions.title,
+        createdAt: docRevisions.createdAt,
+        updatedAt: docRevisions.updatedAt,
+        editor: { id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl },
+      })
+      .from(docRevisions)
+      .leftJoin(users, eq(users.id, docRevisions.editorId))
+      .where(eq(docRevisions.docId, docId))
+      .orderBy(desc(docRevisions.updatedAt))
+      .limit(100)
+    return rows
+  }
+
+  async getRevision(docId: string, revisionId: string, userId: string) {
+    await this.assertDocAccess(docId, userId)
+    const [row] = await this.db
+      .select()
+      .from(docRevisions)
+      .where(and(eq(docRevisions.id, revisionId), eq(docRevisions.docId, docId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('Revision not found')
+    return row
+  }
+
+  // Restore a past revision by writing its content back through the normal
+  // update path (which itself snapshots the pre-restore state).
+  async restoreRevision(docId: string, revisionId: string, userId: string) {
+    const rev = await this.getRevision(docId, revisionId, userId)
+    return this.update(docId, userId, { title: rev.title, content: rev.content })
   }
 
   async delete(docId: string) {

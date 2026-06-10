@@ -7,10 +7,12 @@ import {
   Download,
   Globe,
   GlobeLock,
+  History,
   Link2,
   MessageCircle,
   MessagesSquare,
   Plus,
+  RotateCcw,
   Slash,
   Trash2,
 } from 'lucide-react'
@@ -59,6 +61,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
   const [commentsOpen, setCommentsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
@@ -229,7 +232,11 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     <Card
       variant="glass"
       className={`grid grid-cols-1 ${
-        commentsOpen ? 'md:grid-cols-[240px_1fr_300px]' : 'md:grid-cols-[240px_1fr]'
+        commentsOpen && historyOpen
+          ? 'md:grid-cols-[240px_1fr_300px_300px]'
+          : commentsOpen || historyOpen
+            ? 'md:grid-cols-[240px_1fr_300px]'
+            : 'md:grid-cols-[240px_1fr]'
       } gap-0 h-[640px] overflow-hidden p-0`}
     >
       {/* Sidebar */}
@@ -357,6 +364,15 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               </Button>
               <Button
                 size="sm"
+                variant={historyOpen ? 'secondary' : 'ghost'}
+                onClick={() => setHistoryOpen((v) => !v)}
+                disabled={!activeDoc}
+                title={historyOpen ? 'Hide version history' : 'Version history'}
+              >
+                <History className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
                 variant="gradient"
                 onClick={() => saveDoc.mutate()}
                 disabled={saveDoc.isPending}
@@ -397,7 +413,108 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       {commentsOpen && activeDoc && (
         <DocCommentsPane docId={activeDoc.id} workspaceId={workspaceId} />
       )}
+
+      {historyOpen && activeDoc && (
+        <DocHistoryPane
+          docId={activeDoc.id}
+          onRestored={(content) => {
+            editor?.commands.setContent(content as never)
+            docsQuery.refetch()
+          }}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
     </Card>
+  )
+}
+
+function relativeTime(iso: string): string {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  if (d < 7) return `${d}d ago`
+  return new Date(iso).toLocaleDateString()
+}
+
+type DocRevision = {
+  id: string
+  title: string
+  updatedAt: string
+  editor?: { displayName?: string | null } | null
+}
+
+function DocHistoryPane({
+  docId,
+  onRestored,
+  onClose,
+}: {
+  docId: string
+  onRestored: (content: unknown) => void
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const revisionsQuery = useQuery({
+    queryKey: ['doc-revisions', docId],
+    queryFn: () => api<DocRevision[]>(`/docs/${docId}/revisions`),
+  })
+  const restore = useMutation({
+    mutationFn: (revisionId: string) =>
+      api<{ content: unknown }>(`/docs/${docId}/revisions/${revisionId}/restore`, { method: 'POST' }),
+    onSuccess: (doc) => {
+      onRestored(doc.content)
+      qc.invalidateQueries({ queryKey: ['doc-revisions', docId] })
+      toast.success('Version restored')
+    },
+    onError: () => toast.error('Could not restore that version'),
+  })
+  const revs = revisionsQuery.data ?? []
+  return (
+    <div className="border-l border-border/60 bg-card/40 flex flex-col min-h-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <History className="h-4 w-4" /> Version history
+        </div>
+        <Button size="sm" variant="ghost" onClick={onClose} title="Close">
+          ✕
+        </Button>
+      </div>
+      <div className="flex-1 overflow-auto p-2 space-y-1.5">
+        {revisionsQuery.isLoading && <p className="text-xs text-muted-foreground px-2 py-1">Loading…</p>}
+        {!revisionsQuery.isLoading && revs.length === 0 && (
+          <p className="text-xs text-muted-foreground px-2 py-1">No saved versions yet.</p>
+        )}
+        {revs.map((r, i) => (
+          <div
+            key={r.id}
+            className="rounded-md border border-border/50 px-3 py-2 flex items-center justify-between gap-2 hover:bg-muted/40"
+          >
+            <div className="min-w-0">
+              <div className="text-xs font-medium truncate">
+                {i === 0 ? 'Current version' : `Version ${revs.length - i}`}
+              </div>
+              <div className="text-[11px] text-muted-foreground truncate">
+                {r.editor?.displayName ?? 'Unknown'} · {relativeTime(r.updatedAt)}
+              </div>
+            </div>
+            {i !== 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={restore.isPending}
+                onClick={() => restore.mutate(r.id)}
+                title="Restore this version"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 

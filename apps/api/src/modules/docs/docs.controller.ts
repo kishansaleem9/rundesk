@@ -100,6 +100,31 @@ export class DocsController {
     return this.docs.disablePublicShare(docId, user.id)
   }
 
+  // ─── Version history ───────────────────────────────────────────────────────
+
+  @Get('docs/:docId/revisions')
+  listRevisions(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.listRevisions(docId, user.id)
+  }
+
+  @Get('docs/:docId/revisions/:revisionId')
+  getRevision(
+    @Param('docId') docId: string,
+    @Param('revisionId') revisionId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.docs.getRevision(docId, revisionId, user.id)
+  }
+
+  @Post('docs/:docId/revisions/:revisionId/restore')
+  restoreRevision(
+    @Param('docId') docId: string,
+    @Param('revisionId') revisionId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.docs.restoreRevision(docId, revisionId, user.id)
+  }
+
   // ─── Comments ──────────────────────────────────────────────────────────────
 
   @Get('docs/:docId/comments')

@@ -72,3 +72,28 @@ export const docCommentsRelations = relations(docComments, ({ one, many }) => ({
   }),
   replies:    many(docComments, { relationName: 'doc_comment_replies' }),
 }))
+
+// Point-in-time snapshots of a doc's content for version history / restore.
+// A snapshot is written on create and on each content-changing save; saves by
+// the same editor within a short window coalesce into the latest snapshot so
+// the timeline stays meaningful instead of one row per autosave.
+export const docRevisions = pgTable(
+  'doc_revisions',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    docId:       uuid('doc_id').notNull().references(() => docs.id, { onDelete: 'cascade' }),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    editorId:    uuid('editor_id').references(() => users.id, { onDelete: 'set null' }),
+    title:       text('title').notNull().default('Untitled'),
+    content:     jsonb('content').$type<Record<string, unknown>>().notNull().default({ type: 'doc', content: [] }),
+    plaintext:   text('plaintext').notNull().default(''),
+    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_doc_revisions_doc').on(t.docId, t.updatedAt)],
+)
+
+export const docRevisionsRelations = relations(docRevisions, ({ one }) => ({
+  doc:    one(docs, { fields: [docRevisions.docId], references: [docs.id] }),
+  editor: one(users, { fields: [docRevisions.editorId], references: [users.id] }),
+}))
