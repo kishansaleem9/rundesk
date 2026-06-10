@@ -13,6 +13,7 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
 import { CreateTaskDto } from './dto/task.dto'
@@ -53,6 +54,7 @@ export class TasksController {
   }
 
   @Get('list/:listId')
+  @UseGuards(ResourceMemberGuard)
   async getByList(
     @Param('listId') listId: string,
     @Query('includeSubtasks') includeSubtasks?: string,
@@ -65,16 +67,19 @@ export class TasksController {
   }
 
   @Get(':taskId')
+  @UseGuards(ResourceMemberGuard)
   async getOne(@Param('taskId') taskId: string) {
     return this.tasks.getTask(taskId)
   }
 
   @Get(':taskId/navigation')
+  @UseGuards(ResourceMemberGuard)
   async getTaskNavigation(@Param('taskId') taskId: string) {
     return this.tasks.getTaskNavigation(taskId)
   }
 
   @Post()
+  @UseGuards(ResourceMemberGuard)
   async create(
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: CreateTaskDto,

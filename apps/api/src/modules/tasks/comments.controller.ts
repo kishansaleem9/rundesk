@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
 import { CreateCommentDto } from './dto/comment.dto'
@@ -9,7 +10,7 @@ import type { CurrentUserPayload } from './types'
 @ApiTags('tasks')
 @ApiBearerAuth()
 @Controller('tasks/:taskId/comments')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class TaskCommentsController {
   constructor(private tasks: TasksService) {}
 

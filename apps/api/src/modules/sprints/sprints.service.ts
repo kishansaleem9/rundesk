@@ -231,13 +231,23 @@ export class SprintsService {
   }
 
   async addTask(sprintId: string, taskId: string, storyPoints?: number) {
-    await this.db
-      .insert(sprintTasks)
-      .values({ sprintId, taskId, storyPoints })
-      .onConflictDoUpdate({
-        target: [sprintTasks.sprintId, sprintTasks.taskId],
-        set: { storyPoints },
-      })
+    // When storyPoints is omitted (the common case) the conflict `set` would be
+    // empty, which drizzle rejects ("No values to set") — so only update on
+    // conflict when there's actually a value to write.
+    if (storyPoints === undefined) {
+      await this.db
+        .insert(sprintTasks)
+        .values({ sprintId, taskId })
+        .onConflictDoNothing()
+    } else {
+      await this.db
+        .insert(sprintTasks)
+        .values({ sprintId, taskId, storyPoints })
+        .onConflictDoUpdate({
+          target: [sprintTasks.sprintId, sprintTasks.taskId],
+          set: { storyPoints },
+        })
+    }
     return { ok: true }
   }
 

@@ -1,10 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ListsService } from './lists.service'
 
 @Controller('lists')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class ListsController {
   constructor(private listsService: ListsService) {}
 

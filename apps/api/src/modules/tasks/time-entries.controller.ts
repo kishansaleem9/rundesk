@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Param, Body, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Param, Body, UseGuards, BadRequestException } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
 import type { CurrentUserPayload } from './types'
@@ -8,7 +9,7 @@ import type { CurrentUserPayload } from './types'
 @ApiTags('tasks')
 @ApiBearerAuth()
 @Controller('tasks/:taskId/time-entries')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class TaskTimeEntriesController {
   constructor(private tasks: TasksService) {}
 
@@ -37,11 +38,19 @@ export class TaskTimeEntriesController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: { startedAt: string; endedAt: string; description?: string; isBillable?: boolean },
   ) {
+    const startedAt = new Date(body?.startedAt)
+    const endedAt = new Date(body?.endedAt)
+    if (Number.isNaN(startedAt.getTime()) || Number.isNaN(endedAt.getTime())) {
+      throw new BadRequestException('startedAt and endedAt must be valid ISO dates')
+    }
+    if (endedAt.getTime() < startedAt.getTime()) {
+      throw new BadRequestException('endedAt must be after startedAt')
+    }
     return this.tasks.addManualTimeEntry({
       taskId,
       userId: user.id,
-      startedAt: new Date(body.startedAt),
-      endedAt: new Date(body.endedAt),
+      startedAt,
+      endedAt,
       description: body.description,
       isBillable: body.isBillable,
     })

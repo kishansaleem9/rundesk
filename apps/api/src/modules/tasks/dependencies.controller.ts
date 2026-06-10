@@ -1,6 +1,7 @@
 import { Controller, Post, Delete, Param, Body, UseGuards, Get, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
 import type { CurrentUserPayload } from './types'
@@ -8,7 +9,7 @@ import type { CurrentUserPayload } from './types'
 @ApiTags('tasks')
 @ApiBearerAuth()
 @Controller('tasks/:taskId/dependencies')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class TaskDependenciesController {
   constructor(private tasks: TasksService) {}
 
