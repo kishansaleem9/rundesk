@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { spaces, projects, lists, tasks, workspaceMembers } from '@rundesk/db'
+import { spaces, projects, lists, tasks, goals, sprints, taskViews, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 
@@ -51,49 +51,88 @@ export class ResourceMemberGuard implements CanActivate {
     p: Record<string, string>,
     b: Record<string, unknown>,
   ): Promise<string | null> {
-    if (p.workspaceId) return p.workspaceId
-    if (typeof b.workspaceId === 'string') return b.workspaceId
+    // Path params identify the *resource being acted on* and take priority over
+    // body fields (which can be attacker-supplied) — e.g. POST /sprints/:id/tasks
+    // must be authorized against the sprint's workspace, not the body's taskId.
+    // Containers (goal/sprint/view) are checked before taskId so nested task
+    // routes still resolve correctly.
+    const order: Array<[string | undefined, 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view']> = [
+      [p.workspaceId, 'ws'],
+      [p.spaceId, 'space'],
+      [p.projectId, 'project'],
+      [p.listId, 'list'],
+      [p.goalId, 'goal'],
+      [p.sprintId, 'sprint'],
+      [p.viewId, 'view'],
+      [p.taskId, 'task'],
+      [typeof b.workspaceId === 'string' ? b.workspaceId : undefined, 'ws'],
+      [typeof b.spaceId === 'string' ? b.spaceId : undefined, 'space'],
+      [typeof b.projectId === 'string' ? b.projectId : undefined, 'project'],
+      [typeof b.listId === 'string' ? b.listId : undefined, 'list'],
+      [typeof b.taskId === 'string' ? b.taskId : undefined, 'task'],
+    ]
+    for (const [id, kind] of order) {
+      if (!id) continue
+      return this.resolveByKind(kind, id)
+    }
+    return null
+  }
 
-    const spaceId = p.spaceId ?? (typeof b.spaceId === 'string' ? b.spaceId : undefined)
-    const projectId = p.projectId ?? (typeof b.projectId === 'string' ? b.projectId : undefined)
-    const listId = p.listId ?? (typeof b.listId === 'string' ? b.listId : undefined)
-    const taskId = p.taskId ?? (typeof b.taskId === 'string' ? b.taskId : undefined)
-
-    if (spaceId) {
-      const [r] = await this.db
-        .select({ w: spaces.workspaceId })
-        .from(spaces)
-        .where(eq(spaces.id, spaceId))
-        .limit(1)
+  private async resolveByKind(
+    kind: 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view',
+    id: string,
+  ): Promise<string | null> {
+    if (kind === 'ws') return id
+    if (kind === 'space') {
+      const [r] = await this.db.select({ w: spaces.workspaceId }).from(spaces).where(eq(spaces.id, id)).limit(1)
       return r?.w ?? null
     }
-    if (projectId) {
+    if (kind === 'project') {
       const [r] = await this.db
         .select({ w: spaces.workspaceId })
         .from(projects)
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(eq(projects.id, projectId))
+        .where(eq(projects.id, id))
         .limit(1)
       return r?.w ?? null
     }
-    if (listId) {
+    if (kind === 'list') {
       const [r] = await this.db
         .select({ w: spaces.workspaceId })
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(eq(lists.id, listId))
+        .where(eq(lists.id, id))
         .limit(1)
       return r?.w ?? null
     }
-    if (taskId) {
+    if (kind === 'task') {
       const [r] = await this.db
         .select({ w: spaces.workspaceId })
         .from(tasks)
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(eq(tasks.id, taskId))
+        .where(eq(tasks.id, id))
+        .limit(1)
+      return r?.w ?? null
+    }
+    if (kind === 'goal') {
+      const [r] = await this.db.select({ w: goals.workspaceId }).from(goals).where(eq(goals.id, id)).limit(1)
+      return r?.w ?? null
+    }
+    if (kind === 'sprint') {
+      const [r] = await this.db.select({ w: sprints.workspaceId }).from(sprints).where(eq(sprints.id, id)).limit(1)
+      return r?.w ?? null
+    }
+    if (kind === 'view') {
+      const [r] = await this.db
+        .select({ w: spaces.workspaceId })
+        .from(taskViews)
+        .innerJoin(lists, eq(lists.id, taskViews.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(taskViews.id, id))
         .limit(1)
       return r?.w ?? null
     }

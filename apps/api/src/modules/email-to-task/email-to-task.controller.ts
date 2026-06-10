@@ -12,6 +12,7 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { EmailToTaskService, type InboundEmailPayload } from './email-to-task.service'
 
@@ -21,7 +22,7 @@ import { EmailToTaskService, type InboundEmailPayload } from './email-to-task.se
 @ApiTags('email-to-task')
 @ApiBearerAuth()
 @Controller('lists/:listId/inbound-email')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class EmailAliasController {
   constructor(private readonly svc: EmailToTaskService) {}
 

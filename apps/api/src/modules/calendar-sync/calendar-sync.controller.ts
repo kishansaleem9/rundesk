@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CalendarSyncService, type CalendarProvider } from './calendar-sync.service'
 
@@ -18,7 +19,7 @@ import { CalendarSyncService, type CalendarProvider } from './calendar-sync.serv
 @ApiTags('calendar-sync')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/calendar-sync')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class CalendarSyncController {
   constructor(private readonly sync: CalendarSyncService) {}
 

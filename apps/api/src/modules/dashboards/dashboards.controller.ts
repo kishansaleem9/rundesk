@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request, ParseUUIDPipe } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { DashboardsService } from './dashboards.service'
 import { CreateDashboardPresetDto, UpdateDashboardPresetDto } from './dto/dashboard-preset.dto'
 
@@ -9,11 +10,13 @@ export class DashboardsController {
   constructor(private readonly dashboardsService: DashboardsService) {}
 
   @Get('workspace/:workspaceId')
+  @UseGuards(ResourceMemberGuard)
   listPresets(@Request() req: { user: { id: string } }, @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.dashboardsService.listPresets(req.user.id, workspaceId)
   }
 
   @Post()
+  @UseGuards(ResourceMemberGuard)
   createPreset(@Request() req: { user: { id: string } }, @Body() dto: CreateDashboardPresetDto) {
     return this.dashboardsService.createPreset(req.user.id, dto)
   }
@@ -33,11 +36,13 @@ export class DashboardsController {
   }
 
   @Get('dock/:workspaceId')
+  @UseGuards(ResourceMemberGuard)
   getDockConfig(@Request() req: { user: { id: string } }, @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.dashboardsService.getDockConfig(req.user.id, workspaceId)
   }
 
   @Post('dock/:workspaceId')
+  @UseGuards(ResourceMemberGuard)
   updateDockConfig(
     @Request() req: { user: { id: string } },
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,

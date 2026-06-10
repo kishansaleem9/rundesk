@@ -1,12 +1,13 @@
 import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { SearchService } from './search.service'
 
 @ApiTags('search')
 @ApiBearerAuth()
 @Controller('search')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class SearchController {
   constructor(private search: SearchService) {}
 
