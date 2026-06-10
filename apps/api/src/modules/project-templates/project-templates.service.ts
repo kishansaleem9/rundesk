@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger, type OnModuleInit } from '@nestjs/common'
 import { and, eq, desc, isNull, or, asc } from 'drizzle-orm'
 import {
   projectTemplates,
@@ -14,9 +14,148 @@ type TemplatePayload = NonNullable<typeof projectTemplates.$inferSelect.payload>
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled'
 
+// Platform-wide built-in templates (workspaceId = null). Seeded idempotently on
+// boot so the starter catalog is genuinely applyable, not decorative. `icon` is
+// a lucide icon name the web app maps to a component + cover gradient.
+const BUILT_IN_TEMPLATES: Array<{ name: string; description: string; icon: string; payload: TemplatePayload }> = [
+  {
+    name: 'Software sprint',
+    description: 'Backlog → in progress → review → done, tuned for engineering teams.',
+    icon: 'Code2',
+    payload: {
+      lists: [
+        { name: 'Backlog', position: 0, tasks: [
+          { title: 'Define sprint goal', priority: 'high', status: 'todo' },
+          { title: 'Groom & estimate backlog', priority: 'normal', status: 'todo' },
+        ] },
+        { name: 'In progress', position: 1, tasks: [] },
+        { name: 'In review', position: 2, tasks: [] },
+        { name: 'Done', position: 3, tasks: [] },
+      ],
+    },
+  },
+  {
+    name: 'Client onboarding',
+    description: 'Kickoff → discovery → delivery → handoff, with a checklist per phase.',
+    icon: 'Users',
+    payload: {
+      lists: [
+        { name: 'Kickoff', position: 0, tasks: [
+          { title: 'Schedule kickoff call', priority: 'high', status: 'todo' },
+          { title: 'Share welcome packet', priority: 'normal', status: 'todo' },
+        ] },
+        { name: 'Discovery', position: 1, tasks: [
+          { title: 'Document requirements', priority: 'high', status: 'todo' },
+        ] },
+        { name: 'Delivery', position: 2, tasks: [] },
+        { name: 'Handoff', position: 3, tasks: [
+          { title: 'Final walkthrough', priority: 'normal', status: 'todo' },
+        ] },
+      ],
+    },
+  },
+  {
+    name: 'Marketing campaign',
+    description: 'Content calendar, briefs, design review and a launch checklist.',
+    icon: 'Megaphone',
+    payload: {
+      lists: [
+        { name: 'Ideas', position: 0, tasks: [{ title: 'Brainstorm campaign themes', status: 'todo' }] },
+        { name: 'In production', position: 1, tasks: [
+          { title: 'Write campaign brief', priority: 'high', status: 'todo' },
+          { title: 'Design key visuals', priority: 'normal', status: 'todo' },
+        ] },
+        { name: 'Review', position: 2, tasks: [] },
+        { name: 'Launched', position: 3, tasks: [] },
+      ],
+    },
+  },
+  {
+    name: 'Product launch',
+    description: 'Cross-functional plan with go/no-go gates, PR tasks and ops readiness.',
+    icon: 'Rocket',
+    payload: {
+      lists: [
+        { name: 'Pre-launch', position: 0, tasks: [
+          { title: 'Finalize launch date', priority: 'high', status: 'todo' },
+          { title: 'Draft press release', priority: 'normal', status: 'todo' },
+          { title: 'Go / no-go review', priority: 'urgent', status: 'todo' },
+        ] },
+        { name: 'Launch day', position: 1, tasks: [{ title: 'Publish announcement', priority: 'high', status: 'todo' }] },
+        { name: 'Post-launch', position: 2, tasks: [{ title: 'Collect feedback & metrics', status: 'todo' }] },
+      ],
+    },
+  },
+  {
+    name: 'OKR quarterly cycle',
+    description: 'Set objectives, draft key results and run weekly check-ins.',
+    icon: 'ListChecks',
+    payload: {
+      lists: [
+        { name: 'Objectives', position: 0, tasks: [{ title: 'Draft quarterly objectives', priority: 'high', status: 'todo' }] },
+        { name: 'Key results', position: 1, tasks: [{ title: 'Define measurable key results', priority: 'high', status: 'todo' }] },
+        { name: 'Weekly check-ins', position: 2, tasks: [] },
+        { name: 'Retrospective', position: 3, tasks: [] },
+      ],
+    },
+  },
+  {
+    name: 'Bug triage flow',
+    description: 'Severity lanes from newly reported through fixed and verified.',
+    icon: 'Bug',
+    payload: {
+      lists: [
+        { name: 'Reported', position: 0, tasks: [{ title: 'Triage incoming bug', priority: 'high', status: 'todo' }] },
+        { name: 'Confirmed', position: 1, tasks: [] },
+        { name: 'In progress', position: 2, tasks: [] },
+        { name: 'Fixed / verified', position: 3, tasks: [] },
+      ],
+    },
+  },
+]
+
 @Injectable()
-export class ProjectTemplatesService {
+export class ProjectTemplatesService implements OnModuleInit {
+  private readonly logger = new Logger(ProjectTemplatesService.name)
+
   constructor(@Inject(DB_TOKEN) private db: Db) {}
+
+  async onModuleInit() {
+    try {
+      await this.ensureBuiltIns()
+    } catch (err) {
+      // Seeding the built-in catalog must never block API boot.
+      this.logger.warn(`Could not seed built-in templates: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /** Insert any missing platform-wide built-in templates (idempotent by name). */
+  async ensureBuiltIns() {
+    const existing = await this.db
+      .select({ name: projectTemplates.name })
+      .from(projectTemplates)
+      .where(and(isNull(projectTemplates.workspaceId), eq(projectTemplates.isBuiltIn, true)))
+    const have = new Set(existing.map((r) => r.name))
+    const missing = BUILT_IN_TEMPLATES.filter((t) => !have.has(t.name))
+    if (missing.length === 0) return { inserted: 0 }
+    // onConflictDoNothing + the uq_builtin_template_name partial index make this
+    // safe even if two instances boot and seed concurrently.
+    await this.db
+      .insert(projectTemplates)
+      .values(
+        missing.map((t) => ({
+          workspaceId: null,
+          name: t.name,
+          description: t.description,
+          icon: t.icon,
+          payload: t.payload,
+          isBuiltIn: true,
+        })),
+      )
+      .onConflictDoNothing()
+    this.logger.log(`Seeded ${missing.length} built-in project template(s)`)
+    return { inserted: missing.length }
+  }
 
   /** List both built-in templates and the workspace's own saved templates. */
   async list(workspaceId: string) {

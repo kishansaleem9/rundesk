@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, boolean, uuid, jsonb } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, boolean, uuid, jsonb, uniqueIndex } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
 
@@ -37,7 +37,11 @@ export const projectTemplates = pgTable('project_templates', {
   createdById:  uuid('created_by_id').references(() => users.id),
   createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => ({
+  // Platform-wide built-ins are keyed by name; this makes idempotent seeding
+  // race-safe (concurrent boots can't create duplicate built-in templates).
+  builtInName: uniqueIndex('uq_builtin_template_name').on(t.name).where(sql`${t.workspaceId} IS NULL`),
+}))
 
 export const projectTemplatesRelations = relations(projectTemplates, ({ one }) => ({
   workspace: one(workspaces, {
