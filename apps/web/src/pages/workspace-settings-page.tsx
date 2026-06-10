@@ -833,7 +833,7 @@ function SecurityTab({ workspaceId }: { workspaceId: string }) {
         )}
       </Card>
 
-      <AdvancedSecurityPanel />
+      <AdvancedSecurityPanel workspaceId={workspaceId} />
     </div>
   )
 }

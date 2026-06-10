@@ -57,7 +57,37 @@ export const auditLogs = pgTable('audit_logs', {
   index('idx_audit_logs_actor').on(t.actorId),
 ])
 
+// ─── Workspace security settings ──────────────────────────────────────────────
+// One row per workspace. All fields have safe defaults so an un-configured
+// workspace behaves exactly as before (IP allowlist off, 7-day sessions,
+// unlimited concurrent sessions). Enforcement lives in AuthService; this table
+// is the source of truth the admin panel reads and writes.
+
+export const workspaceSecuritySettings = pgTable('workspace_security_settings', {
+  workspaceId:              uuid('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+  // IP allowlist
+  ipAllowlistEnabled:       boolean('ip_allowlist_enabled').notNull().default(false),
+  ipAllowlist:              jsonb('ip_allowlist').$type<string[]>().notNull().default([]), // IPv4/IPv6, plain or CIDR
+  ipAllowlistIncludeAdmins: boolean('ip_allowlist_include_admins').notNull().default(false), // admins exempt by default
+  // Sessions
+  sessionTimeoutMinutes:    integer('session_timeout_minutes').notNull().default(10080), // 7d — drives refresh-token lifetime
+  maxConcurrentSessions:    integer('max_concurrent_sessions').notNull().default(0),     // 0 = unlimited
+  // Login policy
+  lockoutEnabled:           boolean('lockout_enabled').notNull().default(true),
+  lockoutThreshold:         integer('lockout_threshold').notNull().default(5),
+  lockoutDurationMinutes:   integer('lockout_duration_minutes').notNull().default(30),
+  requireStrongPasswords:   boolean('require_strong_passwords').notNull().default(true),
+  blockBreachedPasswords:   boolean('block_breached_passwords').notNull().default(false), // haveibeenpwned (fail-open)
+  updatedAt:                timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedById:              uuid('updated_by_id').references(() => users.id, { onDelete: 'set null' }),
+})
+
 // ─── Relations ────────────────────────────────────────────────────────────────
+
+export const workspaceSecuritySettingsRelations = relations(workspaceSecuritySettings, ({ one }) => ({
+  workspace: one(workspaces, { fields: [workspaceSecuritySettings.workspaceId], references: [workspaces.id] }),
+  updatedBy: one(users, { fields: [workspaceSecuritySettings.updatedById], references: [users.id] }),
+}))
 
 export const userTotpSecretsRelations = relations(userTotpSecrets, ({ one }) => ({
   user: one(users, { fields: [userTotpSecrets.userId], references: [users.id] }),

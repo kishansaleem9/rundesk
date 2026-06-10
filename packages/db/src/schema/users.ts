@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, jsonb, integer } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { userRoleEnum, oauthProviderEnum } from './enums'
 import { workspaceMembers } from './workspaces'
@@ -15,6 +15,11 @@ export const users = pgTable('users', {
   passwordHash:  text('password_hash'),
   emailVerified: boolean('email_verified').notNull().default(false),
   isActive:      boolean('is_active').notNull().default(true),
+  // Failed-login lockout (driven by per-workspace security policy). Counter
+  // resets to 0 on any successful login; lockedUntil is a short auto-releasing
+  // window, never a permanent ban.
+  failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
+  lockedUntil:         timestamp('locked_until', { withTimezone: true }),
   notificationPreferences: jsonb('notification_preferences').notNull().default({
     channels: {
       webEnabled: true,

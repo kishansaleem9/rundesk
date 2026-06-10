@@ -11,7 +11,11 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap')
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ logger: false }),
+    // trustProxy lets Fastify derive the real client IP from X-Forwarded-For
+    // when running behind a reverse proxy (nginx). Required for the workspace
+    // IP-allowlist policy to see the true client IP in production. Off by
+    // default so a direct deployment isn't tricked by spoofed XFF headers.
+    new FastifyAdapter({ logger: false, trustProxy: process.env.TRUST_PROXY === 'true' }),
   )
 
   app.setGlobalPrefix('api/v1')
