@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { spaces, projects, lists, tasks, goals, sprints, taskViews, workspaceMembers } from '@rundesk/db'
+import { spaces, projects, lists, tasks, goals, sprints, taskViews, labels, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 
@@ -56,7 +56,7 @@ export class ResourceMemberGuard implements CanActivate {
     // must be authorized against the sprint's workspace, not the body's taskId.
     // Containers (goal/sprint/view) are checked before taskId so nested task
     // routes still resolve correctly.
-    const order: Array<[string | undefined, 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view']> = [
+    const order: Array<[string | undefined, 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view' | 'label']> = [
       [p.workspaceId, 'ws'],
       [p.spaceId, 'space'],
       [p.projectId, 'project'],
@@ -64,6 +64,7 @@ export class ResourceMemberGuard implements CanActivate {
       [p.goalId, 'goal'],
       [p.sprintId, 'sprint'],
       [p.viewId, 'view'],
+      [p.labelId, 'label'],
       [p.taskId, 'task'],
       [typeof b.workspaceId === 'string' ? b.workspaceId : undefined, 'ws'],
       [typeof b.spaceId === 'string' ? b.spaceId : undefined, 'space'],
@@ -79,10 +80,14 @@ export class ResourceMemberGuard implements CanActivate {
   }
 
   private async resolveByKind(
-    kind: 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view',
+    kind: 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view' | 'label',
     id: string,
   ): Promise<string | null> {
     if (kind === 'ws') return id
+    if (kind === 'label') {
+      const [r] = await this.db.select({ w: labels.workspaceId }).from(labels).where(eq(labels.id, id)).limit(1)
+      return r?.w ?? null
+    }
     if (kind === 'space') {
       const [r] = await this.db.select({ w: spaces.workspaceId }).from(spaces).where(eq(spaces.id, id)).limit(1)
       return r?.w ?? null

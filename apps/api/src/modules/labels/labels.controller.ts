@@ -2,13 +2,14 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards } from '@n
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { LabelsService } from './labels.service'
 import { CreateLabelDto } from './dto/label.dto'
 
 @ApiTags('labels')
 @ApiBearerAuth()
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class LabelsController {
   constructor(private labels: LabelsService) {}
 
