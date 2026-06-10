@@ -411,6 +411,25 @@ function ListDetail() {
     ? listStatuses
     : Object.entries(DEFAULT_STATUS_META).map(([k, m]) => ({ key: k, name: m.label }))
 
+  // The Board renders one column per list status; a list with no status rows
+  // (e.g. seeded outside the API) must still get the default columns.
+  const boardStatuses: ListStatus[] = listStatuses.length
+    ? listStatuses
+    : Object.entries(DEFAULT_STATUS_META).map(([k, m], i) => ({
+        id: k,
+        listId,
+        key: k,
+        name: m.label,
+        color: m.color,
+        category:
+          k === 'done' || k === 'cancelled'
+            ? 'closed'
+            : k === 'in_progress' || k === 'in_review'
+              ? 'in_progress'
+              : 'open',
+        position: i,
+      }))
+
   return (
     <ListStatusesContext.Provider value={listStatuses}>
     <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-[#0f1114]">
@@ -615,7 +634,7 @@ function ListDetail() {
         ) : activeView === 'board' ? (
           <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {listStatuses.map((s) => (
+              {boardStatuses.map((s) => (
                 <BoardColumn
                   key={s.key}
                   status={s.key}

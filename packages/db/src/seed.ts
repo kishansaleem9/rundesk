@@ -18,6 +18,7 @@ import {
   taskChecklistItems,
   taskViews,
   docs,
+  listStatuses,
 } from './schema'
 import { DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 
@@ -185,6 +186,23 @@ async function seedDemoContent(
       .returning()
     return created
   })
+
+  // Per-list statuses: the API seeds these in lists.service on create, but the
+  // seed inserts the demo list directly, so mirror the same defaults here.
+  // Without them the Board view has no columns to render. Idempotent.
+  await db
+    .insert(listStatuses)
+    .values(
+      [
+        { key: 'backlog',     name: 'Backlog',     color: '#94a3b8', category: 'open' as const,        position: 0 },
+        { key: 'todo',        name: 'To do',       color: '#64748b', category: 'open' as const,        position: 1 },
+        { key: 'in_progress', name: 'In progress', color: '#3b82f6', category: 'in_progress' as const, position: 2 },
+        { key: 'in_review',   name: 'In review',   color: '#a855f7', category: 'in_progress' as const, position: 3 },
+        { key: 'done',        name: 'Done',        color: '#10b981', category: 'closed' as const,      position: 4 },
+        { key: 'cancelled',   name: 'Cancelled',   color: '#f43f5e', category: 'closed' as const,      position: 5 },
+      ].map((s) => ({ listId: list.id, ...s })),
+    )
+    .onConflictDoNothing()
 
   // Workspace labels
   const labelSeeds = [

@@ -1,5 +1,5 @@
 import { createFileRoute, Outlet, redirect, useRouterState } from '@tanstack/react-router'
-import { Suspense, lazy, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
@@ -21,6 +21,20 @@ export const Route = createFileRoute('/app')({
 function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+
+  // ⌘K / Ctrl+K must live here: the palette itself is only mounted while
+  // open, so a listener inside the component can never open it.
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setCmdOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   // The /app/admin subtree renders its own chrome, so skip the workspace
   // sidebar / topbar / command palette to avoid double-stacking shells.
   const isAdminRoute = pathname.startsWith('/app/admin')
