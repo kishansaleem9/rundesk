@@ -183,6 +183,13 @@
       "when": 1900000022000,
       "tag": "0025_doc_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1900000023000,
+      "tag": "0026_goal_key_results",
+      "breakpoints": true
     }
   ]
 }

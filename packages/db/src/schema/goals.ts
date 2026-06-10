@@ -50,3 +50,25 @@ export const goalUpdatesRelations = relations(goalUpdates, ({ one }) => ({
   goal:   one(goals, { fields: [goalUpdates.goalId], references: [goals.id] }),
   author: one(users, { fields: [goalUpdates.authorId], references: [users.id] }),
 }))
+
+// Measurable key results under a goal (OKR-style). Each tracks its own
+// current/target; the parent goal keeps its own overall progress.
+export const goalKeyResults = pgTable('goal_key_results', {
+  id:           uuid('id').primaryKey().defaultRandom(),
+  goalId:       uuid('goal_id').notNull().references(() => goals.id, { onDelete: 'cascade' }),
+  workspaceId:  uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  ownerId:      uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+  title:        text('title').notNull(),
+  unit:         text('unit'),
+  targetValue:  doublePrecision('target_value').notNull().default(100),
+  currentValue: doublePrecision('current_value').notNull().default(0),
+  status:       text('status').$type<GoalStatus>().notNull().default('on_track'),
+  position:     integer('position').notNull().default(0),
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const goalKeyResultsRelations = relations(goalKeyResults, ({ one }) => ({
+  goal:  one(goals, { fields: [goalKeyResults.goalId], references: [goals.id] }),
+  owner: one(users, { fields: [goalKeyResults.ownerId], references: [users.id] }),
+}))

@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
 import { eq, and, desc, asc, isNull } from 'drizzle-orm'
-import { goals, goalUpdates, users } from '@rundesk/db'
+import { goals, goalUpdates, goalKeyResults, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import type { GoalKind, GoalStatus } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -122,5 +122,103 @@ export class GoalsService {
       .from(goalUpdates)
       .where(eq(goalUpdates.goalId, goalId))
       .orderBy(desc(goalUpdates.createdAt))
+  }
+
+  // ─── Single goal detail (goal + owner + key results) ───────────────────────
+  async getOne(goalId: string) {
+    const [goal] = await this.db
+      .select({
+        id: goals.id,
+        workspaceId: goals.workspaceId,
+        spaceId: goals.spaceId,
+        parentGoalId: goals.parentGoalId,
+        ownerId: goals.ownerId,
+        owner: { id: users.id, displayName: users.displayName, avatarUrl: users.avatarUrl },
+        title: goals.title,
+        description: goals.description,
+        kind: goals.kind,
+        targetValue: goals.targetValue,
+        currentValue: goals.currentValue,
+        unit: goals.unit,
+        status: goals.status,
+        startDate: goals.startDate,
+        dueDate: goals.dueDate,
+        completedAt: goals.completedAt,
+        createdAt: goals.createdAt,
+        updatedAt: goals.updatedAt,
+      })
+      .from(goals)
+      .leftJoin(users, eq(users.id, goals.ownerId))
+      .where(eq(goals.id, goalId))
+      .limit(1)
+    if (!goal) throw new NotFoundException('Goal not found')
+    const keyResults = await this.listKeyResults(goalId)
+    return { ...goal, keyResults }
+  }
+
+  // ─── Key results (OKR sub-metrics) ─────────────────────────────────────────
+  listKeyResults(goalId: string) {
+    return this.db
+      .select({
+        id: goalKeyResults.id,
+        goalId: goalKeyResults.goalId,
+        ownerId: goalKeyResults.ownerId,
+        ownerName: users.displayName,
+        title: goalKeyResults.title,
+        unit: goalKeyResults.unit,
+        targetValue: goalKeyResults.targetValue,
+        currentValue: goalKeyResults.currentValue,
+        status: goalKeyResults.status,
+        position: goalKeyResults.position,
+        createdAt: goalKeyResults.createdAt,
+        updatedAt: goalKeyResults.updatedAt,
+      })
+      .from(goalKeyResults)
+      .leftJoin(users, eq(users.id, goalKeyResults.ownerId))
+      .where(eq(goalKeyResults.goalId, goalId))
+      .orderBy(asc(goalKeyResults.position), asc(goalKeyResults.createdAt))
+  }
+
+  async createKeyResult(
+    goalId: string,
+    data: { title: string; unit?: string; targetValue?: number; currentValue?: number; ownerId?: string | null },
+  ) {
+    const [goal] = await this.db.select({ workspaceId: goals.workspaceId }).from(goals).where(eq(goals.id, goalId)).limit(1)
+    if (!goal) throw new NotFoundException('Goal not found')
+    const [existing] = await this.db.select({ n: goalKeyResults.position }).from(goalKeyResults).where(eq(goalKeyResults.goalId, goalId)).orderBy(desc(goalKeyResults.position)).limit(1)
+    const [row] = await this.db
+      .insert(goalKeyResults)
+      .values({
+        goalId,
+        workspaceId: goal.workspaceId,
+        title: data.title,
+        unit: data.unit,
+        targetValue: data.targetValue ?? 100,
+        currentValue: data.currentValue ?? 0,
+        ownerId: data.ownerId ?? null,
+        position: (existing?.n ?? -1) + 1,
+      })
+      .returning()
+    return row
+  }
+
+  async updateKeyResult(
+    krId: string,
+    patch: { title?: string; unit?: string | null; targetValue?: number; currentValue?: number; status?: GoalStatus; ownerId?: string | null },
+  ) {
+    const [existing] = await this.db.select().from(goalKeyResults).where(eq(goalKeyResults.id, krId)).limit(1)
+    if (!existing) throw new NotFoundException('Key result not found')
+    const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
+    if (typeof patch.currentValue === 'number') {
+      const target = patch.targetValue ?? existing.targetValue
+      if (patch.currentValue >= target) set.status = patch.status ?? 'completed'
+    }
+    const [row] = await this.db.update(goalKeyResults).set(set).where(eq(goalKeyResults.id, krId)).returning()
+    return row
+  }
+
+  async deleteKeyResult(krId: string) {
+    await this.db.delete(goalKeyResults).where(eq(goalKeyResults.id, krId))
+    return { ok: true }
   }
 }

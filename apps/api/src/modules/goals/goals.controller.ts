@@ -87,6 +87,11 @@ export class GoalsController {
     )
   }
 
+  @Get('goals/:goalId')
+  getOne(@Param('goalId') goalId: string) {
+    return this.goals.getOne(goalId)
+  }
+
   @Delete('goals/:goalId')
   remove(@Param('goalId') goalId: string) {
     return this.goals.delete(goalId)
@@ -95,5 +100,33 @@ export class GoalsController {
   @Get('goals/:goalId/history')
   history(@Param('goalId') goalId: string) {
     return this.goals.history(goalId)
+  }
+
+  // ─── Key results ───────────────────────────────────────────────────────────
+
+  @Get('goals/:goalId/key-results')
+  listKeyResults(@Param('goalId') goalId: string) {
+    return this.goals.listKeyResults(goalId)
+  }
+
+  @Post('goals/:goalId/key-results')
+  createKeyResult(
+    @Param('goalId') goalId: string,
+    @Body() body: { title: string; unit?: string; targetValue?: number; currentValue?: number; ownerId?: string | null },
+  ) {
+    return this.goals.createKeyResult(goalId, body)
+  }
+
+  @Patch('goals/:goalId/key-results/:krId')
+  updateKeyResult(
+    @Param('krId') krId: string,
+    @Body() body: { title?: string; unit?: string | null; targetValue?: number; currentValue?: number; status?: GoalStatus; ownerId?: string | null },
+  ) {
+    return this.goals.updateKeyResult(krId, body)
+  }
+
+  @Delete('goals/:goalId/key-results/:krId')
+  deleteKeyResult(@Param('krId') krId: string) {
+    return this.goals.deleteKeyResult(krId)
   }
 }
