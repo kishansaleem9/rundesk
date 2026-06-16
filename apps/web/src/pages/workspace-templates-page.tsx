@@ -249,7 +249,7 @@ function ApplyTemplateDialog({
 
   const spacesQuery = useQuery({
     queryKey: ['spaces', workspaceId],
-    queryFn: () => api<NamedRow[]>(`/workspaces/${workspaceId}/spaces`),
+    queryFn: () => api<NamedRow[]>(`/spaces/workspace/${workspaceId}`),
     enabled: open,
   })
   const spaces = spacesQuery.data ?? []
@@ -352,7 +352,7 @@ function SaveTemplateDialog({
 
   const spacesQuery = useQuery({
     queryKey: ['spaces', workspaceId],
-    queryFn: () => api<NamedRow[]>(`/workspaces/${workspaceId}/spaces`),
+    queryFn: () => api<NamedRow[]>(`/spaces/workspace/${workspaceId}`),
     enabled: open,
   })
   const spaces = spacesQuery.data ?? []
@@ -360,7 +360,7 @@ function SaveTemplateDialog({
 
   const projectsQuery = useQuery({
     queryKey: ['projects', effectiveSpace],
-    queryFn: () => api<NamedRow[]>(`/spaces/${effectiveSpace}/projects`),
+    queryFn: () => api<NamedRow[]>(`/projects/space/${effectiveSpace}`),
     enabled: open && Boolean(effectiveSpace),
   })
   const projects = projectsQuery.data ?? []
