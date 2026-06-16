@@ -64,6 +64,28 @@ database_is_empty() {
   [ "$users_missing" = "t" ]
 }
 
+# True only when the drizzle migration ledger exists AND has at least one row.
+# A populated DB with an empty ledger means the schema was materialised with
+# `push` and never recorded — replaying migrations from zero would fail on
+# already-existing objects, so we reconcile instead (see apply_schema).
+migration_ledger_initialized() {
+  docker exec rundesk-postgres pg_isready -U "${POSTGRES_USER:-rundesk}" >/dev/null 2>&1 || return 1
+  local count
+  count="$(docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
+    "SELECT count(*) FROM drizzle.__drizzle_migrations;" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "$count" ] && [ "$count" != "0" ]
+}
+
+# Bring a push-managed DB (no migration ledger) up to date without replaying
+# history: push reconciles the live schema to the TypeScript source (additive
+# for new tables/columns/indexes), then the ledger is recorded so future
+# deploys use migrate. Non-destructive — no DROP SCHEMA, no data loss.
+reconcile_pushed_schema() {
+  echo "▶ Migration ledger empty (DB was created with 'push'). Reconciling schema with push, then recording ledger."
+  docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec drizzle-kit push --force"
+  docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec tsx src/mark-migrations-applied.ts"
+}
+
 # First-time bootstrap for an empty database. This is non-destructive (there is
 # nothing to lose) so it does NOT require ALLOW_SCHEMA_RESET. `push` creates the
 # full schema from the TypeScript source of truth, then the migration journal is
@@ -78,6 +100,13 @@ bootstrap_fresh_schema() {
 apply_schema() {
   if database_is_empty; then
     bootstrap_fresh_schema
+    return
+  fi
+
+  # Populated DB that predates migrate-based deploys (built with `push`, no
+  # ledger): reconcile additively instead of replaying history from zero.
+  if ! migration_ledger_initialized; then
+    reconcile_pushed_schema
     return
   fi
 
