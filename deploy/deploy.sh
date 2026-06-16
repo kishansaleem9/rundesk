@@ -4,7 +4,7 @@
 #   ./deploy/deploy.sh up        # build + start everything
 #   ./deploy/deploy.sh migrate   # apply DB schema (drizzle push) + seed
 #   ./deploy/deploy.sh nginx     # install nginx vhost + certbot SSL
-#   ./deploy/deploy.sh rebuild   # pull latest, rebuild, restart api + web
+#   ./deploy/deploy.sh rebuild   # pull latest, rebuild, apply new migrations, restart api + web
 #   ./deploy/deploy.sh logs      # tail api logs
 #   ./deploy/deploy.sh down      # stop all containers (data persists)
 set -euo pipefail
@@ -160,6 +160,20 @@ case "$CMD" in
     build_web
     docker compose -f deploy/docker-compose.prod.yml --env-file .env build api
     docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d --force-recreate api
+    echo "▶ Waiting for postgres healthy…"
+    for i in $(seq 1 30); do
+      if docker exec rundesk-postgres pg_isready -U "${POSTGRES_USER:-rundesk}" >/dev/null 2>&1; then
+        echo "✓ postgres healthy"
+        break
+      fi
+      sleep 1
+    done
+    # Apply any migrations that shipped with this build. A rebuild deploys new
+    # code that may require new schema (e.g. new tables/columns referenced on the
+    # login path), so skipping this would break the running app. apply_schema
+    # only runs genuinely-new migrations and never resets without ALLOW_SCHEMA_RESET.
+    echo "▶ Applying any new DB migrations"
+    apply_schema
     systemctl reload nginx
     echo "✓ Rebuild complete."
     ;;
