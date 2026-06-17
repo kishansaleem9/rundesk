@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Textarea, cn } from '@rundesk/ui'
+import { Button, Card, cn, toast } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
-import { ChatComposer } from '../components/chat/chat-composer'
+import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
 import {
   formatDateDivider,
   formatMessageTime,
@@ -15,16 +15,17 @@ import {
   Hash,
   Users,
   Smile,
-  Paperclip,
   Sparkles,
   ThumbsUp,
   Reply,
   Forward,
   Bookmark,
   UserPlus,
+  Pin,
+  PinOff,
   X,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
@@ -64,6 +65,7 @@ type Message = {
   body: string
   parentMessageId?: string | null
   editedAt?: string | null
+  pinnedAt?: string | null
   createdAt: string
   reactions?: Array<{
     emoji: string
@@ -123,6 +125,7 @@ export function ChatPage() {
   const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [channelSearch, setChannelSearch] = useState('')
+  const [messageSearch, setMessageSearch] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -168,6 +171,14 @@ export function ChatPage() {
   })
   const messages = messagesQuery.data ?? []
   const rootMessages = useMemo(() => messages.filter((m) => !m.parentMessageId), [messages])
+  const visibleRootMessages = useMemo(() => {
+    const q = messageSearch.trim().toLowerCase()
+    if (!q) return rootMessages
+    return rootMessages.filter(
+      (m) =>
+        m.body.toLowerCase().includes(q) || (m.authorName ?? '').toLowerCase().includes(q),
+    )
+  }, [rootMessages, messageSearch])
   const repliesByParent = useMemo(() => {
     const map = new Map<string, Message[]>()
     for (const message of messages) {
@@ -370,6 +381,36 @@ export function ChatPage() {
     },
   })
 
+  const setPinnedMutation = useMutation({
+    mutationFn: ({ messageId, pinned }: { messageId: string; pinned: boolean }) =>
+      api<Message>(`/chat/messages/${messageId}/pin`, {
+        method: pinned ? 'POST' : 'DELETE',
+      }),
+    onSuccess: () => {
+      // The server also emits chat.message.updated, but invalidate so the
+      // acting user sees the pin state flip immediately.
+      if (selectedId) {
+        qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+      }
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : 'Could not update pin')
+    },
+  })
+
+  const leaveChannelMutation = useMutation({
+    mutationFn: (channelId: string) =>
+      api(`/chat/channels/${channelId}/leave`, { method: 'POST' }),
+    onSuccess: async (_, channelId) => {
+      await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      toast.success('You left the channel')
+      if (selectedId === channelId) setSelectedId(null)
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : 'Could not leave channel')
+    },
+  })
+
   const handleSend = () => {
     const body = input.trim()
     if (!body || !selectedId) return
@@ -444,8 +485,14 @@ export function ChatPage() {
         <ChatHeader
           channel={selectedChannel}
           memberCount={membersQuery.data?.length ?? 0}
+          members={membersQuery.data ?? []}
           showPinnedPanel={showPinnedPanel}
           onTogglePinned={() => setShowPinnedPanel((v) => !v)}
+          search={messageSearch}
+          onSearchChange={setMessageSearch}
+          onLeaveChannel={() => {
+            if (selectedId) leaveChannelMutation.mutate(selectedId)
+          }}
         />
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
@@ -467,11 +514,17 @@ export function ChatPage() {
                 This is the beginning of your conversation. Send a message to get started.
               </p>
             </div>
+          ) : visibleRootMessages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
+              <p className="text-[14px] text-muted-foreground">
+                No messages match “{messageSearch.trim()}”.
+              </p>
+            </div>
           ) : (
             <div className="space-y-0 max-w-3xl mx-auto">
-              {rootMessages.map((m, i) => {
-                const showAuthor = shouldShowMessageHeader(rootMessages, i)
-                const showDate = shouldShowDateDivider(rootMessages, i)
+              {visibleRootMessages.map((m, i) => {
+                const showAuthor = shouldShowMessageHeader(visibleRootMessages, i)
+                const showDate = shouldShowDateDivider(visibleRootMessages, i)
                 const mine = m.authorId === me?.id
                 const replyCount = repliesByParent.get(m.id)?.length ?? 0
                 return (
@@ -525,6 +578,12 @@ export function ChatPage() {
                           <span className="text-[10px] text-muted-foreground/90 tabular-nums">
                             {formatMessageTime(m.createdAt)}
                           </span>
+                        </div>
+                      )}
+                      {m.pinnedAt && (
+                        <div className="flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-300 mb-0.5">
+                          <Pin className="h-2.5 w-2.5" />
+                          Pinned
                         </div>
                       )}
                       <div
@@ -641,6 +700,20 @@ export function ChatPage() {
                             }}
                           >
                             <Bookmark className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title={m.pinnedAt ? 'Unpin from channel' : 'Pin to channel'}
+                            disabled={setPinnedMutation.isPending}
+                            className={cn(
+                              'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center disabled:opacity-50',
+                              m.pinnedAt ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground hover:text-foreground',
+                            )}
+                            onClick={() =>
+                              setPinnedMutation.mutate({ messageId: m.id, pinned: !m.pinnedAt })
+                            }
+                          >
+                            {m.pinnedAt ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
                           </button>
                           <button
                             type="button"
@@ -852,39 +925,18 @@ function ThreadPanel({
         )}
       </div>
       <div className="shrink-0 border-t border-border/80 p-3 bg-[#fbfbfc] dark:bg-[#16181d]">
-        <div className="rounded-xl border border-border/80 bg-background shadow-sm overflow-hidden">
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Reply in thread..."
-            rows={2}
-            className="min-h-[40px] border-0 bg-transparent resize-none text-[14px] focus-visible:ring-0"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                const body = draft.trim()
-                if (!body) return
-                onReply(body)
-                setDraft('')
-              }
-            }}
-          />
-          <div className="px-2 py-1.5 border-t border-border/60 flex justify-end">
-            <Button
-              size="sm"
-              className="h-8 bg-violet-600 hover:bg-violet-700 text-white"
-              onClick={() => {
-                const body = draft.trim()
-                if (!body) return
-                onReply(body)
-                setDraft('')
-              }}
-              disabled={!draft.trim() || pending}
-            >
-              Reply
-            </Button>
-          </div>
-        </div>
+        <ThreadReplyComposer
+          value={draft}
+          onChange={setDraft}
+          onSend={() => {
+            const body = draft.trim()
+            if (!body) return
+            onReply(body)
+            setDraft('')
+          }}
+          disabled={false}
+          sending={pending}
+        />
       </div>
     </aside>
   )

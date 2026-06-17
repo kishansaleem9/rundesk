@@ -31,6 +31,8 @@ export const tasks = pgTable('tasks', {
   dueDate:       timestamp('due_date', { withTimezone: true }),
   completedAt:   timestamp('completed_at', { withTimezone: true }),
   timeEstimate:  integer('time_estimate'), // seconds
+  // Optional cover for the task detail header: a CSS color/gradient string.
+  coverColor:    text('cover_color'),
   isArchived:    boolean('is_archived').notNull().default(false),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

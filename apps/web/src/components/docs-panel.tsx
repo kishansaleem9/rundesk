@@ -7,14 +7,22 @@ import {
   Download,
   Globe,
   GlobeLock,
+  Heading1,
+  Heading3,
   History,
+  Link,
   Link2,
+  ListOrdered,
   MessageCircle,
   MessagesSquare,
+  Pilcrow,
   Plus,
   RotateCcw,
   Slash,
+  Sparkles,
+  Strikethrough,
   Trash2,
+  Underline,
 } from 'lucide-react'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -62,6 +70,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const [slashFilter, setSlashFilter] = useState('')
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [improving, setImproving] = useState(false)
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
@@ -220,6 +229,47 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     URL.revokeObjectURL(url)
   }
 
+  const toggleLink = () => {
+    if (!editor) return
+    if (editor.isActive('link')) {
+      editor.chain().focus().unsetLink().run()
+      return
+    }
+    const url = window.prompt('Link URL')
+    if (url) {
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+    }
+  }
+
+  const improveWriting = async () => {
+    if (!editor || improving) return
+    const { from, to, empty } = editor.state.selection
+    const hasSelection = !empty && from !== to
+    const text = hasSelection
+      ? editor.state.doc.textBetween(from, to, '\n', '\n')
+      : editor.getText()
+    if (!text.trim()) {
+      toast.error('Nothing to improve — add some text first.')
+      return
+    }
+    setImproving(true)
+    try {
+      const result = await api<{ improved: string }>('/ai/writing/improve', {
+        method: 'POST',
+        body: { text, mode: 'improve' },
+      })
+      if (hasSelection) {
+        editor.chain().focus().insertContent(result.improved).run()
+      } else {
+        editor.commands.setContent(result.improved)
+      }
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : 'Could not improve writing')
+    } finally {
+      setImproving(false)
+    }
+  }
+
   const slashItems = [
     { id: 'h2' as const, label: 'Heading 2' },
     { id: 'todo' as const, label: 'Todo list' },
@@ -306,33 +356,100 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant={editor?.isActive('underline') ? 'secondary' : 'ghost'}
+                onClick={() => editor?.chain().focus().toggleUnderline().run()}
+                disabled={!editor}
+                title="Underline"
+              >
+                <Underline className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant={editor?.isActive('strike') ? 'secondary' : 'ghost'}
+                onClick={() => editor?.chain().focus().toggleStrike().run()}
+                disabled={!editor}
+                title="Strikethrough"
+              >
+                <Strikethrough className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant={editor?.isActive('link') ? 'secondary' : 'ghost'}
+                onClick={toggleLink}
+                disabled={!editor}
+                title="Link"
+              >
+                <Link className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant={editor?.isActive('heading', { level: 1 }) ? 'secondary' : 'ghost'}
+                onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
+                disabled={!editor}
+                title="Heading 1"
+              >
+                <Heading1 className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant={editor?.isActive('heading', { level: 2 }) ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
                 disabled={!editor}
+                title="Heading 2"
               >
                 H2
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant={editor?.isActive('heading', { level: 3 }) ? 'secondary' : 'ghost'}
+                onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
+                disabled={!editor}
+                title="Heading 3"
+              >
+                <Heading3 className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant={editor?.isActive('paragraph') ? 'secondary' : 'ghost'}
+                onClick={() => editor?.chain().focus().setParagraph().run()}
+                disabled={!editor}
+                title="Normal text"
+              >
+                <Pilcrow className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant={editor?.isActive('bulletList') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleBulletList().run()}
                 disabled={!editor}
+                title="Bullet list"
               >
                 List
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant={editor?.isActive('orderedList') ? 'secondary' : 'ghost'}
+                onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+                disabled={!editor}
+                title="Numbered list"
+              >
+                <ListOrdered className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant={editor?.isActive('taskList') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleTaskList().run()}
                 disabled={!editor}
+                title="Todo list"
               >
                 Todo
               </Button>
               <Button
                 size="sm"
-                variant="ghost"
+                variant={editor?.isActive('codeBlock') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
                 disabled={!editor}
+                title="Code block"
               >
                 Code
               </Button>
@@ -370,6 +487,16 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 title={historyOpen ? 'Hide version history' : 'Version history'}
               >
                 <History className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={improveWriting}
+                disabled={!editor || improving}
+                title="Improve writing with AI"
+              >
+                <Sparkles className="h-3.5 w-3.5 mr-1" />
+                {improving ? 'Improving…' : 'Improve'}
               </Button>
               <Button
                 size="sm"

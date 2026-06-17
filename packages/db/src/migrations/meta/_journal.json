@@ -204,6 +204,20 @@
       "when": 1900000025000,
       "tag": "0028_builtin_template_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1900000026000,
+      "tag": "0029_task_cover_color",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1900000027000,
+      "tag": "0030_personal_tasks",
+      "breakpoints": true
     }
   ]
 }

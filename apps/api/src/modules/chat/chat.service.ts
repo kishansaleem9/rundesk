@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { eq, and, desc, asc, isNull, or } from 'drizzle-orm'
+import { eq, and, desc, asc, isNull, isNotNull, or } from 'drizzle-orm'
 import {
   chatChannels,
   chatChannelMembers,
@@ -498,6 +498,48 @@ export class ChatService {
       })
     }
     return row
+  }
+
+  // Pin / unpin a message for the whole channel (any channel member may pin).
+  async setPinned(messageId: string, userId: string, pinned: boolean) {
+    const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!existing) throw new NotFoundException('Message not found')
+    const channel = await this.assertChannelAccess(existing.channelId, userId)
+    const [row] = await this.db
+      .update(chatMessages)
+      .set({ pinnedAt: pinned ? new Date() : null })
+      .where(eq(chatMessages.id, messageId))
+      .returning()
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.message.updated',
+      workspaceId: channel.workspaceId,
+      channelId: row.channelId,
+      messageId,
+      patch: { pinnedAt: row.pinnedAt },
+    })
+    return row
+  }
+
+  // List a channel's pinned messages (newest pin first).
+  async listPinned(channelId: string, userId: string) {
+    await this.assertChannelAccess(channelId, userId)
+    return this.db
+      .select({
+        id: chatMessages.id,
+        channelId: chatMessages.channelId,
+        authorId: chatMessages.authorId,
+        body: chatMessages.body,
+        mentions: chatMessages.mentions,
+        editedAt: chatMessages.editedAt,
+        pinnedAt: chatMessages.pinnedAt,
+        createdAt: chatMessages.createdAt,
+        authorName: users.displayName,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(chatMessages)
+      .leftJoin(users, eq(users.id, chatMessages.authorId))
+      .where(and(eq(chatMessages.channelId, channelId), isNotNull(chatMessages.pinnedAt)))
+      .orderBy(desc(chatMessages.pinnedAt))
   }
 
   async deleteMessage(messageId: string, userId: string) {

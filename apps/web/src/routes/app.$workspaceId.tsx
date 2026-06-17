@@ -9,6 +9,9 @@ import {
   CalendarClock,
   ListChecks,
   MoreHorizontal,
+  Plus,
+  Trash2,
+  Circle,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useMemo, useState } from 'react'
@@ -37,6 +40,13 @@ type MemberTask = {
   projectId: string
   spaceId: string
   listName: string
+}
+type PersonalTask = {
+  id: string
+  title: string
+  done: boolean
+  position: number
+  createdAt: string
 }
 type WorkspaceAnnouncement = {
   id: string
@@ -96,12 +106,38 @@ function WorkspaceHome() {
     },
   })
 
+  const personalTasksQuery = useQuery({
+    queryKey: ['personal-tasks', workspaceId],
+    enabled: Boolean(workspaceId),
+    queryFn: () => api<PersonalTask[]>(`/workspaces/${workspaceId}/personal-tasks`),
+  })
+  const [newPersonalTitle, setNewPersonalTitle] = useState('')
+
   const markRead = useMutation({
     mutationFn: (id: string) => api(`/notifications/${id}/read`, { method: 'POST' }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['notifications', workspaceId] })
       await qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
     },
+  })
+
+  const invalidatePersonal = () => qc.invalidateQueries({ queryKey: ['personal-tasks', workspaceId] })
+  const addPersonalTask = useMutation({
+    mutationFn: (title: string) =>
+      api(`/workspaces/${workspaceId}/personal-tasks`, { method: 'POST', body: { title } }),
+    onSuccess: () => {
+      setNewPersonalTitle('')
+      void invalidatePersonal()
+    },
+  })
+  const togglePersonalTask = useMutation({
+    mutationFn: (t: PersonalTask) =>
+      api(`/personal-tasks/${t.id}`, { method: 'PATCH', body: { done: !t.done } }),
+    onSuccess: () => void invalidatePersonal(),
+  })
+  const deletePersonalTask = useMutation({
+    mutationFn: (id: string) => api(`/personal-tasks/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void invalidatePersonal(),
   })
 
   const { namesById } = useMentionNames(workspaceId)
@@ -116,7 +152,7 @@ function WorkspaceHome() {
     const due = new Date(t.dueDate)
     return isToday(due) || isPast(due)
   })
-  const personalList = myTasks.filter((t) => t.listName.toLowerCase().includes('personal'))
+  const personalTasks = personalTasksQuery.data ?? []
   const visibleAnnouncement = (announcementsQuery.data ?? [])[0]
 
   const selectedItems = useMemo(() => {
@@ -213,7 +249,7 @@ function WorkspaceHome() {
             <div className="pt-2 pb-1 text-xs uppercase tracking-wider text-muted-foreground">My Tasks</div>
             <HomeItem icon={CircleCheck} label="Assigned to me" active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} />
             <HomeItem icon={CalendarClock} label="Today & Overdue" active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} />
-            <HomeItem icon={ListChecks} label="Personal List" active={section === 'personal-list'} onClick={() => setSection('personal-list')} count={personalList.length} />
+            <HomeItem icon={ListChecks} label="Personal List" active={section === 'personal-list'} onClick={() => setSection('personal-list')} count={personalTasks.filter((t) => !t.done).length} />
             <HomeItem icon={MoreHorizontal} label="More" active={section === 'more'} onClick={() => setSection('more')} />
           </div>
         </Card>
@@ -273,9 +309,9 @@ function WorkspaceHome() {
             </div>
           )}
 
-          {(section === 'assigned-to-me' || section === 'today-overdue' || section === 'personal-list') && (
+          {(section === 'assigned-to-me' || section === 'today-overdue') && (
             <div className="space-y-2">
-              {(section === 'assigned-to-me' ? assignedToMe : section === 'today-overdue' ? todayAndOverdue : personalList).map((t) => (
+              {(section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).map((t) => (
                 <Link
                   key={t.id}
                   to="/app/$workspaceId/$spaceId/$projectId/$listId"
@@ -289,8 +325,68 @@ function WorkspaceHome() {
                   </Card>
                 </Link>
               ))}
-              {(section === 'assigned-to-me' ? assignedToMe : section === 'today-overdue' ? todayAndOverdue : personalList).length === 0 && (
+              {(section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).length === 0 && (
                 <EmptyStateCard icon={<ListChecks className="h-6 w-6" />} title="No tasks here" description="Tasks that match this section will appear here." />
+              )}
+            </div>
+          )}
+
+          {section === 'personal-list' && (
+            <div className="space-y-3">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  const t = newPersonalTitle.trim()
+                  if (t) addPersonalTask.mutate(t)
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  value={newPersonalTitle}
+                  onChange={(e) => setNewPersonalTitle(e.target.value)}
+                  placeholder="Add a personal task…"
+                  className="flex-1 h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm outline-none focus:border-accent/50"
+                />
+                <Button type="submit" size="sm" disabled={!newPersonalTitle.trim() || addPersonalTask.isPending}>
+                  <Plus className="h-4 w-4" /> Add
+                </Button>
+              </form>
+              {personalTasks.length === 0 ? (
+                <EmptyStateCard
+                  icon={<ListChecks className="h-6 w-6" />}
+                  title="No personal tasks yet"
+                  description="Add private to-dos that only you can see."
+                />
+              ) : (
+                <div className="space-y-1.5">
+                  {personalTasks.map((t) => (
+                    <Card key={t.id} variant="glass" className="p-2.5 flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => togglePersonalTask.mutate(t)}
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        aria-label={t.done ? 'Mark not done' : 'Mark done'}
+                      >
+                        {t.done ? (
+                          <CircleCheck className="h-4 w-4 text-emerald-500" />
+                        ) : (
+                          <Circle className="h-4 w-4" />
+                        )}
+                      </button>
+                      <span className={`flex-1 text-sm ${t.done ? 'line-through text-muted-foreground' : ''}`}>
+                        {t.title}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => deletePersonalTask.mutate(t.id)}
+                        className="shrink-0 text-muted-foreground hover:text-destructive"
+                        aria-label="Delete personal task"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </Card>
+                  ))}
+                </div>
               )}
             </div>
           )}

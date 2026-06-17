@@ -115,6 +115,7 @@ export class TasksController {
       dueDate: string | null
       position: number
       timeEstimate: number | null
+      coverColor: string | null
       isArchived: boolean
     }>,
   ) {

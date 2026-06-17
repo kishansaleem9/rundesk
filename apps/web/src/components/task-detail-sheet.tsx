@@ -11,12 +11,15 @@ import {
   SheetTitle,
   Textarea,
   cn,
+  toast,
 } from '@rundesk/ui'
 import { useEffect, useMemo, useState } from 'react'
+import { ImageIcon, Maximize2, Minimize2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
+import { CoverImagePicker } from './cover-image-picker'
 import { MentionText } from './mention-text'
 import { formatMentionsPlain } from '../lib/mentions'
 
@@ -77,6 +80,7 @@ type TaskDetail = {
   listId: string
   title: string
   description: string | null
+  coverColor?: string | null
   status: TaskStatus
   priority: TaskPriority
   dueDate?: string | null
@@ -227,6 +231,10 @@ export function TaskDetailSheet({
   workspaceId?: string
 }) {
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  const [expanded, setExpanded] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [coverPickerOpen, setCoverPickerOpen] = useState(false)
   const qc = useQueryClient()
   const navigate = useNavigate()
   const fallbackWorkspaceId = useMemo(() => {
@@ -244,6 +252,53 @@ export function TaskDetailSheet({
     queryKey: ['task', taskId],
     queryFn: () => api<TaskDetail>(`/tasks/${taskId}`),
   })
+
+  const updateTitle = useMutation({
+    mutationFn: (title: string) =>
+      api(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        body: { title },
+      }),
+    onSuccess: async () => {
+      setEditingTitle(false)
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : 'Could not update title')
+    },
+  })
+
+  const updateCover = useMutation({
+    mutationFn: (coverColor: string | null) =>
+      api(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        body: { coverColor },
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : 'Could not update cover')
+    },
+  })
+
+  const commitTitle = () => {
+    const next = titleDraft.trim()
+    const current = detailQuery.data?.title ?? ''
+    // Revert silently when emptied or unchanged — never save an empty title.
+    if (!next || next === current) {
+      setEditingTitle(false)
+      return
+    }
+    updateTitle.mutate(next)
+  }
+
+  // Reset transient edit UI when switching to a different task.
+  useEffect(() => {
+    setEditingTitle(false)
+    setTitleDraft('')
+    setCoverPickerOpen(false)
+  }, [taskId])
 
   useEffect(() => {
     if (!enabled || !taskId) return
@@ -266,19 +321,48 @@ export function TaskDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="sm:max-w-2xl w-full overflow-y-auto">
+      <SheetContent
+        className={cn(
+          'w-full overflow-y-auto transition-[max-width] duration-200',
+          expanded ? 'sm:max-w-[90vw]' : 'sm:max-w-2xl',
+        )}
+      >
         {!taskId ? null : detailQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading task…</p>
         ) : detailQuery.data ? (
           <>
-            {/* Cover band — gradient placeholder; replace with real image when available */}
+            {/* Cover band — renders the saved coverColor when set, else the brand gradient. */}
             <div
-              className="-mx-6 -mt-6 mb-4 h-24 bg-brand-gradient relative overflow-hidden rounded-t-md"
-              aria-hidden
+              className={cn(
+                '-mx-6 -mt-6 mb-4 h-24 relative overflow-hidden rounded-t-md group',
+                !detailQuery.data.coverColor && 'bg-brand-gradient',
+              )}
+              style={
+                detailQuery.data.coverColor
+                  ? { background: detailQuery.data.coverColor }
+                  : undefined
+              }
             >
-              <div className="absolute inset-0 bg-grid-dim opacity-40" />
-              <div className="absolute -bottom-12 -right-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+              <div className="absolute inset-0 bg-grid-dim opacity-40" aria-hidden />
+              <div className="absolute -bottom-12 -right-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" aria-hidden />
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setCoverPickerOpen(true)}
+                disabled={updateCover.isPending}
+                className="absolute right-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
+              >
+                <ImageIcon className="h-3.5 w-3.5" />
+                Edit cover
+              </Button>
             </div>
+
+            <CoverImagePicker
+              open={coverPickerOpen}
+              onOpenChange={setCoverPickerOpen}
+              onPick={(cover) => updateCover.mutate(cover === '' ? null : cover)}
+            />
 
             <SheetHeader className="pb-3">
               <div className="flex items-center gap-2 mb-1">
@@ -292,13 +376,62 @@ export function TaskDetailSheet({
                 )}
               </div>
               <div className="flex items-start justify-between gap-3">
-                <SheetTitle className="text-2xl font-display leading-tight flex-1">
-                  {detailQuery.data.title}
-                </SheetTitle>
-                <SaveAsTemplateButton
-                  workspaceId={fallbackWorkspaceId}
-                  taskId={detailQuery.data.id}
-                />
+                {editingTitle ? (
+                  <Input
+                    autoFocus
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={commitTitle}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        commitTitle()
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setEditingTitle(false)
+                      }
+                    }}
+                    disabled={updateTitle.isPending}
+                    className="flex-1 h-auto text-2xl font-display leading-tight"
+                  />
+                ) : (
+                  <SheetTitle
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      setTitleDraft(detailQuery.data.title)
+                      setEditingTitle(true)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setTitleDraft(detailQuery.data.title)
+                        setEditingTitle(true)
+                      }
+                    }}
+                    className="text-2xl font-display leading-tight flex-1 cursor-text rounded-sm hover:bg-muted/40 transition-colors"
+                    title="Click to edit title"
+                  >
+                    {detailQuery.data.title}
+                  </SheetTitle>
+                )}
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setExpanded((prev) => !prev)}
+                    className="h-8 w-8"
+                    title={expanded ? 'Collapse panel' : 'Expand panel'}
+                    aria-label={expanded ? 'Collapse panel' : 'Expand panel'}
+                  >
+                    {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                  </Button>
+                  <SaveAsTemplateButton
+                    workspaceId={fallbackWorkspaceId}
+                    taskId={detailQuery.data.id}
+                  />
+                </div>
               </div>
               <SheetDescription className="sr-only">Task details</SheetDescription>
               <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -415,11 +548,45 @@ function OverviewPanel({
   workspaceId?: string
 }) {
   const qc = useQueryClient()
+  const [editingDescription, setEditingDescription] = useState(false)
+  const [descriptionDraft, setDescriptionDraft] = useState('')
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
     enabled: Boolean(workspaceId),
   })
+
+  const updateDescription = useMutation({
+    mutationFn: (description: string | null) =>
+      api(`/tasks/${taskId}`, {
+        method: 'PATCH',
+        body: { description },
+      }),
+    onSuccess: async () => {
+      setEditingDescription(false)
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : 'Could not update description')
+    },
+  })
+
+  const commitDescription = () => {
+    const trimmed = descriptionDraft.trim()
+    const next = trimmed === '' ? null : descriptionDraft
+    const current = detail.description ?? null
+    if (next === current) {
+      setEditingDescription(false)
+      return
+    }
+    updateDescription.mutate(next)
+  }
+
+  // Reset transient edit UI when switching to a different task.
+  useEffect(() => {
+    setEditingDescription(false)
+    setDescriptionDraft('')
+  }, [taskId])
   const pendingInvitesQuery = useQuery({
     queryKey: ['workspace-invitations', workspaceId],
     queryFn: () => api<Array<{ id: string; email: string; role: string; status: string; expiresAt: string }>>(`/invitations/workspace/${workspaceId}`),
@@ -451,11 +618,34 @@ function OverviewPanel({
     <div className="space-y-4">
       <section>
         <h4 className="text-xs uppercase tracking-wide text-muted-foreground mb-1.5">Description</h4>
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">
-          {detail.description?.trim() ? detail.description : (
-            <span className="text-muted-foreground italic">No description yet.</span>
-          )}
-        </p>
+        {editingDescription ? (
+          <Textarea
+            autoFocus
+            rows={4}
+            value={descriptionDraft}
+            onChange={(e) => setDescriptionDraft(e.target.value)}
+            onBlur={commitDescription}
+            disabled={updateDescription.isPending}
+            placeholder="Add a description…"
+            className="text-sm leading-relaxed"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDescriptionDraft(detail.description ?? '')
+              setEditingDescription(true)
+            }}
+            className="w-full text-left text-sm leading-relaxed whitespace-pre-wrap rounded-md px-2 py-1.5 -mx-2 hover:bg-muted/40 transition-colors"
+            title="Click to edit description"
+          >
+            {detail.description?.trim() ? (
+              detail.description
+            ) : (
+              <span className="text-muted-foreground italic">Add a description…</span>
+            )}
+          </button>
+        )}
       </section>
 
       <div className="grid grid-cols-2 gap-4">

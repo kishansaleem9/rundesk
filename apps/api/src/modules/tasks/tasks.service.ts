@@ -947,6 +947,7 @@ export class TasksService {
       dueDate: Date | null
       position: number
       timeEstimate: number | null
+      coverColor: string | null
       isArchived: boolean
     }>,
   ) {

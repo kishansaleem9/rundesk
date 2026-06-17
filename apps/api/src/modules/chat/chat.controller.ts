@@ -131,4 +131,19 @@ export class ChatController {
   ) {
     return this.chat.toggleReaction(messageId, user.id, body.emoji)
   }
+
+  @Get('chat/channels/:channelId/pinned')
+  listPinned(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.listPinned(channelId, user.id)
+  }
+
+  @Post('chat/messages/:messageId/pin')
+  pin(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.setPinned(messageId, user.id, true)
+  }
+
+  @Delete('chat/messages/:messageId/pin')
+  unpin(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.setPinned(messageId, user.id, false)
+  }
 }
