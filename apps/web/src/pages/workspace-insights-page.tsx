@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useMemo, useState } from 'react'
+import { useParams, useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
   Card,
@@ -12,14 +12,13 @@ import {
 import {
   Sparkles,
   Sun,
-  TrendingUp,
   AlertTriangle,
-  Activity,
   Heart,
-  Brain,
-  ChevronRight,
   Award,
   Target,
+  ChevronRight,
+  Lightbulb,
+  Printer,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -28,15 +27,28 @@ type HealthRow = {
   project: string
   score: number
   delta: string
-  dim: { onTime: number; activity: number; blockers: string; sentiment: string }
+  dim: { onTime: number; activity: number; blockers: string }
+}
+
+type AiInsights = {
+  summary: string
+  health: { score: number; label: string; reasoning: string }
+  suggestions: Array<{ title: string; detail: string; cta?: string; target?: string }>
 }
 
 export function InsightsPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/insights' })
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const hour = new Date().getHours()
   const greeting =
     hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+
+  const [dismissedWorkload, setDismissedWorkload] = useState<Set<number>>(new Set())
+
+  // All four "go deeper" controls land on the Reports page (overview, sprints,
+  // workload, productivity all live there).
+  const goToReports = () => navigate({ to: '/app/$workspaceId/reports', params: { workspaceId } })
 
   const overviewQ = useQuery({
     queryKey: ['reports-overview', workspaceId],
@@ -96,6 +108,35 @@ export function InsightsPage() {
 
   const activeSprint = sprintsQ.data?.find((s) => s.status === 'active')
   const overview = overviewQ.data
+
+  // Real metrics rolled into a compact prompt for the AI insights endpoint.
+  const aiContext = useMemo(() => {
+    const o = overviewQ.data
+    const wl = workloadQ.data ?? []
+    const over = wl.filter((p) => p.dailyLoads.some((l) => l > p.capacity)).map((p) => p.name)
+    const top = (productivityQ.data ?? [])
+      .slice(0, 5)
+      .map((r) => `${r.displayName ?? r.email}: ${r.tasksCompleted}/${r.totalAssigned} done`)
+    return [
+      o ? `Tasks: ${o.total} total, ${o.completed} completed (${o.completionRate}%), ${o.overdue} overdue, ${o.dueToday} due today.` : '',
+      activeSprint
+        ? `Active sprint "${activeSprint.name}": ${activeSprint.completedPoints}/${activeSprint.totalPoints} points complete.`
+        : 'No active sprint.',
+      over.length ? `Over capacity this week: ${over.join(', ')}.` : 'Team workload looks balanced.',
+      top.length ? `Top contributors (30d): ${top.join('; ')}.` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }, [overviewQ.data, activeSprint, workloadQ.data, productivityQ.data])
+
+  const aiQ = useQuery({
+    queryKey: ['ai-insights', workspaceId, aiContext],
+    enabled: Boolean(overviewQ.data && tasksQ.data) && aiContext.length > 0,
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: () => api<AiInsights>('/ai/insights', { method: 'POST', body: { context: aiContext } }),
+  })
+  const ai = aiQ.data
 
   const briefing = useMemo(() => {
     const highlights: Array<{ kind: 'win' | 'risk' | 'flag'; text: string }> = []
@@ -160,9 +201,8 @@ export function InsightsPage() {
           delta: stats.overdue > 0 ? `-${stats.overdue}` : '+0',
           dim: {
             onTime: rate,
-            activity: Math.min(100, stats.total * 4),
+            activity: stats.total,
             blockers: stats.overdue > 2 ? 'high' : stats.overdue > 0 ? 'medium' : 'low',
-            sentiment: score >= 80 ? 'positive' : score >= 60 ? 'neutral' : 'negative',
           },
         }
       })
@@ -170,6 +210,7 @@ export function InsightsPage() {
       .slice(0, 4)
   }, [tasksQ.data])
 
+  // Real contribution data (no fabricated complexity/collaboration metrics).
   const contrib = useMemo(
     () =>
       (productivityQ.data ?? [])
@@ -177,10 +218,7 @@ export function InsightsPage() {
         .map((r) => ({
           name: r.displayName ?? r.email,
           tasks: r.tasksCompleted,
-          points: r.tasksCompleted,
           onTime: r.totalAssigned > 0 ? Math.round((r.tasksCompleted / r.totalAssigned) * 100) : 0,
-          complexity: r.tasksCompleted >= 15 ? 'high' : r.tasksCompleted >= 8 ? 'medium' : 'low',
-          collaboration: Math.min(20, r.totalAssigned),
           blockers: Math.max(0, r.totalAssigned - r.tasksCompleted),
         }))
         .sort((a, b) => b.tasks - a.tasks)
@@ -188,51 +226,34 @@ export function InsightsPage() {
     [productivityQ.data],
   )
 
-  const suggestions = useMemo(() => {
-    const items: Array<{ icon: typeof Activity; text: string; cta: string }> = []
+  // Suggestions: prefer the AI ones; fall back to real-derived heuristics when
+  // AI is unavailable. Both are clickable and navigate to Reports.
+  const fallbackSuggestions = useMemo(() => {
+    const items: Array<{ text: string; cta: string }> = []
     if (overview?.overdue) {
-      items.push({
-        icon: AlertTriangle,
-        text: `Review ${overview.overdue} overdue tasks and reschedule or close them.`,
-        cta: 'View overdue',
-      })
+      items.push({ text: `Review ${overview.overdue} overdue tasks and reschedule or close them.`, cta: 'View overdue' })
     }
     if (activeSprint && activeSprint.completedPoints < activeSprint.totalPoints * 0.5) {
-      items.push({
-        icon: Brain,
-        text: `${activeSprint.name} is under 50% complete — add tasks or adjust scope.`,
-        cta: 'Open sprint',
-      })
+      items.push({ text: `${activeSprint.name} is under 50% complete — add tasks or adjust scope.`, cta: 'Open sprint' })
     }
-    const underloaded = (workloadQ.data ?? []).find(
-      (p) => p.dailyLoads.every((l) => l < p.capacity * 0.6),
-    )
-    const overloaded = (workloadQ.data ?? []).find((p) =>
-      p.dailyLoads.some((l) => l > p.capacity),
-    )
+    const underloaded = (workloadQ.data ?? []).find((p) => p.dailyLoads.every((l) => l < p.capacity * 0.6))
+    const overloaded = (workloadQ.data ?? []).find((p) => p.dailyLoads.some((l) => l > p.capacity))
     if (underloaded && overloaded) {
-      items.push({
-        icon: Activity,
-        text: `Move work from ${overloaded.name} to ${underloaded.name} to balance load.`,
-        cta: 'Workload',
-      })
+      items.push({ text: `Move work from ${overloaded.name} to ${underloaded.name} to balance load.`, cta: 'Workload' })
     }
     return items.slice(0, 3)
   }, [overview, activeSprint, workloadQ.data])
+
+  const shownSuggestions = ai?.suggestions?.length
+    ? ai.suggestions.map((s) => ({ text: s.detail || s.title, cta: s.cta ?? 'Open' }))
+    : fallbackSuggestions
 
   const workloadSuggestions = useMemo(() => {
     const people = workloadQ.data ?? []
     const overloaded = people.filter((p) => p.dailyLoads.some((l) => l > p.capacity))
     const underloaded = people.filter((p) => p.dailyLoads.every((l) => l < p.capacity * 0.7))
-    const pairs: Array<{
-      from: string
-      fromLoad: number
-      to: string
-      toLoad: number
-      taskCount: number
-      reasoning: string
-    }> = []
-    for (const from of overloaded.slice(0, 2)) {
+    const pairs: Array<{ from: string; fromLoad: number; to: string; toLoad: number; reasoning: string }> = []
+    for (const from of overloaded.slice(0, 3)) {
       const to = underloaded[0]
       if (!to) break
       const fromLoad = Math.round(
@@ -246,18 +267,19 @@ export function InsightsPage() {
         fromLoad,
         to: to.name,
         toLoad,
-        taskCount: 1,
         reasoning: `${from.name} is above daily capacity; ${to.name} has bandwidth this week.`,
       })
     }
     return pairs
   }, [workloadQ.data])
 
+  const visibleWorkload = workloadSuggestions.filter((_, i) => !dismissedWorkload.has(i))
+
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
       <header>
         <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-          AI insights
+          Insights
         </div>
         <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-white shadow-glow animate-glow">
@@ -266,7 +288,8 @@ export function InsightsPage() {
           Insights
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Your daily briefing, project health, and team contribution analytics — generated by Claude.
+          Your daily briefing, project health, and team contribution analytics
+          {ai ? ' — summary and suggestions generated by Claude.' : '.'}
         </p>
       </header>
 
@@ -283,7 +306,14 @@ export function InsightsPage() {
               </Badge>
             </div>
             <h2 className="font-display text-2xl font-semibold mb-2">{briefing.greeting}</h2>
-            <p className="text-sm leading-relaxed text-foreground/90">{briefing.summary}</p>
+            <p className="text-sm leading-relaxed text-foreground/90">{ai?.summary ?? briefing.summary}</p>
+            {ai?.health && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                Workspace health:{' '}
+                <span className="font-medium text-foreground capitalize">{ai.health.label.replace('_', ' ')}</span>{' '}
+                ({ai.health.score}/100) — {ai.health.reasoning}
+              </div>
+            )}
             <ul className="mt-4 space-y-1.5">
               {briefing.highlights.map((h, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm">
@@ -301,26 +331,32 @@ export function InsightsPage() {
             </ul>
           </div>
           <div className="space-y-2">
-            <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-              AI suggestions
+            <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1">
+              {ai ? <Sparkles className="h-3 w-3" /> : null}
+              {ai ? 'AI suggestions' : 'Suggestions'}
             </div>
-            {suggestions.map((s, i) => (
-              <button
-                key={i}
-                className="group w-full text-left rounded-lg border border-border/40 bg-card/40 p-3 hover:border-accent/40 hover:bg-card/60 transition-all"
-              >
-                <div className="flex items-start gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-gradient-soft text-white shrink-0">
-                    <s.icon className="h-3.5 w-3.5" />
+            {shownSuggestions.length === 0 ? (
+              <div className="text-xs text-muted-foreground">
+                {aiQ.isError ? 'AI suggestions unavailable.' : 'Nothing needs attention right now.'}
+              </div>
+            ) : (
+              shownSuggestions.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={goToReports}
+                  className="group w-full text-left rounded-lg border border-border/40 bg-card/40 p-3 hover:border-accent/40 hover:bg-card/60 transition-all"
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-gradient-soft text-white shrink-0">
+                      <Lightbulb className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="flex-1 text-xs leading-relaxed">{s.text}</div>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
-                  <div className="flex-1 text-xs leading-relaxed">{s.text}</div>
-                  <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-                <span className="block mt-2 text-[10px] text-accent font-medium">
-                  {s.cta} →
-                </span>
-              </button>
-            ))}
+                  <span className="block mt-2 text-[10px] text-accent font-medium">{s.cta} →</span>
+                </button>
+              ))
+            )}
           </div>
         </div>
       </Card>
@@ -334,11 +370,11 @@ export function InsightsPage() {
               Project health
             </h2>
             <p className="text-xs text-muted-foreground">
-              0–100 daily score · on-time %, activity, blockers, sentiment
+              0–100 score · on-time %, activity, blockers
             </p>
           </div>
-          <Button variant="outline" size="sm">
-            See trend over 30 days
+          <Button variant="outline" size="sm" onClick={goToReports}>
+            See trend in Reports
           </Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -361,22 +397,24 @@ export function InsightsPage() {
               Contribution analytics
             </h2>
             <p className="text-xs text-muted-foreground">
-              This sprint · complexity-weighted, not just task count
+              Last 30 days · completed tasks and on-time rate
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm">Export PDF</Button>
-            <Button variant="ghost" size="sm">Last sprint</Button>
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
+              <Printer className="h-3.5 w-3.5" /> Export PDF
+            </Button>
+            <Button variant="ghost" size="sm" onClick={goToReports}>
+              Open in Reports
+            </Button>
           </div>
         </div>
         <Card variant="glass" className="overflow-hidden p-0">
-          <div className="grid grid-cols-[1fr_60px_60px_80px_70px_70px] md:grid-cols-[1fr_80px_80px_120px_90px_90px] text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border/40 px-4 py-2">
+          <div className="grid grid-cols-[1fr_70px_120px_80px] text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border/40 px-4 py-2">
             <div>Person</div>
             <div className="text-right">Tasks</div>
-            <div className="text-right">Points</div>
             <div className="text-right">On-time</div>
-            <div className="text-right hidden md:block">Collab</div>
-            <div className="text-right">Blockers</div>
+            <div className="text-right">Open</div>
           </div>
           <ul className="divide-y divide-border/30">
             {contrib.length === 0 ? (
@@ -384,85 +422,83 @@ export function InsightsPage() {
                 No team activity in the last 30 days.
               </li>
             ) : (
-            contrib.map((c, i) => (
-              <li
-                key={c.name}
-                className="grid grid-cols-[1fr_60px_60px_80px_70px_70px] md:grid-cols-[1fr_80px_80px_120px_90px_90px] items-center px-4 py-3 hover:bg-card/40 transition-colors"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums shrink-0">
-                    {i + 1}
-                  </div>
-                  <PersonAvatar name={c.name} size="sm" />
-                  <div className="min-w-0">
+              contrib.map((c, i) => (
+                <li
+                  key={c.name}
+                  className="grid grid-cols-[1fr_70px_120px_80px] items-center px-4 py-3 hover:bg-card/40 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums shrink-0">
+                      {i + 1}
+                    </div>
+                    <PersonAvatar name={c.name} size="sm" />
                     <div className="text-sm truncate">{c.name}</div>
-                    <Badge variant="soft" className="text-[9px] uppercase mt-0.5">
-                      {c.complexity} complexity
+                  </div>
+                  <div className="text-right text-sm tabular-nums">{c.tasks}</div>
+                  <div className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Progress value={c.onTime} className="w-12 h-1" />
+                      <span className="text-xs tabular-nums w-8 text-right">{c.onTime}%</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <Badge variant={c.blockers >= 4 ? 'warning' : 'soft'} className="text-[10px] tabular-nums">
+                      {c.blockers}
                     </Badge>
                   </div>
-                </div>
-                <div className="text-right text-sm tabular-nums">{c.tasks}</div>
-                <div className="text-right text-sm tabular-nums">{c.points}</div>
-                <div className="text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <Progress value={c.onTime} className="w-12 h-1" />
-                    <span className="text-xs tabular-nums w-8 text-right">{c.onTime}%</span>
-                  </div>
-                </div>
-                <div className="text-right text-sm tabular-nums hidden md:block">{c.collaboration}</div>
-                <div className="text-right">
-                  <Badge
-                    variant={c.blockers >= 4 ? 'warning' : 'soft'}
-                    className="text-[10px] tabular-nums"
-                  >
-                    {c.blockers}
-                  </Badge>
-                </div>
-              </li>
-            )))}
+                </li>
+              ))
+            )}
           </ul>
         </Card>
       </section>
 
-      {/* Smart workload balancing */}
+      {/* Workload balancing */}
       <Card variant="glass" className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="font-display text-lg font-semibold flex items-center gap-2">
               <Target className="h-4 w-4 text-mint" />
-              Smart workload balancing
+              Workload balancing
             </h2>
-            <p className="text-xs text-muted-foreground">AI-detected redistribution opportunities</p>
+            <p className="text-xs text-muted-foreground">Redistribution opportunities from current capacity</p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {workloadSuggestions.length === 0 ? (
+          {visibleWorkload.length === 0 ? (
             <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
               Team workload looks balanced for the next two weeks.
             </Card>
           ) : (
-          workloadSuggestions.map((s, i) => (
-            <Card key={i} className="p-3 bg-card/30 hover:border-accent/40 transition-all cursor-pointer">
-              <div className="flex items-center gap-2 mb-2">
-                <PersonAvatar name={s.from} size="sm" />
-                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                <PersonAvatar name={s.to} size="sm" />
-                <Badge variant="soft" className="ml-auto text-[9px] uppercase">
-                  {s.taskCount} task{s.taskCount === 1 ? '' : 's'}
-                </Badge>
-              </div>
-              <div className="text-[10px] text-muted-foreground tabular-nums mb-2">
-                <span className="text-warning">{s.fromLoad}%</span>
-                <span> → </span>
-                <span className="text-success">{s.toLoad}%</span>
-              </div>
-              <p className="text-xs leading-relaxed">{s.reasoning}</p>
-              <div className="flex items-center gap-1 mt-2">
-                <Button variant="outline" size="sm" className="h-6 text-[10px] flex-1">Dismiss</Button>
-                <Button variant="gradient" size="sm" className="h-6 text-[10px] flex-1">Apply</Button>
-              </div>
-            </Card>
-          )))}
+            visibleWorkload.map((s, i) => (
+              <Card key={`${s.from}-${s.to}-${i}`} className="p-3 bg-card/30">
+                <div className="flex items-center gap-2 mb-2">
+                  <PersonAvatar name={s.from} size="sm" />
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                  <PersonAvatar name={s.to} size="sm" />
+                </div>
+                <div className="text-[10px] text-muted-foreground tabular-nums mb-2">
+                  <span className="text-warning">{s.fromLoad}%</span>
+                  <span> → </span>
+                  <span className="text-success">{s.toLoad}%</span>
+                </div>
+                <p className="text-xs leading-relaxed">{s.reasoning}</p>
+                <div className="flex items-center gap-1 mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[10px] flex-1"
+                    onClick={() => setDismissedWorkload((prev) => new Set(prev).add(workloadSuggestions.indexOf(s)))}
+                  >
+                    Dismiss
+                  </Button>
+                  <Button variant="gradient" size="sm" className="h-6 text-[10px] flex-1" onClick={goToReports}>
+                    Open workload
+                  </Button>
+                </div>
+              </Card>
+            ))
+          )}
         </div>
       </Card>
     </div>
@@ -513,8 +549,7 @@ function HealthCard({ project }: { project: HealthRow }) {
       <div className="grid grid-cols-2 gap-1 mt-2 text-[10px] text-muted-foreground">
         <span>On-time: {project.dim.onTime}%</span>
         <span>Activity: {project.dim.activity}</span>
-        <span className="capitalize">Blockers: {project.dim.blockers}</span>
-        <span className="capitalize">Mood: {project.dim.sentiment}</span>
+        <span className="capitalize col-span-2">Blockers: {project.dim.blockers}</span>
       </div>
     </Card>
   )
