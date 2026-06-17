@@ -110,11 +110,11 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
     setSaving(true)
     try {
       // Get first available list in workspace
-      const spaces = await api<any[]>(`/workspaces/${workspaceId}/spaces`)
+      const spaces = await api<any[]>(`/spaces/workspace/${workspaceId}`)
       if (!spaces.length) return
-      const projects = await api<any[]>(`/spaces/${spaces[0].id}/projects`)
+      const projects = await api<any[]>(`/projects/space/${spaces[0].id}`)
       if (!projects.length) return
-      const lists = await api<any[]>(`/projects/${projects[0].id}/lists`)
+      const lists = await api<any[]>(`/lists/project/${projects[0].id}`)
       if (!lists.length) return
 
       await api('/tasks', {

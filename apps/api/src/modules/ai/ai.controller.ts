@@ -86,7 +86,7 @@ export class AiController {
     @Res() res: any,
   ) {
     if (!this.ai.isAvailable()) {
-      res.status(503).json({ error: 'AI features are not configured' })
+      res.status(503).send({ error: 'AI features are not configured' })
       return
     }
     await this.ai.chatStream(body.messages, body.workspaceContext ?? '', res as any)

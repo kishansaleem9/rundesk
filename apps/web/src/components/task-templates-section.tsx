@@ -290,13 +290,13 @@ function ApplyTemplateDialog({
 
   const projectsQuery = useQuery({
     queryKey: ['projects-for-template-apply', spaceId],
-    queryFn: () => api<Project[]>(`/spaces/${spaceId}/projects`),
+    queryFn: () => api<Project[]>(`/projects/space/${spaceId}`),
     enabled: Boolean(spaceId),
   })
 
   const listsQuery = useQuery({
     queryKey: ['lists-for-template-apply', projectId],
-    queryFn: () => api<ListRow[]>(`/projects/${projectId}/lists`),
+    queryFn: () => api<ListRow[]>(`/lists/project/${projectId}`),
     enabled: Boolean(projectId),
   })
 
