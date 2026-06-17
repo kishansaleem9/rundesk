@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../lib/api'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { api, ApiError } from '../lib/api'
 import {
   Card,
   Button,
   Badge,
   Input,
   cn,
+  toast,
 } from '@rundesk/ui'
 import {
   CheckCircle2,
@@ -24,6 +25,11 @@ import {
   Sparkles,
   Settings as SettingsIcon,
   Search,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react'
 
 type WidgetType =
@@ -74,6 +80,8 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
   const [widgets, setWidgets] = useState<Widget[]>(preset?.layout || DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
   const [paletteFilter, setPaletteFilter] = useState('')
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null)
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -88,6 +96,67 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
   function removeWidget(id: string) {
     setWidgets((arr) => arr.filter((w) => w.id !== id))
   }
+  function resizeWidget(id: string, patch: Partial<Pick<Widget, 'w' | 'h'>>) {
+    setWidgets((arr) => arr.map((w) => (w.id === id ? { ...w, ...patch } : w)))
+  }
+
+  // Native HTML5 drag-and-drop reorder. Moves the dragged widget to the slot
+  // of the widget it was dropped on; the new order persists via Save layout.
+  function reorder(sourceId: string, targetId: string) {
+    if (sourceId === targetId) return
+    setWidgets((arr) => {
+      const from = arr.findIndex((w) => w.id === sourceId)
+      const to = arr.findIndex((w) => w.id === targetId)
+      if (from === -1 || to === -1) return arr
+      const next = [...arr]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+  }
+  function handleDrop(targetId: string) {
+    if (dragId) reorder(dragId, targetId)
+    setDragId(null)
+    setDropTargetId(null)
+  }
+
+  const suggestLayout = useMutation({
+    mutationFn: () =>
+      api<{ widgets: string[]; reasoning: string }>('/ai/dashboard/suggest-layout', {
+        method: 'POST',
+        body: {
+          availableWidgets: WIDGET_CATALOG.map((c) => ({ type: c.type, label: c.name })),
+          context: `Workspace dashboard with ${widgets.length} widgets currently in use: ${widgets
+            .map((w) => w.type)
+            .join(', ')}`,
+        },
+      }),
+    onSuccess: (res) => {
+      const valid = WIDGET_CATALOG.map((c) => c.type)
+      const ordered = res.widgets.filter((t): t is WidgetType => valid.includes(t as WidgetType))
+      if (ordered.length === 0) {
+        toast('No layout suggestion available', { description: res.reasoning || 'Try again later.' })
+        return
+      }
+      setWidgets((arr) => {
+        // Reuse existing widget instances (preserving size) when the type is
+        // already present, otherwise create a fresh tile for the new type.
+        const pool = [...arr]
+        return ordered.map((type) => {
+          const idx = pool.findIndex((w) => w.type === type)
+          if (idx !== -1) return pool.splice(idx, 1)[0]
+          return { id: crypto.randomUUID(), type, w: 1 as const, h: 1 as const }
+        })
+      })
+      setEditing(true)
+      toast.success('AI suggested a new layout', { description: res.reasoning || undefined })
+    },
+    onError: (err: unknown) => {
+      toast.error('Could not suggest a layout', {
+        description: err instanceof ApiError ? err.message : 'Something went wrong.',
+      })
+    },
+  })
 
   const handleSaveLayout = async () => {
     if (preset?.id) {
@@ -111,8 +180,18 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
             {editing && <Badge variant="gradient" className="text-[10px] uppercase">Edit mode</Badge>}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <Button variant="outline" size="sm">
-              <Sparkles className="h-3.5 w-3.5" /> AI suggest layout
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => suggestLayout.mutate()}
+              disabled={suggestLayout.isPending}
+            >
+              {suggestLayout.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              AI suggest layout
             </Button>
             {editing ? (
               <div className="flex items-center gap-1.5">
@@ -135,7 +214,14 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
               widget={w}
               workspaceId={workspaceId}
               editing={editing}
+              dragging={dragId === w.id}
+              dropTarget={dropTargetId === w.id && dragId !== w.id}
               onRemove={() => removeWidget(w.id)}
+              onResize={(patch) => resizeWidget(w.id, patch)}
+              onDragStart={() => setDragId(w.id)}
+              onDragEnter={() => { if (dragId && dragId !== w.id) setDropTargetId(w.id) }}
+              onDragEnd={() => { setDragId(null); setDropTargetId(null) }}
+              onDrop={() => handleDrop(w.id)}
             />
           ))}
           {editing && (
@@ -194,31 +280,89 @@ function WidgetCell({
   widget,
   workspaceId,
   editing,
+  dragging,
+  dropTarget,
   onRemove,
+  onResize,
+  onDragStart,
+  onDragEnter,
+  onDragEnd,
+  onDrop,
 }: {
   widget: Widget
   workspaceId: string
   editing: boolean
+  dragging: boolean
+  dropTarget: boolean
   onRemove: () => void
+  onResize: (patch: Partial<Pick<Widget, 'w' | 'h'>>) => void
+  onDragStart: () => void
+  onDragEnter: () => void
+  onDragEnd: () => void
+  onDrop: () => void
 }) {
   const meta = WIDGET_CATALOG.find((c) => c.type === widget.type)
   const Icon = meta?.icon ?? CheckCircle2
+  const nextWidth: Widget['w'] = widget.w >= 3 ? 1 : ((widget.w + 1) as Widget['w'])
   return (
     <Card
       variant="glass"
+      draggable={editing}
+      onDragStart={(e) => {
+        if (!editing) return
+        e.dataTransfer.effectAllowed = 'move'
+        // Firefox requires data to be set for drag to initiate.
+        e.dataTransfer.setData('text/plain', widget.id)
+        onDragStart()
+      }}
+      onDragOver={(e) => {
+        if (editing) e.preventDefault()
+      }}
+      onDragEnter={() => editing && onDragEnter()}
+      onDragEnd={onDragEnd}
+      onDrop={(e) => {
+        if (!editing) return
+        e.preventDefault()
+        onDrop()
+      }}
       className={cn(
         'group relative p-3 overflow-hidden',
         widget.w === 2 && 'col-span-2',
         widget.w === 3 && 'col-span-3',
         widget.h === 2 && 'row-span-2',
         editing && 'ring-2 ring-accent/30 hover:ring-accent/50',
+        dragging && 'opacity-40',
+        dropTarget && 'ring-2 ring-accent ring-offset-2 ring-offset-background',
       )}
     >
       {editing && (
         <>
-          <button className="absolute top-1.5 left-1.5 cursor-grab p-1 rounded hover:bg-card/70 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+          <div
+            className="absolute top-1.5 left-1.5 cursor-grab active:cursor-grabbing p-1 rounded hover:bg-card/70 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+            aria-label="Drag to reorder"
+          >
             <GripVertical className="h-3.5 w-3.5" />
-          </button>
+          </div>
+          <div className="absolute bottom-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              type="button"
+              onClick={() => onResize({ w: nextWidth })}
+              title={`Width: ${widget.w} → ${nextWidth} column${nextWidth === 1 ? '' : 's'}`}
+              aria-label="Cycle widget width"
+              className="p-1 rounded bg-card/70 hover:bg-card text-muted-foreground hover:text-foreground"
+            >
+              {widget.w >= 3 ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => onResize({ h: widget.h === 2 ? 1 : 2 })}
+              title={widget.h === 2 ? 'Shrink height' : 'Grow height'}
+              aria-label="Toggle widget height"
+              className="p-1 rounded bg-card/70 hover:bg-card text-muted-foreground hover:text-foreground"
+            >
+              {widget.h === 2 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            </button>
+          </div>
           <button
             onClick={onRemove}
             className="absolute top-1.5 right-1.5 p-1 rounded hover:bg-destructive/15 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
@@ -259,8 +403,7 @@ function BarPriorityWidget({ workspaceId }: { workspaceId: string }) {
   type ProjectBreakdown = { byPriority?: Record<string, number> }
   const q = useQuery({
     queryKey: ['reports-priority-breakdown', workspaceId],
-    queryFn: () =>
-      api<ProjectBreakdown>(`/workspaces/${workspaceId}/reports/overview`).catch(() => ({ byPriority: {} })),
+    queryFn: () => api<ProjectBreakdown>(`/workspaces/${workspaceId}/reports/overview`),
   })
   const breakdown = (q.data?.byPriority ?? {}) as Record<string, number>
   const entries = [
@@ -270,6 +413,16 @@ function BarPriorityWidget({ workspaceId }: { workspaceId: string }) {
     { l: 'Low', v: breakdown.low ?? 0, c: 'bg-muted-foreground' },
   ]
   const max = Math.max(1, ...entries.map((b) => b.v))
+  if (q.isError) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">By priority</div>
+        <div className="flex-1 flex items-center justify-center text-[11px] text-muted-foreground">
+          Couldn’t load priority breakdown
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col h-full">
       <div className="text-xs uppercase tracking-wider text-muted-foreground">By priority</div>

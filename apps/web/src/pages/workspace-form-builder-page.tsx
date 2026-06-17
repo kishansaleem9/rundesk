@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, cn } from '@rundesk/ui'
+import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import {
   ArrowLeft,
   GripVertical,
@@ -17,7 +17,7 @@ import {
   Download,
   Link2,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 
 const FIELD_TYPES = [
   { value: 'short_text', label: 'Short text' },
@@ -103,6 +103,8 @@ export function FormBuilderPage() {
   const [addingField, setAddingField] = useState(false)
   const [newFieldType, setNewFieldType] = useState('short_text')
   const [newFieldLabel, setNewFieldLabel] = useState('')
+  const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null)
+  const [dragOverFieldId, setDragOverFieldId] = useState<string | null>(null)
 
   const formQuery = useQuery({
     queryKey: ['form', formId],
@@ -178,6 +180,47 @@ export function FormBuilderPage() {
       api(`/workspaces/${workspaceId}/forms/${formId}/fields/${fieldId}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['form', formId] }),
   })
+
+  const reorderFields = useMutation({
+    mutationFn: (orderedIds: string[]) =>
+      api<FormField[]>(`/forms/${formId}/fields/reorder`, { method: 'PUT', body: { orderedIds } }),
+    // Optimistically reorder so the drag feels instant; roll back on failure.
+    onMutate: async (orderedIds: string[]) => {
+      await qc.cancelQueries({ queryKey: ['form', formId] })
+      const previous = qc.getQueryData<FormDetail>(['form', formId])
+      if (previous) {
+        const byId = new Map(previous.fields.map((f) => [f.id, f]))
+        const reordered = orderedIds
+          .map((id, index) => {
+            const existing = byId.get(id)
+            return existing ? { ...existing, position: index } : undefined
+          })
+          .filter((f): f is FormField => Boolean(f))
+        qc.setQueryData<FormDetail>(['form', formId], { ...previous, fields: reordered })
+      }
+      return { previous }
+    },
+    onError: (e: unknown, _orderedIds, context) => {
+      if (context?.previous) qc.setQueryData(['form', formId], context.previous)
+      toast.error(e instanceof ApiError ? e.message : 'Failed to reorder fields')
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['form', formId] }),
+  })
+
+  const handleFieldDrop = (targetFieldId: string) => {
+    const fields = formQuery.data?.fields ?? []
+    const sourceId = draggingFieldId
+    setDraggingFieldId(null)
+    setDragOverFieldId(null)
+    if (!sourceId || sourceId === targetFieldId) return
+    const fromIndex = fields.findIndex((f) => f.id === sourceId)
+    const toIndex = fields.findIndex((f) => f.id === targetFieldId)
+    if (fromIndex === -1 || toIndex === -1) return
+    const next = [...fields]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    reorderFields.mutate(next.map((f) => f.id))
+  }
 
   const form = formQuery.data
   if (!form && formQuery.isLoading) {
@@ -265,6 +308,20 @@ export function FormBuilderPage() {
                 onExpand={() => setExpandedField(expandedField === field.id ? null : field.id)}
                 onUpdate={(patch) => updateField.mutate({ fieldId: field.id, patch })}
                 onDelete={() => deleteField.mutate(field.id)}
+                isDragging={draggingFieldId === field.id}
+                isDragOver={dragOverFieldId === field.id && draggingFieldId !== field.id}
+                onDragStart={() => {
+                  setDraggingFieldId(field.id)
+                  setExpandedField(null)
+                }}
+                onDragOver={() => {
+                  if (draggingFieldId && draggingFieldId !== field.id) setDragOverFieldId(field.id)
+                }}
+                onDragEnd={() => {
+                  setDraggingFieldId(null)
+                  setDragOverFieldId(null)
+                }}
+                onDrop={() => handleFieldDrop(field.id)}
               />
             ))}
 
@@ -362,6 +419,12 @@ function FieldCard({
   onExpand,
   onUpdate,
   onDelete,
+  isDragging,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+  onDrop,
 }: {
   field: FormField
   allFields: FormField[]
@@ -370,6 +433,12 @@ function FieldCard({
   onExpand: () => void
   onUpdate: (patch: Partial<FormField>) => void
   onDelete: () => void
+  isDragging: boolean
+  isDragOver: boolean
+  onDragStart: () => void
+  onDragOver: () => void
+  onDragEnd: () => void
+  onDrop: () => void
 }) {
   const typeLabel = FIELD_TYPES.find((t) => t.value === field.type)?.label ?? field.type
   const supportsListRouting = field.type === 'dropdown' || field.type === 'multi_select'
@@ -379,12 +448,43 @@ function FieldCard({
   const workspaceRoutingLookup = new Map(workspaceListOptions.map((opt) => [opt.value, opt.label]))
 
   return (
-    <Card className={cn('overflow-hidden', expanded && 'border-brand-500')}>
+    <Card
+      className={cn(
+        'overflow-hidden transition-colors',
+        expanded && 'border-brand-500',
+        isDragging && 'opacity-50',
+        isDragOver && 'border-brand-500 ring-2 ring-brand-300',
+      )}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        onDragOver()
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        onDrop()
+      }}
+    >
       <div
         className="flex items-center gap-2 px-4 py-3 cursor-pointer select-none"
         onClick={onExpand}
       >
-        <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+        <button
+          type="button"
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.setData('text/plain', field.id)
+            onDragStart()
+          }}
+          onDragEnd={onDragEnd}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Drag to reorder field"
+          title="Drag to reorder"
+          className="shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
         <div className="flex-1 min-w-0">
           <span className="font-medium text-sm">{field.label}</span>
           {field.isRequired && <span className="ml-1 text-destructive text-xs">*</span>}

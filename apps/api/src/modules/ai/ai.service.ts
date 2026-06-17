@@ -220,4 +220,59 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
   isAvailable(): boolean {
     return this.client !== null
   }
+
+  // ─── Workspace insights (real AI over real metrics) ───────────────────────
+  async generateInsights(context: string): Promise<{
+    summary: string
+    health: { score: number; label: string; reasoning: string }
+    suggestions: Array<{ title: string; detail: string; cta?: string; target?: string }>
+  }> {
+    const response = await this.claude.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 1024,
+      system: `You are an analytics assistant for the Rundesk project management app.
+Given a workspace's real metrics, produce concise, actionable insights.
+Respond ONLY with valid JSON of this exact shape:
+{
+  "summary": "2-3 sentence plain-text overview of how the workspace is doing",
+  "health": { "score": 0-100 integer, "label": "thriving|steady|at_risk", "reasoning": "one sentence" },
+  "suggestions": [ { "title": "short", "detail": "one sentence", "cta": "button label", "target": "overdue|sprint|workload|reports" } ]
+}
+Give 3-4 suggestions. "target" must be one of: overdue, sprint, workload, reports.`,
+      messages: [{ role: 'user', content: `Workspace metrics:\n${context}` }],
+    })
+    const text = response.content[0].type === 'text' ? response.content[0].text : ''
+    const jsonMatch = text.match(/\{[\s\S]+\}/)
+    if (!jsonMatch) {
+      return { summary: 'Insights are unavailable right now.', health: { score: 0, label: 'steady', reasoning: '' }, suggestions: [] }
+    }
+    return JSON.parse(jsonMatch[0])
+  }
+
+  // ─── Dashboard layout suggestion (real AI) ────────────────────────────────
+  async suggestDashboardLayout(
+    availableWidgets: Array<{ type: string; label: string }>,
+    context: string,
+  ): Promise<{ widgets: string[]; reasoning: string }> {
+    const response = await this.claude.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 512,
+      system: `You arrange a project dashboard. Choose and order the most useful widgets for this workspace from the available list.
+Respond ONLY with valid JSON: { "widgets": ["type", ...], "reasoning": "one sentence" }.
+"widgets" must be a subset of the provided widget types, ordered most-important first (4-6 items).`,
+      messages: [
+        {
+          role: 'user',
+          content: `Available widgets:\n${availableWidgets.map((w) => `- ${w.type}: ${w.label}`).join('\n')}\n\nWorkspace context:\n${context}`,
+        },
+      ],
+    })
+    const text = response.content[0].type === 'text' ? response.content[0].text : ''
+    const jsonMatch = text.match(/\{[\s\S]+\}/)
+    if (!jsonMatch) return { widgets: availableWidgets.map((w) => w.type).slice(0, 5), reasoning: '' }
+    const parsed = JSON.parse(jsonMatch[0]) as { widgets?: unknown; reasoning?: unknown }
+    const valid = new Set(availableWidgets.map((w) => w.type))
+    const widgets = Array.isArray(parsed.widgets) ? (parsed.widgets as unknown[]).filter((w): w is string => typeof w === 'string' && valid.has(w)) : []
+    return { widgets: widgets.length ? widgets : availableWidgets.map((w) => w.type).slice(0, 5), reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '' }
+  }
 }

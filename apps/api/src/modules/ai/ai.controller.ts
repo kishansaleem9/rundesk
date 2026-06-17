@@ -75,6 +75,26 @@ export class AiController {
     return this.ai.extractTasksFromNotes(body.notes)
   }
 
+  @Post('insights')
+  @ApiOperation({ summary: 'Generate AI insights from real workspace metrics' })
+  async insights(@Body() body: { context: string }) {
+    if (!this.ai.isAvailable()) {
+      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
+    }
+    return this.ai.generateInsights(body.context ?? '')
+  }
+
+  @Post('dashboard/suggest-layout')
+  @ApiOperation({ summary: 'Suggest a dashboard widget layout with AI' })
+  async suggestLayout(
+    @Body() body: { availableWidgets: Array<{ type: string; label: string }>; context?: string },
+  ) {
+    if (!this.ai.isAvailable()) {
+      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
+    }
+    return this.ai.suggestDashboardLayout(body.availableWidgets ?? [], body.context ?? '')
+  }
+
   @Post('chat')
   @ApiOperation({ summary: 'Chat with AI assistant (streaming SSE)' })
   async chat(
