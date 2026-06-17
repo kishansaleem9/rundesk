@@ -153,26 +153,37 @@ ${workspaceContext}
 
 Current date: ${new Date().toISOString().split('T')[0]}`
 
-    ;(res as any).setHeader('Content-Type', 'text/event-stream')
-    ;(res as any).setHeader('Cache-Control', 'no-cache')
-    ;(res as any).setHeader('Connection', 'keep-alive')
-    ;(res as any).flushHeaders?.()
+    // This runs on Fastify, whose reply has no setHeader/write/end — use the
+    // underlying Node response (reply.raw) and hijack the reply so Fastify
+    // doesn't also try to send one.
+    const reply = res as any
+    if (typeof reply.hijack === 'function') reply.hijack()
+    const raw = reply.raw ?? reply
+    raw.setHeader('Content-Type', 'text/event-stream')
+    raw.setHeader('Cache-Control', 'no-cache')
+    raw.setHeader('Connection', 'keep-alive')
+    raw.flushHeaders?.()
 
-    const stream = this.claude.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages,
-    })
+    try {
+      const stream = this.claude.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages,
+      })
 
-    for await (const chunk of stream) {
-      if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-        ;(res as any).write(`data: ${JSON.stringify({ delta: chunk.delta.text })}\n\n`)
+      for await (const chunk of stream) {
+        if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+          raw.write(`data: ${JSON.stringify({ delta: chunk.delta.text })}\n\n`)
+        }
       }
+      raw.write('data: [DONE]\n\n')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'AI request failed'
+      raw.write(`data: ${JSON.stringify({ error: message })}\n\n`)
+    } finally {
+      raw.end()
     }
-
-    ;(res as any).write('data: [DONE]\n\n')
-    ;(res as any).end()
   }
 
   // ─── Smart deadline suggestion ────────────────────────────────────────────
