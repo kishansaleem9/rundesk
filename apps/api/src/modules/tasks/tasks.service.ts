@@ -811,6 +811,15 @@ export class TasksService {
     }))
   }
 
+  // Direct children (subtasks) of a task, for the task detail Subtasks tab.
+  listSubtasks(taskId: string) {
+    return this.db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.parentTaskId, taskId), eq(tasks.isArchived, false)))
+      .orderBy(asc(tasks.position))
+  }
+
   async getTask(taskId: string) {
     const row = await this.db.query.tasks.findFirst({
       where: eq(tasks.id, taskId),

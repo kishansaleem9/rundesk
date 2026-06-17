@@ -72,6 +72,12 @@ export class TasksController {
     return this.tasks.getTask(taskId)
   }
 
+  @Get(':taskId/subtasks')
+  @UseGuards(ResourceMemberGuard)
+  async getSubtasks(@Param('taskId') taskId: string) {
+    return this.tasks.listSubtasks(taskId)
+  }
+
   @Get(':taskId/navigation')
   @UseGuards(ResourceMemberGuard)
   async getTaskNavigation(@Param('taskId') taskId: string) {
