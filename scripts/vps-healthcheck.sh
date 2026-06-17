@@ -178,11 +178,12 @@ async function main() {
 
   // ── auth ──────────────────────────────────────────────────────────────────
   sec('Authentication')
-  let token, workspaceId
+  let token, workspaceId, workspaces = []
   try {
     const r = await call('POST', '/auth/login', { body: { email: EMAIL, password: PASSWORD } })
     token = r.data && r.data.accessToken
-    workspaceId = r.data && r.data.workspaces && r.data.workspaces[0] && r.data.workspaces[0].id
+    workspaces = r.data && Array.isArray(r.data.workspaces) ? r.data.workspaces : []
+    workspaceId = workspaces[0] && workspaces[0].id
     if (r.status < 300 && token) {
       ok(`POST /auth/login → token acquired${workspaceId ? `, workspace ${workspaceId}` : ''}`)
     } else {
@@ -195,14 +196,25 @@ async function main() {
   // ── recently-fixed endpoints ────────────────────────────────────────────────
   sec('Core endpoints (recently fixed paths)')
   let spaceId, projectId, listId, taskId, createdTaskId
-  if (workspaceId) {
+  if (!workspaceId) {
+    wrn('login returned no workspace — skipping workspace-scoped endpoint checks')
+  } else {
+    // Assert the (previously-broken) spaces endpoint responds for the primary workspace.
     try {
       const r = await call('GET', `/spaces/workspace/${workspaceId}`, { token })
-      if (r.status === 200 && Array.isArray(r.data)) { ok(`GET /spaces/workspace/:ws → ${r.data.length} spaces`); spaceId = r.data[0] && r.data[0].id }
+      if (r.status === 200 && Array.isArray(r.data)) ok(`GET /spaces/workspace/:ws → ${r.data.length} spaces`)
       else bad(`GET /spaces/workspace/:ws → status=${r.status} body=${clip(r.json)}`)
     } catch (e) { bad(`spaces threw: ${e.message}`) }
-  } else {
-    wrn('login returned no workspace — skipping workspace-scoped endpoint checks')
+    // To reach projects/lists/tasks/subtasks we need real data — search every
+    // workspace the user belongs to for the first one that has a space.
+    for (const ws of workspaces) {
+      if (!ws || !ws.id) continue
+      try {
+        const r = await call('GET', `/spaces/workspace/${ws.id}`, { token })
+        if (r.status === 200 && Array.isArray(r.data) && r.data.length) { spaceId = r.data[0].id; workspaceId = ws.id; break }
+      } catch {}
+    }
+    if (!spaceId) wrn(`none of your ${workspaces.length} workspace(s) have spaces yet — can't reach the subtasks route from this login; re-run as an account that has projects/tasks to cover it`)
   }
   if (spaceId) {
     try {
@@ -210,8 +222,6 @@ async function main() {
       if (r.status === 200 && Array.isArray(r.data)) { ok(`GET /projects/space/:id → ${r.data.length} projects`); projectId = r.data[0] && r.data[0].id }
       else bad(`GET /projects/space/:id → status=${r.status} body=${clip(r.json)}`)
     } catch (e) { bad(`projects threw: ${e.message}`) }
-  } else if (workspaceId) {
-    wrn('no space found in this workspace — skipping projects/lists/tasks')
   }
   if (projectId) {
     try {
