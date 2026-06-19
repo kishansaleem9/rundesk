@@ -322,6 +322,70 @@ async function main() {
     if (r.status === 200 && Array.isArray(r.data)) ok(`GET project-templates → ${r.data.length} templates (real catalog)`)
     else bad(`GET project-templates → status=${r.status} body=${clip(r.json)}`)
   }
+
+  // ── chat Saved messages — new per-user bookmark backend ─────────────────────
+  sec('chat Saved messages (real per-user bookmark)')
+  if (!wsId) { skp('no workspace — skipped') }
+  else {
+    const chans = await call('GET', `/workspaces/${wsId}/chat/channels`, { token })
+    const chId = Array.isArray(chans.data) && chans.data[0] && chans.data[0].id
+    if (!chId) { wrn('no chat channel — skipped') }
+    else {
+      const msg = await call('POST', `/chat/channels/${chId}/messages`, { token, body: { body: 'regression saved test (auto)' } })
+      const msgId = msg.data && msg.data.id
+      if (msg.status < 300 && msgId) {
+        cleanups.push(() => call('DELETE', `/chat/messages/${msgId}`, { token }))
+        const save = await call('POST', `/chat/messages/${msgId}/save`, { token })
+        if (save.status < 300) ok('POST /chat/messages/:id/save → saved')
+        else bad(`save → status=${save.status} body=${clip(save.json)}`)
+        const list = await call('GET', `/workspaces/${wsId}/chat/saved`, { token })
+        if (list.status === 200 && Array.isArray(list.data) && list.data.some((m) => m.id === msgId)) ok('GET /workspaces/:ws/chat/saved → contains the message')
+        else bad(`saved list → message not present (status=${list.status})`)
+        const unsave = await call('DELETE', `/chat/messages/${msgId}/save`, { token })
+        if (unsave.status < 300) ok('DELETE /chat/messages/:id/save → unsaved')
+        else bad(`unsave → status=${unsave.status}`)
+        const after = await call('GET', `/workspaces/${wsId}/chat/saved`, { token })
+        if (after.status === 200 && Array.isArray(after.data) && !after.data.some((m) => m.id === msgId)) ok('saved list → gone after unsave')
+        else wrn('message still saved after unsave (unexpected)')
+      } else bad(`could not post a chat message → status=${msg.status} body=${clip(msg.json)}`)
+    }
+  }
+
+  // ── docs nested tree — real parentDocId round-trip ──────────────────────────
+  sec('docs nested tree (real parentDocId)')
+  if (!wsId) { skp('no workspace — skipped') }
+  else {
+    const parent = await call('POST', `/workspaces/${wsId}/docs`, { token, body: { title: 'regression parent doc (auto)' } })
+    const parentId = parent.data && parent.data.id
+    if (parent.status < 300 && parentId) {
+      cleanups.push(() => call('DELETE', `/docs/${parentId}`, { token }))
+      const child = await call('POST', `/workspaces/${wsId}/docs`, { token, body: { title: 'regression child doc (auto)', parentDocId: parentId } })
+      const childId = child.data && child.data.id
+      if (child.status < 300 && childId) {
+        cleanups.push(() => call('DELETE', `/docs/${childId}`, { token }))
+        const listed = await call('GET', `/workspaces/${wsId}/docs`, { token })
+        const found = Array.isArray(listed.data) ? listed.data.find((d) => d.id === childId) : null
+        if (found && found.parentDocId === parentId) ok('child doc nests under parent (parentDocId persisted)')
+        else bad(`docs list → child parentDocId wrong (got ${found && found.parentDocId})`)
+      } else bad(`could not create child doc → status=${child.status} body=${clip(child.json)}`)
+    } else bad(`could not create parent doc → status=${parent.status} body=${clip(parent.json)}`)
+  }
+
+  // ── custom report engine — real aggregation over real data ──────────────────
+  sec('custom report engine (real aggregation)')
+  if (!wsId) { skp('no workspace — skipped') }
+  else {
+    const r = await call('POST', `/workspaces/${wsId}/reports/custom/run`, {
+      token,
+      timeoutMs: 30000,
+      body: { dimension: 'status', metrics: ['tasks-count', 'tasks-completed'], days: 3650 },
+    })
+    if (r.status < 300 && r.data && Array.isArray(r.data.rows) && r.data.dimension === 'status') ok(`POST /reports/custom/run → ${r.data.rows.length} group(s) by status`)
+    else bad(`custom report run → status=${r.status} body=${clip(r.json)}`)
+    const saved = await call('GET', `/workspaces/${wsId}/reports/custom`, { token })
+    if (saved.status === 200 && Array.isArray(saved.data)) ok(`GET /reports/custom → saved-report list (${saved.data.length})`)
+    else bad(`saved reports list → status=${saved.status}`)
+  }
 }
 
 (async () => {
