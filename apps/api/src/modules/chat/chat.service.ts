@@ -5,6 +5,7 @@ import {
   chatChannelMembers,
   chatMessages,
   chatMessageReactions,
+  chatMessageSaves,
   workspaceMembers,
   users,
 } from '@rundesk/db'
@@ -540,6 +541,46 @@ export class ChatService {
       .leftJoin(users, eq(users.id, chatMessages.authorId))
       .where(and(eq(chatMessages.channelId, channelId), isNotNull(chatMessages.pinnedAt)))
       .orderBy(desc(chatMessages.pinnedAt))
+  }
+
+  // Save / unsave a message for the current user only (private bookmark).
+  async setSaved(messageId: string, userId: string, saved: boolean) {
+    const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!existing) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(existing.channelId, userId)
+    if (saved) {
+      await this.db.insert(chatMessageSaves).values({ messageId, userId }).onConflictDoNothing()
+    } else {
+      await this.db
+        .delete(chatMessageSaves)
+        .where(and(eq(chatMessageSaves.messageId, messageId), eq(chatMessageSaves.userId, userId)))
+    }
+    return { messageId, saved }
+  }
+
+  // List the current user's saved messages across a workspace (newest first).
+  async listSaved(workspaceId: string, userId: string) {
+    return this.db
+      .select({
+        id: chatMessages.id,
+        channelId: chatMessages.channelId,
+        channelName: chatChannels.name,
+        authorId: chatMessages.authorId,
+        body: chatMessages.body,
+        mentions: chatMessages.mentions,
+        editedAt: chatMessages.editedAt,
+        pinnedAt: chatMessages.pinnedAt,
+        createdAt: chatMessages.createdAt,
+        savedAt: chatMessageSaves.createdAt,
+        authorName: users.displayName,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(chatMessageSaves)
+      .innerJoin(chatMessages, eq(chatMessages.id, chatMessageSaves.messageId))
+      .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+      .leftJoin(users, eq(users.id, chatMessages.authorId))
+      .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatMessageSaves.userId, userId)))
+      .orderBy(desc(chatMessageSaves.createdAt))
   }
 
   async deleteMessage(messageId: string, userId: string) {

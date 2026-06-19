@@ -146,4 +146,20 @@ export class ChatController {
   unpin(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.setPinned(messageId, user.id, false)
   }
+
+  @Get('workspaces/:workspaceId/chat/saved')
+  @UseGuards(WorkspaceMemberGuard)
+  listSaved(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.listSaved(workspaceId, user.id)
+  }
+
+  @Post('chat/messages/:messageId/save')
+  save(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.setSaved(messageId, user.id, true)
+  }
+
+  @Delete('chat/messages/:messageId/save')
+  unsave(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.setSaved(messageId, user.id, false)
+  }
 }

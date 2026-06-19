@@ -218,6 +218,13 @@
       "when": 1900000027000,
       "tag": "0030_personal_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1900000028000,
+      "tag": "0031_chat_message_saves",
+      "breakpoints": true
     }
   ]
 }

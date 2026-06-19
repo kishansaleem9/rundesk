@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pin, Search, Star, Users, X } from 'lucide-react'
+import { Bookmark, Check, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pin, Search, Star, Users, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +22,8 @@ export function ChatHeader({
   members,
   showPinnedPanel,
   onTogglePinned,
+  showSavedPanel,
+  onToggleSaved,
   search,
   onSearchChange,
   onLeaveChannel,
@@ -31,6 +33,8 @@ export function ChatHeader({
   members: ChatMember[]
   showPinnedPanel: boolean
   onTogglePinned: () => void
+  showSavedPanel: boolean
+  onToggleSaved: () => void
   search: string
   onSearchChange: (value: string) => void
   onLeaveChannel: () => void
@@ -199,6 +203,13 @@ export function ChatHeader({
           active={showPinnedPanel}
           disabled={!channel}
           onClick={onTogglePinned}
+        />
+        <IconBtn
+          icon={Bookmark}
+          title="Saved messages"
+          active={showSavedPanel}
+          disabled={!channel}
+          onClick={onToggleSaved}
         />
         <IconBtn
           icon={Star}

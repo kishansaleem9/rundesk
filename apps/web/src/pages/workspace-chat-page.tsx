@@ -118,7 +118,7 @@ export function ChatPage() {
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [threadParentId, setThreadParentId] = useState<string | null>(null)
   const [showPinnedPanel, setShowPinnedPanel] = useState(false)
-  const [pinnedMessageIds, setPinnedMessageIds] = useState<string[]>([])
+  const [showSavedPanel, setShowSavedPanel] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
   const [profileTab, setProfileTab] = useState<'activity' | 'tasks' | 'comments'>('activity')
@@ -170,6 +170,22 @@ export function ChatPage() {
     enabled: !!selectedId,
   })
   const messages = messagesQuery.data ?? []
+  const pinnedQuery = useQuery({
+    queryKey: ['chat-pinned', selectedId],
+    queryFn: () => api<Message[]>(`/chat/channels/${selectedId}/pinned`),
+    enabled: !!selectedId && showPinnedPanel,
+  })
+  const pinnedMessages = pinnedQuery.data ?? []
+  const savedQuery = useQuery({
+    queryKey: ['chat-saved', workspaceId],
+    queryFn: () =>
+      api<Array<Message & { channelName?: string; savedAt?: string }>>(
+        `/workspaces/${workspaceId}/chat/saved`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const savedMessages = savedQuery.data ?? []
+  const savedIds = useMemo(() => new Set(savedMessages.map((m) => m.id)), [savedMessages])
   const rootMessages = useMemo(() => messages.filter((m) => !m.parentMessageId), [messages])
   const visibleRootMessages = useMemo(() => {
     const q = messageSearch.trim().toLowerCase()
@@ -194,10 +210,6 @@ export function ChatPage() {
   const namesById = useMemo(
     () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
     [membersQuery.data],
-  )
-  const pinnedMessages = useMemo(
-    () => pinnedMessageIds.map((id) => messages.find((m) => m.id === id)).filter(Boolean) as Message[],
-    [messages, pinnedMessageIds],
   )
   const selectedProfile = useMemo(
     () => (membersQuery.data ?? []).find((m) => m.userId === profileUserId) ?? null,
@@ -229,31 +241,6 @@ export function ChatPage() {
       totalMessages: asMessages.length,
     }
   }, [profileActivityQuery.data, profileUserId])
-
-  useEffect(() => {
-    if (!workspaceId || !selectedId) return
-    try {
-      const key = `rundesk.chat.pins.${workspaceId}.${selectedId}`
-      const raw = localStorage.getItem(key)
-      if (!raw) {
-        setPinnedMessageIds([])
-        return
-      }
-      const parsed = JSON.parse(raw) as string[]
-      setPinnedMessageIds(Array.isArray(parsed) ? parsed : [])
-    } catch {
-      setPinnedMessageIds([])
-    }
-  }, [workspaceId, selectedId])
-
-  const persistPins = (next: string[]) => {
-    if (!workspaceId || !selectedId) return
-    try {
-      localStorage.setItem(`rundesk.chat.pins.${workspaceId}.${selectedId}`, JSON.stringify(next))
-    } catch {
-      // ignore local storage failures
-    }
-  }
 
   useEffect(() => {
     const socket = getRealtimeSocket()
@@ -391,10 +378,22 @@ export function ChatPage() {
       // acting user sees the pin state flip immediately.
       if (selectedId) {
         qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+        qc.invalidateQueries({ queryKey: ['chat-pinned', selectedId] })
       }
     },
     onError: (error) => {
       toast.error(error instanceof ApiError ? error.message : 'Could not update pin')
+    },
+  })
+
+  const setSavedMutation = useMutation({
+    mutationFn: ({ messageId, saved }: { messageId: string; saved: boolean }) =>
+      api(`/chat/messages/${messageId}/save`, { method: saved ? 'POST' : 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chat-saved', workspaceId] })
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : 'Could not update saved')
     },
   })
 
@@ -487,7 +486,15 @@ export function ChatPage() {
           memberCount={membersQuery.data?.length ?? 0}
           members={membersQuery.data ?? []}
           showPinnedPanel={showPinnedPanel}
-          onTogglePinned={() => setShowPinnedPanel((v) => !v)}
+          onTogglePinned={() => {
+            setShowPinnedPanel((v) => !v)
+            setShowSavedPanel(false)
+          }}
+          showSavedPanel={showSavedPanel}
+          onToggleSaved={() => {
+            setShowSavedPanel((v) => !v)
+            setShowPinnedPanel(false)
+          }}
           search={messageSearch}
           onSearchChange={setMessageSearch}
           onLeaveChannel={() => {
@@ -686,18 +693,13 @@ export function ChatPage() {
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
                             type="button"
-                            title="Save"
+                            title={savedIds.has(m.id) ? 'Remove from saved' : 'Save message'}
+                            disabled={setSavedMutation.isPending}
                             className={cn(
-                              'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center',
-                              pinnedMessageIds.includes(m.id) ? 'text-accent' : 'text-muted-foreground hover:text-foreground',
+                              'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center disabled:opacity-50',
+                              savedIds.has(m.id) ? 'text-accent' : 'text-muted-foreground hover:text-foreground',
                             )}
-                            onClick={() => {
-                              setPinnedMessageIds((prev) => {
-                                const next = prev.includes(m.id) ? prev.filter((id) => id !== m.id) : [...prev, m.id]
-                                persistPins(next)
-                                return next
-                              })
-                            }}
+                            onClick={() => setSavedMutation.mutate({ messageId: m.id, saved: !savedIds.has(m.id) })}
                           >
                             <Bookmark className="h-3 w-3" />
                           </button>
@@ -833,9 +835,20 @@ export function ChatPage() {
         {showPinnedPanel && (
           <PinnedPanel
             messages={pinnedMessages}
+            loading={pinnedQuery.isLoading}
             namesById={namesById}
             onClose={() => setShowPinnedPanel(false)}
             onOpenThread={(id) => setThreadParentId(id)}
+          />
+        )}
+        {showSavedPanel && (
+          <SavedPanel
+            messages={savedMessages}
+            loading={savedQuery.isLoading}
+            namesById={namesById}
+            onClose={() => setShowSavedPanel(false)}
+            onOpenThread={(id) => setThreadParentId(id)}
+            onUnsave={(id) => setSavedMutation.mutate({ messageId: id, saved: false })}
           />
         )}
       </div>
@@ -845,11 +858,13 @@ export function ChatPage() {
 
 function PinnedPanel({
   messages,
+  loading,
   namesById,
   onClose,
   onOpenThread,
 }: {
   messages: Message[]
+  loading?: boolean
   namesById: Record<string, string>
   onClose: () => void
   onOpenThread: (id: string) => void
@@ -863,12 +878,72 @@ function PinnedPanel({
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-        {messages.length === 0 ? (
+        {loading ? (
+          <div className="text-xs text-muted-foreground">Loading…</div>
+        ) : messages.length === 0 ? (
           <div className="text-xs text-muted-foreground">No pinned messages yet.</div>
         ) : (
           messages.map((m) => (
             <Card key={m.id} className="p-3">
               <div className="text-xs text-muted-foreground">{m.authorName ?? 'Unknown'}</div>
+              <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
+              <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id)}>
+                Open thread
+              </button>
+            </Card>
+          ))
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function SavedPanel({
+  messages,
+  loading,
+  namesById,
+  onClose,
+  onOpenThread,
+  onUnsave,
+}: {
+  messages: Array<Message & { channelName?: string; savedAt?: string }>
+  loading?: boolean
+  namesById: Record<string, string>
+  onClose: () => void
+  onOpenThread: (id: string) => void
+  onUnsave: (id: string) => void
+}) {
+  return (
+    <aside className="hidden xl:flex w-80 border-l border-border flex-col">
+      <div className="h-12 border-b border-border px-3 flex items-center justify-between">
+        <div className="text-sm font-semibold flex items-center gap-1.5">
+          <Bookmark className="h-3.5 w-3.5" /> Saved
+        </div>
+        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+        {loading ? (
+          <div className="text-xs text-muted-foreground">Loading…</div>
+        ) : messages.length === 0 ? (
+          <div className="text-xs text-muted-foreground">No saved messages yet. Hover a message and click the bookmark to save it.</div>
+        ) : (
+          messages.map((m) => (
+            <Card key={m.id} className="p-3 group">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground truncate">
+                  {m.authorName ?? 'Unknown'}
+                  {m.channelName ? <span className="opacity-70"> · #{m.channelName}</span> : null}
+                </div>
+                <button
+                  className="text-[11px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={() => onUnsave(m.id)}
+                  title="Remove from saved"
+                >
+                  Remove
+                </button>
+              </div>
               <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
               <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id)}>
                 Open thread

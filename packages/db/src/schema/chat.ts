@@ -49,6 +49,25 @@ export const chatMessageReactions = pgTable('chat_message_reactions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// Per-user saved/bookmarked messages (private to each user, any channel).
+export const chatMessageSaves = pgTable(
+  'chat_message_saves',
+  {
+    id:        uuid('id').primaryKey().defaultRandom(),
+    messageId: uuid('message_id').notNull().references(() => chatMessages.id, { onDelete: 'cascade' }),
+    userId:    uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqSave: uniqueIndex('chat_message_saves_unique').on(t.messageId, t.userId),
+  }),
+)
+
+export const chatMessageSavesRelations = relations(chatMessageSaves, ({ one }) => ({
+  message: one(chatMessages, { fields: [chatMessageSaves.messageId], references: [chatMessages.id] }),
+  user:    one(users,        { fields: [chatMessageSaves.userId], references: [users.id] }),
+}))
+
 export const chatChannelsRelations = relations(chatChannels, ({ one, many }) => ({
   workspace: one(workspaces, { fields: [chatChannels.workspaceId], references: [workspaces.id] }),
   creator:   one(users, { fields: [chatChannels.createdById], references: [users.id] }),
