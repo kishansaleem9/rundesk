@@ -1,8 +1,10 @@
-import { Injectable, Inject } from '@nestjs/common'
-import { and, eq, gte, sql, desc } from 'drizzle-orm'
+import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { and, eq, gte, sql, desc, inArray } from 'drizzle-orm'
 import {
   tasks,
   taskAssignees,
+  taskLabelAssignments,
+  labels,
   users,
   workspaceMembers,
   timeEntries,
@@ -12,6 +14,7 @@ import {
   lists,
   projects,
   spaces,
+  customReports,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -21,6 +24,63 @@ function daysAgo(n: number): Date {
   d.setDate(d.getDate() - n)
   d.setHours(0, 0, 0, 0)
   return d
+}
+
+// ── Custom report builder types ─────────────────────────────────────────────
+export type ReportDefinition = {
+  metrics?: string[]
+  dimensions?: string[]
+  dimension?: string
+  filters?: Array<{ field: string; op: string; value: string }>
+  viz?: 'bar' | 'line' | 'pie' | 'table'
+  days?: number
+}
+
+export type ReportResult = {
+  dimension: string
+  metrics: string[]
+  generatedAt: string
+  rows: Array<{ key: string; label: string; values: Record<string, number> }>
+}
+
+const SUPPORTED_METRICS = [
+  'tasks-count',
+  'tasks-completed',
+  'on-time-rate',
+  'cycle-time',
+  'time-logged',
+  'billable-hours',
+  'sprint-velocity',
+] as const
+
+const SUPPORTED_DIMENSIONS = [
+  'assignee',
+  'status',
+  'priority',
+  'project',
+  'sprint',
+  'label',
+  'date-week',
+  'date-month',
+] as const
+
+function isoWeekKey(d: Date): string {
+  // ISO week: Monday-based. Produce e.g. "2026-W25".
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  const day = date.getUTCDay() || 7
+  date.setUTCDate(date.getUTCDate() + 4 - day)
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1))
+  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
+function monthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function csvCell(v: string | number): string {
+  const s = String(v ?? '')
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 @Injectable()
@@ -341,6 +401,257 @@ export class ReportsService {
         dailyLoads: (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10),
       }
     })
+  }
+
+  // ─── Custom report builder (real metrics × dimension × filters) ────────────
+  async runCustomReport(workspaceId: string, def: ReportDefinition): Promise<ReportResult> {
+    const days = typeof def.days === 'number' && def.days > 0 ? def.days : 30
+    const since = daysAgo(days)
+    const dimension =
+      (def.dimension ?? def.dimensions?.[0] ?? 'assignee') as (typeof SUPPORTED_DIMENSIONS)[number]
+    const requested = (def.metrics ?? []).filter((m) =>
+      (SUPPORTED_METRICS as readonly string[]).includes(m),
+    )
+    const metrics = requested.length ? requested : ['tasks-count']
+    const want = new Set(metrics)
+    const filters = Array.isArray(def.filters) ? def.filters : []
+
+    // Base task set for the workspace within the date window.
+    const taskRows = await this.db
+      .select({
+        id: tasks.id,
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        priority: tasks.priority,
+        createdAt: tasks.createdAt,
+        dueDate: tasks.dueDate,
+        completedAt: tasks.completedAt,
+        projectId: projects.id,
+        projectName: projects.name,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(tasks.listId, lists.id))
+      .innerJoin(projects, eq(lists.projectId, projects.id))
+      .innerJoin(spaces, eq(projects.spaceId, spaces.id))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(tasks.createdAt, since)))
+
+    const taskIds = taskRows.map((t) => t.id)
+    type TaskRow = (typeof taskRows)[number]
+
+    // Assignees (needed for the assignee dimension and assignee filters).
+    const assigneesByTask = new Map<string, Array<{ userId: string; name: string }>>()
+    if (taskIds.length) {
+      const rows = await this.db
+        .select({ taskId: taskAssignees.taskId, userId: users.id, name: users.displayName, email: users.email })
+        .from(taskAssignees)
+        .innerJoin(users, eq(users.id, taskAssignees.userId))
+        .where(inArray(taskAssignees.taskId, taskIds))
+      for (const r of rows) {
+        const list = assigneesByTask.get(r.taskId) ?? []
+        list.push({ userId: r.userId, name: r.name || r.email })
+        assigneesByTask.set(r.taskId, list)
+      }
+    }
+
+    // Labels (only when grouping by label).
+    const labelsByTask = new Map<string, Array<{ id: string; name: string }>>()
+    if (dimension === 'label' && taskIds.length) {
+      const rows = await this.db
+        .select({ taskId: taskLabelAssignments.taskId, id: labels.id, name: labels.name })
+        .from(taskLabelAssignments)
+        .innerJoin(labels, eq(labels.id, taskLabelAssignments.labelId))
+        .where(inArray(taskLabelAssignments.taskId, taskIds))
+      for (const r of rows) {
+        const list = labelsByTask.get(r.taskId) ?? []
+        list.push({ id: r.id, name: r.name })
+        labelsByTask.set(r.taskId, list)
+      }
+    }
+
+    // Time entries (only when a time metric is requested).
+    const timeByTask = new Map<string, { total: number; billable: number }>()
+    if ((want.has('time-logged') || want.has('billable-hours')) && taskIds.length) {
+      const rows = await this.db
+        .select({ taskId: timeEntries.taskId, durationSec: timeEntries.durationSec, isBillable: timeEntries.isBillable })
+        .from(timeEntries)
+        .where(inArray(timeEntries.taskId, taskIds))
+      for (const r of rows) {
+        const sec = r.durationSec ?? 0
+        const cur = timeByTask.get(r.taskId) ?? { total: 0, billable: 0 }
+        cur.total += sec
+        if (r.isBillable) cur.billable += sec
+        timeByTask.set(r.taskId, cur)
+      }
+    }
+
+    // Sprint membership + points (sprint dimension or velocity metric).
+    const sprintByTask = new Map<string, { id: string; name: string; points: number }>()
+    if ((dimension === 'sprint' || want.has('sprint-velocity')) && taskIds.length) {
+      const rows = await this.db
+        .select({ taskId: sprintTasks.taskId, sprintId: sprints.id, sprintName: sprints.name, points: sprintTasks.storyPoints })
+        .from(sprintTasks)
+        .innerJoin(sprints, eq(sprints.id, sprintTasks.sprintId))
+        .where(inArray(sprintTasks.taskId, taskIds))
+      for (const r of rows) {
+        sprintByTask.set(r.taskId, { id: r.sprintId, name: r.sprintName, points: r.points ?? 0 })
+      }
+    }
+
+    // Apply filters as task predicates.
+    const filtered = taskRows.filter((t) => {
+      for (const f of filters) {
+        const field = (f.field ?? '').toLowerCase()
+        const val = (f.value ?? '').toLowerCase().trim()
+        if (!field || !val) continue
+        if (field === 'priority' && (t.priority ?? '').toLowerCase() !== val) return false
+        if (field === 'status' && (t.status ?? '').toLowerCase() !== val) return false
+        if (field === 'project' && (t.projectName ?? '').toLowerCase() !== val) return false
+        if (field === 'assignee') {
+          const names = (assigneesByTask.get(t.id) ?? []).map((a) => a.name.toLowerCase())
+          if (!names.includes(val)) return false
+        }
+      }
+      return true
+    })
+
+    // Group by the chosen dimension (1:many dims fan a task into each group).
+    const groups = new Map<string, { key: string; label: string; tasks: TaskRow[] }>()
+    const add = (key: string, label: string, t: TaskRow) => {
+      const g = groups.get(key)
+      if (g) g.tasks.push(t)
+      else groups.set(key, { key, label, tasks: [t] })
+    }
+    for (const t of filtered) {
+      switch (dimension) {
+        case 'assignee': {
+          const as = assigneesByTask.get(t.id) ?? []
+          if (as.length === 0) add('unassigned', 'Unassigned', t)
+          else for (const a of as) add(a.userId, a.name, t)
+          break
+        }
+        case 'label': {
+          const ls = labelsByTask.get(t.id) ?? []
+          if (ls.length === 0) add('none', 'No label', t)
+          else for (const l of ls) add(l.id, l.name, t)
+          break
+        }
+        case 'status':
+          add(t.status, t.status, t)
+          break
+        case 'priority':
+          add(t.priority ?? 'normal', t.priority ?? 'normal', t)
+          break
+        case 'project':
+          add(t.projectId, t.projectName ?? 'Unknown', t)
+          break
+        case 'sprint': {
+          const s = sprintByTask.get(t.id)
+          if (!s) add('none', 'No sprint', t)
+          else add(s.id, s.name, t)
+          break
+        }
+        case 'date-week':
+          add(isoWeekKey(new Date(t.createdAt)), isoWeekKey(new Date(t.createdAt)), t)
+          break
+        case 'date-month':
+          add(monthKey(new Date(t.createdAt)), monthKey(new Date(t.createdAt)), t)
+          break
+        default:
+          add('all', 'All', t)
+      }
+    }
+
+    const rows = [...groups.values()].map((g) => {
+      const completed = g.tasks.filter((t) => t.statusCategory === 'closed' || !!t.completedAt)
+      const values: Record<string, number> = {}
+      if (want.has('tasks-count')) values['tasks-count'] = g.tasks.length
+      if (want.has('tasks-completed')) values['tasks-completed'] = completed.length
+      if (want.has('on-time-rate')) {
+        const onTime = completed.filter(
+          (t) => t.completedAt && t.dueDate && new Date(t.completedAt) <= new Date(t.dueDate),
+        ).length
+        values['on-time-rate'] = completed.length ? Math.round((onTime / completed.length) * 100) : 0
+      }
+      if (want.has('cycle-time')) {
+        const durations = completed
+          .filter((t) => t.completedAt)
+          .map((t) => (new Date(t.completedAt as Date).getTime() - new Date(t.createdAt).getTime()) / 86400000)
+        values['cycle-time'] = durations.length
+          ? Math.round((durations.reduce((a, b) => a + b, 0) / durations.length) * 10) / 10
+          : 0
+      }
+      if (want.has('time-logged')) {
+        const sec = g.tasks.reduce((a, t) => a + (timeByTask.get(t.id)?.total ?? 0), 0)
+        values['time-logged'] = Math.round((sec / 3600) * 10) / 10
+      }
+      if (want.has('billable-hours')) {
+        const sec = g.tasks.reduce((a, t) => a + (timeByTask.get(t.id)?.billable ?? 0), 0)
+        values['billable-hours'] = Math.round((sec / 3600) * 10) / 10
+      }
+      if (want.has('sprint-velocity')) {
+        values['sprint-velocity'] =
+          Math.round(completed.reduce((a, t) => a + (sprintByTask.get(t.id)?.points ?? 0), 0) * 10) / 10
+      }
+      return { key: g.key, label: g.label, values }
+    })
+
+    const primary = metrics[0]
+    rows.sort((a, b) => (b.values[primary] ?? 0) - (a.values[primary] ?? 0))
+
+    return { dimension, metrics, generatedAt: new Date().toISOString(), rows }
+  }
+
+  async exportCustomReportCsv(workspaceId: string, def: ReportDefinition): Promise<string> {
+    const result = await this.runCustomReport(workspaceId, def)
+    const header = ['group', ...result.metrics]
+    const lines = [header.map(csvCell).join(',')]
+    for (const r of result.rows) {
+      lines.push([csvCell(r.label), ...result.metrics.map((m) => csvCell(r.values[m] ?? 0))].join(','))
+    }
+    return lines.join('\n')
+  }
+
+  // ─── Saved report definitions ─────────────────────────────────────────────
+  listSavedReports(workspaceId: string) {
+    return this.db
+      .select()
+      .from(customReports)
+      .where(eq(customReports.workspaceId, workspaceId))
+      .orderBy(desc(customReports.createdAt))
+  }
+
+  async createSavedReport(workspaceId: string, userId: string, name: string, definition: ReportDefinition) {
+    const [row] = await this.db
+      .insert(customReports)
+      .values({ workspaceId, createdById: userId, name: name?.trim() || 'Untitled report', definition })
+      .returning()
+    return row
+  }
+
+  async updateSavedReport(
+    workspaceId: string,
+    id: string,
+    patch: { name?: string; definition?: ReportDefinition },
+  ) {
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (patch.name !== undefined) set.name = patch.name.trim() || 'Untitled report'
+    if (patch.definition !== undefined) set.definition = patch.definition
+    const [row] = await this.db
+      .update(customReports)
+      .set(set)
+      .where(and(eq(customReports.id, id), eq(customReports.workspaceId, workspaceId)))
+      .returning()
+    if (!row) throw new NotFoundException('Report not found')
+    return row
+  }
+
+  async deleteSavedReport(workspaceId: string, id: string) {
+    const [row] = await this.db
+      .delete(customReports)
+      .where(and(eq(customReports.id, id), eq(customReports.workspaceId, workspaceId)))
+      .returning()
+    if (!row) throw new NotFoundException('Report not found')
+    return { ok: true }
   }
 }
 

@@ -225,6 +225,13 @@
       "when": 1900000028000,
       "tag": "0031_chat_message_saves",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1900000029000,
+      "tag": "0032_custom_reports",
+      "breakpoints": true
     }
   ]
 }

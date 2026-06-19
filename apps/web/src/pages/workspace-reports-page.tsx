@@ -13,10 +13,12 @@ import {
   TrendingDown,
   Minus,
   Download,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { ReportBuilder } from '../components/report-builder'
 
-type Tab = 'overview' | 'productivity' | 'completion' | 'time' | 'sprints' | 'goals'
+type Tab = 'overview' | 'productivity' | 'completion' | 'time' | 'sprints' | 'goals' | 'custom'
 
 type CsvExport = { filename: string; rows: (string | number)[][] } | null
 
@@ -63,6 +65,7 @@ export function ReportsPage() {
     { id: 'time', label: 'Time', icon: Clock },
     { id: 'sprints', label: 'Sprints', icon: Zap },
     { id: 'goals', label: 'Goals', icon: Target },
+    { id: 'custom', label: 'Custom', icon: SlidersHorizontal },
   ]
 
   return (
@@ -123,6 +126,7 @@ export function ReportsPage() {
         {activeTab === 'time' && <TimeTab workspaceId={workspaceId} days={days} registerExport={registerExport} />}
         {activeTab === 'sprints' && <SprintsTab workspaceId={workspaceId} registerExport={registerExport} />}
         {activeTab === 'goals' && <GoalsTab workspaceId={workspaceId} registerExport={registerExport} />}
+        {activeTab === 'custom' && <ReportBuilder workspaceId={workspaceId} />}
       </div>
     </div>
   )

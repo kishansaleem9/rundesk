@@ -1,8 +1,9 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { ReportsService } from './reports.service'
+import { ReportsService, type ReportDefinition } from './reports.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('reports')
 @ApiBearerAuth()
@@ -63,5 +64,61 @@ export class ReportsController {
     @Query('days') days?: string,
   ) {
     return this.reports.getWorkload(workspaceId, days ? parseInt(days, 10) : 14)
+  }
+
+  // ─── Custom report builder ────────────────────────────────────────────────
+  @Post('custom/run')
+  @ApiOperation({ summary: 'Run an ad-hoc custom report definition' })
+  runCustom(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: ReportDefinition,
+  ) {
+    return this.reports.runCustomReport(workspaceId, body ?? {})
+  }
+
+  @Post('custom/export')
+  @ApiOperation({ summary: 'Run a custom report and return it as CSV' })
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="rundesk-report.csv"')
+  exportCustom(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: ReportDefinition,
+  ) {
+    return this.reports.exportCustomReportCsv(workspaceId, body ?? {})
+  }
+
+  @Get('custom')
+  @ApiOperation({ summary: 'List saved custom reports' })
+  listSaved(@Param('workspaceId') workspaceId: string) {
+    return this.reports.listSavedReports(workspaceId)
+  }
+
+  @Post('custom')
+  @ApiOperation({ summary: 'Save a custom report definition' })
+  createSaved(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { name: string; definition: ReportDefinition },
+  ) {
+    return this.reports.createSavedReport(workspaceId, user.id, body.name, body.definition ?? {})
+  }
+
+  @Patch('custom/:reportId')
+  @ApiOperation({ summary: 'Update a saved custom report' })
+  updateSaved(
+    @Param('workspaceId') workspaceId: string,
+    @Param('reportId') reportId: string,
+    @Body() body: { name?: string; definition?: ReportDefinition },
+  ) {
+    return this.reports.updateSavedReport(workspaceId, reportId, body ?? {})
+  }
+
+  @Delete('custom/:reportId')
+  @ApiOperation({ summary: 'Delete a saved custom report' })
+  deleteSaved(
+    @Param('workspaceId') workspaceId: string,
+    @Param('reportId') reportId: string,
+  ) {
+    return this.reports.deleteSavedReport(workspaceId, reportId)
   }
 }
