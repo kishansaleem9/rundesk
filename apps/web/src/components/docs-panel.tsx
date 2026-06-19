@@ -4,12 +4,15 @@ import { Button, Card, Input, toast } from '@rundesk/ui'
 import {
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Download,
   Globe,
   GlobeLock,
   Heading1,
   Heading3,
   History,
+  Layers,
   Link,
   Link2,
   ListOrdered,
@@ -33,6 +36,7 @@ import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
 import { MentionText } from './mention-text'
+import { DocTemplatesDialog, type DocTemplate } from './doc-templates'
 import { useMentionNames } from '../hooks/use-mention-names'
 
 type Doc = {
@@ -40,6 +44,9 @@ type Doc = {
   title: string
   content: Record<string, unknown>
   updatedAt: string
+  parentDocId?: string | null
+  icon?: string | null
+  position?: number
   publicShareId?: string | null
   publicShareEnabledAt?: string | null
 }
@@ -71,6 +78,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [improving, setImproving] = useState(false)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+  const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set())
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
@@ -88,6 +97,30 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     () => docsQuery.data?.find((d) => d.id === selectedDocId) ?? null,
     [docsQuery.data, selectedDocId],
   )
+
+  // Group docs by parent so the sidebar can render a real nested tree
+  // (the backend already returns parentDocId/position on every doc).
+  const docsByParent = useMemo(() => {
+    const map = new Map<string | null, Doc[]>()
+    for (const d of docsQuery.data ?? []) {
+      const key = d.parentDocId ?? null
+      const arr = map.get(key)
+      if (arr) arr.push(d)
+      else map.set(key, [d])
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.title.localeCompare(b.title))
+    }
+    return map
+  }, [docsQuery.data])
+
+  const toggleExpanded = (id: string) =>
+    setExpandedDocs((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const mentionExtension = useMemo(
     () =>
@@ -168,14 +201,29 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   }, [selectedDocId, qc, workspaceId])
 
   const createDoc = useMutation({
-    mutationFn: async () =>
-      api<Doc>(`/workspaces/${workspaceId}/docs`, {
+    mutationFn: async (
+      vars: { title?: string; parentDocId?: string | null; content?: Record<string, unknown> } = {},
+    ) => {
+      const doc = await api<Doc>(`/workspaces/${workspaceId}/docs`, {
         method: 'POST',
-        body: JSON.stringify({ title: newDocName.trim() || 'Untitled' }),
-      }),
-    onSuccess: async (doc) => {
+        body: JSON.stringify({
+          title: vars.title ?? (newDocName.trim() || 'Untitled'),
+          parentDocId: vars.parentDocId ?? null,
+        }),
+      })
+      // Templates ship their body separately via a follow-up content update.
+      if (vars.content) {
+        await api(`/docs/${doc.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ content: vars.content }),
+        })
+      }
+      return { doc, parentDocId: vars.parentDocId ?? null }
+    },
+    onSuccess: async ({ doc, parentDocId }) => {
       setNewDocName('')
       setSelectedDocId(doc.id)
+      if (parentDocId) setExpandedDocs((prev) => new Set(prev).add(parentDocId))
       await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
     },
   })
@@ -278,6 +326,54 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     { id: 'code' as const, label: 'Code block' },
   ].filter((item) => item.label.toLowerCase().includes(slashFilter.toLowerCase()))
 
+  const renderDocNodes = (parentId: string | null, depth: number): React.ReactNode =>
+    (docsByParent.get(parentId) ?? []).map((node) => {
+      const children = docsByParent.get(node.id) ?? []
+      const hasChildren = children.length > 0
+      const isOpen = expandedDocs.has(node.id)
+      return (
+        <div key={node.id}>
+          <div
+            className={`group flex items-center gap-0.5 rounded-md pr-1 transition-colors ${
+              node.id === selectedDocId
+                ? 'bg-accent/15 text-foreground font-medium'
+                : 'hover:bg-card/60 text-muted-foreground hover:text-foreground'
+            }`}
+            style={{ paddingLeft: `${depth * 12}px` }}
+          >
+            {hasChildren ? (
+              <button
+                type="button"
+                className="p-0.5 text-muted-foreground/70 hover:text-foreground shrink-0"
+                onClick={() => toggleExpanded(node.id)}
+                title={isOpen ? 'Collapse' : 'Expand'}
+              >
+                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </button>
+            ) : (
+              <span className="w-4 shrink-0" />
+            )}
+            <button
+              className="flex-1 truncate text-left py-1.5 text-sm"
+              onClick={() => setSelectedDocId(node.id)}
+            >
+              {node.icon ? <span className="mr-1">{node.icon}</span> : null}
+              {node.title}
+            </button>
+            <button
+              type="button"
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-card/80 text-muted-foreground shrink-0"
+              title="Add sub-page"
+              onClick={() => createDoc.mutate({ parentDocId: node.id })}
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          </div>
+          {hasChildren && isOpen && renderDocNodes(node.id, depth + 1)}
+        </div>
+      )
+    })
+
   return (
     <Card
       variant="glass"
@@ -302,19 +398,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               No docs yet — create your first page below.
             </p>
           )}
-          {docsQuery.data?.map((doc) => (
-            <button
-              key={doc.id}
-              className={`w-full truncate text-left rounded-md px-2 py-1.5 text-sm transition-colors ${
-                doc.id === selectedDocId
-                  ? 'bg-accent/15 text-foreground font-medium'
-                  : 'hover:bg-card/60 text-muted-foreground hover:text-foreground'
-              }`}
-              onClick={() => setSelectedDocId(doc.id)}
-            >
-              {doc.title}
-            </button>
-          ))}
+          {renderDocNodes(null, 0)}
         </div>
         <div className="border-t border-border/60 p-2 space-y-2">
           <Input
@@ -323,11 +407,33 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
             placeholder="New page name"
             className="h-9"
           />
-          <Button size="sm" variant="outline" className="w-full" onClick={() => createDoc.mutate()}>
-            <Plus className="h-3.5 w-3.5" /> Add page
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={() => createDoc.mutate({})}
+              disabled={createDoc.isPending}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add page
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              title="Create from a template"
+              onClick={() => setTemplatesOpen(true)}
+            >
+              <Layers className="h-3.5 w-3.5" /> Templates
+            </Button>
+          </div>
         </div>
       </div>
+
+      <DocTemplatesDialog
+        open={templatesOpen}
+        onOpenChange={setTemplatesOpen}
+        onPick={(t: DocTemplate) => createDoc.mutate({ title: t.title, content: t.content })}
+      />
 
       {/* Editor pane */}
       <div className="flex flex-col min-w-0">
