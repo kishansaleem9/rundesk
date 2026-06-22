@@ -25,6 +25,10 @@
 #
 # Options:
 #     HC_SKIP_AI=1   skip the live AI generation calls (status is still checked)
+#     HC_URL=https://rundesk.theaura.agency/api/v1
+#                    test through the public domain (DNS + TLS + reverse proxy)
+#                    instead of the API directly inside the container. Default
+#                    is http://localhost:3001/api/v1 (the live API, edge bypassed).
 #
 # Exits non-zero if any check fails.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -46,10 +50,22 @@ if { [ -z "$EMAIL" ] || [ -z "$PASSWORD" ]; } && [ -t 0 ]; then
 fi
 [ -n "$EMAIL" ] && [ -n "$PASSWORD" ] || { printf "${C_R}A login is required.${C_X}\n"; exit 2; }
 
-printf "\n${C_C}${C_B}Running the full live suite against http://localhost:3001/api/v1 ...${C_X}\n"
+# By default we hit the API process directly inside the container. That IS the
+# live production backend (same DB, R2, Meilisearch, AI key, your real data) —
+# we just skip the public edge so a failure can't be blamed on the proxy/TLS and
+# the rapid create/delete burst can't trip an edge rate-limiter. Set HC_URL to
+# also exercise the public domain (DNS + TLS + reverse proxy):
+#   HC_URL=https://rundesk.theaura.agency/api/v1 ./scripts/vps-master-test.sh
+TARGET="${HC_URL:-http://localhost:3001/api/v1}"
+printf "\n${C_C}${C_B}Running the full live suite against ${TARGET} ...${C_X}\n"
+if [ -n "${HC_URL:-}" ]; then
+  printf "${C_Y}(through the public edge — DNS, TLS and reverse proxy are included in the test)${C_X}\n"
+else
+  printf "${C_C}(direct to the API inside the container — same production DB/R2/AI, edge layer bypassed)${C_X}\n"
+fi
 
 docker exec -i \
-  -e HC_BASE="http://localhost:3001/api/v1" \
+  -e HC_BASE="$TARGET" \
   -e HC_EMAIL="$EMAIL" -e HC_PASSWORD="$PASSWORD" \
   -e HC_SKIP_AI="${HC_SKIP_AI:-}" \
   rundesk-api node - <<'NODE_EOF'
