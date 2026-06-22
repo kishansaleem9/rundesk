@@ -1,8 +1,9 @@
-import { Injectable, Inject } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException } from '@nestjs/common'
 import { eq, and } from 'drizzle-orm'
-import { lists, listStatuses } from '@rundesk/db'
+import { lists, listStatuses, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { assertCanManageContainer } from '../../common/permissions/container-access'
 
 /**
  * Default status pipeline seeded on every new list. Existing lists were
@@ -21,13 +22,14 @@ const DEFAULT_LIST_STATUSES = [
 export class ListsService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
-  async createList(projectId: string, data: { name: string; description?: string }) {
+  async createList(projectId: string, data: { name: string; description?: string }, actorId?: string) {
     const result = await this.db
       .insert(lists)
       .values({
         projectId,
         name: data.name,
         description: data.description,
+        createdById: actorId ?? null,
       })
       .returning()
 
@@ -56,7 +58,8 @@ export class ListsService {
     return list ?? null
   }
 
-  async updateList(listId: string, data: Partial<{ name: string; description: string }>) {
+  async updateList(listId: string, data: Partial<{ name: string; description: string }>, actorId?: string) {
+    if (actorId) await this.assertManageable(listId, actorId)
     const result = await this.db
       .update(lists)
       .set({
@@ -69,7 +72,25 @@ export class ListsService {
     return result[0]
   }
 
-  async deleteList(listId: string) {
+  async deleteList(listId: string, actorId?: string) {
+    if (actorId) await this.assertManageable(listId, actorId)
     await this.db.update(lists).set({ isArchived: true }).where(eq(lists.id, listId))
+  }
+
+  private async assertManageable(listId: string, actorId: string) {
+    const [row] = await this.db
+      .select({ createdById: lists.createdById, workspaceId: spaces.workspaceId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!row) throw new NotFoundException('List not found')
+    await assertCanManageContainer(this.db, {
+      workspaceId: row.workspaceId,
+      createdById: row.createdById,
+      actorId,
+      kind: 'list',
+    })
   }
 }

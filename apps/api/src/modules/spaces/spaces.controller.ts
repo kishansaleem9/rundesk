@@ -24,25 +24,30 @@ export class SpacesController {
     @CurrentUser() user: any,
     @Body() body: { workspaceId: string; name: string; description?: string; color?: string; icon?: string },
   ) {
-    return this.spacesService.createSpace(body.workspaceId, {
-      name: body.name,
-      description: body.description,
-      color: body.color,
-      icon: body.icon,
-    })
+    return this.spacesService.createSpace(
+      body.workspaceId,
+      {
+        name: body.name,
+        description: body.description,
+        color: body.color,
+        icon: body.icon,
+      },
+      user.id,
+    )
   }
 
   @Put(':spaceId')
   async updateSpace(
     @Param('spaceId') spaceId: string,
+    @CurrentUser() user: any,
     @Body() body: Partial<{ name: string; description: string; color: string; icon: string }>,
   ) {
-    return this.spacesService.updateSpace(spaceId, body)
+    return this.spacesService.updateSpace(spaceId, body, user.id)
   }
 
   @Delete(':spaceId')
-  async deleteSpace(@Param('spaceId') spaceId: string) {
-    await this.spacesService.deleteSpace(spaceId)
+  async deleteSpace(@Param('spaceId') spaceId: string, @CurrentUser() user: any) {
+    await this.spacesService.deleteSpace(spaceId, user.id)
     return { message: 'Space archived successfully' }
   }
 }

@@ -24,25 +24,30 @@ export class ProjectsController {
     @CurrentUser() user: any,
     @Body() body: { spaceId: string; name: string; description?: string; color?: string; icon?: string },
   ) {
-    return this.projectsService.createProject(body.spaceId, {
-      name: body.name,
-      description: body.description,
-      color: body.color,
-      icon: body.icon,
-    })
+    return this.projectsService.createProject(
+      body.spaceId,
+      {
+        name: body.name,
+        description: body.description,
+        color: body.color,
+        icon: body.icon,
+      },
+      user.id,
+    )
   }
 
   @Put(':projectId')
   async updateProject(
     @Param('projectId') projectId: string,
+    @CurrentUser() user: any,
     @Body() body: Partial<{ name: string; description: string; color: string; icon: string }>,
   ) {
-    return this.projectsService.updateProject(projectId, body)
+    return this.projectsService.updateProject(projectId, body, user.id)
   }
 
   @Delete(':projectId')
-  async deleteProject(@Param('projectId') projectId: string) {
-    await this.projectsService.deleteProject(projectId)
+  async deleteProject(@Param('projectId') projectId: string, @CurrentUser() user: any) {
+    await this.projectsService.deleteProject(projectId, user.id)
     return { message: 'Project archived successfully' }
   }
 }

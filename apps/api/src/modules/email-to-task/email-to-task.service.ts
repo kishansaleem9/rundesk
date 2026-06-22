@@ -23,6 +23,7 @@ import {
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
+import { assertCanManageContainer } from '../../common/permissions/container-access'
 
 /**
  * Email-to-task: convert inbound emails into rundesk tasks or comments.
@@ -107,6 +108,7 @@ export class EmailToTaskService {
    */
   async rotateAlias(listId: string, actorId: string): Promise<AliasView> {
     await this.assertListExists(listId)
+    await this.assertCanManageAlias(listId, actorId)
     const localPart = await this.mintUniqueLocalPart()
     const [row] = await this.db
       .insert(listEmailAliases)
@@ -119,12 +121,32 @@ export class EmailToTaskService {
     return this.aliasView(row)
   }
 
-  async revokeAlias(listId: string): Promise<{ ok: true }> {
+  async revokeAlias(listId: string, actorId?: string): Promise<{ ok: true }> {
+    if (actorId) await this.assertCanManageAlias(listId, actorId)
     await this.db
       .update(listEmailAliases)
       .set({ revokedAt: new Date(), updatedAt: new Date() })
       .where(eq(listEmailAliases.listId, listId))
     return { ok: true }
+  }
+
+  // Managing a list's inbound-email alias requires the list's creator or a
+  // workspace admin/manager (not any member).
+  private async assertCanManageAlias(listId: string, actorId: string) {
+    const [row] = await this.db
+      .select({ createdById: lists.createdById, workspaceId: spaces.workspaceId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!row) throw new NotFoundException('List not found')
+    await assertCanManageContainer(this.db, {
+      workspaceId: row.workspaceId,
+      createdById: row.createdById,
+      actorId,
+      kind: 'list email alias',
+    })
   }
 
   async getAlias(listId: string): Promise<AliasView | null> {

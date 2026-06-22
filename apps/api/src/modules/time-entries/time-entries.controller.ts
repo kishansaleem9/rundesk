@@ -16,13 +16,16 @@ export class WorkspaceTimeEntriesController {
 
   @Get('workspaces/:workspaceId/time-entries')
   @UseGuards(WorkspaceMemberGuard)
-  list(
+  async list(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() actor: CurrentUserPayload,
     @Query('userId') userId?: string,
     @Query('since') since?: string,
   ) {
+    // Members may only see their own time logs; admins can filter by anyone.
+    const canModerate = await this.time.canModerateApprovals(workspaceId, actor.id)
     return this.time.listForWorkspace(workspaceId, {
-      userId,
+      userId: canModerate ? userId : actor.id,
       since: since ? new Date(since) : undefined,
     })
   }
@@ -37,7 +40,11 @@ export class WorkspaceTimeEntriesController {
     return Promise.all([
       this.time.canModerateApprovals(workspaceId, actor.id),
       this.time.listApprovals(workspaceId, status),
-    ]).then(([canModerate, items]) => ({ canModerate, items }))
+    ]).then(([canModerate, items]) => ({
+      canModerate,
+      // Non-moderators only see their own timesheet rows.
+      items: canModerate ? items : items.filter((i) => i.userId === actor.id),
+    }))
   }
 
   @Post('workspaces/:workspaceId/time-approvals/:userId/:weekStart/approve')

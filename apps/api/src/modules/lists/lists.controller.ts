@@ -21,20 +21,25 @@ export class ListsController {
 
   @Post()
   async createList(@CurrentUser() user: any, @Body() body: { projectId: string; name: string; description?: string }) {
-    return this.listsService.createList(body.projectId, {
-      name: body.name,
-      description: body.description,
-    })
+    return this.listsService.createList(
+      body.projectId,
+      { name: body.name, description: body.description },
+      user.id,
+    )
   }
 
   @Put(':listId')
-  async updateList(@Param('listId') listId: string, @Body() body: Partial<{ name: string; description: string }>) {
-    return this.listsService.updateList(listId, body)
+  async updateList(
+    @Param('listId') listId: string,
+    @CurrentUser() user: any,
+    @Body() body: Partial<{ name: string; description: string }>,
+  ) {
+    return this.listsService.updateList(listId, body, user.id)
   }
 
   @Delete(':listId')
-  async deleteList(@Param('listId') listId: string) {
-    await this.listsService.deleteList(listId)
+  async deleteList(@Param('listId') listId: string, @CurrentUser() user: any) {
+    await this.listsService.deleteList(listId, user.id)
     return { message: 'List archived successfully' }
   }
 }

@@ -48,8 +48,11 @@ export class EmailAliasController {
   }
 
   @Delete()
-  async revoke(@Param('listId') listId: string) {
-    return this.svc.revokeAlias(listId)
+  async revoke(
+    @CurrentUser() user: { id: string },
+    @Param('listId') listId: string,
+  ) {
+    return this.svc.revokeAlias(listId, user.id)
   }
 }
 
