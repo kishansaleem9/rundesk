@@ -512,12 +512,6 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
       api(`/workspaces/${workspaceId}/integrations/slack/test`, { method: 'POST' }),
   })
 
-  const otherIntegrations = [
-    { name: 'Google Calendar', desc: 'Sync task due dates with calendars.', status: 'planned' },
-    { name: 'Google Drive', desc: 'Attach Drive files to tasks.', status: 'planned' },
-    { name: 'GitHub / GitLab', desc: 'Link commits & PRs to tasks via task ID.', status: 'planned' },
-  ]
-
   const hooks = whQuery.data ?? []
 
   return (
@@ -689,28 +683,6 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
           </a>
         </div>
       </Card>
-
-      {/* Other integrations */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {otherIntegrations.map((i) => (
-          <Card key={i.name} className="p-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="font-semibold text-sm">{i.name}</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{i.desc}</p>
-              </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium uppercase tracking-wider bg-muted text-muted-foreground">
-                v1.1
-              </span>
-            </div>
-            <a href={`/app/${workspaceId}/integrations`}>
-              <Button size="sm" variant="outline" className="mt-3 w-full">
-                Manage integration
-              </Button>
-            </a>
-          </Card>
-        ))}
-      </div>
 
       {/* Data export */}
       <Card className="p-4">

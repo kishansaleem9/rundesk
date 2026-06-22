@@ -30,7 +30,6 @@ type Integration = {
   description: string
   category: 'comms' | 'storage' | 'dev' | 'calendar' | 'analytics' | 'crm' | 'ai'
   popular?: boolean
-  installed?: boolean
   comingSoon?: boolean
   brandColor: string
   // simple wordmark/letter for the card
@@ -39,7 +38,7 @@ type Integration = {
 type ConnectionHealth = 'healthy' | 'expiring' | 'expired' | 'disconnected'
 
 const INTEGRATIONS: Integration[] = [
-  { id: 'slack', name: 'Slack', description: 'Get task updates in any channel, create tasks from messages.', category: 'comms', popular: true, installed: true, brandColor: '#4A154B', logo: 'S' },
+  { id: 'slack', name: 'Slack', description: 'Get task updates in any channel, create tasks from messages.', category: 'comms', popular: true, brandColor: '#4A154B', logo: 'S' },
   { id: 'discord', name: 'Discord', description: 'Receive notifications and slash-create tasks from chat.', category: 'comms', brandColor: '#5865F2', logo: 'D' },
   { id: 'teams', name: 'Microsoft Teams', description: 'Pin tasks to channels and get presence-aware notifications.', category: 'comms', brandColor: '#5059C9', logo: 'T' },
 
@@ -53,7 +52,7 @@ const INTEGRATIONS: Integration[] = [
   { id: 'sentry', name: 'Sentry', description: 'Auto-create tasks from production errors.', category: 'dev', brandColor: '#362D59', logo: 'S' },
   { id: 'linear', name: 'Linear', description: 'Two-way sync issues between Linear and Rundesk.', category: 'dev', brandColor: '#5E6AD2', logo: 'L' },
 
-  { id: 'gcal', name: 'Google Calendar', description: 'Two-way sync due dates as calendar events.', category: 'calendar', popular: true, installed: true, brandColor: '#4285F4', logo: 'C' },
+  { id: 'gcal', name: 'Google Calendar', description: 'Two-way sync due dates as calendar events.', category: 'calendar', popular: true, brandColor: '#4285F4', logo: 'C' },
   { id: 'outlook', name: 'Outlook Calendar', description: 'Sync due dates with your Microsoft calendar.', category: 'calendar', brandColor: '#0078D4', logo: 'O' },
   { id: 'cal', name: 'Cal.com', description: 'Schedule meetings inline — auto-create prep doc.', category: 'calendar', brandColor: '#000', logo: 'C' },
 
@@ -67,7 +66,7 @@ const INTEGRATIONS: Integration[] = [
 
   { id: 'zapier', name: 'Zapier', description: '5,000+ apps — wire Rundesk into your existing stack.', category: 'dev', popular: true, brandColor: '#FF4F00', logo: 'Z' },
   { id: 'make', name: 'Make (Integromat)', description: 'Visual workflow automation between Rundesk and the web.', category: 'dev', brandColor: '#6D00CC', logo: 'M' },
-  { id: 'webhook', name: 'Custom webhooks', description: 'Build your own integration with the Rundesk webhook API.', category: 'dev', installed: true, brandColor: '#0c215d', logo: 'W' },
+  { id: 'webhook', name: 'Custom webhooks', description: 'Build your own integration with the Rundesk webhook API.', category: 'dev', brandColor: '#0c215d', logo: 'W' },
 
   { id: 'openai', name: 'OpenAI', description: 'Use GPT models alongside Claude for specific workflows.', category: 'ai', brandColor: '#10A37F', logo: 'A' },
   { id: 'gemini', name: 'Google Gemini', description: 'Bring Gemini Pro into your AI-powered automations.', category: 'ai', brandColor: '#1F71F4', logo: 'G' },
@@ -278,6 +277,7 @@ export function IntegrationsMarketplacePage() {
 
   const runConnectFlow = async () => {
     if (!activeIntegration) return
+    if (!isSupportedIntegration(activeIntegration)) return
     if (activeIntegration.id === 'slack') {
       if (!slackWebhookUrl.trim()) return
       await connectSlack.mutateAsync()
@@ -297,7 +297,6 @@ export function IntegrationsMarketplacePage() {
       }
       return
     }
-    setActiveIntegration(null)
   }
 
   return (
@@ -460,13 +459,22 @@ export function IntegrationsMarketplacePage() {
               </Button>
               <Button
                 onClick={runConnectFlow}
+                title={
+                  activeIntegration && !isSupportedIntegration(activeIntegration)
+                    ? 'This integration is not available yet.'
+                    : undefined
+                }
                 disabled={
                   startOAuth.isPending ||
                   connectSlack.isPending ||
                   !(activeIntegration && isSupportedIntegration(activeIntegration) && isProviderReady(activeIntegration))
                 }
               >
-                {startOAuth.isPending || connectSlack.isPending ? 'Connecting…' : 'Authorize & Connect'}
+                {startOAuth.isPending || connectSlack.isPending
+                  ? 'Connecting…'
+                  : activeIntegration && !isSupportedIntegration(activeIntegration)
+                  ? 'Not available yet'
+                  : 'Authorize & Connect'}
               </Button>
             </div>
           </div>

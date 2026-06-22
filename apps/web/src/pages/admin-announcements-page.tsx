@@ -31,7 +31,12 @@ export function AnnouncementsAdminPage() {
     queryKey: ['announcement-admin-workspaces'],
     queryFn: () => api<Array<{ id: string; name: string }>>('/workspaces'),
   })
-  const workspaceId = workspacesQuery.data?.[0]?.id ?? ''
+  const workspaces = workspacesQuery.data ?? []
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
+  const workspaceId =
+    selectedWorkspaceId && workspaces.some((w) => w.id === selectedWorkspaceId)
+      ? selectedWorkspaceId
+      : workspaces[0]?.id ?? ''
   const announcementsQuery = useQuery({
     queryKey: ['admin-announcements', workspaceId],
     enabled: workspaceId.length > 0,
@@ -117,6 +122,24 @@ export function AnnouncementsAdminPage() {
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
           Pin a banner across the entire workspace. Members can dismiss it once read.
         </p>
+        {workspaces.length > 0 && (
+          <div className="mt-4 space-y-1.5 max-w-xs">
+            <Label htmlFor="announcement-workspace">Workspace</Label>
+            <select
+              id="announcement-workspace"
+              value={workspaceId}
+              onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+              disabled={workspaces.length < 2}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </header>
 
       {/* Compose */}

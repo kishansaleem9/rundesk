@@ -1132,7 +1132,7 @@ function SubmissionsTab({
       { success: 0, unmapped: 0, invalid: 0, other: 0 },
     )
     setBulkFeedback(
-      `Revalidated ${filteredSubmissions.length} submissions: ${summary.success} success, ${summary.unmapped} unmapped, ${summary.invalid} invalid, ${summary.other} other.`,
+      `Recounted ${filteredSubmissions.length} submissions: ${summary.success} success, ${summary.unmapped} unmapped, ${summary.invalid} invalid, ${summary.other} other.`,
     )
   }
   const retryFilteredRouting = async () => {
@@ -1290,7 +1290,7 @@ function SubmissionsTab({
             onClick={revalidateFilteredRouting}
             disabled={filteredSubmissions.length === 0}
           >
-            Revalidate routing
+            Recount routing
           </Button>
           <Button
             variant="outline"
