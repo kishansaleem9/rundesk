@@ -71,7 +71,14 @@ type DocComment = {
 
 export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
+  // Honor a ?doc=<id> deep link (e.g. from global search) by preselecting it.
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const fromUrl = new URLSearchParams(window.location.search).get('doc')
+      if (fromUrl) return fromUrl
+    }
+    return null
+  })
   const [newDocName, setNewDocName] = useState('')
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')

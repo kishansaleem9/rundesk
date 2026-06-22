@@ -262,6 +262,7 @@ export class TasksService {
         },
         ctx.space.workspaceId,
         ctx.space.id,
+        ctx.project.id,
       )
     } catch {
       // Search is best-effort; never fail a write because of it.

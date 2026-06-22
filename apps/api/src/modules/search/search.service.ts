@@ -55,7 +55,7 @@ export class SearchService implements OnModuleInit {
     }
   }
 
-  async indexTask(task: { id: string; title: string; description: string | null; listId: string; createdAt: Date }, workspaceId: string, spaceId: string) {
+  async indexTask(task: { id: string; title: string; description: string | null; listId: string; createdAt: Date }, workspaceId: string, spaceId: string, projectId: string) {
     if (!this.enabled || !this.index) return
     await this.index.addDocuments([{
       id: `task-${task.id}`,
@@ -65,7 +65,7 @@ export class SearchService implements OnModuleInit {
       spaceId,
       title: task.title,
       content: task.description ?? '',
-      url: `/app/${workspaceId}/task/${task.id}`,
+      url: `/app/${workspaceId}/${spaceId}/${projectId}/${task.listId}?task=${task.id}`,
       createdAt: new Date(task.createdAt).getTime(),
     }])
   }
@@ -79,7 +79,7 @@ export class SearchService implements OnModuleInit {
       spaceId: doc.spaceId ?? undefined,
       title: doc.title,
       content: doc.plaintext,
-      url: `/app/${doc.workspaceId}/doc/${doc.id}`,
+      url: `/app/${doc.workspaceId}/docs?doc=${doc.id}`,
       createdAt: new Date(doc.createdAt).getTime(),
     }])
   }
@@ -90,6 +90,7 @@ export class SearchService implements OnModuleInit {
       .select({
         task: tasks,
         spaceId: spaces.id,
+        projectId: projects.id,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -100,7 +101,7 @@ export class SearchService implements OnModuleInit {
     const docRows = await this.db.select().from(docs).where(and(eq(docs.workspaceId, workspaceId), eq(docs.isArchived, false)))
 
     const payload: SearchDoc[] = [
-      ...taskRows.map(({ task, spaceId }) => ({
+      ...taskRows.map(({ task, spaceId, projectId }) => ({
         id: `task-${task.id}`,
         entityType: 'task' as const,
         workspaceId,
@@ -108,7 +109,7 @@ export class SearchService implements OnModuleInit {
         spaceId,
         title: task.title,
         content: task.description ?? '',
-        url: `/app/${workspaceId}/task/${task.id}`,
+        url: `/app/${workspaceId}/${spaceId}/${projectId}/${task.listId}?task=${task.id}`,
         createdAt: new Date(task.createdAt).getTime(),
       })),
       ...docRows.map((d) => ({
@@ -118,7 +119,7 @@ export class SearchService implements OnModuleInit {
         spaceId: d.spaceId ?? undefined,
         title: d.title,
         content: d.plaintext,
-        url: `/app/${workspaceId}/doc/${d.id}`,
+        url: `/app/${workspaceId}/docs?doc=${d.id}`,
         createdAt: new Date(d.createdAt).getTime(),
       })),
     ]
@@ -147,7 +148,7 @@ export class SearchService implements OnModuleInit {
     // Fallback: Postgres ILIKE
     const like = `%${trimmed}%`
     const taskHits = await this.db
-      .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId })
+      .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -177,14 +178,14 @@ export class SearchService implements OnModuleInit {
         entityType: 'task',
         title: t.title,
         content: (t.description ?? '').slice(0, 200),
-        url: `/app/${workspaceId}/task/${t.id}`,
+        url: `/app/${workspaceId}/${t.spaceId}/${t.projectId}/${t.listId}?task=${t.id}`,
       })),
       ...docHits.map((d) => ({
         id: `doc-${d.id}`,
         entityType: 'doc',
         title: d.title,
         content: d.plaintext.slice(0, 200),
-        url: `/app/${workspaceId}/doc/${d.id}`,
+        url: `/app/${workspaceId}/docs?doc=${d.id}`,
       })),
     ]
   }
