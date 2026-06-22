@@ -228,6 +228,43 @@ function canAdvance(step: Step, s: WizardState): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Per-field validation helpers — return an error string, or null when valid.
+// ---------------------------------------------------------------------------
+const EMAIL_RE = /^.+@.+\..+$/
+
+function validateFullName(value: string): string | null {
+  const v = value.trim()
+  if (!v) return 'Please enter your full name.'
+  if (v.length < 2) return 'Name must be at least 2 characters.'
+  return null
+}
+
+function validateEmail(value: string): string | null {
+  const v = value.trim()
+  if (!v) return 'Email is required.'
+  if (!EMAIL_RE.test(v)) return 'Enter a valid email address.'
+  return null
+}
+
+function validatePassword(value: string): string | null {
+  if (!value) return 'Password is required.'
+  if (value.length < 8) return 'Password must be at least 8 characters.'
+  return null
+}
+
+function validateWorkspaceName(value: string): string | null {
+  const v = value.trim()
+  if (!v) return 'Workspace name is required.'
+  if (v.length < 2) return 'Workspace name must be at least 2 characters.'
+  return null
+}
+
+function FieldError({ message }: { message: string | null }) {
+  if (!message) return null
+  return <p className="text-xs text-destructive">{message}</p>
+}
+
+// ---------------------------------------------------------------------------
 // STEP 0 — Account
 // ---------------------------------------------------------------------------
 function StepAccount({
@@ -237,6 +274,16 @@ function StepAccount({
   state: WizardState
   update: (p: Partial<WizardState>) => void
 }) {
+  const [touched, setTouched] = useState({
+    fullName: false,
+    email: false,
+    password: false,
+  })
+
+  const nameError = validateFullName(state.fullName)
+  const emailError = validateEmail(state.email)
+  const passwordError = validatePassword(state.password)
+
   return (
     <div className="space-y-6">
       <header className="space-y-1.5">
@@ -257,8 +304,11 @@ function StepAccount({
             leadingIcon={<User className="h-4 w-4" />}
             value={state.fullName}
             onChange={(e) => update({ fullName: e.target.value })}
+            onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
+            aria-invalid={touched.fullName && nameError ? true : undefined}
             autoFocus
           />
+          {touched.fullName && <FieldError message={nameError} />}
         </div>
         <div className="space-y-2">
           <Label htmlFor="email">Work email</Label>
@@ -269,7 +319,10 @@ function StepAccount({
             leadingIcon={<Mail className="h-4 w-4" />}
             value={state.email}
             onChange={(e) => update({ email: e.target.value })}
+            onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+            aria-invalid={touched.email && emailError ? true : undefined}
           />
+          {touched.email && <FieldError message={emailError} />}
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">Create a password</Label>
@@ -280,10 +333,16 @@ function StepAccount({
             leadingIcon={<Lock className="h-4 w-4" />}
             value={state.password}
             onChange={(e) => update({ password: e.target.value })}
+            onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+            aria-invalid={touched.password && passwordError ? true : undefined}
           />
-          <p className="text-xs text-muted-foreground">
-            Use 8+ characters with a mix of letters, numbers and symbols.
-          </p>
+          {touched.password && passwordError ? (
+            <FieldError message={passwordError} />
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Use 8+ characters with a mix of letters, numbers and symbols.
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -300,6 +359,14 @@ function StepWorkspace({
   state: WizardState
   update: (p: Partial<WizardState>) => void
 }) {
+  const [touched, setTouched] = useState({
+    workspaceName: false,
+    industry: false,
+    teamSize: false,
+  })
+
+  const workspaceNameError = validateWorkspaceName(state.workspaceName)
+
   function setName(name: string) {
     const slug = name
       .toLowerCase()
@@ -330,8 +397,11 @@ function StepWorkspace({
             leadingIcon={<Building2 className="h-4 w-4" />}
             value={state.workspaceName}
             onChange={(e) => setName(e.target.value)}
+            onBlur={() => setTouched((t) => ({ ...t, workspaceName: true }))}
+            aria-invalid={touched.workspaceName && workspaceNameError ? true : undefined}
             autoFocus
           />
+          {touched.workspaceName && <FieldError message={workspaceNameError} />}
         </div>
 
         {state.workspaceSlug && (
@@ -348,7 +418,10 @@ function StepWorkspace({
             <Label>What&apos;s your industry?</Label>
             <RadioGroup
               value={state.industry}
-              onValueChange={(v) => update({ industry: v })}
+              onValueChange={(v) => {
+                update({ industry: v })
+                setTouched((t) => ({ ...t, industry: true }))
+              }}
               className="grid gap-1.5"
             >
               {[
@@ -366,13 +439,19 @@ function StepWorkspace({
                 />
               ))}
             </RadioGroup>
+            {touched.industry && state.industry === '' && (
+              <FieldError message="Please select an industry." />
+            )}
           </div>
 
           <div className="space-y-2">
             <Label>Team size</Label>
             <RadioGroup
               value={state.teamSize}
-              onValueChange={(v) => update({ teamSize: v })}
+              onValueChange={(v) => {
+                update({ teamSize: v })
+                setTouched((t) => ({ ...t, teamSize: true }))
+              }}
               className="grid gap-1.5"
             >
               {['Just me', '2–10', '11–50', '51–200', '200+'].map((s) => (
@@ -384,6 +463,9 @@ function StepWorkspace({
                 />
               ))}
             </RadioGroup>
+            {touched.teamSize && state.teamSize === '' && (
+              <FieldError message="Please select a team size." />
+            )}
           </div>
         </div>
       </div>
@@ -521,9 +603,21 @@ function StepInvites({
 }) {
   const [emailDraft, setEmailDraft] = useState('')
   const [roleDraft, setRoleDraft] = useState<Invitee['orgRole']>('member')
+  const [emailTouched, setEmailTouched] = useState(false)
+
+  const trimmedDraft = emailDraft.trim()
+  const draftError =
+    trimmedDraft === ''
+      ? null
+      : !EMAIL_RE.test(trimmedDraft)
+        ? 'Enter a valid email address.'
+        : state.invites.some((i) => i.email === trimmedDraft)
+          ? 'This email is already on the list.'
+          : null
 
   function add() {
     const e = emailDraft.trim()
+    setEmailTouched(true)
     if (!/^.+@.+\..+$/.test(e)) {
       toast.error('That doesn\'t look like a valid email')
       return
@@ -543,6 +637,7 @@ function StepInvites({
       ],
     })
     setEmailDraft('')
+    setEmailTouched(false)
   }
 
   function remove(email: string) {
@@ -565,13 +660,15 @@ function StepInvites({
           e.preventDefault()
           add()
         }}
-        className="grid gap-2 sm:grid-cols-[1fr_180px_auto]"
+        className="grid gap-x-2 gap-y-1.5 sm:grid-cols-[1fr_180px_auto]"
       >
         <Input
           placeholder="teammate@company.com"
           leadingIcon={<Mail className="h-4 w-4" />}
           value={emailDraft}
           onChange={(e) => setEmailDraft(e.target.value)}
+          onBlur={() => setEmailTouched(true)}
+          aria-invalid={emailTouched && draftError ? true : undefined}
         />
         <select
           value={roleDraft}
@@ -587,6 +684,11 @@ function StepInvites({
         <Button type="submit" variant="outline">
           <Plus className="h-4 w-4" /> Add
         </Button>
+        {emailTouched && draftError && (
+          <div className="sm:col-span-3">
+            <FieldError message={draftError} />
+          </div>
+        )}
       </form>
 
       {/* Role explanation */}

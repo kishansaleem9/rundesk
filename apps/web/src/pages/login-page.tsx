@@ -15,6 +15,38 @@ type SsoLookupResponse = {
   connection: { workspaceId: string; provider: 'oidc' | 'saml'; displayName: string } | null
 }
 
+// Per-field validation helpers — return an error string, or null when valid.
+const EMAIL_RE = /^.+@.+\..+$/
+
+function validateEmail(value: string): string | null {
+  const v = value.trim()
+  if (!v) return 'Email is required.'
+  if (!EMAIL_RE.test(v)) return 'Enter a valid email address.'
+  return null
+}
+
+function validatePassword(value: string): string | null {
+  if (!value) return 'Password is required.'
+  return null
+}
+
+function validateNewPassword(value: string): string | null {
+  if (!value) return 'Password is required.'
+  if (value.length < 8) return 'Password must be at least 8 characters.'
+  return null
+}
+
+function validateConfirmPassword(value: string, original: string): string | null {
+  if (!value) return 'Please confirm your password.'
+  if (value !== original) return 'Passwords do not match.'
+  return null
+}
+
+function FieldError({ message }: { message: string | null }) {
+  if (!message) return null
+  return <p className="text-xs text-destructive">{message}</p>
+}
+
 type LoginResponse = {
   accessToken: string
   refreshToken: string
@@ -41,6 +73,17 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [ssoHint, setSsoHint] = useState<SsoLookupResponse['connection']>(null)
+  const [touched, setTouched] = useState({
+    email: false,
+    password: false,
+    newPassword: false,
+    confirmPassword: false,
+  })
+
+  const emailError = validateEmail(email)
+  const passwordError = validatePassword(password)
+  const newPasswordError = validateNewPassword(newPassword)
+  const confirmPasswordError = validateConfirmPassword(confirmPassword, newPassword)
   const showSeededLogins =
     import.meta.env.DEV ||
     String(import.meta.env.VITE_SHOW_SEEDED_LOGINS).toLowerCase() === 'true'
@@ -132,12 +175,9 @@ export function LoginPage() {
       setError('Missing reset token')
       return
     }
-    if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters')
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      setError('Passwords do not match')
+    // Surface field-level problems inline rather than in the shared block.
+    if (newPasswordError || confirmPasswordError) {
+      setTouched((t) => ({ ...t, newPassword: true, confirmPassword: true }))
       return
     }
     setLoading(true)
@@ -274,9 +314,12 @@ export function LoginPage() {
                   leadingIcon={<Mail className="h-4 w-4" />}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                  aria-invalid={mode !== 'reset' && touched.email && emailError ? true : undefined}
                   placeholder="you@company.com"
                   disabled={mode === 'reset'}
                 />
+                {mode !== 'reset' && touched.email && <FieldError message={emailError} />}
               </div>
 
               {mode === 'login' && (
@@ -298,8 +341,11 @@ export function LoginPage() {
                     leadingIcon={<Lock className="h-4 w-4" />}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+                    aria-invalid={touched.password && passwordError ? true : undefined}
                     placeholder="••••••••"
                   />
+                  {touched.password && <FieldError message={passwordError} />}
                 </div>
               )}
 
@@ -315,8 +361,11 @@ export function LoginPage() {
                       leadingIcon={<Lock className="h-4 w-4" />}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
+                      onBlur={() => setTouched((t) => ({ ...t, newPassword: true }))}
+                      aria-invalid={touched.newPassword && newPasswordError ? true : undefined}
                       placeholder="Minimum 8 characters"
                     />
+                    {touched.newPassword && <FieldError message={newPasswordError} />}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="confirmPassword">Confirm password</Label>
@@ -328,8 +377,11 @@ export function LoginPage() {
                       leadingIcon={<Lock className="h-4 w-4" />}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
+                      onBlur={() => setTouched((t) => ({ ...t, confirmPassword: true }))}
+                      aria-invalid={touched.confirmPassword && confirmPasswordError ? true : undefined}
                       placeholder="Repeat password"
                     />
+                    {touched.confirmPassword && <FieldError message={confirmPasswordError} />}
                   </div>
                 </>
               )}
