@@ -587,9 +587,20 @@ async function main() {
   const chans = await call('GET',`/workspaces/${WS_ID}/chat/channels`,{ token:TOKEN })
   rep('GET /workspaces/:ws/chat/channels', chans)
   {
-    const ch = await call('POST',`/workspaces/${WS_ID}/chat/channels`,{ token:TOKEN, body:{ name:`zz-master-${Date.now()}` } })
-    if (rep('POST /workspaces/:ws/chat/channels', ch)) {
-      const channelId = ch.data?.id
+    // There is no delete-channel API, so reuse a single stable channel across
+    // runs instead of creating a fresh one each time (which would slowly
+    // clutter the workspace). Create it only if it doesn't already exist.
+    const existing = Array.isArray(chans.data) ? chans.data.find(c=>c?.name==='zz-master-test') : null
+    let channelId = existing?.id
+    if (channelId) {
+      skp('POST …/chat/channels — reusing existing zz-master-test channel')
+      await call('POST',`/chat/channels/${channelId}/join`,{ token:TOKEN })
+    } else {
+      const ch = await call('POST',`/workspaces/${WS_ID}/chat/channels`,{ token:TOKEN, body:{ name:'zz-master-test' } })
+      rep('POST /workspaces/:ws/chat/channels', ch)
+      channelId = ch.data?.id
+    }
+    if (channelId) {
       const msg = await call('POST',`/chat/channels/${channelId}/messages`,{ token:TOKEN, body:{ body:'master test message' } })
       if (rep('POST /chat/channels/:id/messages', msg)) {
         const messageId = msg.data?.id
@@ -607,7 +618,6 @@ async function main() {
         rep('DELETE /chat/messages/:id', await call('DELETE',`/chat/messages/${messageId}`,{ token:TOKEN }))
       }
       rep('POST /chat/channels/:id/leave', await call('POST',`/chat/channels/${channelId}/leave`,{ token:TOKEN }))
-      wrn('chat: the test channel cannot be auto-deleted (no delete-channel API) — it is left empty')
     }
   }
 
@@ -800,8 +810,9 @@ cat <<TXT
   • This suite hit every backend module live. Anything marked "gated" needs an
     admin login; "reachable" probes routes whose real action has side-effects
     (sending email, importing data, seeding) and are intentionally not executed.
-  • A leftover empty chat channel "zz-master-*" may remain (the API has no
-    delete-channel endpoint). Everything else is cleaned up automatically.
+  • A single reusable empty chat channel "zz-master-test" is kept between runs
+    (the API has no delete-channel endpoint, so it is reused rather than
+    re-created). Everything else is cleaned up automatically.
   • Frontend-only behaviours still to eyeball in the app:
       – Member login hides "Settings"; /settings + /app/admin redirect away.
       – @-mentions dropdown in task descriptions & chat.
