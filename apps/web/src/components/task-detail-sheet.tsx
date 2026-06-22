@@ -571,6 +571,25 @@ function OverviewPanel({
     },
   })
 
+  const patchTask = useMutation({
+    mutationFn: (patch: Record<string, unknown>) =>
+      api(`/tasks/${taskId}`, { method: 'PATCH', body: patch }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : 'Could not update task')
+    },
+  })
+
+  const statusesQuery = useQuery({
+    queryKey: ['list-statuses', detail.listId],
+    queryFn: () => api<Array<{ key: string; name: string }>>(`/lists/${detail.listId}/statuses`),
+    enabled: Boolean(detail.listId),
+  })
+  const statusOptions = statusesQuery.data ?? []
+  const toDateInput = (d: string | null | undefined) => (d ? new Date(d).toISOString().slice(0, 10) : '')
+
   const commitDescription = () => {
     const trimmed = descriptionDraft.trim()
     const next = trimmed === '' ? null : descriptionDraft
@@ -650,24 +669,55 @@ function OverviewPanel({
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Status">
-          <Badge variant="secondary" className="capitalize">
-            {detail.status.replace('_', ' ')}
-          </Badge>
+          <select
+            value={detail.status}
+            onChange={(e) => patchTask.mutate({ status: e.target.value })}
+            disabled={patchTask.isPending}
+            className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          >
+            {/* Keep the current value selectable even if statuses are still loading */}
+            {statusOptions.length === 0 && <option value={detail.status}>{detail.status.replace('_', ' ')}</option>}
+            {statusOptions.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.name}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="Priority">
-          <Badge variant="outline" className={cn('capitalize', priorityColor(detail.priority))}>
-            {detail.priority}
-          </Badge>
+          <select
+            value={detail.priority}
+            onChange={(e) => patchTask.mutate({ priority: e.target.value })}
+            disabled={patchTask.isPending}
+            className={cn(
+              'w-full h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50',
+              priorityColor(detail.priority),
+            )}
+          >
+            {(['urgent', 'high', 'normal', 'low'] as const).map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="Due date">
-          <span className="text-sm">
-            {detail.dueDate ? new Date(detail.dueDate).toLocaleDateString() : '—'}
-          </span>
+          <input
+            type="date"
+            value={toDateInput(detail.dueDate)}
+            onChange={(e) => patchTask.mutate({ dueDate: e.target.value || null })}
+            disabled={patchTask.isPending}
+            className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          />
         </Field>
         <Field label="Start date">
-          <span className="text-sm">
-            {detail.startDate ? new Date(detail.startDate).toLocaleDateString() : '—'}
-          </span>
+          <input
+            type="date"
+            value={toDateInput(detail.startDate)}
+            onChange={(e) => patchTask.mutate({ startDate: e.target.value || null })}
+            disabled={patchTask.isPending}
+            className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          />
         </Field>
       </div>
 
