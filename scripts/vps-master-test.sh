@@ -179,14 +179,17 @@ async function main() {
       onCleanup('role', ()=>call('DELETE',`/workspaces/${WS_ID}/roles/${roleId}`,{ token:TOKEN }))
       rep('GET …/roles/:id', await call('GET',`/workspaces/${WS_ID}/roles/${roleId}`,{ token:TOKEN }))
       rep('GET …/roles/:id/assignees', await call('GET',`/workspaces/${WS_ID}/roles/${roleId}/assignees`,{ token:TOKEN }))
-      if (USER_ID) {
-        const asg = await call('POST',`/workspaces/${WS_ID}/members/${USER_ID}/roles/${roleId}`,{ token:TOKEN })
+      // role assignment is keyed by the workspace MEMBER row id, not the user id
+      const mem = await call('GET',`/workspaces/${WS_ID}/members`,{ token:TOKEN })
+      const memberId = Array.isArray(mem.data) ? (mem.data.find(m=>m.userId===USER_ID)?.workspaceMemberId) : null
+      if (memberId) {
+        const asg = await call('POST',`/workspaces/${WS_ID}/members/${memberId}/roles/${roleId}`,{ token:TOKEN })
         if (good(asg)) { ok('POST …/members/:id/roles/:roleId (assign)')
-          rep('GET …/members/:id/roles', await call('GET',`/workspaces/${WS_ID}/members/${USER_ID}/roles`,{ token:TOKEN }))
-          rep('DELETE …/members/:id/roles/:roleId (unassign)', await call('DELETE',`/workspaces/${WS_ID}/members/${USER_ID}/roles/${roleId}`,{ token:TOKEN }))
+          rep('GET …/members/:id/roles', await call('GET',`/workspaces/${WS_ID}/members/${memberId}/roles`,{ token:TOKEN }))
+          rep('DELETE …/members/:id/roles/:roleId (unassign)', await call('DELETE',`/workspaces/${WS_ID}/members/${memberId}/roles/${roleId}`,{ token:TOKEN }))
         } else if (!IS_WS_ADMIN && asg.status===403) skp('member role assign — gated 403 ✓')
-        else wrn(`member role assign → ${asg.status}`)
-      }
+        else bad(`member role assign → ${asg.status} ${clip(asg.json)}`)
+      } else skp('member role assign — could not resolve own workspace member id')
     }
   }
 
@@ -368,7 +371,7 @@ async function main() {
       }
       const sh = await call('POST',`/docs/${docId}/share`,{ token:TOKEN })
       if (rep('POST /docs/:id/share (enable public)', sh)) {
-        const slug = sh.data?.publicShareSlug ?? sh.data?.slug
+        const slug = sh.data?.publicShareId ?? sh.data?.publicShareSlug ?? sh.data?.slug
         if (slug) rep('GET /public/docs/:slug (anonymous)', await call('GET',`/public/docs/${slug}`))
         else skp('public doc fetch — share response had no slug')
         rep('DELETE /docs/:id/share (disable public)', await call('DELETE',`/docs/${docId}/share`,{ token:TOKEN }))
