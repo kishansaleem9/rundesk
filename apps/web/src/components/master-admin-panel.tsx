@@ -1,12 +1,10 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Badge, Button, Card, Input, Switch, Textarea } from '@rundesk/ui'
+import { Badge, Button, Card, Input, Switch } from '@rundesk/ui'
 import {
   Building2,
   CreditCard,
-  Database,
-  Download,
   Lock,
   Receipt,
   Search,
@@ -54,8 +52,6 @@ export function MasterAdminPanel() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null)
-  const [seatDelta, setSeatDelta] = useState('0')
-  const [internalNote, setInternalNote] = useState('')
   const [impersonatedOrgId, setImpersonatedOrgId] = useState<string | null>(null)
   const orgsQuery = useQuery({
     queryKey: ['admin-organizations'],
@@ -217,67 +213,7 @@ export function MasterAdminPanel() {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Card className="p-4 space-y-3">
-              <h3 className="font-semibold flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-accent" />
-                Subscription Management
-              </h3>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60 text-left">Upgrade to Enterprise</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60 text-left">Downgrade Plan</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60 text-left">Pause Subscription</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60 text-left">Cancel at Renewal</button>
-              </div>
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
-                  <div className="text-xs text-muted-foreground mb-1">Seat Adjustment</div>
-                  <Input value={seatDelta} onChange={(e) => setSeatDelta(e.target.value)} placeholder="+10 or -5" />
-                </div>
-                <Button>Apply Seats</Button>
-              </div>
-            </Card>
-
-            <Card className="p-4 space-y-3">
-              <h3 className="font-semibold flex items-center gap-2">
-                <Receipt className="h-4 w-4 text-accent" />
-                Invoicing & Billing
-              </h3>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60">Generate Invoice</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60">Retry Payment</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60">Apply Credit Note</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60">Send Reminder</button>
-              </div>
-              <Button variant="outline" className="w-full">
-                <Download className="h-4 w-4 mr-1" />
-                Export Billing History (CSV)
-              </Button>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Card className="p-4 space-y-3">
-              <h3 className="font-semibold flex items-center gap-2">
-                <Database className="h-4 w-4 text-accent" />
-                Tenant Data Controls
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60 text-left">View Data Usage</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60 text-left">Export Full Tenant Data</button>
-                <button className="rounded border border-border px-3 py-2 hover:bg-card/60 text-left">Archive Tenant</button>
-                <button className="rounded border border-destructive/50 px-3 py-2 hover:bg-destructive/10 text-left text-destructive">
-                  Delete Tenant (Hard)
-                </button>
-              </div>
-              <Textarea
-                rows={3}
-                value={internalNote}
-                onChange={(e) => setInternalNote(e.target.value)}
-                placeholder="Internal operator note..."
-              />
-            </Card>
-
+          <div className="grid grid-cols-1 gap-5">
             <Card className="p-4 space-y-3">
               <h3 className="font-semibold flex items-center gap-2">
                 <Lock className="h-4 w-4 text-accent" />

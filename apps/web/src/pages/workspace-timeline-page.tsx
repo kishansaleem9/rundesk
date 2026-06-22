@@ -459,13 +459,6 @@ function TaskRow({
             }}
           />
         </div>
-        {task.dueDate && (
-          <div
-            className="absolute top-1/2 -translate-y-1/2 h-0.5 bg-white/70"
-            style={{ left: Math.max(0, left - 20), width: 18 }}
-            title="Dependency indicator"
-          />
-        )}
       </div>
     </div>
   )

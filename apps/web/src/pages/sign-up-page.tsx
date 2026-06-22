@@ -7,7 +7,6 @@ import {
   Label,
   LogoWordmark,
   Progress,
-  Separator,
   RadioGroup,
   RadioGroupItem,
   Checkbox,
@@ -248,21 +247,6 @@ function StepAccount({
           Start with the basics — we&apos;ll have your workspace ready in under two minutes.
         </p>
       </header>
-
-      <div className="grid gap-2">
-        <Button variant="glass" size="lg" className="w-full justify-center">
-          <GoogleIcon /> Continue with Google
-        </Button>
-        <Button variant="glass" size="lg" className="w-full justify-center">
-          <MicrosoftIcon /> Continue with Microsoft
-        </Button>
-      </div>
-
-      <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
-        <Separator className="flex-1" />
-        or sign up with email
-        <Separator className="flex-1" />
-      </div>
 
       <div className="space-y-4">
         <div className="space-y-2">
@@ -687,27 +671,5 @@ function StepDone({ state }: { state: WizardState }) {
         </Button>
       </div>
     </div>
-  )
-}
-
-// Inline icons (so this file is self-contained)
-function GoogleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <path fill="#EA4335" d="M12 10.2v3.8h5.4c-.2 1.4-1.7 4-5.4 4-3.2 0-5.9-2.7-5.9-6s2.7-6 5.9-6c1.8 0 3.1.8 3.8 1.4l2.6-2.5C16.7 3.5 14.6 2.5 12 2.5 6.7 2.5 2.5 6.8 2.5 12s4.2 9.5 9.5 9.5c5.5 0 9.1-3.9 9.1-9.3 0-.6 0-1.1-.1-1.6L12 10.2z" />
-      <path fill="#34A853" d="M3.6 7.6l3.1 2.3C7.6 8 9.6 6 12 6c1.8 0 3.1.8 3.8 1.4l2.6-2.5C16.7 3.5 14.6 2.5 12 2.5 8.4 2.5 5.3 4.5 3.6 7.6z" />
-      <path fill="#FBBC04" d="M12 21.5c2.6 0 4.7-.9 6.3-2.3l-3-2.4c-.8.6-2 1.2-3.3 1.2-2.7 0-4.9-1.7-5.7-4.1l-3.1 2.4c1.5 3 4.7 5.2 8.8 5.2z" />
-      <path fill="#4285F4" d="M21.1 12.2c0-.6 0-1.1-.1-1.6H12v3.8h5.4c-.2 1.4-1.7 4-5.4 4l3 2.4c2.4-2.2 3.9-5.4 3.9-8.6z" />
-    </svg>
-  )
-}
-function MicrosoftIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-      <path fill="#F25022" d="M3 3h8v8H3z" />
-      <path fill="#7FBA00" d="M13 3h8v8h-8z" />
-      <path fill="#00A4EF" d="M3 13h8v8H3z" />
-      <path fill="#FFB900" d="M13 13h8v8h-8z" />
-    </svg>
   )
 }

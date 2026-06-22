@@ -336,7 +336,7 @@ export function MindMapsPage() {
             <Badge variant="secondary" className="ml-1">Live</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Brainstorm at the speed of thought. Drop nodes, connect them, convert any branch into a task.
+            Brainstorm at the speed of thought. Drop nodes, connect them.
           </p>
         </div>
         <Button

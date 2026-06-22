@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
-import { Bell, AtSign, MessageSquare, CheckSquare, UserPlus, RefreshCw } from 'lucide-react'
+import { Bell, AtSign, MessageSquare, UserPlus, RefreshCw } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { MentionText } from '../components/mention-text'
@@ -9,7 +9,18 @@ import { useMentionNames } from '../hooks/use-mention-names'
 
 type Notification = {
   id: string
-  type: 'mention' | 'comment' | 'task_assigned' | 'task_completed' | 'watcher' | string
+  type:
+    | 'task_assigned'
+    | 'task_mentioned'
+    | 'task_commented'
+    | 'task_due_soon'
+    | 'task_overdue'
+    | 'task_status_changed'
+    | 'task_updated'
+    | 'chat_message'
+    | 'doc_mentioned'
+    | 'doc_commented'
+    | string
   title: string
   body?: string | null
   readAt?: string | null
@@ -19,14 +30,30 @@ type Notification = {
 }
 
 const TYPE_META: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  mention: { icon: AtSign, color: 'text-accent', label: 'Mentioned you' },
-  comment: { icon: MessageSquare, color: 'text-blue-500', label: 'Commented' },
+  task_mentioned: { icon: AtSign, color: 'text-accent', label: 'Mentioned you' },
+  task_commented: { icon: MessageSquare, color: 'text-blue-500', label: 'Commented' },
+  doc_mentioned: { icon: AtSign, color: 'text-accent', label: 'Mentioned you' },
+  doc_commented: { icon: MessageSquare, color: 'text-blue-500', label: 'Commented' },
   task_assigned: { icon: UserPlus, color: 'text-emerald-500', label: 'Assigned you' },
-  task_completed: { icon: CheckSquare, color: 'text-emerald-600', label: 'Completed' },
-  watcher: { icon: Bell, color: 'text-amber-500', label: 'Watching' },
+  task_due_soon: { icon: Bell, color: 'text-amber-500', label: 'Due soon' },
+  task_overdue: { icon: Bell, color: 'text-red-500', label: 'Overdue' },
   chat_message: { icon: MessageSquare, color: 'text-indigo-500', label: 'New message' },
   task_status_changed: { icon: RefreshCw, color: 'text-cyan-500', label: 'Status changed' },
   task_updated: { icon: RefreshCw, color: 'text-cyan-500', label: 'Task updated' },
+}
+
+// Comment/mention notification types the backend actually emits (see
+// apps/api notifications.service.ts NotificationType). Resolve only makes
+// sense for these.
+const COMMENT_OR_MENTION_TYPES = new Set([
+  'task_mentioned',
+  'task_commented',
+  'doc_mentioned',
+  'doc_commented',
+])
+
+function isCommentOrMention(type: string): boolean {
+  return COMMENT_OR_MENTION_TYPES.has(type)
 }
 
 export function InboxPage() {
@@ -133,7 +160,7 @@ export function InboxPage() {
                           if (destination) navigate({ to: destination as any })
                         }}
                         onResolve={
-                          n.type === 'task_commented' || n.type === 'task_mentioned'
+                          isCommentOrMention(n.type)
                             ? async () => {
                                 if (!n.readAt) await markRead.mutateAsync(n.id)
                               }
@@ -160,7 +187,7 @@ export function InboxPage() {
                           if (destination) navigate({ to: destination as any })
                         }}
                         onResolve={
-                          n.type === 'task_commented' || n.type === 'task_mentioned'
+                          isCommentOrMention(n.type)
                             ? async () => {
                                 if (!n.readAt) await markRead.mutateAsync(n.id)
                               }
