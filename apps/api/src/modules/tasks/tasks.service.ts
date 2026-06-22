@@ -1366,6 +1366,18 @@ export class TasksService {
           listId: taskRow.listId,
           newValue: userId,
         })
+        // The automations UI exposes this as the "Task assignee changes" trigger.
+        // Fire it directly (not via fireTaskEvent) to avoid a duplicate webhook.
+        void this.automations
+          .fire('task.assignee_changed', {
+            workspaceId: ctx.workspaceId,
+            taskId,
+            userId: actorId,
+            projectId: ctx.projectId,
+            listId: taskRow.listId,
+            newValue: userId,
+          })
+          .catch(() => {})
 
         // Don't notify someone they assigned themselves
         if (userId !== actorId) {
@@ -1453,6 +1465,25 @@ export class TasksService {
 
     // Fire comment + mention notifications (best-effort)
     void this.notifyComment(taskId, authorId, body, finalMentions)
+
+    // Fire the "Comment is added to task" automation trigger (best-effort).
+    void (async () => {
+      try {
+        const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+        if (!taskRow) return
+        const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+        if (!ctx) return
+        await this.automations.fire('task.comment_added', {
+          workspaceId: ctx.workspaceId,
+          taskId,
+          userId: authorId,
+          projectId: ctx.projectId,
+          listId: taskRow.listId,
+        })
+      } catch {
+        /* best-effort */
+      }
+    })()
 
     return hydrated
   }

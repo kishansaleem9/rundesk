@@ -1,5 +1,6 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { and, eq, desc } from 'drizzle-orm'
+import { Cron, CronExpression } from '@nestjs/schedule'
+import { and, eq, desc, lte, sql } from 'drizzle-orm'
 import {
   automations,
   automationRuns,
@@ -8,6 +9,9 @@ import {
   taskWatchers,
   workspaceMembers,
   notifications,
+  lists,
+  projects,
+  spaces,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -26,6 +30,39 @@ type TriggerContext = {
 @Injectable()
 export class AutomationsService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
+
+  // ─── Time-based triggers ───────────────────────────────────────────────────
+  // Fires the "Task becomes overdue" / "Task due date passes" automation
+  // triggers once a day. These have no event source elsewhere (they're not
+  // user actions), so the engine drives them itself.
+  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  async runOverdueTriggers(): Promise<void> {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const rows = await this.db
+      .select({
+        taskId: tasks.id,
+        workspaceId: spaces.workspaceId,
+        projectId: projects.id,
+        listId: lists.id,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(tasks.isArchived, false),
+          lte(tasks.dueDate, today),
+          sql`${tasks.statusCategory} <> 'closed'`,
+        ),
+      )
+    for (const r of rows) {
+      const ctx = { workspaceId: r.workspaceId, taskId: r.taskId, projectId: r.projectId, listId: r.listId }
+      await this.fire('task.overdue', ctx).catch(() => {})
+      await this.fire('task.due_passed', ctx).catch(() => {})
+    }
+  }
 
   // ─── CRUD ─────────────────────────────────────────────────────────────────
 
