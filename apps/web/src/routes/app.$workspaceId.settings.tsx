@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { getWorkspaceRole } from '../hooks/use-workspace-role'
 
 export const Route = createFileRoute('/app/$workspaceId/settings')({
   beforeLoad: ({ params }) => {
@@ -8,6 +9,10 @@ export const Route = createFileRoute('/app/$workspaceId/settings')({
     )
     if (!ok) {
       throw redirect({ to: '/app/profile' })
+    }
+    // Workspace settings (branding, members, integrations, security) are admin-only.
+    if (!getWorkspaceRole(workspaceId).isAdmin) {
+      throw redirect({ to: '/app' })
     }
   },
 })

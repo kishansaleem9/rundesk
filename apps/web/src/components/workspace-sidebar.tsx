@@ -29,6 +29,7 @@ import {
 import { Button, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 function isUuidLike(value: string | undefined): value is string {
   if (!value) return false
@@ -133,6 +134,7 @@ export function WorkspaceSidebar() {
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : undefined
+  const { isAdmin } = useWorkspaceRole(workspaceId)
   const [openSwitcher, setOpenSwitcher] = useState(false)
   const [spacesExpanded, setSpacesExpanded] = useState(true)
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
@@ -509,7 +511,9 @@ export function WorkspaceSidebar() {
                 <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label="Integrations" compact />
                 <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label="Mind maps" compact />
                 <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label="Clips" compact />
-                <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label="Settings" compact />
+                {isAdmin && (
+                  <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label="Settings" compact />
+                )}
               </div>
             )}
           </div>
@@ -678,7 +682,9 @@ export function WorkspaceSidebar() {
             <DockLink to="/app/$workspaceId/ai" params={{ workspaceId: workspaceId! }} icon={Bot} label="AI" />
             <DockLink to="/app/$workspaceId/docs" params={{ workspaceId: workspaceId! }} icon={FileText} label="Docs" />
             <DockLink to="/app/$workspaceId/dashboard" params={{ workspaceId: workspaceId! }} icon={LayoutDashboard} label="Dashboards" />
-            <DockLink to="/app/$workspaceId/settings" params={{ workspaceId: workspaceId! }} icon={Settings} label="Settings" />
+            {isAdmin && (
+              <DockLink to="/app/$workspaceId/settings" params={{ workspaceId: workspaceId! }} icon={Settings} label="Settings" />
+            )}
             <button
               className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] text-muted-foreground border border-border/60 ml-1 hover:bg-accent/15"
               title="Dock settings"

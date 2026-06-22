@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet, useMatches, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, Outlet, redirect, useMatches, useNavigate } from '@tanstack/react-router'
 import { Badge, Button } from '@rundesk/ui'
 import { ShieldCheck, ScrollText, Users, Settings, Webhook, Megaphone, Crown, LogOut, Plug } from 'lucide-react'
 import { MasterAdminPanel } from '../components/master-admin-panel'
@@ -6,6 +6,12 @@ import { useAuthStore } from '../store/auth'
 import { api, ApiError } from '../lib/api'
 
 export const Route = createFileRoute('/app/admin')({
+  // The super-admin console is platform-level — only super_admins may enter.
+  beforeLoad: () => {
+    if (useAuthStore.getState().user?.role !== 'super_admin') {
+      throw redirect({ to: '/app' })
+    }
+  },
   component: AdminShell,
 })
 
