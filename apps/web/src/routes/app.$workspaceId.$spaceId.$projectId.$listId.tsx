@@ -84,6 +84,41 @@ const PRIORITY_COLORS: Record<TaskPriority, string> = {
   normal: 'text-blue-500',
   low: 'text-gray-400',
 }
+const PRIORITY_OPTIONS: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
+
+// Converts a native <input type="date"> value (yyyy-MM-dd, or '') into an ISO
+// date string the backend's @IsDateString() accepts, or undefined when blank so
+// the field is omitted from the create body entirely.
+function dateInputToIso(value: string): string | undefined {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const parsed = new Date(trimmed)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString()
+}
+
+// Builds the POST /tasks body, defaulting priority to 'normal' and omitting
+// blank optional dates (an empty string would fail @IsDateString validation).
+function buildCreateTaskBody(input: {
+  listId: string
+  title: string
+  status?: string
+  priority?: TaskPriority
+  dueDate?: string
+  startDate?: string
+}): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    listId: input.listId,
+    title: input.title,
+    priority: input.priority ?? 'normal',
+  }
+  if (input.status) body.status = input.status
+  const dueDate = dateInputToIso(input.dueDate ?? '')
+  if (dueDate) body.dueDate = dueDate
+  const startDate = dateInputToIso(input.startDate ?? '')
+  if (startDate) body.startDate = startDate
+  return body
+}
+
 const VIRTUALIZE_THRESHOLD = 120
 const TASK_ROW_ESTIMATE_PX = 46
 const BOARD_VIRTUALIZE_THRESHOLD = 80
@@ -181,6 +216,9 @@ function ListDetail() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
+  const [newTaskDueDate, setNewTaskDueDate] = useState('')
+  const [newTaskStartDate, setNewTaskStartDate] = useState('')
   const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table'>('list')
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
   const [sortBy, setSortBy] = useState<'created' | 'due' | 'priority'>('created')
@@ -249,16 +287,23 @@ function ListDetail() {
     try {
       await api('/tasks', {
         method: 'POST',
-        body: JSON.stringify({
-          listId,
-          title: newTaskTitle,
-          priority: 'normal',
-          // Status intentionally omitted: backend picks the list's first
-          // open status, which may differ from the legacy "todo" default.
-        }),
+        // Status intentionally omitted: backend picks the list's first
+        // open status, which may differ from the legacy "todo" default.
+        body: JSON.stringify(
+          buildCreateTaskBody({
+            listId,
+            title: newTaskTitle,
+            priority: newTaskPriority,
+            dueDate: newTaskDueDate,
+            startDate: newTaskStartDate,
+          }),
+        ),
       })
 
       setNewTaskTitle('')
+      setNewTaskPriority('normal')
+      setNewTaskDueDate('')
+      setNewTaskStartDate('')
       await refetch()
     } catch (error) {
       console.error('Failed to create task', error)
@@ -446,6 +491,25 @@ function ListDetail() {
               onKeyPress={(e) => e.key === 'Enter' && handleCreateTask()}
               className="h-8 w-full sm:w-64 text-[13px] border-border/80 focus-visible:ring-violet-500/25"
             />
+            <WorkFilterSelect
+              value={newTaskPriority}
+              onChange={(v) => setNewTaskPriority(v as TaskPriority)}
+              className="h-8 capitalize"
+            >
+              {PRIORITY_OPTIONS.map((p) => (
+                <option key={p} value={p} className="capitalize">
+                  {p}
+                </option>
+              ))}
+            </WorkFilterSelect>
+            <Input
+              type="date"
+              value={newTaskDueDate}
+              onChange={(e) => setNewTaskDueDate(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleCreateTask()}
+              title="Due date"
+              className="h-8 w-[9.5rem] text-[13px] border-border/80 focus-visible:ring-violet-500/25"
+            />
             <Button size="sm" className="h-8 bg-violet-600 hover:bg-violet-700 text-white" onClick={handleCreateTask}>
               Add task
             </Button>
@@ -623,10 +687,19 @@ function ListDetail() {
               })
               await refetch()
             }}
-            onAddTask={async (status, title) => {
+            onAddTask={async (status, title, opts) => {
               await api('/tasks', {
                 method: 'POST',
-                body: JSON.stringify({ listId, title, status, priority: 'normal' }),
+                body: JSON.stringify(
+                  buildCreateTaskBody({
+                    listId,
+                    title,
+                    status,
+                    priority: opts?.priority,
+                    dueDate: opts?.dueDate,
+                    startDate: opts?.startDate,
+                  }),
+                ),
               })
               await refetch()
             }}
@@ -752,7 +825,11 @@ function GroupedListView({
   onToggleSelect: (taskId: string, additive: boolean) => void
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
-  onAddTask: (status: TaskStatus, title: string) => Promise<void> | void
+  onAddTask: (
+    status: TaskStatus,
+    title: string,
+    opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string },
+  ) => Promise<void> | void
 }) {
   const ordered = useOrderedStatuses()
   const grouped = useMemo(() => {
@@ -865,7 +942,7 @@ function GroupedListView({
                     />
                   ))
                 )}
-                <InlineAddTask status={status} onAdd={(title) => onAddTask(status, title)} />
+                <InlineAddTask status={status} onAdd={(title, opts) => onAddTask(status, title, opts)} />
               </div>
             )}
           </section>
@@ -1052,20 +1129,45 @@ function InlineAddTask({
   onAdd,
 }: {
   status: TaskStatus
-  onAdd: (title: string) => Promise<void> | void
+  onAdd: (
+    title: string,
+    opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string },
+  ) => Promise<void> | void
 }) {
   const meta = useStatusMeta(status)
   const [value, setValue] = useState('')
+  const [priority, setPriority] = useState<TaskPriority>('normal')
+  const [dueDate, setDueDate] = useState('')
   const [active, setActive] = useState(false)
+  // Guards the field-level onBlur from collapsing the composer while focus is
+  // simply moving between the title/priority/date controls in the same row.
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const reset = () => {
+    setValue('')
+    setPriority('normal')
+    setDueDate('')
+  }
 
   const submit = async () => {
     const trimmed = value.trim()
     if (!trimmed) {
       setActive(false)
+      reset()
       return
     }
-    await onAdd(trimmed)
-    setValue('')
+    await onAdd(trimmed, { priority, dueDate })
+    reset()
+  }
+
+  const onFieldBlur = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current)
+    closeTimer.current = setTimeout(() => {
+      void submit()
+    }, 120)
+  }
+  const cancelClose = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current)
   }
 
   if (!active) {
@@ -1087,20 +1189,52 @@ function InlineAddTask({
         autoFocus
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        onBlur={() => {
-          void submit()
-        }}
+        onFocus={cancelClose}
+        onBlur={onFieldBlur}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
+            cancelClose()
             void submit()
           } else if (e.key === 'Escape') {
-            setValue('')
+            cancelClose()
+            reset()
             setActive(false)
           }
         }}
         placeholder={`New ${meta.label.toLowerCase()} task…`}
-        className="h-7 text-sm border-0 shadow-none focus-visible:ring-0 px-0"
+        className="h-7 flex-1 text-sm border-0 shadow-none focus-visible:ring-0 px-0"
+      />
+      <WorkFilterSelect
+        value={priority}
+        onChange={(v) => setPriority(v as TaskPriority)}
+        className="h-7 capitalize shrink-0"
+      >
+        {PRIORITY_OPTIONS.map((p) => (
+          <option key={p} value={p} className="capitalize">
+            {p}
+          </option>
+        ))}
+      </WorkFilterSelect>
+      <Input
+        type="date"
+        value={dueDate}
+        onChange={(e) => setDueDate(e.target.value)}
+        onFocus={cancelClose}
+        onBlur={onFieldBlur}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            cancelClose()
+            void submit()
+          } else if (e.key === 'Escape') {
+            cancelClose()
+            reset()
+            setActive(false)
+          }
+        }}
+        title="Due date"
+        className="h-7 w-[9rem] shrink-0 text-xs border-border/80 focus-visible:ring-0"
       />
     </div>
   )

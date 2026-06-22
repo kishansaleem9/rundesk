@@ -535,6 +535,109 @@ export function TaskDetailSheet({
 }
 
 // ---------------------------------------------------------------------------
+// Mention textarea (shared @-mention dropdown for plain-text fields)
+// ---------------------------------------------------------------------------
+
+/**
+ * A Textarea with a people-mention dropdown. Typing '@' followed by text shows a
+ * filtered list of workspace members; selecting one inserts the member's name at
+ * the cursor. Mirrors the people-mention UX of the comments composer. Self-contained
+ * — it owns its dropdown state and never mutates anything outside `onChange`.
+ */
+function MentionTextarea({
+  value,
+  onChange,
+  members,
+  ...textareaProps
+}: {
+  value: string
+  onChange: (next: string) => void
+  members: WorkspaceMemberLite[]
+} & Omit<React.ComponentProps<typeof Textarea>, 'value' | 'onChange'>) {
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const mentionQuery = value.slice(value.lastIndexOf('@') + 1).toLowerCase()
+  const candidates = members.filter((m) =>
+    (m.displayName || m.email).toLowerCase().includes(mentionQuery),
+  )
+  const showMentions = value.includes('@') && value[value.length - 1] !== ' ' && candidates.length > 0
+
+  const insertMention = (member: WorkspaceMemberLite) => {
+    const at = value.lastIndexOf('@')
+    const prefix = at >= 0 ? value.slice(0, at) : value
+    const display = member.displayName || member.email
+    onChange(`${prefix}@${display} `)
+    setMentionIndex(0)
+  }
+
+  return (
+    <div className="relative">
+      <Textarea
+        {...textareaProps}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (showMentions) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault()
+              setMentionIndex((prev) => (prev + 1) % candidates.length)
+              return
+            }
+            if (e.key === 'ArrowUp') {
+              e.preventDefault()
+              setMentionIndex((prev) => (prev - 1 + candidates.length) % candidates.length)
+              return
+            }
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              const member = candidates[mentionIndex]
+              if (member) insertMention(member)
+              return
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              onChange(value.replace(/@[^ ]*$/, ''))
+              setMentionIndex(0)
+              return
+            }
+          }
+          textareaProps.onKeyDown?.(e)
+        }}
+      />
+      {showMentions && (
+        <div className="absolute z-20 mt-1 w-full rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+          <div className="max-h-40 overflow-auto">
+            {candidates.slice(0, 8).map((member, idx) => (
+              <button
+                key={member.userId}
+                type="button"
+                className={cn(
+                  'w-full px-2.5 py-2 text-left text-xs flex items-center gap-2',
+                  idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70',
+                )}
+                onMouseEnter={() => setMentionIndex(idx)}
+                // Use onMouseDown so the click registers before the textarea blur fires.
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  insertMention(member)
+                }}
+              >
+                <div className="h-6 w-6 rounded-full bg-brand-100 text-foreground text-[10px] font-semibold flex items-center justify-center">
+                  {(member.displayName || member.email)[0]?.toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-medium text-foreground truncate">{member.displayName || member.email}</div>
+                  <div className="text-muted-foreground truncate">{member.email}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Overview
 // ---------------------------------------------------------------------------
 
@@ -638,14 +741,15 @@ function OverviewPanel({
       <section>
         <h4 className="text-xs uppercase tracking-wide text-muted-foreground mb-1.5">Description</h4>
         {editingDescription ? (
-          <Textarea
+          <MentionTextarea
             autoFocus
             rows={4}
             value={descriptionDraft}
-            onChange={(e) => setDescriptionDraft(e.target.value)}
+            onChange={setDescriptionDraft}
+            members={membersQuery.data ?? []}
             onBlur={commitDescription}
             disabled={updateDescription.isPending}
-            placeholder="Add a description…"
+            placeholder="Add a description… use @ to mention"
             className="text-sm leading-relaxed"
           />
         ) : (
@@ -1722,11 +1826,13 @@ function AttachmentsPanel({
           contentType: selectedFile.type || 'application/octet-stream',
         },
       })
-      await fetch(presign.uploadUrl, {
+      const putRes = await fetch(presign.uploadUrl, {
         method: 'PUT',
         headers: { 'Content-Type': selectedFile.type || 'application/octet-stream' },
         body: selectedFile,
       })
+      // Reject when the storage PUT is blocked/failed so we never record a phantom attachment.
+      if (!putRes.ok) throw new Error('Upload failed (' + putRes.status + ')')
       await api(`/tasks/${taskId}/attachments`, {
         method: 'POST',
         body: {
@@ -1742,6 +1848,9 @@ function AttachmentsPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Could not upload file')
     },
   })
   const removeAttachment = useMutation({
