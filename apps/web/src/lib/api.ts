@@ -81,6 +81,31 @@ type ApiOptions = Omit<RequestInit, 'body'> & {
   skipAuth?: boolean
 }
 
+/**
+ * Download a file from an authenticated API route as a Blob and save it.
+ * Browser <a download> navigations can't send the Authorization header (the JWT
+ * is header-only), so file exports must go through fetch with the bearer token.
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const token = useAuthStore.getState().accessToken
+  let res = await fetchWithAuth(path, { method: 'GET' }, token)
+  if (res.status === 401 && useAuthStore.getState().refreshToken) {
+    const newToken = await ensureFreshToken()
+    if (newToken) res = await fetchWithAuth(path, { method: 'GET' }, newToken)
+    else useAuthStore.getState().clear()
+  }
+  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function api<T = unknown>(
   path: string,
   options: ApiOptions = {},

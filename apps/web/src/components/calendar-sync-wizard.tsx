@@ -54,7 +54,7 @@ export function CalendarSyncWizard({
 
   const { data: ical, refetch: refetchIcal } = useQuery({
     queryKey: ['ical-token', workspaceId],
-    queryFn: () => api<IcalToken | null>(`/workspaces/${workspaceId}/calendar-sync/ical-token`, { method: 'POST' }),
+    queryFn: () => api<IcalToken | null>(`/workspaces/${workspaceId}/calendar-sync/ical-token`),
     enabled: open,
   })
 

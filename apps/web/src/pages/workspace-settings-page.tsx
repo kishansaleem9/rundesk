@@ -3,7 +3,7 @@ import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
 import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck } from 'lucide-react'
-import { api, ApiError } from '../lib/api'
+import { api, ApiError, downloadFile } from '../lib/api'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
@@ -717,12 +717,28 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
         <h3 className="font-semibold text-sm mb-1">Data export</h3>
         <p className="text-xs text-muted-foreground mb-3">Download a full copy of your workspace data.</p>
         <div className="flex gap-2">
-          <a href={`/api/v1/workspaces/${workspaceId}/export/json`} download>
-            <Button size="sm" variant="outline">Export JSON</Button>
-          </a>
-          <a href={`/api/v1/workspaces/${workspaceId}/export/csv/tasks`} download>
-            <Button size="sm" variant="outline">Export tasks CSV</Button>
-          </a>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              downloadFile(`/workspaces/${workspaceId}/export/json`, `rundesk-${workspaceId}.json`).catch((e) =>
+                toast.error(e instanceof Error ? e.message : 'Export failed'),
+              )
+            }
+          >
+            Export JSON
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              downloadFile(`/workspaces/${workspaceId}/export/csv/tasks`, `rundesk-${workspaceId}-tasks.csv`).catch((e) =>
+                toast.error(e instanceof Error ? e.message : 'Export failed'),
+              )
+            }
+          >
+            Export tasks CSV
+          </Button>
         </div>
       </Card>
     </div>

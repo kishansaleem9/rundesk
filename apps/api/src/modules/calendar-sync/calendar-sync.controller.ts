@@ -23,6 +23,15 @@ import { CalendarSyncService, type CalendarProvider } from './calendar-sync.serv
 export class CalendarSyncController {
   constructor(private readonly sync: CalendarSyncService) {}
 
+  @Get('ical-token')
+  async getToken(
+    @CurrentUser() user: { id: string },
+    @Param('workspaceId') workspaceId: string,
+  ) {
+    // Read (or first-time mint) without rotating an existing subscription URL.
+    return this.sync.getOrCreateIcalToken(user.id, workspaceId)
+  }
+
   @Post('ical-token')
   async mintToken(
     @CurrentUser() user: { id: string },

@@ -159,12 +159,22 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
   })
 
   const handleSaveLayout = async () => {
-    if (preset?.id) {
-      await api(`/dashboards/${preset.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ layout: widgets }),
-      })
-      qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] })
+    try {
+      if (preset?.id) {
+        await api(`/dashboards/${preset.id}`, { method: 'PUT', body: { layout: widgets } })
+      } else {
+        // No preset yet — persist the edited layout as a new default dashboard
+        // instead of silently discarding the changes on remount.
+        await api('/dashboards', {
+          method: 'POST',
+          body: { workspaceId, name: 'My dashboard', layout: widgets, isDefault: true },
+        })
+      }
+      await qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] })
+      toast.success('Dashboard layout saved')
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Could not save layout')
+      return
     }
     setEditing(false)
   }

@@ -10,7 +10,6 @@ export class CreateDashboardPresetDto {
   name!: string
 
   @IsArray()
-  @IsNotEmpty()
   layout!: any[]
 
   @IsBoolean()

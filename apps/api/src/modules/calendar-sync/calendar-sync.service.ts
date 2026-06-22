@@ -224,6 +224,24 @@ export class CalendarSyncService {
    * workspace. The returned token is the secret half of the public feed
    * URL `/ical/{token}.ics`.
    */
+  /**
+   * Return the user's existing (non-revoked) iCal token without rotating it,
+   * minting one only if none exists. Used for read/display so opening the
+   * dialog doesn't invalidate already-distributed subscription URLs.
+   */
+  async getOrCreateIcalToken(userId: string, workspaceId: string): Promise<{ token: string; url: string }> {
+    const [existing] = await this.db
+      .select()
+      .from(userIcalTokens)
+      .where(and(eq(userIcalTokens.userId, userId), eq(userIcalTokens.workspaceId, workspaceId)))
+      .limit(1)
+    if (existing && !existing.revokedAt) {
+      const base = process.env.PUBLIC_BASE_URL ?? 'http://localhost:3001'
+      return { token: existing.token, url: `${base}/ical/${existing.token}.ics` }
+    }
+    return this.mintIcalToken(userId, workspaceId)
+  }
+
   async mintIcalToken(userId: string, workspaceId: string): Promise<{ token: string; url: string }> {
     const token = `ical_${randomBytes(24).toString('base64url')}`
     await this.db
