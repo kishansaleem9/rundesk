@@ -310,8 +310,8 @@ async function main() {
   sec('Security — audit fixes')
   if (wsId && myUserId) {
     // S2: role allowlist — trying to set super_admin must be rejected (400 admin / 403 non-admin), never 2xx
-    const esc = await call('PATCH',`/workspaces/${wsId}/members/${myUserId}/role`,{ token, body:{ role:'super_admin' } })
-    esc.status===400 || esc.status===403 ? ok(`role allowlist blocks super_admin (${esc.status})`) : bad(`role escalation NOT blocked → ${esc.status}`)
+    const esc = await call('PATCH',`/workspaces/${wsId}/members/${myUserId}`,{ token, body:{ role:'super_admin' } })
+    esc.status===400 || esc.status===403 ? ok(`role allowlist blocks super_admin (${esc.status})`) : bad(`role escalation NOT blocked → ${esc.status} ${clip(esc.json)}`)
   } else skp('no workspace/user — role test skipped')
   {
     // S1: feature-flags global scope requires super_admin
