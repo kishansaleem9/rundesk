@@ -60,7 +60,8 @@ export class WebhooksController {
   }
 
   @Post(':webhookId/test')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @RequirePermissions('webhook.manage')
   @ApiOperation({ summary: 'Send a test event to the webhook' })
   test(
     @Param('workspaceId') workspaceId: string,
