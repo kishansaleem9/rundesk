@@ -44,7 +44,28 @@ export function InsightsPage() {
   const greeting =
     hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
-  const [dismissedWorkload, setDismissedWorkload] = useState<Set<number>>(new Set())
+  // Dismissed workload suggestions, keyed by the overloaded member's name and
+  // persisted per-workspace (a per-device preference) so they survive reload.
+  const dismissKey = `rundesk.insights.dismissedWorkload.${workspaceId}`
+  const [dismissedWorkload, setDismissedWorkload] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const raw = localStorage.getItem(dismissKey)
+      return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+    } catch {
+      return new Set()
+    }
+  })
+  const dismissWorkload = (name: string) =>
+    setDismissedWorkload((prev) => {
+      const next = new Set(prev).add(name)
+      try {
+        localStorage.setItem(dismissKey, JSON.stringify([...next]))
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
 
   // All four "go deeper" controls land on the Reports page (overview, sprints,
   // workload, productivity all live there).
@@ -273,7 +294,7 @@ export function InsightsPage() {
     return pairs
   }, [workloadQ.data])
 
-  const visibleWorkload = workloadSuggestions.filter((_, i) => !dismissedWorkload.has(i))
+  const visibleWorkload = workloadSuggestions.filter((s) => !dismissedWorkload.has(s.from))
 
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
@@ -488,7 +509,7 @@ export function InsightsPage() {
                     variant="outline"
                     size="sm"
                     className="h-6 text-[10px] flex-1"
-                    onClick={() => setDismissedWorkload((prev) => new Set(prev).add(workloadSuggestions.indexOf(s)))}
+                    onClick={() => dismissWorkload(s.from)}
                   >
                     Dismiss
                   </Button>

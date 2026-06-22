@@ -858,6 +858,18 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
     mutationFn: (id: string) => api(`/labels/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace-labels', workspaceId] }),
   })
+  const rename = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api(`/labels/${id}`, { method: 'PATCH', body: { name } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace-labels', workspaceId] }),
+  })
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const commitRename = (id: string, original: string) => {
+    const trimmed = editName.trim()
+    if (trimmed && trimmed !== original) rename.mutate({ id, name: trimmed })
+    setEditingId(null)
+  }
 
   return (
     <div className="space-y-3">
@@ -886,9 +898,33 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
         </div>
         <ul className="divide-y divide-border">
           {(labels.data ?? []).map((l) => (
-            <li key={l.id} className="px-4 py-2.5 flex items-center gap-3">
+            <li key={l.id} className="px-4 py-2.5 flex items-center gap-3 group">
               <span className="h-3 w-3 rounded-full" style={{ backgroundColor: l.color }} />
-              <span className="flex-1 text-sm">{l.name}</span>
+              {editingId === l.id ? (
+                <Input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onBlur={() => commitRename(l.id, l.name)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename(l.id, l.name)
+                    if (e.key === 'Escape') setEditingId(null)
+                  }}
+                  className="flex-1 h-7 text-sm"
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="flex-1 text-left text-sm hover:underline"
+                  title="Click to rename"
+                  onClick={() => {
+                    setEditingId(l.id)
+                    setEditName(l.name)
+                  }}
+                >
+                  {l.name}
+                </button>
+              )}
               <button onClick={() => remove.mutate(l.id)} className="text-muted-foreground hover:text-destructive">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>

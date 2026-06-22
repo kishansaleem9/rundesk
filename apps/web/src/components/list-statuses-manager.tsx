@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type DragEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { GripVertical, Plus, Trash2, X } from 'lucide-react'
 import { Button, Input, Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@rundesk/ui'
@@ -44,6 +44,7 @@ export function ListStatusesManager({
   })
 
   const [reassignFor, setReassignFor] = useState<{ id: string; name: string } | null>(null)
+  const [dragId, setDragId] = useState<string | null>(null)
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['list-statuses', listId] })
@@ -67,6 +68,30 @@ export function ListStatusesManager({
       }),
     onSuccess: invalidate,
   })
+
+  const reorderStatuses = useMutation({
+    mutationFn: (orderedIds: string[]) =>
+      api(`/lists/${listId}/statuses/reorder`, { method: 'POST', body: { orderedIds } }),
+    onSuccess: invalidate,
+  })
+
+  const sortedStatuses = statuses.slice().sort((a, b) => a.position - b.position)
+  const handleDropOn = (targetId: string) => {
+    if (!dragId || dragId === targetId) {
+      setDragId(null)
+      return
+    }
+    const ids = sortedStatuses.map((s) => s.id)
+    const from = ids.indexOf(dragId)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0) {
+      setDragId(null)
+      return
+    }
+    ids.splice(to, 0, ids.splice(from, 1)[0])
+    reorderStatuses.mutate(ids)
+    setDragId(null)
+  }
 
   const deleteStatus = useMutation({
     mutationFn: ({ statusId, reassignToStatusId }: { statusId: string; reassignToStatusId?: string }) =>
@@ -96,13 +121,16 @@ export function ListStatusesManager({
           </p>
 
           <div className="space-y-2">
-            {statuses
-              .slice()
-              .sort((a, b) => a.position - b.position)
+            {sortedStatuses
               .map((status) => (
                 <StatusRow
                   key={status.id}
                   status={status}
+                  isDragging={dragId === status.id}
+                  onDragStart={() => setDragId(status.id)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => handleDropOn(status.id)}
+                  onDragEnd={() => setDragId(null)}
                   onPatch={(patch) => updateStatus.mutate({ statusId: status.id, patch })}
                   onDelete={() => deleteStatus.mutate({ statusId: status.id }, {
                     onError: (err: any) => {
@@ -143,15 +171,35 @@ function StatusRow({
   status,
   onPatch,
   onDelete,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDragging,
 }: {
   status: ListStatus
   onPatch: (patch: Partial<ListStatus>) => void
   onDelete: () => void
+  onDragStart?: () => void
+  onDragOver?: (e: DragEvent) => void
+  onDrop?: () => void
+  onDragEnd?: () => void
+  isDragging?: boolean
 }) {
   const [name, setName] = useState(status.name)
   return (
-    <div className="flex items-center gap-2 rounded-md border border-border/70 bg-card px-2 py-1.5">
-      <GripVertical className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+    <div
+      draggable={Boolean(onDragStart)}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={cn(
+        'flex items-center gap-2 rounded-md border border-border/70 bg-card px-2 py-1.5',
+        isDragging && 'opacity-50',
+      )}
+    >
+      <GripVertical className="h-4 w-4 text-muted-foreground/60 shrink-0 cursor-grab active:cursor-grabbing" />
       <ColorSwatch color={status.color} onChange={(color) => onPatch({ color })} />
       <Input
         value={name}
