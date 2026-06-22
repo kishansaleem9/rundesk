@@ -48,9 +48,11 @@ const ENTITY_ICON: Record<string, React.ElementType> = {
 export function CommandPalette({
   open: openProp,
   onOpenChange,
+  initialQuery = '',
 }: {
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  initialQuery?: string
 } = {}) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = openProp ?? internalOpen
@@ -58,7 +60,13 @@ export function CommandPalette({
     if (onOpenChange) onOpenChange(next)
     else setInternalOpen(next)
   }
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initialQuery)
+
+  // When the palette is opened with a query forwarded from the header search
+  // input, seed the command query so results show immediately.
+  useEffect(() => {
+    if (open && initialQuery) setQuery(initialQuery)
+  }, [open, initialQuery])
   const navigate = useNavigate()
   const location = useLocation()
   const workspaceId = useMemo(

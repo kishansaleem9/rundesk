@@ -22,6 +22,7 @@ import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as SubmitSlugRouteImport } from './routes/submit.$slug'
 import { Route as DSlugRouteImport } from './routes/d.$slug'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
+import { Route as AppHelpRouteImport } from './routes/app.help'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppWorkspaceIdRouteImport } from './routes/app.$workspaceId'
 import { Route as AppAdminWebhooksRouteImport } from './routes/app.admin.webhooks'
@@ -119,6 +120,11 @@ const AppProfileRoute = AppProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => AppRoute,
 } as any).lazy(() => import('./routes/app.profile.lazy').then((d) => d.Route))
+const AppHelpRoute = AppHelpRouteImport.update({
+  id: '/help',
+  path: '/help',
+  getParentRoute: () => AppRoute,
+} as any).lazy(() => import('./routes/app.help.lazy').then((d) => d.Route))
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -404,6 +410,7 @@ export interface FileRoutesByFullPath {
   '/sso-complete': typeof SsoCompleteRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
+  '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
   '/d/$slug': typeof DSlugRoute
   '/submit/$slug': typeof SubmitSlugRoute
@@ -454,6 +461,7 @@ export interface FileRoutesByTo {
   '/sso-complete': typeof SsoCompleteRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
+  '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
   '/d/$slug': typeof DSlugRoute
   '/submit/$slug': typeof SubmitSlugRoute
@@ -505,6 +513,7 @@ export interface FileRoutesById {
   '/sso-complete': typeof SsoCompleteRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
+  '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
   '/d/$slug': typeof DSlugRoute
   '/submit/$slug': typeof SubmitSlugRoute
@@ -558,6 +567,7 @@ export interface FileRouteTypes {
     | '/sso-complete'
     | '/app/$workspaceId'
     | '/app/admin'
+    | '/app/help'
     | '/app/profile'
     | '/d/$slug'
     | '/submit/$slug'
@@ -608,6 +618,7 @@ export interface FileRouteTypes {
     | '/sso-complete'
     | '/app/$workspaceId'
     | '/app/admin'
+    | '/app/help'
     | '/app/profile'
     | '/d/$slug'
     | '/submit/$slug'
@@ -658,6 +669,7 @@ export interface FileRouteTypes {
     | '/sso-complete'
     | '/app/$workspaceId'
     | '/app/admin'
+    | '/app/help'
     | '/app/profile'
     | '/d/$slug'
     | '/submit/$slug'
@@ -789,6 +801,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/app/profile'
       preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/app/help': {
+      id: '/app/help'
+      path: '/help'
+      fullPath: '/app/help'
+      preLoaderRoute: typeof AppHelpRouteImport
       parentRoute: typeof AppRoute
     }
     '/app/admin': {
@@ -1218,6 +1237,7 @@ const AppAdminRouteWithChildren = AppAdminRoute._addFileChildren(
 interface AppRouteChildren {
   AppWorkspaceIdRoute: typeof AppWorkspaceIdRouteWithChildren
   AppAdminRoute: typeof AppAdminRouteWithChildren
+  AppHelpRoute: typeof AppHelpRoute
   AppProfileRoute: typeof AppProfileRoute
   AppIndexRoute: typeof AppIndexRoute
 }
@@ -1225,6 +1245,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppWorkspaceIdRoute: AppWorkspaceIdRouteWithChildren,
   AppAdminRoute: AppAdminRouteWithChildren,
+  AppHelpRoute: AppHelpRoute,
   AppProfileRoute: AppProfileRoute,
   AppIndexRoute: AppIndexRoute,
 }

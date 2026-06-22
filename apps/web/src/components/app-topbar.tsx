@@ -61,7 +61,7 @@ export function AppTopbar({
   onCommandOpen,
   onMenuOpen,
 }: {
-  onCommandOpen?: () => void
+  onCommandOpen?: (query?: string) => void
   onMenuOpen?: () => void
 }) {
   const params = useParams({ strict: false }) as {
@@ -191,20 +191,35 @@ function Breadcrumbs({
 }
 
 // ---------------------------------------------------------------------------
-// Search trigger
+// Search field — always-typeable header input that forwards its value into the
+// command palette (the palette is the results surface). ⌘K still works.
 // ---------------------------------------------------------------------------
-function SearchBar({ onCommandOpen }: { onCommandOpen?: () => void }) {
+function SearchBar({ onCommandOpen }: { onCommandOpen?: (query?: string) => void }) {
+  const [value, setValue] = useState('')
+
+  function openPalette(query?: string) {
+    onCommandOpen?.(query)
+    // The palette takes over as the active input; reset the header field so it
+    // doesn't hold a stale query the next time it's focused.
+    setValue('')
+  }
+
   return (
-    <button
-      onClick={onCommandOpen}
-      className="hidden md:flex items-center gap-2 h-9 px-3 rounded-lg border border-border/60 bg-card/60 hover:bg-card/80 text-sm text-muted-foreground w-72 transition-colors"
-    >
-      <Search className="h-4 w-4" />
-      <span className="flex-1 text-left">Search or jump to…</span>
-      <kbd className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono bg-muted/40 border border-border/40 rounded text-muted-foreground">
+    <div className="hidden md:flex items-center gap-2 h-9 px-3 rounded-lg border border-border/60 bg-card/60 focus-within:bg-card/80 focus-within:ring-1 focus-within:ring-ring text-sm text-muted-foreground w-72 transition-colors">
+      <Search className="h-4 w-4 shrink-0" />
+      <input
+        type="text"
+        value={value}
+        placeholder="Search or jump to…"
+        aria-label="Search"
+        className="flex-1 min-w-0 bg-transparent outline-none placeholder:text-muted-foreground text-foreground"
+        onFocus={() => openPalette()}
+        onChange={(e) => openPalette(e.target.value)}
+      />
+      <kbd className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono bg-muted/40 border border-border/40 rounded text-muted-foreground shrink-0">
         ⌘K
       </kbd>
-    </button>
+    </div>
   )
 }
 
@@ -560,9 +575,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
             Workspace settings
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          onSelect={() => window.open('https://github.com/mrrjatt/rundesk/issues', '_blank')}
-        >
+        <DropdownMenuItem onSelect={() => navigate({ to: '/app/help' })}>
           <HelpCircle className="h-4 w-4 text-muted-foreground" />
           Help & support
         </DropdownMenuItem>

@@ -20,7 +20,15 @@ export const Route = createFileRoute('/app')({
 
 function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
+  const [cmdQuery, setCmdQuery] = useState('')
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+
+  // Open the command palette, optionally seeding it with a query forwarded
+  // from the header search input.
+  const openCommand = (query?: string) => {
+    setCmdQuery(query ?? '')
+    setCmdOpen(true)
+  }
 
   // ⌘K / Ctrl+K must live here: the palette itself is only mounted while
   // open, so a listener inside the component can never open it.
@@ -28,6 +36,7 @@ function AppShell() {
     function handler(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        setCmdQuery('')
         setCmdOpen(true)
       }
     }
@@ -53,14 +62,14 @@ function AppShell() {
     <div className="h-screen flex bg-background overflow-hidden">
       <WorkspaceSidebar />
       <div className="flex-1 flex flex-col min-w-0">
-        <AppTopbar onCommandOpen={() => setCmdOpen(true)} />
+        <AppTopbar onCommandOpen={openCommand} />
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>
       </div>
       {cmdOpen ? (
         <Suspense fallback={null}>
-          <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} />
+          <CommandPalette open={cmdOpen} onOpenChange={setCmdOpen} initialQuery={cmdQuery} />
         </Suspense>
       ) : null}
       <ShortcutsOverlay />
