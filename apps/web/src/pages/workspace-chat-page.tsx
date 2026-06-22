@@ -847,7 +847,12 @@ export function ChatPage() {
             loading={savedQuery.isLoading}
             namesById={namesById}
             onClose={() => setShowSavedPanel(false)}
-            onOpenThread={(id) => setThreadParentId(id)}
+            onOpenThread={(id, channelId) => {
+              // A saved message may live in another channel — switch to it first.
+              if (channelId && channelId !== selectedId) setSelectedId(channelId)
+              setThreadParentId(id)
+              setShowSavedPanel(false)
+            }}
             onUnsave={(id) => setSavedMutation.mutate({ messageId: id, saved: false })}
           />
         )}
@@ -910,7 +915,7 @@ function SavedPanel({
   loading?: boolean
   namesById: Record<string, string>
   onClose: () => void
-  onOpenThread: (id: string) => void
+  onOpenThread: (id: string, channelId: string) => void
   onUnsave: (id: string) => void
 }) {
   return (
@@ -945,7 +950,7 @@ function SavedPanel({
                 </button>
               </div>
               <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
-              <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id)}>
+              <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id, m.channelId)}>
                 Open thread
               </button>
             </Card>

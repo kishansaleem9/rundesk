@@ -108,9 +108,13 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   // Group docs by parent so the sidebar can render a real nested tree
   // (the backend already returns parentDocId/position on every doc).
   const docsByParent = useMemo(() => {
+    const all = docsQuery.data ?? []
+    const presentIds = new Set(all.map((d) => d.id))
     const map = new Map<string | null, Doc[]>()
-    for (const d of docsQuery.data ?? []) {
-      const key = d.parentDocId ?? null
+    for (const d of all) {
+      // Treat a doc whose parent isn't in the list (e.g. the parent was
+      // archived) as a root, so its subtree never disappears from the sidebar.
+      const key = d.parentDocId && presentIds.has(d.parentDocId) ? d.parentDocId : null
       const arr = map.get(key)
       if (arr) arr.push(d)
       else map.set(key, [d])
