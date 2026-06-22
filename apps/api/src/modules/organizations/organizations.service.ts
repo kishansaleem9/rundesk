@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { eq, and, sql } from 'drizzle-orm'
 import { organizations, organizationMembers, workspaceMembers, workspaces, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -71,7 +71,28 @@ export class OrganizationsService {
       .where(eq(workspaces.organizationId, organizationId))
   }
 
-  async updateMemberRole(organizationId: string, userId: string, role: 'owner' | 'admin' | 'billing' | 'member') {
+  async updateMemberRole(
+    organizationId: string,
+    userId: string,
+    role: 'owner' | 'admin' | 'billing' | 'member',
+    actorId?: string,
+  ) {
+    const ALLOWED_ROLES = ['owner', 'admin', 'billing', 'member']
+    if (!ALLOWED_ROLES.includes(role)) {
+      throw new BadRequestException(`Invalid role. Must be one of: ${ALLOWED_ROLES.join(', ')}`)
+    }
+    // Only an existing owner may grant the owner role (prevents a non-owner
+    // admin from escalating themselves or others past their own level).
+    if (role === 'owner' && actorId) {
+      const [actor] = await this.db
+        .select({ role: organizationMembers.role })
+        .from(organizationMembers)
+        .where(and(eq(organizationMembers.organizationId, organizationId), eq(organizationMembers.userId, actorId)))
+        .limit(1)
+      if (!actor || actor.role !== 'owner') {
+        throw new ForbiddenException('Only an organization owner can grant the owner role')
+      }
+    }
     // Last owner protection
     if (role !== 'owner') {
       const [currentMember] = await this.db

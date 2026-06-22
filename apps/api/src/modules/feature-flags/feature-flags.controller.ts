@@ -2,8 +2,8 @@ import { Controller, Get, Put, Body, Param, UseGuards, HttpCode, HttpStatus, Bad
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { FeatureFlagsService } from './feature-flags.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { Roles } from '../../common/decorators/roles.decorator'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import type { FlagKey } from '@rundesk/feature-flags'
 
 @ApiTags('feature-flags')
@@ -23,13 +23,12 @@ export class FeatureFlagsController {
   }
 
   @Get('workspace/:workspaceId')
-  @Roles('super_admin', 'workspace_admin')
+  @UseGuards(WorkspaceAdminGuard)
   async listWorkspaceOverrides(@Param('workspaceId') workspaceId: string) {
     return this.featureFlagsService.listOverrides(workspaceId)
   }
 
   @Put(':flagKey')
-  @Roles('super_admin', 'workspace_admin')
   @HttpCode(HttpStatus.OK)
   async setFlag(
     @Param('flagKey') flagKey: FlagKey,
@@ -45,13 +44,15 @@ export class FeatureFlagsController {
     if ((body.scope === 'workspace' && !body.workspaceId) || (body.scope === 'role' && !body.scopeId) || (body.scope === 'user' && !body.scopeId)) {
       throw new BadRequestException(`scope "${body.scope}" requires the corresponding id`)
     }
+    // Authorization is enforced in the service: super_admin for global/role/user
+    // scopes, workspace_admin of the target workspace for workspace scope.
     await this.featureFlagsService.setFlag(
       flagKey,
       body.enabled,
       body.scope,
       body.scopeId ?? null,
       body.workspaceId ?? null,
-      user.id,
+      { id: user.id, role: user.role },
     )
     return { updated: true }
   }

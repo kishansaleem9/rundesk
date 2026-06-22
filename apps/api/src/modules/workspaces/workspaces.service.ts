@@ -126,7 +126,24 @@ export class WorkspacesService {
     role: string,
     actor?: { id: string; email?: string },
   ) {
+    // Only these roles may be assigned to a workspace member. Crucially this
+    // excludes `super_admin` (a platform-level role in the same enum) — without
+    // this allowlist any workspace admin could self-promote to god-mode.
+    const ASSIGNABLE_ROLES = ['workspace_admin', 'manager', 'member', 'guest']
+    if (!ASSIGNABLE_ROLES.includes(role)) {
+      throw new BadRequestException(`Invalid role. Must be one of: ${ASSIGNABLE_ROLES.join(', ')}`)
+    }
     const previous = await this.getMembership(workspaceId, userId)
+    // Never let the last workspace admin be demoted out of the workspace.
+    if (previous?.role === 'workspace_admin' && role !== 'workspace_admin') {
+      const admins = await this.db
+        .select({ userId: workspaceMembers.userId })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.role, 'workspace_admin' as any)))
+      if (admins.length <= 1) {
+        throw new BadRequestException('Cannot demote the last workspace admin')
+      }
+    }
     await this.db
       .update(workspaceMembers)
       .set({ role: role as any })
@@ -174,6 +191,16 @@ export class WorkspacesService {
   }
 
   async removeMember(workspaceId: string, userId: string, actor?: { id: string; email?: string }) {
+    const member = await this.getMembership(workspaceId, userId)
+    if (member?.role === 'workspace_admin') {
+      const admins = await this.db
+        .select({ userId: workspaceMembers.userId })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.role, 'workspace_admin' as any)))
+      if (admins.length <= 1) {
+        throw new BadRequestException('Cannot remove the last workspace admin')
+      }
+    }
     await this.db
       .delete(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))

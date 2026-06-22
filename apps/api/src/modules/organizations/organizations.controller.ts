@@ -59,8 +59,9 @@ export class OrganizationsController {
     @Param('organizationId') orgId: string,
     @Param('userId') userId: string,
     @Body() body: { role: 'owner' | 'admin' | 'billing' | 'member' },
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.organizationsService.updateMemberRole(orgId, userId, body.role)
+    return this.organizationsService.updateMemberRole(orgId, userId, body.role, user.id)
   }
 
   @Delete(':organizationId/members/:userId')

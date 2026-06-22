@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import {
   ListStatusesService,
   type StatusCategory,
@@ -19,7 +20,7 @@ import {
 @ApiTags('list-statuses')
 @ApiBearerAuth()
 @Controller('lists/:listId/statuses')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class ListStatusesController {
   constructor(private statuses: ListStatusesService) {}
 

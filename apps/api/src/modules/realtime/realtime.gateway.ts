@@ -8,9 +8,13 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets'
 import { Server, Socket } from 'socket.io'
-import { Logger } from '@nestjs/common'
+import { Logger, Inject } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
+import { and, eq } from 'drizzle-orm'
+import { workspaceMembers, lists, projects, spaces, tasks, docs, workspaceCanvases } from '@rundesk/db'
+import type { Db } from '@rundesk/db'
+import { DB_TOKEN } from '../../common/database/database.module'
 
 /**
  * Room taxonomy:
@@ -90,7 +94,64 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    @Inject(DB_TOKEN) private readonly db: Db,
   ) {}
+
+  /** Resolve the owning workspace for a room key, or null if it can't be resolved. */
+  private async resolveWorkspaceForRoom(kind: string, id: string): Promise<string | null> {
+    if (kind === 'workspace') return id
+    if (kind === 'doc') {
+      const [d] = await this.db.select({ w: docs.workspaceId }).from(docs).where(eq(docs.id, id)).limit(1)
+      return d?.w ?? null
+    }
+    if (kind === 'canvas') {
+      const [c] = await this.db.select({ w: workspaceCanvases.workspaceId }).from(workspaceCanvases).where(eq(workspaceCanvases.id, id)).limit(1)
+      return c?.w ?? null
+    }
+    if (kind === 'list') {
+      const [r] = await this.db
+        .select({ w: spaces.workspaceId })
+        .from(lists)
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(lists.id, id))
+        .limit(1)
+      return r?.w ?? null
+    }
+    if (kind === 'task') {
+      const [r] = await this.db
+        .select({ w: spaces.workspaceId })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(tasks.id, id))
+        .limit(1)
+      return r?.w ?? null
+    }
+    return null
+  }
+
+  /** A socket may only join a room it is authorized for (own user channel, or a
+   *  workspace it belongs to — resolved transitively for list/task/doc/canvas). */
+  private async canJoinRoom(client: Socket, room: string): Promise<boolean> {
+    const userId = (client.data as { userId?: string })?.userId
+    if (!userId) return false
+    const idx = room.indexOf(':')
+    if (idx < 0) return false
+    const kind = room.slice(0, idx)
+    const id = room.slice(idx + 1)
+    if (!id) return false
+    if (kind === 'user') return id === userId
+    const workspaceId = await this.resolveWorkspaceForRoom(kind, id)
+    if (!workspaceId) return false
+    const [membership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return !!membership
+  }
 
   async handleConnection(client: Socket) {
     const token = (client.handshake.auth?.token as string | undefined)
@@ -138,13 +199,22 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage('subscribe')
-  handleSubscribe(
+  async handleSubscribe(
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { rooms: RoomKey[] },
   ) {
     if (!Array.isArray(body?.rooms)) return { ok: false, error: 'rooms must be an array' }
-    for (const room of body.rooms) client.join(room)
-    return { ok: true, joined: body.rooms }
+    const joined: string[] = []
+    const denied: string[] = []
+    for (const room of body.rooms) {
+      if (await this.canJoinRoom(client, room)) {
+        client.join(room)
+        joined.push(room)
+      } else {
+        denied.push(room)
+      }
+    }
+    return { ok: true, joined, denied }
   }
 
   @SubscribeMessage('unsubscribe')

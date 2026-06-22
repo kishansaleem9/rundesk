@@ -1,6 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common'
-import { eq, isNull } from 'drizzle-orm'
-import { featureFlags } from '@rundesk/db'
+import { Injectable, Inject, ForbiddenException } from '@nestjs/common'
+import { and, eq, isNull } from 'drizzle-orm'
+import { featureFlags, workspaceMembers } from '@rundesk/db'
 import { DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
 import type { Db } from '@rundesk/db'
@@ -83,8 +83,29 @@ export class FeatureFlagsService {
     scope: 'global' | 'workspace' | 'role' | 'user',
     scopeId: string | null,
     workspaceId: string | null,
-    updatedBy: string,
+    actor: { id: string; role?: string },
   ) {
+    // Authorization: global / role / user overrides are platform-wide and
+    // require super_admin; workspace overrides require workspace_admin of the
+    // target workspace. (The @Roles decorator was never enforced — no RolesGuard
+    // existed — so this is the real gate.)
+    const isSuperAdmin = actor.role === 'super_admin'
+    if (scope === 'workspace') {
+      if (!isSuperAdmin) {
+        if (!workspaceId) throw new ForbiddenException('workspaceId is required for workspace-scoped flags')
+        const [membership] = await this.db
+          .select({ role: workspaceMembers.role })
+          .from(workspaceMembers)
+          .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
+          .limit(1)
+        if (!membership || membership.role !== 'workspace_admin') {
+          throw new ForbiddenException('Workspace admin required to change workspace feature flags')
+        }
+      }
+    } else if (!isSuperAdmin) {
+      throw new ForbiddenException('Only a super admin can change global, role, or user feature flags')
+    }
+    const updatedBy = actor.id
     await this.db.insert(featureFlags).values({
       flagKey, scope, scopeId, workspaceId: workspaceId ?? undefined, enabled, updatedBy,
     }).onConflictDoUpdate({
