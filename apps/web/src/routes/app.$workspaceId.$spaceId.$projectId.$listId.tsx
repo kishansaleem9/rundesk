@@ -70,7 +70,7 @@ type CustomFieldDef = {
   options?: Array<{ label: string; value: string }> | null
 }
 type CustomFieldValue = {
-  fieldId: string
+  definition: { id: string }
   value: string | number | boolean | null
 }
 
@@ -1155,7 +1155,7 @@ function TableView({
           const rows = await api<CustomFieldValue[]>(
             `/workspaces/${workspaceId}/tasks/${task.id}/custom-fields`,
           )
-          const rowMap = Object.fromEntries(rows.map((r) => [r.fieldId, r.value]))
+          const rowMap = Object.fromEntries(rows.map((r) => [r.definition.id, r.value]))
           return [task.id, rowMap] as const
         }),
       )

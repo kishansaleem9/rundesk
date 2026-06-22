@@ -479,13 +479,20 @@ export class TasksService {
 
     if (requestedKey) {
       const match = rows.find((r) => r.key === requestedKey)
-      if (!match) {
-        throw new BadRequestException(
-          `Status "${requestedKey}" is not defined for this list. ` +
-            `Available statuses: ${rows.map((r) => r.key).join(', ')}`,
-        )
-      }
-      return { key: match.key, category: match.category as StatusCategory }
+      if (match) return { key: match.key, category: match.category as StatusCategory }
+      // Fallback: map common/legacy keys to a category and pick the list's first
+      // status in that category, so callers passing 'done'/'todo' still work on
+      // lists whose statuses were renamed (instead of a hard 400).
+      const closedKeys = new Set(['done', 'complete', 'completed', 'closed', 'cancelled'])
+      const inferred: StatusCategory = closedKeys.has(requestedKey.toLowerCase()) ? 'closed' : 'open'
+      const byCategory =
+        rows.find((r) => (r.category as StatusCategory) === inferred) ??
+        (inferred === 'closed' ? rows[rows.length - 1] : rows[0])
+      if (byCategory) return { key: byCategory.key, category: byCategory.category as StatusCategory }
+      throw new BadRequestException(
+        `Status "${requestedKey}" is not defined for this list. ` +
+          `Available statuses: ${rows.map((r) => r.key).join(', ')}`,
+      )
     }
 
     const firstOpen = rows.find((r) => r.category === 'open')

@@ -183,7 +183,7 @@ export function FormBuilderPage() {
 
   const reorderFields = useMutation({
     mutationFn: (orderedIds: string[]) =>
-      api<FormField[]>(`/forms/${formId}/fields/reorder`, { method: 'PUT', body: { orderedIds } }),
+      api<FormField[]>(`/workspaces/${workspaceId}/forms/${formId}/fields/reorder`, { method: 'PUT', body: { orderedIds } }),
     // Optimistically reorder so the drag feels instant; roll back on failure.
     onMutate: async (orderedIds: string[]) => {
       await qc.cancelQueries({ queryKey: ['form', formId] })
