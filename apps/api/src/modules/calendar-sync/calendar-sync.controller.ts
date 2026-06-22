@@ -58,8 +58,11 @@ export class CalendarSyncController {
   }
 
   @Post('tasks/:taskId/push')
-  async pushTask(@Param('taskId') taskId: string) {
-    return this.sync.pushTask(taskId)
+  async pushTask(
+    @Param('workspaceId') workspaceId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.sync.pushTask(taskId, workspaceId)
   }
 }
 

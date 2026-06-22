@@ -67,9 +67,14 @@ export class CalendarSyncService {
    * Best-effort: failures are swallowed so a flaky calendar API doesn't
    * fail the user's task update.
    */
-  async pushTask(taskId: string): Promise<{ pushed: CalendarProvider[]; skipped: string[] }> {
+  async pushTask(taskId: string, expectedWorkspaceId?: string): Promise<{ pushed: CalendarProvider[]; skipped: string[] }> {
     const ctx = await this.resolveTaskContext(taskId)
     if (!ctx) return { pushed: [], skipped: ['task-not-found'] }
+    // When called from an HTTP route, ensure the task actually belongs to the
+    // caller's workspace (the route only proves membership of :workspaceId).
+    if (expectedWorkspaceId && ctx.task.workspaceId !== expectedWorkspaceId) {
+      return { pushed: [], skipped: ['task-not-in-workspace'] }
+    }
 
     const pushed: CalendarProvider[] = []
     const skipped: string[] = []
