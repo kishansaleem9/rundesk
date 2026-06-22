@@ -15,6 +15,7 @@ import {
   Input,
   PersonAvatar,
   cn,
+  toast,
 } from '@rundesk/ui'
 import {
   Video,
@@ -73,6 +74,7 @@ export function ClipsPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const recordingStartedAtRef = useRef<number | null>(null)
   const clipsQuery = useQuery({
     queryKey: ['clips', workspaceId],
     queryFn: () => api<Clip[]>(`/workspaces/${workspaceId}/clips`),
@@ -133,14 +135,54 @@ export function ClipsPage() {
     if (isRecording) return
     try {
       setUploadError(null)
-      const stream =
-        mode === 'screen'
-          ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-          : await navigator.mediaDevices.getUserMedia({ audio: true })
+
+      if (!navigator.mediaDevices?.getDisplayMedia || !navigator.mediaDevices?.getUserMedia) {
+        const message =
+          'Recording is not available in this browser. Screen and voice recording require a secure (HTTPS) context.'
+        setUploadError(message)
+        toast.error('Recording unavailable', { description: message })
+        return
+      }
+
+      let stream: MediaStream
+      try {
+        stream =
+          mode === 'screen'
+            ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+            : await navigator.mediaDevices.getUserMedia({ audio: true })
+      } catch (captureError) {
+        // getDisplayMedia/getUserMedia reject when permission is denied, the
+        // picker is dismissed, the context is insecure, or display-capture is
+        // disallowed (e.g. inside an iframe). Surface it clearly and make sure
+        // no "starting" UI state is left hanging.
+        const message =
+          mode === 'screen'
+            ? 'Screen recording was blocked or cancelled. It requires HTTPS and screen-share permission — check that you allowed sharing and try again.'
+            : 'Microphone access was blocked or cancelled. Voice recording requires HTTPS and microphone permission — check your browser settings and try again.'
+        console.error('Recording failed to start', captureError)
+        setUploadError(message)
+        toast.error(
+          mode === 'screen' ? 'Screen recording blocked' : 'Microphone blocked',
+          { description: message },
+        )
+        // Reset any transient capture/recording state so nothing looks stuck.
+        mediaStreamRef.current = null
+        mediaRecorderRef.current = null
+        recordingStartedAtRef.current = null
+        setIsRecording(false)
+        setRecordingStartedAt(null)
+        return
+      }
+
       mediaStreamRef.current = stream
       const recorder = new MediaRecorder(stream)
       mediaRecorderRef.current = recorder
       chunksRef.current = []
+      // Capture the start timestamp in a ref so `onstop` reads the real value
+      // instead of the (initially null) state captured when the recorder was
+      // created. Without this the first recording always computes duration 0.
+      const startedAt = Date.now()
+      recordingStartedAtRef.current = startedAt
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunksRef.current.push(event.data)
       }
@@ -149,11 +191,13 @@ export function ClipsPage() {
         if (blob.size === 0) {
           setUploadError('Recording output was empty. Please try again and record for at least a second.')
           stream.getTracks().forEach((t) => t.stop())
+          recordingStartedAtRef.current = null
           setIsRecording(false)
           setRecordingStartedAt(null)
           return
         }
-        const elapsed = recordingStartedAt ? Math.floor((Date.now() - recordingStartedAt) / 1000) : 0
+        const startTs = recordingStartedAtRef.current ?? startedAt
+        const elapsed = Math.max(0, Math.floor((Date.now() - startTs) / 1000))
         void uploadClip(blob, {
           durationSeconds: elapsed,
           title:
@@ -161,19 +205,33 @@ export function ClipsPage() {
               ? `${workspaceName} screen recording ${Date.now().toString(36)}`
               : `${workspaceName} voice memo ${Date.now().toString(36)}`,
         }).catch((err) => {
-          setUploadError((err as Error)?.message ?? 'Clip upload failed')
+          const message = (err as Error)?.message ?? 'Clip upload failed'
+          setUploadError(message)
+          toast.error('Clip upload failed', { description: message })
         })
         stream.getTracks().forEach((t) => t.stop())
+        recordingStartedAtRef.current = null
         setIsRecording(false)
         setRecordingStartedAt(null)
       }
       setRecordingMode(mode)
       recorder.start()
-      setRecordingStartedAt(Date.now())
+      setRecordingStartedAt(startedAt)
       setRecordingNow(Date.now())
       setIsRecording(true)
     } catch (error) {
+      // Catch-all so a click on "Record screen" can never throw out of the
+      // handler and leave the page looking blank/frozen.
       console.error('Recording failed to start', error)
+      const message =
+        (error as Error)?.message ?? 'Something went wrong starting the recording. Please try again.'
+      setUploadError(message)
+      toast.error('Could not start recording', { description: message })
+      mediaStreamRef.current = null
+      mediaRecorderRef.current = null
+      recordingStartedAtRef.current = null
+      setIsRecording(false)
+      setRecordingStartedAt(null)
     }
   }
 
@@ -202,31 +260,42 @@ export function ClipsPage() {
     setUploading(true)
     setUploadProgress(0)
     setUploadingFileName(fileName)
-    const presign = await api<{ uploadUrl: string; storageKey: string }>(
-      `/workspaces/${workspaceId}/clips/presign`,
-      {
-        method: 'POST',
-        body: {
-          fileName,
-          contentType: blob.type || 'video/webm',
-          durationSeconds: data.durationSeconds,
-          title: `${workspaceName} ${kind.replace('-', ' ')} ${uniqueId}`,
+    let succeeded = false
+    try {
+      const presign = await api<{ uploadUrl: string; storageKey: string }>(
+        `/workspaces/${workspaceId}/clips/presign`,
+        {
+          method: 'POST',
+          body: {
+            fileName,
+            contentType: blob.type || 'video/webm',
+            durationSeconds: data.durationSeconds,
+            title: `${workspaceName} ${kind.replace('-', ' ')} ${uniqueId}`,
+          },
         },
-      },
-    )
-    const putRes = await uploadBlobWithProgress({
-      url: presign.uploadUrl,
-      blob,
-      contentType: blob.type || 'video/webm',
-      onProgress: (percent) => setUploadProgress(percent),
-    })
-    if (!putRes.ok) {
-      const details = putRes.responseText
-      setUploading(false)
-      setUploadingFileName('')
-      throw new Error(`R2 upload failed (${putRes.status}): ${details || putRes.statusText}`)
+      )
+      const putRes = await uploadBlobWithProgress({
+        url: presign.uploadUrl,
+        blob,
+        contentType: blob.type || 'video/webm',
+        onProgress: (percent) => setUploadProgress(percent),
+      })
+      if (!putRes.ok) {
+        const details = putRes.responseText
+        throw new Error(`R2 upload failed (${putRes.status}): ${details || putRes.statusText}`)
+      }
+      await qc.invalidateQueries({ queryKey: ['clips', workspaceId] })
+      succeeded = true
+    } finally {
+      // On any failure (presign error, R2/CORS rejection, or network error)
+      // clear the uploading UI immediately so it never hangs. The happy path
+      // keeps the progress bar visible briefly via the timeout below.
+      if (!succeeded) {
+        setUploading(false)
+        setUploadingFileName('')
+        setUploadProgress(0)
+      }
     }
-    await qc.invalidateQueries({ queryKey: ['clips', workspaceId] })
     setUploadProgress(100)
     setTimeout(() => {
       setUploading(false)
