@@ -221,7 +221,7 @@ export function SignUpWizard() {
 }
 
 function canAdvance(step: Step, s: WizardState): boolean {
-  if (step === 0) return s.fullName.trim().length > 1 && /^.+@.+\..+$/.test(s.email) && s.password.length >= 8
+  if (step === 0) return s.fullName.trim().length > 1 && /^.+@.+\..+$/.test(s.email) && validatePassword(s.password) === null
   if (step === 1) return s.workspaceName.trim().length > 1 && s.industry !== '' && s.teamSize !== ''
   if (step === 2) return s.features.length > 0
   return true
@@ -246,10 +246,21 @@ function validateEmail(value: string): string | null {
   return null
 }
 
+// Mirrors the server's strong-password policy (passwordStrengthProblem in
+// workspace-security-settings.service.ts) so the requirements are enforced on
+// this step instead of silently failing at the final /auth/signup call.
+const PASSWORD_RULES: Array<{ label: string; hint: string; test: (v: string) => boolean }> = [
+  { label: 'At least 10 characters', hint: 'at least 10 characters', test: (v) => v.length >= 10 },
+  { label: 'A lowercase letter', hint: 'a lowercase letter', test: (v) => /[a-z]/.test(v) },
+  { label: 'An uppercase letter', hint: 'an uppercase letter', test: (v) => /[A-Z]/.test(v) },
+  { label: 'A number', hint: 'a number', test: (v) => /[0-9]/.test(v) },
+  { label: 'A symbol', hint: 'a symbol', test: (v) => /[^A-Za-z0-9]/.test(v) },
+]
+
 function validatePassword(value: string): string | null {
   if (!value) return 'Password is required.'
-  if (value.length < 8) return 'Password must be at least 8 characters.'
-  return null
+  const missing = PASSWORD_RULES.filter((r) => !r.test(value)).map((r) => r.hint)
+  return missing.length ? `Password must contain ${missing.join(', ')}.` : null
 }
 
 function validateWorkspaceName(value: string): string | null {
@@ -262,6 +273,33 @@ function validateWorkspaceName(value: string): string | null {
 function FieldError({ message }: { message: string | null }) {
   if (!message) return null
   return <p className="text-xs text-destructive">{message}</p>
+}
+
+/** Live, per-rule password requirements shown on the account step. */
+function PasswordChecklist({ value }: { value: string }) {
+  return (
+    <ul className="grid grid-cols-1 gap-y-1 pt-0.5 sm:grid-cols-2 sm:gap-x-3">
+      {PASSWORD_RULES.map((rule) => {
+        const ok = rule.test(value)
+        return (
+          <li
+            key={rule.hint}
+            className={
+              'flex items-center gap-1.5 text-xs transition-colors ' +
+              (ok ? 'text-emerald-500' : 'text-muted-foreground')
+            }
+          >
+            {ok ? (
+              <Check className="h-3 w-3 shrink-0" />
+            ) : (
+              <X className="h-3 w-3 shrink-0 opacity-40" />
+            )}
+            {rule.label}
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -329,20 +367,14 @@ function StepAccount({
           <Input
             id="password"
             type="password"
-            placeholder="At least 8 characters"
+            placeholder="At least 10 characters"
             leadingIcon={<Lock className="h-4 w-4" />}
             value={state.password}
             onChange={(e) => update({ password: e.target.value })}
             onBlur={() => setTouched((t) => ({ ...t, password: true }))}
             aria-invalid={touched.password && passwordError ? true : undefined}
           />
-          {touched.password && passwordError ? (
-            <FieldError message={passwordError} />
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Use 8+ characters with a mix of letters, numbers and symbols.
-            </p>
-          )}
+          <PasswordChecklist value={state.password} />
         </div>
       </div>
     </div>
