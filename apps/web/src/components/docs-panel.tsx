@@ -2,11 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, toast } from '@rundesk/ui'
 import {
+  AlignCenter,
+  AlignJustify,
+  AlignLeft,
+  AlignRight,
   Check,
   CheckCircle2,
+  CheckSquare,
   ChevronDown,
   ChevronRight,
   Download,
+  FileText,
   Globe,
   GlobeLock,
   Heading1,
@@ -18,6 +24,7 @@ import {
   ListOrdered,
   MessageCircle,
   MessagesSquare,
+  Palette,
   Pilcrow,
   Plus,
   RotateCcw,
@@ -32,6 +39,9 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { TextStyle } from '@tiptap/extension-text-style'
+import { Color } from '@tiptap/extension-color'
+import TextAlign from '@tiptap/extension-text-align'
 import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
@@ -87,6 +97,10 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const [improving, setImproving] = useState(false)
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set())
+  const [colorOpen, setColorOpen] = useState(false)
+  const [aiMenuOpen, setAiMenuOpen] = useState(false)
+  const [insertOpen, setInsertOpen] = useState(false)
+  const [createTask, setCreateTask] = useState<{ open: boolean; title: string }>({ open: false, title: '' })
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
@@ -169,6 +183,9 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       Placeholder.configure({ placeholder: 'Write your doc... type @ to mention' }),
       TaskList,
       TaskItem.configure({ nested: true }),
+      TextStyle,
+      Color,
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
       mentionExtension,
     ],
     content: activeDoc?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
@@ -300,33 +317,66 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  const improveWriting = async () => {
+  // AI actions — "improve" plus the edit modes the bug doc asked for. All four
+  // are backed by the real /ai/writing/improve endpoint (mode = improve | shorten
+  // | expand | format). Operates on the selection if there is one, else the doc.
+  const runAi = async (mode: 'improve' | 'shorten' | 'expand' | 'format') => {
     if (!editor || improving) return
+    setAiMenuOpen(false)
     const { from, to, empty } = editor.state.selection
     const hasSelection = !empty && from !== to
     const text = hasSelection
       ? editor.state.doc.textBetween(from, to, '\n', '\n')
       : editor.getText()
     if (!text.trim()) {
-      toast.error('Nothing to improve — add some text first.')
+      toast.error('Nothing to edit — add or select some text first.')
       return
     }
     setImproving(true)
     try {
       const result = await api<{ improved: string }>('/ai/writing/improve', {
         method: 'POST',
-        body: { text, mode: 'improve' },
+        body: { text, mode },
       })
       if (hasSelection) {
-        editor.chain().focus().insertContent(result.improved).run()
+        editor.chain().focus().deleteSelection().insertContent(result.improved).run()
       } else {
         editor.commands.setContent(result.improved)
       }
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : 'Could not improve writing')
+      toast.error(error instanceof ApiError ? error.message : 'AI request failed')
     } finally {
       setImproving(false)
     }
+  }
+
+  const TEXT_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#6366f1', '#a855f7', '#ec4899', '#0f172a', '#94a3b8']
+  const applyColor = (c: string) => { editor?.chain().focus().setColor(c).run(); setColorOpen(false) }
+  const clearColor = () => { editor?.chain().focus().unsetColor().run(); setColorOpen(false) }
+  const setAlign = (align: 'left' | 'center' | 'right' | 'justify') =>
+    editor?.chain().focus().setTextAlign(align).run()
+
+  // Insert a link to another doc (deep link the docs route honors via ?doc=).
+  const embedDoc = (d: Doc) => {
+    if (!editor) return
+    editor
+      .chain()
+      .focus()
+      .insertContent([
+        { type: 'text', marks: [{ type: 'link', attrs: { href: `/app/${workspaceId}/docs?doc=${d.id}` } }], text: d.title || 'Untitled doc' },
+        { type: 'text', text: ' ' },
+      ])
+      .run()
+    setInsertOpen(false)
+  }
+
+  // Open the "create task from selection" dialog, prefilling the selected text.
+  const openCreateTaskFromSelection = () => {
+    const sel = editor && !editor.state.selection.empty
+      ? editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ', ' ').trim()
+      : ''
+    setInsertOpen(false)
+    setCreateTask({ open: true, title: sel })
   }
 
   const slashItems = [
@@ -445,6 +495,24 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
         onOpenChange={setTemplatesOpen}
         onPick={(t: DocTemplate) => createDoc.mutate({ title: t.title, content: t.content })}
       />
+
+      {createTask.open && (
+        <CreateTaskFromDocDialog
+          workspaceId={workspaceId}
+          initialTitle={createTask.title}
+          onClose={() => setCreateTask({ open: false, title: '' })}
+          onCreated={(task, taskPath) =>
+            editor
+              ?.chain()
+              .focus()
+              .insertContent([
+                { type: 'text', marks: [{ type: 'link', attrs: { href: taskPath } }], text: `↗ ${task.title}` },
+                { type: 'text', text: ' ' },
+              ])
+              .run()
+          }
+        />
+      )}
 
       {/* Editor pane */}
       <div className="flex flex-col min-w-0">
@@ -570,6 +638,96 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               >
                 Code
               </Button>
+              {/* Font color */}
+              <span className="relative inline-flex">
+                <Button
+                  size="sm"
+                  variant={colorOpen ? 'secondary' : 'ghost'}
+                  onClick={() => setColorOpen((v) => !v)}
+                  disabled={!editor}
+                  title="Text color"
+                >
+                  <Palette className="h-3.5 w-3.5" />
+                </Button>
+                {colorOpen && (
+                  <div className="absolute z-40 top-9 left-0 w-44 rounded-md border border-border bg-card shadow-lg p-2">
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {TEXT_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          className="h-6 w-6 rounded-full border border-border/60"
+                          style={{ backgroundColor: c }}
+                          onClick={() => applyColor(c)}
+                          title={c}
+                        />
+                      ))}
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <label className="text-[11px] text-muted-foreground flex items-center gap-1 cursor-pointer">
+                        Custom
+                        <input
+                          type="color"
+                          className="h-6 w-6 cursor-pointer rounded border border-border bg-transparent p-0"
+                          onChange={(e) => applyColor(e.target.value)}
+                        />
+                      </label>
+                      <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground" onClick={clearColor}>
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </span>
+              {/* Alignment */}
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'left' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('left')} disabled={!editor} title="Align left">
+                <AlignLeft className="h-3.5 w-3.5" />
+              </Button>
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'center' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('center')} disabled={!editor} title="Align center">
+                <AlignCenter className="h-3.5 w-3.5" />
+              </Button>
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'right' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('right')} disabled={!editor} title="Align right">
+                <AlignRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'justify' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('justify')} disabled={!editor} title="Justify">
+                <AlignJustify className="h-3.5 w-3.5" />
+              </Button>
+              {/* Insert menu */}
+              <span className="relative inline-flex">
+                <Button
+                  size="sm"
+                  variant={insertOpen ? 'secondary' : 'ghost'}
+                  onClick={() => setInsertOpen((v) => !v)}
+                  disabled={!editor}
+                  title="Insert"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-0.5" /> Insert <ChevronDown className="h-3 w-3 ml-0.5" />
+                </Button>
+                {insertOpen && (
+                  <div className="absolute z-40 top-9 left-0 w-56 rounded-md border border-border bg-card shadow-lg overflow-hidden">
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); toggleLink() }}>
+                      <Link className="h-3.5 w-3.5" /> Link
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); editor?.chain().focus().toggleTaskList().run() }}>
+                      <CheckSquare className="h-3.5 w-3.5" /> Checklist
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={openCreateTaskFromSelection}>
+                      <Plus className="h-3.5 w-3.5" /> Create task from selection
+                    </button>
+                    <div className="border-t border-border max-h-40 overflow-auto">
+                      <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-muted-foreground">Embed doc</div>
+                      {(docsQuery.data ?? []).filter((d) => d.id !== selectedDocId).slice(0, 20).map((d) => (
+                        <button key={d.id} className="w-full text-left px-3 py-1.5 text-sm hover:bg-surface-50 truncate flex items-center gap-2" onClick={() => embedDoc(d)}>
+                          <FileText className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{d.title || 'Untitled'}</span>
+                        </button>
+                      ))}
+                      {(docsQuery.data ?? []).filter((d) => d.id !== selectedDocId).length === 0 && (
+                        <div className="px-3 py-1.5 text-xs text-muted-foreground">No other docs to embed</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </span>
               <Button
                 size="sm"
                 variant="ghost"
@@ -605,16 +763,35 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               >
                 <History className="h-3.5 w-3.5" />
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={improveWriting}
-                disabled={!editor || improving}
-                title="Improve writing with AI"
-              >
-                <Sparkles className="h-3.5 w-3.5 mr-1" />
-                {improving ? 'Improving…' : 'Improve'}
-              </Button>
+              <span className="relative inline-flex">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => runAi('improve')}
+                  disabled={!editor || improving}
+                  title="Improve writing with AI"
+                >
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  {improving ? 'Working…' : 'AI'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={aiMenuOpen ? 'secondary' : 'ghost'}
+                  onClick={() => setAiMenuOpen((v) => !v)}
+                  disabled={!editor || improving}
+                  title="More AI actions"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+                {aiMenuOpen && (
+                  <div className="absolute z-40 top-9 right-0 w-44 rounded-md border border-border bg-card shadow-lg overflow-hidden">
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('improve')}>Improve writing</button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('shorten')}>Make shorter</button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('expand')}>Expand</button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('format')}>Fix grammar &amp; format</button>
+                  </div>
+                )}
+              </span>
               <Button
                 size="sm"
                 variant="gradient"
@@ -1008,6 +1185,126 @@ function CommentBody({
               Delete
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CreateTaskFromDocDialog({
+  workspaceId,
+  initialTitle,
+  onClose,
+  onCreated,
+}: {
+  workspaceId: string
+  initialTitle: string
+  onClose: () => void
+  onCreated: (task: { id: string; title: string }, taskPath: string) => void
+}) {
+  const [title, setTitle] = useState(initialTitle)
+  const [spaceId, setSpaceId] = useState('')
+  const [projectId, setProjectId] = useState('')
+  const [listId, setListId] = useState('')
+
+  const spaces = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
+  })
+  const projects = useQuery({
+    enabled: !!spaceId,
+    queryKey: ['projects', spaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/projects/space/${spaceId}`),
+  })
+  const lists = useQuery({
+    enabled: !!projectId,
+    queryKey: ['lists', projectId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/lists/project/${projectId}`),
+  })
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<{ id: string; title: string }>(`/tasks`, { method: 'POST', body: { listId, title: title.trim() } }),
+    onSuccess: (task) => {
+      toast.success('Task created')
+      onCreated(task, `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${task.id}`)
+      onClose()
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Could not create task'),
+  })
+
+  const selectCls =
+    'w-full h-9 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-card p-5 space-y-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-base font-semibold">Create task from selection</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" title="Close">
+            ✕
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground">Task title</label>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" />
+        </div>
+        <div className="grid grid-cols-1 gap-2">
+          <select
+            className={selectCls}
+            value={spaceId}
+            onChange={(e) => {
+              setSpaceId(e.target.value)
+              setProjectId('')
+              setListId('')
+            }}
+          >
+            <option value="">Select space…</option>
+            {(spaces.data ?? []).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className={selectCls}
+            value={projectId}
+            disabled={!spaceId}
+            onChange={(e) => {
+              setProjectId(e.target.value)
+              setListId('')
+            }}
+          >
+            <option value="">Select project…</option>
+            {(projects.data ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <select className={selectCls} value={listId} disabled={!projectId} onChange={(e) => setListId(e.target.value)}>
+            <option value="">Select list…</option>
+            {(lists.data ?? []).map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="gradient"
+            disabled={!title.trim() || !listId || create.isPending}
+            onClick={() => create.mutate()}
+          >
+            {create.isPending ? 'Creating…' : 'Create task'}
+          </Button>
         </div>
       </div>
     </div>
