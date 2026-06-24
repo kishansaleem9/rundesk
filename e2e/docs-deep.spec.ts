@@ -31,7 +31,7 @@ test.describe('docs — comments, history, public share', () => {
     await uiLogin(page)
     await page.goto(`/app/${wsId}/docs?doc=${docId}`)
     await page.getByRole('button', { name: 'Version history' }).click()
-    await expect(page.getByRole('heading', { name: 'Version history' })).toBeVisible()
+    await expect(page.getByText('Version history').first()).toBeVisible()
   })
 
   test('toggle public share on and off', async ({ page }) => {

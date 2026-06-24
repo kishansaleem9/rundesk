@@ -45,7 +45,7 @@ test.describe('task detail — deep interactions', () => {
 
   test('start and stop a timer', async ({ page }) => {
     await openTask(page)
-    await page.getByText('Time', { exact: true }).click()
+    await page.getByRole('button', { name: 'Time', exact: true }).click()
     await page.getByPlaceholder('What are you working on?').fill('e2e work')
     await page.getByRole('button', { name: 'Start timer' }).click()
     const stop = page.getByRole('button', { name: 'Stop' })

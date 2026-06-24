@@ -16,6 +16,10 @@ test.describe('planning modules', () => {
     await page.getByRole('button', { name: 'New sprint' }).click()
     const name = uniq('sprint')
     await page.getByPlaceholder('Sprint name (e.g. Sprint 12)').fill(name)
+    // start + end dates are required (the Create button stays disabled otherwise)
+    const dates = page.locator('input[type="date"]')
+    await dates.nth(0).fill('2026-08-01')
+    await dates.nth(1).fill('2026-08-15')
     await page.getByRole('button', { name: 'Create sprint' }).click()
     await expect(page.getByText(name).first()).toBeVisible()
     // cleanup

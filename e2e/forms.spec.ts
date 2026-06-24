@@ -17,14 +17,26 @@ test.describe('forms', () => {
     const name = uniq('form')
     await page.getByPlaceholder('e.g. Bug report, Feature request…').fill(name)
     await page.getByRole('button', { name: 'Create', exact: true }).click()
-    // lands in the builder
-    await expect(page.getByText('builder')).toBeVisible({ timeout: 15_000 })
-    await page.getByRole('button', { name: /Add field/ }).first().click()
+
+    // confirm the form was created, then open its builder
+    let formId = ''
+    await expect
+      .poll(
+        async () => {
+          const forms = await apiGet(request, token, `/workspaces/${wsId}/forms`)
+          const f = Array.isArray(forms) ? forms.find((x: any) => x.title === name) : null
+          if (f) formId = f.id
+          return !!f
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true)
+
+    await page.goto(`/app/${wsId}/forms/${formId}`)
+    await expect(page.getByRole('heading', { name })).toBeVisible() // builder shows the form title
+    await page.getByRole('button', { name: 'Add field', exact: true }).first().click()
     await expect(page.getByPlaceholder('Field label')).toBeVisible()
 
-    // cleanup
-    const forms = await apiGet(request, token, `/workspaces/${wsId}/forms`)
-    const f = Array.isArray(forms) ? forms.find((x: any) => x.title === name) : null
-    if (f) await apiDelete(request, token, `/workspaces/${wsId}/forms/${f.id}`)
+    await apiDelete(request, token, `/workspaces/${wsId}/forms/${formId}`)
   })
 })

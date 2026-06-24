@@ -22,7 +22,7 @@ const PAGES: Array<[path: string, heading: RegExp]> = [
   ['/ai', /Rundesk AI/],
   ['/import', /Import from ClickUp/],
   ['/time', /Time tracking/],
-  ['/time/approvals', /Approvals/],
+  ['/time/approvals?tab=pending', /Approvals/],
   ['/inbox', /Notifications/],
   ['/integrations', /Integrations/],
   ['/settings', /Settings/],
