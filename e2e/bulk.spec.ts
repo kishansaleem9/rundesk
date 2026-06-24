@@ -18,18 +18,17 @@ test.describe('board bulk actions', () => {
     await deleteTree(request, token, tree)
   })
 
-  test('select all and archive', async ({ page, request }) => {
-    page.on('dialog', (d) => d.accept()) // accept the "Archive N tasks?" confirm
+  test('select all and bulk mark-done in table view', async ({ page, request }) => {
     await uiLogin(page)
     await page.goto(boardUrl(tree))
     await page.getByRole('button', { name: 'Table', exact: true }).click()
     await page.getByRole('checkbox', { name: 'Select all tasks' }).check()
-    await page.getByRole('button', { name: 'Archive selected tasks' }).click()
+    await page.getByRole('button', { name: 'Mark done' }).click()
     await expect
       .poll(async () => {
         const t = await apiGet(request, token, `/tasks/${ids[0]}`)
-        return t.isArchived === true
+        return t.status
       }, { timeout: 10_000 })
-      .toBe(true)
+      .toBe('done')
   })
 })
