@@ -14,7 +14,13 @@ export const uniq = (p: string) => `zz-e2e ${p} ${Date.now().toString(36)}-${cou
 const unwrap = (j: any) => (j && typeof j === 'object' && 'data' in j ? j.data : j)
 
 export async function apiLogin(request: APIRequestContext, email = EMAIL, password = PASSWORD) {
-  const res = await request.post(`${API}/auth/login`, { data: { email, password } })
+  // Retry through transient 5xx/connection errors — e.g. the API still warming
+  // up in the first seconds after a deploy/rebuild.
+  let res = await request.post(`${API}/auth/login`, { data: { email, password } })
+  for (let attempt = 0; attempt < 6 && !res.ok() && [0, 500, 502, 503, 504].includes(res.status()); attempt++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    res = await request.post(`${API}/auth/login`, { data: { email, password } })
+  }
   expect(res.ok(), `API login failed (${res.status()}) for ${email}`).toBeTruthy()
   const d = unwrap(await res.json())
   return { token: d.accessToken as string, workspaces: (d.workspaces ?? []) as Array<{ id: string; name: string; role: string }> }
