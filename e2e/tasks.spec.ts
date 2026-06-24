@@ -73,16 +73,19 @@ test.describe('tasks', () => {
     const before = await apiGet(request, token, `/tasks/${task.id}`)
     await uiLogin(page)
     await page.goto(boardUrl(tree))
-    await page.getByText('Board', { exact: true }).first().click()
-    await page.waitForTimeout(800) // let the board grid render
+    // switch to the Board view (a real <button>{label}</button> tab) and wait
+    // for the board to render — columns are <h3>{label}</h3> headings.
+    await page.getByRole('button', { name: 'Board', exact: true }).click()
+    await expect(
+      page.getByRole('heading', { name: /^(Backlog|To do|In progress|In review|Done|Cancelled)$/ }).first(),
+    ).toBeVisible({ timeout: 10_000 })
     const card = page.getByText(title).first()
     await expect(card).toBeVisible()
 
-    // pick the first visible column whose header starts with a known label
-    // (headers include a count, e.g. "In progress 0", so match by prefix)
+    // pick the first visible column header that isn't the card's current one
     let target: Locator | null = null
     for (const label of ['In progress', 'In review', 'Done', 'To do', 'Backlog']) {
-      const col = page.getByText(new RegExp('^' + label)).first()
+      const col = page.getByRole('heading', { name: label, exact: true }).first()
       if (await col.isVisible().catch(() => false)) { target = col; break }
     }
     if (!target) throw new Error('no board column header visible')
