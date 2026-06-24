@@ -20,6 +20,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { PasswordChecklist, isPasswordStrong } from '../lib/password'
 import { useAuthStore } from '../store/auth'
 
 export const Route = createFileRoute('/accept-invite')({
@@ -187,11 +188,12 @@ function AcceptInvite() {
                   <Input
                     id="password"
                     type="password"
-                    placeholder="At least 8 characters"
+                    placeholder="At least 10 characters"
                     leadingIcon={<Lock className="h-4 w-4" />}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
+                  <PasswordChecklist value={password} />
                 </div>
               </div>
             </div>
@@ -206,7 +208,7 @@ function AcceptInvite() {
             size="lg"
             className="w-full"
             onClick={handleClaim}
-            disabled={claiming || (invite.requiresAccountCreation && (!fullName || password.length < 8))}
+            disabled={claiming || (invite.requiresAccountCreation && (!fullName || !isPasswordStrong(password)))}
           >
             {claiming ? (
               <>

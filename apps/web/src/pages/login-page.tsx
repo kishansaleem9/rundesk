@@ -9,6 +9,7 @@ import {
 } from '@rundesk/ui'
 import { Mail, Lock, ArrowRight, ShieldCheck, KeyRound } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { PasswordChecklist, passwordPolicyError } from '../lib/password'
 import { useAuthStore } from '../store/auth'
 
 type SsoLookupResponse = {
@@ -31,9 +32,7 @@ function validatePassword(value: string): string | null {
 }
 
 function validateNewPassword(value: string): string | null {
-  if (!value) return 'Password is required.'
-  if (value.length < 8) return 'Password must be at least 8 characters.'
-  return null
+  return passwordPolicyError(value)
 }
 
 function validateConfirmPassword(value: string, original: string): string | null {
@@ -363,9 +362,9 @@ export function LoginPage() {
                       onChange={(e) => setNewPassword(e.target.value)}
                       onBlur={() => setTouched((t) => ({ ...t, newPassword: true }))}
                       aria-invalid={touched.newPassword && newPasswordError ? true : undefined}
-                      placeholder="Minimum 8 characters"
+                      placeholder="At least 10 characters"
                     />
-                    {touched.newPassword && <FieldError message={newPasswordError} />}
+                    <PasswordChecklist value={newPassword} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="confirmPassword">Confirm password</Label>

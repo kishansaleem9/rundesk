@@ -5,11 +5,13 @@ import { InvitationsService } from './invitations.service'
 import { InvitationsController } from './invitations.controller'
 import { AuthModule } from '../auth/auth.module'
 import { EmailModule } from '../email/email.module'
+import { SecurityModule } from '../security/security.module'
 
 @Module({
   imports: [
     AuthModule,
     EmailModule,
+    SecurityModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

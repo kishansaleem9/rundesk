@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, GoneException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, GoneException, BadRequestException } from '@nestjs/common'
 import { eq, and } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import { organizations, invitations, organizationMembers, workspaceMembers, users } from '@rundesk/db'
@@ -6,6 +6,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
+import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
 
 @Injectable()
 export class InvitationsService {
@@ -13,6 +14,7 @@ export class InvitationsService {
     @Inject(DB_TOKEN) private db: Db,
     private emailService: EmailService,
     private config: ConfigService,
+    private securitySettings: WorkspaceSecuritySettingsService,
   ) {}
 
   private claimUrlForToken(token: string) {
@@ -188,6 +190,11 @@ export class InvitationsService {
         if (!dto.password || !dto.fullName) {
           throw new ConflictException('Password and full name required for new account')
         }
+
+        // New accounts created via an invite must meet the same strong-password
+        // baseline enforced at /auth/signup.
+        const strengthProblem = this.securitySettings.passwordStrengthProblem(dto.password)
+        if (strengthProblem) throw new BadRequestException(strengthProblem)
 
         const { hashSync } = await import('bcryptjs')
         const [newUser] = await tx

@@ -24,13 +24,13 @@ import {
   ArrowLeft,
   Check,
   Plus,
-  X,
   Trash2,
   ShieldCheck,
   Loader2,
 } from 'lucide-react'
 import { useAuthStore } from '../store/auth'
 import { api } from '../lib/api'
+import { PasswordChecklist, passwordPolicyError } from '../lib/password'
 
 type Step = 0 | 1 | 2 | 3 | 4
 
@@ -221,7 +221,7 @@ export function SignUpWizard() {
 }
 
 function canAdvance(step: Step, s: WizardState): boolean {
-  if (step === 0) return s.fullName.trim().length > 1 && /^.+@.+\..+$/.test(s.email) && validatePassword(s.password) === null
+  if (step === 0) return s.fullName.trim().length > 1 && /^.+@.+\..+$/.test(s.email) && passwordPolicyError(s.password) === null
   if (step === 1) return s.workspaceName.trim().length > 1 && s.industry !== '' && s.teamSize !== ''
   if (step === 2) return s.features.length > 0
   return true
@@ -246,23 +246,6 @@ function validateEmail(value: string): string | null {
   return null
 }
 
-// Mirrors the server's strong-password policy (passwordStrengthProblem in
-// workspace-security-settings.service.ts) so the requirements are enforced on
-// this step instead of silently failing at the final /auth/signup call.
-const PASSWORD_RULES: Array<{ label: string; hint: string; test: (v: string) => boolean }> = [
-  { label: 'At least 10 characters', hint: 'at least 10 characters', test: (v) => v.length >= 10 },
-  { label: 'A lowercase letter', hint: 'a lowercase letter', test: (v) => /[a-z]/.test(v) },
-  { label: 'An uppercase letter', hint: 'an uppercase letter', test: (v) => /[A-Z]/.test(v) },
-  { label: 'A number', hint: 'a number', test: (v) => /[0-9]/.test(v) },
-  { label: 'A symbol', hint: 'a symbol', test: (v) => /[^A-Za-z0-9]/.test(v) },
-]
-
-function validatePassword(value: string): string | null {
-  if (!value) return 'Password is required.'
-  const missing = PASSWORD_RULES.filter((r) => !r.test(value)).map((r) => r.hint)
-  return missing.length ? `Password must contain ${missing.join(', ')}.` : null
-}
-
 function validateWorkspaceName(value: string): string | null {
   const v = value.trim()
   if (!v) return 'Workspace name is required.'
@@ -273,33 +256,6 @@ function validateWorkspaceName(value: string): string | null {
 function FieldError({ message }: { message: string | null }) {
   if (!message) return null
   return <p className="text-xs text-destructive">{message}</p>
-}
-
-/** Live, per-rule password requirements shown on the account step. */
-function PasswordChecklist({ value }: { value: string }) {
-  return (
-    <ul className="grid grid-cols-1 gap-y-1 pt-0.5 sm:grid-cols-2 sm:gap-x-3">
-      {PASSWORD_RULES.map((rule) => {
-        const ok = rule.test(value)
-        return (
-          <li
-            key={rule.hint}
-            className={
-              'flex items-center gap-1.5 text-xs transition-colors ' +
-              (ok ? 'text-emerald-500' : 'text-muted-foreground')
-            }
-          >
-            {ok ? (
-              <Check className="h-3 w-3 shrink-0" />
-            ) : (
-              <X className="h-3 w-3 shrink-0 opacity-40" />
-            )}
-            {rule.label}
-          </li>
-        )
-      })}
-    </ul>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +276,7 @@ function StepAccount({
 
   const nameError = validateFullName(state.fullName)
   const emailError = validateEmail(state.email)
-  const passwordError = validatePassword(state.password)
+  const passwordError = passwordPolicyError(state.password)
 
   return (
     <div className="space-y-6">
