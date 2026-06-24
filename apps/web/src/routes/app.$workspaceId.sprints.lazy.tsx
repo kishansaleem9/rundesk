@@ -1,6 +1,11 @@
-import { createLazyFileRoute } from '@tanstack/react-router'
-import { SprintsPage } from '../pages/workspace-sprints-page'
+import { createLazyFileRoute, Outlet } from '@tanstack/react-router'
+
+// Layout route so nested children (e.g. /sprints/$sprintId) render via the
+// Outlet instead of being shadowed by the sprints list page.
+function SprintsSectionLayout() {
+  return <Outlet />
+}
 
 export const Route = createLazyFileRoute('/app/$workspaceId/sprints')({
-  component: SprintsPage,
+  component: SprintsSectionLayout,
 })

@@ -10,7 +10,7 @@ test.describe('planning modules', () => {
     wsId = a.workspaces[0].id
   })
 
-  test('create a sprint', async ({ page, request }) => {
+  test('create a sprint and open its detail page', async ({ page, request }) => {
     await uiLogin(page)
     await page.goto(`/app/${wsId}/sprints`)
     await page.getByRole('button', { name: 'New sprint' }).click()
@@ -22,13 +22,20 @@ test.describe('planning modules', () => {
     await dates.nth(1).fill('2026-08-15')
     await page.getByRole('button', { name: 'Create sprint' }).click()
     await expect(page.getByText(name).first()).toBeVisible()
-    // cleanup
+
     const sprints = await apiGet(request, token, `/workspaces/${wsId}/sprints`)
     const s = Array.isArray(sprints) ? sprints.find((x: any) => x.name === name) : null
-    if (s) await apiDelete(request, token, `/sprints/${s.id}`)
+    expect(s, 'sprint created').toBeTruthy()
+
+    // the detail route must render the detail page, NOT be shadowed by the list
+    await page.goto(`/app/${wsId}/sprints/${s.id}`)
+    await expect(page.getByText(name).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'New sprint' })).toHaveCount(0)
+
+    await apiDelete(request, token, `/sprints/${s.id}`)
   })
 
-  test('create a goal', async ({ page, request }) => {
+  test('create a goal and open its detail page', async ({ page, request }) => {
     await uiLogin(page)
     await page.goto(`/app/${wsId}/goals`)
     await page.getByRole('button', { name: 'New goal' }).click()
@@ -36,9 +43,15 @@ test.describe('planning modules', () => {
     await page.getByPlaceholder('Goal title (e.g. Ship v1.0 by end of Q2)').fill(title)
     await page.getByRole('button', { name: 'Create', exact: true }).click()
     await expect(page.getByText(title).first()).toBeVisible()
-    // cleanup
+
     const goals = await apiGet(request, token, `/workspaces/${wsId}/goals`)
     const g = Array.isArray(goals) ? goals.find((x: any) => x.title === title) : null
-    if (g) await apiDelete(request, token, `/goals/${g.id}`)
+    expect(g, 'goal created').toBeTruthy()
+
+    await page.goto(`/app/${wsId}/goals/${g.id}`)
+    await expect(page.getByText(title).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'New goal' })).toHaveCount(0)
+
+    await apiDelete(request, token, `/goals/${g.id}`)
   })
 })
