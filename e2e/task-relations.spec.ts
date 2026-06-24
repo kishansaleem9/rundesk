@@ -28,8 +28,13 @@ test.describe('task detail — watchers & custom fields', () => {
   test('add a watcher', async ({ page }) => {
     await openTask(page)
     await page.getByText('Watchers').click()
-    await page.getByRole('combobox').first().selectOption({ index: 1 }) // first addable member
-    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    // scope to the watcher <select> (the one with the placeholder option)
+    const sel = page.locator('select').filter({ has: page.locator('option', { hasText: 'Add teammate as watcher' }) })
+    await expect.poll(async () => sel.locator('option').count(), { timeout: 10_000 }).toBeGreaterThan(1)
+    await sel.selectOption({ index: 1 })
+    const addBtn = page.getByRole('button', { name: 'Add', exact: true })
+    await expect(addBtn).toBeEnabled()
+    await addBtn.click()
     await expect(page.getByText(/[1-9]\d* watcher/)).toBeVisible()
   })
 
@@ -43,7 +48,7 @@ test.describe('task detail — watchers & custom fields', () => {
     await expect(page.getByText('E2E Severity')).toBeVisible()
     const input = page.getByRole('textbox').first()
     await input.fill('critical')
-    await input.press('Enter')
+    await input.blur() // text custom fields commit on blur
     await expect
       .poll(async () => {
         const rows = await apiGet(request, token, `/workspaces/${tree.wsId}/tasks/${taskId}/custom-fields`)
