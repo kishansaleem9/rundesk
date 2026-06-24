@@ -6,10 +6,13 @@
  *
  * Run from repo root after sourcing .env (POSTGRES_USER / POSTGRES_DB optional).
  */
-const fs = require('fs')
-const path = require('path')
-const crypto = require('crypto')
-const { execFileSync } = require('child_process')
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+import { execFileSync } from 'child_process'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const container = process.env.DRIZZLE_PG_CONTAINER || 'rundesk-postgres'
 const pgUser = process.env.POSTGRES_USER || 'rundesk'
