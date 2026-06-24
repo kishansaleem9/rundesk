@@ -46,7 +46,13 @@ test.describe('task detail — watchers & custom fields', () => {
     await openTask(page)
     await page.getByText('Fields', { exact: true }).click()
     await expect(page.getByText('E2E Severity')).toBeVisible()
-    const input = page.getByRole('textbox').first()
+    // scope to the field's row so we don't grab the top-bar search box
+    const input = page
+      .locator('div')
+      .filter({ hasText: 'E2E Severity' })
+      .filter({ has: page.getByRole('textbox') })
+      .last()
+      .getByRole('textbox')
     await input.fill('critical')
     await input.blur() // text custom fields commit on blur
     await expect
