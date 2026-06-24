@@ -23,7 +23,9 @@ test.describe('collaboration & lists', () => {
     const msg = uniq('chat')
     await composer.fill(msg)
     await composer.press('Enter')
-    await expect(page.getByText(msg)).toBeVisible()
+    // the sent message renders above the composer; .first() avoids matching the
+    // composer textarea if it briefly still holds the typed value
+    await expect(page.getByText(msg).first()).toBeVisible()
   })
 
   test('list statuses: open the manager, add and remove a status', async ({ page, request }) => {
