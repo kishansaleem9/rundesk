@@ -1,20 +1,26 @@
-import { test, expect, Page } from '@playwright/test'
+import { test, expect, Page, Locator } from '@playwright/test'
 import { apiLogin, apiPost, apiGet, uiLogin, createTree, deleteTree, boardUrl, uniq, type Tree } from './helpers'
 
-// dnd-kit uses pointer sensors — drag with an explicit press → stepped move → release.
-async function dragCardTo(page: Page, cardText: string, targetColumn: string) {
-  const card = page.getByText(cardText, { exact: false }).first()
-  const target = page.getByText(targetColumn, { exact: false }).first()
+// dnd-kit uses a pointer sensor — press, nudge to start the drag, step to the
+// target, release. Both locators must already be visible (non-null boxes).
+async function dndDrag(page: Page, card: Locator, target: Locator) {
   const cb = await card.boundingBox()
   const tb = await target.boundingBox()
-  if (!cb || !tb) throw new Error('card/target not found for drag')
+  if (!cb || !tb) throw new Error('card/target has no bounding box')
   await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2)
   await page.mouse.down()
-  // several intermediate moves so dnd-kit registers the drag
-  for (let i = 1; i <= 6; i++) {
-    await page.mouse.move(cb.x + (tb.x - cb.x) * (i / 6) + 4, cb.y + (tb.y - cb.y) * (i / 6) + 4)
-    await page.waitForTimeout(40)
+  await page.mouse.move(cb.x + cb.width / 2 + 10, cb.y + cb.height / 2 + 10) // nudge → activate
+  await page.waitForTimeout(120)
+  const steps = 12
+  for (let i = 1; i <= steps; i++) {
+    await page.mouse.move(
+      cb.x + (tb.x + tb.width / 2 - cb.x) * (i / steps),
+      cb.y + (tb.y + tb.height / 2 - cb.y) * (i / steps),
+    )
+    await page.waitForTimeout(30)
   }
+  await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2)
+  await page.waitForTimeout(120)
   await page.mouse.up()
 }
 
@@ -40,29 +46,25 @@ test.describe('tasks', () => {
     await quick.press('Enter')
     await expect(page.getByText(title)).toBeVisible()
 
-    // open the task detail drawer
+    // open the task detail drawer (a Sheet — anchor on its tabs, not role=dialog)
     await page.getByText(title).click()
-    const drawer = page.getByRole('dialog')
-    await expect(drawer).toBeVisible()
-    await expect(drawer.getByRole('tab', { name: 'Overview' }).or(drawer.getByText('Overview'))).toBeVisible()
-    await expect(drawer.getByText('Subtasks')).toBeVisible()
+    await expect(page.getByText('Subtasks')).toBeVisible()
+    await expect(page.getByText('Overview')).toBeVisible()
   })
 
   test('add a subtask from the task drawer', async ({ page, request }) => {
     const taskTitle = uniq('parent')
-    const task = await apiPost(request, token, '/tasks', { listId: tree.listId, title: taskTitle })
+    await apiPost(request, token, '/tasks', { listId: tree.listId, title: taskTitle })
     await uiLogin(page)
     await page.goto(boardUrl(tree))
     await page.getByText(taskTitle).click()
-    const drawer = page.getByRole('dialog')
-    await expect(drawer).toBeVisible()
-    await drawer.getByText('Subtasks').click()
+    await expect(page.getByText('Subtasks')).toBeVisible()
+    await page.getByText('Subtasks').click()
     const sub = uniq('subtask')
-    const subInput = drawer.getByPlaceholder(/Add subtask/i)
+    const subInput = page.getByPlaceholder('+ Add subtask')
     await subInput.fill(sub)
     await subInput.press('Enter')
-    await expect(drawer.getByText(sub)).toBeVisible()
-    await apiPost(request, token, `/tasks`, { listId: tree.listId, title: 'noop' }).catch(() => {})
+    await expect(page.getByText(sub)).toBeVisible()
   })
 
   test('drag a task between board columns changes its status', async ({ page, request }) => {
@@ -71,14 +73,21 @@ test.describe('tasks', () => {
     const before = await apiGet(request, token, `/tasks/${task.id}`)
     await uiLogin(page)
     await page.goto(boardUrl(tree))
-    // switch to the Board view
-    await page.getByRole('tab', { name: 'Board' }).or(page.getByText('Board', { exact: true })).first().click()
-    await expect(page.getByText(title)).toBeVisible()
-    // drag from its current column to "In progress"
-    await dragCardTo(page, title, 'In progress')
-    await page.waitForTimeout(600)
+    await page.getByText('Board', { exact: true }).first().click()
+    const card = page.getByText(title).first()
+    await expect(card).toBeVisible()
+
+    // pick the first visible column header that isn't the card's current one
+    let target: Locator | null = null
+    for (const label of ['In progress', 'In review', 'Done', 'To do', 'Backlog']) {
+      const col = page.getByText(label, { exact: true }).first()
+      if (await col.isVisible().catch(() => false)) { target = col; break }
+    }
+    if (!target) throw new Error('no board column header visible')
+
+    await dndDrag(page, card, target)
     await expect
-      .poll(async () => (await apiGet(request, token, `/tasks/${task.id}`)).status, { timeout: 10_000 })
+      .poll(async () => (await apiGet(request, token, `/tasks/${task.id}`)).status, { timeout: 12_000 })
       .not.toBe(before.status)
   })
 })

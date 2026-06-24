@@ -32,7 +32,7 @@ test.describe('collaboration & lists', () => {
     try {
       await uiLogin(page)
       await page.goto(boardUrl(tree))
-      await page.getByRole('button', { name: "Manage this list's statuses" }).click()
+      await page.getByRole('button', { name: 'Statuses' }).click()
       await expect(page.getByText('Manage list statuses')).toBeVisible()
       const statusName = uniq('status').slice(0, 24)
       await page.getByPlaceholder('Add status…').fill(statusName)
