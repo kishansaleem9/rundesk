@@ -42,12 +42,9 @@ test.describe('time / roles / api keys', () => {
     await uiLogin(page)
     await page.goto(`/app/${wsId}/settings`)
     await page.getByRole('button', { name: 'Roles', exact: true }).click()
-    const nameInput = page.getByPlaceholder('e.g. Project Lead')
-    if (!(await nameInput.isVisible().catch(() => false))) {
-      await page.getByRole('button', { name: '+', exact: true }).first().click()
-    }
+    await page.getByRole('button', { name: 'New role' }).click()
     const roleName = uniq('role').slice(0, 24)
-    await nameInput.fill(roleName)
+    await page.getByPlaceholder('e.g. Project Lead').fill(roleName)
     await page.getByRole('button', { name: 'Create role' }).click()
     let id = ''
     await expect

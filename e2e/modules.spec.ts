@@ -50,7 +50,7 @@ test.describe('modules: automations / boards', () => {
     await uiLogin(page)
     await page.goto(`/app/${wsId}/mindmaps`)
     await page.getByRole('button', { name: /New mind map/i }).click()
-    await expect(page.getByPlaceholder('Node label').or(page.getByRole('button', { name: /Add child/i }))).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByPlaceholder('Node label').or(page.getByRole('button', { name: /Add child/i })).first()).toBeVisible({ timeout: 15_000 })
     const canvases = await apiGet(request, token, `/workspaces/${wsId}/canvases`)
     if (Array.isArray(canvases)) {
       for (const c of canvases.filter((x: any) => x.type === 'mindmap')) {
