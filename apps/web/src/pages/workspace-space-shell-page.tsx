@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
-import { Folder, Users, CircleDot } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Folder, Users, CircleDot, ArchiveRestore } from 'lucide-react'
 import { Button } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { WorkHubPage, WorkEmptyState, WorkEntityCard } from '../components/work/work-ui'
@@ -40,9 +40,22 @@ function SpaceHome() {
   })
   const space = spaces.find((s) => s.id === spaceId)
 
+  const qc = useQueryClient()
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects', spaceId],
     queryFn: () => api<Project[]>(`/projects/space/${spaceId}`),
+  })
+  const { data: archivedProjects = [] } = useQuery({
+    queryKey: ['projects-archived', spaceId],
+    queryFn: () => api<Project[]>(`/projects/space/${spaceId}/archived`),
+  })
+  const restoreProject = useMutation({
+    mutationFn: (projectId: string) => api(`/projects/${projectId}/restore`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['projects', spaceId] })
+      qc.invalidateQueries({ queryKey: ['projects-archived', spaceId] })
+      qc.invalidateQueries({ queryKey: ['space-tree'] })
+    },
   })
 
   return (
@@ -94,6 +107,34 @@ function SpaceHome() {
           </div>
         )}
       </section>
+
+      {archivedProjects.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-[13px] font-semibold text-muted-foreground mb-2">
+            Archived projects ({archivedProjects.length})
+          </h2>
+          <div className="space-y-1">
+            {archivedProjects.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between rounded-md border border-border/70 bg-card/40 px-3 py-1.5"
+              >
+                <span className="text-[13px] text-muted-foreground truncate">{p.name}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0"
+                  disabled={restoreProject.isPending}
+                  onClick={() => restoreProject.mutate(p.id)}
+                >
+                  <ArchiveRestore className="h-3.5 w-3.5 mr-1.5" />
+                  Restore
+                </Button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <ContainerMembersSheet
         kind="space"

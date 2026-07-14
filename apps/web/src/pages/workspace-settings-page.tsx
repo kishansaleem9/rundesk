@@ -164,6 +164,14 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     },
   })
 
+  const archive = useMutation({
+    mutationFn: () => api(`/workspaces/${workspaceId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['workspaces'] })
+      window.location.href = '/app'
+    },
+  })
+
   if (!wsQuery.data) return <Card className="p-6 text-sm text-muted-foreground">Loading…</Card>
 
   const dirty =
@@ -202,6 +210,27 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending} size="sm">
           {save.isPending ? 'Saving…' : 'Save changes'}
         </Button>
+      </div>
+
+      <div className="pt-4 mt-2 border-t border-destructive/30">
+        <p className="text-sm font-semibold text-destructive">Danger zone</p>
+        <div className="mt-2 flex items-center justify-between gap-4">
+          <span className="text-xs text-muted-foreground">
+            Archiving hides this workspace for everyone. It can be restored by an admin.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-destructive/50 text-destructive hover:bg-destructive/10 shrink-0"
+            disabled={archive.isPending}
+            onClick={() => {
+              if (window.confirm(`Archive workspace "${wsQuery.data!.name}"? Members will lose access until it is restored.`))
+                archive.mutate()
+            }}
+          >
+            {archive.isPending ? 'Archiving…' : 'Archive workspace'}
+          </Button>
+        </div>
       </div>
     </Card>
   )

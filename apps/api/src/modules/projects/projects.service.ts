@@ -39,6 +39,14 @@ export class ProjectsService {
     return project
   }
 
+  /** List only the archived projects of a space (for the restore UI). */
+  async getArchivedProjectsBySpace(spaceId: string) {
+    return this.db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.spaceId, spaceId), eq(projects.isArchived, true)))
+  }
+
   async getProjectsBySpace(spaceId: string, actorId?: string) {
     const base = and(eq(projects.spaceId, spaceId), eq(projects.isArchived, false))
     if (!actorId || (await this.canSeeAllProjects(spaceId, actorId))) {

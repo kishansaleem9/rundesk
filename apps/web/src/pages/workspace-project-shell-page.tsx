@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, Card } from '@rundesk/ui'
+import { Button, Input, Card, cn } from '@rundesk/ui'
 import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot } from 'lucide-react'
 import { api } from '../lib/api'
 import {
@@ -43,6 +43,7 @@ function ProjectHome() {
   const [newListDescription, setNewListDescription] = useState('')
   const [membersOpen, setMembersOpen] = useState(false)
   const [statusesOpen, setStatusesOpen] = useState(false)
+  const [dragListId, setDragListId] = useState<string | null>(null)
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects', spaceId],
@@ -54,6 +55,28 @@ function ProjectHome() {
     queryKey: ['lists', projectId],
     queryFn: () => api<List[]>(`/lists/project/${projectId}`),
   })
+
+  const reorderLists = useMutation({
+    mutationFn: (orderedIds: string[]) =>
+      api(`/lists/project/${projectId}/reorder`, { method: 'POST', body: { orderedIds } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['lists', projectId] }),
+  })
+  const handleListDrop = (targetId: string) => {
+    if (!dragListId || dragListId === targetId) {
+      setDragListId(null)
+      return
+    }
+    const ids = lists.map((l) => l.id)
+    const from = ids.indexOf(dragListId)
+    const to = ids.indexOf(targetId)
+    if (from < 0 || to < 0) {
+      setDragListId(null)
+      return
+    }
+    ids.splice(to, 0, ids.splice(from, 1)[0])
+    reorderLists.mutate(ids)
+    setDragListId(null)
+  }
 
   const createList = useMutation({
     mutationFn: () =>
@@ -157,13 +180,23 @@ function ProjectHome() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {lists.map((list) => (
-              <ListCard
+              <div
                 key={list.id}
-                list={list}
-                workspaceId={workspaceId}
-                spaceId={spaceId}
-                projectId={projectId}
-              />
+                draggable
+                onDragStart={() => setDragListId(list.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleListDrop(list.id)}
+                onDragEnd={() => setDragListId(null)}
+                className={cn('cursor-grab active:cursor-grabbing', dragListId === list.id && 'opacity-50')}
+                title="Drag to reorder lists"
+              >
+                <ListCard
+                  list={list}
+                  workspaceId={workspaceId}
+                  spaceId={spaceId}
+                  projectId={projectId}
+                />
+              </div>
             ))}
           </div>
         )}

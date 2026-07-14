@@ -15,6 +15,11 @@ export class ProjectsController {
     return this.projectsService.getProjectsBySpace(spaceId, user.id)
   }
 
+  @Get('space/:spaceId/archived')
+  async getArchivedProjects(@Param('spaceId') spaceId: string) {
+    return this.projectsService.getArchivedProjectsBySpace(spaceId)
+  }
+
   @Get(':projectId')
   async getProject(@Param('projectId') projectId: string) {
     return this.projectsService.getProject(projectId)
