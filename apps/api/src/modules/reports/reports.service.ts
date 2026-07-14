@@ -144,8 +144,20 @@ export class ReportsService {
     return m && privileged.includes(m.role) ? undefined : userId
   }
 
-  async getProductivity(workspaceId: string, days = 30, restrictToUserId?: string) {
+  async getProductivity(
+    workspaceId: string,
+    days = 30,
+    restrictToUserId?: string,
+    scope: { spaceId?: string; projectId?: string } = {},
+  ) {
     const since = daysAgo(days)
+    // Optional space/project scope (Plan §9). Applied inside the CASE counts so
+    // every member still appears (with 0) rather than being filtered out.
+    const inScope = scope.projectId
+      ? sql`${lists.projectId} = ${scope.projectId}`
+      : scope.spaceId
+        ? sql`${projects.spaceId} = ${scope.spaceId}`
+        : sql`true`
 
     const rows = await this.db
       .select({
@@ -153,22 +165,56 @@ export class ReportsService {
         displayName: users.displayName,
         email: users.email,
         avatarUrl: users.avatarUrl,
-        tasksCompleted: sql<number>`count(distinct case when ${tasks.status} = 'done' then ${tasks.id} end)::int`,
-        tasksCreated: sql<number>`count(distinct case when ${tasks.createdById} = ${users.id} then ${tasks.id} end)::int`,
-        totalAssigned: sql<number>`count(distinct ${tasks.id})::int`,
+        tasksCompleted: sql<number>`count(distinct case when ${tasks.status} = 'done' and ${inScope} then ${tasks.id} end)::int`,
+        tasksCreated: sql<number>`count(distinct case when ${tasks.createdById} = ${users.id} and ${inScope} then ${tasks.id} end)::int`,
+        totalAssigned: sql<number>`count(distinct case when ${inScope} then ${tasks.id} end)::int`,
       })
       .from(users)
       .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
       .leftJoin(taskAssignees, eq(taskAssignees.userId, users.id))
       .leftJoin(tasks, and(eq(tasks.id, taskAssignees.taskId), gte(tasks.updatedAt, since)))
+      .leftJoin(lists, eq(lists.id, tasks.listId))
+      .leftJoin(projects, eq(projects.id, lists.projectId))
       .where(
         restrictToUserId
           ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, restrictToUserId))
           : eq(workspaceMembers.workspaceId, workspaceId),
       )
       .groupBy(users.id, users.displayName, users.email, users.avatarUrl)
-      .orderBy(desc(sql`count(distinct case when ${tasks.status} = 'done' then ${tasks.id} end)`))
+      .orderBy(desc(sql`count(distinct case when ${tasks.status} = 'done' and ${inScope} then ${tasks.id} end)`))
 
+    return rows
+  }
+
+  /** Completed-tasks trend bucketed by week or month (Plan §9). */
+  async getProductivityTrend(
+    workspaceId: string,
+    days = 90,
+    bucket: 'week' | 'month' = 'week',
+    scope: { spaceId?: string; projectId?: string } = {},
+  ) {
+    const since = daysAgo(days)
+    const periodExpr =
+      bucket === 'month'
+        ? sql<string>`to_char(${tasks.completedAt} at time zone 'UTC', 'YYYY-MM')`
+        : sql<string>`to_char(date_trunc('week', ${tasks.completedAt} at time zone 'UTC'), 'YYYY-MM-DD')`
+    const scopeCond = scope.projectId
+      ? eq(lists.projectId, scope.projectId)
+      : scope.spaceId
+        ? eq(projects.spaceId, scope.spaceId)
+        : undefined
+    const rows = await this.db
+      .select({
+        period: periodExpr,
+        tasksCompleted: sql<number>`count(distinct ${tasks.id})::int`,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(tasks.completedAt, since), scopeCond))
+      .groupBy(periodExpr)
+      .orderBy(periodExpr)
     return rows
   }
 

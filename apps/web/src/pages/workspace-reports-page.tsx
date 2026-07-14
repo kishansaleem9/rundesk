@@ -316,10 +316,34 @@ function ProductivityTab({
     totalAssigned: number
   }
 
-  const query = useQuery({
-    queryKey: ['reports-productivity', workspaceId, days],
-    queryFn: () => api<Row[]>(`/workspaces/${workspaceId}/reports/productivity?days=${days}`),
+  const [spaceFilter, setSpaceFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState('')
+  const [bucket, setBucket] = useState<'week' | 'month'>('week')
+
+  const spacesQuery = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
   })
+  const projectsQuery = useQuery({
+    queryKey: ['projects', spaceFilter],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/projects/space/${spaceFilter}`),
+    enabled: !!spaceFilter,
+  })
+  const scopeParams = `${spaceFilter ? `&spaceId=${spaceFilter}` : ''}${projectFilter ? `&projectId=${projectFilter}` : ''}`
+
+  const query = useQuery({
+    queryKey: ['reports-productivity', workspaceId, days, spaceFilter, projectFilter],
+    queryFn: () => api<Row[]>(`/workspaces/${workspaceId}/reports/productivity?days=${days}${scopeParams}`),
+  })
+  const trendQuery = useQuery({
+    queryKey: ['reports-productivity-trend', workspaceId, bucket, spaceFilter, projectFilter],
+    queryFn: () =>
+      api<Array<{ period: string; tasksCompleted: number }>>(
+        `/workspaces/${workspaceId}/reports/productivity-trend?days=180&bucket=${bucket}${scopeParams}`,
+      ),
+  })
+  const trend = trendQuery.data ?? []
+  const trendMax = Math.max(1, ...trend.map((t) => t.tasksCompleted))
 
   const rows = useMemo(() => query.data ?? [], [query.data])
   useEffect(() => {
@@ -341,8 +365,71 @@ function ProductivityTab({
   }, [rows, days, workspaceId, registerExport])
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">Team performance in the last {days} days</p>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={spaceFilter}
+          onChange={(e) => {
+            setSpaceFilter(e.target.value)
+            setProjectFilter('')
+          }}
+          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+        >
+          <option value="">All spaces</option>
+          {(spacesQuery.data ?? []).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={projectFilter}
+          onChange={(e) => setProjectFilter(e.target.value)}
+          disabled={!spaceFilter}
+          className="h-8 rounded-md border border-border bg-background px-2 text-sm disabled:opacity-50"
+        >
+          <option value="">All projects</option>
+          {(projectsQuery.data ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <div className="ml-auto flex items-center gap-1 rounded-md border border-border p-0.5 text-xs">
+          {(['week', 'month'] as const).map((b) => (
+            <button
+              key={b}
+              onClick={() => setBucket(b)}
+              className={cn('px-2 py-0.5 rounded capitalize', bucket === b ? 'bg-brand-700 text-white' : 'text-muted-foreground')}
+            >
+              {b}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-foreground mb-2">Completed tasks trend ({bucket})</h3>
+        {trend.length === 0 ? (
+          <div className="text-center text-muted-foreground py-6 text-sm">No completed tasks in this range.</div>
+        ) : (
+          <div className="flex items-end gap-1.5 h-32 border-b border-border pb-0">
+            {trend.map((t) => (
+              <div key={t.period} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`${t.period}: ${t.tasksCompleted}`}>
+                <div className="text-[10px] tabular-nums text-muted-foreground">{t.tasksCompleted}</div>
+                <div
+                  className="w-full max-w-[28px] rounded-t bg-brand-700"
+                  style={{ height: `${Math.max(2, (t.tasksCompleted / trendMax) * 100)}%` }}
+                />
+                <div className="text-[9px] text-muted-foreground truncate w-full text-center">
+                  {bucket === 'month' ? t.period : t.period.slice(5)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>

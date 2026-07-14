@@ -26,9 +26,28 @@ export class ReportsController {
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: { id: string },
     @Query('days') days?: string,
+    @Query('spaceId') spaceId?: string,
+    @Query('projectId') projectId?: string,
   ) {
     const restrict = await this.reports.getViewerScope(workspaceId, user.id)
-    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30, restrict)
+    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30, restrict, { spaceId, projectId })
+  }
+
+  @Get('productivity-trend')
+  @ApiOperation({ summary: 'Completed-tasks trend by week or month' })
+  productivityTrend(
+    @Param('workspaceId') workspaceId: string,
+    @Query('days') days?: string,
+    @Query('bucket') bucket?: string,
+    @Query('spaceId') spaceId?: string,
+    @Query('projectId') projectId?: string,
+  ) {
+    return this.reports.getProductivityTrend(
+      workspaceId,
+      days ? parseInt(days, 10) : 90,
+      bucket === 'month' ? 'month' : 'week',
+      { spaceId, projectId },
+    )
   }
 
   @Get('completion')
