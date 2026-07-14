@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, cn, toast } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
+import { AddPeopleDialog } from '../components/chat/add-people-dialog'
 import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
 import {
   formatDateDivider,
@@ -112,6 +113,7 @@ export function ChatPage() {
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [addPeopleOpen, setAddPeopleOpen] = useState(false)
   const [input, setInput] = useState('')
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -520,7 +522,18 @@ export function ChatPage() {
           onLeaveChannel={() => {
             if (selectedId) leaveChannelMutation.mutate(selectedId)
           }}
+          onAddPeople={selectedChannel && !selectedChannel.isDm ? () => setAddPeopleOpen(true) : undefined}
         />
+
+        {selectedChannel && !selectedChannel.isDm && (
+          <AddPeopleDialog
+            channelId={selectedChannel.id}
+            workspaceId={workspaceId}
+            channelName={selectedChannel.name}
+            open={addPeopleOpen}
+            onOpenChange={setAddPeopleOpen}
+          />
+        )}
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
           {rootMessages.length === 0 ? (

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bookmark, Check, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pin, Search, Star, Users, X } from 'lucide-react'
+import { Bookmark, Check, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pin, Search, Star, UserPlus, Users, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +27,7 @@ export function ChatHeader({
   search,
   onSearchChange,
   onLeaveChannel,
+  onAddPeople,
 }: {
   channel: ChatChannel | null
   memberCount: number
@@ -38,6 +39,7 @@ export function ChatHeader({
   search: string
   onSearchChange: (value: string) => void
   onLeaveChannel: () => void
+  onAddPeople?: () => void
 }) {
   const title = channel?.isDm
     ? channel.dmPeerName ?? 'Direct message'
@@ -147,6 +149,17 @@ export function ChatHeader({
       )}
 
       <div className="flex items-center gap-0.5 shrink-0">
+        {!channel?.isDm && onAddPeople && (
+          <button
+            type="button"
+            onClick={onAddPeople}
+            className="hidden sm:flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12px] text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+            title="Add people"
+          >
+            <UserPlus className="h-3.5 w-3.5" />
+            <span>Add</span>
+          </button>
+        )}
         {!channel?.isDm && memberCount > 0 && (
           <Popover>
             <PopoverTrigger asChild>
