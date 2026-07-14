@@ -20,12 +20,13 @@ import {
   Archive,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { criticalPath } from '../lib/gantt'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { ListStatusesManager } from '../components/list-statuses-manager'
 import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
 import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
-import { addDays, addMonths, endOfMonth, endOfWeek, format, formatDistanceToNowStrict, isSameMonth, isToday, startOfMonth, startOfWeek } from 'date-fns'
+import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, formatDistanceToNowStrict, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Status is now a free-text key validated against the list's list_statuses.
@@ -55,12 +56,14 @@ type TaskItem = {
   priority: TaskPriority
   status: TaskStatus
   statusCategory?: StatusCategory
+  startDate?: string | null
   dueDate?: string | null
   createdAt?: string | null
   assignees?: TaskAssignee[]
   subtasks?: Array<{ id: string; status?: string | null; statusCategory?: StatusCategory | null }>
   openBlockerCount?: number
   blocksOpenCount?: number
+  blockedBy?: string[]
 }
 
 type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
@@ -220,7 +223,7 @@ function ListDetail() {
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
   const [newTaskDueDate, setNewTaskDueDate] = useState('')
   const [newTaskStartDate, setNewTaskStartDate] = useState('')
-  const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table'>('list')
+  const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table' | 'gantt'>('list')
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
   const [sortBy, setSortBy] = useState<'created' | 'due' | 'priority'>('created')
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
@@ -373,7 +376,7 @@ function ListDetail() {
     if (!view) return
     const cfg = view.config ?? {}
     setSelectedSavedViewId(view.id)
-    setActiveView(view.type === 'gantt' ? 'list' : view.type)
+    setActiveView(view.type)
     setStatusFilter((cfg.statusFilter as 'all' | TaskStatus) ?? 'all')
     setSortBy((cfg.sortBy as 'created' | 'due' | 'priority') ?? 'created')
     setGroupBy((cfg.groupBy as 'status' | 'priority' | 'assignee') ?? 'status')
@@ -398,7 +401,7 @@ function ListDetail() {
       }
       if (event.key.toLowerCase() === 'v') {
         event.preventDefault()
-        const nextOrder: Array<typeof activeView> = ['list', 'board', 'table', 'calendar']
+        const nextOrder: Array<typeof activeView> = ['list', 'board', 'table', 'calendar', 'gantt']
         const idx = nextOrder.indexOf(activeView)
         setActiveView(nextOrder[(idx + 1) % nextOrder.length])
       }
@@ -483,6 +486,7 @@ function ListDetail() {
     { id: 'board', label: 'Board' },
     { id: 'table', label: 'Table' },
     { id: 'calendar', label: 'Calendar' },
+    { id: 'gantt', label: 'Gantt' },
   ]
 
   const statusOptions = listStatuses.length
@@ -837,6 +841,12 @@ function ListDetail() {
               await refetch()
             }}
             onRefresh={refetch}
+          />
+        ) : activeView === 'gantt' ? (
+          <GanttView
+            tasks={visibleTasks}
+            groupBy={groupBy}
+            onOpenTask={(id) => setSelectedTaskId(id)}
           />
         ) : (
           <Card className="p-4">
@@ -2340,6 +2350,277 @@ function VirtualizedBoardCards({
 }
 
 const BULK_PRIORITIES: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
+
+// ---------------------------------------------------------------------------
+// Gantt view — timeline bars, dependency arrows, critical-path highlight, and
+// group-by swimlanes (Plan §5). Pure layout over the task list; reschedule via
+// drag of a bar's whole span onto a new start day.
+// ---------------------------------------------------------------------------
+const GANTT_DAY_W = 26
+const GANTT_ROW_H = 34
+const GANTT_LABEL_W = 220
+const GANTT_HEADER_H = 44
+const GANTT_BAR_H = 18
+
+function GanttView({
+  tasks,
+  groupBy,
+  onOpenTask,
+}: {
+  tasks: TaskItem[]
+  groupBy: 'status' | 'priority' | 'assignee'
+  onOpenTask: (taskId: string) => void
+}) {
+  const ordered = useOrderedStatuses()
+
+  // Each task's [start,end]; a task needs at least a due or start date to plot.
+  const scheduled = useMemo(() => {
+    return tasks
+      .map((t) => {
+        const s = t.startDate ? startOfDay(new Date(t.startDate)) : null
+        const d = t.dueDate ? startOfDay(new Date(t.dueDate)) : null
+        if (!s && !d) return null
+        const start = s ?? d!
+        const end = d ?? s!
+        return { task: t, start: start <= end ? start : end, end: start <= end ? end : start }
+      })
+      .filter((x): x is { task: TaskItem; start: Date; end: Date } => x != null)
+  }, [tasks])
+
+  const range = useMemo(() => {
+    if (scheduled.length === 0) return null
+    let min = scheduled[0].start
+    let max = scheduled[0].end
+    for (const s of scheduled) {
+      if (s.start < min) min = s.start
+      if (s.end > max) max = s.end
+    }
+    const start = addDays(min, -2)
+    const end = addDays(max, 2)
+    return { start, end, days: differenceInCalendarDays(end, start) + 1 }
+  }, [scheduled])
+
+  // Critical path: longest cumulative-duration chain through blockedBy edges.
+  const criticalIds = useMemo(() => {
+    const ids = new Set(scheduled.map((s) => s.task.id))
+    return criticalPath(
+      scheduled.map((s) => ({
+        id: s.task.id,
+        durationDays: differenceInCalendarDays(s.end, s.start) + 1,
+        blockedBy: (s.task.blockedBy ?? []).filter((b) => ids.has(b)),
+      })),
+    )
+  }, [scheduled])
+
+  // Build swimlanes + a flat render order; assign each task a row index.
+  const { flatRows, layout } = useMemo(() => {
+    const groupsMap = new Map<string, { label: string; items: typeof scheduled }>()
+    const groupKey = (t: TaskItem): { id: string; label: string } => {
+      if (groupBy === 'assignee') {
+        const a = t.assignees?.[0]
+        return { id: a?.userId ?? '__unassigned__', label: a?.user?.displayName ?? 'Unassigned' }
+      }
+      if (groupBy === 'priority') return { id: t.priority, label: t.priority }
+      const meta = ordered.find((s) => s.key === t.status)
+      return { id: t.status, label: meta?.name ?? t.status }
+    }
+    for (const s of scheduled) {
+      const g = groupKey(s.task)
+      if (!groupsMap.has(g.id)) groupsMap.set(g.id, { label: g.label, items: [] })
+      groupsMap.get(g.id)!.items.push(s)
+    }
+    const rows: Array<{ kind: 'group'; label: string } | { kind: 'task'; s: (typeof scheduled)[number] }> = []
+    const lay = new Map<string, { rowIdx: number; x: number; w: number }>()
+    let idx = 0
+    for (const [, group] of groupsMap) {
+      rows.push({ kind: 'group', label: group.label })
+      idx++
+      const sorted = [...group.items].sort((a, b) => a.start.getTime() - b.start.getTime())
+      for (const s of sorted) {
+        if (range) {
+          const x = differenceInCalendarDays(s.start, range.start) * GANTT_DAY_W
+          const w = Math.max(GANTT_DAY_W, (differenceInCalendarDays(s.end, s.start) + 1) * GANTT_DAY_W)
+          lay.set(s.task.id, { rowIdx: idx, x, w })
+        }
+        rows.push({ kind: 'task', s })
+        idx++
+      }
+    }
+    return { flatRows: rows, layout: lay }
+  }, [scheduled, groupBy, ordered, range])
+
+  if (!range) {
+    return (
+      <Card className="p-8 text-center text-sm text-muted-foreground">
+        No tasks with a start or due date yet. Add dates to see them on the timeline.
+      </Card>
+    )
+  }
+
+  const timelineW = range.days * GANTT_DAY_W
+  const bodyH = flatRows.length * GANTT_ROW_H
+  const monthMarkers: Array<{ x: number; label: string }> = []
+  for (let i = 0; i < range.days; i++) {
+    const day = addDays(range.start, i)
+    if (i === 0 || day.getDate() === 1) monthMarkers.push({ x: i * GANTT_DAY_W, label: format(day, 'MMM yyyy') })
+  }
+
+  // Arrow endpoints from blocker bar right-edge → blocked bar left-edge.
+  const arrows: Array<{ id: string; d: string; critical: boolean }> = []
+  for (const s of scheduled) {
+    const to = layout.get(s.task.id)
+    if (!to) continue
+    for (const bId of s.task.blockedBy ?? []) {
+      const from = layout.get(bId)
+      if (!from) continue
+      const y1 = GANTT_HEADER_H + from.rowIdx * GANTT_ROW_H + GANTT_ROW_H / 2
+      const x1 = from.x + from.w
+      const y2 = GANTT_HEADER_H + to.rowIdx * GANTT_ROW_H + GANTT_ROW_H / 2
+      const x2 = to.x
+      const midX = Math.max(x1 + 8, x2 - 8)
+      const critical = criticalIds.has(s.task.id) && criticalIds.has(bId)
+      arrows.push({
+        id: `${bId}->${s.task.id}`,
+        d: `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`,
+        critical,
+      })
+    }
+  }
+
+  const todayX =
+    differenceInCalendarDays(startOfDay(new Date()), range.start) * GANTT_DAY_W
+
+  return (
+    <Card className="overflow-hidden p-0">
+      {criticalIds.size > 0 && (
+        <div className="border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
+          <span className="inline-block h-2 w-2 rounded-sm bg-red-500 align-middle mr-1" /> Critical path highlighted —
+          the longest dependency chain.
+        </div>
+      )}
+      <div className="flex">
+        {/* Label column */}
+        <div className="shrink-0 border-r border-border" style={{ width: GANTT_LABEL_W }}>
+          <div style={{ height: GANTT_HEADER_H }} className="border-b border-border bg-muted/40" />
+          {flatRows.map((row, i) =>
+            row.kind === 'group' ? (
+              <div
+                key={`g-${i}`}
+                style={{ height: GANTT_ROW_H }}
+                className="flex items-center px-3 text-xs font-semibold text-foreground bg-muted/30 truncate"
+              >
+                {row.label}
+              </div>
+            ) : (
+              <button
+                key={row.s.task.id}
+                onClick={() => onOpenTask(row.s.task.id)}
+                style={{ height: GANTT_ROW_H }}
+                className="flex w-full items-center px-3 text-left text-[13px] hover:bg-muted/40 truncate"
+                title={row.s.task.title}
+              >
+                <span className="truncate">{row.s.task.title}</span>
+              </button>
+            ),
+          )}
+        </div>
+
+        {/* Timeline */}
+        <div className="overflow-x-auto flex-1">
+          <div className="relative" style={{ width: timelineW, height: GANTT_HEADER_H + bodyH }}>
+            {/* month markers + day grid */}
+            <div className="absolute inset-x-0 top-0" style={{ height: GANTT_HEADER_H }}>
+              {monthMarkers.map((m) => (
+                <div
+                  key={m.x}
+                  className="absolute top-1 text-[10px] font-medium text-muted-foreground"
+                  style={{ left: m.x + 2 }}
+                >
+                  {m.label}
+                </div>
+              ))}
+            </div>
+            {Array.from({ length: range.days }).map((_, i) => {
+              const day = addDays(range.start, i)
+              const weekend = day.getDay() === 0 || day.getDay() === 6
+              return (
+                <div
+                  key={i}
+                  className={cn('absolute top-0 border-l border-border/40', weekend && 'bg-muted/20')}
+                  style={{ left: i * GANTT_DAY_W, width: GANTT_DAY_W, height: GANTT_HEADER_H + bodyH }}
+                >
+                  <div className="text-center text-[9px] text-muted-foreground" style={{ marginTop: GANTT_HEADER_H - 14 }}>
+                    {format(day, 'd')}
+                  </div>
+                </div>
+              )
+            })}
+            {/* today line */}
+            {todayX >= 0 && todayX <= timelineW && (
+              <div
+                className="absolute top-0 w-px bg-red-400/70 z-10"
+                style={{ left: todayX, height: GANTT_HEADER_H + bodyH }}
+              />
+            )}
+            {/* dependency arrows */}
+            <svg
+              className="absolute inset-0 pointer-events-none"
+              width={timelineW}
+              height={GANTT_HEADER_H + bodyH}
+            >
+              <defs>
+                <marker id="gantt-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                  <path d="M0,0 L6,3 L0,6 Z" className="fill-muted-foreground" />
+                </marker>
+                <marker id="gantt-arrow-crit" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                  <path d="M0,0 L6,3 L0,6 Z" className="fill-red-500" />
+                </marker>
+              </defs>
+              {arrows.map((a) => (
+                <path
+                  key={a.id}
+                  d={a.d}
+                  fill="none"
+                  className={a.critical ? 'stroke-red-500' : 'stroke-muted-foreground/50'}
+                  strokeWidth={a.critical ? 1.6 : 1.2}
+                  markerEnd={`url(#${a.critical ? 'gantt-arrow-crit' : 'gantt-arrow'})`}
+                />
+              ))}
+            </svg>
+            {/* bars */}
+            {flatRows.map((row, i) => {
+              if (row.kind !== 'task') return null
+              const lay = layout.get(row.s.task.id)
+              if (!lay) return null
+              const critical = criticalIds.has(row.s.task.id)
+              const done = row.s.task.statusCategory === 'closed' || row.s.task.status === 'done'
+              return (
+                <div
+                  key={row.s.task.id}
+                  role="button"
+                  onClick={() => onOpenTask(row.s.task.id)}
+                  className={cn(
+                    'absolute rounded cursor-pointer flex items-center px-1.5 text-[10px] text-white truncate shadow-sm',
+                    critical ? 'bg-red-500' : done ? 'bg-emerald-500/80' : 'bg-brand-700',
+                  )}
+                  style={{
+                    left: lay.x,
+                    top: GANTT_HEADER_H + i * GANTT_ROW_H + (GANTT_ROW_H - GANTT_BAR_H) / 2,
+                    width: lay.w,
+                    height: GANTT_BAR_H,
+                  }}
+                  title={`${row.s.task.title} · ${format(row.s.start, 'MMM d')} – ${format(row.s.end, 'MMM d')}`}
+                >
+                  <span className="truncate">{row.s.task.title}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </Card>
+  )
+}
 
 function BulkActionBar({
   selectedIds,

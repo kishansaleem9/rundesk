@@ -844,11 +844,29 @@ export class TasksService {
       }
     }
 
+    // Per-task "blocked by" edges (which in-list tasks must finish first),
+    // for the Gantt view's dependency arrows + critical path (Plan §5).
+    const idSet = new Set(taskIds)
+    const blockedBy = new Map<string, Set<string>>()
+    const addEdge = (taskId: string, blockerId: string) => {
+      if (!idSet.has(blockerId) || blockerId === taskId) return
+      const set = blockedBy.get(taskId) ?? new Set<string>()
+      set.add(blockerId)
+      blockedBy.set(taskId, set)
+    }
+    for (const dep of dependencyRows) {
+      if (dep.type === 'blocked_by') addEdge(dep.taskId, dep.relatedTaskId)
+    }
+    for (const dep of reverseDependencyRows) {
+      if (dep.type === 'blocks') addEdge(dep.taskId, dep.relatedTaskId)
+    }
+
     return rows.map((r) => ({
       ...r,
       labels: byTask.get(r.id) ?? [],
       openBlockerCount: openBlockerCount.get(r.id) ?? 0,
       blocksOpenCount: blocksOpenCount.get(r.id) ?? 0,
+      blockedBy: [...(blockedBy.get(r.id) ?? [])],
     }))
   }
 
