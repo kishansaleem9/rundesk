@@ -14,7 +14,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { useEffect, useMemo, useState } from 'react'
-import { ImageIcon, Maximize2, Minimize2 } from 'lucide-react'
+import { ImageIcon, Maximize2, Minimize2, Copy } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -282,6 +282,19 @@ export function TaskDetailSheet({
     },
   })
 
+  const duplicateTask = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${fallbackWorkspaceId}/task-templates/duplicate/${taskId}`, { method: 'POST' }),
+    onSuccess: async () => {
+      toast.success('Task duplicated')
+      await qc.invalidateQueries()
+      onOpenChange(false)
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : 'Could not duplicate task')
+    },
+  })
+
   const commitTitle = () => {
     const next = titleDraft.trim()
     const current = detailQuery.data?.title ?? ''
@@ -345,6 +358,17 @@ export function TaskDetailSheet({
             >
               <div className="absolute inset-0 bg-grid-dim opacity-40" aria-hidden />
               <div className="absolute -bottom-12 -right-8 h-40 w-40 rounded-full bg-white/10 blur-2xl" aria-hidden />
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => duplicateTask.mutate()}
+                disabled={duplicateTask.isPending || !fallbackWorkspaceId}
+                className="absolute left-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Duplicate
+              </Button>
               <Button
                 type="button"
                 size="sm"
