@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common'
+import { Injectable, Inject, HttpException, HttpStatus } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
@@ -40,12 +40,37 @@ export class AiService {
     return this.client
   }
 
+  private get hourlyLimit(): number {
+    const v = Number(this.config.get<string>('AI_HOURLY_LIMIT'))
+    return Number.isFinite(v) && v > 0 ? v : 200
+  }
+
+  /**
+   * Enforce a per-user hourly AI call cap (Plan §7.15 "per-user rate limits").
+   * Throws 429 when exceeded. No-op for calls without a user context.
+   */
+  async assertWithinRateLimit(ctx: AiCtx, now: Date = new Date()) {
+    if (!ctx.userId) return
+    const since = new Date(now.getTime() - 3_600_000)
+    const [row] = await this.db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(aiUsage)
+      .where(and(eq(aiUsage.userId, ctx.userId), gte(aiUsage.createdAt, since)))
+    if ((row?.c ?? 0) >= this.hourlyLimit) {
+      throw new HttpException(
+        `AI hourly rate limit reached (${this.hourlyLimit}/hour). Try again later.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      )
+    }
+  }
+
   /** Create a message and record its token usage (Plan §7.15). */
   private async complete(
     feature: string,
     ctx: AiCtx,
     params: Anthropic.Messages.MessageCreateParamsNonStreaming,
   ) {
+    await this.assertWithinRateLimit(ctx)
     const response = await this.claude.messages.create(params)
     void this.recordUsage(feature, params.model, ctx, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0)
     return response
