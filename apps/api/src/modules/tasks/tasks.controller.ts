@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -201,6 +202,31 @@ export class TasksController {
       body.recurrenceRule ?? null,
       body.preserveAssignees ?? true,
     )
+  }
+
+  // Persist (or clear) a task's recurrence so completing it auto-creates the
+  // next occurrence. Body: { cadenceDays } | { rule } | null (to clear).
+  @Put(':taskId/recurrence')
+  async setRecurrence(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body()
+    body: {
+      cadenceDays?: number | null
+      rule?: {
+        mode: 'daily' | 'weekly' | 'monthly'
+        interval?: number
+        weekdays?: number[]
+        dayOfMonth?: number
+        skipWeekends?: boolean
+      } | null
+    } | null,
+  ) {
+    const config =
+      body && (body.cadenceDays != null || body.rule != null)
+        ? { cadenceDays: body.cadenceDays ?? null, rule: body.rule ?? null }
+        : null
+    return this.tasks.setRecurrence(taskId, user.id, config)
   }
 
   @Post(':taskId/move')

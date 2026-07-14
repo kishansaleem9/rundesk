@@ -267,6 +267,13 @@
       "when": 1900000034000,
       "tag": "0037_manager_grandfather",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1900000035000,
+      "tag": "0038_task_recurrence",
+      "breakpoints": true
     }
   ]
 }

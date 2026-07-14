@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, index, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, integer, index, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { lists } from './lists'
 import { users } from './users'
@@ -33,6 +33,18 @@ export const tasks = pgTable('tasks', {
   timeEstimate:  integer('time_estimate'), // seconds
   // Optional cover for the task detail header: a CSS color/gradient string.
   coverColor:    text('cover_color'),
+  // Persisted recurrence config. When set and the task is completed, the next
+  // occurrence is auto-created and the config moves forward to it (0038).
+  recurrence:    jsonb('recurrence').$type<{
+    cadenceDays?: number | null
+    rule?: {
+      mode: 'daily' | 'weekly' | 'monthly'
+      interval?: number
+      weekdays?: number[]
+      dayOfMonth?: number
+      skipWeekends?: boolean
+    } | null
+  }>(),
   isArchived:    boolean('is_archived').notNull().default(false),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

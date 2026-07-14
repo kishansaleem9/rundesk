@@ -994,6 +994,29 @@ export class TasksService {
 
     const [after] = await this.db.update(tasks).set(set).where(eq(tasks.id, taskId)).returning()
 
+    // Auto-materialise the next occurrence when a recurring task is completed,
+    // handing the recurrence forward to it. Guarded so any hiccup never blocks
+    // the status change itself. No-op for the (vast majority) non-recurring tasks.
+    if (
+      nextCategory === 'closed' &&
+      (before.statusCategory as StatusCategory) !== 'closed' &&
+      before.recurrence
+    ) {
+      try {
+        const rec = before.recurrence as { cadenceDays?: number | null; rule?: RecurrenceRule | null }
+        const next = await this.createNextRecurringOccurrence(
+          taskId,
+          actorId,
+          rec.cadenceDays ?? null,
+          rec.rule ?? null,
+        )
+        await this.db.update(tasks).set({ recurrence: before.recurrence }).where(eq(tasks.id, next.nextTaskId))
+        await this.db.update(tasks).set({ recurrence: null }).where(eq(tasks.id, taskId))
+      } catch {
+        // Recurrence is best-effort; the completion still stands.
+      }
+    }
+
     // Emit activity log entries for the interesting transitions.
     if (patch.status && patch.status !== before.status) {
       await this.logActivity({
@@ -1228,6 +1251,46 @@ export class TasksService {
       updated,
       failed,
     }
+  }
+
+  /**
+   * Persist (or clear) a task's recurrence config. Once set, completing the
+   * task auto-creates the next occurrence (see updateTask). Pass null to stop
+   * the task recurring.
+   */
+  async setRecurrence(
+    taskId: string,
+    actorId: string,
+    config: { cadenceDays?: number | null; rule?: RecurrenceRule | null } | null,
+  ) {
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const task = await this.getTask(taskId)
+    if (!task) throw new NotFoundException('Task not found')
+
+    let value: { cadenceDays?: number; rule?: RecurrenceRule } | null = null
+    if (config) {
+      if (config.rule) {
+        if (!['daily', 'weekly', 'monthly'].includes(config.rule.mode)) {
+          throw new BadRequestException('Recurrence rule mode must be daily, weekly, or monthly')
+        }
+        value = { rule: config.rule }
+      } else if (config.cadenceDays != null) {
+        const n = config.cadenceDays
+        if (!Number.isFinite(n) || n <= 0 || n > 365) {
+          throw new BadRequestException('cadenceDays must be between 1 and 365')
+        }
+        value = { cadenceDays: n }
+      } else {
+        throw new BadRequestException('Provide cadenceDays or rule, or null to clear recurrence')
+      }
+    }
+
+    const [row] = await this.db
+      .update(tasks)
+      .set({ recurrence: value, updatedAt: new Date() })
+      .where(eq(tasks.id, taskId))
+      .returning()
+    return row
   }
 
   async createNextRecurringOccurrence(
