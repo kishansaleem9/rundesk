@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, sql } from 'drizzle-orm'
+import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, sql, inArray } from 'drizzle-orm'
 import {
   chatChannels,
   chatChannelMembers,
@@ -242,6 +242,7 @@ export class ChatService {
     description?: string
     isPrivate?: boolean
     createdById: string
+    memberIds?: string[]
   }) {
     const name = data.name.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-')
     if (!name) throw new ForbiddenException('Channel name required')
@@ -259,6 +260,10 @@ export class ChatService {
       .insert(chatChannelMembers)
       .values({ channelId: row.id, userId: data.createdById })
       .onConflictDoNothing()
+    // Seed any invited members (validated against workspace membership).
+    if (data.memberIds?.length) {
+      await this.addChannelMembers(row.id, data.createdById, data.memberIds)
+    }
     this.realtime.emitToWorkspace(data.workspaceId, {
       type: 'chat.channel.created',
       workspaceId: data.workspaceId,
@@ -274,6 +279,46 @@ export class ChatService {
       .values({ channelId, userId })
       .onConflictDoNothing()
     return { ok: true }
+  }
+
+  /** Add other workspace members to a channel (enables group conversations). */
+  async addChannelMembers(channelId: string, actorId: string, userIds: string[]) {
+    const channel = await this.assertChannelAccess(channelId, actorId)
+    const unique = [...new Set((userIds ?? []).filter(Boolean))]
+    if (unique.length === 0) return { ok: true, added: 0 }
+    // Only add users who belong to the channel's workspace.
+    const wsMembers = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, channel.workspaceId), inArray(workspaceMembers.userId, unique)))
+    const valid = wsMembers.map((m) => m.userId)
+    if (valid.length === 0) return { ok: true, added: 0 }
+    await this.db
+      .insert(chatChannelMembers)
+      .values(valid.map((userId) => ({ channelId, userId })))
+      .onConflictDoNothing()
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.channel.members.added',
+      workspaceId: channel.workspaceId,
+      channelId,
+    })
+    return { ok: true, added: valid.length }
+  }
+
+  async listChannelMembers(channelId: string, userId: string) {
+    await this.assertChannelAccess(channelId, userId)
+    return this.db
+      .select({
+        userId: chatChannelMembers.userId,
+        displayName: users.displayName,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        joinedAt: chatChannelMembers.joinedAt,
+      })
+      .from(chatChannelMembers)
+      .innerJoin(users, eq(users.id, chatChannelMembers.userId))
+      .where(eq(chatChannelMembers.channelId, channelId))
+      .orderBy(asc(chatChannelMembers.joinedAt))
   }
 
   async leaveChannel(channelId: string, userId: string) {

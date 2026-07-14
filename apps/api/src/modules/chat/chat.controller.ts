@@ -25,7 +25,7 @@ export class ChatController {
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { name: string; description?: string; isPrivate?: boolean },
+    @Body() body: { name: string; description?: string; isPrivate?: boolean; memberIds?: string[] },
   ) {
     return this.chat.createChannel({
       workspaceId,
@@ -33,6 +33,7 @@ export class ChatController {
       description: body.description,
       isPrivate: body.isPrivate,
       createdById: user.id,
+      memberIds: body.memberIds,
     })
   }
 
@@ -76,6 +77,20 @@ export class ChatController {
   @Post('chat/channels/:channelId/read')
   markRead(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.markChannelRead(channelId, user.id)
+  }
+
+  @Get('chat/channels/:channelId/members')
+  channelMembers(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.listChannelMembers(channelId, user.id)
+  }
+
+  @Post('chat/channels/:channelId/members')
+  addChannelMembers(
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { userIds: string[] },
+  ) {
+    return this.chat.addChannelMembers(channelId, user.id, body.userIds ?? [])
   }
 
   @Get('chat/channels/:channelId/messages')

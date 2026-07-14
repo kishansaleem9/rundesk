@@ -59,6 +59,7 @@ export type RealtimeEvent =
   | { type: 'notification.created'; userId: string; notification: unknown }
   // Chat events
   | { type: 'chat.channel.created'; workspaceId: string; channel: unknown }
+  | { type: 'chat.channel.members.added'; workspaceId: string; channelId: string }
   | { type: 'chat.message.created'; workspaceId: string; channelId: string; message: unknown }
   | { type: 'chat.message.updated'; workspaceId: string; channelId: string; messageId: string; patch: Record<string, unknown> }
   | { type: 'chat.message.deleted'; workspaceId: string; channelId: string; messageId: string }
