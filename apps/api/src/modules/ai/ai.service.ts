@@ -343,6 +343,31 @@ Current date: ${new Date().toISOString().split('T')[0]}`
   }
 
   /**
+   * Non-streaming chatbot reply (Plan §7.6) — used when @Rundesk is mentioned
+   * in a channel so the answer can be posted as a normal message.
+   */
+  async chatReply(
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    workspaceContext: string,
+    ctx: AiCtx = {},
+  ): Promise<string> {
+    const systemPrompt = `You are Rundesk AI, an assistant inside the Rundesk project management chat.
+A teammate mentioned you (@Rundesk). Answer helpfully and concisely in 1-4 sentences.
+
+Workspace context:
+${workspaceContext}
+
+Current date: ${new Date().toISOString().split('T')[0]}`
+    const response = await this.complete('chat.mention', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 700,
+      system: systemPrompt,
+      messages,
+    })
+    return response.content[0]?.type === 'text' ? response.content[0].text : ''
+  }
+
+  /**
    * Build a real workspace context string for the chatbot (Plan §7.6): the
    * user's role, space/project/task counts, and their open assigned tasks —
    * so answers are grounded instead of a workspace-ID stub.

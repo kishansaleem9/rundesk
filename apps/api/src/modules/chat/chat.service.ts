@@ -14,15 +14,75 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
 import { TasksService } from '../tasks/tasks.service'
+import { AiService } from '../ai/ai.service'
+
+const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
 
 @Injectable()
 export class ChatService {
+  private aiUserId: string | null = null
+
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private realtime: RealtimeGateway,
     private notifications: NotificationsService,
     private tasks: TasksService,
+    private ai: AiService,
   ) {}
+
+  /** Ensure a system "Rundesk AI" user exists to author @Rundesk replies. */
+  private async ensureAiUser(): Promise<string> {
+    if (this.aiUserId) return this.aiUserId
+    const [existing] = await this.db.select({ id: users.id }).from(users).where(eq(users.email, AI_USER_EMAIL)).limit(1)
+    if (existing) {
+      this.aiUserId = existing.id
+      return existing.id
+    }
+    const [created] = await this.db
+      .insert(users)
+      .values({ email: AI_USER_EMAIL, displayName: 'Rundesk AI', emailVerified: true } as any)
+      .onConflictDoNothing()
+      .returning({ id: users.id })
+    if (created) {
+      this.aiUserId = created.id
+      return created.id
+    }
+    const [row] = await this.db.select({ id: users.id }).from(users).where(eq(users.email, AI_USER_EMAIL)).limit(1)
+    this.aiUserId = row.id
+    return row.id
+  }
+
+  /** If a message mentions @Rundesk, generate + post an AI reply (§7.6). */
+  private async maybeAnswerAiMention(channel: { id: string; workspaceId: string }, authorId: string, body: string) {
+    if (!/@rundesk\b/i.test(body) || !this.ai.isAvailable()) return
+    try {
+      const aiUserId = await this.ensureAiUser()
+      // Make sure the AI is a member so its message passes access checks.
+      await this.db
+        .insert(chatChannelMembers)
+        .values({ channelId: channel.id, userId: aiUserId })
+        .onConflictDoNothing()
+      const context = await this.ai.buildWorkspaceContext(channel.workspaceId, authorId)
+      const prompt = body.replace(/@rundesk\b/gi, '').trim() || 'Say hello and offer help.'
+      const answer = await this.ai.chatReply([{ role: 'user', content: prompt }], context, {
+        userId: authorId,
+        workspaceId: channel.workspaceId,
+      })
+      if (!answer) return
+      const [aiMsg] = await this.db
+        .insert(chatMessages)
+        .values({ channelId: channel.id, authorId: aiUserId, body: answer })
+        .returning()
+      this.realtime.emitToWorkspace(channel.workspaceId, {
+        type: 'chat.message.created',
+        workspaceId: channel.workspaceId,
+        channelId: channel.id,
+        message: { ...aiMsg, authorName: 'Rundesk AI', reactions: [] },
+      })
+    } catch {
+      // AI reply is best-effort; never break the user's message.
+    }
+  }
 
   private extractMentionIds(body: string): string[] {
     const ids = new Set<string>()
@@ -620,6 +680,9 @@ export class ChatService {
         emailContext: { taskTitle: channelLabel, workspaceName: 'Workspace', commentSnippet: body.slice(0, 180) },
       })
     }
+
+    // @Rundesk AI assistant (§7.6) — best-effort, fire-and-forget.
+    void this.maybeAnswerAiMention({ id: channel.id, workspaceId: channel.workspaceId }, data.authorId, body)
 
     return enriched
   }

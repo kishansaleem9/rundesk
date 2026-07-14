@@ -40,7 +40,8 @@ function buildSvc(db: any) {
   const realtime = { emitToWorkspace: mock.fn() } as any
   const notifications = {} as any
   const tasks = {} as any
-  return new ChatService(db, realtime, notifications, tasks)
+  const ai = { isAvailable: () => false } as any
+  return new ChatService(db, realtime, notifications, tasks, ai)
 }
 
 describe('ChatService.setSaved', () => {
