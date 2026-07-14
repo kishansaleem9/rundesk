@@ -17,6 +17,7 @@ import {
   Users,
   Smile,
   Sparkles,
+  ListTodo,
   ThumbsUp,
   Reply,
   Forward,
@@ -390,6 +391,21 @@ export function ChatPage() {
     },
   })
 
+  const createTaskFromMessage = useMutation({
+    mutationFn: async (messageId: string) => {
+      // Resolve a target list (first space → first project → first list).
+      const spaces = await api<Array<{ id: string }>>(`/spaces/workspace/${workspaceId}`)
+      if (!spaces[0]) throw new Error('Create a space and list first')
+      const projects = await api<Array<{ id: string }>>(`/projects/space/${spaces[0].id}`)
+      if (!projects[0]) throw new Error('Create a project and list first')
+      const lists = await api<Array<{ id: string }>>(`/lists/project/${projects[0].id}`)
+      if (!lists[0]) throw new Error('Create a list first')
+      return api(`/chat/messages/${messageId}/create-task`, { method: 'POST', body: { listId: lists[0].id } })
+    },
+    onSuccess: () => toast.success('Task created from message'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
   const setPinnedMutation = useMutation({
     mutationFn: ({ messageId, pinned }: { messageId: string; pinned: boolean }) =>
       api<Message>(`/chat/messages/${messageId}/pin`, {
@@ -684,6 +700,15 @@ export function ChatPage() {
                             onClick={() => setInput((prev) => `${prev ? `${prev}\n` : ''}/ai summarize: ${m.body.slice(0, 120)}`)}
                           >
                             <Sparkles className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Create task from message"
+                            disabled={createTaskFromMessage.isPending}
+                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center disabled:opacity-50"
+                            onClick={() => createTaskFromMessage.mutate(m.id)}
+                          >
+                            <ListTodo className="h-3 w-3" />
                           </button>
                           <button
                             type="button"
