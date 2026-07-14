@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
 import { eq, and } from 'drizzle-orm'
-import { projects, spaces } from '@rundesk/db'
+import { projects, spaces, projectMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
@@ -27,7 +27,15 @@ export class ProjectsService {
       })
       .returning()
 
-    return result[0]
+    const project = result[0]
+    // Seed the creator as an admin member (mirrors the 0035 backfill).
+    if (actorId && project) {
+      await this.db
+        .insert(projectMembers)
+        .values({ projectId: project.id, userId: actorId, role: 'admin', addedById: actorId })
+        .onConflictDoNothing()
+    }
+    return project
   }
 
   async getProjectsBySpace(spaceId: string) {

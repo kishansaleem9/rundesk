@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
 import { eq, and } from 'drizzle-orm'
-import { spaces } from '@rundesk/db'
+import { spaces, spaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
@@ -26,7 +26,16 @@ export class SpacesService {
       })
       .returning()
 
-    return result[0]
+    const space = result[0]
+    // Seed the creator as an admin member so private-conversion never orphans
+    // the space (mirrors the 0035 backfill for existing spaces).
+    if (actorId && space) {
+      await this.db
+        .insert(spaceMembers)
+        .values({ spaceId: space.id, userId: actorId, role: 'admin', addedById: actorId })
+        .onConflictDoNothing()
+    }
+    return space
   }
 
   async getSpacesByWorkspace(workspaceId: string) {
