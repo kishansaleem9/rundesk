@@ -1,5 +1,5 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common'
-import { and, eq, desc, isNull, or, like } from 'drizzle-orm'
+import { and, eq, desc, isNull, or, like, gte, lte } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import * as OTPAuth from 'otpauth'
 import * as bcrypt from 'bcryptjs'
@@ -214,25 +214,71 @@ export class SecurityService {
     await this.db.insert(auditLogs).values(opts)
   }
 
+  private auditFilters(
+    workspaceId: string,
+    opts: { action?: string; actionPrefix?: string; actorId?: string; from?: Date; to?: Date },
+  ) {
+    const filters = [eq(auditLogs.workspaceId, workspaceId)]
+    if (opts.action) filters.push(eq(auditLogs.action, opts.action))
+    if (opts.actionPrefix) filters.push(like(auditLogs.action, `${opts.actionPrefix}%`))
+    if (opts.actorId) filters.push(eq(auditLogs.actorId, opts.actorId))
+    if (opts.from) filters.push(gte(auditLogs.createdAt, opts.from))
+    if (opts.to) filters.push(lte(auditLogs.createdAt, opts.to))
+    return filters
+  }
+
   async getAuditLogs(
     workspaceId: string,
-    opts: { page?: number; limit?: number; action?: string; actionPrefix?: string } = {},
+    opts: {
+      page?: number
+      limit?: number
+      action?: string
+      actionPrefix?: string
+      actorId?: string
+      from?: Date
+      to?: Date
+    } = {},
   ) {
     const limit = Math.min(opts.limit ?? 50, 200)
     const offset = ((opts.page ?? 1) - 1) * limit
 
-    const filters = [eq(auditLogs.workspaceId, workspaceId)]
-    if (opts.action) filters.push(eq(auditLogs.action, opts.action))
-    if (opts.actionPrefix) filters.push(like(auditLogs.action, `${opts.actionPrefix}%`))
-
     const rows = await this.db
       .select()
       .from(auditLogs)
-      .where(and(...filters))
+      .where(and(...this.auditFilters(workspaceId, opts)))
       .orderBy(desc(auditLogs.createdAt))
       .limit(limit)
       .offset(offset)
 
     return rows
+  }
+
+  /** Export the (filtered) audit trail as a CSV string (Plan §13.3). */
+  async exportAuditLogsCsv(
+    workspaceId: string,
+    opts: { action?: string; actionPrefix?: string; actorId?: string; from?: Date; to?: Date } = {},
+  ) {
+    const rows = await this.db
+      .select()
+      .from(auditLogs)
+      .where(and(...this.auditFilters(workspaceId, opts)))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(10000)
+
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const header = ['Timestamp', 'Actor', 'Action', 'Resource', 'Description', 'IP address']
+    const lines = rows.map((r) =>
+      [
+        (r.createdAt as Date).toISOString(),
+        r.actorEmail ?? r.actorId ?? '',
+        r.action,
+        [r.resourceType, r.resourceId].filter(Boolean).join(':'),
+        r.description,
+        r.ipAddress ?? '',
+      ]
+        .map(esc)
+        .join(','),
+    )
+    return [header.map(esc).join(','), ...lines].join('\n')
   }
 }

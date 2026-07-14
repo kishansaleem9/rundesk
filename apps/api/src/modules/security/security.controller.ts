@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Header, Param, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { SecurityService } from './security.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -104,12 +104,45 @@ export class AuditLogsController {
     @Query('limit') limit?: string,
     @Query('action') action?: string,
     @Query('actionPrefix') actionPrefix?: string,
+    @Query('actorId') actorId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     return this.svc.getAuditLogs(workspaceId, {
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 50,
       action,
       actionPrefix,
+      actorId,
+      from: parseAuditDate(from),
+      to: parseAuditDate(to),
     })
   }
+
+  @Get('export')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="audit-log.csv"')
+  @ApiOperation({ summary: 'Export the audit trail as CSV (admin only)' })
+  export(
+    @Param('workspaceId') workspaceId: string,
+    @Query('action') action?: string,
+    @Query('actionPrefix') actionPrefix?: string,
+    @Query('actorId') actorId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.svc.exportAuditLogsCsv(workspaceId, {
+      action,
+      actionPrefix,
+      actorId,
+      from: parseAuditDate(from),
+      to: parseAuditDate(to),
+    })
+  }
+}
+
+function parseAuditDate(s?: string): Date | undefined {
+  if (!s) return undefined
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? undefined : d
 }

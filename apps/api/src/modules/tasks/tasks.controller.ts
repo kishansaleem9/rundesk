@@ -243,6 +243,11 @@ export class TasksController {
     return this.tasks.deleteTask(taskId, user.id)
   }
 
+  @Post(':taskId/restore')
+  async restore(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.tasks.restoreTask(taskId, user.id)
+  }
+
   // --- Assignees ----------------------------------------------------------
   @Post(':taskId/assignees')
   async addAssignee(

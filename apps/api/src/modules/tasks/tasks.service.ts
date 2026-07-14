@@ -1387,6 +1387,27 @@ export class TasksService {
     return { ok: true }
   }
 
+  /** Restore an archived (soft-deleted) task (Plan §13.4). */
+  async restoreTask(taskId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
+    if (!before) throw new NotFoundException('Task not found')
+    if (!before.isArchived) return before
+    const [row] = await this.db
+      .update(tasks)
+      .set({ isArchived: false, updatedAt: new Date() })
+      .where(eq(tasks.id, taskId))
+      .returning()
+    await this.logActivity({ taskId, actorId, action: 'restored' })
+    this.realtime.emitToList(before.listId, {
+      type: 'task.updated',
+      listId: before.listId,
+      taskId,
+      patch: { isArchived: false },
+    })
+    return row
+  }
+
   async moveTask(taskId: string, actorId: string, targetListId: string, position: number) {
     await this.assertTaskWriteAccess(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
