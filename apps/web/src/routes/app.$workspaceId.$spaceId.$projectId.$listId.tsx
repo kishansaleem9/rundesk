@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, cn } from '@rundesk/ui'
+import { Button, Card, Input, PersonAvatar, cn } from '@rundesk/ui'
 import {
   TaskListChrome,
   WorkFilterSelect,
@@ -58,6 +58,7 @@ type TaskItem = {
   dueDate?: string | null
   createdAt?: string | null
   assignees?: TaskAssignee[]
+  subtasks?: Array<{ id: string; status?: string | null; statusCategory?: StatusCategory | null }>
   openBlockerCount?: number
   blocksOpenCount?: number
 }
@@ -225,6 +226,9 @@ function ListDetail() {
   const [groupBy, setGroupBy] = useState<'status' | 'priority'>('status')
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
+  // Board: collapsed columns (ephemeral) + per-status WIP limits (persisted).
+  const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(() => new Set())
+  const [wipLimits, setWipLimits] = useState<Record<string, number>>({})
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [statusManagerOpen, setStatusManagerOpen] = useState(false)
@@ -370,6 +374,7 @@ function ListDetail() {
     setSortBy((cfg.sortBy as 'created' | 'due' | 'priority') ?? 'created')
     setGroupBy((cfg.groupBy as 'status' | 'priority') ?? 'status')
     setHiddenFields(new Set(Array.isArray(cfg.hiddenFields) ? (cfg.hiddenFields as string[]) : []))
+    setWipLimits(cfg.wipLimits && typeof cfg.wipLimits === 'object' ? (cfg.wipLimits as Record<string, number>) : {})
   }
 
   useEffect(() => {
@@ -605,7 +610,7 @@ function ListDetail() {
                   body: JSON.stringify({
                     name,
                     type: activeView,
-                    config: { activeView, statusFilter, sortBy, groupBy, hiddenFields: Array.from(hiddenFields) },
+                    config: { activeView, statusFilter, sortBy, groupBy, hiddenFields: Array.from(hiddenFields), wipLimits },
                   }),
                 })
                 setSaveAsName('')
@@ -623,7 +628,7 @@ function ListDetail() {
                   onClick={async () => {
                     await api(`/views/${selectedSavedViewId}`, {
                       method: 'PATCH',
-                      body: { config: { activeView, statusFilter, sortBy, groupBy, hiddenFields: Array.from(hiddenFields) } },
+                      body: { config: { activeView, statusFilter, sortBy, groupBy, hiddenFields: Array.from(hiddenFields), wipLimits } },
                     })
                     await qc.invalidateQueries({ queryKey: ['list-views', listId] })
                   }}
@@ -746,6 +751,31 @@ function ListDetail() {
                   status={s.key}
                   tasks={tasksByStatus[s.key] ?? []}
                   onOpenTask={(taskId) => setSelectedTaskId(taskId)}
+                  collapsed={collapsedColumns.has(s.key)}
+                  onToggleCollapse={() =>
+                    setCollapsedColumns((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(s.key)) next.delete(s.key)
+                      else next.add(s.key)
+                      return next
+                    })
+                  }
+                  wipLimit={wipLimits[s.key]}
+                  onSetWipLimit={(n) =>
+                    setWipLimits((prev) => {
+                      const next = { ...prev }
+                      if (n == null) delete next[s.key]
+                      else next[s.key] = n
+                      return next
+                    })
+                  }
+                  onAddTask={async (title) => {
+                    await api('/tasks', {
+                      method: 'POST',
+                      body: JSON.stringify({ listId, title, status: s.key, priority: 'normal' }),
+                    })
+                    await refetch()
+                  }}
                 />
               ))}
             </div>
@@ -1920,15 +1950,28 @@ function BoardColumn({
   status,
   tasks,
   onOpenTask,
+  collapsed,
+  onToggleCollapse,
+  wipLimit,
+  onSetWipLimit,
+  onAddTask,
 }: {
   status: TaskStatus
   tasks: TaskItem[]
   onOpenTask: (taskId: string) => void
+  collapsed: boolean
+  onToggleCollapse: () => void
+  wipLimit?: number
+  onSetWipLimit: (n: number | null) => void
+  onAddTask: (title: string) => Promise<void> | void
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${status}`,
   })
   const meta = useStatusMeta(status)
+  const [addTitle, setAddTitle] = useState('')
+  const [editingWip, setEditingWip] = useState(false)
+  const overWip = wipLimit != null && tasks.length > wipLimit
 
   return (
     <div
@@ -1936,25 +1979,86 @@ function BoardColumn({
       className={cn(
         'rounded-lg border border-border bg-muted/30 flex flex-col min-h-40 transition-colors',
         isOver && 'ring-2 ring-brand-500 bg-accent/10',
+        overWip && 'ring-1 ring-red-400/60',
       )}
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="text-muted-foreground hover:text-foreground"
+          aria-label={collapsed ? 'Expand column' : 'Collapse column'}
+        >
+          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: meta.color }} />
         <h3 className="font-medium text-sm">{meta.label}</h3>
-        <span className="text-xs text-muted-foreground tabular-nums">{tasks.length}</span>
-      </div>
-      <div className="p-2 space-y-2 flex-1">
-        {tasks.length >= BOARD_VIRTUALIZE_THRESHOLD ? (
-          <VirtualizedBoardCards tasks={tasks} onOpenTask={onOpenTask} />
+        <span className={cn('text-xs tabular-nums', overWip ? 'text-red-500 font-semibold' : 'text-muted-foreground')}>
+          {tasks.length}
+          {wipLimit != null ? `/${wipLimit}` : ''}
+        </span>
+        {editingWip ? (
+          <input
+            type="number"
+            min={0}
+            autoFocus
+            defaultValue={wipLimit ?? ''}
+            onBlur={(e) => {
+              const v = e.target.value.trim()
+              onSetWipLimit(v === '' ? null : Math.max(0, parseInt(v, 10) || 0))
+              setEditingWip(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              if (e.key === 'Escape') setEditingWip(false)
+            }}
+            placeholder="WIP"
+            className="ml-auto h-6 w-14 rounded border border-border bg-background px-1 text-[11px]"
+          />
         ) : (
-          tasks.map((task) => (
-            <BoardTaskCard key={task.id} task={task} onOpenTask={onOpenTask} />
-          ))
-        )}
-        {tasks.length === 0 && (
-          <div className="text-xs text-muted-foreground text-center py-4">Drop tasks here</div>
+          <button
+            type="button"
+            onClick={() => setEditingWip(true)}
+            className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
+            title="Set a work-in-progress limit"
+          >
+            {wipLimit != null ? 'WIP ✎' : 'Set WIP'}
+          </button>
         )}
       </div>
+      {!collapsed && (
+        <>
+          <div className="p-2 space-y-2 flex-1">
+            {tasks.length >= BOARD_VIRTUALIZE_THRESHOLD ? (
+              <VirtualizedBoardCards tasks={tasks} onOpenTask={onOpenTask} />
+            ) : (
+              tasks.map((task) => (
+                <BoardTaskCard key={task.id} task={task} onOpenTask={onOpenTask} />
+              ))
+            )}
+            {tasks.length === 0 && (
+              <div className="text-xs text-muted-foreground text-center py-4">Drop tasks here</div>
+            )}
+          </div>
+          <form
+            className="p-2 pt-0"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              const t = addTitle.trim()
+              if (!t) return
+              setAddTitle('')
+              await onAddTask(t)
+            }}
+          >
+            <input
+              value={addTitle}
+              onChange={(e) => setAddTitle(e.target.value)}
+              placeholder="+ Add task"
+              className="w-full h-8 rounded border border-transparent bg-transparent px-2 text-sm placeholder:text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
+            />
+          </form>
+        </>
+      )}
     </div>
   )
 }
@@ -1973,22 +2077,57 @@ function BoardTaskCard({
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
     : undefined
 
+  const assignees = task.assignees ?? []
+  const subtasks = task.subtasks ?? []
+  const subtasksDone = subtasks.filter((s) => s.statusCategory === 'closed' || s.status === 'done').length
+  const due = task.dueDate ? new Date(task.dueDate) : null
+  const overdue = due ? due.getTime() < Date.now() && !(task.statusCategory === 'closed' || task.status === 'done') : false
+
   return (
     <button
       ref={setNodeRef}
       style={style}
-      className={`w-full text-left rounded border border-border p-2 hover:bg-muted ${isDragging ? 'opacity-50' : ''}`}
+      className={`w-full text-left rounded border border-border bg-card p-2 hover:bg-muted ${isDragging ? 'opacity-50' : ''}`}
       onClick={() => onOpenTask(task.id)}
       {...listeners}
       {...attributes}
     >
-      <div className="font-medium text-sm">{task.title}</div>
-      <div className="text-xs text-muted-foreground">{task.priority}</div>
-      {(task.openBlockerCount ?? 0) > 0 ? (
-        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-          blocked by {task.openBlockerCount}
+      <div className="flex items-start gap-2">
+        <Flag className={cn('h-3 w-3 mt-0.5 shrink-0', PRIORITY_COLORS[task.priority])} />
+        <div className="font-medium text-sm leading-snug">{task.title}</div>
+      </div>
+      {(due || subtasks.length > 0 || (task.openBlockerCount ?? 0) > 0 || assignees.length > 0) && (
+        <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11px] text-muted-foreground">
+          {due && (
+            <span className={cn('inline-flex items-center gap-1', overdue && 'text-red-500 font-medium')}>
+              <CalendarIcon className="h-3 w-3" />
+              {format(due, 'MMM d')}
+            </span>
+          )}
+          {subtasks.length > 0 && (
+            <span className="inline-flex items-center gap-1" title="Subtasks done">
+              ☑ {subtasksDone}/{subtasks.length}
+            </span>
+          )}
+          {(task.openBlockerCount ?? 0) > 0 && (
+            <span className="text-amber-700 dark:text-amber-300">blocked by {task.openBlockerCount}</span>
+          )}
+          {assignees.length > 0 && (
+            <span className="ml-auto flex -space-x-1.5">
+              {assignees.slice(0, 3).map((a) => (
+                <span key={a.userId} className="ring-1 ring-card rounded-full">
+                  <PersonAvatar name={a.user?.displayName ?? '?'} size="xs" />
+                </span>
+              ))}
+              {assignees.length > 3 && (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] ring-1 ring-card">
+                  +{assignees.length - 3}
+                </span>
+              )}
+            </span>
+          )}
         </div>
-      ) : null}
+      )}
     </button>
   )
 }

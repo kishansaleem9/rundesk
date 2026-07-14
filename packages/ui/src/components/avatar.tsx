@@ -65,7 +65,7 @@ export function PersonAvatar({
   name: string
   imageUrl?: string | null
   className?: string
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 }) {
   const initials = name
     .split(' ')
@@ -75,6 +75,7 @@ export function PersonAvatar({
     .join('')
 
   const sizes = {
+    xs: 'h-5 w-5 text-[9px]',
     sm: 'h-7 w-7 text-[10px]',
     md: 'h-9 w-9 text-xs',
     lg: 'h-12 w-12 text-sm',
