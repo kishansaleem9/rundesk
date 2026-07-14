@@ -10,6 +10,7 @@ import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module
 import { SpacesModule } from './modules/spaces/spaces.module'
 import { ProjectsModule } from './modules/projects/projects.module'
 import { FoldersModule } from './modules/folders/folders.module'
+import { ContainerMembersModule } from './modules/container-members/container-members.module'
 import { ListsModule } from './modules/lists/lists.module'
 import { TasksModule } from './modules/tasks/tasks.module'
 import { LabelsModule } from './modules/labels/labels.module'
@@ -75,6 +76,7 @@ import { SampleDataModule } from './modules/sample-data/sample-data.module'
     SpacesModule,
     ProjectsModule,
     FoldersModule,
+    ContainerMembersModule,
     ListsModule,
     TasksModule,
     LabelsModule,
