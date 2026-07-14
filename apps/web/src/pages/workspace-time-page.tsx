@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Badge, cn } from '@rundesk/ui'
-import { Play, Pause, Clock, DollarSign, Download } from 'lucide-react'
+import { Play, Pause, Clock, DollarSign, Download, Pencil, Trash2, Check, X } from 'lucide-react'
 import { format, startOfWeek, addDays } from 'date-fns'
 import { api } from '../lib/api'
+import { useAuthStore } from '../store/auth'
 
 type TimeEntry = {
   id: string
@@ -48,6 +49,7 @@ function safeCsv(value: string): string {
 export function TimePage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/time' })
   const qc = useQueryClient()
+  const currentUserId = useAuthStore((s) => s.user?.id)
   const [tab, setTab] = useState<'timer' | 'timesheet' | 'reports'>('timesheet')
   const [elapsedSec, setElapsedSec] = useState(0)
 
@@ -243,6 +245,7 @@ export function TimePage() {
         )}
 
         {tab === 'timesheet' && (
+          <>
           <Card className="p-4">
             <div className="grid grid-cols-8 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               <div className="col-span-1">Task</div>
@@ -289,6 +292,30 @@ export function TimePage() {
               })}
             </div>
           </Card>
+
+          <Card className="p-4 mt-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-foreground">Entries</h3>
+              <span className="text-xs text-muted-foreground">{entries.length} total</span>
+            </div>
+            {entries.length === 0 ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                No entries yet. Start a timer or log time on a task.
+              </div>
+            ) : (
+              <div className="divide-y divide-border/40">
+                {entries.map((e) => (
+                  <EntryRow
+                    key={e.id}
+                    entry={e}
+                    workspaceId={workspaceId}
+                    editable={e.userId === currentUserId}
+                  />
+                ))}
+              </div>
+            )}
+          </Card>
+          </>
         )}
 
         {tab === 'reports' && (
@@ -316,6 +343,137 @@ export function TimePage() {
           </Card>
         )}
       </div>
+    </div>
+  )
+}
+
+function EntryRow({
+  entry,
+  workspaceId,
+  editable,
+}: {
+  entry: TimeEntry
+  workspaceId: string
+  editable: boolean
+}) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [durationMin, setDurationMin] = useState(String(Math.round(entry.durationSeconds / 60)))
+  const [description, setDescription] = useState(entry.description ?? '')
+  const [billable, setBillable] = useState(entry.billable)
+
+  const invalidate = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ['time-entries', workspaceId] }),
+      qc.invalidateQueries({ queryKey: ['time-report', workspaceId] }),
+    ])
+
+  const save = useMutation({
+    mutationFn: () => {
+      const minutes = Number(durationMin)
+      if (!Number.isFinite(minutes) || minutes < 0) throw new Error('Enter a valid duration in minutes')
+      return api(`/time-entries/${entry.id}`, {
+        method: 'PATCH',
+        body: {
+          durationSec: Math.round(minutes * 60),
+          description: description.trim() || null,
+          isBillable: billable,
+        },
+      })
+    },
+    onSuccess: async () => {
+      setEditing(false)
+      await invalidate()
+    },
+    onError: (err) => window.alert(err instanceof Error ? err.message : 'Could not save entry'),
+  })
+
+  const del = useMutation({
+    mutationFn: () => api(`/time-entries/${entry.id}`, { method: 'DELETE' }),
+    onSuccess: () => invalidate(),
+    onError: (err) => window.alert(err instanceof Error ? err.message : 'Could not delete entry'),
+  })
+
+  const startEdit = () => {
+    setDurationMin(String(Math.round(entry.durationSeconds / 60)))
+    setDescription(entry.description ?? '')
+    setBillable(entry.billable)
+    setEditing(true)
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 py-2 text-sm">
+        <span className="min-w-0 flex-1 truncate text-foreground">{entry.taskTitle ?? 'Task'}</span>
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <input
+            type="number"
+            min={0}
+            value={durationMin}
+            onChange={(e) => setDurationMin(e.target.value)}
+            className="w-16 h-8 rounded-md border border-border/80 bg-background px-2 tabular-nums"
+          />
+          min
+        </label>
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Description"
+          className="h-8 flex-1 min-w-[8rem] rounded-md border border-border/80 bg-background px-2"
+        />
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <input type="checkbox" checked={billable} onChange={(e) => setBillable(e.target.checked)} />
+          Billable
+        </label>
+        <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+          <Check className="h-3.5 w-3.5" />
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={save.isPending}>
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-3 py-2 text-sm group">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-foreground">{entry.taskTitle ?? 'Task'}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {format(new Date(entry.loggedAt), 'MMM d, yyyy')}
+          {!editable && entry.userName ? ` · ${entry.userName}` : ''}
+          {entry.description ? ` · ${entry.description}` : ''}
+        </p>
+      </div>
+      {entry.billable && (
+        <Badge variant="secondary" className="shrink-0">
+          Billable
+        </Badge>
+      )}
+      <span className="w-16 shrink-0 text-right tabular-nums text-muted-foreground">
+        {formatHours(entry.durationSeconds)}
+      </span>
+      {editable && (
+        <>
+          <button
+            onClick={startEdit}
+            aria-label="Edit entry"
+            className="p-1.5 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-foreground hover:bg-accent/10"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              if (window.confirm('Delete this time entry?')) del.mutate()
+            }}
+            disabled={del.isPending}
+            aria-label="Delete entry"
+            className="p-1.5 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-500 hover:bg-red-500/10"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </>
+      )}
     </div>
   )
 }
