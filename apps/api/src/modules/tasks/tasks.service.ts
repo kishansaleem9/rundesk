@@ -495,6 +495,18 @@ export class TasksService {
     return { key: fallback.key, category: fallback.category as StatusCategory }
   }
 
+  /** Guests may view/comment but not create tasks (Plan §3.3). */
+  private async assertNotGuestInList(listId: string, actorId: string) {
+    const ctx = await this.resolveWorkspaceForList(listId)
+    if (!ctx) return
+    const [m] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    if (m?.role === 'guest') throw new ForbiddenException('Guests cannot create tasks')
+  }
+
   async createTask(data: {
     listId: string
     title: string
@@ -510,6 +522,7 @@ export class TasksService {
     labelIds?: string[]
     createdById: string
   }) {
+    await this.assertNotGuestInList(data.listId, data.createdById)
     const resolved = await this.resolveStatusForList(data.listId, data.status)
 
     const [task] = await this.db

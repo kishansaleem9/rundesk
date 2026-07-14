@@ -128,7 +128,22 @@ export class ReportsService {
   }
 
   // ─── Productivity per member ──────────────────────────────────────────────
-  async getProductivity(workspaceId: string, days = 30) {
+  /**
+   * View-Reports scoping (Plan §3.3): admins/managers see everyone; plain
+   * members/guests see only their own row. Returns the userId to restrict to,
+   * or undefined for full visibility.
+   */
+  async getViewerScope(workspaceId: string, userId: string): Promise<string | undefined> {
+    const [m] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    const privileged = ['workspace_admin', 'manager', 'super_admin']
+    return m && privileged.includes(m.role) ? undefined : userId
+  }
+
+  async getProductivity(workspaceId: string, days = 30, restrictToUserId?: string) {
     const since = daysAgo(days)
 
     const rows = await this.db
@@ -145,7 +160,11 @@ export class ReportsService {
       .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
       .leftJoin(taskAssignees, eq(taskAssignees.userId, users.id))
       .leftJoin(tasks, and(eq(tasks.id, taskAssignees.taskId), gte(tasks.updatedAt, since)))
-      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .where(
+        restrictToUserId
+          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, restrictToUserId))
+          : eq(workspaceMembers.workspaceId, workspaceId),
+      )
       .groupBy(users.id, users.displayName, users.email, users.avatarUrl)
       .orderBy(desc(sql`count(distinct case when ${tasks.status} = 'done' then ${tasks.id} end)`))
 
@@ -207,7 +226,7 @@ export class ReportsService {
   }
 
   // ─── Time tracking report ─────────────────────────────────────────────────
-  async getTimeReport(workspaceId: string, days = 30) {
+  async getTimeReport(workspaceId: string, days = 30, restrictToUserId?: string) {
     const since = daysAgo(days)
 
     const rows = await this.db
@@ -225,7 +244,11 @@ export class ReportsService {
         timeEntries,
         and(eq(timeEntries.userId, users.id), gte(timeEntries.startedAt, since)),
       )
-      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .where(
+        restrictToUserId
+          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, restrictToUserId))
+          : eq(workspaceMembers.workspaceId, workspaceId),
+      )
       .groupBy(users.id, users.displayName, users.email)
       .orderBy(desc(sql`coalesce(sum(${timeEntries.durationSec}), 0)`))
 

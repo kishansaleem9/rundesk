@@ -2,11 +2,12 @@ import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, Http
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService } from './ai.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { NotGuestGuard } from '../../common/guards/not-guest.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('ai')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, NotGuestGuard)
 @Controller('ai')
 export class AiController {
   constructor(private readonly ai: AiService) {}

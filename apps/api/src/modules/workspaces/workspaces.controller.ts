@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Delete, UseGuards, ParseUUIDPipe } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService } from './workspaces.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -21,8 +21,13 @@ export class WorkspacesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a new workspace (the creator becomes workspace_admin)' })
+  @ApiOperation({ summary: 'Create a new workspace (Super Admin only, per plan §3.3)' })
   async create(@CurrentUser() user: any, @Body() dto: CreateWorkspaceDto) {
+    // The first workspace is provisioned at signup; creating additional
+    // workspaces is a Super-Admin-only action (Plan §3.3).
+    if (user.role !== 'super_admin') {
+      throw new ForbiddenException('Only a Super Admin can create additional workspaces')
+    }
     return this.workspacesService.create(user.id, dto)
   }
 

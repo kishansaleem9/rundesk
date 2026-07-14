@@ -21,6 +21,23 @@ export class TimeEntriesService {
     return membership?.role === 'workspace_admin'
   }
 
+  /** Guests may not track time (Plan §3.3). Resolves the task's workspace role. */
+  private async assertNotGuestForTask(taskId: string, userId: string) {
+    const [row] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .innerJoin(
+        workspaceMembers,
+        and(eq(workspaceMembers.workspaceId, spaces.workspaceId), eq(workspaceMembers.userId, userId)),
+      )
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (row?.role === 'guest') throw new ForbiddenException('Guests cannot track time')
+  }
+
   private normalizeWeekStart(weekStart: string): string {
     const parsed = new Date(`${weekStart}T00:00:00.000Z`)
     if (Number.isNaN(parsed.getTime())) {
@@ -273,6 +290,7 @@ export class TimeEntriesService {
   }
 
   async start(userId: string, taskId: string, description?: string, isBillable?: boolean) {
+    await this.assertNotGuestForTask(taskId, userId)
     // Stop any existing running timer for this user
     const running = await this.getRunning(userId)
     if (running) await this.stop(running.id, userId)
@@ -312,6 +330,7 @@ export class TimeEntriesService {
     description?: string
     isBillable?: boolean
   }) {
+    await this.assertNotGuestForTask(data.taskId, data.userId)
     const startedAt = data.startedAt ?? new Date()
     const endedAt = new Date(startedAt.getTime() + data.durationSec * 1000)
     const [row] = await this.db

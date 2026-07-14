@@ -22,11 +22,13 @@ export class ReportsController {
 
   @Get('productivity')
   @ApiOperation({ summary: 'Per-member productivity report' })
-  productivity(
+  async productivity(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
     @Query('days') days?: string,
   ) {
-    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30)
+    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
+    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30, restrict)
   }
 
   @Get('completion')
@@ -40,11 +42,13 @@ export class ReportsController {
 
   @Get('time')
   @ApiOperation({ summary: 'Time tracking report' })
-  time(
+  async time(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
     @Query('days') days?: string,
   ) {
-    return this.reports.getTimeReport(workspaceId, days ? parseInt(days, 10) : 30)
+    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
+    return this.reports.getTimeReport(workspaceId, days ? parseInt(days, 10) : 30, restrict)
   }
 
   @Get('sprints')
