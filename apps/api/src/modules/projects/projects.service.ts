@@ -11,7 +11,7 @@ export class ProjectsService {
 
   async createProject(
     spaceId: string,
-    data: { name: string; description?: string; color?: string; icon?: string },
+    data: { name: string; description?: string; color?: string; icon?: string; folderId?: string },
     actorId?: string,
   ) {
     const result = await this.db
@@ -22,6 +22,7 @@ export class ProjectsService {
         description: data.description,
         color: data.color || '#354fb0',
         icon: data.icon,
+        folderId: data.folderId ?? null,
         createdById: actorId ?? null,
       })
       .returning()
@@ -46,7 +47,7 @@ export class ProjectsService {
 
   async updateProject(
     projectId: string,
-    data: Partial<{ name: string; description: string; color: string; icon: string }>,
+    data: Partial<{ name: string; description: string; color: string; icon: string; folderId: string | null }>,
     actorId?: string,
   ) {
     if (actorId) await this.assertManageable(projectId, actorId)

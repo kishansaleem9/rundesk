@@ -24,7 +24,7 @@ export class ProjectsController {
   @RequirePermissions('project.create')
   async createProject(
     @CurrentUser() user: any,
-    @Body() body: { spaceId: string; name: string; description?: string; color?: string; icon?: string },
+    @Body() body: { spaceId: string; name: string; description?: string; color?: string; icon?: string; folderId?: string },
   ) {
     return this.projectsService.createProject(
       body.spaceId,
@@ -33,6 +33,7 @@ export class ProjectsController {
         description: body.description,
         color: body.color,
         icon: body.icon,
+        folderId: body.folderId,
       },
       user.id,
     )
@@ -42,7 +43,7 @@ export class ProjectsController {
   async updateProject(
     @Param('projectId') projectId: string,
     @CurrentUser() user: any,
-    @Body() body: Partial<{ name: string; description: string; color: string; icon: string }>,
+    @Body() body: Partial<{ name: string; description: string; color: string; icon: string; folderId: string | null }>,
   ) {
     return this.projectsService.updateProject(projectId, body, user.id)
   }
