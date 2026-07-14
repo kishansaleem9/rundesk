@@ -79,6 +79,15 @@ export class ChatController {
     return this.chat.markChannelRead(channelId, user.id)
   }
 
+  @Patch('chat/channels/:channelId/notifications')
+  setNotificationLevel(
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { level: string },
+  ) {
+    return this.chat.setChannelNotificationLevel(channelId, user.id, body.level)
+  }
+
   @Get('chat/channels/:channelId/members')
   channelMembers(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.listChannelMembers(channelId, user.id)

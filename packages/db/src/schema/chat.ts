@@ -22,6 +22,8 @@ export const chatChannelMembers = pgTable(
     channelId: uuid('channel_id').notNull().references(() => chatChannels.id, { onDelete: 'cascade' }),
     userId:    uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
+    // Per-channel notification preference: 'all' | 'mentions' | 'none' (0039).
+    notificationLevel: text('notification_level').$type<'all' | 'mentions' | 'none'>().notNull().default('all'),
     joinedAt:  timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

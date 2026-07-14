@@ -79,6 +79,7 @@ export class ChatService {
 
     const memberSet = new Set(memberships.map((m) => m.channelId))
     const lastReadMap = new Map(memberships.map((m) => [m.channelId, m.lastReadAt]))
+    const levelMap = new Map(memberships.map((m) => [m.channelId, m.notificationLevel]))
 
     // Unread = top-level messages the user didn't author, newer than their
     // last-read marker, across the channels they're a member of.
@@ -106,6 +107,7 @@ export class ChatService {
         joined: memberSet.has(c.id),
         unreadCount: unreadMap.get(c.id) ?? 0,
         lastReadAt: lastReadMap.get(c.id) ?? null,
+        notificationLevel: levelMap.get(c.id) ?? 'all',
       }))
 
     const dmChannels = visible.filter((c) => c.isDm)
@@ -147,6 +149,22 @@ export class ChatService {
         set: { lastReadAt: now },
       })
     return { ok: true, lastReadAt: now }
+  }
+
+  /** Set the caller's notification level for a channel ('all' | 'mentions' | 'none'). */
+  async setChannelNotificationLevel(channelId: string, userId: string, level: string) {
+    if (!['all', 'mentions', 'none'].includes(level)) {
+      throw new ForbiddenException("level must be 'all', 'mentions', or 'none'")
+    }
+    await this.assertChannelAccess(channelId, userId)
+    await this.db
+      .insert(chatChannelMembers)
+      .values({ channelId, userId, notificationLevel: level as 'all' | 'mentions' | 'none' })
+      .onConflictDoUpdate({
+        target: [chatChannelMembers.channelId, chatChannelMembers.userId],
+        set: { notificationLevel: level as 'all' | 'mentions' | 'none' },
+      })
+    return { ok: true, level }
   }
 
   /** Total + per-channel unread counts across the user's channels in a workspace. */
@@ -546,6 +564,14 @@ export class ChatService {
       message: enriched,
     })
 
+    // Per-channel notification levels: 'all' (default) hears every message,
+    // 'mentions' only @-mentions, 'none' is muted.
+    const levelRows = await this.db
+      .select({ userId: chatChannelMembers.userId, level: chatChannelMembers.notificationLevel })
+      .from(chatChannelMembers)
+      .where(eq(chatChannelMembers.channelId, data.channelId))
+    const levelByUser = new Map(levelRows.map((r) => [r.userId, r.level]))
+
     if (mentionIds.size > 0) {
       const memberRows = await this.db
         .select({ userId: workspaceMembers.userId })
@@ -556,6 +582,8 @@ export class ChatService {
       for (const userId of mentionIds) {
         if (userId === data.authorId) continue
         if (!workspaceMemberIds.has(userId)) continue
+        // Muted members don't get pinged even on @mention.
+        if ((levelByUser.get(userId) ?? 'all') === 'none') continue
         void this.notifications.create({
           userId,
           workspaceId: channel.workspaceId,
@@ -577,6 +605,8 @@ export class ChatService {
     const notifiedIds = new Set([...mentionIds, data.authorId])
     for (const { userId } of memberRows) {
       if (notifiedIds.has(userId)) continue
+      // Only 'all' members hear non-mention messages; 'mentions'/'none' opt out.
+      if ((levelByUser.get(userId) ?? 'all') !== 'all') continue
       void this.notifications.create({
         userId,
         workspaceId: channel.workspaceId,
