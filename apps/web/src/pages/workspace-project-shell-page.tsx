@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, Card } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users } from 'lucide-react'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot } from 'lucide-react'
 import { api } from '../lib/api'
 import {
   WorkHubPage,
@@ -12,6 +12,7 @@ import {
   WorkSectionTitle,
 } from '../components/work/work-ui'
 import { ContainerMembersSheet } from '../components/container-members-sheet'
+import { ScopedStatusesManager } from '../components/list-statuses-manager'
 
 type List = {
   id: string
@@ -41,6 +42,7 @@ function ProjectHome() {
   const [newListName, setNewListName] = useState('')
   const [newListDescription, setNewListDescription] = useState('')
   const [membersOpen, setMembersOpen] = useState(false)
+  const [statusesOpen, setStatusesOpen] = useState(false)
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects', spaceId],
@@ -78,6 +80,10 @@ function ProjectHome() {
       description={project?.description}
       headerAction={
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setStatusesOpen(true)}>
+            <CircleDot className="h-3.5 w-3.5 mr-1.5" />
+            Statuses
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
             <Users className="h-3.5 w-3.5 mr-1.5" />
             Members
@@ -173,6 +179,14 @@ function ProjectHome() {
         initialVisibility={project?.visibility ?? null}
         open={membersOpen}
         onOpenChange={setMembersOpen}
+      />
+
+      <ScopedStatusesManager
+        scope="project"
+        containerId={projectId}
+        containerName={project?.name}
+        open={statusesOpen}
+        onOpenChange={setStatusesOpen}
       />
     </WorkHubPage>
   )

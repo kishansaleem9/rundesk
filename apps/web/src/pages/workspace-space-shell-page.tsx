@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Folder, Users } from 'lucide-react'
+import { Folder, Users, CircleDot } from 'lucide-react'
 import { Button } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { WorkHubPage, WorkEmptyState, WorkEntityCard } from '../components/work/work-ui'
 import { ContainerMembersSheet } from '../components/container-members-sheet'
+import { ScopedStatusesManager } from '../components/list-statuses-manager'
 
 type Project = {
   id: string
@@ -31,6 +32,7 @@ export function SpaceShell() {
 function SpaceHome() {
   const { workspaceId, spaceId } = useParams({ from: '/app/$workspaceId/$spaceId' })
   const [membersOpen, setMembersOpen] = useState(false)
+  const [statusesOpen, setStatusesOpen] = useState(false)
 
   const { data: spaces = [] } = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -49,10 +51,16 @@ function SpaceHome() {
       title={space?.name ?? 'Space'}
       description={space?.description}
       headerAction={
-        <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
-          <Users className="h-3.5 w-3.5 mr-1.5" />
-          Members
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setStatusesOpen(true)}>
+            <CircleDot className="h-3.5 w-3.5 mr-1.5" />
+            Statuses
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
+            <Users className="h-3.5 w-3.5 mr-1.5" />
+            Members
+          </Button>
+        </div>
       }
     >
       <section>
@@ -95,6 +103,14 @@ function SpaceHome() {
         initialVisibility={space?.visibility ?? 'public'}
         open={membersOpen}
         onOpenChange={setMembersOpen}
+      />
+
+      <ScopedStatusesManager
+        scope="space"
+        containerId={spaceId}
+        containerName={space?.name}
+        open={statusesOpen}
+        onOpenChange={setStatusesOpen}
       />
     </WorkHubPage>
   )

@@ -30,6 +30,7 @@ const CATEGORY_LABELS: Record<StatusCategory, string> = {
   closed: 'Closed',
 }
 
+/** Manage a List's own status pipeline (read-only when it inherits a template). */
 export function ListStatusesManager({
   listId,
   open,
@@ -39,10 +40,71 @@ export function ListStatusesManager({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  return (
+    <StatusPipelineManager
+      open={open}
+      onOpenChange={onOpenChange}
+      basePath={`/lists/${listId}/statuses`}
+      queryKey={['list-statuses', listId]}
+      extraInvalidateKeys={[['tasks', listId]]}
+      title="Manage list statuses"
+      supportsScope
+      listIdForScope={listId}
+    />
+  )
+}
+
+/** Manage a Space/Project shared status template. */
+export function ScopedStatusesManager({
+  scope,
+  containerId,
+  containerName,
+  open,
+  onOpenChange,
+}: {
+  scope: 'space' | 'project'
+  containerId: string
+  containerName?: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <StatusPipelineManager
+      open={open}
+      onOpenChange={onOpenChange}
+      basePath={`/${scope}s/${containerId}/statuses`}
+      queryKey={[`${scope}-statuses`, containerId]}
+      title={`${scope === 'space' ? 'Space' : 'Project'} statuses`}
+      subtitle={`Shared status set for ${containerName ? `“${containerName}”` : `this ${scope}`}. Every list using the ${scope} set updates together.`}
+    />
+  )
+}
+
+function StatusPipelineManager({
+  basePath,
+  queryKey,
+  extraInvalidateKeys = [],
+  title,
+  subtitle,
+  supportsScope = false,
+  listIdForScope,
+  open,
+  onOpenChange,
+}: {
+  basePath: string
+  queryKey: unknown[]
+  extraInvalidateKeys?: unknown[][]
+  title: string
+  subtitle?: string
+  supportsScope?: boolean
+  listIdForScope?: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   const qc = useQueryClient()
   const { data: statuses = [] } = useQuery({
-    queryKey: ['list-statuses', listId],
-    queryFn: () => api<ListStatus[]>(`/lists/${listId}/statuses`),
+    queryKey,
+    queryFn: () => api<ListStatus[]>(basePath),
     enabled: open,
   })
 
@@ -50,37 +112,38 @@ export function ListStatusesManager({
   const [dragId, setDragId] = useState<string | null>(null)
 
   const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: ['list-statuses', listId] })
-    void qc.invalidateQueries({ queryKey: ['tasks', listId] })
+    void qc.invalidateQueries({ queryKey })
+    for (const k of extraInvalidateKeys) void qc.invalidateQueries({ queryKey: k })
   }
 
   const createStatus = useMutation({
     mutationFn: (input: { name: string; color: string; category: StatusCategory }) =>
-      api(`/lists/${listId}/statuses`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
+      api(`${basePath}`, { method: 'POST', body: JSON.stringify(input) }),
     onSuccess: invalidate,
   })
 
   const updateStatus = useMutation({
     mutationFn: ({ statusId, patch }: { statusId: string; patch: Partial<ListStatus> }) =>
-      api(`/lists/${listId}/statuses/${statusId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(patch),
-      }),
+      api(`${basePath}/${statusId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     onSuccess: invalidate,
   })
 
   const reorderStatuses = useMutation({
     mutationFn: (orderedIds: string[]) =>
-      api(`/lists/${listId}/statuses/reorder`, { method: 'POST', body: { orderedIds } }),
+      api(`${basePath}/reorder`, { method: 'POST', body: { orderedIds } }),
     onSuccess: invalidate,
   })
 
-  const scope: StatusScope = statuses[0]?.scope ?? 'list'
+  const scope: StatusScope = supportsScope ? statuses[0]?.scope ?? 'list' : 'list'
   const inherited = scope !== 'list'
   const sortedStatuses = statuses.slice().sort((a, b) => a.position - b.position)
+
+  const switchScope = useMutation({
+    mutationFn: (nextScope: StatusScope) =>
+      api(`/lists/${listIdForScope}/status-scope`, { method: 'PATCH', body: { scope: nextScope } }),
+    onSuccess: invalidate,
+    onError: (err: any) => window.alert(err?.message ?? 'Could not change the status source'),
+  })
   const handleDropOn = (targetId: string) => {
     if (!dragId || dragId === targetId) {
       setDragId(null)
@@ -101,9 +164,7 @@ export function ListStatusesManager({
   const deleteStatus = useMutation({
     mutationFn: ({ statusId, reassignToStatusId }: { statusId: string; reassignToStatusId?: string }) =>
       api(
-        `/lists/${listId}/statuses/${statusId}${
-          reassignToStatusId ? `?reassignToStatusId=${reassignToStatusId}` : ''
-        }`,
+        `${basePath}/${statusId}${reassignToStatusId ? `?reassignToStatusId=${reassignToStatusId}` : ''}`,
         { method: 'DELETE' },
       ),
     onSuccess: () => {
@@ -116,7 +177,7 @@ export function ListStatusesManager({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Manage list statuses</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -128,9 +189,26 @@ export function ListStatusesManager({
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Statuses define how work moves through this list. Renaming a status
-              updates it everywhere; deleting one prompts you to move its tasks first.
+              {subtitle ??
+                'Statuses define how work moves through this list. Renaming a status updates it everywhere; deleting one prompts you to move its tasks first.'}
             </p>
+          )}
+
+          {listIdForScope && (
+            <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+              <span className="font-medium text-foreground">Status source:</span>
+              <select
+                value={scope}
+                disabled={switchScope.isPending}
+                onChange={(e) => switchScope.mutate(e.target.value as StatusScope)}
+                className="h-8 rounded-md border border-border/80 bg-background px-2 text-[13px]"
+              >
+                <option value="list">This list</option>
+                <option value="project">Project template</option>
+                <option value="space">Space template</option>
+              </select>
+              {switchScope.isPending && <span className="text-xs">Switching…</span>}
+            </label>
           )}
 
           <div className="space-y-2">
