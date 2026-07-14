@@ -536,6 +536,19 @@ export class TasksService {
     createdById: string
   }) {
     await this.assertNotGuestInList(data.listId, data.createdById)
+    // Cap nesting at two levels (parent → subtask). A subtask cannot itself have
+    // subtasks, so reject a parent that is already a subtask (Plan §4).
+    if (data.parentTaskId) {
+      const [parent] = await this.db
+        .select({ parentTaskId: tasks.parentTaskId })
+        .from(tasks)
+        .where(eq(tasks.id, data.parentTaskId))
+        .limit(1)
+      if (!parent) throw new NotFoundException('Parent task not found')
+      if (parent.parentTaskId) {
+        throw new BadRequestException('Subtasks can only be nested one level deep')
+      }
+    }
     const resolved = await this.resolveStatusForList(data.listId, data.status)
 
     const [task] = await this.db
@@ -840,12 +853,28 @@ export class TasksService {
   }
 
   // Direct children (subtasks) of a task, for the task detail Subtasks tab.
-  listSubtasks(taskId: string) {
-    return this.db
+  // Each subtask is a full task row plus its own assignees so the panel can
+  // edit assignee/due-date inline, independent of the parent (Plan §4).
+  async listSubtasks(taskId: string) {
+    const rows = await this.db
       .select()
       .from(tasks)
       .where(and(eq(tasks.parentTaskId, taskId), eq(tasks.isArchived, false)))
       .orderBy(asc(tasks.position))
+    if (rows.length === 0) return []
+    const ids = rows.map((r) => r.id)
+    const assigneeRows = await this.db
+      .select({ taskId: taskAssignees.taskId, userId: users.id, displayName: users.displayName, email: users.email })
+      .from(taskAssignees)
+      .innerJoin(users, eq(users.id, taskAssignees.userId))
+      .where(inArray(taskAssignees.taskId, ids))
+    const byTask = new Map<string, Array<{ userId: string; displayName: string | null; email: string | null }>>()
+    for (const a of assigneeRows) {
+      const list = byTask.get(a.taskId) ?? []
+      list.push({ userId: a.userId, displayName: a.displayName, email: a.email })
+      byTask.set(a.taskId, list)
+    }
+    return rows.map((r) => ({ ...r, assignees: byTask.get(r.id) ?? [] }))
   }
 
   async getTask(taskId: string) {

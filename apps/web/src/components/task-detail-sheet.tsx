@@ -43,6 +43,8 @@ type Subtask = {
   priority: TaskPriority
   status: TaskStatus
   isArchived?: boolean
+  dueDate?: string | null
+  assignees?: Array<{ userId: string; displayName?: string | null; email?: string | null }>
 }
 
 type TaskPickerItem = {
@@ -520,6 +522,7 @@ export function TaskDetailSheet({
                 <SubtasksPanel
                   taskId={detailQuery.data.id}
                   parentListId={detailQuery.data.listId}
+                  workspaceId={fallbackWorkspaceId}
                   inline={detailQuery.data.subtasks ?? []}
                 />
               )}
@@ -1079,16 +1082,24 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
 function SubtasksPanel({
   taskId,
   parentListId,
+  workspaceId,
   inline,
 }: {
   taskId: string
   parentListId: string
+  workspaceId?: string
   inline: Subtask[]
 }) {
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
   const [editingSubtaskTitle, setEditingSubtaskTitle] = useState('')
+
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<WorkspaceMemberLite[]>(`/workspaces/${workspaceId}/members`),
+    enabled: !!workspaceId,
+  })
 
   // Probe a dedicated endpoint first; fall back to inline subtasks from getTask.
   const probe = useQuery({
@@ -1107,15 +1118,19 @@ function SubtasksPanel({
   const doneCount = subtasks.filter((s) => s.status === 'done').length
   const donePct = subtasks.length ? Math.round((doneCount / subtasks.length) * 100) : 0
 
+  const invalidateSubtasks = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ['task', taskId] }),
+      qc.invalidateQueries({ queryKey: ['task', taskId, 'subtasks'] }),
+    ])
+
   const toggleDone = useMutation({
     mutationFn: ({ id, done }: { id: string; done: boolean }) =>
       api(`/tasks/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({ status: done ? 'done' : 'todo' }),
       }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['task', taskId] })
-    },
+    onSuccess: invalidateSubtasks,
   })
 
   const create = useMutation({
@@ -1126,7 +1141,7 @@ function SubtasksPanel({
       }),
     onSuccess: async () => {
       setTitle('')
-      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      await invalidateSubtasks()
     },
   })
 
@@ -1139,15 +1154,32 @@ function SubtasksPanel({
     onSuccess: async () => {
       setEditingSubtaskId(null)
       setEditingSubtaskTitle('')
-      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      await invalidateSubtasks()
     },
   })
 
   const deleteSubtask = useMutation({
     mutationFn: (id: string) => api(`/tasks/${id}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    onSuccess: invalidateSubtasks,
+  })
+
+  // Single-owner assignment for a subtask row: clear existing then set the pick.
+  const setAssignee = useMutation({
+    mutationFn: async ({ subtask, userId }: { subtask: Subtask; userId: string | null }) => {
+      for (const a of subtask.assignees ?? []) {
+        await api(`/tasks/${subtask.id}/assignees/${a.userId}`, { method: 'DELETE' })
+      }
+      if (userId) {
+        await api(`/tasks/${subtask.id}/assignees`, { method: 'POST', body: { userId } })
+      }
     },
+    onSuccess: invalidateSubtasks,
+  })
+
+  const setDueDate = useMutation({
+    mutationFn: ({ id, dueDate }: { id: string; dueDate: string | null }) =>
+      api(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ dueDate }) }),
+    onSuccess: invalidateSubtasks,
   })
 
   return (
@@ -1212,6 +1244,30 @@ function SubtasksPanel({
               <Badge variant="outline" className={cn('capitalize text-xs', priorityColor(s.priority))}>
                 {s.priority}
               </Badge>
+              {editingSubtaskId !== s.id && workspaceId && (
+                <select
+                  className="h-7 max-w-[120px] rounded border border-border bg-background px-1 text-[11px]"
+                  value={s.assignees?.[0]?.userId ?? ''}
+                  onChange={(e) => setAssignee.mutate({ subtask: s, userId: e.target.value || null })}
+                  title="Assignee"
+                >
+                  <option value="">Unassigned</option>
+                  {(membersQuery.data ?? []).map((m) => (
+                    <option key={m.userId} value={m.userId}>
+                      {m.displayName || m.email}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {editingSubtaskId !== s.id && (
+                <input
+                  type="date"
+                  className="h-7 rounded border border-border bg-background px-1 text-[11px] text-muted-foreground"
+                  value={s.dueDate ? s.dueDate.slice(0, 10) : ''}
+                  onChange={(e) => setDueDate.mutate({ id: s.id, dueDate: e.target.value || null })}
+                  title="Due date"
+                />
+              )}
               {editingSubtaskId !== s.id && (
                 <button
                   type="button"
