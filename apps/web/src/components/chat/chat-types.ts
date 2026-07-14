@@ -4,6 +4,7 @@ export type ChatChannel = {
   description?: string | null
   isPrivate: boolean
   isDm: boolean
+  createdById?: string | null
   joined: boolean
   unreadCount?: number
   lastReadAt?: string | null

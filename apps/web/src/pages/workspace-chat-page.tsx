@@ -25,6 +25,8 @@ import {
   UserPlus,
   Pin,
   PinOff,
+  Pencil,
+  Trash2,
   X,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
@@ -70,6 +72,9 @@ type Message = {
   parentMessageId?: string | null
   editedAt?: string | null
   pinnedAt?: string | null
+  pinnedById?: string | null
+  pinnedByName?: string | null
+  deletedAt?: string | null
   createdAt: string
   reactions?: Array<{
     emoji: string
@@ -122,6 +127,8 @@ export function ChatPage() {
   const [startingDm, setStartingDm] = useState(false)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [threadParentId, setThreadParentId] = useState<string | null>(null)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editingBody, setEditingBody] = useState('')
   const [showPinnedPanel, setShowPinnedPanel] = useState(false)
   const [showSavedPanel, setShowSavedPanel] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
@@ -168,6 +175,11 @@ export function ChatPage() {
     () => channels.find((c) => c.id === selectedId) ?? null,
     [channels, selectedId],
   )
+  const channelMembersQuery = useQuery({
+    queryKey: ['chat-channel-members', selectedId],
+    queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/chat/channels/${selectedId}/members`),
+    enabled: !!selectedId && !selectedChannel?.isDm,
+  })
 
   const messagesQuery = useQuery({
     queryKey: ['chat-messages', selectedId],
@@ -280,6 +292,9 @@ export function ChatPage() {
       }
       if (event.type === 'chat.channel.created') {
         qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      }
+      if (event.type === 'chat.channel.members.updated' && event.channelId) {
+        qc.invalidateQueries({ queryKey: ['chat-channel-members', event.channelId] })
       }
       if (event.type === 'chat.reaction.toggled' && event.channelId) {
         qc.invalidateQueries({ queryKey: ['chat-messages', event.channelId] })
@@ -424,6 +439,28 @@ export function ChatPage() {
     },
   })
 
+  const editMessageMutation = useMutation({
+    mutationFn: ({ messageId, body }: { messageId: string; body: string }) =>
+      api(`/chat/messages/${messageId}`, { method: 'PATCH', body: JSON.stringify({ body }) }),
+    onSuccess: () => {
+      setEditingMessageId(null)
+      setEditingBody('')
+      if (selectedId) qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not edit message'),
+  })
+
+  const deleteMessageMutation = useMutation({
+    mutationFn: (messageId: string) => api(`/chat/messages/${messageId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      if (selectedId) {
+        qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+        qc.invalidateQueries({ queryKey: ['chat-pinned', selectedId] })
+      }
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not delete message'),
+  })
+
   const setSavedMutation = useMutation({
     mutationFn: ({ messageId, saved }: { messageId: string; saved: boolean }) =>
       api(`/chat/messages/${messageId}/save`, { method: saved ? 'POST' : 'DELETE' }),
@@ -445,6 +482,18 @@ export function ChatPage() {
     },
     onError: (error) => {
       toast.error(error instanceof ApiError ? error.message : 'Could not leave channel')
+    },
+  })
+
+  const removeMemberMutation = useMutation({
+    mutationFn: ({ channelId, userId }: { channelId: string; userId: string }) =>
+      api(`/chat/channels/${channelId}/members/${userId}`, { method: 'DELETE' }),
+    onSuccess: async (_, { channelId }) => {
+      await qc.invalidateQueries({ queryKey: ['chat-channel-members', channelId] })
+      toast.success('Member removed from channel')
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : 'Could not remove member')
     },
   })
 
@@ -533,8 +582,10 @@ export function ChatPage() {
         <div className="flex-1 flex flex-col min-w-0">
         <ChatHeader
           channel={selectedChannel}
-          memberCount={membersQuery.data?.length ?? 0}
-          members={membersQuery.data ?? []}
+          memberCount={
+            selectedChannel?.isDm ? membersQuery.data?.length ?? 0 : channelMembersQuery.data?.length ?? 0
+          }
+          members={selectedChannel?.isDm ? membersQuery.data ?? [] : channelMembersQuery.data ?? []}
           showPinnedPanel={showPinnedPanel}
           onTogglePinned={() => {
             setShowPinnedPanel((v) => !v)
@@ -554,6 +605,8 @@ export function ChatPage() {
           onSetNotificationLevel={
             selectedId ? (level) => setNotificationLevel.mutate({ channelId: selectedId, level }) : undefined
           }
+          currentUserId={me?.id}
+          onRemoveMember={selectedId ? (userId) => removeMemberMutation.mutate({ channelId: selectedId, userId }) : undefined}
         />
 
         {selectedChannel && !selectedChannel.isDm && (
@@ -651,20 +704,62 @@ export function ChatPage() {
                           </span>
                         </div>
                       )}
-                      {m.pinnedAt && (
+                      {m.pinnedAt && !m.deletedAt && (
                         <div className="flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-300 mb-0.5">
                           <Pin className="h-2.5 w-2.5" />
-                          Pinned
+                          Pinned{m.pinnedByName ? ` by ${m.pinnedByName}` : ''}
+                          {m.pinnedAt ? ` · ${formatMessageTime(m.pinnedAt)}` : ''}
                         </div>
                       )}
-                      <div
-                        className={cn(
-                          'text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90',
-                        )}
-                      >
-                        <MentionText text={m.body} namesById={namesById} />
-                        {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">(edited)</span>}
-                      </div>
+                      {m.deletedAt ? (
+                        <div className="text-[13px] italic text-muted-foreground/80">This message was deleted</div>
+                      ) : editingMessageId === m.id ? (
+                        <div className="mt-0.5">
+                          <textarea
+                            autoFocus
+                            value={editingBody}
+                            onChange={(e) => setEditingBody(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault()
+                                if (editingBody.trim()) editMessageMutation.mutate({ messageId: m.id, body: editingBody.trim() })
+                              }
+                              if (e.key === 'Escape') {
+                                setEditingMessageId(null)
+                                setEditingBody('')
+                              }
+                            }}
+                            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[14px] focus:outline-none focus:ring-1 focus:ring-ring"
+                            rows={2}
+                          />
+                          <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                            <button
+                              type="button"
+                              className="text-violet-600 dark:text-violet-300 hover:underline"
+                              onClick={() => editingBody.trim() && editMessageMutation.mutate({ messageId: m.id, body: editingBody.trim() })}
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className="hover:underline"
+                              onClick={() => {
+                                setEditingMessageId(null)
+                                setEditingBody('')
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <span>· Enter to save, Esc to cancel</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90">
+                          <MentionText text={m.body} namesById={namesById} />
+                          {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">(edited)</span>}
+                        </div>
+                      )}
+                      {!m.deletedAt && editingMessageId !== m.id && (
                       <div className="absolute right-3 -top-3 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150">
                         <div className="relative rounded-lg border border-border/80 bg-background shadow-md px-1 py-0.5 flex items-center gap-0.5">
                           <button
@@ -800,8 +895,36 @@ export function ChatPage() {
                           >
                             <UserPlus className="h-3 w-3" />
                           </button>
+                          {mine && (
+                            <>
+                              <span className="mx-0.5 h-4 w-px bg-border/70" />
+                              <button
+                                type="button"
+                                title="Edit message"
+                                className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
+                                onClick={() => {
+                                  setEditingMessageId(m.id)
+                                  setEditingBody(m.body)
+                                }}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Delete message"
+                                disabled={deleteMessageMutation.isPending}
+                                className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-red-500 hover:bg-red-500/10 flex items-center justify-center disabled:opacity-50"
+                                onClick={() => {
+                                  if (window.confirm('Delete this message?')) deleteMessageMutation.mutate(m.id)
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
+                      )}
                       {!!m.reactions?.length && (
                         <div className="mt-1 flex items-center gap-1 flex-wrap">
                           {m.reactions.map((r) => (
@@ -965,6 +1088,13 @@ function PinnedPanel({
             <Card key={m.id} className="p-3">
               <div className="text-xs text-muted-foreground">{m.authorName ?? 'Unknown'}</div>
               <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
+              {(m.pinnedByName || m.pinnedAt) && (
+                <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Pin className="h-2.5 w-2.5" />
+                  Pinned{m.pinnedByName ? ` by ${m.pinnedByName}` : ''}
+                  {m.pinnedAt ? ` · ${formatMessageTime(m.pinnedAt)}` : ''}
+                </div>
+              )}
               <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id)}>
                 Open thread
               </button>

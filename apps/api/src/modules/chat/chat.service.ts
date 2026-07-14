@@ -128,6 +128,7 @@ export class ChatService {
         description: chatChannels.description,
         isPrivate: chatChannels.isPrivate,
         isDm: chatChannels.isDm,
+        createdById: chatChannels.createdById,
         createdAt: chatChannels.createdAt,
       })
       .from(chatChannels)

@@ -29,6 +29,8 @@ export function ChatHeader({
   onLeaveChannel,
   onAddPeople,
   onSetNotificationLevel,
+  currentUserId,
+  onRemoveMember,
 }: {
   channel: ChatChannel | null
   memberCount: number
@@ -42,7 +44,12 @@ export function ChatHeader({
   onLeaveChannel: () => void
   onAddPeople?: () => void
   onSetNotificationLevel?: (level: 'all' | 'mentions' | 'none') => void
+  currentUserId?: string
+  onRemoveMember?: (userId: string) => void
 }) {
+  // The channel creator may remove other members (backend also allows workspace
+  // admins; the control is shown to the creator).
+  const canRemoveMembers = !!channel?.createdById && channel.createdById === currentUserId
   const title = channel?.isDm
     ? channel.dmPeerName ?? 'Direct message'
     : channel?.name ?? 'Select a channel'
@@ -185,19 +192,38 @@ export function ChatHeader({
                   members.map((member) => (
                     <div
                       key={member.userId}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted/40"
+                      className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted/40"
                     >
                       <div className="h-6 w-6 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
                         {initials(member.displayName || member.email)}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="font-medium text-foreground truncate">
                           {member.displayName || member.email}
+                          {member.userId === channel?.createdById && (
+                            <span className="ml-1 text-[10px] text-muted-foreground">· owner</span>
+                          )}
                         </div>
                         {member.displayName && (
                           <div className="text-[11px] text-muted-foreground truncate">{member.email}</div>
                         )}
                       </div>
+                      {canRemoveMembers &&
+                        member.userId !== channel?.createdById &&
+                        member.userId !== currentUserId && (
+                          <button
+                            type="button"
+                            title="Remove from channel"
+                            className="shrink-0 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-500/10"
+                            onClick={() => {
+                              if (window.confirm(`Remove ${member.displayName || member.email} from this channel?`)) {
+                                onRemoveMember?.(member.userId)
+                              }
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                     </div>
                   ))
                 )}
