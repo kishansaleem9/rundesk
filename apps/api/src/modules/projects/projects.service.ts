@@ -106,6 +106,18 @@ export class ProjectsService {
     await this.db.update(projects).set({ isArchived: true }).where(eq(projects.id, projectId))
   }
 
+  /** Restore an archived project (Plan §2.4 / §13.4). */
+  async restoreProject(projectId: string, actorId?: string) {
+    if (actorId) await this.assertManageable(projectId, actorId)
+    const [row] = await this.db
+      .update(projects)
+      .set({ isArchived: false, updatedAt: new Date() })
+      .where(eq(projects.id, projectId))
+      .returning()
+    if (!row) throw new NotFoundException('Project not found')
+    return row
+  }
+
   private async assertManageable(projectId: string, actorId: string) {
     const [row] = await this.db
       .select({ createdById: projects.createdById, workspaceId: spaces.workspaceId })

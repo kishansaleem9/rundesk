@@ -43,6 +43,15 @@ export class ListsController {
     )
   }
 
+  @Post('project/:projectId/reorder')
+  async reorderLists(
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: any,
+    @Body() body: { orderedIds: string[] },
+  ) {
+    return this.listsService.reorderLists(projectId, body.orderedIds ?? [], user.id)
+  }
+
   @Put(':listId')
   async updateList(
     @Param('listId') listId: string,

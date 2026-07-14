@@ -43,6 +43,26 @@ export class WorkspacesController {
     return this.workspacesService.update(workspaceId, body, { id: user.id, email: user.email })
   }
 
+  @Delete(':workspaceId')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Archive (soft-delete) a workspace' })
+  async archive(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.workspacesService.archiveWorkspace(workspaceId, { id: user.id, email: user.email })
+  }
+
+  @Post(':workspaceId/restore')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Restore an archived workspace' })
+  async restore(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.workspacesService.restoreWorkspace(workspaceId, { id: user.id, email: user.email })
+  }
+
   @Get(':workspaceId/members')
   @UseGuards(WorkspaceMemberGuard)
   async listMembers(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {

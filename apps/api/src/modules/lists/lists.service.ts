@@ -1,5 +1,5 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { eq, and } from 'drizzle-orm'
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
+import { eq, and, asc } from 'drizzle-orm'
 import { lists, listStatuses, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -48,6 +48,27 @@ export class ListsService {
       .select()
       .from(lists)
       .where(and(eq(lists.projectId, projectId), eq(lists.isArchived, false)))
+      .orderBy(asc(lists.position), asc(lists.createdAt))
+  }
+
+  /** Reorder lists within a project; writes each list's position to its index. */
+  async reorderLists(projectId: string, orderedIds: string[], actorId?: string) {
+    const all = await this.getListsByProject(projectId)
+    const validIds = new Set(all.map((l) => l.id))
+    const missing = orderedIds.filter((id) => !validIds.has(id))
+    if (missing.length > 0) {
+      throw new BadRequestException(`These ids are not lists of this project: ${missing.join(', ')}`)
+    }
+    if (orderedIds.length !== all.length) {
+      throw new BadRequestException('orderedIds must contain every list of the project exactly once')
+    }
+    if (actorId && all[0]) await this.assertManageable(all[0].id, actorId)
+    await Promise.all(
+      orderedIds.map((id, position) =>
+        this.db.update(lists).set({ position, updatedAt: new Date() }).where(eq(lists.id, id)),
+      ),
+    )
+    return this.getListsByProject(projectId)
   }
 
   async getList(listId: string) {

@@ -53,4 +53,9 @@ export class ProjectsController {
     await this.projectsService.deleteProject(projectId, user.id)
     return { message: 'Project archived successfully' }
   }
+
+  @Post(':projectId/restore')
+  async restoreProject(@Param('projectId') projectId: string, @CurrentUser() user: any) {
+    return this.projectsService.restoreProject(projectId, user.id)
+  }
 }

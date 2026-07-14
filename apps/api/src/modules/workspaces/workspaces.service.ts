@@ -30,7 +30,46 @@ export class WorkspacesService {
       .select({ workspace: workspaces, role: workspaceMembers.role })
       .from(workspaceMembers)
       .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
-      .where(eq(workspaceMembers.userId, userId))
+      .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, false)))
+  }
+
+  /** Soft-delete (archive) a workspace so it disappears from members' lists. */
+  async archiveWorkspace(workspaceId: string, actor?: { id: string; email?: string }) {
+    const [row] = await this.db
+      .update(workspaces)
+      .set({ isArchived: true, updatedAt: new Date() })
+      .where(eq(workspaces.id, workspaceId))
+      .returning()
+    if (!row) throw new NotFoundException('Workspace not found')
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      action: 'workspace.archived',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      description: 'Workspace archived (soft-deleted)',
+    })
+    return row
+  }
+
+  async restoreWorkspace(workspaceId: string, actor?: { id: string; email?: string }) {
+    const [row] = await this.db
+      .update(workspaces)
+      .set({ isArchived: false, updatedAt: new Date() })
+      .where(eq(workspaces.id, workspaceId))
+      .returning()
+    if (!row) throw new NotFoundException('Workspace not found')
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      action: 'workspace.restored',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      description: 'Workspace restored from archive',
+    })
+    return row
   }
 
   async findById(id: string) {
