@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
@@ -28,6 +28,27 @@ export class WorkspaceTimeEntriesController {
       userId: canModerate ? userId : actor.id,
       since: since ? new Date(since) : undefined,
     })
+  }
+
+  // Edit / delete a time log. The service enforces that only the entry's
+  // owner can modify it (404 if missing, 403 if it belongs to someone else).
+  @Patch('time-entries/:entryId')
+  async update(
+    @Param('entryId') entryId: string,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Body() body: { durationSec?: number; description?: string | null; isBillable?: boolean; startedAt?: string },
+  ) {
+    return this.time.update(entryId, actor.id, {
+      durationSec: body.durationSec,
+      description: body.description,
+      isBillable: body.isBillable,
+      startedAt: body.startedAt ? new Date(body.startedAt) : undefined,
+    })
+  }
+
+  @Delete('time-entries/:entryId')
+  async remove(@Param('entryId') entryId: string, @CurrentUser() actor: CurrentUserPayload) {
+    return this.time.remove(entryId, actor.id)
   }
 
   @Get('workspaces/:workspaceId/time-approvals')
