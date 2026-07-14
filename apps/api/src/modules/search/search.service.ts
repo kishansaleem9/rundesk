@@ -1,10 +1,18 @@
 import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
-import { ilike, or, eq, and, desc } from 'drizzle-orm'
-import { tasks, docs, lists, projects, spaces } from '@rundesk/db'
+import { ilike, or, eq, and, desc, inArray, type SQL } from 'drizzle-orm'
+import { tasks, taskAssignees, docs, lists, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+
+export type SearchEntityType = 'task' | 'doc'
+export type SearchFilters = {
+  types?: SearchEntityType[]
+  statusCategory?: 'open' | 'in_progress' | 'closed'
+  priority?: 'urgent' | 'high' | 'normal' | 'low'
+  assigneeId?: string
+}
 
 // The Meilisearch index schema is intentionally light-weight.
 type SearchDoc = {
@@ -127,15 +135,29 @@ export class SearchService implements OnModuleInit {
     this.logger.log(`Reindexed workspace ${workspaceId}: ${payload.length} documents`)
   }
 
-  async search(workspaceId: string, query: string, limit = 10): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
+  async search(
+    workspaceId: string,
+    query: string,
+    limit = 10,
+    filters: SearchFilters = {},
+  ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const trimmed = query.trim()
-    if (!trimmed) return []
+    const hasTaskFilter = Boolean(filters.statusCategory || filters.priority || filters.assigneeId)
+    const wantTasks = !filters.types || filters.types.includes('task')
+    // Task-specific filters imply the caller wants tasks, so docs are excluded.
+    const wantDocs = (!filters.types || filters.types.includes('doc')) && !hasTaskFilter
 
-    if (this.enabled && this.index) {
-      const res = await this.index.search(trimmed, {
-        filter: [`workspaceId = "${workspaceId}"`],
-        limit,
-      })
+    // Nothing to match on at all → empty. (Filter-only searches are allowed.)
+    if (!trimmed && !hasTaskFilter && !filters.types) return []
+
+    // Meilisearch can only satisfy the text + entity-type filters — it doesn't
+    // index status/priority/assignee. Fall back to Postgres for those.
+    if (this.enabled && this.index && trimmed && !hasTaskFilter) {
+      const filterExpr = [`workspaceId = "${workspaceId}"`]
+      if (filters.types && filters.types.length === 1) {
+        filterExpr.push(`entityType = "${filters.types[0]}"`)
+      }
+      const res = await this.index.search(trimmed, { filter: filterExpr, limit })
       return res.hits.map((h) => ({
         id: h.id,
         entityType: h.entityType,
@@ -145,32 +167,53 @@ export class SearchService implements OnModuleInit {
       }))
     }
 
-    // Fallback: Postgres ILIKE
-    const like = `%${trimmed}%`
-    const taskHits = await this.db
-      .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id })
-      .from(tasks)
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(
-        eq(spaces.workspaceId, workspaceId),
-        eq(tasks.isArchived, false),
-        or(ilike(tasks.title, like), ilike(tasks.description, like)),
-      ))
-      .orderBy(desc(tasks.updatedAt))
-      .limit(limit)
+    // Fallback / rich-filter path: Postgres ILIKE + structured filters.
+    const like = trimmed ? `%${trimmed}%` : null
 
-    const docHits = await this.db
-      .select()
-      .from(docs)
-      .where(and(
-        eq(docs.workspaceId, workspaceId),
-        eq(docs.isArchived, false),
-        or(ilike(docs.title, like), ilike(docs.plaintext, like)),
-      ))
-      .orderBy(desc(docs.updatedAt))
-      .limit(limit)
+    const taskHits = wantTasks
+      ? await (async () => {
+          const conds: Array<SQL | undefined> = [
+            eq(spaces.workspaceId, workspaceId),
+            eq(tasks.isArchived, false),
+          ]
+          if (like) conds.push(or(ilike(tasks.title, like), ilike(tasks.description, like)))
+          if (filters.statusCategory) conds.push(eq(tasks.statusCategory, filters.statusCategory))
+          if (filters.priority) conds.push(eq(tasks.priority, filters.priority))
+          if (filters.assigneeId) {
+            conds.push(
+              inArray(
+                tasks.id,
+                this.db
+                  .select({ taskId: taskAssignees.taskId })
+                  .from(taskAssignees)
+                  .where(eq(taskAssignees.userId, filters.assigneeId)),
+              ),
+            )
+          }
+          return this.db
+            .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id })
+            .from(tasks)
+            .innerJoin(lists, eq(lists.id, tasks.listId))
+            .innerJoin(projects, eq(projects.id, lists.projectId))
+            .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+            .where(and(...conds))
+            .orderBy(desc(tasks.updatedAt))
+            .limit(limit)
+        })()
+      : []
+
+    const docHits = wantDocs
+      ? await this.db
+          .select()
+          .from(docs)
+          .where(and(
+            eq(docs.workspaceId, workspaceId),
+            eq(docs.isArchived, false),
+            ...(like ? [or(ilike(docs.title, like), ilike(docs.plaintext, like))] : []),
+          ))
+          .orderBy(desc(docs.updatedAt))
+          .limit(limit)
+      : []
 
     return [
       ...taskHits.map((t) => ({

@@ -9,6 +9,7 @@ import {
   CommandList,
   CommandShortcut,
   CommandSeparator,
+  cn,
 } from '@rundesk/ui'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
@@ -61,6 +62,9 @@ export function CommandPalette({
     else setInternalOpen(next)
   }
   const [query, setQuery] = useState(initialQuery)
+  const [typeFilter, setTypeFilter] = useState<'all' | 'task' | 'doc'>('all')
+  const [statusFilter, setStatusFilter] = useState<'' | 'open' | 'in_progress' | 'closed'>('')
+  const [priorityFilter, setPriorityFilter] = useState<'' | 'urgent' | 'high' | 'normal' | 'low'>('')
 
   // When the palette is opened with a query forwarded from the header search
   // input, seed the command query so results show immediately.
@@ -74,11 +78,17 @@ export function CommandPalette({
     [location.pathname],
   )
 
+  const hasFilter = typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== ''
   const searchQuery = useQuery({
-    enabled: open && Boolean(workspaceId) && query.trim().length > 0,
-    queryKey: ['search', workspaceId, query],
-    queryFn: () =>
-      api<SearchHit[]>(`/search/${workspaceId}?q=${encodeURIComponent(query)}`),
+    enabled: open && Boolean(workspaceId) && (query.trim().length > 0 || hasFilter),
+    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter],
+    queryFn: () => {
+      const params = new URLSearchParams({ q: query })
+      if (typeFilter !== 'all') params.set('types', typeFilter)
+      if (statusFilter) params.set('statusCategory', statusFilter)
+      if (priorityFilter) params.set('priority', priorityFilter)
+      return api<SearchHit[]>(`/search/${workspaceId}?${params.toString()}`)
+    },
   })
 
   const createTask = useMutation({
@@ -137,14 +147,47 @@ export function CommandPalette({
         value={query}
         onValueChange={setQuery}
       />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60">
+        <FilterGroup label="Type">
+          {(['all', 'task', 'doc'] as const).map((v) => (
+            <FilterChip key={v} active={typeFilter === v} onClick={() => setTypeFilter(v)}>
+              {v === 'all' ? 'All' : v === 'task' ? 'Tasks' : 'Docs'}
+            </FilterChip>
+          ))}
+        </FilterGroup>
+        <FilterGroup label="Status">
+          {(['open', 'in_progress', 'closed'] as const).map((v) => (
+            <FilterChip
+              key={v}
+              active={statusFilter === v}
+              onClick={() => setStatusFilter((cur) => (cur === v ? '' : v))}
+            >
+              {v === 'open' ? 'To do' : v === 'in_progress' ? 'Active' : 'Closed'}
+            </FilterChip>
+          ))}
+        </FilterGroup>
+        <FilterGroup label="Priority">
+          {(['urgent', 'high', 'normal', 'low'] as const).map((v) => (
+            <FilterChip
+              key={v}
+              active={priorityFilter === v}
+              onClick={() => setPriorityFilter((cur) => (cur === v ? '' : v))}
+            >
+              {v.charAt(0).toUpperCase() + v.slice(1)}
+            </FilterChip>
+          ))}
+        </FilterGroup>
+      </div>
       <CommandList>
         <CommandEmpty>
           {query.trim() ? (
             <span>
               No matches — try a different keyword, or press <CommandShortcut>↵</CommandShortcut> to create a task.
             </span>
+          ) : hasFilter ? (
+            <span>No items match the selected filters.</span>
           ) : (
-            <span>Start typing to search across your workspace.</span>
+            <span>Start typing to search, or pick a filter above.</span>
           )}
         </CommandEmpty>
 
@@ -203,5 +246,41 @@ export function CommandPalette({
         )}
       </CommandList>
     </CommandDialog>
+  )
+}
+
+function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 mr-0.5">
+        {label}
+      </span>
+      {children}
+    </div>
+  )
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
+        active
+          ? 'border-brand-500 bg-brand-500/10 text-foreground'
+          : 'border-border/70 text-muted-foreground hover:text-foreground hover:bg-accent/10',
+      )}
+    >
+      {children}
+    </button>
   )
 }
