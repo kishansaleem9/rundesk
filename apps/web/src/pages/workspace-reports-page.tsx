@@ -13,6 +13,7 @@ import {
   TrendingDown,
   Minus,
   Download,
+  Printer,
   SlidersHorizontal,
 } from 'lucide-react'
 import { api } from '../lib/api'
@@ -35,6 +36,49 @@ function downloadCsv(filename: string, rows: (string | number)[][]) {
   link.download = filename
   link.click()
   URL.revokeObjectURL(url)
+}
+
+function escapeHtml(value: string | number): string {
+  return String(value).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string),
+  )
+}
+
+/**
+ * Render the current report's tabular data into a clean, self-contained print
+ * window and open the browser print dialog — where "Save as PDF" produces the
+ * PDF export. Reuses the same rows each tab registers for CSV.
+ */
+function printReport(title: string, rows: (string | number)[][]) {
+  if (rows.length === 0) return
+  const [header, ...body] = rows
+  const win = window.open('', '_blank', 'width=900,height=700')
+  if (!win) return
+  const generatedOn = new Date().toLocaleString()
+  const thead = `<tr>${header.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`
+  const tbody = body
+    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
+    .join('')
+  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #111827; margin: 32px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .meta { color: #6b7280; font-size: 12px; margin-bottom: 20px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left; }
+  th { background: #f9fafb; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafafa; }
+  @media print { body { margin: 12mm; } }
+</style></head><body>
+  <h1>${escapeHtml(title)}</h1>
+  <div class="meta">Rundesk · generated ${escapeHtml(generatedOn)}</div>
+  <table><thead>${thead}</thead><tbody>${tbody}</tbody></table>
+</body></html>`)
+  win.document.close()
+  win.focus()
+  // Give the new document a tick to lay out before invoking print.
+  win.setTimeout(() => win.print(), 250)
 }
 
 export function ReportsPage() {
@@ -68,6 +112,12 @@ export function ReportsPage() {
     { id: 'custom', label: 'Custom', icon: SlidersHorizontal },
   ]
 
+  const activeLabel = tabs.find((t) => t.id === activeTab)?.label ?? 'Report'
+  const handlePrint = () => {
+    if (!exportPayload) return
+    printReport(`${activeLabel} report · last ${days} days`, exportPayload.rows)
+  }
+
   return (
     <div className="h-full flex flex-col">
       <header className="px-6 py-4 border-b border-border">
@@ -95,6 +145,16 @@ export function ReportsPage() {
               title={exportPayload ? 'Download current report as CSV' : 'No data to export yet'}
             >
               <Download className="h-3.5 w-3.5" /> Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handlePrint}
+              disabled={!exportPayload}
+              title={exportPayload ? 'Open a printable view — choose “Save as PDF”' : 'No data to export yet'}
+            >
+              <Printer className="h-3.5 w-3.5" /> Print / PDF
             </Button>
           </div>
         </div>
