@@ -798,6 +798,18 @@ function OverviewPanel({
     onSuccess: (r) => toast.success('Task summary', { description: r.summary, duration: 10000 }),
     onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
   })
+  const aiSuggestDeadline = useMutation({
+    mutationFn: () =>
+      api<{ suggestedDate: string; reasoning: string }>(`/ai/task/deadline`, {
+        method: 'POST',
+        body: { title: detail.title, description: detail.description ?? undefined, workspaceId },
+      }),
+    onSuccess: (r) => {
+      patchTask.mutate({ dueDate: r.suggestedDate })
+      toast.success(`AI suggested ${r.suggestedDate}`, { description: r.reasoning })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+  })
 
   // Reset transient edit UI when switching to a different task.
   useEffect(() => {
@@ -933,7 +945,22 @@ function OverviewPanel({
             </button>
           </div>
         </Field>
-        <Field label="Due date">
+        <Field
+          label={
+            <span className="flex items-center justify-between">
+              Due date
+              <button
+                type="button"
+                disabled={aiSuggestDeadline.isPending}
+                onClick={() => aiSuggestDeadline.mutate()}
+                className="inline-flex items-center gap-1 rounded px-1 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                title="Suggest a deadline with AI"
+              >
+                <Sparkles className="h-2.5 w-2.5" /> AI
+              </button>
+            </span>
+          }
+        >
           <input
             type="date"
             value={toDateInput(detail.dueDate)}
@@ -1015,7 +1042,7 @@ function OverviewPanel({
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
       <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{label}</div>
