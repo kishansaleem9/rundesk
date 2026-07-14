@@ -83,6 +83,8 @@ type Message = {
   }>
 }
 
+type CustomEmoji = { id: string; shortcode: string; imageUrl: string; createdById?: string | null }
+
 type MemberProfileStats = {
   recentMessages: Message[]
   recentReplies: Message[]
@@ -135,6 +137,9 @@ export function ChatPage() {
   const [showSavedPanel, setShowSavedPanel] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
+  const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
+  const [newEmojiCode, setNewEmojiCode] = useState('')
+  const [newEmojiUrl, setNewEmojiUrl] = useState('')
   const [profileTab, setProfileTab] = useState<'activity' | 'tasks' | 'comments'>('activity')
   const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
@@ -199,6 +204,12 @@ export function ChatPage() {
     enabled: !!selectedId,
     refetchInterval: 20000,
   })
+  const customEmojiQuery = useQuery({
+    queryKey: ['chat-custom-emoji', workspaceId],
+    queryFn: () => api<CustomEmoji[]>(`/chat/workspaces/${workspaceId}/custom-emoji`),
+  })
+  const customEmoji = customEmojiQuery.data ?? []
+  const emojiByCode = useMemo(() => new Map(customEmoji.map((e) => [e.shortcode, e.imageUrl])), [customEmoji])
 
   const messagesQuery = useQuery({
     queryKey: ['chat-messages', selectedId],
@@ -440,6 +451,24 @@ export function ChatPage() {
     },
   })
 
+  const addCustomEmojiMutation = useMutation({
+    mutationFn: ({ shortcode, imageUrl }: { shortcode: string; imageUrl: string }) =>
+      api(`/chat/workspaces/${workspaceId}/custom-emoji`, { method: 'POST', body: JSON.stringify({ shortcode, imageUrl }) }),
+    onSuccess: () => {
+      setNewEmojiCode('')
+      setNewEmojiUrl('')
+      qc.invalidateQueries({ queryKey: ['chat-custom-emoji', workspaceId] })
+      toast.success('Custom emoji added')
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not add emoji'),
+  })
+
+  const deleteCustomEmojiMutation = useMutation({
+    mutationFn: (emojiId: string) => api(`/chat/custom-emoji/${emojiId}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['chat-custom-emoji', workspaceId] }),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not remove emoji'),
+  })
+
   const forwardMutation = useMutation({
     mutationFn: ({ channelId, body }: { channelId: string; body: string }) =>
       api<Message>(`/chat/channels/${channelId}/messages`, {
@@ -665,6 +694,71 @@ export function ChatPage() {
           />
         )}
 
+        {emojiManagerOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setEmojiManagerOpen(false)}
+          >
+            <Card className="w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm">Custom emoji</h3>
+                <button className="text-muted-foreground hover:text-foreground" onClick={() => setEmojiManagerOpen(false)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex items-end gap-2">
+                <label className="flex-1 text-[11px] text-muted-foreground">
+                  Shortcode
+                  <input
+                    value={newEmojiCode}
+                    onChange={(e) => setNewEmojiCode(e.target.value)}
+                    placeholder="partyparrot"
+                    className="mt-0.5 w-full h-8 rounded border border-border bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <label className="flex-[1.4] text-[11px] text-muted-foreground">
+                  Image URL
+                  <input
+                    value={newEmojiUrl}
+                    onChange={(e) => setNewEmojiUrl(e.target.value)}
+                    placeholder="https://…/emoji.png"
+                    className="mt-0.5 w-full h-8 rounded border border-border bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <Button
+                  size="sm"
+                  disabled={!newEmojiCode.trim() || !newEmojiUrl.trim() || addCustomEmojiMutation.isPending}
+                  onClick={() => addCustomEmojiMutation.mutate({ shortcode: newEmojiCode.trim(), imageUrl: newEmojiUrl.trim() })}
+                >
+                  Add
+                </Button>
+              </div>
+              <div className="mt-4 max-h-64 overflow-y-auto space-y-1">
+                {customEmoji.length === 0 ? (
+                  <div className="text-xs text-muted-foreground py-3 text-center">
+                    No custom emoji yet. Add one above — use it as <code>:shortcode:</code> to react.
+                  </div>
+                ) : (
+                  customEmoji.map((ce) => (
+                    <div key={ce.id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted/40">
+                      <img src={ce.imageUrl} alt={ce.shortcode} className="h-6 w-6 object-contain" />
+                      <span className="flex-1 text-sm">:{ce.shortcode}:</span>
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-red-500"
+                        title="Remove emoji"
+                        onClick={() => deleteCustomEmojiMutation.mutate(ce.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
+
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
           {rootMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
@@ -817,20 +911,46 @@ export function ChatPage() {
                             <Smile className="h-3 w-3" />
                           </button>
                           {reactionPickerFor === m.id && (
-                            <div className="absolute right-0 top-8 z-20 rounded-lg border border-border bg-card shadow-lg p-1 flex items-center gap-1">
-                              {['😀', '🔥', '❤️', '👏', '👍', '🎉'].map((emoji) => (
-                                <button
-                                  key={emoji}
-                                  type="button"
-                                  className="h-7 w-7 rounded hover:bg-muted text-sm"
-                                  onClick={() => {
-                                    toggleReactionMutation.mutate({ messageId: m.id, emoji })
-                                    setReactionPickerFor(null)
-                                  }}
-                                >
-                                  {emoji}
-                                </button>
-                              ))}
+                            <div className="absolute right-0 top-8 z-20 w-56 rounded-lg border border-border bg-card shadow-lg p-1.5">
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {['😀', '🔥', '❤️', '👏', '👍', '🎉'].map((emoji) => (
+                                  <button
+                                    key={emoji}
+                                    type="button"
+                                    className="h-7 w-7 rounded hover:bg-muted text-sm"
+                                    onClick={() => {
+                                      toggleReactionMutation.mutate({ messageId: m.id, emoji })
+                                      setReactionPickerFor(null)
+                                    }}
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                                {customEmoji.map((ce) => (
+                                  <button
+                                    key={ce.id}
+                                    type="button"
+                                    title={`:${ce.shortcode}:`}
+                                    className="h-7 w-7 rounded hover:bg-muted flex items-center justify-center"
+                                    onClick={() => {
+                                      toggleReactionMutation.mutate({ messageId: m.id, emoji: `:${ce.shortcode}:` })
+                                      setReactionPickerFor(null)
+                                    }}
+                                  >
+                                    <img src={ce.imageUrl} alt={ce.shortcode} className="h-5 w-5 object-contain" />
+                                  </button>
+                                ))}
+                              </div>
+                              <button
+                                type="button"
+                                className="mt-1 w-full text-left text-[11px] text-muted-foreground hover:text-foreground"
+                                onClick={() => {
+                                  setEmojiManagerOpen(true)
+                                  setReactionPickerFor(null)
+                                }}
+                              >
+                                ＋ Add custom emoji…
+                              </button>
                             </div>
                           )}
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
@@ -973,19 +1093,29 @@ export function ChatPage() {
                       )}
                       {!!m.reactions?.length && (
                         <div className="mt-1 flex items-center gap-1 flex-wrap">
-                          {m.reactions.map((r) => (
-                            <button
-                              key={`${m.id}-${r.emoji}`}
-                              type="button"
-                              className={cn(
-                                'text-[10px] rounded-full border px-1.5 py-0.5 transition-colors',
-                                r.reacted ? 'border-accent/60 bg-accent/10 text-accent' : 'border-border/70',
-                              )}
-                              onClick={() => toggleReactionMutation.mutate({ messageId: m.id, emoji: r.emoji })}
-                            >
-                              {r.emoji} {r.count}
-                            </button>
-                          ))}
+                          {m.reactions.map((r) => {
+                            const code = /^:([a-z0-9_]+):$/.exec(r.emoji)?.[1]
+                            const customUrl = code ? emojiByCode.get(code) : undefined
+                            return (
+                              <button
+                                key={`${m.id}-${r.emoji}`}
+                                type="button"
+                                className={cn(
+                                  'text-[10px] rounded-full border px-1.5 py-0.5 transition-colors flex items-center gap-1',
+                                  r.reacted ? 'border-accent/60 bg-accent/10 text-accent' : 'border-border/70',
+                                )}
+                                onClick={() => toggleReactionMutation.mutate({ messageId: m.id, emoji: r.emoji })}
+                                title={code ? `:${code}:` : undefined}
+                              >
+                                {customUrl ? (
+                                  <img src={customUrl} alt={code} className="h-3.5 w-3.5 object-contain" />
+                                ) : (
+                                  <span>{r.emoji}</span>
+                                )}
+                                {r.count}
+                              </button>
+                            )
+                          })}
                         </div>
                       )}
                       {replyCount > 0 && (

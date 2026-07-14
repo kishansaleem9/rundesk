@@ -98,6 +98,25 @@ export class ChatController {
     return this.chat.getChannelReceipts(channelId, user.id)
   }
 
+  @Get('chat/workspaces/:workspaceId/custom-emoji')
+  listCustomEmoji(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.listCustomEmoji(workspaceId, user.id)
+  }
+
+  @Post('chat/workspaces/:workspaceId/custom-emoji')
+  addCustomEmoji(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { shortcode: string; imageUrl: string },
+  ) {
+    return this.chat.addCustomEmoji(workspaceId, user.id, body.shortcode, body.imageUrl)
+  }
+
+  @Delete('chat/custom-emoji/:emojiId')
+  deleteCustomEmoji(@Param('emojiId') emojiId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.deleteCustomEmoji(emojiId, user.id)
+  }
+
   @Post('chat/messages/:messageId/create-task')
   createTaskFromMessage(
     @Param('messageId') messageId: string,

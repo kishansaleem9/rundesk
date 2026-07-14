@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, sql, inArray } from 'drizzle-orm'
 import {
   chatChannels,
@@ -6,6 +6,7 @@ import {
   chatMessages,
   chatMessageReactions,
   chatMessageSaves,
+  chatCustomEmoji,
   workspaceMembers,
   users,
 } from '@rundesk/db'
@@ -426,6 +427,61 @@ export class ChatService {
     await this.db
       .delete(chatChannelMembers)
       .where(and(eq(chatChannelMembers.channelId, channelId), eq(chatChannelMembers.userId, userId)))
+    return { ok: true }
+  }
+
+  // --- Custom workspace emoji (Plan §6) -----------------------------------
+  private async assertWorkspaceRole(workspaceId: string, userId: string): Promise<string> {
+    const [m] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    if (!m) throw new ForbiddenException('Workspace membership required')
+    return m.role
+  }
+
+  async listCustomEmoji(workspaceId: string, userId: string) {
+    await this.assertWorkspaceRole(workspaceId, userId)
+    return this.db
+      .select({
+        id: chatCustomEmoji.id,
+        shortcode: chatCustomEmoji.shortcode,
+        imageUrl: chatCustomEmoji.imageUrl,
+        createdById: chatCustomEmoji.createdById,
+      })
+      .from(chatCustomEmoji)
+      .where(eq(chatCustomEmoji.workspaceId, workspaceId))
+      .orderBy(asc(chatCustomEmoji.shortcode))
+  }
+
+  async addCustomEmoji(workspaceId: string, userId: string, shortcode: string, imageUrl: string) {
+    await this.assertWorkspaceRole(workspaceId, userId)
+    const code = (shortcode ?? '').trim().toLowerCase().replace(/:/g, '')
+    if (!/^[a-z0-9_]{2,32}$/.test(code)) {
+      throw new BadRequestException('Shortcode must be 2–32 lowercase letters, numbers, or underscores')
+    }
+    if (!/^https?:\/\/\S+$/.test(imageUrl ?? '')) {
+      throw new BadRequestException('imageUrl must be an http(s) URL')
+    }
+    const [row] = await this.db
+      .insert(chatCustomEmoji)
+      .values({ workspaceId, shortcode: code, imageUrl, createdById: userId })
+      .onConflictDoNothing()
+      .returning()
+    if (!row) throw new BadRequestException(`:${code}: already exists in this workspace`)
+    return row
+  }
+
+  async deleteCustomEmoji(emojiId: string, userId: string) {
+    const [emoji] = await this.db.select().from(chatCustomEmoji).where(eq(chatCustomEmoji.id, emojiId))
+    if (!emoji) throw new NotFoundException('Emoji not found')
+    const role = await this.assertWorkspaceRole(emoji.workspaceId, userId)
+    const isModerator = role === 'workspace_admin' || role === 'super_admin'
+    if (emoji.createdById !== userId && !isModerator) {
+      throw new ForbiddenException('Only the creator or a workspace admin can delete this emoji')
+    }
+    await this.db.delete(chatCustomEmoji).where(eq(chatCustomEmoji.id, emojiId))
     return { ok: true }
   }
 

@@ -56,6 +56,28 @@ export const chatMessageReactions = pgTable('chat_message_reactions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// Workspace-defined custom emoji (Plan §6): a :shortcode: mapped to an image,
+// usable in reactions. Unique per workspace by shortcode.
+export const chatCustomEmoji = pgTable(
+  'chat_custom_emoji',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    shortcode:   text('shortcode').notNull(),
+    imageUrl:    text('image_url').notNull(),
+    createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqShortcode: uniqueIndex('chat_custom_emoji_workspace_shortcode_unique').on(t.workspaceId, t.shortcode),
+  }),
+)
+
+export const chatCustomEmojiRelations = relations(chatCustomEmoji, ({ one }) => ({
+  workspace: one(workspaces, { fields: [chatCustomEmoji.workspaceId], references: [workspaces.id] }),
+  creator:   one(users, { fields: [chatCustomEmoji.createdById], references: [users.id] }),
+}))
+
 // Per-user saved/bookmarked messages (private to each user, any channel).
 export const chatMessageSaves = pgTable(
   'chat_message_saves',
