@@ -432,6 +432,18 @@ export function ChatPage() {
     },
   })
 
+  const setNotificationLevel = useMutation({
+    mutationFn: ({ channelId, level }: { channelId: string; level: 'all' | 'mentions' | 'none' }) =>
+      api(`/chat/channels/${channelId}/notifications`, { method: 'PATCH', body: { level } }),
+    onSuccess: async (_, { level }) => {
+      await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      toast.success(level === 'none' ? 'Channel muted' : level === 'mentions' ? 'Notifying on @mentions only' : 'Notifying on all messages')
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : 'Could not update notifications')
+    },
+  })
+
   const handleSend = () => {
     const body = input.trim()
     if (!body || !selectedId) return
@@ -523,6 +535,9 @@ export function ChatPage() {
             if (selectedId) leaveChannelMutation.mutate(selectedId)
           }}
           onAddPeople={selectedChannel && !selectedChannel.isDm ? () => setAddPeopleOpen(true) : undefined}
+          onSetNotificationLevel={
+            selectedId ? (level) => setNotificationLevel.mutate({ channelId: selectedId, level }) : undefined
+          }
         />
 
         {selectedChannel && !selectedChannel.isDm && (

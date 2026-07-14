@@ -7,6 +7,7 @@ export type ChatChannel = {
   joined: boolean
   unreadCount?: number
   lastReadAt?: string | null
+  notificationLevel?: 'all' | 'mentions' | 'none'
   dmPeerId?: string
   dmPeerName?: string | null
   dmPeerAvatarUrl?: string | null

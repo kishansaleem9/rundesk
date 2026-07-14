@@ -28,6 +28,7 @@ export function ChatHeader({
   onSearchChange,
   onLeaveChannel,
   onAddPeople,
+  onSetNotificationLevel,
 }: {
   channel: ChatChannel | null
   memberCount: number
@@ -40,6 +41,7 @@ export function ChatHeader({
   onSearchChange: (value: string) => void
   onLeaveChannel: () => void
   onAddPeople?: () => void
+  onSetNotificationLevel?: (level: 'all' | 'mentions' | 'none') => void
 }) {
   const title = channel?.isDm
     ? channel.dmPeerName ?? 'Direct message'
@@ -251,6 +253,25 @@ export function ChatHeader({
               {starred ? <Check className="h-4 w-4" /> : <Star className="h-4 w-4" />}
               {starred ? 'Remove from favorites' : 'Add to favorites'}
             </DropdownMenuItem>
+            {onSetNotificationLevel && (
+              <>
+                <DropdownMenuSeparator />
+                {([
+                  ['all', 'All messages'],
+                  ['mentions', 'Only @mentions'],
+                  ['none', 'Mute'],
+                ] as const).map(([level, label]) => (
+                  <DropdownMenuItem key={level} onClick={() => onSetNotificationLevel(level)}>
+                    {(channel?.notificationLevel ?? 'all') === level ? (
+                      <Check className="h-4 w-4" />
+                    ) : (
+                      <span className="h-4 w-4" />
+                    )}
+                    {label}
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
             {!channel?.isDm && (
               <>
                 <DropdownMenuSeparator />
