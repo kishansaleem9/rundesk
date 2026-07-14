@@ -14,7 +14,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { useEffect, useMemo, useState } from 'react'
-import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2 } from 'lucide-react'
+import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2, Paperclip, X as XIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -111,6 +111,7 @@ type TaskComment = {
   assignee?: UserLite | null
   resolver?: UserLite | null
   reactions?: Array<{ emoji: string; userId: string }>
+  attachments?: Array<{ id: string; fileName: string; fileSize?: number | null; mimeType?: string | null; url?: string | null }>
 }
 
 type ActivityEntry = {
@@ -2182,10 +2183,46 @@ function AttachmentsPanel({
 // Comments
 // ---------------------------------------------------------------------------
 
+function CommentAttachments({
+  files,
+}: {
+  files?: Array<{ id: string; fileName: string; fileSize?: number | null; mimeType?: string | null; url?: string | null }>
+}) {
+  if (!files || files.length === 0) return null
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {files.map((f) =>
+        f.mimeType?.startsWith('image/') && f.url ? (
+          <a key={f.id} href={f.url} target="_blank" rel="noreferrer" title={f.fileName}>
+            <img
+              src={f.url}
+              alt={f.fileName}
+              loading="lazy"
+              className="h-16 w-16 rounded-md object-cover border border-border"
+            />
+          </a>
+        ) : (
+          <a
+            key={f.id}
+            href={f.url ?? '#'}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs hover:bg-muted/60"
+          >
+            <Paperclip className="h-3 w-3 text-muted-foreground" />
+            <span className="max-w-[160px] truncate">{f.fileName}</span>
+          </a>
+        ),
+      )}
+    </div>
+  )
+}
+
 function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: string }) {
   const qc = useQueryClient()
   const currentUser = useAuthStore((s) => s.user)
   const [text, setText] = useState('')
+  const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
   const [editingBody, setEditingBody] = useState('')
@@ -2244,21 +2281,50 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
   })
 
   const create = useMutation({
-    mutationFn: () =>
-      api(`/tasks/${taskId}/comments`, {
+    mutationFn: async () => {
+      // Upload any attached files first, then post the comment referencing them.
+      const attachmentIds: string[] = []
+      for (const file of commentFiles) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          throw new Error(`"${file.name}" exceeds the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB limit`)
+        }
+        const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
+          method: 'POST',
+          body: { fileName: file.name, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
+        })
+        const putRes = await fetch(presign.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file,
+        })
+        if (!putRes.ok) throw new Error(`Upload failed for "${file.name}" (${putRes.status})`)
+        const rec = await api<{ id: string }>(`/tasks/${taskId}/attachments`, {
+          method: 'POST',
+          body: { fileName: file.name, storageKey: presign.storageKey, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
+        })
+        attachmentIds.push(rec.id)
+      }
+      return api(`/tasks/${taskId}/comments`, {
         method: 'POST',
         body: JSON.stringify({
           body: text,
           parentCommentId: replyTo ?? undefined,
           mentions: selectedMentionUserIds.map((userId) => ({ userId, offset: 0, length: 0 })),
+          attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
         }),
-      }),
+      })
+    },
     onSuccess: async () => {
       setText('')
+      setCommentFiles([])
       setReplyTo(null)
       setSelectedMentionUserIds([])
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Could not post comment')
     },
   })
   const update = useMutation({
@@ -2373,6 +2439,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                   </span>
                 </div>
                 <MentionText text={c.body} namesById={namesById} className="mt-1 text-sm" />
+                <CommentAttachments files={c.attachments} />
                 <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                   {c.assignee?.displayName && (
                     <Badge variant="outline" className="text-[10px]">Assigned: {c.assignee.displayName}</Badge>
@@ -2482,6 +2549,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                           </span>
                         </div>
                         <MentionText text={reply.body} namesById={namesById} className="mt-1 text-sm" />
+                        <CommentAttachments files={reply.attachments} />
                         <div className="mt-2 flex gap-2">
                           <button
                             type="button"
@@ -2689,13 +2757,48 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
             )}
           </div>
         )}
-        <div className="mt-2 flex justify-end">
+        {commentFiles.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {commentFiles.map((file, i) => (
+              <span
+                key={`${file.name}-${i}`}
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs"
+              >
+                <Paperclip className="h-3 w-3 text-muted-foreground" />
+                <span className="max-w-[140px] truncate">{file.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.name}`}
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setCommentFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  <XIcon className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+            <Paperclip className="h-3.5 w-3.5" />
+            Attach
+            <input
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const picked = Array.from(e.target.files ?? [])
+                if (picked.length) setCommentFiles((prev) => [...prev, ...picked])
+                e.target.value = ''
+              }}
+            />
+          </label>
           <Button
             size="sm"
             onClick={() => create.mutate()}
             disabled={!text.trim() || create.isPending}
           >
-            Comment
+            {create.isPending ? 'Posting…' : 'Comment'}
           </Button>
         </div>
       </div>

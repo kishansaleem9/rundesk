@@ -1548,10 +1548,30 @@ export class TasksService {
       orderBy: asc(taskComments.createdAt),
       with: { author: true, reactions: true, assignee: true, resolver: true },
     })
-    return rows
+    // Hydrate per-comment attachments (Plan §4). Kept as a separate query to
+    // avoid a schema import cycle between comments and attachments.
+    const commentIds = rows.map((r: { id: string }) => r.id)
+    if (commentIds.length === 0) return rows
+    const files = await this.db
+      .select()
+      .from(taskAttachments)
+      .where(and(eq(taskAttachments.taskId, taskId), inArray(taskAttachments.commentId, commentIds)))
+    const byComment = new Map<string, Array<Record<string, unknown>>>()
+    for (const f of files) {
+      const list = byComment.get(f.commentId as string) ?? []
+      list.push({
+        id: f.id,
+        fileName: f.fileName,
+        fileSize: f.sizeBytes,
+        mimeType: f.contentType,
+        url: this.r2.configured ? await this.r2.getObjectUrl(f.storageKey) : f.storageKey,
+      })
+      byComment.set(f.commentId as string, list)
+    }
+    return rows.map((r: { id: string }) => ({ ...r, attachments: byComment.get(r.id) ?? [] }))
   }
 
-  async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>) {
+  async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {
     if (!body.trim()) throw new BadRequestException('Comment body cannot be empty')
     const extracted = this.extractMentionIds(body).map((userId) => ({ userId, offset: 0, length: 0 }))
     const finalMentions = mentions && mentions.length > 0 ? mentions : extracted
@@ -1559,6 +1579,14 @@ export class TasksService {
       .insert(taskComments)
       .values({ taskId, authorId, body, parentCommentId, mentions: finalMentions.length > 0 ? finalMentions : null })
       .returning()
+    // Link any pre-uploaded attachments to this comment. Only rows belonging to
+    // the same task are linked, so a caller can't attach files from elsewhere.
+    if (attachmentIds && attachmentIds.length > 0) {
+      await this.db
+        .update(taskAttachments)
+        .set({ commentId: comment.id })
+        .where(and(eq(taskAttachments.taskId, taskId), inArray(taskAttachments.id, attachmentIds)))
+    }
     // Auto-subscribe the author as a watcher
     await this.db.insert(taskWatchers).values({ taskId, userId: authorId }).onConflictDoNothing()
 

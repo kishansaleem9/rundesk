@@ -25,7 +25,7 @@ export class TaskCommentsController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: CreateCommentDto,
   ) {
-    return this.tasks.createComment(taskId, user.id, body.body, body.parentCommentId, body.mentions)
+    return this.tasks.createComment(taskId, user.id, body.body, body.parentCommentId, body.mentions, body.attachmentIds)
   }
 
   @Patch(':commentId')

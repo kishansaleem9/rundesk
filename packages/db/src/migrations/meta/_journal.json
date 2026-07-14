@@ -302,6 +302,13 @@
       "when": 1900000039000,
       "tag": "0042_approval_and_billable",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1900000040000,
+      "tag": "0043_comment_attachments",
+      "breakpoints": true
     }
   ]
 }
