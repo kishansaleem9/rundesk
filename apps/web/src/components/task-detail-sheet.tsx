@@ -13,7 +13,7 @@ import {
   cn,
   toast,
 } from '@rundesk/ui'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2, Paperclip, X as XIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -22,6 +22,7 @@ import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker } from './cover-image-picker'
 import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
+import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -584,11 +585,13 @@ function MentionTextarea({
   value,
   onChange,
   members,
+  textareaRef,
   ...textareaProps
 }: {
   value: string
   onChange: (next: string) => void
   members: WorkspaceMemberLite[]
+  textareaRef?: React.Ref<HTMLTextAreaElement>
 } & Omit<React.ComponentProps<typeof Textarea>, 'value' | 'onChange'>) {
   const [mentionIndex, setMentionIndex] = useState(0)
   const mentionQuery = value.slice(value.lastIndexOf('@') + 1).toLowerCase()
@@ -609,6 +612,7 @@ function MentionTextarea({
     <div className="relative">
       <Textarea
         {...textareaProps}
+        ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
@@ -689,6 +693,57 @@ function OverviewPanel({
   const qc = useQueryClient()
   const [editingDescription, setEditingDescription] = useState(false)
   const [descriptionDraft, setDescriptionDraft] = useState('')
+  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+
+  // Wrap the current selection (or insert at the caret) with markdown syntax.
+  const applyDescriptionFormat = (kind: 'bold' | 'italic' | 'code' | 'link' | 'h2' | 'ul' | 'ol' | 'quote') => {
+    const el = descriptionRef.current
+    const text = descriptionDraft
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? text.length
+    const selected = text.slice(start, end)
+
+    const wrap = (marker: string, placeholder: string) => {
+      const body = selected || placeholder
+      const next = text.slice(0, start) + marker + body + marker + text.slice(end)
+      setDescriptionDraft(next)
+      requestAnimationFrame(() => {
+        el?.focus()
+        const s = start + marker.length
+        el?.setSelectionRange(s, s + body.length)
+      })
+    }
+    const linePrefix = (prefix: string) => {
+      const lineStart = text.lastIndexOf('\n', start - 1) + 1
+      const next = text.slice(0, lineStart) + prefix + text.slice(lineStart)
+      setDescriptionDraft(next)
+      requestAnimationFrame(() => {
+        el?.focus()
+        const c = end + prefix.length
+        el?.setSelectionRange(c, c)
+      })
+    }
+
+    if (kind === 'bold') return wrap('**', 'bold text')
+    if (kind === 'italic') return wrap('*', 'italic text')
+    if (kind === 'code') return wrap('`', 'code')
+    if (kind === 'link') {
+      const label = selected || 'link text'
+      const next = text.slice(0, start) + `[${label}](https://)` + text.slice(end)
+      setDescriptionDraft(next)
+      requestAnimationFrame(() => {
+        el?.focus()
+        const urlPos = start + label.length + 3
+        el?.setSelectionRange(urlPos, urlPos + 8) // select the https:// placeholder
+      })
+      return
+    }
+    if (kind === 'h2') return linePrefix('## ')
+    if (kind === 'ul') return linePrefix('- ')
+    if (kind === 'ol') return linePrefix('1. ')
+    if (kind === 'quote') return linePrefix('> ')
+  }
+
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
@@ -887,32 +942,78 @@ function OverviewPanel({
           </div>
         </div>
         {editingDescription ? (
-          <MentionTextarea
-            autoFocus
-            rows={4}
-            value={descriptionDraft}
-            onChange={setDescriptionDraft}
-            members={membersQuery.data ?? []}
-            onBlur={commitDescription}
-            disabled={updateDescription.isPending}
-            placeholder="Add a description… use @ to mention"
-            className="text-sm leading-relaxed"
-          />
-        ) : (
-          <button
-            type="button"
+          <div>
+            <div className="mb-1.5 flex flex-wrap items-center gap-0.5">
+              {([
+                ['bold', 'B', 'Bold', 'font-bold'],
+                ['italic', 'I', 'Italic', 'italic'],
+                ['code', '<>', 'Code', 'font-mono text-[11px]'],
+                ['link', '🔗', 'Link', ''],
+                ['h2', 'H', 'Heading', 'font-semibold'],
+                ['ul', '•', 'Bulleted list', ''],
+                ['ol', '1.', 'Numbered list', 'text-[11px]'],
+                ['quote', '❝', 'Quote', ''],
+              ] as const).map(([kind, glyph, title, cls]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  title={title}
+                  // preventDefault on mousedown keeps the textarea selection intact
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyDescriptionFormat(kind)}
+                  className={cn(
+                    'h-6 min-w-6 px-1.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent/10',
+                    cls,
+                  )}
+                >
+                  {glyph}
+                </button>
+              ))}
+            </div>
+            <MentionTextarea
+              autoFocus
+              rows={5}
+              value={descriptionDraft}
+              onChange={setDescriptionDraft}
+              members={membersQuery.data ?? []}
+              textareaRef={descriptionRef}
+              onBlur={commitDescription}
+              disabled={updateDescription.isPending}
+              placeholder="Add a description… **markdown** supported, @ to mention"
+              className="text-sm leading-relaxed font-mono"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">Markdown supported · click away to save</p>
+          </div>
+        ) : detail.description?.trim() ? (
+          <div
+            role="button"
+            tabIndex={0}
             onClick={() => {
               setDescriptionDraft(detail.description ?? '')
               setEditingDescription(true)
             }}
-            className="w-full text-left text-sm leading-relaxed whitespace-pre-wrap rounded-md px-2 py-1.5 -mx-2 hover:bg-muted/40 transition-colors"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setDescriptionDraft(detail.description ?? '')
+                setEditingDescription(true)
+              }
+            }}
+            className="w-full cursor-text rounded-md px-2 py-1.5 -mx-2 text-sm hover:bg-muted/40 transition-colors"
             title="Click to edit description"
           >
-            {detail.description?.trim() ? (
-              detail.description
-            ) : (
-              <span className="text-muted-foreground italic">Add a description…</span>
-            )}
+            <Markdown source={detail.description} />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDescriptionDraft('')
+              setEditingDescription(true)
+            }}
+            className="w-full text-left text-sm leading-relaxed rounded-md px-2 py-1.5 -mx-2 hover:bg-muted/40 transition-colors"
+            title="Click to edit description"
+          >
+            <span className="text-muted-foreground italic">Add a description…</span>
           </button>
         )}
       </section>
