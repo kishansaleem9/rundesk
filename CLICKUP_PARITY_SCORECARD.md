@@ -118,3 +118,55 @@ Net: feature-complete happy-path is genuinely real (the `~99.9%` above reflects 
 that work), and input handling is now hardened end-to-end — malformed requests return clean
 4xx everywhere, with DTO validation on the core/public surfaces and a global DB-error safety
 net behind the rest.
+
+## Plan-alignment upgrade (2026-07)
+
+Work to migrate the platform onto the detailed plan
+(`Rundesk_Detailed_features_enlisting.docx`) beyond ClickUp parity. Every backend
+change below was verified against a live Postgres (idempotent migrations applied
+twice; behaviour exercised with seeded data), and both apps build + all 129 API
+tests pass. Migrations are contiguous `0000..0039`.
+
+### Hierarchy & organization (Plan §2)
+- **Folders (Level 4)** — `folders` table (migration `0034`); projects carry a
+  `folder_id`. Sidebar groups projects under collapsible folders with create-folder
+  and move-project actions.
+- **Scoped statuses (Plan §2.3/2.4)** — space- and project-level status templates
+  (`space_statuses`, `project_statuses`, migration `0036`) backfilled losslessly from
+  existing list statuses behind a `RAISE EXCEPTION` guard. A list's `status_scope`
+  routes reads + task-status validation to the chosen scope; managed via a "Statuses"
+  editor on space/project pages and a per-list scope switcher.
+
+### Membership, visibility & permissions (Plan §2.3/2.4/3)
+- **Container membership** — `space_members` / `project_members` (migration `0035`)
+  with a Members panel (roles admin/edit/comment/view) and public/private visibility.
+- **Private-container enforcement** — `ResourceMemberGuard` blocks opening a private
+  space/project you're not a member of (managers/admins bypass); list endpoints hide
+  private containers from non-members.
+- **Manager scope (Plan §3.1/3.3)** — `integrations.manage`, `webhook.manage` and
+  `automation.manage` demoted from the manager default to workspace_admin (the plan
+  scopes managers to projects/teams/time, not workspace infrastructure). Existing
+  managers grandfathered via a locked "Legacy manager access" custom role
+  (migration `0037`).
+
+### Tasks (Plan §4.8)
+- **Recurring tasks** — persisted recurrence (`tasks.recurrence`, migration `0038`,
+  daily/weekly/monthly/cadence). Completing a recurring task auto-creates the next
+  occurrence (dates shifted) and hands the recurrence forward. "Repeat" control in the
+  task detail sheet.
+
+### Chat (Plan §6)
+- **Unread tracking (§6.9)** — per-channel unread counts + read state (activates
+  `chat_channel_members.last_read_at`); sidebar badges + auto mark-read on open.
+- **Channel membership (§6.1)** — add/remove members, initial members on create,
+  invite-people dialog (enables group conversations).
+- **Per-channel notifications + mute (§6.2/6.9)** — `notification_level`
+  all/mentions/none (migration `0039`) respected on message dispatch; header control.
+
+### Time, Reports, Notifications, Search (Plan §8/9/10/11)
+- **Time-log edit/delete (§8.2)** — inline editable entries, owner-gated.
+- **Report export (§9.6)** — CSV (existing) + new Print/PDF on the reports page.
+- **Notification digest (§10.3)** — daily/weekly unread-notification email with an
+  opt-in preference + hourly scheduler + settings UI.
+- **Advanced search filters (§11.2)** — type/status/priority/assignee/label/due-date
+  range, with command-palette chips.
