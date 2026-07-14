@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -12,34 +12,83 @@ import {
   Badge,
   cn,
 } from '@rundesk/ui'
-import { Repeat, Calendar, Clock, Check } from 'lucide-react'
+import { Repeat, Calendar, Check } from 'lucide-react'
 
-type Cadence = 'daily' | 'weekly' | 'monthly' | 'custom'
+type Mode = 'daily' | 'weekly' | 'monthly'
 
-const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+export type RecurrenceRule = {
+  mode: Mode
+  interval?: number
+  weekdays?: number[]
+  dayOfMonth?: number
+  skipWeekends?: boolean
+}
+
+// Weekday buttons in Mon→Sun display order, each carrying its JS getDay() value
+// (0=Sun … 6=Sat) so what we store matches the backend's convention exactly.
+const WEEKDAYS: Array<{ label: string; day: number }> = [
+  { label: 'M', day: 1 },
+  { label: 'T', day: 2 },
+  { label: 'W', day: 3 },
+  { label: 'T', day: 4 },
+  { label: 'F', day: 5 },
+  { label: 'S', day: 6 },
+  { label: 'S', day: 0 },
+]
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export function RecurringTaskDialog({
   open,
   onOpenChange,
+  initialRule,
+  onSubmit,
+  saving,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
+  initialRule?: RecurrenceRule | null
+  onSubmit: (rule: RecurrenceRule) => void
+  saving?: boolean
 }) {
-  const [cadence, setCadence] = useState<Cadence>('weekly')
-  const [days, setDays] = useState<Set<number>>(new Set([0, 2, 4]))
+  const [mode, setMode] = useState<Mode>('weekly')
+  const [days, setDays] = useState<Set<number>>(new Set([1, 3, 5]))
   const [interval, setInterval] = useState(1)
-  const [time, setTime] = useState('09:00')
-  const [endsOn, setEndsOn] = useState<'never' | 'on' | 'after'>('never')
+  const [skipWeekends, setSkipWeekends] = useState(false)
+
+  // Hydrate from the task's existing rule each time the dialog opens.
+  useEffect(() => {
+    if (!open) return
+    if (initialRule) {
+      setMode(initialRule.mode)
+      setInterval(Math.max(1, initialRule.interval ?? 1))
+      setSkipWeekends(!!initialRule.skipWeekends)
+      if (initialRule.weekdays?.length) setDays(new Set(initialRule.weekdays))
+    } else {
+      setMode('weekly')
+      setInterval(1)
+      setSkipWeekends(false)
+      setDays(new Set([1, 3, 5]))
+    }
+  }, [open, initialRule])
 
   function summary() {
-    if (cadence === 'daily') return `Every ${interval > 1 ? `${interval} days` : 'day'} at ${time}`
-    if (cadence === 'weekly') {
-      const picked = [...days].sort().map((i) => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]).join(', ')
-      return `Every ${interval > 1 ? `${interval} weeks` : 'week'} on ${picked || '—'}`
+    const every = interval > 1 ? `${interval} ` : ''
+    if (mode === 'daily') return `Every ${every}day${interval > 1 ? 's' : ''}${skipWeekends ? ', skipping weekends' : ''}`
+    if (mode === 'weekly') {
+      const picked = [...days].sort().map((d) => DAY_NAMES[d]).join(', ')
+      return `Every ${every}week${interval > 1 ? 's' : ''} on ${picked || '—'}`
     }
-    if (cadence === 'monthly') return `Every ${interval > 1 ? `${interval} months` : 'month'}`
-    return 'Custom schedule'
+    return `Every ${every}month${interval > 1 ? 's' : ''}`
   }
+
+  const submit = () => {
+    const rule: RecurrenceRule = { mode, interval }
+    if (mode === 'weekly') rule.weekdays = [...days]
+    if (mode === 'daily') rule.skipWeekends = skipWeekends
+    onSubmit(rule)
+  }
+
+  const canSubmit = mode !== 'weekly' || days.size > 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -49,7 +98,7 @@ export function RecurringTaskDialog({
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-gradient text-white shadow-sm">
               <Repeat className="h-3.5 w-3.5" />
             </span>
-            Make recurring
+            Custom recurrence
           </DialogTitle>
           <DialogDescription>
             We&apos;ll auto-create the next instance when this task is completed.
@@ -57,102 +106,76 @@ export function RecurringTaskDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-4 gap-2">
-            {(['daily', 'weekly', 'monthly', 'custom'] as const).map((c) => (
+          <div className="grid grid-cols-3 gap-2">
+            {(['daily', 'weekly', 'monthly'] as const).map((m) => (
               <button
-                key={c}
-                onClick={() => setCadence(c)}
+                key={m}
+                onClick={() => setMode(m)}
                 className={cn(
                   'rounded-lg border px-2 py-2.5 text-xs font-medium capitalize transition-all',
-                  cadence === c
+                  mode === m
                     ? 'border-accent bg-accent/15 text-foreground'
                     : 'border-border/60 text-muted-foreground hover:bg-card/60',
                 )}
               >
-                {c}
+                {m}
               </button>
             ))}
           </div>
 
           <div className="rounded-lg border border-border/40 bg-card/30 p-4 space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Repeat every</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={99}
-                    value={interval}
-                    onChange={(e) => setInterval(Math.max(1, Number(e.target.value)))}
-                    className="w-20"
-                  />
-                  <span className="text-sm capitalize text-muted-foreground">
-                    {cadence === 'daily' ? 'day(s)' : cadence === 'weekly' ? 'week(s)' : 'month(s)'}
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Time</Label>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Repeat every</Label>
+              <div className="flex items-center gap-2">
                 <Input
-                  type="time"
-                  leadingIcon={<Clock className="h-4 w-4" />}
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
+                  type="number"
+                  min={1}
+                  max={52}
+                  value={interval}
+                  onChange={(e) => setInterval(Math.min(52, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-20"
                 />
+                <span className="text-sm capitalize text-muted-foreground">
+                  {mode === 'daily' ? 'day(s)' : mode === 'weekly' ? 'week(s)' : 'month(s)'}
+                </span>
               </div>
             </div>
 
-            {cadence === 'weekly' && (
+            {mode === 'weekly' && (
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">On these days</Label>
                 <div className="grid grid-cols-7 gap-1.5">
-                  {DAYS.map((d, i) => (
+                  {WEEKDAYS.map(({ label, day }, i) => (
                     <button
                       key={i}
-                      onClick={() => {
+                      onClick={() =>
                         setDays((s) => {
                           const n = new Set(s)
-                          if (n.has(i)) n.delete(i)
-                          else n.add(i)
+                          if (n.has(day)) n.delete(day)
+                          else n.add(day)
                           return n
                         })
-                      }}
+                      }
                       className={cn(
                         'rounded-md border h-9 text-xs font-medium transition-all',
-                        days.has(i)
+                        days.has(day)
                           ? 'border-transparent bg-brand-gradient text-white'
                           : 'border-border/60 text-muted-foreground hover:bg-card/60',
                       )}
                     >
-                      {d}
+                      {label}
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Ends</Label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {(['never', 'on', 'after'] as const).map((e) => (
-                  <button
-                    key={e}
-                    onClick={() => setEndsOn(e)}
-                    className={cn(
-                      'rounded-md border px-2 py-1.5 text-xs font-medium capitalize transition-all',
-                      endsOn === e
-                        ? 'border-accent bg-accent/10'
-                        : 'border-border/60 text-muted-foreground',
-                    )}
-                  >
-                    {e === 'never' ? 'Never' : e === 'on' ? 'On a date' : 'After N times'}
-                  </button>
-                ))}
-              </div>
-              {endsOn === 'on' && <Input type="date" className="mt-2" />}
-              {endsOn === 'after' && <Input type="number" placeholder="10" className="mt-2 w-32" />}
-            </div>
+            {mode === 'daily' && (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={skipWeekends} onChange={(e) => setSkipWeekends(e.target.checked)} />
+                Skip weekends
+              </label>
+            )}
           </div>
 
           <div className="flex items-center gap-2 rounded-md border border-accent/30 bg-accent/5 px-3 py-2">
@@ -164,8 +187,8 @@ export function RecurringTaskDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="gradient" onClick={() => onOpenChange(false)}>
-            <Check className="h-3.5 w-3.5" /> Set recurrence
+          <Button variant="gradient" onClick={submit} disabled={!canSubmit || saving}>
+            <Check className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Set recurrence'}
           </Button>
         </DialogFooter>
       </DialogContent>

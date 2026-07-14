@@ -21,6 +21,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker } from './cover-image-picker'
 import { MentionText } from './mention-text'
+import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { formatMentionsPlain } from '../lib/mentions'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -98,7 +99,7 @@ type TaskDetail = {
   watchers?: Watcher[]
   dependencies?: Dependency[]
   attachments?: Attachment[]
-  recurrence?: { cadenceDays?: number | null; rule?: { mode: 'daily' | 'weekly' | 'monthly' } | null } | null
+  recurrence?: { cadenceDays?: number | null; rule?: RecurrenceRule | null } | null
 }
 
 type TaskComment = {
@@ -720,10 +721,12 @@ function OverviewPanel({
     },
   })
 
+  const [recurrenceDialogOpen, setRecurrenceDialogOpen] = useState(false)
   const setRecurrence = useMutation({
     mutationFn: (body: Record<string, unknown> | null) =>
       api(`/tasks/${taskId}/recurrence`, { method: 'PUT', body: body ?? {} }),
     onSuccess: async () => {
+      setRecurrenceDialogOpen(false)
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
     onError: (err) => {
@@ -733,7 +736,13 @@ function OverviewPanel({
   const recurrenceValue = (() => {
     const r = detail.recurrence
     if (!r) return 'off'
-    if (r.rule?.mode === 'monthly') return 'monthly'
+    // A bare monthly rule (no interval/dayOfMonth) is the "monthly" preset;
+    // any richer rule is a custom schedule set via the dialog.
+    if (r.rule) {
+      const isPresetMonthly =
+        r.rule.mode === 'monthly' && (r.rule.interval ?? 1) === 1 && r.rule.dayOfMonth == null
+      return isPresetMonthly ? 'monthly' : 'custom'
+    }
     if (r.cadenceDays === 1) return 'daily'
     if (r.cadenceDays === 7) return 'weekly'
     if (r.cadenceDays === 14) return 'biweekly'
@@ -745,6 +754,7 @@ function OverviewPanel({
     if (v === 'weekly') return setRecurrence.mutate({ cadenceDays: 7 })
     if (v === 'biweekly') return setRecurrence.mutate({ cadenceDays: 14 })
     if (v === 'monthly') return setRecurrence.mutate({ rule: { mode: 'monthly' } })
+    if (v === 'custom') return setRecurrenceDialogOpen(true)
   }
 
   const statusesQuery = useQuery({
@@ -998,8 +1008,24 @@ function OverviewPanel({
             <option value="weekly">Weekly</option>
             <option value="biweekly">Every 2 weeks</option>
             <option value="monthly">Monthly</option>
-            {recurrenceValue === 'custom' && <option value="custom">Custom</option>}
+            <option value="custom">Custom…</option>
           </select>
+          {recurrenceValue === 'custom' && (
+            <button
+              type="button"
+              onClick={() => setRecurrenceDialogOpen(true)}
+              className="mt-1 text-xs text-accent hover:underline"
+            >
+              Edit custom schedule
+            </button>
+          )}
+          <RecurringTaskDialog
+            open={recurrenceDialogOpen}
+            onOpenChange={setRecurrenceDialogOpen}
+            initialRule={detail.recurrence?.rule ?? null}
+            saving={setRecurrence.isPending}
+            onSubmit={(rule) => setRecurrence.mutate({ rule })}
+          />
         </Field>
         <Field label="Estimate (hrs)">
           <input
