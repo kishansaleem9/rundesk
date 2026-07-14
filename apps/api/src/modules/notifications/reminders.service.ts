@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
-import { and, eq, gte, isNull, lte, sql } from 'drizzle-orm'
+import { and, eq, gte, lte, sql } from 'drizzle-orm'
 import { tasks, taskAssignees, users, lists, projects, spaces, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -53,7 +53,7 @@ export class RemindersService {
         .innerJoin(workspaces, eq(workspaces.id, spaces.workspaceId))
         .where(
           and(
-            isNull(tasks.isArchived),
+            eq(tasks.isArchived, false),
             gte(tasks.dueDate, today),
             lte(tasks.dueDate, in2days),
             // Exclude done and cancelled
@@ -105,7 +105,7 @@ export class RemindersService {
         .innerJoin(workspaces, eq(workspaces.id, spaces.workspaceId))
         .where(
           and(
-            isNull(tasks.isArchived),
+            eq(tasks.isArchived, false),
             lte(tasks.dueDate, today),
             sql`${tasks.status} NOT IN ('done', 'cancelled')`,
           ),
