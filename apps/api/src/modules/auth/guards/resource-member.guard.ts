@@ -10,6 +10,12 @@ import { and, eq } from 'drizzle-orm'
 import { spaces, projects, lists, tasks, goals, sprints, taskViews, labels, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
+import {
+  checkContainerAccess,
+  type ContainerAccessContext,
+} from '../../../common/permissions/container-access.guard-helper'
+
+type ResolvedResource = { workspaceId: string; container?: ContainerAccessContext }
 
 /**
  * Enforces workspace membership for resources nested under a space / project /
@@ -31,8 +37,9 @@ export class ResourceMemberGuard implements CanActivate {
     const user = req.user
     if (!user?.id) throw new ForbiddenException('Not authenticated')
 
-    const workspaceId = await this.resolveWorkspaceId(req.params ?? {}, req.body ?? {})
-    if (!workspaceId) throw new NotFoundException('Resource not found')
+    const resolved = await this.resolveResource(req.params ?? {}, req.body ?? {})
+    if (!resolved) throw new NotFoundException('Resource not found')
+    const { workspaceId, container } = resolved
 
     if (user.role === 'super_admin') return true
 
@@ -43,14 +50,24 @@ export class ResourceMemberGuard implements CanActivate {
       .limit(1)
     if (!member) throw new ForbiddenException('You are not a member of this workspace')
 
+    // Private-container enforcement: a workspace member still needs container
+    // membership to reach a private space/project. Public containers pass.
+    if (container) {
+      const ok = await checkContainerAccess(this.db, container, {
+        userId: user.id,
+        workspaceRole: member.role as string,
+      })
+      if (!ok) throw new ForbiddenException('This space or project is private')
+    }
+
     req.workspaceMember = { ...member, workspaceId, userId: user.id }
     return true
   }
 
-  private async resolveWorkspaceId(
+  private async resolveResource(
     p: Record<string, string>,
     b: Record<string, unknown>,
-  ): Promise<string | null> {
+  ): Promise<ResolvedResource | null> {
     // Path params identify the *resource being acted on* and take priority over
     // body fields (which can be attacker-supplied) — e.g. POST /sprints/:id/tasks
     // must be authorized against the sprint's workspace, not the body's taskId.
@@ -82,64 +99,81 @@ export class ResourceMemberGuard implements CanActivate {
   private async resolveByKind(
     kind: 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view' | 'label',
     id: string,
-  ): Promise<string | null> {
-    if (kind === 'ws') return id
+  ): Promise<ResolvedResource | null> {
+    if (kind === 'ws') return { workspaceId: id }
     if (kind === 'label') {
       const [r] = await this.db.select({ w: labels.workspaceId }).from(labels).where(eq(labels.id, id)).limit(1)
-      return r?.w ?? null
+      return r ? { workspaceId: r.w } : null
     }
+    if (kind === 'goal') {
+      const [r] = await this.db.select({ w: goals.workspaceId }).from(goals).where(eq(goals.id, id)).limit(1)
+      return r ? { workspaceId: r.w } : null
+    }
+    if (kind === 'sprint') {
+      const [r] = await this.db.select({ w: sprints.workspaceId }).from(sprints).where(eq(sprints.id, id)).limit(1)
+      return r ? { workspaceId: r.w } : null
+    }
+
+    // Container-nested kinds: resolve the space + (optional) project visibility
+    // chain in the same query so private access can be enforced.
     if (kind === 'space') {
-      const [r] = await this.db.select({ w: spaces.workspaceId }).from(spaces).where(eq(spaces.id, id)).limit(1)
-      return r?.w ?? null
+      const [r] = await this.db
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility })
+        .from(spaces)
+        .where(eq(spaces.id, id))
+        .limit(1)
+      return r
+        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv } }
+        : null
     }
     if (kind === 'project') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility })
         .from(projects)
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
         .where(eq(projects.id, id))
         .limit(1)
-      return r?.w ?? null
+      return r
+        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        : null
     }
     if (kind === 'list') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility })
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
         .where(eq(lists.id, id))
         .limit(1)
-      return r?.w ?? null
+      return r
+        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        : null
     }
     if (kind === 'task') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility })
         .from(tasks)
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
         .where(eq(tasks.id, id))
         .limit(1)
-      return r?.w ?? null
-    }
-    if (kind === 'goal') {
-      const [r] = await this.db.select({ w: goals.workspaceId }).from(goals).where(eq(goals.id, id)).limit(1)
-      return r?.w ?? null
-    }
-    if (kind === 'sprint') {
-      const [r] = await this.db.select({ w: sprints.workspaceId }).from(sprints).where(eq(sprints.id, id)).limit(1)
-      return r?.w ?? null
+      return r
+        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        : null
     }
     if (kind === 'view') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility })
         .from(taskViews)
         .innerJoin(lists, eq(lists.id, taskViews.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
         .where(eq(taskViews.id, id))
         .limit(1)
-      return r?.w ?? null
+      return r
+        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        : null
     }
     return null
   }
