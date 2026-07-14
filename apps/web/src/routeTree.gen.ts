@@ -11,6 +11,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as SsoCompleteRouteImport } from './routes/sso-complete'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as RegisterRouteImport } from './routes/register'
@@ -74,6 +75,11 @@ const AppWorkspaceIdFormsIndexLazyRouteImport = createFileRoute(
   '/app/$workspaceId/forms/',
 )()
 
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SsoCompleteRoute = SsoCompleteRouteImport.update({
   id: '/sso-complete',
   path: '/sso-complete',
@@ -441,6 +447,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/help': typeof AppHelpRoute
@@ -495,6 +502,7 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/help': typeof AppHelpRoute
@@ -547,6 +555,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
   '/app/help': typeof AppHelpRoute
@@ -604,6 +613,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/sign-up'
     | '/sso-complete'
+    | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/help'
@@ -658,6 +668,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/sign-up'
     | '/sso-complete'
+    | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/help'
@@ -709,6 +720,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/sign-up'
     | '/sso-complete'
+    | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
     | '/app/help'
@@ -765,12 +777,20 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   SignUpRoute: typeof SignUpRoute
   SsoCompleteRoute: typeof SsoCompleteRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
   DSlugRoute: typeof DSlugRoute
   SubmitSlugRoute: typeof SubmitSlugRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sso-complete': {
       id: '/sso-complete'
       path: '/sso-complete'
@@ -1332,6 +1352,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   SignUpRoute: SignUpRoute,
   SsoCompleteRoute: SsoCompleteRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
   DSlugRoute: DSlugRoute,
   SubmitSlugRoute: SubmitSlugRoute,
 }
