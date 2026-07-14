@@ -14,7 +14,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { useEffect, useMemo, useState } from 'react'
-import { ImageIcon, Maximize2, Minimize2, Copy } from 'lucide-react'
+import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -759,6 +759,46 @@ function OverviewPanel({
     updateDescription.mutate(next)
   }
 
+  // ── AI actions (Plan §7.3 / §7.5 / §7.9) ────────────────────────────────────
+  const aiSuggestPriority = useMutation({
+    mutationFn: () =>
+      api<{ priority: string; reasoning: string }>(`/ai/task/priority`, {
+        method: 'POST',
+        body: { title: detail.title, description: detail.description ?? undefined, workspaceId },
+      }),
+    onSuccess: (r) => {
+      patchTask.mutate({ priority: r.priority })
+      toast.success(`AI set priority to ${r.priority}`, { description: r.reasoning })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+  })
+  const aiImproveDescription = useMutation({
+    mutationFn: (mode: 'improve' | 'format') =>
+      api<{ improved: string }>(`/ai/writing/improve`, {
+        method: 'POST',
+        body: { text: detail.description ?? detail.title, mode, workspaceId },
+      }),
+    onSuccess: (r) => {
+      setDescriptionDraft(r.improved)
+      setEditingDescription(true)
+      toast.success('AI draft ready — review and save')
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+  })
+  const aiSummarize = useMutation({
+    mutationFn: () =>
+      api<{ summary: string }>(`/ai/summarize`, {
+        method: 'POST',
+        body: {
+          content: `${detail.title}\n\n${detail.description ?? ''}`,
+          type: 'task',
+          workspaceId,
+        },
+      }),
+    onSuccess: (r) => toast.success('Task summary', { description: r.summary, duration: 10000 }),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+  })
+
   // Reset transient edit UI when switching to a different task.
   useEffect(() => {
     setEditingDescription(false)
@@ -794,7 +834,29 @@ function OverviewPanel({
   return (
     <div className="space-y-4">
       <section>
-        <h4 className="text-xs uppercase tracking-wide text-muted-foreground mb-1.5">Description</h4>
+        <div className="flex items-center justify-between mb-1.5">
+          <h4 className="text-xs uppercase tracking-wide text-muted-foreground">Description</h4>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={aiImproveDescription.isPending}
+              onClick={() => aiImproveDescription.mutate('improve')}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
+              title="Improve description with AI"
+            >
+              <Wand2 className="h-3 w-3" /> Improve
+            </button>
+            <button
+              type="button"
+              disabled={aiSummarize.isPending}
+              onClick={() => aiSummarize.mutate()}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
+              title="Summarize this task with AI"
+            >
+              <Sparkles className="h-3 w-3" /> Summarize
+            </button>
+          </div>
+        </div>
         {editingDescription ? (
           <MentionTextarea
             autoFocus
@@ -844,21 +906,32 @@ function OverviewPanel({
           </select>
         </Field>
         <Field label="Priority">
-          <select
-            value={detail.priority}
-            onChange={(e) => patchTask.mutate({ priority: e.target.value })}
-            disabled={patchTask.isPending}
-            className={cn(
-              'w-full h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50',
-              priorityColor(detail.priority),
-            )}
-          >
-            {(['urgent', 'high', 'normal', 'low'] as const).map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-1">
+            <select
+              value={detail.priority}
+              onChange={(e) => patchTask.mutate({ priority: e.target.value })}
+              disabled={patchTask.isPending}
+              className={cn(
+                'flex-1 h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50',
+                priorityColor(detail.priority),
+              )}
+            >
+              {(['urgent', 'high', 'normal', 'low'] as const).map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={aiSuggestPriority.isPending}
+              onClick={() => aiSuggestPriority.mutate()}
+              className="h-8 w-8 shrink-0 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
+              title="Suggest priority with AI"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </Field>
         <Field label="Due date">
           <input
