@@ -1,5 +1,5 @@
-import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq } from 'drizzle-orm'
+import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
+import { and, asc, eq } from 'drizzle-orm'
 import { organizationMembers, organizations, workspaces, workspaceMembers, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -223,18 +223,41 @@ export class WorkspacesService {
     return this.db.transaction(async (tx) => {
       let orgId = dto.organizationId
 
-      if (!orgId) {
-        const [org] = await tx
-          .insert(organizations)
-          .values({ name: dto.name, slug: finalSlug })
-          .returning()
-        orgId = org.id
-
-        await tx.insert(organizationMembers).values({
-          organizationId: org.id,
-          userId,
-          role: 'owner',
-        })
+      if (orgId) {
+        // Verify the caller belongs to the target organization.
+        const [member] = await tx
+          .select({ id: organizationMembers.id })
+          .from(organizationMembers)
+          .where(
+            and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.userId, userId)),
+          )
+          .limit(1)
+        if (!member) throw new ForbiddenException('Not a member of that organization')
+      } else {
+        // Attach the new workspace to the caller's existing organization — one
+        // top-level org per tenant — rather than spawning a fresh org for every
+        // workspace (the previous behaviour). Only create an org when the caller
+        // genuinely has none (first-workspace path, mirroring signUp).
+        const [existing] = await tx
+          .select({ organizationId: organizationMembers.organizationId })
+          .from(organizationMembers)
+          .where(eq(organizationMembers.userId, userId))
+          .orderBy(asc(organizationMembers.joinedAt))
+          .limit(1)
+        if (existing) {
+          orgId = existing.organizationId
+        } else {
+          const [org] = await tx
+            .insert(organizations)
+            .values({ name: dto.name, slug: finalSlug })
+            .returning()
+          orgId = org.id
+          await tx.insert(organizationMembers).values({
+            organizationId: org.id,
+            userId,
+            role: 'owner',
+          })
+        }
       }
 
       const [workspace] = await tx
