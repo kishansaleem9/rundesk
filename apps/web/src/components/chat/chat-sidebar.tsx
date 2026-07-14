@@ -137,6 +137,7 @@ export function ChatSidebar({
                   )
                 }
                 label={c.name}
+                unread={c.unreadCount ?? 0}
               />
             ))}
             {filteredChannels.length === 0 && !channelsLoading && (
@@ -195,6 +196,7 @@ export function ChatSidebar({
                 onClick={() => onSelectChannel(c.id)}
                 icon={<MemberAvatar label={initials(c.dmPeerName)} size="sm" />}
                 label={c.dmPeerName ?? 'Direct message'}
+                unread={c.unreadCount ?? 0}
               />
             ))}
             {filteredDms.length === 0 && !channelsLoading && (
@@ -212,12 +214,15 @@ function ChannelRow({
   onClick,
   icon,
   label,
+  unread = 0,
 }: {
   active: boolean
   onClick: () => void
   icon: ReactNode
   label: string
+  unread?: number
 }) {
+  const hasUnread = unread > 0 && !active
   return (
     <button
       type="button"
@@ -226,11 +231,18 @@ function ChannelRow({
         'w-full flex items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px] transition-colors',
         active
           ? 'bg-violet-500/12 text-violet-700 dark:text-violet-200 font-medium'
-          : 'text-foreground/85 hover:bg-black/[0.04] dark:hover:bg-white/[0.05]',
+          : hasUnread
+            ? 'text-foreground font-semibold hover:bg-black/[0.04] dark:hover:bg-white/[0.05]'
+            : 'text-foreground/85 hover:bg-black/[0.04] dark:hover:bg-white/[0.05]',
       )}
     >
       {icon}
       <span className="truncate flex-1">{label}</span>
+      {hasUnread && (
+        <span className="ml-auto shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-violet-600 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
     </button>
   )
 }

@@ -37,6 +37,8 @@ type Channel = {
   isPrivate: boolean
   isDm: boolean
   joined: boolean
+  unreadCount?: number
+  lastReadAt?: string | null
   dmPeerId?: string
   dmPeerName?: string | null
   dmPeerAvatarUrl?: string | null
@@ -290,6 +292,24 @@ export function ChatPage() {
     if (!scrollRef.current) return
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages.length, selectedId])
+
+  // Mark the open channel read once its messages load (and whenever new ones
+  // arrive while it's open), then refresh the channel list to clear its badge.
+  useEffect(() => {
+    if (!selectedId || messages.length === 0) return
+    let cancelled = false
+    void api(`/chat/channels/${selectedId}/read`, { method: 'POST' })
+      .then(() => {
+        if (!cancelled) {
+          void qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+          void qc.invalidateQueries({ queryKey: ['chat-unread', workspaceId] })
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId, messages.length, workspaceId, qc])
 
   useEffect(() => {
     if (!highlightedMessageId) return

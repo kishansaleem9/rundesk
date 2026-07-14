@@ -5,6 +5,8 @@ export type ChatChannel = {
   isPrivate: boolean
   isDm: boolean
   joined: boolean
+  unreadCount?: number
+  lastReadAt?: string | null
   dmPeerId?: string
   dmPeerName?: string | null
   dmPeerAvatarUrl?: string | null
