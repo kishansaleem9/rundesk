@@ -58,6 +58,7 @@ export function PushNotificationsPanel() {
         muteSounds: boolean
       }
       events: Record<EventKey, Record<Channel, boolean>>
+      digest?: { enabled: boolean; frequency: 'daily' | 'weekly'; hour: number }
     }>('/notifications/preferences'),
   })
 
@@ -73,6 +74,7 @@ export function PushNotificationsPanel() {
           muteSounds: false,
         },
         events: DEFAULTS,
+        digest: { enabled: false, frequency: 'daily' as const, hour: 8 },
       },
     [prefsQuery.data],
   )
@@ -83,6 +85,9 @@ export function PushNotificationsPanel() {
   const [dndEnd, setDndEnd] = useState(prefs.channels.dndEnd)
   const [dndOn, setDndOn] = useState(prefs.channels.dndOn)
   const [muteSounds, setMuteSounds] = useState(prefs.channels.muteSounds)
+  const [digestEnabled, setDigestEnabled] = useState(prefs.digest?.enabled ?? false)
+  const [digestFrequency, setDigestFrequency] = useState<'daily' | 'weekly'>(prefs.digest?.frequency ?? 'daily')
+  const [digestHour, setDigestHour] = useState(prefs.digest?.hour ?? 8)
 
   useEffect(() => {
     setMatrix(prefs.events)
@@ -92,6 +97,9 @@ export function PushNotificationsPanel() {
     setDndEnd(prefs.channels.dndEnd)
     setDndOn(prefs.channels.dndOn)
     setMuteSounds(prefs.channels.muteSounds)
+    setDigestEnabled(prefs.digest?.enabled ?? false)
+    setDigestFrequency(prefs.digest?.frequency ?? 'daily')
+    setDigestHour(prefs.digest?.hour ?? 8)
   }, [prefs])
 
   function toggle(event: EventKey, channel: Channel) {
@@ -115,6 +123,7 @@ export function PushNotificationsPanel() {
             muteSounds,
           },
           events: matrix,
+          digest: { enabled: digestEnabled, frequency: digestFrequency, hour: digestHour },
         },
       }),
     onSuccess: async () => {
@@ -222,6 +231,50 @@ export function PushNotificationsPanel() {
             <Button variant="gradient" size="sm" className="h-7">
               Allow notifications
             </Button>
+          </div>
+        )}
+      </Card>
+
+      <Card variant="glass" className="p-5 space-y-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-gradient text-white shadow-glow">
+            <Mail className="h-4 w-4" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-display text-lg font-semibold">Email digest</h3>
+            <p className="text-sm text-muted-foreground">
+              Get a periodic email summarising your unread notifications.
+            </p>
+          </div>
+          <Switch checked={digestEnabled} onCheckedChange={setDigestEnabled} />
+        </div>
+        {digestEnabled && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="text-sm">
+              <span className="block text-xs font-medium text-muted-foreground mb-1">Frequency</span>
+              <select
+                value={digestFrequency}
+                onChange={(e) => setDigestFrequency(e.target.value as 'daily' | 'weekly')}
+                className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly (Mondays)</option>
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="block text-xs font-medium text-muted-foreground mb-1">Send at</span>
+              <select
+                value={digestHour}
+                onChange={(e) => setDigestHour(Number(e.target.value))}
+                className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+              >
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>
+                    {String(h).padStart(2, '0')}:00
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         )}
       </Card>
