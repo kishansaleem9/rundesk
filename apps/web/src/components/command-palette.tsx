@@ -65,6 +65,7 @@ export function CommandPalette({
   const [typeFilter, setTypeFilter] = useState<'all' | 'task' | 'doc'>('all')
   const [statusFilter, setStatusFilter] = useState<'' | 'open' | 'in_progress' | 'closed'>('')
   const [priorityFilter, setPriorityFilter] = useState<'' | 'urgent' | 'high' | 'normal' | 'low'>('')
+  const [labelFilter, setLabelFilter] = useState<string>('')
 
   // When the palette is opened with a query forwarded from the header search
   // input, seed the command query so results show immediately.
@@ -78,15 +79,22 @@ export function CommandPalette({
     [location.pathname],
   )
 
-  const hasFilter = typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== ''
+  const labelsQuery = useQuery({
+    enabled: open && Boolean(workspaceId),
+    queryKey: ['labels', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string; color: string }>>(`/workspaces/${workspaceId}/labels`),
+  })
+
+  const hasFilter = typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== '' || labelFilter !== ''
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter],
+    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeFilter !== 'all') params.set('types', typeFilter)
       if (statusFilter) params.set('statusCategory', statusFilter)
       if (priorityFilter) params.set('priority', priorityFilter)
+      if (labelFilter) params.set('labelId', labelFilter)
       return api<SearchHit[]>(`/search/${workspaceId}?${params.toString()}`)
     },
   })
@@ -177,6 +185,22 @@ export function CommandPalette({
             </FilterChip>
           ))}
         </FilterGroup>
+        {(labelsQuery.data?.length ?? 0) > 0 && (
+          <FilterGroup label="Label">
+            <select
+              value={labelFilter}
+              onChange={(e) => setLabelFilter(e.target.value)}
+              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+            >
+              <option value="">Any</option>
+              {labelsQuery.data!.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </FilterGroup>
+        )}
       </div>
       <CommandList>
         <CommandEmpty>
