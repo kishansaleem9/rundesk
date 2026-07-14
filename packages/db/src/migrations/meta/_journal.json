@@ -246,6 +246,13 @@
       "when": 1900000031000,
       "tag": "0034_folders",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1900000032000,
+      "tag": "0035_container_membership",
+      "breakpoints": true
     }
   ]
 }

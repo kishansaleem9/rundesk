@@ -90,3 +90,16 @@ export const viewTypeEnum = pgEnum('view_type', [
   'gantt',
   'table',
 ])
+
+// Container-level (space / project) membership role and visibility.
+export const containerRoleEnum = pgEnum('container_role', [
+  'admin',
+  'edit',
+  'comment',
+  'view',
+])
+
+export const containerVisibilityEnum = pgEnum('container_visibility', [
+  'public',
+  'private',
+])

@@ -3,6 +3,7 @@ import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { projects } from './projects'
 import { users } from './users'
+import { containerVisibilityEnum } from './enums'
 
 export const spaces = pgTable('spaces', {
   id:          uuid('id').primaryKey().defaultRandom(),
@@ -13,6 +14,7 @@ export const spaces = pgTable('spaces', {
   icon:        text('icon'),
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   isArchived:  boolean('is_archived').notNull().default(false),
+  visibility:  containerVisibilityEnum('visibility').notNull().default('public'),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
