@@ -724,6 +724,10 @@ function ListDetail() {
             tasks={visibleTasks}
             groupBy={groupBy}
             selectedTaskIds={selectedTaskIds}
+            onPatchTask={async (taskId, patch) => {
+              await api(`/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(patch) })
+              await refetch()
+            }}
             onToggleSelect={(taskId, additive) => {
               setSelectedTaskIds((prev) => {
                 const next = new Set(prev)
@@ -1003,6 +1007,7 @@ function GroupedListView({
   onToggleSelect,
   onOpenTask,
   onToggleDone,
+  onPatchTask,
   onAddTask,
 }: {
   tasks: TaskItem[]
@@ -1011,6 +1016,7 @@ function GroupedListView({
   onToggleSelect: (taskId: string, additive: boolean) => void
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
+  onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void> | void
   onAddTask: (
     status: TaskStatus,
     title: string,
@@ -1114,6 +1120,7 @@ function GroupedListView({
                     onToggleSelect={onToggleSelect}
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
+                    onPatchTask={onPatchTask}
                   />
                 ) : (
                   groupTasks.map((task) => (
@@ -1124,6 +1131,7 @@ function GroupedListView({
                       onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
                       onOpenTask={onOpenTask}
                       onToggleDone={onToggleDone}
+                      onPatchTask={onPatchTask}
                     />
                   ))
                 )}
@@ -1172,6 +1180,7 @@ function GroupedListView({
                     onToggleSelect={onToggleSelect}
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
+                    onPatchTask={onPatchTask}
                   />
                 ) : (
                   groupTasks.map((task) => (
@@ -1182,6 +1191,7 @@ function GroupedListView({
                       onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
                       onOpenTask={onOpenTask}
                       onToggleDone={onToggleDone}
+                      onPatchTask={onPatchTask}
                     />
                   ))
                 )}
@@ -1202,6 +1212,7 @@ function VirtualizedTaskRows({
   onToggleSelect,
   onOpenTask,
   onToggleDone,
+  onPatchTask,
 }: {
   virtualKey: string
   tasks: TaskItem[]
@@ -1209,6 +1220,7 @@ function VirtualizedTaskRows({
   onToggleSelect: (taskId: string, additive: boolean) => void
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
+  onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void> | void
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null)
   const rowVirtualizer = useVirtualizer({
@@ -1240,6 +1252,7 @@ function VirtualizedTaskRows({
                 onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
                 onOpenTask={onOpenTask}
                 onToggleDone={onToggleDone}
+                onPatchTask={onPatchTask}
               />
             </div>
           )
@@ -1255,18 +1268,26 @@ function TaskRow({
   onToggleSelect,
   onOpenTask,
   onToggleDone,
+  onPatchTask,
 }: {
   task: TaskItem
   selected: boolean
   onToggleSelect: (additive: boolean) => void
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
+  onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void> | void
 }) {
   // statusCategory ('closed') is the post-custom-statuses signal; falling
   // back to the literal 'done' key keeps existing tasks rendering correctly
   // while the API/list-statuses caches warm up.
   const isDone = task.statusCategory === 'closed' || task.status === 'done'
   const assignees = task.assignees ?? []
+  // Inline edits (Plan §5): cycle priority on click; edit due date in place.
+  const cyclePriority = () => {
+    const order: TaskPriority[] = ['low', 'normal', 'high', 'urgent']
+    const next = order[(order.indexOf(task.priority) + 1) % order.length]
+    void onPatchTask?.(task.id, { priority: next })
+  }
 
   return (
     <div
@@ -1335,13 +1356,39 @@ function TaskRow({
         ) : null}
       </div>
 
-      <Flag className={cn('h-3.5 w-3.5 shrink-0', PRIORITY_COLORS[task.priority])} />
+      {onPatchTask ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            cyclePriority()
+          }}
+          className="shrink-0 rounded p-0.5 hover:bg-muted"
+          title={`Priority: ${task.priority} — click to change`}
+          aria-label="Change priority"
+        >
+          <Flag className={cn('h-3.5 w-3.5', PRIORITY_COLORS[task.priority])} />
+        </button>
+      ) : (
+        <Flag className={cn('h-3.5 w-3.5 shrink-0', PRIORITY_COLORS[task.priority])} />
+      )}
 
-      {task.dueDate && (
-        <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
-          <CalendarIcon className="h-3 w-3" />
-          {format(new Date(task.dueDate), 'MMM d')}
-        </div>
+      {onPatchTask ? (
+        <input
+          type="date"
+          value={task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : ''}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => void onPatchTask(task.id, { dueDate: e.target.value || null })}
+          title="Set due date"
+          className="h-6 w-[7.5rem] shrink-0 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
+        />
+      ) : (
+        task.dueDate && (
+          <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+            <CalendarIcon className="h-3 w-3" />
+            {format(new Date(task.dueDate), 'MMM d')}
+          </div>
+        )
       )}
 
       <div className="flex -space-x-1 shrink-0 min-w-[40px] justify-end">
