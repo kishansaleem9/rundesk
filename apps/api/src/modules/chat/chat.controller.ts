@@ -93,6 +93,15 @@ export class ChatController {
     return this.chat.listChannelMembers(channelId, user.id)
   }
 
+  @Post('chat/messages/:messageId/create-task')
+  createTaskFromMessage(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { listId: string; title?: string },
+  ) {
+    return this.chat.createTaskFromMessage(messageId, user.id, body.listId, body.title)
+  }
+
   @Post('chat/channels/:channelId/members')
   addChannelMembers(
     @Param('channelId') channelId: string,

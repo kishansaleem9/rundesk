@@ -39,7 +39,8 @@ function makeDb(selectResults: any[][]) {
 function buildSvc(db: any) {
   const realtime = { emitToWorkspace: mock.fn() } as any
   const notifications = {} as any
-  return new ChatService(db, realtime, notifications)
+  const tasks = {} as any
+  return new ChatService(db, realtime, notifications, tasks)
 }
 
 describe('ChatService.setSaved', () => {

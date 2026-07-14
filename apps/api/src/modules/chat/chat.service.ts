@@ -13,6 +13,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
+import { TasksService } from '../tasks/tasks.service'
 
 @Injectable()
 export class ChatService {
@@ -20,6 +21,7 @@ export class ChatService {
     @Inject(DB_TOKEN) private db: Db,
     private realtime: RealtimeGateway,
     private notifications: NotificationsService,
+    private tasks: TasksService,
   ) {}
 
   private extractMentionIds(body: string): string[] {
@@ -620,6 +622,27 @@ export class ChatService {
     }
 
     return enriched
+  }
+
+  /**
+   * Create a task from a chat message (Plan §6.10). Title defaults to the
+   * message's first line; the full message becomes the description.
+   */
+  async createTaskFromMessage(messageId: string, userId: string, listId: string, title?: string) {
+    const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!message) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(message.channelId, userId)
+    if (!listId) throw new ForbiddenException('listId is required')
+
+    const firstLine = message.body.split('\n')[0].trim()
+    const resolvedTitle = (title?.trim() || firstLine || 'Task from chat').slice(0, 200)
+    const task = await this.tasks.createTask({
+      listId,
+      title: resolvedTitle,
+      description: message.body,
+      createdById: userId,
+    })
+    return task
   }
 
   async editMessage(messageId: string, userId: string, body: string) {
