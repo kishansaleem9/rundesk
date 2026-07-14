@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, cn, toast } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
@@ -115,10 +115,12 @@ type MemberActivityItem = {
 
 export function ChatPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/chat' })
+  const deepLink = useSearch({ from: '/app/$workspaceId/chat' }) as { channel?: string; message?: string }
   const navigate = useNavigate()
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const consumedDeepLinkRef = useRef<string | null>(null)
   const [addPeopleOpen, setAddPeopleOpen] = useState(false)
   const [input, setInput] = useState('')
   const [creating, setCreating] = useState(false)
@@ -165,11 +167,21 @@ export function ChatPage() {
   const showMentions = input.includes('@') && input[input.length - 1] !== ' '
 
   useEffect(() => {
-    if (!selectedId && channels.length > 0) {
+    if (channels.length === 0) return
+    // Deep-link (inbox → chat): open the linked channel once (Plan §6).
+    if (deepLink.channel && consumedDeepLinkRef.current !== deepLink.channel) {
+      const linked = channels.find((c) => c.id === deepLink.channel)
+      if (linked) {
+        consumedDeepLinkRef.current = deepLink.channel
+        setSelectedId(linked.id)
+        return
+      }
+    }
+    if (!selectedId) {
       const general = channels.find((c) => c.name === 'general') ?? channels[0]
       setSelectedId(general.id)
     }
-  }, [channels, selectedId])
+  }, [channels, selectedId, deepLink.channel])
 
   const selectedChannel = useMemo(
     () => channels.find((c) => c.id === selectedId) ?? null,
@@ -187,6 +199,16 @@ export function ChatPage() {
     enabled: !!selectedId,
   })
   const messages = messagesQuery.data ?? []
+
+  // Once the linked channel's messages are loaded, scroll to + highlight the
+  // deep-linked message (reuses the existing highlight machinery).
+  useEffect(() => {
+    if (!deepLink.message || !deepLink.channel) return
+    if (selectedId !== deepLink.channel) return
+    if (!messages.some((m) => m.id === deepLink.message)) return
+    setHighlightedMessageId(deepLink.message)
+  }, [deepLink.message, deepLink.channel, selectedId, messages])
+
   const pinnedQuery = useQuery({
     queryKey: ['chat-pinned', selectedId],
     queryFn: () => api<Message[]>(`/chat/channels/${selectedId}/pinned`),

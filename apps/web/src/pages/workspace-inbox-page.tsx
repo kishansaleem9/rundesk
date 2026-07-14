@@ -83,6 +83,23 @@ export function InboxPage() {
     },
   })
 
+  // Navigate to a resolved path, splitting any query string into `search` so
+  // deep-links like /app/:ws/chat?channel=..&message=.. actually carry params.
+  const go = (dest: string) => {
+    const qIdx = dest.indexOf('?')
+    if (qIdx === -1) {
+      navigate({ to: dest as any })
+      return
+    }
+    const pathname = dest.slice(0, qIdx)
+    const params = new URLSearchParams(dest.slice(qIdx + 1))
+    const search: Record<string, string> = {}
+    params.forEach((v, k) => {
+      search[k] = v
+    })
+    navigate({ to: pathname as any, search: search as any })
+  }
+
   const resolveDestination = async (notif: Notification) => {
     const raw = notif.target?.url?.trim()
     if (!raw) return null
@@ -157,7 +174,7 @@ export function InboxPage() {
                         onOpen={async () => {
                           if (!n.readAt) await markRead.mutateAsync(n.id)
                           const destination = await resolveDestination(n)
-                          if (destination) navigate({ to: destination as any })
+                          if (destination) go(destination)
                         }}
                         onResolve={
                           isCommentOrMention(n.type)
@@ -184,7 +201,7 @@ export function InboxPage() {
                         namesById={namesById}
                         onOpen={async () => {
                           const destination = await resolveDestination(n)
-                          if (destination) navigate({ to: destination as any })
+                          if (destination) go(destination)
                         }}
                         onResolve={
                           isCommentOrMention(n.type)

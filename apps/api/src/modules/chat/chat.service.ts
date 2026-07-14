@@ -681,7 +681,11 @@ export class ChatService {
           type: 'task_mentioned',
           title: channel.isDm ? `You were mentioned by ${author?.displayName ?? 'a teammate'}` : `You were mentioned in ${channelLabel}`,
           body: body.slice(0, 180),
-          target: { entityType: 'chat_message', entityId: row.id, url: `/app/${channel.workspaceId}/chat` },
+          target: {
+            entityType: 'chat_message',
+            entityId: row.id,
+            url: `/app/${channel.workspaceId}/chat?channel=${data.channelId}&message=${row.id}`,
+          },
           emailContext: { taskTitle: channelLabel, workspaceName: 'Workspace' },
         })
       }
@@ -704,7 +708,11 @@ export class ChatService {
         type: 'chat_message',
         title: channel.isDm ? `New message from ${author?.displayName ?? 'a teammate'}` : `New message in ${channelLabel}`,
         body: body.slice(0, 180),
-        target: { entityType: 'chat_message', entityId: row.id, url: `/app/${channel.workspaceId}/chat` },
+        target: {
+          entityType: 'chat_message',
+          entityId: row.id,
+          url: `/app/${channel.workspaceId}/chat?channel=${data.channelId}&message=${row.id}`,
+        },
         emailContext: { taskTitle: channelLabel, workspaceName: 'Workspace', commentSnippet: body.slice(0, 180) },
       })
     }
