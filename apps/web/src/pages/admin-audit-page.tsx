@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Shield, Search, Download } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, downloadFile } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 
 type AuditLog = {
@@ -119,24 +119,12 @@ export function AuditLogPage() {
   })
 
   function exportCsv() {
-    const rows = [
-      ['Timestamp', 'Actor', 'Action', 'Resource', 'Description', 'IP'],
-      ...logs.map((l) => [
-        l.createdAt,
-        l.actorEmail ?? '',
-        l.action,
-        `${l.resourceType ?? ''} ${l.resourceId ?? ''}`.trim(),
-        l.description,
-        l.ipAddress ?? '',
-      ]),
-    ]
-    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `audit-log-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
+    if (!workspaceId) return
+    // Server-side export streams the FULL filtered trail, not just the loaded page.
+    void downloadFile(
+      `/workspaces/${workspaceId}/audit-logs/export`,
+      `audit-log-${new Date().toISOString().split('T')[0]}.csv`,
+    )
   }
 
   return (
