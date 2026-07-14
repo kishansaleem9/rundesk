@@ -376,6 +376,62 @@ export class EmailService {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
+  /** Send a periodic digest of unread notifications. */
+  async sendDigest(opts: {
+    to: string
+    recipientName: string
+    frequency: 'daily' | 'weekly'
+    total: number
+    groups: Array<{
+      type: string
+      count: number
+      items: Array<{ title: string; body: string | null; url: string | null }>
+    }>
+    appUrl: string
+  }) {
+    const TYPE_LABELS: Record<string, string> = {
+      task_assigned: 'Assignments',
+      task_mentioned: 'Mentions',
+      task_commented: 'Comments',
+      task_due_soon: 'Due soon',
+      task_overdue: 'Overdue',
+      task_status_changed: 'Status changes',
+      task_updated: 'Updates',
+      chat_message: 'Chat',
+      doc_mentioned: 'Doc mentions',
+      doc_commented: 'Doc comments',
+    }
+    const sections = opts.groups
+      .map((g) => {
+        const label = TYPE_LABELS[g.type] ?? g.type
+        const items = g.items
+          .map((it) => {
+            const title = this.esc(it.title)
+            const linked = it.url ? `<a href="${this.esc(it.url)}" style="color:#354fb0;text-decoration:none;">${title}</a>` : title
+            const body = it.body ? `<span style="color:#6b7280;"> — ${this.esc(it.body.slice(0, 120))}</span>` : ''
+            return `<li style="margin:4px 0;">${linked}${body}</li>`
+          })
+          .join('')
+        const more = g.count > g.items.length ? `<li style="color:#9ca3af;list-style:none;">+ ${g.count - g.items.length} more</li>` : ''
+        return `<h3 style="margin:20px 0 6px;font-size:15px;color:#0c215d;">${this.esc(label)} (${g.count})</h3>
+          <ul style="margin:0;padding-left:18px;font-size:14px;">${items}${more}</ul>`
+      })
+      .join('')
+
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] Your ${opts.frequency} digest — ${opts.total} update${opts.total === 1 ? '' : 's'}`,
+      html: this.layout({
+        heading: `You have ${opts.total} unread notification${opts.total === 1 ? '' : 's'}`,
+        body: `<p>Hi ${this.esc(opts.recipientName)},</p>
+          <p>Here's what happened while you were away:</p>
+          ${sections}`,
+        ctaUrl: opts.appUrl,
+        ctaLabel: 'Open Rundesk',
+      }),
+    })
+  }
+
   private async send(opts: { to: string; subject: string; html: string }) {
     if (!this.transport) {
       this.logger.log(`[DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}`)

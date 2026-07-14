@@ -22,6 +22,15 @@ export class NotificationsController {
     return this.notifications.unreadCount(user.id)
   }
 
+  @Get('digest/preview')
+  digestPreview(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('frequency') frequency?: string,
+  ) {
+    const freq = frequency === 'weekly' ? 'weekly' : 'daily'
+    return this.notifications.buildDigest(user.id, freq)
+  }
+
   @Get('preferences')
   getPreferences(@CurrentUser() user: CurrentUserPayload) {
     return this.notifications.getPreferences(user.id)
@@ -40,6 +49,7 @@ export class NotificationsController {
         muteSounds?: boolean
       }
       events?: Record<string, Partial<Record<'inApp' | 'web' | 'mobile' | 'email', boolean>>>
+      digest?: { enabled?: boolean; frequency?: 'daily' | 'weekly'; hour?: number }
     },
   ) {
     return this.notifications.updatePreferences(user.id, body)

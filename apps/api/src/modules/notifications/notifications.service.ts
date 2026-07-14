@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common'
-import { eq, and, isNull, desc, sql, inArray } from 'drizzle-orm'
+import { eq, and, isNull, desc, sql, inArray, gte } from 'drizzle-orm'
 import { notifications, users, webPushSubscriptions } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -33,6 +33,8 @@ type NotificationEventKey =
 
 type NotificationChannelMatrix = Record<'inApp' | 'web' | 'mobile' | 'email', boolean>
 
+type DigestFrequency = 'daily' | 'weekly'
+
 type NotificationPreferences = {
   channels: {
     webEnabled: boolean
@@ -43,11 +45,18 @@ type NotificationPreferences = {
     muteSounds: boolean
   }
   events: Record<NotificationEventKey, NotificationChannelMatrix>
+  digest: {
+    enabled: boolean
+    frequency: DigestFrequency
+    /** Hour of day (0–23, server time) the digest is sent. */
+    hour: number
+  }
 }
 
 type NotificationPreferencesPatch = {
   channels?: Partial<NotificationPreferences['channels']>
   events?: Partial<Record<NotificationEventKey, Partial<NotificationChannelMatrix>>>
+  digest?: Partial<NotificationPreferences['digest']>
 }
 
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
@@ -68,6 +77,11 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
     doc: { inApp: true, web: true, mobile: false, email: true },
     chat: { inApp: true, web: true, mobile: false, email: true },
     activity: { inApp: true, web: true, mobile: false, email: true },
+  },
+  digest: {
+    enabled: false,
+    frequency: 'daily',
+    hour: 8,
   },
 }
 
@@ -300,6 +314,109 @@ export class NotificationsService {
   }
 
   // ---------------------------------------------------------------------------
+  // Digest
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Aggregate a user's unread notifications from the current digest window
+   * (last 24h daily / 7d weekly) into per-type groups. Pure read — used by the
+   * preview endpoint and the scheduled digest sender.
+   */
+  async buildDigest(
+    userId: string,
+    frequency: DigestFrequency = 'daily',
+    now: Date = new Date(),
+  ): Promise<{
+    userId: string
+    frequency: DigestFrequency
+    since: string
+    until: string
+    total: number
+    groups: Array<{ type: string; count: number; items: Array<{ title: string; body: string | null; url: string | null; createdAt: string }> }>
+  }> {
+    const windowMs = frequency === 'weekly' ? 7 * 24 * 3600_000 : 24 * 3600_000
+    const since = new Date(now.getTime() - windowMs)
+
+    const rows = await this.db
+      .select({
+        type: notifications.type,
+        title: notifications.title,
+        body: notifications.body,
+        target: notifications.target,
+        createdAt: notifications.createdAt,
+      })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          isNull(notifications.readAt),
+          gte(notifications.createdAt, since),
+        ),
+      )
+      .orderBy(desc(notifications.createdAt))
+
+    const ITEMS_PER_GROUP = 6
+    const byType = new Map<string, { count: number; items: any[] }>()
+    for (const r of rows) {
+      const g = byType.get(r.type) ?? { count: 0, items: [] }
+      g.count += 1
+      if (g.items.length < ITEMS_PER_GROUP) {
+        g.items.push({
+          title: r.title,
+          body: r.body,
+          url: (r.target as any)?.url ?? null,
+          createdAt: (r.createdAt as Date).toISOString(),
+        })
+      }
+      byType.set(r.type, g)
+    }
+
+    const groups = [...byType.entries()]
+      .map(([type, g]) => ({ type, count: g.count, items: g.items }))
+      .sort((a, b) => b.count - a.count)
+
+    return {
+      userId,
+      frequency,
+      since: since.toISOString(),
+      until: now.toISOString(),
+      total: rows.length,
+      groups,
+    }
+  }
+
+  /**
+   * Recipients whose digest is enabled, with the metadata the scheduler needs
+   * to decide whether to send this hour.
+   */
+  async listDigestRecipients(): Promise<
+    Array<{ userId: string; email: string; displayName: string | null; frequency: DigestFrequency; hour: number }>
+  > {
+    const rows = await this.db
+      .select({
+        userId: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        prefs: users.notificationPreferences,
+      })
+      .from(users)
+      .where(sql`(${users.notificationPreferences} -> 'digest' ->> 'enabled')::boolean = true`)
+
+    return rows
+      .map((r) => {
+        const d = (r.prefs as Partial<NotificationPreferences> | undefined)?.digest
+        return {
+          userId: r.userId,
+          email: r.email,
+          displayName: r.displayName,
+          frequency: (d?.frequency ?? 'daily') as DigestFrequency,
+          hour: typeof d?.hour === 'number' ? d.hour : 8,
+        }
+      })
+      .filter((r) => Boolean(r.email))
+  }
+
+  // ---------------------------------------------------------------------------
   // Private — email dispatch
   // ---------------------------------------------------------------------------
 
@@ -473,6 +590,10 @@ export class NotificationsService {
         doc: { ...base.events.doc, ...(patch.events?.doc ?? {}) },
         chat: { ...base.events.chat, ...(patch.events?.chat ?? {}) },
         activity: { ...base.events.activity, ...(patch.events?.activity ?? {}) },
+      },
+      digest: {
+        ...base.digest,
+        ...(patch.digest ?? {}),
       },
     }
   }
