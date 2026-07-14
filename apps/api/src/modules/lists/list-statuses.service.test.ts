@@ -68,6 +68,21 @@ function buildDb(opts: {
           })),
         }
       }
+      // getListStatusContext detection: shape with `scope` (lists ⋈ projects).
+      // Default fixtures use scope 'list' so the list owns its own pipeline.
+      if (shape && typeof shape === 'object' && 'scope' in shape) {
+        return {
+          from: mock.fn(() => ({
+            innerJoin: mock.fn(() => ({
+              where: mock.fn(() => ({
+                limit: mock.fn(async () => [
+                  { listId: 'list-1', projectId: 'proj-1', scope: 'list', spaceId: 'space-1' },
+                ]),
+              })),
+            })),
+          })),
+        }
+      }
       return { from: fromHandler }
     }),
     insert: mock.fn(() => ({
