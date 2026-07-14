@@ -6,6 +6,8 @@ import { api } from '../lib/api'
 
 type StatusCategory = 'open' | 'in_progress' | 'closed'
 
+type StatusScope = 'list' | 'project' | 'space'
+
 type ListStatus = {
   id: string
   listId: string
@@ -14,6 +16,7 @@ type ListStatus = {
   color: string
   category: StatusCategory
   position: number
+  scope?: StatusScope
 }
 
 const PRESET_COLORS = [
@@ -75,6 +78,8 @@ export function ListStatusesManager({
     onSuccess: invalidate,
   })
 
+  const scope: StatusScope = statuses[0]?.scope ?? 'list'
+  const inherited = scope !== 'list'
   const sortedStatuses = statuses.slice().sort((a, b) => a.position - b.position)
   const handleDropOn = (targetId: string) => {
     if (!dragId || dragId === targetId) {
@@ -115,10 +120,18 @@ export function ListStatusesManager({
         </DialogHeader>
 
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Statuses define how work moves through this list. Renaming a status
-            updates it everywhere; deleting one prompts you to move its tasks first.
-          </p>
+          {inherited ? (
+            <p className="text-sm rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+              This list uses the <strong>{scope}</strong>&rsquo;s shared status set. These statuses are
+              read-only here — edit them under the {scope}&rsquo;s settings and every list using the
+              {' '}{scope} set updates together.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Statuses define how work moves through this list. Renaming a status
+              updates it everywhere; deleting one prompts you to move its tasks first.
+            </p>
+          )}
 
           <div className="space-y-2">
             {sortedStatuses
@@ -126,8 +139,9 @@ export function ListStatusesManager({
                 <StatusRow
                   key={status.id}
                   status={status}
+                  readOnly={inherited}
                   isDragging={dragId === status.id}
-                  onDragStart={() => setDragId(status.id)}
+                  onDragStart={inherited ? undefined : () => setDragId(status.id)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => handleDropOn(status.id)}
                   onDragEnd={() => setDragId(null)}
@@ -145,10 +159,12 @@ export function ListStatusesManager({
               ))}
           </div>
 
-          <AddStatusForm
-            onAdd={(input) => createStatus.mutate(input)}
-            isPending={createStatus.isPending}
-          />
+          {!inherited && (
+            <AddStatusForm
+              onAdd={(input) => createStatus.mutate(input)}
+              isPending={createStatus.isPending}
+            />
+          )}
         </div>
 
         {reassignFor && (
@@ -176,6 +192,7 @@ function StatusRow({
   onDrop,
   onDragEnd,
   isDragging,
+  readOnly = false,
 }: {
   status: ListStatus
   onPatch: (patch: Partial<ListStatus>) => void
@@ -185,11 +202,12 @@ function StatusRow({
   onDrop?: () => void
   onDragEnd?: () => void
   isDragging?: boolean
+  readOnly?: boolean
 }) {
   const [name, setName] = useState(status.name)
   return (
     <div
-      draggable={Boolean(onDragStart)}
+      draggable={Boolean(onDragStart) && !readOnly}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -199,37 +217,52 @@ function StatusRow({
         isDragging && 'opacity-50',
       )}
     >
-      <GripVertical className="h-4 w-4 text-muted-foreground/60 shrink-0 cursor-grab active:cursor-grabbing" />
-      <ColorSwatch color={status.color} onChange={(color) => onPatch({ color })} />
-      <Input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={() => {
-          const trimmed = name.trim()
-          if (trimmed && trimmed !== status.name) onPatch({ name: trimmed })
-          else setName(status.name)
-        }}
-        className="h-8 text-sm flex-1 border-0 shadow-none focus-visible:ring-0 px-1"
-      />
+      {readOnly ? (
+        <span className="h-4 w-4 shrink-0" aria-hidden />
+      ) : (
+        <GripVertical className="h-4 w-4 text-muted-foreground/60 shrink-0 cursor-grab active:cursor-grabbing" />
+      )}
+      {readOnly ? (
+        <span className="h-5 w-5 rounded-full border border-border/70 shrink-0" style={{ backgroundColor: status.color }} />
+      ) : (
+        <ColorSwatch color={status.color} onChange={(color) => onPatch({ color })} />
+      )}
+      {readOnly ? (
+        <span className="h-8 flex items-center text-sm flex-1 px-1 truncate">{status.name}</span>
+      ) : (
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => {
+            const trimmed = name.trim()
+            if (trimmed && trimmed !== status.name) onPatch({ name: trimmed })
+            else setName(status.name)
+          }}
+          className="h-8 text-sm flex-1 border-0 shadow-none focus-visible:ring-0 px-1"
+        />
+      )}
       <select
         value={status.category}
         onChange={(e) => onPatch({ category: e.target.value as StatusCategory })}
-        className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
+        disabled={readOnly}
+        className="h-7 rounded border border-border/70 bg-background px-2 text-xs disabled:opacity-70"
         aria-label="Status category"
       >
         {(Object.entries(CATEGORY_LABELS) as Array<[StatusCategory, string]>).map(([value, label]) => (
           <option key={value} value={value}>{label}</option>
         ))}
       </select>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7"
-        onClick={onDelete}
-        aria-label={`Delete ${status.name}`}
-      >
-        <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-      </Button>
+      {!readOnly && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={onDelete}
+          aria-label={`Delete ${status.name}`}
+        >
+          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+        </Button>
+      )}
     </div>
   )
 }
