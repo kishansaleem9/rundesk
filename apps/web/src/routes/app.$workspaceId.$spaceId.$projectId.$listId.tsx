@@ -223,6 +223,8 @@ function ListDetail() {
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
   const [sortBy, setSortBy] = useState<'created' | 'due' | 'priority'>('created')
   const [groupBy, setGroupBy] = useState<'status' | 'priority'>('status')
+  // Custom-field column visibility, persisted per saved view (Plan §4/§5).
+  const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [statusManagerOpen, setStatusManagerOpen] = useState(false)
@@ -367,6 +369,7 @@ function ListDetail() {
     setStatusFilter((cfg.statusFilter as 'all' | TaskStatus) ?? 'all')
     setSortBy((cfg.sortBy as 'created' | 'due' | 'priority') ?? 'created')
     setGroupBy((cfg.groupBy as 'status' | 'priority') ?? 'status')
+    setHiddenFields(new Set(Array.isArray(cfg.hiddenFields) ? (cfg.hiddenFields as string[]) : []))
   }
 
   useEffect(() => {
@@ -540,6 +543,36 @@ function ListDetail() {
               <option value="status">By status</option>
               <option value="priority">By priority</option>
             </WorkFilterSelect>
+            {activeView === 'table' && projectFields.length > 0 && (
+              <details className="relative">
+                <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
+                  Fields ({projectFields.length - hiddenFields.size}/{projectFields.length})
+                </summary>
+                <div className="absolute z-20 mt-1 w-52 rounded-md border border-border bg-card p-1.5 shadow-lg">
+                  {projectFields.map((f) => (
+                    <label
+                      key={f.id}
+                      className="flex items-center gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-muted/40 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!hiddenFields.has(f.id)}
+                        onChange={(e) =>
+                          setHiddenFields((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.delete(f.id)
+                            else next.add(f.id)
+                            return next
+                          })
+                        }
+                      />
+                      <span className="truncate">{f.name}</span>
+                    </label>
+                  ))}
+                  <p className="px-2 pt-1 text-[11px] text-muted-foreground">Save the view to persist.</p>
+                </div>
+              </details>
+            )}
             <WorkFilterSelect
               value={selectedSavedViewId}
               onChange={(v) => {
@@ -572,7 +605,7 @@ function ListDetail() {
                   body: JSON.stringify({
                     name,
                     type: activeView,
-                    config: { activeView, statusFilter, sortBy, groupBy },
+                    config: { activeView, statusFilter, sortBy, groupBy, hiddenFields: Array.from(hiddenFields) },
                   }),
                 })
                 setSaveAsName('')
@@ -590,7 +623,7 @@ function ListDetail() {
                   onClick={async () => {
                     await api(`/views/${selectedSavedViewId}`, {
                       method: 'PATCH',
-                      body: { config: { activeView, statusFilter, sortBy, groupBy } },
+                      body: { config: { activeView, statusFilter, sortBy, groupBy, hiddenFields: Array.from(hiddenFields) } },
                     })
                     await qc.invalidateQueries({ queryKey: ['list-views', listId] })
                   }}
@@ -730,7 +763,7 @@ function ListDetail() {
             tasks={visibleTasks}
             workspaceId={workspaceId}
             projectId={projectId}
-            projectFields={projectFields}
+            projectFields={projectFields.filter((f) => !hiddenFields.has(f.id))}
             workspaceMembers={workspaceMembers}
             onOpenTask={(id) => setSelectedTaskId(id)}
             onPatchTask={async (id, patch) => {
@@ -1345,7 +1378,9 @@ function TableView({
     { key: 'due', label: 'Due date', width: 'w-28' },
     { key: 'created', label: 'Created', width: 'w-24' },
   ] as const
-  const customColumns = projectFields.slice(0, 3)
+  // Visibility is controlled upstream by the view's Fields picker; render all
+  // that were passed in (Plan §4/§5 per-view custom-field visibility).
+  const customColumns = projectFields
   const selectedIds = Array.from(selected)
   const useTableVirtualization = tasks.length >= TABLE_VIRTUALIZE_THRESHOLD
   const tableRowVirtualizer = useVirtualizer({
