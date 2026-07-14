@@ -162,11 +162,16 @@ tests pass. Migrations are contiguous `0000..0039`.
   invite-people dialog (enables group conversations).
 - **Per-channel notifications + mute (§6.2/6.9)** — `notification_level`
   all/mentions/none (migration `0039`) respected on message dispatch; header control.
+- **Create task from message (§6.10)** — `POST /chat/messages/:id/create-task`
+  (title from first line, body → description) + a message-toolbar action.
 
 ### Time, Reports, Notifications, Search (Plan §8/9/10/11)
 - **Time-log edit/delete (§8.2)** — inline editable entries, owner-gated.
+- **Estimated vs actual (§8.6)** — progress bar (logged / estimate) with an
+  over-estimate indicator on the task time panel.
 - **Report export (§9.6)** — CSV (existing) + new Print/PDF on the reports page.
 - **Notification digest (§10.3)** — daily/weekly unread-notification email with an
   opt-in preference + hourly scheduler + settings UI.
 - **Advanced search filters (§11.2)** — type/status/priority/assignee/label/due-date
-  range, with command-palette chips.
+  range, with command-palette chips, plus **saved filter presets** (per-user,
+  migration `0040`).
