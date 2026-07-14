@@ -936,6 +936,8 @@ function SubtasksPanel({
   })
 
   const subtasks = probe.data ?? inline
+  const doneCount = subtasks.filter((s) => s.status === 'done').length
+  const donePct = subtasks.length ? Math.round((doneCount / subtasks.length) * 100) : 0
 
   const toggleDone = useMutation({
     mutationFn: ({ id, done }: { id: string; done: boolean }) =>
@@ -982,6 +984,20 @@ function SubtasksPanel({
 
   return (
     <div className="space-y-2">
+      {subtasks.length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">
+            {doneCount}/{subtasks.length}
+          </span>
+          <span>subtasks done</span>
+          <div className="ml-auto h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all"
+              style={{ width: `${donePct}%` }}
+            />
+          </div>
+        </div>
+      )}
       {subtasks.length === 0 ? (
         <EmptyState title="No subtasks yet" hint="Break this task into smaller pieces." />
       ) : (
