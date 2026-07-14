@@ -402,6 +402,25 @@ export class ChatService {
       .orderBy(asc(chatChannelMembers.joinedAt))
   }
 
+  /**
+   * Read state per channel member (Plan §6 read receipts). A member has "seen"
+   * a message when their lastReadAt (set on opening the channel) is at/after the
+   * message's createdAt — so the client can render "Seen by …" per message
+   * without a per-message receipts table.
+   */
+  async getChannelReceipts(channelId: string, userId: string) {
+    await this.assertChannelAccess(channelId, userId)
+    return this.db
+      .select({
+        userId: chatChannelMembers.userId,
+        displayName: users.displayName,
+        lastReadAt: chatChannelMembers.lastReadAt,
+      })
+      .from(chatChannelMembers)
+      .innerJoin(users, eq(users.id, chatChannelMembers.userId))
+      .where(eq(chatChannelMembers.channelId, channelId))
+  }
+
   async leaveChannel(channelId: string, userId: string) {
     await this.assertChannelAccess(channelId, userId)
     await this.db

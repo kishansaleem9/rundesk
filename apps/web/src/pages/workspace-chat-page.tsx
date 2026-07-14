@@ -192,6 +192,13 @@ export function ChatPage() {
     queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/chat/channels/${selectedId}/members`),
     enabled: !!selectedId && !selectedChannel?.isDm,
   })
+  const receiptsQuery = useQuery({
+    queryKey: ['chat-receipts', selectedId],
+    queryFn: () =>
+      api<Array<{ userId: string; displayName: string; lastReadAt: string | null }>>(`/chat/channels/${selectedId}/receipts`),
+    enabled: !!selectedId,
+    refetchInterval: 20000,
+  })
 
   const messagesQuery = useQuery({
     queryKey: ['chat-messages', selectedId],
@@ -208,6 +215,23 @@ export function ChatPage() {
     if (!messages.some((m) => m.id === deepLink.message)) return
     setHighlightedMessageId(deepLink.message)
   }, [deepLink.message, deepLink.channel, selectedId, messages])
+
+  // Read receipts (Plan §6): who has seen the latest message. A member has seen
+  // it when their lastReadAt is at/after that message's timestamp.
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+  const seenByNames = useMemo(() => {
+    if (!lastMessage) return [] as string[]
+    return (receiptsQuery.data ?? [])
+      .filter(
+        (r) =>
+          r.userId !== me?.id &&
+          r.userId !== lastMessage.authorId &&
+          r.lastReadAt &&
+          new Date(r.lastReadAt).getTime() >= new Date(lastMessage.createdAt).getTime(),
+      )
+      .map((r) => r.displayName)
+      .filter(Boolean)
+  }, [lastMessage, receiptsQuery.data, me?.id])
 
   const pinnedQuery = useQuery({
     queryKey: ['chat-pinned', selectedId],
@@ -981,6 +1005,15 @@ export function ChatPage() {
             </div>
           )}
         </div>
+
+        {seenByNames.length > 0 && (
+          <div className="px-5 pb-1 text-right text-[10px] text-muted-foreground">
+            Seen by{' '}
+            {seenByNames.length <= 3
+              ? seenByNames.join(', ')
+              : `${seenByNames.slice(0, 2).join(', ')} +${seenByNames.length - 2}`}
+          </div>
+        )}
 
         <ChatComposer
           channelLabel={channelLabel}
