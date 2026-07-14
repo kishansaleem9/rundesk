@@ -26,6 +26,7 @@ import {
   Settings,
   Sparkles,
   Target,
+  Users,
   Zap,
 } from 'lucide-react'
 import { api } from '../lib/api'
@@ -44,6 +45,18 @@ const ENTITY_ICON: Record<string, React.ElementType> = {
   project: Folder,
   list: ListIcon,
   channel: MessageSquare,
+  message: MessageSquare,
+  comment: MessageSquare,
+  user: Users,
+}
+const ENTITY_ORDER = ['task', 'doc', 'comment', 'channel', 'message', 'user']
+const ENTITY_LABEL: Record<string, string> = {
+  task: 'Tasks',
+  doc: 'Docs',
+  comment: 'Comments',
+  channel: 'Channels',
+  message: 'Messages',
+  user: 'People',
 }
 
 export function CommandPalette({
@@ -66,6 +79,9 @@ export function CommandPalette({
   const [statusFilter, setStatusFilter] = useState<'' | 'open' | 'in_progress' | 'closed'>('')
   const [priorityFilter, setPriorityFilter] = useState<'' | 'urgent' | 'high' | 'normal' | 'low'>('')
   const [labelFilter, setLabelFilter] = useState<string>('')
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('')
+  const [dueAfter, setDueAfter] = useState<string>('')
+  const [dueBefore, setDueBefore] = useState<string>('')
 
   // When the palette is opened with a query forwarded from the header search
   // input, seed the command query so results show immediately.
@@ -99,6 +115,9 @@ export function CommandPalette({
     setStatusFilter((f.statusCategory as any) ?? '')
     setPriorityFilter((f.priority as any) ?? '')
     setLabelFilter((f.labelId as string) ?? '')
+    setAssigneeFilter((f.assigneeId as string) ?? '')
+    setDueAfter((f.dueAfter as string) ?? '')
+    setDueBefore((f.dueBefore as string) ?? '')
   }
   const saveCurrent = useMutation({
     mutationFn: (name: string) => {
@@ -107,6 +126,9 @@ export function CommandPalette({
       if (statusFilter) filters.statusCategory = statusFilter
       if (priorityFilter) filters.priority = priorityFilter
       if (labelFilter) filters.labelId = labelFilter
+      if (assigneeFilter) filters.assigneeId = assigneeFilter
+      if (dueAfter) filters.dueAfter = dueAfter
+      if (dueBefore) filters.dueBefore = dueBefore
       return api(`/search/${workspaceId}/saved`, { method: 'POST', body: { name, query, filters } })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-searches', workspaceId] }),
@@ -116,16 +138,27 @@ export function CommandPalette({
     onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-searches', workspaceId] }),
   })
 
-  const hasFilter = typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== '' || labelFilter !== ''
+  const membersQuery = useQuery({
+    enabled: open && Boolean(workspaceId),
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
+  })
+
+  const hasFilter =
+    typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== '' || labelFilter !== '' ||
+    assigneeFilter !== '' || dueAfter !== '' || dueBefore !== ''
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter],
+    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter, assigneeFilter, dueAfter, dueBefore],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeFilter !== 'all') params.set('types', typeFilter)
       if (statusFilter) params.set('statusCategory', statusFilter)
       if (priorityFilter) params.set('priority', priorityFilter)
       if (labelFilter) params.set('labelId', labelFilter)
+      if (assigneeFilter) params.set('assigneeId', assigneeFilter)
+      if (dueAfter) params.set('dueAfter', dueAfter)
+      if (dueBefore) params.set('dueBefore', dueBefore)
       return api<SearchHit[]>(`/search/${workspaceId}?${params.toString()}`)
     },
   })
@@ -232,6 +265,39 @@ export function CommandPalette({
             </select>
           </FilterGroup>
         )}
+        {(membersQuery.data?.length ?? 0) > 0 && (
+          <FilterGroup label="Assignee">
+            <select
+              value={assigneeFilter}
+              onChange={(e) => setAssigneeFilter(e.target.value)}
+              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+            >
+              <option value="">Anyone</option>
+              {membersQuery.data!.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.displayName || m.email}
+                </option>
+              ))}
+            </select>
+          </FilterGroup>
+        )}
+        <FilterGroup label="Due">
+          <input
+            type="date"
+            value={dueAfter}
+            onChange={(e) => setDueAfter(e.target.value)}
+            title="Due after"
+            className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
+          />
+          <span className="text-[11px] text-muted-foreground/60">→</span>
+          <input
+            type="date"
+            value={dueBefore}
+            onChange={(e) => setDueBefore(e.target.value)}
+            title="Due before"
+            className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
+          />
+        </FilterGroup>
       </div>
       {(((savedQuery.data?.length ?? 0) > 0) || hasFilter || query.trim()) && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 -mt-1">
@@ -300,30 +366,32 @@ export function CommandPalette({
         {searchQuery.data && searchQuery.data.length > 0 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="Results">
-              {searchQuery.data.map((hit) => {
-                const Icon = ENTITY_ICON[hit.entityType] ?? FileText
-                return (
-                  <CommandItem
-                    key={hit.id}
-                    value={`${hit.entityType}-${hit.id}-${hit.title}`}
-                    onSelect={() => go(hit.url)}
-                  >
-                    <Icon className="text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm">{hit.title}</div>
-                      {hit.content && (
-                        <div className="truncate text-xs text-muted-foreground">{hit.content}</div>
-                      )}
-                    </div>
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {hit.entityType}
-                    </span>
-                    <ArrowRight className="text-muted-foreground" />
-                  </CommandItem>
-                )
-              })}
-            </CommandGroup>
+            {/* Results grouped by entity type (§11.1) */}
+            {ENTITY_ORDER.filter((t) => searchQuery.data!.some((h) => h.entityType === t)).map((type) => (
+              <CommandGroup key={type} heading={ENTITY_LABEL[type] ?? type}>
+                {searchQuery.data!
+                  .filter((h) => h.entityType === type)
+                  .map((hit) => {
+                    const Icon = ENTITY_ICON[hit.entityType] ?? FileText
+                    return (
+                      <CommandItem
+                        key={hit.id}
+                        value={`${hit.entityType}-${hit.id}-${hit.title}`}
+                        onSelect={() => go(hit.url)}
+                      >
+                        <Icon className="text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm">{hit.title}</div>
+                          {hit.content && (
+                            <div className="truncate text-xs text-muted-foreground">{hit.content}</div>
+                          )}
+                        </div>
+                        <ArrowRight className="text-muted-foreground" />
+                      </CommandItem>
+                    )
+                  })}
+              </CommandGroup>
+            ))}
           </>
         )}
 
