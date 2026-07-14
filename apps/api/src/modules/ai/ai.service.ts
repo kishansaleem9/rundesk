@@ -1,13 +1,32 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Inject } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
+import { and, eq, gte, lte, sql } from 'drizzle-orm'
+import { aiUsage } from '@rundesk/db'
+import type { Db } from '@rundesk/db'
+import { DB_TOKEN } from '../../common/database/database.module'
+
+export type AiCtx = { userId?: string; workspaceId?: string }
+
+// Rough per-million-token pricing (USD) for cost *estimation* in reports.
+const MODEL_PRICING: Record<string, { in: number; out: number }> = {
+  'claude-sonnet-4-6': { in: 3, out: 15 },
+  'claude-haiku-4-5': { in: 1, out: 5 },
+}
+function estimateCost(model: string, inTok: number, outTok: number): number {
+  const p = MODEL_PRICING[model] ?? { in: 1, out: 5 }
+  return (inTok / 1_000_000) * p.in + (outTok / 1_000_000) * p.out
+}
 
 @Injectable()
 export class AiService {
   private client: Anthropic | null = null
 
-  constructor(private config: ConfigService) {
+  constructor(
+    private config: ConfigService,
+    @Inject(DB_TOKEN) private db: Db,
+  ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
       this.client = new Anthropic({ apiKey })
@@ -21,8 +40,79 @@ export class AiService {
     return this.client
   }
 
+  /** Create a message and record its token usage (Plan §7.15). */
+  private async complete(
+    feature: string,
+    ctx: AiCtx,
+    params: Anthropic.Messages.MessageCreateParamsNonStreaming,
+  ) {
+    const response = await this.claude.messages.create(params)
+    void this.recordUsage(feature, params.model, ctx, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0)
+    return response
+  }
+
+  async recordUsage(feature: string, model: string, ctx: AiCtx, inputTokens: number, outputTokens: number) {
+    try {
+      await this.db.insert(aiUsage).values({
+        workspaceId: ctx.workspaceId ?? null,
+        userId: ctx.userId ?? null,
+        feature,
+        model,
+        inputTokens,
+        outputTokens,
+      })
+    } catch {
+      // Usage tracking must never break an AI response.
+    }
+  }
+
+  /** Aggregate AI usage + estimated cost, per user and per model (Plan §7.15). */
+  async usageSummary(opts: { workspaceId?: string; from?: Date; to?: Date } = {}) {
+    const filters = []
+    if (opts.workspaceId) filters.push(eq(aiUsage.workspaceId, opts.workspaceId))
+    if (opts.from) filters.push(gte(aiUsage.createdAt, opts.from))
+    if (opts.to) filters.push(lte(aiUsage.createdAt, opts.to))
+    const where = filters.length ? and(...filters) : undefined
+
+    const rows = await this.db
+      .select({
+        userId: aiUsage.userId,
+        model: aiUsage.model,
+        inTok: sql<number>`coalesce(sum(${aiUsage.inputTokens}),0)::int`,
+        outTok: sql<number>`coalesce(sum(${aiUsage.outputTokens}),0)::int`,
+        calls: sql<number>`count(*)::int`,
+      })
+      .from(aiUsage)
+      .where(where)
+      .groupBy(aiUsage.userId, aiUsage.model)
+
+    let totalCost = 0
+    let totalCalls = 0
+    let totalIn = 0
+    let totalOut = 0
+    const byUser: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }> = {}
+    const byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }> = {}
+    for (const r of rows) {
+      const cost = estimateCost(r.model, r.inTok, r.outTok)
+      totalCost += cost
+      totalCalls += r.calls
+      totalIn += r.inTok
+      totalOut += r.outTok
+      const u = (byUser[r.userId ?? 'unknown'] ??= { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 })
+      u.calls += r.calls; u.inputTokens += r.inTok; u.outputTokens += r.outTok; u.costUsd += cost
+      const m = (byModel[r.model] ??= { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 })
+      m.calls += r.calls; m.inputTokens += r.inTok; m.outputTokens += r.outTok; m.costUsd += cost
+    }
+    const round = (n: number) => Math.round(n * 10000) / 10000
+    return {
+      totals: { calls: totalCalls, inputTokens: totalIn, outputTokens: totalOut, costUsd: round(totalCost) },
+      byUser: Object.fromEntries(Object.entries(byUser).map(([k, v]) => [k, { ...v, costUsd: round(v.costUsd) }])),
+      byModel: Object.fromEntries(Object.entries(byModel).map(([k, v]) => [k, { ...v, costUsd: round(v.costUsd) }])),
+    }
+  }
+
   // ─── Task generation from a natural language prompt ───────────────────────
-  async generateTask(prompt: string, context?: string): Promise<{
+  async generateTask(prompt: string, context?: string, ctx: AiCtx = {}): Promise<{
     title: string
     description: string
     subtasks: string[]
@@ -41,7 +131,7 @@ Respond ONLY with valid JSON matching this exact shape:
 }
 ${context ? `\nWorkspace context:\n${context}` : ''}`
 
-    const response = await this.claude.messages.create({
+    const response = await this.complete('task.generate', ctx, {
       model: 'claude-haiku-4-5',
       max_tokens: 1024,
       system: systemPrompt,
@@ -103,8 +193,8 @@ Respond ONLY with valid JSON: { "priority": "urgent" | "high" | "normal" | "low"
   }
 
   // ─── Task / Project summary ───────────────────────────────────────────────
-  async summarize(content: string, type: 'task' | 'project' = 'task'): Promise<string> {
-    const response = await this.claude.messages.create({
+  async summarize(content: string, type: 'task' | 'project' = 'task', ctx: AiCtx = {}): Promise<string> {
+    const response = await this.complete('summarize', ctx, {
       model: 'claude-haiku-4-5',
       max_tokens: 512,
       system: `You are a concise summarizer for Rundesk.

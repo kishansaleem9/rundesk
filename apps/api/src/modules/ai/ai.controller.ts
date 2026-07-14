@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
+import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService } from './ai.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -17,13 +17,31 @@ export class AiController {
     return { available: this.ai.isAvailable() }
   }
 
+  @Get('usage')
+  @ApiOperation({ summary: 'AI usage + estimated cost per user / per model' })
+  usage(
+    @Query('workspaceId') workspaceId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const parse = (s?: string) => {
+      if (!s) return undefined
+      const d = new Date(s)
+      return Number.isNaN(d.getTime()) ? undefined : d
+    }
+    return this.ai.usageSummary({ workspaceId, from: parse(from), to: parse(to) })
+  }
+
   @Post('task/generate')
   @ApiOperation({ summary: 'Generate a task from a natural language prompt' })
-  async generateTask(@Body() body: { prompt: string; context?: string }) {
+  async generateTask(
+    @CurrentUser() user: any,
+    @Body() body: { prompt: string; context?: string; workspaceId?: string },
+  ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.generateTask(body.prompt, body.context)
+    return this.ai.generateTask(body.prompt, body.context, { userId: user.id, workspaceId: body.workspaceId })
   }
 
   @Post('task/priority')
@@ -46,11 +64,17 @@ export class AiController {
 
   @Post('summarize')
   @ApiOperation({ summary: 'Summarize a task or project' })
-  async summarize(@Body() body: { content: string; type?: 'task' | 'project' }) {
+  async summarize(
+    @CurrentUser() user: any,
+    @Body() body: { content: string; type?: 'task' | 'project'; workspaceId?: string },
+  ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    const summary = await this.ai.summarize(body.content, body.type ?? 'task')
+    const summary = await this.ai.summarize(body.content, body.type ?? 'task', {
+      userId: user.id,
+      workspaceId: body.workspaceId,
+    })
     return { summary }
   }
 
