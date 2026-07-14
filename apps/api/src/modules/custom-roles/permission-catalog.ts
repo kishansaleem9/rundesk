@@ -118,15 +118,16 @@ export const ROLE_RANK: Record<LegacyWorkspaceRole, number> = {
 // everything else, so a newly-added catalog permission defaults to admin-only
 // until it is explicitly granted to a lower tier here.
 const MEMBER_DELTA: readonly Permission[] = ['space.create', 'doc.publish', 'report.export', 'report.view.basic']
+// Managers manage their projects, teams, and time — but NOT workspace-level
+// infrastructure. `integrations.manage`, `webhook.manage`, and
+// `automation.manage` were demoted to workspace_admin (0037); existing managers
+// keep them via the grandfather custom role created in that migration.
 const MANAGER_DELTA: readonly Permission[] = [
   'members.invite',
   'project.create',
-  'integrations.manage',
   'project.delete',
   'list.delete',
   'task.delete.any',
-  'automation.manage',
-  'webhook.manage',
   'template.manage',
   'time.approval.manage',
 ]

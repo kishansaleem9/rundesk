@@ -260,6 +260,13 @@
       "when": 1900000033000,
       "tag": "0036_scoped_statuses",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1900000034000,
+      "tag": "0037_manager_grandfather",
+      "breakpoints": true
     }
   ]
 }
