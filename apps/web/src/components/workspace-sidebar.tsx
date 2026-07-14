@@ -8,6 +8,7 @@ import {
   Inbox,
   MessageCircle,
   FolderOpen,
+  Folder,
   Settings,
   Plus,
   Bot,
@@ -148,6 +149,7 @@ export function WorkspaceSidebar() {
   const { organizations, workspaces } = useAuthStore()
   const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>({})
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
   const [recentItems, setRecentItems] = useState<Array<{ label: string; path: string }>>([])
   const [favoriteItems, setFavoriteItems] = useState<Array<{ label: string; path: string }>>([])
 
@@ -166,13 +168,17 @@ export function WorkspaceSidebar() {
       const spaces = await api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`)
       const projectGroups = await Promise.all(
         spaces.map(async (space) => {
-          const projects = await api<Array<{ id: string; name: string }>>(`/projects/space/${space.id}`)
-          return Promise.all(
+          const [projects, folders] = await Promise.all([
+            api<Array<{ id: string; name: string; folderId?: string | null }>>(`/projects/space/${space.id}`),
+            api<Array<{ id: string; name: string }>>(`/spaces/${space.id}/folders`).catch(() => []),
+          ])
+          const projectsWithLists = await Promise.all(
             projects.map(async (project) => {
               const lists = await api<Array<{ id: string; name: string }>>(`/lists/project/${project.id}`)
               return { ...project, lists }
             }),
-          ).then((projectsWithLists) => ({ ...space, projects: projectsWithLists }))
+          )
+          return { ...space, projects: projectsWithLists, folders }
         }),
       )
       return projectGroups
@@ -540,7 +546,68 @@ export function WorkspaceSidebar() {
               <Clock3 className="h-3.5 w-3.5" />
               Recent items will appear as you navigate
             </div>
-            {spaceTreeQuery.data?.map((space) => (
+            {spaceTreeQuery.data?.map((space) => {
+              const renderProjectNode = (project: (typeof space.projects)[number]) => (
+                <div key={project.id} className="space-y-0.5">
+                  <button
+                    className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                    onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
+                  >
+                    <ChevronDown
+                      className={cn('h-3 w-3 transition-transform', expandedProjects[project.id] && 'rotate-180')}
+                    />
+                    <Link
+                      to="/app/$workspaceId/$spaceId/$projectId"
+                      params={{ workspaceId, spaceId: space.id, projectId: project.id }}
+                      className="truncate hover:text-foreground"
+                    >
+                      {project.name}
+                    </Link>
+                  </button>
+                  {expandedProjects[project.id] && (
+                    <div className="ml-5 space-y-0.5">
+                      {project.lists.map((list) => {
+                        const listPath = resolveRoutePath(
+                          '/app/$workspaceId/$spaceId/$projectId/$listId',
+                          {
+                            workspaceId,
+                            spaceId: space.id,
+                            projectId: project.id,
+                            listId: list.id,
+                          },
+                        )
+                        const listActive = pathsEqual(pathname, listPath)
+                        return (
+                        <Link
+                          key={list.id}
+                          to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                          params={{ workspaceId, spaceId: space.id, projectId: project.id, listId: list.id }}
+                          className={cn(
+                            'flex items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-accent/10',
+                            listActive
+                              ? 'text-foreground font-medium bg-accent/15'
+                              : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'h-1.5 w-1.5 rounded-full',
+                              listActive ? 'bg-brand-500' : 'bg-muted-foreground/50',
+                            )}
+                          />
+                          <span className="truncate">{list.name}</span>
+                        </Link>
+                        )
+                      })}
+                      {project.lists.length === 0 && (
+                        <div className="px-2 py-1 text-[11px] text-muted-foreground">No lists yet</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+              const ungrouped = space.projects.filter((p) => !p.folderId)
+              return (
               <div key={space.id} className="space-y-0.5">
                 <button
                   className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
@@ -558,72 +625,39 @@ export function WorkspaceSidebar() {
                 </button>
                 {expandedSpaces[space.id] && (
                   <div className="ml-6 space-y-0.5">
-                    {space.projects.map((project) => (
-                      <div key={project.id} className="space-y-0.5">
-                        <button
-                          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
-                          onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
-                        >
-                          <ChevronDown
-                            className={cn('h-3 w-3 transition-transform', expandedProjects[project.id] && 'rotate-180')}
-                          />
-                          <Link
-                            to="/app/$workspaceId/$spaceId/$projectId"
-                            params={{ workspaceId, spaceId: space.id, projectId: project.id }}
-                            className="truncate hover:text-foreground"
+                    {(space.folders ?? []).map((folder) => {
+                      const folderProjects = space.projects.filter((p) => p.folderId === folder.id)
+                      const open = expandedFolders[folder.id] ?? true
+                      return (
+                        <div key={folder.id} className="space-y-0.5">
+                          <button
+                            className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                            onClick={() => setExpandedFolders((prev) => ({ ...prev, [folder.id]: !(prev[folder.id] ?? true) }))}
                           >
-                            {project.name}
-                          </Link>
-                        </button>
-                        {expandedProjects[project.id] && (
-                          <div className="ml-5 space-y-0.5">
-                            {project.lists.map((list) => {
-                              const listPath = resolveRoutePath(
-                                '/app/$workspaceId/$spaceId/$projectId/$listId',
-                                {
-                                  workspaceId,
-                                  spaceId: space.id,
-                                  projectId: project.id,
-                                  listId: list.id,
-                                },
-                              )
-                              const listActive = pathsEqual(pathname, listPath)
-                              return (
-                              <Link
-                                key={list.id}
-                                to="/app/$workspaceId/$spaceId/$projectId/$listId"
-                                params={{ workspaceId, spaceId: space.id, projectId: project.id, listId: list.id }}
-                                className={cn(
-                                  'flex items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-accent/10',
-                                  listActive
-                                    ? 'text-foreground font-medium bg-accent/15'
-                                    : 'text-muted-foreground hover:text-foreground',
-                                )}
-                              >
-                                <span
-                                  className={cn(
-                                    'h-1.5 w-1.5 rounded-full',
-                                    listActive ? 'bg-brand-500' : 'bg-muted-foreground/50',
-                                  )}
-                                />
-                                <span className="truncate">{list.name}</span>
-                              </Link>
-                              )
-                            })}
-                            {project.lists.length === 0 && (
-                              <div className="px-2 py-1 text-[11px] text-muted-foreground">No lists yet</div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                            <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
+                            <Folder className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{folder.name}</span>
+                          </button>
+                          {open && (
+                            <div className="ml-4 space-y-0.5">
+                              {folderProjects.map((project) => renderProjectNode(project))}
+                              {folderProjects.length === 0 && (
+                                <div className="px-2 py-1 text-[11px] text-muted-foreground">Empty folder</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                    {ungrouped.map((project) => renderProjectNode(project))}
                     {space.projects.length === 0 && (
                       <div className="px-2 py-1 text-[11px] text-muted-foreground">No projects yet</div>
                     )}
                   </div>
                 )}
               </div>
-            ))}
+              )
+            })}
             {spaceTreeQuery.isLoading && <p className="px-2 py-1 text-xs text-muted-foreground">Loading spaces...</p>}
             {!spaceTreeQuery.isLoading && (spacesQuery.data?.length ?? 0) === 0 && (
               <p className="px-2 py-1 text-xs text-muted-foreground">No spaces yet. Create one from home.</p>
