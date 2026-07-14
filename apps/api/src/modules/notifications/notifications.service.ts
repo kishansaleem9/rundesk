@@ -20,6 +20,7 @@ type NotificationType =
   | 'chat_message'
   | 'doc_mentioned'
   | 'doc_commented'
+  | 'approval_needed'
 
 type NotificationEventKey =
   | 'mention'

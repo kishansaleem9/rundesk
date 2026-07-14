@@ -4,12 +4,14 @@ import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, work
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { NotificationsService } from '../notifications/notifications.service'
 
 @Injectable()
 export class TimeEntriesService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private readonly security: SecurityService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async canModerateApprovals(workspaceId: string, userId: string) {
@@ -36,6 +38,59 @@ export class TimeEntriesService {
       .where(eq(tasks.id, taskId))
       .limit(1)
     if (row?.role === 'guest') throw new ForbiddenException('Guests cannot track time')
+  }
+
+  /** The owning project's billable default for a task (§8.3). */
+  private async projectDefaultBillable(taskId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ def: projects.defaultBillable })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    return row?.def ?? false
+  }
+
+  /**
+   * Member submits their weekly timesheet for approval (§8.7): marks the week
+   * 'submitted' and notifies workspace managers/admins (§10.1 approval_needed).
+   */
+  async submitTimesheet(workspaceId: string, userId: string, weekStart: string) {
+    const normalizedWeekStart = this.normalizeWeekStart(weekStart)
+    const [row] = await this.db
+      .insert(timeApprovals)
+      .values({ workspaceId, userId, weekStart: normalizedWeekStart, status: 'submitted' })
+      .onConflictDoUpdate({
+        target: [timeApprovals.workspaceId, timeApprovals.userId, timeApprovals.weekStart],
+        set: { status: 'submitted', rejectionReason: null, approvedById: null, approvedAt: null, updatedAt: new Date() },
+      })
+      .returning()
+
+    // Notify managers/admins that an approval is needed.
+    const [submitter] = await this.db.select({ name: users.displayName }).from(users).where(eq(users.id, userId)).limit(1)
+    const managers = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          inArray(workspaceMembers.role, ['workspace_admin', 'manager', 'super_admin']),
+        ),
+      )
+    for (const m of managers) {
+      if (m.userId === userId) continue
+      void this.notifications.create({
+        userId: m.userId,
+        workspaceId,
+        actorId: userId,
+        type: 'approval_needed',
+        title: `Timesheet awaiting approval`,
+        body: `${submitter?.name ?? 'A teammate'} submitted their timesheet for the week of ${normalizedWeekStart}.`,
+        target: { entityType: 'timesheet', entityId: `${userId}:${normalizedWeekStart}`, url: `/app/${workspaceId}/time/approvals` },
+      })
+    }
+    return row
   }
 
   private normalizeWeekStart(weekStart: string): string {
@@ -301,7 +356,7 @@ export class TimeEntriesService {
         taskId,
         startedAt: new Date(),
         description,
-        isBillable: isBillable ?? false,
+        isBillable: isBillable ?? (await this.projectDefaultBillable(taskId)),
       })
       .returning()
     return row
@@ -342,7 +397,7 @@ export class TimeEntriesService {
         endedAt,
         durationSec: data.durationSec,
         description: data.description,
-        isBillable: data.isBillable ?? false,
+        isBillable: data.isBillable ?? (await this.projectDefaultBillable(data.taskId)),
       })
       .returning()
     return row

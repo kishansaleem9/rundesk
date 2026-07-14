@@ -81,6 +81,7 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'chat_message',
   'doc_mentioned',
   'doc_commented',
+  'approval_needed',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

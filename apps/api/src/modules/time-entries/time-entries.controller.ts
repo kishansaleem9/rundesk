@@ -68,6 +68,16 @@ export class WorkspaceTimeEntriesController {
     }))
   }
 
+  @Post('workspaces/:workspaceId/time-approvals/submit')
+  @UseGuards(WorkspaceMemberGuard)
+  submitTimesheet(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Body() body: { weekStart: string },
+  ) {
+    return this.time.submitTimesheet(workspaceId, actor.id, body.weekStart)
+  }
+
   @Post('workspaces/:workspaceId/time-approvals/:userId/:weekStart/approve')
   @UseGuards(WorkspaceMemberGuard, WorkspaceAdminGuard)
   approveTimesheet(
