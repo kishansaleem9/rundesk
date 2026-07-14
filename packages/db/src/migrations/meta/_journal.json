@@ -253,6 +253,13 @@
       "when": 1900000032000,
       "tag": "0035_container_membership",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1900000033000,
+      "tag": "0036_scoped_statuses",
+      "breakpoints": true
     }
   ]
 }
