@@ -11,8 +11,8 @@ export class ProjectsController {
   constructor(private projectsService: ProjectsService) {}
 
   @Get('space/:spaceId')
-  async getProjectsBySpace(@Param('spaceId') spaceId: string) {
-    return this.projectsService.getProjectsBySpace(spaceId)
+  async getProjectsBySpace(@Param('spaceId') spaceId: string, @CurrentUser() user: any) {
+    return this.projectsService.getProjectsBySpace(spaceId, user.id)
   }
 
   @Get(':projectId')

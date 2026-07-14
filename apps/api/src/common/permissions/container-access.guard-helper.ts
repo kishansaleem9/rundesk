@@ -1,6 +1,18 @@
 import { and, eq } from 'drizzle-orm'
-import { spaceMembers, projectMembers } from '@rundesk/db'
+import { spaceMembers, projectMembers, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
+
+const WS_MANAGER_ROLE_SET = ['workspace_admin', 'manager', 'super_admin']
+
+/** True if the user holds a manager-tier role in the workspace. */
+export async function isWorkspaceManager(db: Db, workspaceId: string, userId: string): Promise<boolean> {
+  const [wm] = await db
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    .limit(1)
+  return !!wm && WS_MANAGER_ROLE_SET.includes(wm.role as string)
+}
 
 /**
  * Visibility context for the container chain owning a resource.
@@ -13,8 +25,6 @@ export type ContainerAccessContext = {
   projectId?: string | null
   projectVisibility?: string | null
 }
-
-const WS_MANAGER_ROLES = ['workspace_admin', 'manager', 'super_admin']
 
 /**
  * Decide whether `actor` may access a resource inside the given container
@@ -32,7 +42,7 @@ export async function checkContainerAccess(
   ctx: ContainerAccessContext,
   actor: { userId: string; workspaceRole?: string },
 ): Promise<boolean> {
-  if (actor.workspaceRole && WS_MANAGER_ROLES.includes(actor.workspaceRole)) return true
+  if (actor.workspaceRole && WS_MANAGER_ROLE_SET.includes(actor.workspaceRole)) return true
 
   const spacePrivate = ctx.spaceVisibility === 'private'
   if (spacePrivate) {

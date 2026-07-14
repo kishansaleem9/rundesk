@@ -11,8 +11,8 @@ export class SpacesController {
   constructor(private spacesService: SpacesService) {}
 
   @Get('workspace/:workspaceId')
-  async getSpacesByWorkspace(@Param('workspaceId') workspaceId: string) {
-    return this.spacesService.getSpacesByWorkspace(workspaceId)
+  async getSpacesByWorkspace(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any) {
+    return this.spacesService.getSpacesByWorkspace(workspaceId, user.id)
   }
 
   @Get(':spaceId')

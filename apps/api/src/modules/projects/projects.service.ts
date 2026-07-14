@@ -1,9 +1,10 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { eq, and } from 'drizzle-orm'
-import { projects, spaces, projectMembers } from '@rundesk/db'
+import { eq, and, or, inArray, sql } from 'drizzle-orm'
+import { projects, spaces, projectMembers, spaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 
 @Injectable()
 export class ProjectsService {
@@ -38,11 +39,40 @@ export class ProjectsService {
     return project
   }
 
-  async getProjectsBySpace(spaceId: string) {
+  async getProjectsBySpace(spaceId: string, actorId?: string) {
+    const base = and(eq(projects.spaceId, spaceId), eq(projects.isArchived, false))
+    if (!actorId || (await this.canSeeAllProjects(spaceId, actorId))) {
+      return this.db.select().from(projects).where(base)
+    }
+    // Otherwise: non-private projects (public/inherit) plus the private ones the
+    // caller is a member of.
     return this.db
       .select()
       .from(projects)
-      .where(and(eq(projects.spaceId, spaceId), eq(projects.isArchived, false)))
+      .where(
+        and(
+          base,
+          or(
+            sql`${projects.visibility} is distinct from 'private'`,
+            inArray(
+              projects.id,
+              this.db.select({ id: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, actorId)),
+            ),
+          ),
+        ),
+      )
+  }
+
+  /** Managers and admins of the owning space see every project in it. */
+  private async canSeeAllProjects(spaceId: string, actorId: string): Promise<boolean> {
+    const [sp] = await this.db.select({ workspaceId: spaces.workspaceId }).from(spaces).where(eq(spaces.id, spaceId)).limit(1)
+    if (sp && (await isWorkspaceManager(this.db, sp.workspaceId, actorId))) return true
+    const [sm] = await this.db
+      .select({ role: spaceMembers.role })
+      .from(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, actorId)))
+      .limit(1)
+    return sm?.role === 'admin'
   }
 
   async getProject(projectId: string) {

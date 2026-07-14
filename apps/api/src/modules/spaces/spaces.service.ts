@@ -1,9 +1,10 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, or, ne, inArray } from 'drizzle-orm'
 import { spaces, spaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 
 @Injectable()
 export class SpacesService {
@@ -38,11 +39,28 @@ export class SpacesService {
     return space
   }
 
-  async getSpacesByWorkspace(workspaceId: string) {
+  async getSpacesByWorkspace(workspaceId: string, actorId?: string) {
+    const base = and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false))
+    // Managers (and internal callers with no actor) see every space.
+    if (!actorId || (await isWorkspaceManager(this.db, workspaceId, actorId))) {
+      return this.db.select().from(spaces).where(base)
+    }
+    // Everyone else sees public spaces plus the private ones they belong to.
     return this.db
       .select()
       .from(spaces)
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false)))
+      .where(
+        and(
+          base,
+          or(
+            ne(spaces.visibility, 'private'),
+            inArray(
+              spaces.id,
+              this.db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, actorId)),
+            ),
+          ),
+        ),
+      )
   }
 
   async getSpace(spaceId: string) {
