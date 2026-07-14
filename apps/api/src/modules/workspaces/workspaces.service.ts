@@ -107,6 +107,19 @@ export class WorkspacesService {
       userId: user.id,
       role: role as any,
     })
+    // Keep the org directory consistent: any workspace member is also an org
+    // member — the invariant the single-org tenant model relies on.
+    const [ws] = await this.db
+      .select({ organizationId: workspaces.organizationId })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    if (ws) {
+      await this.db
+        .insert(organizationMembers)
+        .values({ organizationId: ws.organizationId, userId: user.id, role: 'member' })
+        .onConflictDoNothing()
+    }
     await this.security.logAuditEvent({
       workspaceId,
       actorId: actor?.id,
