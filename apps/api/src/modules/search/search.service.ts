@@ -2,7 +2,10 @@ import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, desc, inArray, gte, lte, type SQL } from 'drizzle-orm'
-import { tasks, taskAssignees, taskLabelAssignments, docs, lists, projects, spaces, savedSearches } from '@rundesk/db'
+import {
+  tasks, taskAssignees, taskLabelAssignments, taskComments, docs, lists, projects, spaces,
+  savedSearches, users, workspaceMembers, chatChannels, chatMessages,
+} from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
@@ -168,13 +171,16 @@ export class SearchService implements OnModuleInit {
         filterExpr.push(`entityType = "${filters.types[0]}"`)
       }
       const res = await this.index.search(trimmed, { filter: filterExpr, limit })
-      return res.hits.map((h) => ({
+      const meiliHits = res.hits.map((h) => ({
         id: h.id,
         entityType: h.entityType,
         title: h.title,
         content: (h.content ?? '').slice(0, 200),
         url: h.url,
       }))
+      // Meili only indexes tasks/docs — add the other entity types from Postgres.
+      const extras = filters.types ? [] : await this.searchExtras(workspaceId, `%${trimmed}%`, limit)
+      return [...meiliHits, ...extras]
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
@@ -238,6 +244,9 @@ export class SearchService implements OnModuleInit {
           .limit(limit)
       : []
 
+    // Extras only for a general text search (no type/task-specific filter).
+    const extras = like && !filters.types ? await this.searchExtras(workspaceId, like, limit) : []
+
     return [
       ...taskHits.map((t) => ({
         id: `task-${t.id}`,
@@ -252,6 +261,59 @@ export class SearchService implements OnModuleInit {
         title: d.title,
         content: d.plaintext.slice(0, 200),
         url: `/app/${workspaceId}/docs?doc=${d.id}`,
+      })),
+      ...extras,
+    ]
+  }
+
+  /** Search users, comments, channels, and messages (Plan §11.1). */
+  private async searchExtras(workspaceId: string, like: string, limit: number) {
+    const [userHits, commentHits, channelHits, messageHits] = await Promise.all([
+      this.db
+        .select({ id: users.id, displayName: users.displayName, email: users.email })
+        .from(users)
+        .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), or(ilike(users.displayName, like), ilike(users.email, like))))
+        .limit(limit),
+      this.db
+        .select({ id: taskComments.id, body: taskComments.body, taskId: tasks.id, taskTitle: tasks.title, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id })
+        .from(taskComments)
+        .innerJoin(tasks, eq(tasks.id, taskComments.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), ilike(taskComments.body, like)))
+        .orderBy(desc(taskComments.createdAt))
+        .limit(limit),
+      this.db
+        .select({ id: chatChannels.id, name: chatChannels.name })
+        .from(chatChannels)
+        .where(and(eq(chatChannels.workspaceId, workspaceId), ilike(chatChannels.name, like)))
+        .limit(limit),
+      this.db
+        .select({ id: chatMessages.id, body: chatMessages.body, channelId: chatMessages.channelId })
+        .from(chatMessages)
+        .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+        .where(and(eq(chatChannels.workspaceId, workspaceId), ilike(chatMessages.body, like)))
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(limit),
+    ])
+    return [
+      ...userHits.map((u) => ({
+        id: `user-${u.id}`, entityType: 'user', title: u.displayName || u.email, content: u.email,
+        url: `/app/${workspaceId}/settings`,
+      })),
+      ...commentHits.map((c) => ({
+        id: `comment-${c.id}`, entityType: 'comment', title: `Comment on “${c.taskTitle}”`, content: c.body.slice(0, 200),
+        url: `/app/${workspaceId}/${c.spaceId}/${c.projectId}/${c.listId}?task=${c.taskId}`,
+      })),
+      ...channelHits.map((c) => ({
+        id: `channel-${c.id}`, entityType: 'channel', title: `#${c.name}`, content: '',
+        url: `/app/${workspaceId}/chat?channel=${c.id}`,
+      })),
+      ...messageHits.map((m) => ({
+        id: `message-${m.id}`, entityType: 'message', title: 'Chat message', content: m.body.slice(0, 200),
+        url: `/app/${workspaceId}/chat?channel=${m.channelId}&message=${m.id}`,
       })),
     ]
   }
