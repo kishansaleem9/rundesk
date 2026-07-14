@@ -11,7 +11,7 @@ import {
   CommandSeparator,
   cn,
 } from '@rundesk/ui'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowRight,
   CheckCircle2,
@@ -74,6 +74,7 @@ export function CommandPalette({
   }, [open, initialQuery])
   const navigate = useNavigate()
   const location = useLocation()
+  const qc = useQueryClient()
   const workspaceId = useMemo(
     () => getWorkspaceIdFromPath(location.pathname),
     [location.pathname],
@@ -83,6 +84,36 @@ export function CommandPalette({
     enabled: open && Boolean(workspaceId),
     queryKey: ['labels', workspaceId],
     queryFn: () => api<Array<{ id: string; name: string; color: string }>>(`/workspaces/${workspaceId}/labels`),
+  })
+
+  type SavedSearch = { id: string; name: string; query: string | null; filters: Record<string, unknown> }
+  const savedQuery = useQuery({
+    enabled: open && Boolean(workspaceId),
+    queryKey: ['saved-searches', workspaceId],
+    queryFn: () => api<SavedSearch[]>(`/search/${workspaceId}/saved`),
+  })
+  const applyPreset = (s: SavedSearch) => {
+    const f = s.filters ?? {}
+    setQuery(s.query ?? '')
+    setTypeFilter((f.types as string[])?.length === 1 ? ((f.types as string[])[0] as 'task' | 'doc') : 'all')
+    setStatusFilter((f.statusCategory as any) ?? '')
+    setPriorityFilter((f.priority as any) ?? '')
+    setLabelFilter((f.labelId as string) ?? '')
+  }
+  const saveCurrent = useMutation({
+    mutationFn: (name: string) => {
+      const filters: Record<string, unknown> = {}
+      if (typeFilter !== 'all') filters.types = [typeFilter]
+      if (statusFilter) filters.statusCategory = statusFilter
+      if (priorityFilter) filters.priority = priorityFilter
+      if (labelFilter) filters.labelId = labelFilter
+      return api(`/search/${workspaceId}/saved`, { method: 'POST', body: { name, query, filters } })
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-searches', workspaceId] }),
+  })
+  const deletePreset = useMutation({
+    mutationFn: (id: string) => api(`/search/${workspaceId}/saved/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-searches', workspaceId] }),
   })
 
   const hasFilter = typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== '' || labelFilter !== ''
@@ -202,6 +233,45 @@ export function CommandPalette({
           </FilterGroup>
         )}
       </div>
+      {(((savedQuery.data?.length ?? 0) > 0) || hasFilter || query.trim()) && (
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 -mt-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 mr-0.5">
+            Presets
+          </span>
+          {savedQuery.data?.map((s) => (
+            <span key={s.id} className="inline-flex items-center rounded-full border border-border/70 text-[11px]">
+              <button
+                type="button"
+                onClick={() => applyPreset(s)}
+                className="pl-2 pr-1 py-0.5 text-muted-foreground hover:text-foreground"
+              >
+                {s.name}
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete ${s.name}`}
+                onClick={() => deletePreset.mutate(s.id)}
+                className="px-1 py-0.5 text-muted-foreground/60 hover:text-red-500"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          {(hasFilter || query.trim()) && (
+            <button
+              type="button"
+              disabled={saveCurrent.isPending}
+              onClick={() => {
+                const name = window.prompt('Save this search as…')?.trim()
+                if (name) saveCurrent.mutate(name)
+              }}
+              className="rounded-full border border-dashed border-border/70 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/10"
+            >
+              + Save current
+            </button>
+          )}
+        </div>
+      )}
       <CommandList>
         <CommandEmpty>
           {query.trim() ? (
