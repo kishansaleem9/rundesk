@@ -63,6 +63,20 @@ export class AuthController {
     return this.authService.resetPassword(body.token, body.password)
   }
 
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify a user email address with a token' })
+  async verifyEmail(@Body() body: { token: string }) {
+    return this.authService.verifyEmail(body.token)
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resend the email-verification link' })
+  async resendVerification(@Body() body: { email: string }) {
+    return this.authService.resendVerification(body.email)
+  }
+
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()

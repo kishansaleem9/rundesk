@@ -125,6 +125,35 @@ export class EmailService {
     })
   }
 
+  /** Send an email-verification link */
+  async sendVerificationEmail(opts: {
+    to: string
+    recipientName?: string
+    verifyUrl: string
+    expiresAt: Date
+  }) {
+    const expiry = opts.expiresAt.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    })
+
+    return this.send({
+      to: opts.to,
+      subject: '[Rundesk] Verify your email',
+      html: this.layout({
+        heading: 'Verify your email',
+        body: `
+          <p>Hi ${this.esc(opts.recipientName || 'there')},</p>
+          <p>Confirm your email address to finish setting up your Rundesk account.</p>
+          <p style="font-size: 13px; color: #6b7280;">This link will expire on ${expiry}.</p>
+        `,
+        ctaUrl: opts.verifyUrl,
+        ctaLabel: 'Verify email',
+      }),
+    })
+  }
+
   /** Send a task-assigned email */
   async sendTaskAssigned(opts: {
     to: string

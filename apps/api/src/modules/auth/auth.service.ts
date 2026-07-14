@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config'
 import { randomUUID, randomBytes } from 'node:crypto'
 import { and, eq, isNull, desc } from 'drizzle-orm'
 import { compareSync, hashSync } from 'bcryptjs'
-import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets } from '@rundesk/db'
+import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { UsersService } from '../users/users.service'
@@ -318,7 +318,59 @@ export class AuthService {
       this.logger.log(`[DEV] Invitation for ${inv.email}: ${inv.claimUrl}`)
     }
 
+    // Send an email-verification link (best-effort; never blocks signup).
+    await this.issueEmailVerification(result.user.id, result.user.email, result.user.displayName)
+
     return this.login(result.user, meta)
+  }
+
+  /** Create a verification token and email the confirmation link. */
+  private async issueEmailVerification(userId: string, email: string, displayName?: string) {
+    try {
+      const token = randomBytes(32).toString('base64url')
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      await this.db.insert(emailVerifications).values({ userId, token, expiresAt })
+      const appUrl = this.config.get<string>('APP_URL', 'http://localhost:5173')
+      await this.emailService.sendVerificationEmail({
+        to: email,
+        recipientName: displayName,
+        verifyUrl: `${appUrl}/verify-email?token=${token}`,
+        expiresAt,
+      })
+    } catch (err) {
+      this.logger.error(
+        `Failed to issue email verification for ${email}: ${(err as Error).message}`,
+      )
+    }
+  }
+
+  /** Confirm an email with a token, flipping users.emailVerified to true. */
+  async verifyEmail(token: string) {
+    if (!token) throw new BadRequestException('Missing verification token')
+    const [row] = await this.db
+      .select()
+      .from(emailVerifications)
+      .where(and(eq(emailVerifications.token, token), isNull(emailVerifications.usedAt)))
+      .limit(1)
+    if (!row || row.expiresAt < new Date()) {
+      throw new BadRequestException('Verification link is invalid or expired')
+    }
+    await this.db.update(users).set({ emailVerified: true }).where(eq(users.id, row.userId))
+    await this.db
+      .update(emailVerifications)
+      .set({ usedAt: new Date() })
+      .where(eq(emailVerifications.id, row.id))
+    return { ok: true }
+  }
+
+  /** Re-send a verification link. Silent about whether the account exists. */
+  async resendVerification(email: string) {
+    const normalized = email.toLowerCase().trim()
+    const user = await this.usersService.findByEmail(normalized)
+    if (user && !user.emailVerified) {
+      await this.issueEmailVerification(user.id, user.email, user.displayName)
+    }
+    return { ok: true }
   }
 
   /** @deprecated Use signUp for new accounts */
