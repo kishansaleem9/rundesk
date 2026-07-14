@@ -309,6 +309,13 @@
       "when": 1900000040000,
       "tag": "0043_comment_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1900000041000,
+      "tag": "0044_task_assignee_unique",
+      "breakpoints": true
     }
   ]
 }

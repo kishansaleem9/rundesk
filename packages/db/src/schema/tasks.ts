@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, index, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, integer, index, uniqueIndex, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { lists } from './lists'
 import { users } from './users'
@@ -57,7 +57,11 @@ export const taskAssignees = pgTable('task_assignees', {
   taskId: uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   assignedAt: timestamp('assigned_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => ({
+  // A user is assigned to a task at most once; makes addAssignee's
+  // onConflictDoNothing actually dedupe (Plan §5 bulk-assign).
+  taskUserUnique: uniqueIndex('task_assignees_task_user_unique').on(t.taskId, t.userId),
+}))
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   list:       one(lists, { fields: [tasks.listId], references: [lists.id] }),

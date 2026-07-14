@@ -223,7 +223,7 @@ function ListDetail() {
   const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table'>('list')
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
   const [sortBy, setSortBy] = useState<'created' | 'due' | 'priority'>('created')
-  const [groupBy, setGroupBy] = useState<'status' | 'priority'>('status')
+  const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
   // Board: collapsed columns (ephemeral) + per-status WIP limits (persisted).
@@ -372,7 +372,7 @@ function ListDetail() {
     setActiveView(view.type === 'gantt' ? 'list' : view.type)
     setStatusFilter((cfg.statusFilter as 'all' | TaskStatus) ?? 'all')
     setSortBy((cfg.sortBy as 'created' | 'due' | 'priority') ?? 'created')
-    setGroupBy((cfg.groupBy as 'status' | 'priority') ?? 'status')
+    setGroupBy((cfg.groupBy as 'status' | 'priority' | 'assignee') ?? 'status')
     setHiddenFields(new Set(Array.isArray(cfg.hiddenFields) ? (cfg.hiddenFields as string[]) : []))
     setWipLimits(cfg.wipLimits && typeof cfg.wipLimits === 'object' ? (cfg.wipLimits as Record<string, number>) : {})
   }
@@ -547,6 +547,7 @@ function ListDetail() {
             <WorkFilterSelect value={groupBy} onChange={(v) => setGroupBy(v as typeof groupBy)}>
               <option value="status">By status</option>
               <option value="priority">By priority</option>
+              <option value="assignee">By assignee</option>
             </WorkFilterSelect>
             {activeView === 'table' && projectFields.length > 0 && (
               <details className="relative">
@@ -860,6 +861,7 @@ function ListDetail() {
       <BulkActionBar
         selectedIds={selectedTaskIds}
         onClear={() => setSelectedTaskIds(new Set())}
+        workspaceMembers={workspaceMembers}
         onApplied={async () => {
           setSelectedTaskIds(new Set())
           await refetch()
@@ -883,7 +885,7 @@ function GroupedListView({
   onAddTask,
 }: {
   tasks: TaskItem[]
-  groupBy: 'status' | 'priority'
+  groupBy: 'status' | 'priority' | 'assignee'
   selectedTaskIds: Set<string>
   onToggleSelect: (taskId: string, additive: boolean) => void
   onOpenTask: (taskId: string) => void
@@ -912,6 +914,63 @@ function GroupedListView({
     for (const s of ordered) initial[s.key] = s.category === 'closed'
     return initial
   })
+
+  if (groupBy === 'assignee') {
+    // Group by each task's first assignee; a task with no assignee lands in
+    // "Unassigned". Names come from the task's own assignee payload.
+    const groups = new Map<string, { name: string; tasks: TaskItem[] }>()
+    for (const task of tasks) {
+      const first = task.assignees?.[0]
+      const gid = first?.userId ?? '__unassigned__'
+      const name = first?.user?.displayName ?? 'Unassigned'
+      if (!groups.has(gid)) groups.set(gid, { name, tasks: [] })
+      groups.get(gid)!.tasks.push(task)
+    }
+    const ordered = [...groups.entries()].sort((a, b) => {
+      if (a[0] === '__unassigned__') return 1
+      if (b[0] === '__unassigned__') return -1
+      return a[1].name.localeCompare(b[1].name)
+    })
+    return (
+      <div className="space-y-4">
+        {ordered.map(([gid, group]) => (
+          <Card key={gid} className="p-3">
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+              {gid === '__unassigned__' ? (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground">?</span>
+              ) : (
+                <PersonAvatar name={group.name} size="xs" />
+              )}
+              {group.name} ({group.tasks.length})
+            </div>
+            <div className="space-y-2">
+              {group.tasks.length >= VIRTUALIZE_THRESHOLD ? (
+                <VirtualizedTaskRows
+                  virtualKey={`assignee:${gid}`}
+                  tasks={group.tasks}
+                  selectedTaskIds={selectedTaskIds}
+                  onToggleSelect={onToggleSelect}
+                  onOpenTask={onOpenTask}
+                  onToggleDone={onToggleDone}
+                />
+              ) : (
+                group.tasks.map((task) => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    selected={selectedTaskIds.has(task.id)}
+                    onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
+                    onOpenTask={onOpenTask}
+                    onToggleDone={onToggleDone}
+                  />
+                ))
+              )}
+            </div>
+          </Card>
+        ))}
+      </div>
+    )
+  }
 
   if (groupBy === 'priority') {
     const priorityGroups: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
@@ -2175,10 +2234,12 @@ function BulkActionBar({
   selectedIds,
   onClear,
   onApplied,
+  workspaceMembers = [],
 }: {
   selectedIds: Set<string>
   onClear: () => void
   onApplied: () => Promise<void> | void
+  workspaceMembers?: WorkspaceMember[]
 }) {
   const [busy, setBusy] = useState(false)
   const count = selectedIds.size
@@ -2254,6 +2315,27 @@ function BulkActionBar({
             </option>
           ))}
         </select>
+
+        {workspaceMembers.length > 0 && (
+          <select
+            disabled={busy}
+            value=""
+            onChange={(e) => {
+              if (!e.target.value) return
+              void apply({ assigneeIdsAdd: [e.target.value] })
+              e.target.value = ''
+            }}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs max-w-[9rem]"
+            aria-label="Assign to"
+          >
+            <option value="">Assign…</option>
+            {workspaceMembers.map((m) => (
+              <option key={m.userId} value={m.userId}>
+                {m.displayName || m.email}
+              </option>
+            ))}
+          </select>
+        )}
 
         <Button
           size="sm"
