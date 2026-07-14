@@ -33,7 +33,7 @@ type TaskStatus =
   | 'cancelled'
 
 type UserLite = { id: string; displayName?: string | null; email?: string | null }
-type WorkspaceMemberLite = { userId: string; displayName: string; email: string }
+type WorkspaceMemberLite = { userId: string; displayName: string; email: string; role?: string }
 type MentionTaskLite = { id: string; title: string; projectName?: string; listName?: string }
 type MentionDocLite = { id: string; title: string; updatedAt?: string }
 
@@ -74,6 +74,9 @@ type Attachment = {
   createdAt?: string | null
   url?: string | null
 }
+
+/** Keep in sync with MAX_ATTACHMENT_BYTES in apps/api tasks.service.ts (Plan §4). */
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 
 type TaskDetail = {
   id: string
@@ -2023,11 +2026,15 @@ function AttachmentsPanel({
   const uploadAttachment = useMutation({
     mutationFn: async () => {
       if (!selectedFile) return
+      if (selectedFile.size > MAX_ATTACHMENT_BYTES) {
+        throw new Error(`File is too large. The limit is ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`)
+      }
       const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
         method: 'POST',
         body: {
           fileName: selectedFile.name,
           contentType: selectedFile.type || 'application/octet-stream',
+          sizeBytes: selectedFile.size,
         },
       })
       const putRes = await fetch(presign.uploadUrl, {
@@ -2128,9 +2135,20 @@ function AttachmentsPanel({
               key={a.id}
               className="flex items-center gap-3 rounded-md border border-border p-3 hover:bg-muted/40 transition-colors"
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded bg-brand-100 text-foreground text-xs font-medium">
-                {(a.mimeType ?? a.fileName.split('.').pop() ?? 'FILE').slice(0, 4).toUpperCase()}
-              </div>
+              {a.mimeType?.startsWith('image/') && a.url ? (
+                <a href={a.url} target="_blank" rel="noreferrer" className="shrink-0">
+                  <img
+                    src={a.url}
+                    alt={a.fileName}
+                    loading="lazy"
+                    className="h-10 w-10 rounded object-cover border border-border"
+                  />
+                </a>
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center rounded bg-brand-100 text-foreground text-xs font-medium">
+                  {(a.mimeType ?? a.fileName.split('.').pop() ?? 'FILE').slice(0, 4).toUpperCase()}
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium truncate">{a.fileName}</div>
                 <div className="text-xs text-muted-foreground">
@@ -2166,6 +2184,7 @@ function AttachmentsPanel({
 
 function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: string }) {
   const qc = useQueryClient()
+  const currentUser = useAuthStore((s) => s.user)
   const [text, setText] = useState('')
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
@@ -2203,6 +2222,14 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
     () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
     [membersQuery.data],
   )
+  // A workspace admin/manager (or super_admin) may delete anyone's comment (Plan §4).
+  const canModerate = useMemo(() => {
+    if (currentUser?.role === 'super_admin') return true
+    const mine = (membersQuery.data ?? []).find((m) => m.userId === currentUser?.id)
+    return mine?.role === 'workspace_admin' || mine?.role === 'manager' || mine?.role === 'super_admin'
+  }, [membersQuery.data, currentUser?.id, currentUser?.role])
+  const isAuthor = (c: { author?: UserLite | null }) => !!currentUser && c.author?.id === currentUser.id
+  const canDelete = (c: { author?: UserLite | null }) => isAuthor(c) || canModerate
 
   const commentsQuery = useQuery({
     queryKey: ['task', taskId, 'comments'],
@@ -2364,23 +2391,27 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                   >
                     Reply
                   </button>
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => {
-                      setEditingCommentId(c.id)
-                      setEditingBody(c.body)
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-rose-500 hover:text-rose-600"
-                    onClick={() => remove.mutate(c.id)}
-                  >
-                    Delete
-                  </button>
+                  {isAuthor(c) && (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        setEditingCommentId(c.id)
+                        setEditingBody(c.body)
+                      }}
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {canDelete(c) && (
+                    <button
+                      type="button"
+                      className="text-xs text-rose-500 hover:text-rose-600"
+                      onClick={() => remove.mutate(c.id)}
+                    >
+                      Delete
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -2459,23 +2490,27 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                           >
                             Reply
                           </button>
-                          <button
-                            type="button"
-                            className="text-xs text-muted-foreground hover:text-foreground"
-                            onClick={() => {
-                              setEditingCommentId(reply.id)
-                              setEditingBody(reply.body)
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="text-xs text-rose-500 hover:text-rose-600"
-                            onClick={() => remove.mutate(reply.id)}
-                          >
-                            Delete
-                          </button>
+                          {isAuthor(reply) && (
+                            <button
+                              type="button"
+                              className="text-xs text-muted-foreground hover:text-foreground"
+                              onClick={() => {
+                                setEditingCommentId(reply.id)
+                                setEditingBody(reply.body)
+                              }}
+                            >
+                              Edit
+                            </button>
+                          )}
+                          {canDelete(reply) && (
+                            <button
+                              type="button"
+                              className="text-xs text-rose-500 hover:text-rose-600"
+                              onClick={() => remove.mutate(reply.id)}
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                         {editingCommentId === reply.id && (
                           <div className="mt-2 space-y-2">

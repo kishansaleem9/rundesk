@@ -322,11 +322,12 @@ export class TasksController {
   async presignAttachmentUpload(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { fileName: string; contentType?: string },
+    @Body() body: { fileName: string; contentType?: string; sizeBytes?: number },
   ) {
     return this.tasks.createAttachmentUploadUrl(taskId, user.id, {
       fileName: body.fileName,
       contentType: body.contentType ?? 'application/octet-stream',
+      sizeBytes: body.sizeBytes,
     })
   }
 

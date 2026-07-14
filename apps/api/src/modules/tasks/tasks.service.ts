@@ -64,6 +64,10 @@ type ActivityAction =
   | 'moved'
 
 type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
+
+/** Hard cap on a single task/comment attachment (Plan §4). */
+export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
+
 type RecurrenceRule = {
   mode: 'daily' | 'weekly' | 'monthly'
   interval?: number
@@ -348,6 +352,14 @@ export class TasksService {
     return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
   }
 
+  /** Reject attachments over the hard cap (Plan §4). Undefined size is allowed. */
+  private assertAttachmentSize(sizeBytes?: number): void {
+    if (sizeBytes != null && Number.isFinite(sizeBytes) && sizeBytes > MAX_ATTACHMENT_BYTES) {
+      const mb = Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))
+      throw new BadRequestException(`Attachment exceeds the ${mb} MB limit`)
+    }
+  }
+
   private clampRecurrenceInterval(interval?: number): number {
     if (!interval || !Number.isFinite(interval)) return 1
     return Math.min(Math.max(Math.floor(interval), 1), 52)
@@ -436,10 +448,11 @@ export class TasksService {
   async createAttachmentUploadUrl(
     taskId: string,
     actorId: string,
-    body: { fileName: string; contentType: string },
+    body: { fileName: string; contentType: string; sizeBytes?: number },
   ) {
     const ctx = await this.assertTaskWriteAccess(taskId, actorId)
     if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
+    this.assertAttachmentSize(body.sizeBytes)
     const fileName = this.sanitizeFileName(body.fileName)
     const key = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${fileName}`
     const uploadUrl = await this.r2.presignPutObject(key, body.contentType || 'application/octet-stream', {
@@ -903,6 +916,7 @@ export class TasksService {
     data: { fileName: string; url?: string; storageKey?: string; contentType?: string; sizeBytes?: number },
   ) {
     await this.assertTaskWriteAccess(taskId, actorId)
+    this.assertAttachmentSize(data.sizeBytes)
     const [task] = await this.db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
     if (!task) throw new NotFoundException('Task not found')
     const storageKey = data.storageKey ?? data.url
@@ -1797,13 +1811,34 @@ export class TasksService {
     }
   }
 
-  async deleteComment(commentId: string, authorId: string) {
+  async deleteComment(commentId: string, actorId: string) {
     const [existing] = await this.db.select().from(taskComments).where(eq(taskComments.id, commentId))
     if (!existing) throw new NotFoundException('Comment not found')
-    if (existing.authorId !== authorId) throw new BadRequestException('Cannot delete another user\'s comment')
+    // The author can always delete their own comment; workspace admins/managers
+    // may delete anyone's (Plan §4 — moderation).
+    if (existing.authorId !== actorId && !(await this.isTaskWorkspaceModerator(existing.taskId, actorId))) {
+      throw new ForbiddenException("Only the author or a workspace admin can delete this comment")
+    }
     await this.db.delete(taskComments).where(eq(taskComments.id, commentId))
     this.realtime.emitToTask(existing.taskId, { type: 'comment.deleted', taskId: existing.taskId, commentId })
     return { ok: true }
+  }
+
+  /** True if the actor is a workspace_admin / manager / super_admin over the task's workspace. */
+  private async isTaskWorkspaceModerator(taskId: string, actorId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .innerJoin(
+        workspaceMembers,
+        and(eq(workspaceMembers.workspaceId, spaces.workspaceId), eq(workspaceMembers.userId, actorId)),
+      )
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    return row?.role === 'workspace_admin' || row?.role === 'manager' || row?.role === 'super_admin'
   }
 
   async toggleReaction(commentId: string, userId: string, emoji: string) {
