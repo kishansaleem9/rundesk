@@ -1,11 +1,12 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ProjectsService } from './projects.service'
 
 @Controller('projects')
-@UseGuards(JwtAuthGuard, ResourceMemberGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard, PermissionsGuard)
 export class ProjectsController {
   constructor(private projectsService: ProjectsService) {}
 
@@ -20,6 +21,7 @@ export class ProjectsController {
   }
 
   @Post()
+  @RequirePermissions('project.create')
   async createProject(
     @CurrentUser() user: any,
     @Body() body: { spaceId: string; name: string; description?: string; color?: string; icon?: string },

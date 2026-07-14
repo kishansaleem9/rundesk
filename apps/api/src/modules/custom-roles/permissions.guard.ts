@@ -39,7 +39,8 @@ export class PermissionsGuard implements CanActivate {
 
     const req = ctx.switchToHttp().getRequest()
     const user = req.user
-    const workspaceId: string | undefined = req.params?.workspaceId
+    const workspaceId: string | undefined =
+      req.params?.workspaceId ?? req.workspaceMember?.workspaceId ?? req.body?.workspaceId
 
     if (!user?.id) throw new ForbiddenException('Not authenticated')
     if (!workspaceId) throw new ForbiddenException('Workspace context required')

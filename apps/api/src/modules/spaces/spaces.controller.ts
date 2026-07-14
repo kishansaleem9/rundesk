@@ -1,11 +1,12 @@
 import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SpacesService } from './spaces.service'
 
 @Controller('spaces')
-@UseGuards(JwtAuthGuard, ResourceMemberGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard, PermissionsGuard)
 export class SpacesController {
   constructor(private spacesService: SpacesService) {}
 
@@ -20,6 +21,7 @@ export class SpacesController {
   }
 
   @Post()
+  @RequirePermissions('space.create')
   async createSpace(
     @CurrentUser() user: any,
     @Body() body: { workspaceId: string; name: string; description?: string; color?: string; icon?: string },

@@ -26,6 +26,7 @@ export type Permission =
   | 'security.policy.manage'
   // Content
   | 'space.create'
+  | 'project.create'
   | 'space.delete'
   | 'project.delete'
   | 'list.delete'
@@ -37,6 +38,7 @@ export type Permission =
   | 'webhook.manage'
   | 'template.manage'
   // Reporting
+  | 'report.view.basic'
   | 'report.export'
   | 'time.approval.manage'
 
@@ -75,6 +77,7 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   { key: 'security.policy.manage', label: 'Manage security policies',   description: 'IP allowlists, MFA enforcement, session policies', category: 'Security' },
   // Content
   { key: 'space.create',     label: 'Create spaces',             description: 'Spin up new spaces in this workspace', category: 'Content' },
+  { key: 'project.create',   label: 'Create projects',           description: 'Create projects inside a space', category: 'Content' },
   { key: 'space.delete',     label: 'Delete spaces',             description: 'Permanently delete a space and its contents', category: 'Content' },
   { key: 'project.delete',   label: 'Delete projects',           description: 'Permanently delete projects', category: 'Content' },
   { key: 'list.delete',      label: 'Delete lists',              description: 'Permanently delete lists', category: 'Content' },
@@ -86,6 +89,7 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   { key: 'webhook.manage',    label: 'Manage webhooks',    description: 'Create / rotate outbound webhook endpoints', category: 'Automation' },
   { key: 'template.manage',   label: 'Manage templates',   description: 'Save / edit / delete project + task templates', category: 'Automation' },
   // Reporting
+  { key: 'report.view.basic',     label: 'View reports',             description: 'Open dashboards and reports', category: 'Reporting' },
   { key: 'report.export',         label: 'Export reports',           description: 'Download dashboards / reports as CSV or PDF', category: 'Reporting' },
   { key: 'time.approval.manage',  label: 'Manage time approvals',    description: 'Approve or reject time entries submitted by others', category: 'Reporting' },
 ]
@@ -113,9 +117,10 @@ export const ROLE_RANK: Record<LegacyWorkspaceRole, number> = {
 // Permissions each lower tier adds. workspace_admin (and super_admin) inherit
 // everything else, so a newly-added catalog permission defaults to admin-only
 // until it is explicitly granted to a lower tier here.
-const MEMBER_DELTA: readonly Permission[] = ['space.create', 'doc.publish', 'report.export']
+const MEMBER_DELTA: readonly Permission[] = ['space.create', 'doc.publish', 'report.export', 'report.view.basic']
 const MANAGER_DELTA: readonly Permission[] = [
   'members.invite',
+  'project.create',
   'integrations.manage',
   'project.delete',
   'list.delete',
