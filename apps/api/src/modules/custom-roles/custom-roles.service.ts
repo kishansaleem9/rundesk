@@ -10,7 +10,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import {
-  LEGACY_ROLE_PERMISSIONS,
+  effectiveCascade,
   PERMISSION_CATALOG,
   isKnownPermission,
   type LegacyWorkspaceRole,
@@ -371,7 +371,7 @@ export class CustomRolesService {
           .where(inArray(customRolePermissions.roleId, customRoleIds))
       : []
 
-    const merged = new Set<Permission>(LEGACY_ROLE_PERMISSIONS[legacyRole] ?? [])
+    const merged = new Set<Permission>(effectiveCascade(legacyRole))
     for (const p of customPerms) {
       if (isKnownPermission(p.permission)) merged.add(p.permission)
     }

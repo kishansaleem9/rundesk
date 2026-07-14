@@ -95,35 +95,67 @@ export const PERMISSION_KEYS: ReadonlySet<Permission> = new Set(
 )
 
 /**
- * Default permission bundles granted by each legacy role. Used by
- * hasPermission() so the existing 4-role model continues to gate
- * features that haven't migrated to custom roles yet.
+ * Strict role hierarchy. Higher roles inherit every permission of all lower
+ * roles (a cascade). CASCADE_DELTAS lists only what each tier ADDS on top of
+ * the tier below it; effectiveCascade() rolls them up. This is the single
+ * source of truth — LEGACY_ROLE_PERMISSIONS below is derived from it.
  */
 export type LegacyWorkspaceRole = 'super_admin' | 'workspace_admin' | 'manager' | 'member' | 'guest'
 
-export const LEGACY_ROLE_PERMISSIONS: Record<LegacyWorkspaceRole, readonly Permission[]> = {
-  super_admin:     PERMISSION_CATALOG.map((p) => p.key),
-  workspace_admin: PERMISSION_CATALOG.map((p) => p.key),
-  manager: [
-    'members.invite',
-    'integrations.manage',
-    'space.create',
-    'project.delete',
-    'list.delete',
-    'task.delete.any',
-    'doc.publish',
-    'automation.manage',
-    'webhook.manage',
-    'template.manage',
-    'report.export',
-    'time.approval.manage',
-  ],
-  member: [
-    'space.create',
-    'doc.publish',
-    'report.export',
-  ],
+export const ROLE_RANK: Record<LegacyWorkspaceRole, number> = {
+  guest: 0,
+  member: 1,
+  manager: 2,
+  workspace_admin: 3,
+  super_admin: 4,
+}
+
+// Permissions each lower tier adds. workspace_admin (and super_admin) inherit
+// everything else, so a newly-added catalog permission defaults to admin-only
+// until it is explicitly granted to a lower tier here.
+const MEMBER_DELTA: readonly Permission[] = ['space.create', 'doc.publish', 'report.export']
+const MANAGER_DELTA: readonly Permission[] = [
+  'members.invite',
+  'integrations.manage',
+  'project.delete',
+  'list.delete',
+  'task.delete.any',
+  'automation.manage',
+  'webhook.manage',
+  'template.manage',
+  'time.approval.manage',
+]
+const LOWER_TIER_KEYS = new Set<Permission>([...MEMBER_DELTA, ...MANAGER_DELTA])
+
+const CASCADE_DELTAS: Record<LegacyWorkspaceRole, readonly Permission[]> = {
   guest: [],
+  member: MEMBER_DELTA,
+  manager: MANAGER_DELTA,
+  workspace_admin: PERMISSION_CATALOG.map((p) => p.key).filter((k) => !LOWER_TIER_KEYS.has(k)),
+  super_admin: [],
+}
+
+/** Full permission set for a role = its delta unioned with every lower tier's. */
+export function effectiveCascade(role: LegacyWorkspaceRole): Permission[] {
+  const rank = ROLE_RANK[role] ?? 0
+  const out = new Set<Permission>()
+  for (const r of Object.keys(ROLE_RANK) as LegacyWorkspaceRole[]) {
+    if (ROLE_RANK[r] <= rank) for (const p of CASCADE_DELTAS[r]) out.add(p)
+  }
+  return Array.from(out)
+}
+
+/**
+ * Default permission bundles per legacy role, derived from the cascade so
+ * there is one source of truth. Used by hasPermission() for members that
+ * haven't migrated to custom roles yet.
+ */
+export const LEGACY_ROLE_PERMISSIONS: Record<LegacyWorkspaceRole, readonly Permission[]> = {
+  super_admin: effectiveCascade('super_admin'),
+  workspace_admin: effectiveCascade('workspace_admin'),
+  manager: effectiveCascade('manager'),
+  member: effectiveCascade('member'),
+  guest: effectiveCascade('guest'),
 }
 
 export function isKnownPermission(key: string): key is Permission {
