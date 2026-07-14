@@ -235,6 +235,10 @@ function ListDetail() {
   const [emailAliasOpen, setEmailAliasOpen] = useState(false)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
+  const [calendarView, setCalendarView] = useState<'month' | 'week'>('month')
+  const [calendarDragTaskId, setCalendarDragTaskId] = useState<string | null>(null)
+  const [calendarQuickAddDay, setCalendarQuickAddDay] = useState<string | null>(null)
+  const [calendarQuickAddTitle, setCalendarQuickAddTitle] = useState('')
   const [saveAsName, setSaveAsName] = useState('')
   const [selectedSavedViewId, setSelectedSavedViewId] = useState<string>('')
   const [appliedInitialView, setAppliedInitialView] = useState(false)
@@ -404,18 +408,39 @@ function ListDetail() {
   }, [activeView])
 
   const calendarDays = useMemo(() => {
+    const days: Date[] = []
+    if (calendarView === 'week') {
+      const weekStart = startOfWeek(calendarMonth, { weekStartsOn: 1 })
+      for (let i = 0; i < 7; i++) days.push(addDays(weekStart, i))
+      return days
+    }
     const monthStart = startOfMonth(calendarMonth)
     const monthEnd = endOfMonth(calendarMonth)
     const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
     const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
-    const days: Date[] = []
     let cur = gridStart
     while (cur <= gridEnd) {
       days.push(cur)
       cur = addDays(cur, 1)
     }
     return days
-  }, [calendarMonth])
+  }, [calendarMonth, calendarView])
+
+  // Reschedule a task's due date onto a calendar day (drag-drop / click-create).
+  const rescheduleTask = async (taskId: string, day: Date) => {
+    await api(`/tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ dueDate: format(day, 'yyyy-MM-dd') }),
+    })
+    await refetch()
+  }
+  const createTaskOnDay = async (day: Date, title: string) => {
+    await api('/tasks', {
+      method: 'POST',
+      body: JSON.stringify(buildCreateTaskBody({ listId, title, dueDate: format(day, 'yyyy-MM-dd') })),
+    })
+    await refetch()
+  }
 
   const draggingTask = useMemo(
     () => tasks.find((t) => t.id === draggingTaskId) ?? null,
@@ -816,11 +841,43 @@ function ListDetail() {
         ) : (
           <Card className="p-4">
             <div className="flex items-center justify-between mb-3">
-              <Button size="sm" variant="outline" onClick={() => setCalendarMonth((d) => addMonths(d, -1))}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setCalendarMonth((d) => (calendarView === 'week' ? addDays(d, -7) : addMonths(d, -1)))
+                }
+              >
                 Prev
               </Button>
-              <h3 className="font-semibold">{format(calendarMonth, 'MMMM yyyy')}</h3>
-              <Button size="sm" variant="outline" onClick={() => setCalendarMonth((d) => addMonths(d, 1))}>
+              <div className="flex items-center gap-3">
+                <h3 className="font-semibold">
+                  {calendarView === 'week'
+                    ? `${format(startOfWeek(calendarMonth, { weekStartsOn: 1 }), 'MMM d')} – ${format(endOfWeek(calendarMonth, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
+                    : format(calendarMonth, 'MMMM yyyy')}
+                </h3>
+                <div className="flex items-center gap-1 rounded-md border border-border p-0.5 text-xs">
+                  {(['month', 'week'] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setCalendarView(v)}
+                      className={cn(
+                        'px-2 py-0.5 rounded capitalize',
+                        calendarView === v ? 'bg-brand-700 text-white' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setCalendarMonth((d) => (calendarView === 'week' ? addDays(d, 7) : addMonths(d, 1)))
+                }
+              >
                 Next
               </Button>
             </div>
@@ -833,23 +890,77 @@ function ListDetail() {
               {calendarDays.map((day) => {
                 const key = format(day, 'yyyy-MM-dd')
                 const dayTasks = tasksByDate.find(([k]) => k === key)?.[1] ?? []
+                const isDragTarget = calendarDragTaskId != null
                 return (
                   <div
                     key={key}
-                    className={`min-h-28 rounded border border-border p-2 ${isToday(day) ? 'ring-1 ring-ring' : ''} ${isSameMonth(day, calendarMonth) ? 'bg-card' : 'bg-muted/30 text-muted-foreground'}`}
+                    onDragOver={(e) => {
+                      if (calendarDragTaskId) e.preventDefault()
+                    }}
+                    onDrop={() => {
+                      if (calendarDragTaskId) {
+                        void rescheduleTask(calendarDragTaskId, day)
+                        setCalendarDragTaskId(null)
+                      }
+                    }}
+                    className={cn(
+                      calendarView === 'week' ? 'min-h-64' : 'min-h-28',
+                      'group/day rounded border border-border p-2 transition-colors',
+                      isToday(day) && 'ring-1 ring-ring',
+                      isSameMonth(day, calendarMonth) ? 'bg-card' : 'bg-muted/30 text-muted-foreground',
+                      isDragTarget && 'hover:ring-2 hover:ring-brand-500 hover:bg-accent/10',
+                    )}
                   >
-                    <div className="text-xs mb-1">{format(day, 'd')}</div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs">{format(day, 'd')}</span>
+                      <button
+                        type="button"
+                        aria-label="Add task on this day"
+                        onClick={() => {
+                          setCalendarQuickAddDay(key)
+                          setCalendarQuickAddTitle('')
+                        }}
+                        className="opacity-0 group-hover/day:opacity-100 text-muted-foreground hover:text-foreground"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
                     <div className="space-y-1">
-                      {dayTasks.slice(0, 3).map((task) => (
+                      {dayTasks.slice(0, calendarView === 'week' ? 12 : 3).map((task) => (
                         <button
                           key={task.id}
-                          className="block w-full text-left rounded bg-muted px-1 py-0.5 text-[11px] hover:bg-secondary"
+                          draggable
+                          onDragStart={() => setCalendarDragTaskId(task.id)}
+                          onDragEnd={() => setCalendarDragTaskId(null)}
+                          className="block w-full text-left rounded bg-muted px-1 py-0.5 text-[11px] hover:bg-secondary cursor-grab active:cursor-grabbing"
                           onClick={() => setSelectedTaskId(task.id)}
                         >
                           {task.title}
                         </button>
                       ))}
-                      {dayTasks.length > 3 ? <div className="text-[11px] text-muted-foreground">+{dayTasks.length - 3} more</div> : null}
+                      {dayTasks.length > (calendarView === 'week' ? 12 : 3) ? (
+                        <div className="text-[11px] text-muted-foreground">
+                          +{dayTasks.length - (calendarView === 'week' ? 12 : 3)} more
+                        </div>
+                      ) : null}
+                      {calendarQuickAddDay === key && (
+                        <input
+                          autoFocus
+                          value={calendarQuickAddTitle}
+                          onChange={(e) => setCalendarQuickAddTitle(e.target.value)}
+                          onBlur={() => setCalendarQuickAddDay(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && calendarQuickAddTitle.trim()) {
+                              void createTaskOnDay(day, calendarQuickAddTitle.trim())
+                              setCalendarQuickAddDay(null)
+                              setCalendarQuickAddTitle('')
+                            }
+                            if (e.key === 'Escape') setCalendarQuickAddDay(null)
+                          }}
+                          placeholder="Task title…"
+                          className="w-full rounded border border-border bg-background px-1 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      )}
                     </div>
                   </div>
                 )
