@@ -14,6 +14,7 @@ import {
   lists,
   projects,
   spaces,
+  clients,
   customReports,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -252,6 +253,41 @@ export class ReportsService {
       .groupBy(users.id, users.displayName, users.email)
       .orderBy(desc(sql`coalesce(sum(${timeEntries.durationSec}), 0)`))
 
+    return rows.map((r) => ({
+      ...r,
+      totalHours: Math.round((r.totalSeconds / 3600) * 10) / 10,
+      billableHours: Math.round((r.billableSeconds / 3600) * 10) / 10,
+    }))
+  }
+
+  /** Billable hours broken down by project (and its client), Plan §9. */
+  async getTimeByProject(workspaceId: string, days = 30, restrictToUserId?: string) {
+    const since = daysAgo(days)
+    const rows = await this.db
+      .select({
+        projectId: projects.id,
+        projectName: projects.name,
+        clientId: clients.id,
+        clientName: clients.name,
+        totalSeconds: sql<number>`coalesce(sum(${timeEntries.durationSec}), 0)::int`,
+        billableSeconds: sql<number>`coalesce(sum(case when ${timeEntries.isBillable} then ${timeEntries.durationSec} else 0 end), 0)::int`,
+        entryCount: sql<number>`count(${timeEntries.id})::int`,
+      })
+      .from(timeEntries)
+      .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .leftJoin(clients, eq(clients.id, projects.clientId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          gte(timeEntries.startedAt, since),
+          restrictToUserId ? eq(timeEntries.userId, restrictToUserId) : undefined,
+        ),
+      )
+      .groupBy(projects.id, projects.name, clients.id, clients.name)
+      .orderBy(desc(sql`coalesce(sum(${timeEntries.durationSec}), 0)`))
     return rows.map((r) => ({
       ...r,
       totalHours: Math.round((r.totalSeconds / 3600) * 10) / 10,

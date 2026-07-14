@@ -51,6 +51,17 @@ export class ReportsController {
     return this.reports.getTimeReport(workspaceId, days ? parseInt(days, 10) : 30, restrict)
   }
 
+  @Get('time-by-project')
+  @ApiOperation({ summary: 'Billable hours by project + client' })
+  async timeByProject(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Query('days') days?: string,
+  ) {
+    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
+    return this.reports.getTimeByProject(workspaceId, days ? parseInt(days, 10) : 30, restrict)
+  }
+
   @Get('sprints')
   @ApiOperation({ summary: 'Sprint velocity report' })
   sprints(@Param('workspaceId') workspaceId: string) {

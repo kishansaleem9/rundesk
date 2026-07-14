@@ -330,6 +330,13 @@
       "when": 1900000043000,
       "tag": "0046_chat_custom_emoji",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1900000044000,
+      "tag": "0047_clients",
+      "breakpoints": true
     }
   ]
 }

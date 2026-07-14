@@ -531,10 +531,24 @@ function TimeTab({
     billableHours: number
   }
 
+  type ProjectRow = {
+    projectId: string
+    projectName: string
+    clientName: string | null
+    totalHours: number
+    billableHours: number
+    entryCount: number
+  }
+
   const query = useQuery({
     queryKey: ['reports-time', workspaceId, days],
     queryFn: () => api<Row[]>(`/workspaces/${workspaceId}/reports/time?days=${days}`),
   })
+  const byProjectQuery = useQuery({
+    queryKey: ['reports-time-by-project', workspaceId, days],
+    queryFn: () => api<ProjectRow[]>(`/workspaces/${workspaceId}/reports/time-by-project?days=${days}`),
+  })
+  const projectRows = byProjectQuery.data ?? []
 
   const rows = useMemo(() => query.data ?? [], [query.data])
   const totalHours = rows.reduce((s, r) => s + r.totalHours, 0)
@@ -596,6 +610,34 @@ function TimeTab({
           <div className="text-center text-muted-foreground py-8">No time entries recorded</div>
         )}
       </div>
+
+      {projectRows.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-foreground mb-2">Billable by project</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Project</th>
+                  <th className="text-left py-2 px-4 text-muted-foreground font-medium">Client</th>
+                  <th className="text-right py-2 px-4 text-muted-foreground font-medium">Total hours</th>
+                  <th className="text-right py-2 pl-4 text-muted-foreground font-medium">Billable</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectRows.map((row) => (
+                  <tr key={row.projectId} className="border-b border-border/50 hover:bg-muted/30">
+                    <td className="py-2 pr-4 font-medium">{row.projectName}</td>
+                    <td className="py-2 px-4 text-muted-foreground">{row.clientName ?? '—'}</td>
+                    <td className="text-right py-2 px-4 tabular-nums font-medium">{row.totalHours}h</td>
+                    <td className="text-right py-2 pl-4 tabular-nums text-emerald-600">{row.billableHours}h</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

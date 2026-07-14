@@ -93,7 +93,7 @@ export class ProjectsService {
 
   async updateProject(
     projectId: string,
-    data: Partial<{ name: string; description: string; color: string; icon: string; folderId: string | null; defaultBillable: boolean }>,
+    data: Partial<{ name: string; description: string; color: string; icon: string; folderId: string | null; defaultBillable: boolean; clientId: string | null }>,
     actorId?: string,
   ) {
     if (actorId) await this.assertManageable(projectId, actorId)

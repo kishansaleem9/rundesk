@@ -207,7 +207,7 @@ function ProjectHome() {
 
       <ProjectActivitySection projectId={projectId} />
 
-      <ProjectTimeSettingsSection projectId={projectId} />
+      <ProjectTimeSettingsSection projectId={projectId} workspaceId={workspaceId} />
 
       <ContainerMembersSheet
         kind="project"
@@ -468,18 +468,40 @@ function ProjectActivitySection({ projectId }: { projectId: string }) {
   )
 }
 
-function ProjectTimeSettingsSection({ projectId }: { projectId: string }) {
+function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: string; workspaceId: string }) {
   const qc = useQueryClient()
+  const [newClientName, setNewClientName] = useState('')
   const projectQuery = useQuery({
     queryKey: ['project', projectId],
-    queryFn: () => api<{ id: string; defaultBillable?: boolean }>(`/projects/${projectId}`),
+    queryFn: () => api<{ id: string; defaultBillable?: boolean; clientId?: string | null }>(`/projects/${projectId}`),
+  })
+  const clientsQuery = useQuery({
+    queryKey: ['clients', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/workspaces/${workspaceId}/clients`),
   })
   const defaultBillable = projectQuery.data?.defaultBillable ?? false
+  const clientId = projectQuery.data?.clientId ?? ''
+  const clients = clientsQuery.data ?? []
 
   const toggle = useMutation({
     mutationFn: (next: boolean) =>
       api(`/projects/${projectId}`, { method: 'PUT', body: { defaultBillable: next } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+  const setClient = useMutation({
+    mutationFn: (nextClientId: string | null) =>
+      api(`/projects/${projectId}`, { method: 'PUT', body: { clientId: nextClientId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+  const createClient = useMutation({
+    mutationFn: (name: string) =>
+      api<{ id: string }>(`/workspaces/${workspaceId}/clients`, { method: 'POST', body: { name } }),
+    onSuccess: async (row) => {
+      setNewClientName('')
+      await qc.invalidateQueries({ queryKey: ['clients', workspaceId] })
+      setClient.mutate(row.id)
+    },
+    onError: (err) => window.alert(err instanceof Error ? err.message : 'Could not create client'),
   })
 
   return (
@@ -521,6 +543,45 @@ function ProjectTimeSettingsSection({ projectId }: { projectId: string }) {
             />
           </button>
         </label>
+
+        <div className="mt-4 pt-4 border-t border-border/60">
+          <div className="text-[14px] font-medium">Client</div>
+          <div className="text-[12px] text-muted-foreground mb-2">
+            Bill this project&apos;s time to a client — shown in the time report.
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={clientId}
+              onChange={(e) => setClient.mutate(e.target.value || null)}
+              disabled={setClient.isPending}
+              className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+            >
+              <option value="">No client</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <form
+            className="mt-2 flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (newClientName.trim()) createClient.mutate(newClientName.trim())
+            }}
+          >
+            <Input
+              value={newClientName}
+              onChange={(e) => setNewClientName(e.target.value)}
+              placeholder="+ New client name"
+              className="h-8 flex-1"
+            />
+            <Button type="submit" size="sm" variant="outline" disabled={!newClientName.trim() || createClient.isPending}>
+              Add
+            </Button>
+          </form>
+        </div>
       </Card>
     </section>
   )

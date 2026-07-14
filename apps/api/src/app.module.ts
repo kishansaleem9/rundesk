@@ -9,6 +9,7 @@ import { InvitationsModule } from './modules/invitations/invitations.module'
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module'
 import { SpacesModule } from './modules/spaces/spaces.module'
 import { ProjectsModule } from './modules/projects/projects.module'
+import { ClientsModule } from './modules/clients/clients.module'
 import { FoldersModule } from './modules/folders/folders.module'
 import { ContainerMembersModule } from './modules/container-members/container-members.module'
 import { ListsModule } from './modules/lists/lists.module'
@@ -75,6 +76,7 @@ import { SampleDataModule } from './modules/sample-data/sample-data.module'
     FeatureFlagsModule,
     SpacesModule,
     ProjectsModule,
+    ClientsModule,
     FoldersModule,
     ContainerMembersModule,
     ListsModule,

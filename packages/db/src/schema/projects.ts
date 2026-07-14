@@ -16,6 +16,9 @@ export const projects = pgTable('projects', {
   // The FK to folders is declared in migration 0034 (kept out of the Drizzle
   // schema to avoid a folders<->projects import cycle).
   folderId:    uuid('folder_id'),
+  // Optional client this project bills to (Plan §9). FK declared in migration
+  // 0047 (kept out of Drizzle to avoid a projects<->clients import cycle).
+  clientId:    uuid('client_id'),
   position:    integer('position').notNull().default(0),
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   isArchived:  boolean('is_archived').notNull().default(false),
