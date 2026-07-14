@@ -994,6 +994,23 @@ function OverviewPanel({
             {recurrenceValue === 'custom' && <option value="custom">Custom</option>}
           </select>
         </Field>
+        <Field label="Estimate (hrs)">
+          <input
+            type="number"
+            min={0}
+            step={0.25}
+            defaultValue={detail.timeEstimate != null ? Math.round((detail.timeEstimate / 3600) * 100) / 100 : ''}
+            onBlur={(e) => {
+              const v = e.target.value.trim()
+              const hrs = v === '' ? null : Number(v)
+              const secs = hrs == null || !Number.isFinite(hrs) ? null : Math.round(hrs * 3600)
+              if (secs !== (detail.timeEstimate ?? null)) patchTask.mutate({ timeEstimate: secs })
+            }}
+            disabled={patchTask.isPending}
+            placeholder="—"
+            className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          />
+        </Field>
       </div>
 
       <Field label="Assignees">

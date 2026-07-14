@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { eq, and, desc, isNull, gte, inArray } from 'drizzle-orm'
+import { eq, and, desc, isNull, gte, inArray, sql } from 'drizzle-orm'
 import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -38,6 +38,35 @@ export class TimeEntriesService {
       .where(eq(tasks.id, taskId))
       .limit(1)
     if (row?.role === 'guest') throw new ForbiddenException('Guests cannot track time')
+  }
+
+  /** Per-member monthly timesheet totals over the last `months` (§8.5). */
+  async getMonthlyTimesheet(workspaceId: string, months = 6) {
+    const since = new Date()
+    since.setUTCMonth(since.getUTCMonth() - months)
+    since.setUTCDate(1)
+    since.setUTCHours(0, 0, 0, 0)
+    const monthExpr = sql<string>`to_char(${timeEntries.startedAt} at time zone 'UTC', 'YYYY-MM')`
+    const rows = await this.db
+      .select({
+        userId: users.id,
+        displayName: users.displayName,
+        month: monthExpr,
+        totalSeconds: sql<number>`coalesce(sum(${timeEntries.durationSec}), 0)::int`,
+        billableSeconds: sql<number>`coalesce(sum(case when ${timeEntries.isBillable} then ${timeEntries.durationSec} else 0 end), 0)::int`,
+      })
+      .from(users)
+      .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
+      .innerJoin(timeEntries, and(eq(timeEntries.userId, users.id), gte(timeEntries.startedAt, since)))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .groupBy(users.id, users.displayName, monthExpr)
+    return rows
+      .map((r) => ({
+        ...r,
+        totalHours: Math.round((r.totalSeconds / 3600) * 10) / 10,
+        billableHours: Math.round((r.billableSeconds / 3600) * 10) / 10,
+      }))
+      .sort((a, b) => (a.month < b.month ? 1 : a.month > b.month ? -1 : a.displayName.localeCompare(b.displayName)))
   }
 
   /** The owning project's billable default for a task (§8.3). */

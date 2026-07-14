@@ -51,6 +51,19 @@ export class WorkspaceTimeEntriesController {
     return this.time.remove(entryId, actor.id)
   }
 
+  @Get('workspaces/:workspaceId/time-monthly')
+  @UseGuards(WorkspaceMemberGuard)
+  async monthly(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Query('months') months?: string,
+  ) {
+    const rows = await this.time.getMonthlyTimesheet(workspaceId, months ? parseInt(months, 10) : 6)
+    const canModerate = await this.time.canModerateApprovals(workspaceId, actor.id)
+    // Members see only their own monthly rows.
+    return canModerate ? rows : rows.filter((r) => r.userId === actor.id)
+  }
+
   @Get('workspaces/:workspaceId/time-approvals')
   @UseGuards(WorkspaceMemberGuard)
   listApprovals(

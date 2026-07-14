@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
-import { and, eq, gte, lte, sql } from 'drizzle-orm'
-import { tasks, taskAssignees, users, lists, projects, spaces, workspaces } from '@rundesk/db'
+import { and, eq, gte, lte, isNull, sql } from 'drizzle-orm'
+import { tasks, taskAssignees, users, lists, projects, spaces, workspaces, timeEntries } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { NotificationsService } from './notifications.service'
@@ -134,6 +134,43 @@ export class RemindersService {
       )
     } catch (err) {
       this.logger.error('Due-date reminder job failed', err)
+    }
+  }
+
+  /**
+   * End-of-day: warn anyone who left a timer running (Plan §8.1).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_6PM)
+  async warnLeftRunningTimers() {
+    try {
+      const running = await this.db
+        .select({
+          userId: timeEntries.userId,
+          taskId: tasks.id,
+          taskTitle: tasks.title,
+          workspaceId: spaces.workspaceId,
+          startedAt: timeEntries.startedAt,
+        })
+        .from(timeEntries)
+        .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(isNull(timeEntries.endedAt))
+
+      for (const row of running) {
+        void this.notifications.create({
+          userId: row.userId,
+          workspaceId: row.workspaceId,
+          type: 'task_updated',
+          title: 'Timer still running',
+          body: `Your timer on “${row.taskTitle}” is still running — don't forget to stop it.`,
+          target: { entityType: 'task', entityId: row.taskId, url: `/app/${row.workspaceId}/time` },
+        })
+      }
+      if (running.length) this.logger.log(`End-of-day: warned ${running.length} running timers`)
+    } catch (err) {
+      this.logger.error('End-of-day timer warning job failed', err)
     }
   }
 }
