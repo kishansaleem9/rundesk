@@ -2,7 +2,7 @@ import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, desc, inArray, gte, lte, type SQL } from 'drizzle-orm'
-import { tasks, taskAssignees, taskLabelAssignments, docs, lists, projects, spaces } from '@rundesk/db'
+import { tasks, taskAssignees, taskLabelAssignments, docs, lists, projects, spaces, savedSearches } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
@@ -254,5 +254,42 @@ export class SearchService implements OnModuleInit {
         url: `/app/${workspaceId}/docs?doc=${d.id}`,
       })),
     ]
+  }
+
+  // ── Saved search presets (Plan §11.2) ───────────────────────────────────────
+
+  async listSavedSearches(workspaceId: string, userId: string) {
+    return this.db
+      .select()
+      .from(savedSearches)
+      .where(and(eq(savedSearches.workspaceId, workspaceId), eq(savedSearches.userId, userId)))
+      .orderBy(desc(savedSearches.updatedAt))
+  }
+
+  async createSavedSearch(
+    workspaceId: string,
+    userId: string,
+    name: string,
+    query: string | null,
+    filters: Record<string, unknown>,
+  ) {
+    const trimmed = name?.trim()
+    if (!trimmed) throw new Error('A preset name is required')
+    const [row] = await this.db
+      .insert(savedSearches)
+      .values({ workspaceId, userId, name: trimmed.slice(0, 80), query: query || null, filters: filters ?? {} })
+      .onConflictDoUpdate({
+        target: [savedSearches.userId, savedSearches.workspaceId, savedSearches.name],
+        set: { query: query || null, filters: filters ?? {}, updatedAt: new Date() },
+      })
+      .returning()
+    return row
+  }
+
+  async deleteSavedSearch(id: string, userId: string) {
+    await this.db
+      .delete(savedSearches)
+      .where(and(eq(savedSearches.id, id), eq(savedSearches.userId, userId)))
+    return { ok: true }
   }
 }

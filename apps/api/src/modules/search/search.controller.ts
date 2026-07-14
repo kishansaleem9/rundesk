@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Param, Query, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Delete, Param, Query, Body, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SearchService, type SearchEntityType, type SearchFilters } from './search.service'
 
 const ENTITY_TYPES: SearchEntityType[] = ['task', 'doc']
@@ -57,5 +58,24 @@ export class SearchController {
   @Post(':workspaceId/reindex')
   reindex(@Param('workspaceId') workspaceId: string) {
     return this.search.reindexWorkspace(workspaceId)
+  }
+
+  @Get(':workspaceId/saved')
+  listSaved(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any) {
+    return this.search.listSavedSearches(workspaceId, user.id)
+  }
+
+  @Post(':workspaceId/saved')
+  createSaved(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
+    @Body() body: { name: string; query?: string | null; filters?: Record<string, unknown> },
+  ) {
+    return this.search.createSavedSearch(workspaceId, user.id, body.name, body.query ?? null, body.filters ?? {})
+  }
+
+  @Delete(':workspaceId/saved/:id')
+  deleteSaved(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.search.deleteSavedSearch(id, user.id)
   }
 }

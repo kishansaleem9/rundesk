@@ -281,6 +281,13 @@
       "when": 1900000036000,
       "tag": "0039_channel_notification_level",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1900000037000,
+      "tag": "0040_saved_searches",
+      "breakpoints": true
     }
   ]
 }
