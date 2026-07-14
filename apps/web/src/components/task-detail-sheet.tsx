@@ -92,6 +92,7 @@ type TaskDetail = {
   watchers?: Watcher[]
   dependencies?: Dependency[]
   attachments?: Attachment[]
+  recurrence?: { cadenceDays?: number | null; rule?: { mode: 'daily' | 'weekly' | 'monthly' } | null } | null
 }
 
 type TaskComment = {
@@ -709,6 +710,33 @@ function OverviewPanel({
     },
   })
 
+  const setRecurrence = useMutation({
+    mutationFn: (body: Record<string, unknown> | null) =>
+      api(`/tasks/${taskId}/recurrence`, { method: 'PUT', body: body ?? {} }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : 'Could not update repeat')
+    },
+  })
+  const recurrenceValue = (() => {
+    const r = detail.recurrence
+    if (!r) return 'off'
+    if (r.rule?.mode === 'monthly') return 'monthly'
+    if (r.cadenceDays === 1) return 'daily'
+    if (r.cadenceDays === 7) return 'weekly'
+    if (r.cadenceDays === 14) return 'biweekly'
+    return 'custom'
+  })()
+  const onRecurrenceChange = (v: string) => {
+    if (v === 'off') return setRecurrence.mutate(null)
+    if (v === 'daily') return setRecurrence.mutate({ cadenceDays: 1 })
+    if (v === 'weekly') return setRecurrence.mutate({ cadenceDays: 7 })
+    if (v === 'biweekly') return setRecurrence.mutate({ cadenceDays: 14 })
+    if (v === 'monthly') return setRecurrence.mutate({ rule: { mode: 'monthly' } })
+  }
+
   const statusesQuery = useQuery({
     queryKey: ['list-statuses', detail.listId],
     queryFn: () => api<Array<{ key: string; name: string }>>(`/lists/${detail.listId}/statuses`),
@@ -846,6 +874,22 @@ function OverviewPanel({
             disabled={patchTask.isPending}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
+        </Field>
+        <Field label="Repeat">
+          <select
+            value={recurrenceValue}
+            onChange={(e) => onRecurrenceChange(e.target.value)}
+            disabled={setRecurrence.isPending}
+            className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            title="When completed, auto-create the next occurrence"
+          >
+            <option value="off">Doesn’t repeat</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Every 2 weeks</option>
+            <option value="monthly">Monthly</option>
+            {recurrenceValue === 'custom' && <option value="custom">Custom</option>}
+          </select>
         </Field>
       </div>
 
