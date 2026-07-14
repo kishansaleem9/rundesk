@@ -46,6 +46,12 @@ export class ChatController {
     return this.chat.ensureDmChannel(workspaceId, user.id, body.peerUserId)
   }
 
+  @Get('workspaces/:workspaceId/chat/unread')
+  @UseGuards(WorkspaceMemberGuard)
+  unread(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.unreadSummary(workspaceId, user.id)
+  }
+
   @Get('workspaces/:workspaceId/chat/members/:memberUserId/activity')
   @UseGuards(WorkspaceMemberGuard)
   getMemberActivity(
@@ -65,6 +71,11 @@ export class ChatController {
   @Post('chat/channels/:channelId/leave')
   leave(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.leaveChannel(channelId, user.id)
+  }
+
+  @Post('chat/channels/:channelId/read')
+  markRead(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.markChannelRead(channelId, user.id)
   }
 
   @Get('chat/channels/:channelId/messages')

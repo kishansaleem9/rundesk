@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { eq, and, desc, asc, isNull, isNotNull, or } from 'drizzle-orm'
+import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, sql } from 'drizzle-orm'
 import {
   chatChannels,
   chatChannelMembers,
@@ -78,9 +78,35 @@ export class ChatService {
       .where(eq(chatChannelMembers.userId, userId))
 
     const memberSet = new Set(memberships.map((m) => m.channelId))
+    const lastReadMap = new Map(memberships.map((m) => [m.channelId, m.lastReadAt]))
+
+    // Unread = top-level messages the user didn't author, newer than their
+    // last-read marker, across the channels they're a member of.
+    const unreadRows = await this.db
+      .select({ channelId: chatMessages.channelId, count: sql<number>`count(*)::int` })
+      .from(chatMessages)
+      .innerJoin(
+        chatChannelMembers,
+        and(eq(chatChannelMembers.channelId, chatMessages.channelId), eq(chatChannelMembers.userId, userId)),
+      )
+      .where(
+        and(
+          ne(chatMessages.authorId, userId),
+          isNull(chatMessages.parentMessageId),
+          or(isNull(chatChannelMembers.lastReadAt), gt(chatMessages.createdAt, chatChannelMembers.lastReadAt)),
+        ),
+      )
+      .groupBy(chatMessages.channelId)
+    const unreadMap = new Map(unreadRows.map((r) => [r.channelId, r.count]))
+
     const visible = rows
       .filter((c) => !c.isPrivate || memberSet.has(c.id))
-      .map((c) => ({ ...c, joined: memberSet.has(c.id) }))
+      .map((c) => ({
+        ...c,
+        joined: memberSet.has(c.id),
+        unreadCount: unreadMap.get(c.id) ?? 0,
+        lastReadAt: lastReadMap.get(c.id) ?? null,
+      }))
 
     const dmChannels = visible.filter((c) => c.isDm)
     if (dmChannels.length === 0) return visible
@@ -107,6 +133,49 @@ export class ChatService {
         dmPeerAvatarUrl: peer?.avatarUrl ?? null,
       }
     })
+  }
+
+  /** Mark a channel read up to now for the user (upserts their member row). */
+  async markChannelRead(channelId: string, userId: string) {
+    await this.assertChannelAccess(channelId, userId)
+    const now = new Date()
+    await this.db
+      .insert(chatChannelMembers)
+      .values({ channelId, userId, lastReadAt: now })
+      .onConflictDoUpdate({
+        target: [chatChannelMembers.channelId, chatChannelMembers.userId],
+        set: { lastReadAt: now },
+      })
+    return { ok: true, lastReadAt: now }
+  }
+
+  /** Total + per-channel unread counts across the user's channels in a workspace. */
+  async unreadSummary(workspaceId: string, userId: string) {
+    const rows = await this.db
+      .select({ channelId: chatMessages.channelId, count: sql<number>`count(*)::int` })
+      .from(chatMessages)
+      .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+      .innerJoin(
+        chatChannelMembers,
+        and(eq(chatChannelMembers.channelId, chatMessages.channelId), eq(chatChannelMembers.userId, userId)),
+      )
+      .where(
+        and(
+          eq(chatChannels.workspaceId, workspaceId),
+          isNull(chatChannels.archivedAt),
+          ne(chatMessages.authorId, userId),
+          isNull(chatMessages.parentMessageId),
+          or(isNull(chatChannelMembers.lastReadAt), gt(chatMessages.createdAt, chatChannelMembers.lastReadAt)),
+        ),
+      )
+      .groupBy(chatMessages.channelId)
+    const byChannel: Record<string, number> = {}
+    let total = 0
+    for (const r of rows) {
+      byChannel[r.channelId] = r.count
+      total += r.count
+    }
+    return { total, byChannel }
   }
 
   async ensureDmChannel(workspaceId: string, currentUserId: string, peerUserId: string) {
