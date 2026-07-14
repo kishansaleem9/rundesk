@@ -281,6 +281,64 @@ export class TaskTemplatesService {
     return { taskId: task.id, templateId, task }
   }
 
+  /**
+   * Duplicate an existing task: clone its core fields, assignees, labels,
+   * checklists, custom-field values and one level of subtasks into the SAME
+   * list, with "(copy)" appended to the title. Dates are copied verbatim from
+   * the source (not shifted like template offsets). The copy starts open.
+   */
+  async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string }) {
+    const ctx = await this.resolveTaskContext(taskId)
+    if (!ctx) throw new NotFoundException('Task not found')
+    if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
+
+    const [src] = await this.db
+      .select({ startDate: tasks.startDate, dueDate: tasks.dueDate })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    const assignees = await this.db
+      .select({ userId: taskAssignees.userId })
+      .from(taskAssignees)
+      .where(eq(taskAssignees.taskId, taskId))
+    const assigneeIds = assignees.map((a) => a.userId)
+
+    const payload = await this.snapshotTask(taskId)
+    const now = new Date()
+    const labelIds = await this.resolveLabelIds(workspaceId, payload.labels, actor.id)
+
+    const task = await this.tasksService.createTask({
+      listId: ctx.listId,
+      title: `${payload.title || 'Task'} (copy)`,
+      description: payload.description ?? undefined,
+      priority: payload.priority,
+      timeEstimate: payload.timeEstimate ?? undefined,
+      startDate: src?.startDate ?? undefined,
+      dueDate: src?.dueDate ?? undefined,
+      labelIds: labelIds.length ? labelIds : undefined,
+      assigneeIds: assigneeIds.length ? assigneeIds : undefined,
+      createdById: actor.id,
+    })
+    if (!task) throw new Error('Task creation returned no row')
+
+    await this.materialiseChecklists(task.id, payload.checklists)
+    await this.materialiseCustomFieldValues(task.id, ctx.projectId, payload.customFieldValues)
+    await this.materialiseSubtasks(ctx.listId, task.id, payload.subtasks, actor.id, now)
+
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor.id,
+      actorEmail: actor.email,
+      action: 'task.duplicated',
+      resourceType: 'task',
+      resourceId: task.id,
+      description: 'Duplicated a task',
+      metadata: { sourceTaskId: taskId },
+    })
+
+    return { taskId: task.id, task }
+  }
+
   // ----------------------------------------------------------- helpers
 
   private async requireTemplate(workspaceId: string, id: string) {

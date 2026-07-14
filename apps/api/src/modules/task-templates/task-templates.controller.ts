@@ -110,6 +110,17 @@ export class TaskTemplatesController {
     )
   }
 
+  @Post('duplicate/:taskId')
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Duplicate an existing task into the same list' })
+  duplicate(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Param('taskId', new ParseUUIDPipe()) taskId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.templates.duplicateTask(workspaceId, taskId, { id: user.id, email: user.email })
+  }
+
   @Post(':id/instantiate')
   @UseGuards(WorkspaceMemberGuard)
   @ApiOperation({ summary: 'Create a real task from a template under a target list' })
