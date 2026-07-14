@@ -1,8 +1,8 @@
 import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
-import { ilike, or, eq, and, desc, inArray, type SQL } from 'drizzle-orm'
-import { tasks, taskAssignees, docs, lists, projects, spaces } from '@rundesk/db'
+import { ilike, or, eq, and, desc, inArray, gte, lte, type SQL } from 'drizzle-orm'
+import { tasks, taskAssignees, taskLabelAssignments, docs, lists, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
@@ -12,6 +12,9 @@ export type SearchFilters = {
   statusCategory?: 'open' | 'in_progress' | 'closed'
   priority?: 'urgent' | 'high' | 'normal' | 'low'
   assigneeId?: string
+  labelId?: string
+  dueAfter?: Date
+  dueBefore?: Date
 }
 
 // The Meilisearch index schema is intentionally light-weight.
@@ -142,7 +145,14 @@ export class SearchService implements OnModuleInit {
     filters: SearchFilters = {},
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const trimmed = query.trim()
-    const hasTaskFilter = Boolean(filters.statusCategory || filters.priority || filters.assigneeId)
+    const hasTaskFilter = Boolean(
+      filters.statusCategory ||
+        filters.priority ||
+        filters.assigneeId ||
+        filters.labelId ||
+        filters.dueAfter ||
+        filters.dueBefore,
+    )
     const wantTasks = !filters.types || filters.types.includes('task')
     // Task-specific filters imply the caller wants tasks, so docs are excluded.
     const wantDocs = (!filters.types || filters.types.includes('doc')) && !hasTaskFilter
@@ -190,6 +200,19 @@ export class SearchService implements OnModuleInit {
               ),
             )
           }
+          if (filters.labelId) {
+            conds.push(
+              inArray(
+                tasks.id,
+                this.db
+                  .select({ taskId: taskLabelAssignments.taskId })
+                  .from(taskLabelAssignments)
+                  .where(eq(taskLabelAssignments.labelId, filters.labelId)),
+              ),
+            )
+          }
+          if (filters.dueAfter) conds.push(gte(tasks.dueDate, filters.dueAfter))
+          if (filters.dueBefore) conds.push(lte(tasks.dueDate, filters.dueBefore))
           return this.db
             .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id })
             .from(tasks)

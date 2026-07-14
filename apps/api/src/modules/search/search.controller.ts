@@ -24,6 +24,9 @@ export class SearchController {
     @Query('statusCategory') statusCategory?: string,
     @Query('priority') priority?: string,
     @Query('assigneeId') assigneeId?: string,
+    @Query('labelId') labelId?: string,
+    @Query('dueAfter') dueAfter?: string,
+    @Query('dueBefore') dueBefore?: string,
   ) {
     const filters: SearchFilters = {}
     if (types) {
@@ -40,6 +43,14 @@ export class SearchController {
       filters.priority = priority as SearchFilters['priority']
     }
     if (assigneeId) filters.assigneeId = assigneeId
+    if (labelId) filters.labelId = labelId
+    const parseDate = (s?: string) => {
+      if (!s) return undefined
+      const d = new Date(s)
+      return Number.isNaN(d.getTime()) ? undefined : d
+    }
+    filters.dueAfter = parseDate(dueAfter)
+    filters.dueBefore = parseDate(dueBefore)
     return this.search.search(workspaceId, q ?? '', limit ? Number(limit) : 10, filters)
   }
 
