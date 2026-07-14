@@ -48,7 +48,7 @@ export class ProjectsController {
   async updateProject(
     @Param('projectId') projectId: string,
     @CurrentUser() user: any,
-    @Body() body: Partial<{ name: string; description: string; color: string; icon: string; folderId: string | null }>,
+    @Body() body: Partial<{ name: string; description: string; color: string; icon: string; folderId: string | null; defaultBillable: boolean }>,
   ) {
     return this.projectsService.updateProject(projectId, body, user.id)
   }

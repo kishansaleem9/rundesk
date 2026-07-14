@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, Card, cn } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot } from 'lucide-react'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign } from 'lucide-react'
 import { api } from '../lib/api'
 import {
   WorkHubPage,
@@ -204,6 +204,8 @@ function ProjectHome() {
 
       <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} />
 
+      <ProjectTimeSettingsSection projectId={projectId} />
+
       <ContainerMembersSheet
         kind="project"
         containerId={projectId}
@@ -383,6 +385,64 @@ function CustomFieldsSection({
           ))}
         </Card>
       )}
+    </section>
+  )
+}
+
+function ProjectTimeSettingsSection({ projectId }: { projectId: string }) {
+  const qc = useQueryClient()
+  const projectQuery = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: () => api<{ id: string; defaultBillable?: boolean }>(`/projects/${projectId}`),
+  })
+  const defaultBillable = projectQuery.data?.defaultBillable ?? false
+
+  const toggle = useMutation({
+    mutationFn: (next: boolean) =>
+      api(`/projects/${projectId}`, { method: 'PUT', body: { defaultBillable: next } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+  })
+
+  return (
+    <section>
+      <WorkSectionTitle>
+        <span className="flex items-center gap-2">
+          <DollarSign className="h-4 w-4 text-muted-foreground" />
+          Time tracking
+        </span>
+      </WorkSectionTitle>
+      <p className="text-[13px] text-muted-foreground mb-4 -mt-1">
+        Defaults applied to time logged against tasks in this project.
+      </p>
+      <Card className="p-4 border-border/80">
+        <label className="flex items-center justify-between gap-4 cursor-pointer">
+          <div>
+            <div className="text-[14px] font-medium">Billable by default</div>
+            <div className="text-[12px] text-muted-foreground">
+              New time entries on this project&apos;s tasks are marked billable unless overridden.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={defaultBillable}
+            disabled={projectQuery.isLoading || toggle.isPending}
+            onClick={() => toggle.mutate(!defaultBillable)}
+            className={cn(
+              'relative h-6 w-11 shrink-0 rounded-full transition-colors',
+              defaultBillable ? 'bg-brand-700' : 'bg-muted',
+              (projectQuery.isLoading || toggle.isPending) && 'opacity-60',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
+                defaultBillable && 'translate-x-5',
+              )}
+            />
+          </button>
+        </label>
+      </Card>
     </section>
   )
 }

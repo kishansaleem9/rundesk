@@ -16,6 +16,7 @@ import {
   Sun,
   Check,
   Inbox as InboxIcon,
+  Square,
 } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import {
@@ -84,6 +85,7 @@ export function AppTopbar({
       )}
       <Breadcrumbs {...params} />
       <div className="flex-1" />
+      <TimerIndicator />
       <SearchBar onCommandOpen={onCommandOpen} />
       <QuickCreateButton />
       <ThemeToggle />
@@ -187,6 +189,106 @@ function Breadcrumbs({
         </>
       )}
     </nav>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Active-timer indicator — a live running-timer pill in the header. Visible on
+// every screen so a running timer is never forgotten; click to jump to the
+// time page, or stop it inline.
+// ---------------------------------------------------------------------------
+type ActiveTimer = {
+  id: string
+  taskId: string
+  startedAt: string
+  taskTitle?: string | null
+  workspaceId?: string | null
+}
+
+function formatTimerClock(seconds: number): string {
+  const hh = String(Math.floor(seconds / 3600)).padStart(2, '0')
+  const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')
+  const ss = String(seconds % 60).padStart(2, '0')
+  return `${hh}:${mm}:${ss}`
+}
+
+function TimerIndicator() {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const [elapsed, setElapsed] = useState(0)
+
+  const { data: timer } = useQuery({
+    queryKey: ['active-timer'],
+    queryFn: async () => {
+      try {
+        return await api<ActiveTimer | null>('/time-entries/active')
+      } catch {
+        return null
+      }
+    },
+    refetchInterval: 15000,
+  })
+
+  useEffect(() => {
+    if (!timer?.startedAt) {
+      setElapsed(0)
+      return
+    }
+    const tick = () =>
+      setElapsed(Math.max(0, Math.floor((Date.now() - new Date(timer.startedAt).getTime()) / 1000)))
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => window.clearInterval(id)
+  }, [timer?.id, timer?.startedAt])
+
+  const stop = useMutation({
+    mutationFn: (t: ActiveTimer) =>
+      api(`/tasks/${t.taskId}/time-entries/stop/${t.id}`, { method: 'POST' }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['active-timer'] }),
+        qc.invalidateQueries({ queryKey: ['time-entries'] }),
+      ])
+    },
+  })
+
+  if (!timer) return null
+
+  return (
+    <div className="hidden sm:flex items-center h-9 rounded-lg border border-brand-700/30 bg-brand-700/10 pl-2.5 pr-1 gap-2 text-sm">
+      <button
+        type="button"
+        onClick={() =>
+          timer.workspaceId &&
+          navigate({ to: '/app/$workspaceId/time', params: { workspaceId: timer.workspaceId } })
+        }
+        className="flex items-center gap-2 min-w-0 group"
+        aria-label="Open time tracking"
+      >
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-brand-700 opacity-75 animate-ping" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-700" />
+        </span>
+        <span className="tabular-nums font-medium text-foreground">{formatTimerClock(elapsed)}</span>
+        <span className="truncate max-w-[120px] text-muted-foreground group-hover:text-foreground transition-colors">
+          {timer.taskTitle ?? 'Timer'}
+        </span>
+      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => stop.mutate(timer)}
+            disabled={stop.isPending}
+            className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
+            aria-label="Stop timer"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Stop timer</TooltipContent>
+      </Tooltip>
+    </div>
   )
 }
 

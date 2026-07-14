@@ -2116,8 +2116,24 @@ export class TasksService {
 
   async getActiveTimer(userId: string) {
     const [active] = await this.db
-      .select()
+      .select({
+        id: timeEntries.id,
+        taskId: timeEntries.taskId,
+        userId: timeEntries.userId,
+        description: timeEntries.description,
+        startedAt: timeEntries.startedAt,
+        isBillable: timeEntries.isBillable,
+        taskTitle: tasks.title,
+        workspaceId: spaces.workspaceId,
+        spaceId: spaces.id,
+        projectId: projects.id,
+        listId: lists.id,
+      })
       .from(timeEntries)
+      .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(and(eq(timeEntries.userId, userId), isNull(timeEntries.endedAt)))
       .orderBy(desc(timeEntries.startedAt))
       .limit(1)

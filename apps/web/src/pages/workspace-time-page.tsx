@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { Link, useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Badge, cn } from '@rundesk/ui'
-import { Play, Pause, Clock, DollarSign, Download, Pencil, Trash2, Check, X } from 'lucide-react'
+import { Button, Card, Badge, cn, toast } from '@rundesk/ui'
+import { Play, Pause, Clock, DollarSign, Download, Pencil, Trash2, Check, X, Send, CalendarRange, ClipboardCheck } from 'lucide-react'
 import { format, startOfWeek, addDays } from 'date-fns'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 
 type TimeEntry = {
@@ -36,6 +36,16 @@ type TimeReportRow = {
   billableHours: number
 }
 
+type MonthlyRow = {
+  userId: string
+  displayName: string
+  month: string // 'YYYY-MM'
+  totalSeconds: number
+  billableSeconds: number
+  totalHours: number
+  billableHours: number
+}
+
 function formatHours(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -46,15 +56,23 @@ function safeCsv(value: string): string {
   return `"${value.replace(/"/g, '""')}"`
 }
 
+function formatMonth(month: string): string {
+  // month is 'YYYY-MM'
+  const [y, m] = month.split('-').map(Number)
+  if (!y || !m) return month
+  return format(new Date(Date.UTC(y, m - 1, 1)), 'MMM yyyy')
+}
+
 export function TimePage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/time' })
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
-  const [tab, setTab] = useState<'timer' | 'timesheet' | 'reports'>('timesheet')
+  const [tab, setTab] = useState<'timer' | 'timesheet' | 'monthly' | 'reports'>('timesheet')
   const [elapsedSec, setElapsedSec] = useState(0)
 
   const weekStart = useMemo(() => startOfWeek(new Date(), { weekStartsOn: 1 }), [])
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
+  const weekStartIso = useMemo(() => format(weekStart, 'yyyy-MM-dd'), [weekStart])
 
   const entriesQuery = useQuery({
     queryKey: ['time-entries', workspaceId],
@@ -90,6 +108,52 @@ export function TimePage() {
     },
     enabled: tab === 'reports',
   })
+  const monthlyQuery = useQuery({
+    queryKey: ['time-monthly', workspaceId],
+    queryFn: async () => {
+      try {
+        return await api<MonthlyRow[]>(`/workspaces/${workspaceId}/time-monthly?months=6`)
+      } catch {
+        return [] as MonthlyRow[]
+      }
+    },
+    enabled: tab === 'monthly',
+  })
+  const approvalStatusQuery = useQuery({
+    queryKey: ['time-approvals', workspaceId, 'self'],
+    queryFn: async () => {
+      try {
+        return await api<{
+          canModerate: boolean
+          items: Array<{ id: string; userId: string; weekStart: string; status: string }>
+        }>(`/workspaces/${workspaceId}/time-approvals`)
+      } catch {
+        return { canModerate: false, items: [] }
+      }
+    },
+  })
+
+  const submitTimesheet = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/time-approvals/submit`, {
+        method: 'POST',
+        body: { weekStart: weekStartIso },
+      }),
+    onSuccess: async () => {
+      toast('Timesheet submitted', { description: 'Your week is now awaiting manager approval.' })
+      await qc.invalidateQueries({ queryKey: ['time-approvals', workspaceId] })
+    },
+    onError: (err) =>
+      toast('Could not submit timesheet', {
+        description: err instanceof ApiError ? err.message : 'Please try again.',
+      }),
+  })
+
+  // Status of THIS week's submission for the current user (drives the submit button).
+  const canModerate = approvalStatusQuery.data?.canModerate ?? false
+  const myWeekStatus = (approvalStatusQuery.data?.items ?? []).find(
+    (s) => s.weekStart === weekStartIso && s.userId === currentUserId,
+  )?.status
 
   const activeTimer = activeTimerQuery.data ?? null
   useEffect(() => {
@@ -182,7 +246,7 @@ export function TimePage() {
           </Button>
         </div>
         <div className="mt-3 flex items-center gap-1 -mb-[1px]">
-          {(['timesheet', 'timer', 'reports'] as const).map((t) => (
+          {(['timesheet', 'timer', 'monthly', 'reports'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -246,6 +310,40 @@ export function TimePage() {
 
         {tab === 'timesheet' && (
           <>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Week of</span>
+              <span className="font-medium text-foreground">{format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')}</span>
+              {myWeekStatus === 'submitted' && <Badge variant="warning" className="text-[10px] uppercase">Submitted</Badge>}
+              {myWeekStatus === 'approved' && <Badge variant="success" className="text-[10px] uppercase">Approved</Badge>}
+              {myWeekStatus === 'rejected' && <Badge variant="destructive" className="text-[10px] uppercase">Rejected — resubmit</Badge>}
+            </div>
+            <div className="flex items-center gap-2">
+              {canModerate && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/app/$workspaceId/time/approvals" params={{ workspaceId }} search={{ tab: 'pending', historyFilter: 'all' }}>
+                    <ClipboardCheck className="h-3.5 w-3.5 mr-1.5" /> Approvals
+                  </Link>
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={() => submitTimesheet.mutate()}
+                disabled={submitTimesheet.isPending || entries.length === 0 || myWeekStatus === 'submitted' || myWeekStatus === 'approved'}
+              >
+                <Send className="h-3.5 w-3.5 mr-1.5" />
+                {myWeekStatus === 'submitted'
+                  ? 'Awaiting approval'
+                  : myWeekStatus === 'approved'
+                  ? 'Approved'
+                  : submitTimesheet.isPending
+                  ? 'Submitting…'
+                  : myWeekStatus === 'rejected'
+                  ? 'Resubmit for approval'
+                  : 'Submit for approval'}
+              </Button>
+            </div>
+          </div>
           <Card className="p-4">
             <div className="grid grid-cols-8 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               <div className="col-span-1">Task</div>
@@ -316,6 +414,41 @@ export function TimePage() {
             )}
           </Card>
           </>
+        )}
+
+        {tab === 'monthly' && (
+          <Card className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarRange className="h-4 w-4 text-accent" />
+              <h3 className="text-sm font-semibold text-foreground">Monthly timesheet</h3>
+              <span className="text-xs text-muted-foreground">Last 6 months{canModerate ? ' · all members' : ''}</span>
+            </div>
+            <div className={cn('grid grid-cols-4 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider', !canModerate && 'grid-cols-3')}>
+              <div>Month</div>
+              {canModerate && <div>Member</div>}
+              <div className="text-center">Total hours</div>
+              <div className="text-center">Billable hours</div>
+            </div>
+            {monthlyQuery.isLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : (monthlyQuery.data ?? []).length === 0 ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">No time logged in the last 6 months.</div>
+            ) : (
+              <div className="space-y-1">
+                {(monthlyQuery.data ?? []).map((row) => (
+                  <div
+                    key={`${row.month}:${row.userId}`}
+                    className={cn('grid grid-cols-4 gap-2 py-1.5 text-sm border-b border-border/40', !canModerate && 'grid-cols-3')}
+                  >
+                    <div className="tabular-nums">{formatMonth(row.month)}</div>
+                    {canModerate && <div className="truncate">{row.displayName || 'Member'}</div>}
+                    <div className="text-center tabular-nums">{row.totalHours.toFixed(1)}h</div>
+                    <div className="text-center tabular-nums text-success">{row.billableHours.toFixed(1)}h</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
         )}
 
         {tab === 'reports' && (

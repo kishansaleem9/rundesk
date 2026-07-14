@@ -28,7 +28,7 @@ type Timesheet = {
   weekOf: string
   total: number // hours
   billable: number
-  status: 'pending' | 'approved' | 'rejected'
+  status: 'pending' | 'submitted' | 'approved' | 'rejected'
   approvedAt?: string | null
   approvedById?: string | null
   reviewerName?: string | null
@@ -95,8 +95,10 @@ export function TimeApprovalsPage() {
   })
   const canModerateApprovals = approvalsQuery.data?.canModerate ?? false
   const allSheets = approvalsQuery.data?.items ?? []
-  const pending = allSheets.filter((m) => m.status === 'pending')
-  const history = allSheets.filter((m) => m.status !== 'pending')
+  // "Pending" holds everything still awaiting a decision: auto-generated drafts
+  // ('pending') and timesheets a member has explicitly submitted ('submitted').
+  const pending = allSheets.filter((m) => m.status === 'pending' || m.status === 'submitted')
+  const history = allSheets.filter((m) => m.status === 'approved' || m.status === 'rejected')
   const historyCounts = useMemo(
     () => ({
       all: history.length,
@@ -361,7 +363,10 @@ export function TimeApprovalsPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{t.name}</span>
                     {t.status === 'pending' && (
-                      <Badge variant="warning" className="text-[9px] uppercase">Pending</Badge>
+                      <Badge variant="secondary" className="text-[9px] uppercase">Draft</Badge>
+                    )}
+                    {t.status === 'submitted' && (
+                      <Badge variant="warning" className="text-[9px] uppercase">Submitted</Badge>
                     )}
                     {t.status === 'approved' && (
                       <Badge variant="success" className="text-[9px] uppercase">

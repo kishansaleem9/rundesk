@@ -171,7 +171,7 @@ export class TimeEntriesService {
     }))
   }
 
-  async listApprovals(workspaceId: string, status?: 'pending' | 'approved' | 'rejected') {
+  async listApprovals(workspaceId: string, status?: 'pending' | 'submitted' | 'approved' | 'rejected') {
     const since = new Date()
     since.setUTCDate(since.getUTCDate() - 90)
 
@@ -227,7 +227,7 @@ export class TimeEntriesService {
         weekOf: string
         total: number
         billable: number
-        status: 'pending' | 'approved' | 'rejected'
+        status: 'pending' | 'submitted' | 'approved' | 'rejected'
         approvedAt?: Date | null
         approvedById?: string | null
         reviewerName?: string | null
@@ -255,7 +255,7 @@ export class TimeEntriesService {
           weekOf: `${start.toLocaleDateString()} — ${end.toLocaleDateString()}`,
           total: 0,
           billable: 0,
-          status: (approval?.status as 'pending' | 'approved' | 'rejected') ?? 'pending',
+          status: (approval?.status as 'pending' | 'submitted' | 'approved' | 'rejected') ?? 'pending',
           approvedAt: approval?.approvedAt ?? null,
           approvedById: approval?.approvedById ?? null,
           reviewerName: reviewer?.name ?? null,

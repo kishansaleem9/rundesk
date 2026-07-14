@@ -69,7 +69,7 @@ export class WorkspaceTimeEntriesController {
   listApprovals(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() actor: CurrentUserPayload,
-    @Query('status') status?: 'pending' | 'approved' | 'rejected',
+    @Query('status') status?: 'pending' | 'submitted' | 'approved' | 'rejected',
   ) {
     return Promise.all([
       this.time.canModerateApprovals(workspaceId, actor.id),
