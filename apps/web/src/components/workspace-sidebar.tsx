@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronDown,
   Check,
@@ -26,8 +26,19 @@ import {
   ArrowUp,
   ArrowDown,
   X,
+  MoreHorizontal,
+  FolderPlus,
 } from 'lucide-react'
-import { Button, cn } from '@rundesk/ui'
+import {
+  Button,
+  cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@rundesk/ui'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
@@ -147,9 +158,31 @@ export function WorkspaceSidebar() {
   const [viewport, setViewport] = useState({ w: 1400, h: 900 })
   const dockRef = useRef<HTMLDivElement | null>(null)
   const { organizations, workspaces } = useAuthStore()
+  const qc = useQueryClient()
   const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>({})
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
+
+  const createFolder = async (spaceId: string) => {
+    const name = window.prompt('New folder name')?.trim()
+    if (!name) return
+    try {
+      await api(`/spaces/${spaceId}/folders`, { method: 'POST', body: { name } })
+      setExpandedSpaces((prev) => ({ ...prev, [spaceId]: true }))
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not create folder')
+    }
+  }
+
+  const moveProject = async (projectId: string, folderId: string | null) => {
+    try {
+      await api(`/projects/${projectId}`, { method: 'PUT', body: { folderId } })
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not move project')
+    }
+  }
   const [recentItems, setRecentItems] = useState<Array<{ label: string; path: string }>>([])
   const [favoriteItems, setFavoriteItems] = useState<Array<{ label: string; path: string }>>([])
 
@@ -549,21 +582,58 @@ export function WorkspaceSidebar() {
             {spaceTreeQuery.data?.map((space) => {
               const renderProjectNode = (project: (typeof space.projects)[number]) => (
                 <div key={project.id} className="space-y-0.5">
-                  <button
-                    className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
-                    onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
-                  >
-                    <ChevronDown
-                      className={cn('h-3 w-3 transition-transform', expandedProjects[project.id] && 'rotate-180')}
-                    />
-                    <Link
-                      to="/app/$workspaceId/$spaceId/$projectId"
-                      params={{ workspaceId, spaceId: space.id, projectId: project.id }}
-                      className="truncate hover:text-foreground"
+                  <div className="group flex items-center gap-1">
+                    <button
+                      className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                      onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
                     >
-                      {project.name}
-                    </Link>
-                  </button>
+                      <ChevronDown
+                        className={cn('h-3 w-3 transition-transform', expandedProjects[project.id] && 'rotate-180')}
+                      />
+                      <Link
+                        to="/app/$workspaceId/$spaceId/$projectId"
+                        params={{ workspaceId, spaceId: space.id, projectId: project.id }}
+                        className="truncate hover:text-foreground"
+                      >
+                        {project.name}
+                      </Link>
+                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
+                          aria-label={`Actions for ${project.name}`}
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-52">
+                        <DropdownMenuLabel>Move to folder</DropdownMenuLabel>
+                        {(space.folders ?? []).map((folder) => (
+                          <DropdownMenuItem
+                            key={folder.id}
+                            disabled={project.folderId === folder.id}
+                            onClick={() => moveProject(project.id, folder.id)}
+                          >
+                            <Folder className="h-3.5 w-3.5" />
+                            <span className="truncate">{folder.name}</span>
+                          </DropdownMenuItem>
+                        ))}
+                        {(space.folders ?? []).length === 0 && (
+                          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No folders in this space yet</div>
+                        )}
+                        {project.folderId && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => moveProject(project.id, null)}>
+                              <X className="h-3.5 w-3.5" />
+                              Remove from folder
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                   {expandedProjects[project.id] && (
                     <div className="ml-5 space-y-0.5">
                       {project.lists.map((list) => {
@@ -653,6 +723,13 @@ export function WorkspaceSidebar() {
                     {space.projects.length === 0 && (
                       <div className="px-2 py-1 text-[11px] text-muted-foreground">No projects yet</div>
                     )}
+                    <button
+                      className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                      onClick={() => createFolder(space.id)}
+                    >
+                      <FolderPlus className="h-3.5 w-3.5 shrink-0" />
+                      New folder
+                    </button>
                   </div>
                 )}
               </div>
