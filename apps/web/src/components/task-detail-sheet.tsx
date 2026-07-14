@@ -85,6 +85,7 @@ type TaskDetail = {
   priority: TaskPriority
   dueDate?: string | null
   startDate?: string | null
+  timeEstimate?: number | null
   labels: Array<{ id: string; name: string; color: string }>
   assignees?: Array<{ user: UserLite }>
   subtasks?: Subtask[]
@@ -548,7 +549,9 @@ export function TaskDetailSheet({
                 <CommentsPanel taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
               )}
               {activeTab === 'activity' && <ActivityPanel taskId={detailQuery.data.id} />}
-              {activeTab === 'time' && <TimePanel taskId={detailQuery.data.id} />}
+              {activeTab === 'time' && (
+                <TimePanel taskId={detailQuery.data.id} estimate={detailQuery.data.timeEstimate} />
+              )}
             </div>
           </>
         ) : (
@@ -2614,7 +2617,7 @@ function ActivityPanel({ taskId }: { taskId: string }) {
 // Time entries
 // ---------------------------------------------------------------------------
 
-function TimePanel({ taskId }: { taskId: string }) {
+function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | null }) {
   const qc = useQueryClient()
   const [manualStart, setManualStart] = useState('')
   const [manualEnd, setManualEnd] = useState('')
@@ -2764,6 +2767,31 @@ function TimePanel({ taskId }: { taskId: string }) {
         <span className="text-muted-foreground">Total tracked</span>
         <span className="font-mono font-medium">{formatDuration(totalTrackedMs)}</span>
       </div>
+
+      {typeof estimate === 'number' && estimate > 0 && (() => {
+        const estMs = estimate * 1000
+        const pct = Math.min(100, Math.round((totalTrackedMs / estMs) * 100))
+        const over = totalTrackedMs > estMs
+        return (
+          <div className="rounded-md border border-border/70 bg-card px-3 py-2 text-sm space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Estimated vs actual</span>
+              <span className="font-mono text-xs">
+                {formatDuration(totalTrackedMs)} / {formatDuration(estMs)}
+                {over && (
+                  <span className="text-red-500 ml-1">(+{formatDuration(totalTrackedMs - estMs)})</span>
+                )}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className={cn('h-full rounded-full transition-all', over ? 'bg-red-500' : 'bg-brand-500')}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        )
+      })()}
 
       {entries.length === 0 ? (
         <EmptyState title="No time logged yet" hint="Start a timer to begin tracking." />
