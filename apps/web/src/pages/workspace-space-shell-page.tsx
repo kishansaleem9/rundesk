@@ -1,8 +1,11 @@
+import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Folder } from 'lucide-react'
+import { Folder, Users } from 'lucide-react'
+import { Button } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { WorkHubPage, WorkEmptyState, WorkEntityCard } from '../components/work/work-ui'
+import { ContainerMembersSheet } from '../components/container-members-sheet'
 
 type Project = {
   id: string
@@ -12,7 +15,7 @@ type Project = {
   icon?: string | null
 }
 
-type Space = { id: string; name: string; description?: string | null }
+type Space = { id: string; name: string; description?: string | null; visibility?: string | null }
 
 export function SpaceShell() {
   const matches = useMatches()
@@ -27,6 +30,7 @@ export function SpaceShell() {
 
 function SpaceHome() {
   const { workspaceId, spaceId } = useParams({ from: '/app/$workspaceId/$spaceId' })
+  const [membersOpen, setMembersOpen] = useState(false)
 
   const { data: spaces = [] } = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -44,6 +48,12 @@ function SpaceHome() {
       breadcrumb="Space"
       title={space?.name ?? 'Space'}
       description={space?.description}
+      headerAction={
+        <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
+          <Users className="h-3.5 w-3.5 mr-1.5" />
+          Members
+        </Button>
+      }
     >
       <section>
         <div className="flex items-center justify-between mb-4">
@@ -76,6 +86,16 @@ function SpaceHome() {
           </div>
         )}
       </section>
+
+      <ContainerMembersSheet
+        kind="space"
+        containerId={spaceId}
+        workspaceId={workspaceId}
+        containerName={space?.name}
+        initialVisibility={space?.visibility ?? 'public'}
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+      />
     </WorkHubPage>
   )
 }

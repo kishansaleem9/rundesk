@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, Card } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2 } from 'lucide-react'
+import { List as ListIcon, Plus, Settings, Trash2, Users } from 'lucide-react'
 import { api } from '../lib/api'
 import {
   WorkHubPage,
@@ -11,6 +11,7 @@ import {
   WorkCreateCard,
   WorkSectionTitle,
 } from '../components/work/work-ui'
+import { ContainerMembersSheet } from '../components/container-members-sheet'
 
 type List = {
   id: string
@@ -18,7 +19,7 @@ type List = {
   description?: string | null
 }
 
-type Project = { id: string; name: string; description?: string | null }
+type Project = { id: string; name: string; description?: string | null; visibility?: string | null }
 
 export function ProjectShell() {
   const matches = useMatches()
@@ -39,6 +40,7 @@ function ProjectHome() {
   const [showCreateList, setShowCreateList] = useState(false)
   const [newListName, setNewListName] = useState('')
   const [newListDescription, setNewListDescription] = useState('')
+  const [membersOpen, setMembersOpen] = useState(false)
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects', spaceId],
@@ -75,14 +77,20 @@ function ProjectHome() {
       title={project?.name ?? 'Project'}
       description={project?.description}
       headerAction={
-        <Button
-          size="sm"
-          className="bg-violet-600 hover:bg-violet-700 text-white"
-          onClick={() => setShowCreateList((v) => !v)}
-        >
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
-          {showCreateList ? 'Cancel' : 'Add list'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
+            <Users className="h-3.5 w-3.5 mr-1.5" />
+            Members
+          </Button>
+          <Button
+            size="sm"
+            className="bg-violet-600 hover:bg-violet-700 text-white"
+            onClick={() => setShowCreateList((v) => !v)}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            {showCreateList ? 'Cancel' : 'Add list'}
+          </Button>
+        </div>
       }
     >
       <section className="mb-10">
@@ -156,6 +164,16 @@ function ProjectHome() {
       </section>
 
       <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} />
+
+      <ContainerMembersSheet
+        kind="project"
+        containerId={projectId}
+        workspaceId={workspaceId}
+        containerName={project?.name}
+        initialVisibility={project?.visibility ?? null}
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+      />
     </WorkHubPage>
   )
 }
