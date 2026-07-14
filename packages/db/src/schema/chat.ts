@@ -40,6 +40,11 @@ export const chatMessages = pgTable('chat_messages', {
   mentions:        jsonb('mentions').$type<Array<{ userId: string }>>(),
   editedAt:        timestamp('edited_at', { withTimezone: true }),
   pinnedAt:        timestamp('pinned_at', { withTimezone: true }),
+  // Who pinned this message (Plan §6). Null when not pinned / unpinned.
+  pinnedById:      uuid('pinned_by_id').references(() => users.id, { onDelete: 'set null' }),
+  // Soft-delete tombstone (Plan §6): the row stays so threads/pins keep their
+  // shape and the UI can show "message was deleted"; body is blanked on delete.
+  deletedAt:       timestamp('deleted_at', { withTimezone: true }),
   createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 

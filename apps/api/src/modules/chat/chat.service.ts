@@ -409,6 +409,31 @@ export class ChatService {
     return { ok: true }
   }
 
+  /** Remove another member from a channel (Plan §6). Only the channel creator
+   *  or a workspace admin may do this; the creator can't be removed. */
+  async removeChannelMember(channelId: string, actorId: string, targetUserId: string) {
+    const channel = await this.assertChannelAccess(channelId, actorId)
+    if (targetUserId === actorId) {
+      // Removing yourself is "leave", not "remove".
+      return this.leaveChannel(channelId, actorId)
+    }
+    if (!(await this.canModerateChannel(channel, actorId))) {
+      throw new ForbiddenException('Only the channel creator or a workspace admin can remove members')
+    }
+    if (channel.createdById === targetUserId) {
+      throw new ForbiddenException('The channel creator cannot be removed')
+    }
+    await this.db
+      .delete(chatChannelMembers)
+      .where(and(eq(chatChannelMembers.channelId, channelId), eq(chatChannelMembers.userId, targetUserId)))
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.channel.members.updated',
+      workspaceId: channel.workspaceId,
+      channelId,
+    })
+    return { ok: true }
+  }
+
   async listMessages(channelId: string, userId: string, opts: { limit?: number; before?: string } = {}) {
     await this.assertChannelAccess(channelId, userId)
     const limit = Math.min(opts.limit ?? 50, 200)
@@ -424,6 +449,8 @@ export class ChatService {
         mentions: chatMessages.mentions,
         editedAt: chatMessages.editedAt,
         pinnedAt: chatMessages.pinnedAt,
+        pinnedById: chatMessages.pinnedById,
+        deletedAt: chatMessages.deletedAt,
         createdAt: chatMessages.createdAt,
         authorName: users.displayName,
         authorAvatarUrl: users.avatarUrl,
@@ -711,6 +738,7 @@ export class ChatService {
   async editMessage(messageId: string, userId: string, body: string) {
     const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!existing) throw new NotFoundException('Message not found')
+    if (existing.deletedAt) throw new ForbiddenException('Cannot edit a deleted message')
     await this.assertChannelAccess(existing.channelId, userId)
     if (existing.authorId !== userId) throw new ForbiddenException('Not your message')
     const [row] = await this.db
@@ -738,7 +766,7 @@ export class ChatService {
     const channel = await this.assertChannelAccess(existing.channelId, userId)
     const [row] = await this.db
       .update(chatMessages)
-      .set({ pinnedAt: pinned ? new Date() : null })
+      .set({ pinnedAt: pinned ? new Date() : null, pinnedById: pinned ? userId : null })
       .where(eq(chatMessages.id, messageId))
       .returning()
     this.realtime.emitToWorkspace(channel.workspaceId, {
@@ -746,15 +774,15 @@ export class ChatService {
       workspaceId: channel.workspaceId,
       channelId: row.channelId,
       messageId,
-      patch: { pinnedAt: row.pinnedAt },
+      patch: { pinnedAt: row.pinnedAt, pinnedById: row.pinnedById },
     })
     return row
   }
 
-  // List a channel's pinned messages (newest pin first).
+  // List a channel's pinned messages (newest pin first), with pinner attribution.
   async listPinned(channelId: string, userId: string) {
     await this.assertChannelAccess(channelId, userId)
-    return this.db
+    const rows = await this.db
       .select({
         id: chatMessages.id,
         channelId: chatMessages.channelId,
@@ -763,14 +791,28 @@ export class ChatService {
         mentions: chatMessages.mentions,
         editedAt: chatMessages.editedAt,
         pinnedAt: chatMessages.pinnedAt,
+        pinnedById: chatMessages.pinnedById,
         createdAt: chatMessages.createdAt,
         authorName: users.displayName,
         authorAvatarUrl: users.avatarUrl,
       })
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
-      .where(and(eq(chatMessages.channelId, channelId), isNotNull(chatMessages.pinnedAt)))
+      .where(
+        and(
+          eq(chatMessages.channelId, channelId),
+          isNotNull(chatMessages.pinnedAt),
+          isNull(chatMessages.deletedAt),
+        ),
+      )
       .orderBy(desc(chatMessages.pinnedAt))
+    // Attach the pinner's display name (Plan §6 pin attribution).
+    const pinnerIds = [...new Set(rows.map((r) => r.pinnedById).filter((id): id is string => !!id))]
+    const pinnerNames = pinnerIds.length
+      ? await this.db.select({ id: users.id, name: users.displayName }).from(users).where(inArray(users.id, pinnerIds))
+      : []
+    const nameById = new Map(pinnerNames.map((p) => [p.id, p.name]))
+    return rows.map((r) => ({ ...r, pinnedByName: r.pinnedById ? nameById.get(r.pinnedById) ?? null : null }))
   }
 
   // Save / unsave a message for the current user only (private bookmark).
@@ -813,21 +855,40 @@ export class ChatService {
       .orderBy(desc(chatMessageSaves.createdAt))
   }
 
+  /** Channel creator or a workspace admin/super_admin may moderate (Plan §6). */
+  private async canModerateChannel(
+    channel: { createdById: string | null; workspaceId: string },
+    userId: string,
+  ): Promise<boolean> {
+    if (channel.createdById === userId) return true
+    const [m] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, channel.workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return m?.role === 'workspace_admin' || m?.role === 'super_admin'
+  }
+
   async deleteMessage(messageId: string, userId: string) {
     const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!existing) throw new NotFoundException('Message not found')
-    await this.assertChannelAccess(existing.channelId, userId)
-    if (existing.authorId !== userId) throw new ForbiddenException('Not your message')
-    const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, existing.channelId))
-    await this.db.delete(chatMessages).where(eq(chatMessages.id, messageId))
-    if (channel) {
-      this.realtime.emitToWorkspace(channel.workspaceId, {
-        type: 'chat.message.deleted',
-        workspaceId: channel.workspaceId,
-        channelId: existing.channelId,
-        messageId,
-      })
+    const channel = await this.assertChannelAccess(existing.channelId, userId)
+    if (existing.authorId !== userId && !(await this.canModerateChannel(channel, userId))) {
+      throw new ForbiddenException('Only the author or a channel/workspace admin can delete this message')
     }
+    // Soft-delete tombstone: keep the row (threads/pins), blank the body, unpin.
+    const [row] = await this.db
+      .update(chatMessages)
+      .set({ deletedAt: new Date(), body: '', pinnedAt: null, pinnedById: null })
+      .where(eq(chatMessages.id, messageId))
+      .returning()
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.message.updated',
+      workspaceId: channel.workspaceId,
+      channelId: existing.channelId,
+      messageId,
+      patch: { deletedAt: row.deletedAt, body: '', pinnedAt: null },
+    })
     return { ok: true }
   }
 

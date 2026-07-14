@@ -316,6 +316,13 @@
       "when": 1900000041000,
       "tag": "0044_task_assignee_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1900000042000,
+      "tag": "0045_chat_pin_by_and_tombstone",
+      "breakpoints": true
     }
   ]
 }

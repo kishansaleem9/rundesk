@@ -111,6 +111,15 @@ export class ChatController {
     return this.chat.addChannelMembers(channelId, user.id, body.userIds ?? [])
   }
 
+  @Delete('chat/channels/:channelId/members/:userId')
+  removeChannelMember(
+    @Param('channelId') channelId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.chat.removeChannelMember(channelId, user.id, userId)
+  }
+
   @Get('chat/channels/:channelId/messages')
   listMessages(
     @Param('channelId') channelId: string,
