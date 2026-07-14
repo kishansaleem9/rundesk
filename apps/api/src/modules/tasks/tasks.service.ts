@@ -16,7 +16,6 @@ import {
   timeEntries,
   users,
   lists,
-  listStatuses,
   projects,
   spaces,
   workspaces,
@@ -24,6 +23,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { resolveEffectiveStatuses } from '../../common/statuses/status-resolution'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
 import { AutomationsService } from '../automations/automations.service'
@@ -461,15 +461,9 @@ export class TasksService {
     listId: string,
     requestedKey: string | undefined,
   ): Promise<{ key: string; category: StatusCategory }> {
-    const rows = await this.db
-      .select({
-        key: listStatuses.key,
-        category: listStatuses.category,
-        position: listStatuses.position,
-      })
-      .from(listStatuses)
-      .where(eq(listStatuses.listId, listId))
-      .orderBy(asc(listStatuses.position))
+    // Resolve against the list's effective status set, honouring its
+    // status_scope (own list_statuses, or the project/space template).
+    const rows = await resolveEffectiveStatuses(this.db, listId)
 
     if (rows.length === 0) {
       // Lists migrated from before custom-statuses always have seeded rows,

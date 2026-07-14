@@ -6,9 +6,10 @@ import {
   ConflictException,
 } from '@nestjs/common'
 import { and, asc, eq, sql } from 'drizzle-orm'
-import { listStatuses, lists, tasks } from '@rundesk/db'
+import { listStatuses, lists, tasks, projectStatuses, spaceStatuses } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { getListStatusContext } from '../../common/statuses/status-resolution'
 
 export type StatusCategory = 'open' | 'in_progress' | 'closed'
 
@@ -43,11 +44,46 @@ export class ListStatusesService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
   async list(listId: string) {
-    return this.db
+    const ctx = await getListStatusContext(this.db, listId)
+    const scope = ctx?.scope ?? 'list'
+
+    if (scope === 'project' && ctx) {
+      const rows = await this.db
+        .select()
+        .from(projectStatuses)
+        .where(eq(projectStatuses.projectId, ctx.projectId))
+        .orderBy(asc(projectStatuses.position), asc(projectStatuses.createdAt))
+      return rows.map((r) => ({ ...r, listId, scope }))
+    }
+    if (scope === 'space' && ctx) {
+      const rows = await this.db
+        .select()
+        .from(spaceStatuses)
+        .where(eq(spaceStatuses.spaceId, ctx.spaceId))
+        .orderBy(asc(spaceStatuses.position), asc(spaceStatuses.createdAt))
+      return rows.map((r) => ({ ...r, listId, scope }))
+    }
+
+    const rows = await this.db
       .select()
       .from(listStatuses)
       .where(eq(listStatuses.listId, listId))
       .orderBy(asc(listStatuses.position), asc(listStatuses.createdAt))
+    return rows.map((r) => ({ ...r, scope: 'list' as const }))
+  }
+
+  /**
+   * List-level status mutations are only valid when the list owns its own
+   * pipeline. If it inherits a project/space template, the caller must edit
+   * that template instead (409, so the UI can redirect).
+   */
+  private async assertOwnScope(listId: string) {
+    const ctx = await getListStatusContext(this.db, listId)
+    if (ctx && ctx.scope !== 'list') {
+      throw new ConflictException(
+        `This list uses the ${ctx.scope}'s status set. Edit statuses at the ${ctx.scope} level instead.`,
+      )
+    }
   }
 
   /**
@@ -75,6 +111,7 @@ export class ListStatusesService {
     }
 
     await this.assertListExists(listId)
+    await this.assertOwnScope(listId)
 
     // Generate a unique key from the name; suffix on collision.
     const baseKey = slugifyKey(name)
@@ -109,6 +146,7 @@ export class ListStatusesService {
   }
 
   async update(listId: string, statusId: string, patch: ListStatusUpdateInput) {
+    await this.assertOwnScope(listId)
     const existing = await this.requireById(listId, statusId)
     const updates: Record<string, unknown> = { updatedAt: new Date() }
 
@@ -154,6 +192,7 @@ export class ListStatusesService {
    * a status that would orphan tasks.
    */
   async remove(listId: string, statusId: string, reassignToStatusId?: string | null) {
+    await this.assertOwnScope(listId)
     const existing = await this.requireById(listId, statusId)
 
     const [{ count }] = await this.db
@@ -192,6 +231,7 @@ export class ListStatusesService {
    * stay deterministic.
    */
   async reorder(listId: string, orderedIds: string[]) {
+    await this.assertOwnScope(listId)
     const all = await this.list(listId)
     const validIds = new Set(all.map((s) => s.id))
     const missing = orderedIds.filter((id) => !validIds.has(id))
