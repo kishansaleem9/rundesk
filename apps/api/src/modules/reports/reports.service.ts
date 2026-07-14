@@ -1,8 +1,9 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { and, eq, gte, sql, desc, inArray } from 'drizzle-orm'
+import { and, eq, gte, sql, desc, asc, inArray } from 'drizzle-orm'
 import {
   tasks,
   taskAssignees,
+  taskActivity,
   taskLabelAssignments,
   labels,
   users,
@@ -339,6 +340,64 @@ export class ReportsService {
       totalHours: Math.round((r.totalSeconds / 3600) * 10) / 10,
       billableHours: Math.round((r.billableSeconds / 3600) * 10) / 10,
     }))
+  }
+
+  /**
+   * Average time tasks spend in each status (Plan §9 bottleneck view), derived
+   * from status_changed activity: a task is "in" meta.to from that event until
+   * its next status change (or now if it's still there).
+   */
+  async getStatusDurations(workspaceId: string, days = 90) {
+    const since = daysAgo(days)
+    const events = await this.db
+      .select({
+        taskId: taskActivity.taskId,
+        meta: taskActivity.meta,
+        createdAt: taskActivity.createdAt,
+      })
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(taskActivity.action, 'status_changed'),
+          gte(taskActivity.createdAt, since),
+        ),
+      )
+      .orderBy(asc(taskActivity.taskId), asc(taskActivity.createdAt))
+
+    const now = Date.now()
+    const durations = new Map<string, { totalMs: number; count: number }>()
+    let i = 0
+    while (i < events.length) {
+      const taskId = events[i].taskId
+      const group: typeof events = []
+      while (i < events.length && events[i].taskId === taskId) {
+        group.push(events[i])
+        i++
+      }
+      for (let j = 0; j < group.length; j++) {
+        const to = (group[j].meta as { to?: string } | null)?.to
+        if (!to) continue
+        const start = new Date(group[j].createdAt).getTime()
+        const end = j + 1 < group.length ? new Date(group[j + 1].createdAt).getTime() : now
+        const ms = Math.max(0, end - start)
+        const d = durations.get(to) ?? { totalMs: 0, count: 0 }
+        d.totalMs += ms
+        d.count += 1
+        durations.set(to, d)
+      }
+    }
+    return [...durations.entries()]
+      .map(([status, d]) => ({
+        status,
+        avgHours: Math.round((d.totalMs / d.count / 3_600_000) * 10) / 10,
+        samples: d.count,
+      }))
+      .sort((a, b) => b.avgHours - a.avgHours)
   }
 
   // ─── Sprint velocity ──────────────────────────────────────────────────────

@@ -510,6 +510,15 @@ function CompletionTab({
     queryKey: ['reports-completion', workspaceId, days],
     queryFn: () => api<Data>(`/workspaces/${workspaceId}/reports/completion?days=${days}`),
   })
+  const durQuery = useQuery({
+    queryKey: ['reports-status-durations', workspaceId, days],
+    queryFn: () =>
+      api<Array<{ status: string; avgHours: number; samples: number }>>(
+        `/workspaces/${workspaceId}/reports/status-durations?days=${days}`,
+      ),
+  })
+  const durations = durQuery.data ?? []
+  const durMax = Math.max(1, ...durations.map((x) => x.avgHours))
 
   const d = query.data
   useEffect(() => {
@@ -589,6 +598,32 @@ function CompletionTab({
                 </div>
               )
             })}
+          </div>
+        </Card>
+      )}
+
+      {durations.length > 0 && (
+        <Card className="p-4">
+          <h3 className="text-sm font-medium mb-1">Avg time in each status</h3>
+          <p className="text-xs text-muted-foreground mb-3">
+            Where tasks spend the most time — the longest bars are your bottlenecks.
+          </p>
+          <div className="space-y-2">
+            {durations.map((row) => (
+              <div key={row.status} className="flex items-center gap-3">
+                <span className="text-sm w-28 capitalize truncate">{row.status.replace(/_/g, ' ')}</span>
+                <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full', STATUS_COLORS[row.status] ?? 'bg-brand-700')}
+                    style={{ width: `${Math.max(2, (row.avgHours / durMax) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-sm tabular-nums w-24 text-right">
+                  {row.avgHours >= 48 ? `${(row.avgHours / 24).toFixed(1)}d` : `${row.avgHours}h`}
+                </span>
+                <span className="text-xs text-muted-foreground tabular-nums w-14 text-right">n={row.samples}</span>
+              </div>
+            ))}
           </div>
         </Card>
       )}

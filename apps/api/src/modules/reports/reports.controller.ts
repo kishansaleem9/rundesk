@@ -59,6 +59,12 @@ export class ReportsController {
     return this.reports.getCompletionAnalytics(workspaceId, days ? parseInt(days, 10) : 30)
   }
 
+  @Get('status-durations')
+  @ApiOperation({ summary: 'Average time tasks spend in each status (bottlenecks)' })
+  statusDurations(@Param('workspaceId') workspaceId: string, @Query('days') days?: string) {
+    return this.reports.getStatusDurations(workspaceId, days ? parseInt(days, 10) : 90)
+  }
+
   @Get('time')
   @ApiOperation({ summary: 'Time tracking report' })
   async time(
