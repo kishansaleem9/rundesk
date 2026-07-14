@@ -2,8 +2,8 @@ import { Injectable, Inject, HttpException, HttpStatus } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
-import { and, eq, gte, lte, sql } from 'drizzle-orm'
-import { aiUsage } from '@rundesk/db'
+import { and, eq, gte, lte, ne, sql } from 'drizzle-orm'
+import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
@@ -49,29 +49,56 @@ export class AiService {
    * Enforce a per-user hourly AI call cap (Plan §7.15 "per-user rate limits").
    * Throws 429 when exceeded. No-op for calls without a user context.
    */
+  private get orgHourlyLimit(): number {
+    const v = Number(this.config.get<string>('AI_ORG_HOURLY_LIMIT'))
+    return Number.isFinite(v) && v > 0 ? v : 2000
+  }
+
   async assertWithinRateLimit(ctx: AiCtx, now: Date = new Date()) {
-    if (!ctx.userId) return
     const since = new Date(now.getTime() - 3_600_000)
-    const [row] = await this.db
-      .select({ c: sql<number>`count(*)::int` })
-      .from(aiUsage)
-      .where(and(eq(aiUsage.userId, ctx.userId), gte(aiUsage.createdAt, since)))
-    if ((row?.c ?? 0) >= this.hourlyLimit) {
-      throw new HttpException(
-        `AI hourly rate limit reached (${this.hourlyLimit}/hour). Try again later.`,
-        HttpStatus.TOO_MANY_REQUESTS,
-      )
+    if (ctx.userId) {
+      const [row] = await this.db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(aiUsage)
+        .where(and(eq(aiUsage.userId, ctx.userId), gte(aiUsage.createdAt, since)))
+      if ((row?.c ?? 0) >= this.hourlyLimit) {
+        throw new HttpException(
+          `AI hourly rate limit reached (${this.hourlyLimit}/hour). Try again later.`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        )
+      }
+    }
+    // Per-organization (workspace) cap (Plan §7.15).
+    if (ctx.workspaceId) {
+      const [row] = await this.db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(aiUsage)
+        .where(and(eq(aiUsage.workspaceId, ctx.workspaceId), gte(aiUsage.createdAt, since)))
+      if ((row?.c ?? 0) >= this.orgHourlyLimit) {
+        throw new HttpException(
+          `Workspace AI hourly limit reached (${this.orgHourlyLimit}/hour). Try again later.`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        )
+      }
     }
   }
 
-  /** Create a message and record its token usage (Plan §7.15). */
+  /**
+   * Create a message: rate-limit, enable prompt caching on the system block,
+   * and record token usage (Plan §7.15). All non-streaming AI calls route here.
+   */
   private async complete(
     feature: string,
     ctx: AiCtx,
     params: Anthropic.Messages.MessageCreateParamsNonStreaming,
   ) {
     await this.assertWithinRateLimit(ctx)
-    const response = await this.claude.messages.create(params)
+    // Prompt caching: mark the (repeated) system prompt as a cache breakpoint.
+    const finalParams: Anthropic.Messages.MessageCreateParamsNonStreaming =
+      typeof params.system === 'string' && params.system.length > 200
+        ? { ...params, system: [{ type: 'text', text: params.system, cache_control: { type: 'ephemeral' } }] }
+        : params
+    const response = await this.claude.messages.create(finalParams)
     void this.recordUsage(feature, params.model, ctx, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0)
     return response
   }
@@ -170,14 +197,14 @@ ${context ? `\nWorkspace context:\n${context}` : ''}`
   }
 
   // ─── Meeting notes → action items ─────────────────────────────────────────
-  async extractTasksFromNotes(notes: string): Promise<Array<{
+  async extractTasksFromNotes(notes: string, ctx: AiCtx = {}): Promise<Array<{
     title: string
     description: string
     assigneeName?: string
     dueDate?: string
     priority: string
   }>> {
-    const response = await this.claude.messages.create({
+    const response = await this.complete('meeting.notes', ctx, {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       system: `You are a meeting notes analyzer for Rundesk.
@@ -194,11 +221,11 @@ Respond ONLY with a valid JSON array.`,
   }
 
   // ─── Auto-priority detection ──────────────────────────────────────────────
-  async suggestPriority(title: string, description?: string): Promise<{
+  async suggestPriority(title: string, description?: string, ctx: AiCtx = {}): Promise<{
     priority: 'urgent' | 'high' | 'normal' | 'low'
     reasoning: string
   }> {
-    const response = await this.claude.messages.create({
+    const response = await this.complete('task.priority', ctx, {
       model: 'claude-haiku-4-5',
       max_tokens: 256,
       system: `You are a task prioritizer. Given a task title and optional description, suggest the appropriate priority.
@@ -235,6 +262,7 @@ Focus on the key goals, current status, and any blockers.`,
   async improveWriting(
     text: string,
     mode: 'improve' | 'shorten' | 'expand' | 'format' = 'improve',
+    ctx: AiCtx = {},
   ): Promise<string> {
     const instructions: Record<string, string> = {
       improve: 'Improve the clarity, grammar, and professionalism of this text while keeping the same meaning.',
@@ -243,7 +271,7 @@ Focus on the key goals, current status, and any blockers.`,
       format: 'Reformat this text with proper markdown: headings, bullet points, bold for key terms.',
     }
 
-    const response = await this.claude.messages.create({
+    const response = await this.complete('writing.improve', ctx, {
       model: 'claude-haiku-4-5',
       max_tokens: 1024,
       system: `You are a writing assistant. ${instructions[mode]} Return ONLY the improved text.`,
@@ -258,7 +286,11 @@ Focus on the key goals, current status, and any blockers.`,
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
     workspaceContext: string,
     res: Response,
+    ctx: AiCtx = {},
   ): Promise<void> {
+    // Enforce rate limits before we hijack the reply for streaming.
+    await this.assertWithinRateLimit(ctx)
+
     const systemPrompt = `You are Rundesk AI, an intelligent assistant embedded in the Rundesk project management platform.
 You help users manage tasks, understand their workspace, draft messages, generate content, and answer questions.
 Be concise, helpful, and action-oriented.
@@ -283,7 +315,8 @@ Current date: ${new Date().toISOString().split('T')[0]}`
       const stream = this.claude.messages.stream({
         model: 'claude-sonnet-4-6',
         max_tokens: 2048,
-        system: systemPrompt,
+        // Cache the (large, repeated) system context across turns.
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
         messages,
       })
 
@@ -292,6 +325,14 @@ Current date: ${new Date().toISOString().split('T')[0]}`
           raw.write(`data: ${JSON.stringify({ delta: chunk.delta.text })}\n\n`)
         }
       }
+      const final = await stream.finalMessage().catch(() => null)
+      void this.recordUsage(
+        'chat',
+        'claude-sonnet-4-6',
+        ctx,
+        final?.usage?.input_tokens ?? 0,
+        final?.usage?.output_tokens ?? 0,
+      )
       raw.write('data: [DONE]\n\n')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'AI request failed'
@@ -301,14 +342,71 @@ Current date: ${new Date().toISOString().split('T')[0]}`
     }
   }
 
+  /**
+   * Build a real workspace context string for the chatbot (Plan §7.6): the
+   * user's role, space/project/task counts, and their open assigned tasks —
+   * so answers are grounded instead of a workspace-ID stub.
+   */
+  async buildWorkspaceContext(workspaceId: string, userId: string): Promise<string> {
+    try {
+      const [[wsRow], [roleRow], [counts], openTasks] = await Promise.all([
+        this.db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1),
+        this.db
+          .select({ role: workspaceMembers.role })
+          .from(workspaceMembers)
+          .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+          .limit(1),
+        this.db
+          .select({
+            spaces: sql<number>`count(distinct ${spaces.id})::int`,
+            projects: sql<number>`count(distinct ${projects.id})::int`,
+            openTasks: sql<number>`count(distinct case when ${tasks.statusCategory} <> 'closed' and ${tasks.isArchived} = false then ${tasks.id} end)::int`,
+          })
+          .from(spaces)
+          .leftJoin(projects, eq(projects.spaceId, spaces.id))
+          .leftJoin(lists, eq(lists.projectId, projects.id))
+          .leftJoin(tasks, eq(tasks.listId, lists.id))
+          .where(eq(spaces.workspaceId, workspaceId)),
+        this.db
+          .select({ title: tasks.title, dueDate: tasks.dueDate, priority: tasks.priority })
+          .from(tasks)
+          .innerJoin(taskAssignees, eq(taskAssignees.taskId, tasks.id))
+          .innerJoin(lists, eq(lists.id, tasks.listId))
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(
+            and(
+              eq(spaces.workspaceId, workspaceId),
+              eq(taskAssignees.userId, userId),
+              eq(tasks.isArchived, false),
+              ne(tasks.statusCategory, 'closed'),
+            ),
+          )
+          .limit(15),
+      ])
+      const mine = openTasks
+        .map((t) => `- ${t.title}${t.dueDate ? ` (due ${new Date(t.dueDate).toISOString().slice(0, 10)})` : ''} [${t.priority}]`)
+        .join('\n')
+      return [
+        `Workspace: ${wsRow?.name ?? 'Unknown'}`,
+        `Your role: ${roleRow?.role ?? 'member'}`,
+        `Workspace totals: ${counts?.spaces ?? 0} spaces, ${counts?.projects ?? 0} projects, ${counts?.openTasks ?? 0} open tasks`,
+        openTasks.length ? `Your open assigned tasks:\n${mine}` : 'You have no open assigned tasks.',
+      ].join('\n')
+    } catch {
+      return `Workspace ID: ${workspaceId}`
+    }
+  }
+
   // ─── Smart deadline suggestion ────────────────────────────────────────────
   async suggestDeadline(
     title: string,
     description?: string,
     teamWorkload?: string,
+    ctx: AiCtx = {},
   ): Promise<{ suggestedDate: string; reasoning: string }> {
     const today = new Date().toISOString().split('T')[0]
-    const response = await this.claude.messages.create({
+    const response = await this.complete('task.deadline', ctx, {
       model: 'claude-haiku-4-5',
       max_tokens: 256,
       system: `You are a project planning assistant. Today's date is ${today}.
@@ -337,12 +435,12 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
   }
 
   // ─── Workspace insights (real AI over real metrics) ───────────────────────
-  async generateInsights(context: string): Promise<{
+  async generateInsights(context: string, ctx: AiCtx = {}): Promise<{
     summary: string
     health: { score: number; label: string; reasoning: string }
     suggestions: Array<{ title: string; detail: string; cta?: string; target?: string }>
   }> {
-    const response = await this.claude.messages.create({
+    const response = await this.complete('insights', ctx, {
       model: 'claude-haiku-4-5',
       max_tokens: 1024,
       system: `You are an analytics assistant for the Rundesk project management app.
@@ -368,8 +466,9 @@ Give 3-4 suggestions. "target" must be one of: overdue, sprint, workload, report
   async suggestDashboardLayout(
     availableWidgets: Array<{ type: string; label: string }>,
     context: string,
+    ctx: AiCtx = {},
   ): Promise<{ widgets: string[]; reasoning: string }> {
-    const response = await this.claude.messages.create({
+    const response = await this.complete('dashboard.layout', ctx, {
       model: 'claude-haiku-4-5',
       max_tokens: 512,
       system: `You arrange a project dashboard. Choose and order the most useful widgets for this workspace from the available list.

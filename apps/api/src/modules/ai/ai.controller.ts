@@ -47,20 +47,29 @@ export class AiController {
 
   @Post('task/priority')
   @ApiOperation({ summary: 'Suggest priority for a task' })
-  async suggestPriority(@Body() body: { title: string; description?: string }) {
+  async suggestPriority(
+    @CurrentUser() user: any,
+    @Body() body: { title: string; description?: string; workspaceId?: string },
+  ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.suggestPriority(body.title, body.description)
+    return this.ai.suggestPriority(body.title, body.description, { userId: user.id, workspaceId: body.workspaceId })
   }
 
   @Post('task/deadline')
   @ApiOperation({ summary: 'Suggest a deadline for a task' })
-  async suggestDeadline(@Body() body: { title: string; description?: string; teamWorkload?: string }) {
+  async suggestDeadline(
+    @CurrentUser() user: any,
+    @Body() body: { title: string; description?: string; teamWorkload?: string; workspaceId?: string },
+  ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.suggestDeadline(body.title, body.description, body.teamWorkload)
+    return this.ai.suggestDeadline(body.title, body.description, body.teamWorkload, {
+      userId: user.id,
+      workspaceId: body.workspaceId,
+    })
   }
 
   @Post('summarize')
@@ -82,51 +91,61 @@ export class AiController {
   @Post('writing/improve')
   @ApiOperation({ summary: 'Improve writing with AI' })
   async improveWriting(
-    @Body() body: { text: string; mode?: 'improve' | 'shorten' | 'expand' | 'format' },
+    @CurrentUser() user: any,
+    @Body() body: { text: string; mode?: 'improve' | 'shorten' | 'expand' | 'format'; workspaceId?: string },
   ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    const improved = await this.ai.improveWriting(body.text, body.mode ?? 'improve')
+    const improved = await this.ai.improveWriting(body.text, body.mode ?? 'improve', {
+      userId: user.id,
+      workspaceId: body.workspaceId,
+    })
     return { improved }
   }
 
   @Post('meeting-notes')
   @ApiOperation({ summary: 'Extract action items from meeting notes' })
-  async extractFromNotes(@Body() body: { notes: string }) {
+  async extractFromNotes(@CurrentUser() user: any, @Body() body: { notes: string; workspaceId?: string }) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.extractTasksFromNotes(body.notes)
+    return this.ai.extractTasksFromNotes(body.notes, { userId: user.id, workspaceId: body.workspaceId })
   }
 
   @Post('insights')
   @ApiOperation({ summary: 'Generate AI insights from real workspace metrics' })
-  async insights(@Body() body: { context: string }) {
+  async insights(@CurrentUser() user: any, @Body() body: { context: string; workspaceId?: string }) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.generateInsights(body.context ?? '')
+    return this.ai.generateInsights(body.context ?? '', { userId: user.id, workspaceId: body.workspaceId })
   }
 
   @Post('dashboard/suggest-layout')
   @ApiOperation({ summary: 'Suggest a dashboard widget layout with AI' })
   async suggestLayout(
-    @Body() body: { availableWidgets: Array<{ type: string; label: string }>; context?: string },
+    @CurrentUser() user: any,
+    @Body() body: { availableWidgets: Array<{ type: string; label: string }>; context?: string; workspaceId?: string },
   ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.suggestDashboardLayout(body.availableWidgets ?? [], body.context ?? '')
+    return this.ai.suggestDashboardLayout(body.availableWidgets ?? [], body.context ?? '', {
+      userId: user.id,
+      workspaceId: body.workspaceId,
+    })
   }
 
   @Post('chat')
   @ApiOperation({ summary: 'Chat with AI assistant (streaming SSE)' })
   async chat(
+    @CurrentUser() user: any,
     @Body()
     body: {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>
       workspaceContext?: string
+      workspaceId?: string
     },
     @Res() res: any,
   ) {
@@ -134,6 +153,14 @@ export class AiController {
       res.status(503).send({ error: 'AI features are not configured' })
       return
     }
-    await this.ai.chatStream(body.messages, body.workspaceContext ?? '', res as any)
+    // Real context injection (§7.6): build a grounded workspace summary
+    // server-side when a workspaceId is provided.
+    const context = body.workspaceId
+      ? await this.ai.buildWorkspaceContext(body.workspaceId, user.id)
+      : body.workspaceContext ?? ''
+    await this.ai.chatStream(body.messages, context, res as any, {
+      userId: user.id,
+      workspaceId: body.workspaceId,
+    })
   }
 }
