@@ -2150,6 +2150,38 @@ export class TasksService {
     })
   }
 
+  /** Aggregated activity across every task in a project (Plan §4 timeline). */
+  async listProjectActivity(projectId: string, limit = 100) {
+    const rows = await this.db
+      .select({
+        id: taskActivity.id,
+        action: taskActivity.action,
+        meta: taskActivity.meta,
+        createdAt: taskActivity.createdAt,
+        taskId: taskActivity.taskId,
+        taskTitle: tasks.title,
+        actorId: users.id,
+        actorName: users.displayName,
+        actorEmail: users.email,
+      })
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .leftJoin(users, eq(users.id, taskActivity.actorId))
+      .where(eq(lists.projectId, projectId))
+      .orderBy(desc(taskActivity.createdAt))
+      .limit(limit)
+    return rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      meta: r.meta,
+      createdAt: r.createdAt,
+      taskId: r.taskId,
+      taskTitle: r.taskTitle,
+      actor: r.actorId ? { id: r.actorId, displayName: r.actorName, email: r.actorEmail } : null,
+    }))
+  }
+
   // --- Time entries --------------------------------------------------------
   async startTimer(taskId: string, userId: string, description?: string) {
     // If there's an already-running timer for this user, stop it first.

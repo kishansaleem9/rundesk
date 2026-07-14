@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, Card, cn } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign } from 'lucide-react'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity } from 'lucide-react'
+import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import {
   WorkHubPage,
@@ -204,6 +205,8 @@ function ProjectHome() {
 
       <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} />
 
+      <ProjectActivitySection projectId={projectId} />
+
       <ProjectTimeSettingsSection projectId={projectId} />
 
       <ContainerMembersSheet
@@ -383,6 +386,82 @@ function CustomFieldsSection({
               </Button>
             </div>
           ))}
+        </Card>
+      )}
+    </section>
+  )
+}
+
+type ProjectActivity = {
+  id: string
+  action: string
+  createdAt: string
+  taskId: string
+  taskTitle?: string | null
+  actor?: { id: string; displayName?: string | null; email?: string | null } | null
+}
+
+function activityIcon(action: string): string {
+  if (action.includes('assigned')) return '👤'
+  if (action.includes('comment')) return '💬'
+  if (action.includes('status')) return '🔁'
+  if (action.includes('attachment')) return '📎'
+  if (action.includes('checklist')) return '☑️'
+  if (action.includes('subtask')) return '🔗'
+  if (action.includes('created')) return '✨'
+  if (action.includes('deleted') || action.includes('archived')) return '🗑️'
+  return '•'
+}
+
+function ProjectActivitySection({ projectId }: { projectId: string }) {
+  const { data: activity = [], isLoading } = useQuery({
+    queryKey: ['project-activity', projectId],
+    queryFn: () => api<ProjectActivity[]>(`/projects/${projectId}/activity?limit=40`),
+  })
+  const label = (action: string) => action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+
+  return (
+    <section>
+      <WorkSectionTitle>
+        <span className="flex items-center gap-2">
+          <Activity className="h-4 w-4 text-muted-foreground" />
+          Recent activity
+        </span>
+      </WorkSectionTitle>
+      <p className="text-[13px] text-muted-foreground mb-4 -mt-1">
+        Everything happening across this project&apos;s tasks.
+      </p>
+      {isLoading ? (
+        <Card className="p-4 text-sm text-muted-foreground border-border/80">Loading…</Card>
+      ) : activity.length === 0 ? (
+        <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
+          No activity yet. Task changes across this project will show up here.
+        </Card>
+      ) : (
+        <Card className="border-border/80 overflow-hidden">
+          <ol className="divide-y divide-border/60">
+            {activity.map((a) => (
+              <li key={a.id} className="flex items-start gap-3 p-3 text-sm">
+                <span className="mt-0.5 shrink-0">{activityIcon(a.action)}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate">
+                    <span className="font-medium">{a.actor?.displayName ?? a.actor?.email ?? 'System'}</span>{' '}
+                    <span className="text-muted-foreground">{label(a.action)}</span>
+                    {a.taskTitle ? (
+                      <>
+                        {' '}
+                        <span className="text-muted-foreground">on</span>{' '}
+                        <span className="font-medium">{a.taskTitle}</span>
+                      </>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatDistanceToNowStrict(new Date(a.createdAt), { addSuffix: true })}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
         </Card>
       )}
     </section>

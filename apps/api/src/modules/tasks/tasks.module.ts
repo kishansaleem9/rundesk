@@ -3,7 +3,7 @@ import { TasksService } from './tasks.service'
 import { TasksController } from './tasks.controller'
 import { TaskCommentsController } from './comments.controller'
 import { TaskChecklistsController } from './checklists.controller'
-import { TaskActivityController } from './activity.controller'
+import { TaskActivityController, ProjectActivityController } from './activity.controller'
 import { TaskDependenciesController } from './dependencies.controller'
 import { TaskTimeEntriesController, TimeEntriesController } from './time-entries.controller'
 import { RealtimeModule } from '../realtime/realtime.module'
@@ -29,6 +29,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     TaskCommentsController,
     TaskChecklistsController,
     TaskActivityController,
+    ProjectActivityController,
     TaskDependenciesController,
     TaskTimeEntriesController,
     TimeEntriesController,
