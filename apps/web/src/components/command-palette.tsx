@@ -30,6 +30,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type SearchHit = { id: string; entityType: string; title: string; content: string; url: string }
 
@@ -68,6 +69,7 @@ export function CommandPalette({
   onOpenChange?: (open: boolean) => void
   initialQuery?: string
 } = {}) {
+  const { t } = useTranslation()
   const [internalOpen, setInternalOpen] = useState(false)
   const open = openProp ?? internalOpen
   const setOpen = (next: boolean) => {
@@ -200,22 +202,22 @@ export function CommandPalette({
 
   const navTargets = workspaceId
     ? [
-        { icon: LayoutDashboard, label: 'Dashboard', to: `/app/${workspaceId}/dashboard` },
-        { icon: GanttChart, label: 'Timeline', to: `/app/${workspaceId}/timeline` },
-        { icon: Inbox, label: 'Inbox', to: `/app/${workspaceId}/inbox` },
-        { icon: MessageSquare, label: 'Chat', to: `/app/${workspaceId}/chat` },
-        { icon: FileText, label: 'Docs', to: `/app/${workspaceId}/docs` },
-        { icon: Target, label: 'Goals', to: `/app/${workspaceId}/goals` },
-        { icon: Sparkles, label: 'AI', to: `/app/${workspaceId}/ai` },
-        { icon: Zap, label: 'Automations', to: `/app/${workspaceId}/automations` },
-        { icon: Settings, label: 'Settings', to: `/app/${workspaceId}/settings` },
+        { icon: LayoutDashboard, label: t('nav.dashboards'), to: `/app/${workspaceId}/dashboard` },
+        { icon: GanttChart, label: t('nav.timeline'), to: `/app/${workspaceId}/timeline` },
+        { icon: Inbox, label: t('nav.inbox'), to: `/app/${workspaceId}/inbox` },
+        { icon: MessageSquare, label: t('nav.chat'), to: `/app/${workspaceId}/chat` },
+        { icon: FileText, label: t('nav.docs'), to: `/app/${workspaceId}/docs` },
+        { icon: Target, label: t('nav.goals'), to: `/app/${workspaceId}/goals` },
+        { icon: Sparkles, label: t('nav.ai'), to: `/app/${workspaceId}/ai` },
+        { icon: Zap, label: t('nav.automations'), to: `/app/${workspaceId}/automations` },
+        { icon: Settings, label: t('nav.settings'), to: `/app/${workspaceId}/settings` },
       ]
     : []
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       <CommandInput
-        placeholder="Search tasks, docs, people…  or type to create"
+        placeholder={t('palette.searchPlaceholder')}
         value={query}
         onValueChange={setQuery}
       />
@@ -256,7 +258,7 @@ export function CommandPalette({
               onChange={(e) => setLabelFilter(e.target.value)}
               className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
             >
-              <option value="">Any</option>
+              <option value="">{t('palette.filterAny')}</option>
               {labelsQuery.data!.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
@@ -272,7 +274,7 @@ export function CommandPalette({
               onChange={(e) => setAssigneeFilter(e.target.value)}
               className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
             >
-              <option value="">Anyone</option>
+              <option value="">{t('palette.filterAnyone')}</option>
               {membersQuery.data!.map((m) => (
                 <option key={m.userId} value={m.userId}>
                   {m.displayName || m.email}
@@ -353,10 +355,10 @@ export function CommandPalette({
 
         {/* Quick action — create task from query */}
         {query.trim() && workspaceId && (
-          <CommandGroup heading="Quick actions">
+          <CommandGroup heading={t('palette.quickActions')}>
             <CommandItem onSelect={() => createTask.mutate()} value={`__create__${query}`}>
               <Plus className="text-accent" />
-              Create task <span className="font-medium text-foreground">&quot;{query.trim()}&quot;</span>
+              {t('palette.createTask')} <span className="font-medium text-foreground">&quot;{query.trim()}&quot;</span>
               <CommandShortcut>↵</CommandShortcut>
             </CommandItem>
           </CommandGroup>
@@ -397,7 +399,7 @@ export function CommandPalette({
 
         {/* Navigation shortcuts */}
         {!query.trim() && navTargets.length > 0 && (
-          <CommandGroup heading="Jump to">
+          <CommandGroup heading={t('palette.jumpTo')}>
             {navTargets.map(({ icon: Icon, label, to }) => (
               <CommandItem key={to} value={`nav-${label}`} onSelect={() => go(to)}>
                 <Icon className="text-muted-foreground" />

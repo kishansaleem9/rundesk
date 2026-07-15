@@ -65,6 +65,14 @@ export const en = {
   'inbox.unread': 'Unread',
   'inbox.earlier': 'Earlier',
 
+  // Command palette
+  'palette.searchPlaceholder': 'Search tasks, docs, people…  or type to create',
+  'palette.quickActions': 'Quick actions',
+  'palette.createTask': 'Create task',
+  'palette.jumpTo': 'Jump to',
+  'palette.filterAny': 'Any',
+  'palette.filterAnyone': 'Anyone',
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -212,6 +220,13 @@ export const es: Record<TranslationKey, string> = {
   'inbox.unread': 'Sin leer',
   'inbox.earlier': 'Anteriores',
 
+  'palette.searchPlaceholder': 'Busca tareas, documentos, personas…  o escribe para crear',
+  'palette.quickActions': 'Acciones rápidas',
+  'palette.createTask': 'Crear tarea',
+  'palette.jumpTo': 'Ir a',
+  'palette.filterAny': 'Cualquiera',
+  'palette.filterAnyone': 'Cualquier persona',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -350,6 +365,13 @@ export const ar: Record<TranslationKey, string> = {
   'inbox.emptyDesc': 'ستظهر هنا الإشارات وإسنادات المهام والردود. خذ نفسًا.',
   'inbox.unread': 'غير مقروءة',
   'inbox.earlier': 'سابقة',
+
+  'palette.searchPlaceholder': 'ابحث عن المهام والمستندات والأشخاص…  أو اكتب للإنشاء',
+  'palette.quickActions': 'إجراءات سريعة',
+  'palette.createTask': 'إنشاء مهمة',
+  'palette.jumpTo': 'الانتقال إلى',
+  'palette.filterAny': 'أي',
+  'palette.filterAnyone': 'أي شخص',
 
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
