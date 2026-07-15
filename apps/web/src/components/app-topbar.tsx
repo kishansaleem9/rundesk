@@ -69,6 +69,7 @@ export function AppTopbar({
   onCommandOpen?: (query?: string) => void
   onMenuOpen?: () => void
 }) {
+  const { t } = useTranslation()
   const params = useParams({ strict: false }) as {
     workspaceId?: string
     spaceId?: string
@@ -82,7 +83,7 @@ export function AppTopbar({
         <button
           onClick={onMenuOpen}
           className="lg:hidden h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
-          aria-label="Open sidebar menu"
+          aria-label={t('topbar.openSidebar')}
         >
           <Menu className="h-4 w-4" />
         </button>
@@ -238,6 +239,7 @@ function formatTimerClock(seconds: number): string {
 function TimerIndicator() {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const [elapsed, setElapsed] = useState(0)
 
   const { data: timer } = useQuery({
@@ -265,8 +267,8 @@ function TimerIndicator() {
   }, [timer?.id, timer?.startedAt])
 
   const stop = useMutation({
-    mutationFn: (t: ActiveTimer) =>
-      api(`/tasks/${t.taskId}/time-entries/stop/${t.id}`, { method: 'POST' }),
+    mutationFn: (entry: ActiveTimer) =>
+      api(`/tasks/${entry.taskId}/time-entries/stop/${entry.id}`, { method: 'POST' }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ['active-timer'] }),
@@ -286,7 +288,7 @@ function TimerIndicator() {
           navigate({ to: '/app/$workspaceId/time', params: { workspaceId: timer.workspaceId } })
         }
         className="flex items-center gap-2 min-w-0 group"
-        aria-label="Open time tracking"
+        aria-label={t('topbar.openTimeTracking')}
       >
         <span className="relative flex h-2 w-2 shrink-0">
           <span className="absolute inline-flex h-full w-full rounded-full bg-brand-700 opacity-75 animate-ping" />
@@ -294,7 +296,7 @@ function TimerIndicator() {
         </span>
         <span className="tabular-nums font-medium text-foreground">{formatTimerClock(elapsed)}</span>
         <span className="truncate max-w-[120px] text-muted-foreground group-hover:text-foreground transition-colors">
-          {timer.taskTitle ?? 'Timer'}
+          {timer.taskTitle ?? t('topbar.timer')}
         </span>
       </button>
       <Tooltip>
@@ -304,12 +306,12 @@ function TimerIndicator() {
             onClick={() => stop.mutate(timer)}
             disabled={stop.isPending}
             className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors"
-            aria-label="Stop timer"
+            aria-label={t('topbar.stopTimer')}
           >
             <Square className="h-3.5 w-3.5 fill-current" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Stop timer</TooltipContent>
+        <TooltipContent>{t('topbar.stopTimer')}</TooltipContent>
       </Tooltip>
     </div>
   )
@@ -354,11 +356,12 @@ function SearchBar({ onCommandOpen }: { onCommandOpen?: (query?: string) => void
 // ---------------------------------------------------------------------------
 function QuickCreateButton() {
   const [open, setOpen] = useState(false)
+  const { t } = useTranslation()
   return (
     <>
       <Button variant="gradient" size="sm" className="h-9 gap-1.5" onClick={() => setOpen(true)}>
         <Plus className="h-4 w-4" />
-        <span>New</span>
+        <span>{t('topbar.new')}</span>
       </Button>
       {open && <QuickCreateModal onClose={() => setOpen(false)} />}
     </>
@@ -371,14 +374,17 @@ function QuickCreateButton() {
 function ThemeToggle() {
   const theme = useThemeStore((s) => s.theme)
   const toggle = useThemeStore((s) => s.toggle)
+  const { t } = useTranslation()
   const next = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light'
+  const themeLabel = (mode: string) =>
+    mode === 'light' ? t('topbar.themeLight') : mode === 'dark' ? t('topbar.themeDark') : t('topbar.themeSystem')
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           onClick={toggle}
           className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
-          aria-label="Toggle theme"
+          aria-label={t('topbar.toggleTheme')}
         >
           {theme === 'light' ? (
             <Moon className="h-4 w-4" />
@@ -390,7 +396,7 @@ function ThemeToggle() {
         </button>
       </TooltipTrigger>
       <TooltipContent>
-        Theme: {theme} · switch to {next}
+        {t('topbar.themeTooltip', { current: themeLabel(theme), next: themeLabel(next) })}
       </TooltipContent>
     </Tooltip>
   )
@@ -425,7 +431,7 @@ type NotificationPreferences = {
 function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
   const [open, setOpen] = useState(false)
   const qc = useQueryClient()
-  const { t } = useTranslation()
+  const { t, tCount } = useTranslation()
   const { namesById } = useMentionNames(workspaceId)
   const prefsQuery = useQuery({
     queryKey: ['notification-preferences'],
@@ -506,14 +512,14 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
       const allowSound = !prefs?.channels?.muteSounds && allowWeb
       if (allowSound) beep()
       if (allowWeb) {
-        toast(event.notification?.title ?? 'New notification', {
+        toast(event.notification?.title ?? t('topbar.newNotification'), {
           description: event.notification?.body
             ? formatMentionsPlain(event.notification.body, namesById)
             : '',
         })
       }
       if (allowWeb && 'Notification' in window && Notification.permission === 'granted') {
-        void new Notification(event.notification?.title ?? 'New notification', {
+        void new Notification(event.notification?.title ?? t('topbar.newNotification'), {
           body: event.notification?.body
             ? formatMentionsPlain(event.notification.body, namesById)
             : '',
@@ -568,7 +574,7 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
       <PopoverTrigger asChild>
         <button
           className="relative h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
-          aria-label="Notifications"
+          aria-label={t('topbar.notifications')}
         >
           <Bell className="h-4 w-4" />
           {unread > 0 && (
@@ -582,7 +588,7 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
         <div className="px-4 py-3 border-b border-border/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <h3 className="font-display font-semibold text-sm">{t('nav.inbox')}</h3>
-            {unread > 0 && <Badge variant="gradient" className="text-[10px]">{unread} new</Badge>}
+            {unread > 0 && <Badge variant="gradient" className="text-[10px]">{tCount('topbar.unreadNew', unread)}</Badge>}
           </div>
           {unread > 0 && (
             <button
@@ -595,15 +601,15 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
         </div>
         <div className="flex-1 overflow-y-auto">
           {listQuery.isLoading ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
+            <div className="p-8 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
           ) : notifs.length === 0 ? (
             <div className="flex flex-col items-center gap-2 p-8 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-gradient-soft text-white shadow-glow">
                 <InboxIcon className="h-5 w-5" />
               </div>
-              <p className="text-sm font-medium">You&apos;re all caught up</p>
+              <p className="text-sm font-medium">{t('topbar.allCaughtUp')}</p>
               <p className="text-xs text-muted-foreground max-w-[220px]">
-                Mentions, comment replies and assignments will land here.
+                {t('topbar.notifEmptyHint')}
               </p>
             </div>
           ) : (
@@ -677,7 +683,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
       <DropdownMenuTrigger asChild>
         <button
           className="rounded-full ring-2 ring-transparent transition-all hover:ring-border focus-visible:outline-none focus-visible:ring-ring"
-          aria-label="User menu"
+          aria-label={t('topbar.userMenu')}
         >
           <PersonAvatar name={user?.displayName ?? '?'} size="md" />
         </button>

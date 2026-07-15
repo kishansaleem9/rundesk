@@ -180,14 +180,14 @@ export function WorkspaceSidebar() {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
 
   const createFolder = async (spaceId: string) => {
-    const name = window.prompt('New folder name')?.trim()
+    const name = window.prompt(t('nav.newFolderPrompt'))?.trim()
     if (!name) return
     try {
       await api(`/spaces/${spaceId}/folders`, { method: 'POST', body: { name } })
       setExpandedSpaces((prev) => ({ ...prev, [spaceId]: true }))
       await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not create folder')
+      window.alert(err instanceof Error ? err.message : t('nav.createFolderError'))
     }
   }
 
@@ -196,7 +196,7 @@ export function WorkspaceSidebar() {
       await api(`/projects/${projectId}`, { method: 'PUT', body: { folderId } })
       await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Could not move project')
+      window.alert(err instanceof Error ? err.message : t('nav.moveProjectError'))
     }
   }
   const [recentItems, setRecentItems] = useState<Array<{ label: string; path: string }>>([])
@@ -239,6 +239,36 @@ export function WorkspaceSidebar() {
     enabled: !!workspaceId,
   })
   const { t } = useTranslation()
+  // Localize the fixed set of app-defined nav/recent labels for display, while the
+  // stored label stays English (a stable id for icon lookup + persistence). User
+  // data (pinned entity names) is never routed through here.
+  const navLabel = (label: string): string => {
+    switch (label) {
+      case 'Home': return t('nav.home')
+      case 'Inbox': return t('nav.inbox')
+      case 'Teams': return t('nav.teams')
+      case 'Docs': return t('nav.docs')
+      case 'Dashboards': return t('nav.dashboards')
+      case 'AI': return t('nav.ai')
+      case 'Whiteboards': return t('nav.whiteboards')
+      case 'Forms': return t('nav.forms')
+      case 'Automations': return t('nav.automations')
+      case 'Workload': return t('nav.workload')
+      case 'Timeline': return t('nav.timeline')
+      case 'Templates': return t('nav.templates')
+      case 'Integrations': return t('nav.integrations')
+      case 'Goals': return t('nav.goals')
+      case 'Reports': return t('nav.reports')
+      case 'Time': return t('nav.time')
+      case 'Mind maps': return t('nav.mindMaps')
+      case 'Clips': return t('nav.clips')
+      case 'Settings': return t('nav.settings')
+      case 'Task list': return t('nav.taskList')
+      case 'Project': return t('nav.project')
+      case 'Space': return t('nav.space')
+      default: return label
+    }
+  }
   // Durable pinned items (spaces/lists/tasks/docs/channels) — Plan §2.
   const { data: pinnedItems = [] } = useFavorites(workspaceId)
   const unpinFavorite = useToggleFavorite(workspaceId)
@@ -392,8 +422,8 @@ export function WorkspaceSidebar() {
         >
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{currentWorkspace?.name ?? 'Workspace'}</p>
-              <p className="truncate text-xs text-muted-foreground">{currentOrg?.name ?? 'Select workspace'}</p>
+              <p className="truncate text-sm font-semibold">{currentWorkspace?.name ?? t('common.workspace')}</p>
+              <p className="truncate text-xs text-muted-foreground">{currentOrg?.name ?? t('nav.selectWorkspace')}</p>
             </div>
             <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', openSwitcher && 'rotate-180')} />
           </div>
@@ -426,7 +456,7 @@ export function WorkspaceSidebar() {
             })}
             <Button size="sm" variant="outline" className="w-full mt-1" onClick={() => navigate({ to: '/sign-up' })}>
               <Plus className="h-3.5 w-3.5 mr-1" />
-              New workspace
+              {t('nav.newWorkspace')}
             </Button>
           </div>
         )}
@@ -442,13 +472,13 @@ export function WorkspaceSidebar() {
               className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
               onClick={() => setFavoritesExpanded((v) => !v)}
             >
-              <span>Favorites</span>
+              <span>{t('nav.favorites')}</span>
               <ChevronDown className={cn('h-3 w-3 transition-transform', favoritesExpanded && 'rotate-180')} />
             </button>
             {favoritesExpanded && (
               <div className="space-y-1">
                 {favoriteItems.length === 0 ? (
-                  <div className="px-2 py-1 text-xs text-muted-foreground">No favorites yet. Star from Recents.</div>
+                  <div className="px-2 py-1 text-xs text-muted-foreground">{t('nav.noFavorites')}</div>
                 ) : (
                   favoriteItems.map((item, idx) => {
                     const Icon = navIconForLabel(item.label)
@@ -469,26 +499,26 @@ export function WorkspaceSidebar() {
                           )}
                         >
                           <Icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate flex-1">{item.label}</span>
+                          <span className="truncate flex-1">{navLabel(item.label)}</span>
                         </Link>
                         <button
                           className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 opacity-0 group-hover:opacity-100"
                           onClick={() => moveFavorite(idx, -1)}
-                          title="Move up"
+                          title={t('nav.moveUp')}
                         >
                           <ArrowUp className="h-3.5 w-3.5 mx-auto" />
                         </button>
                         <button
                           className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 opacity-0 group-hover:opacity-100"
                           onClick={() => moveFavorite(idx, 1)}
-                          title="Move down"
+                          title={t('nav.moveDown')}
                         >
                           <ArrowDown className="h-3.5 w-3.5 mx-auto" />
                         </button>
                         <button
                           className="h-6 w-6 rounded text-muted-foreground hover:text-rose-500 hover:bg-accent/15 opacity-0 group-hover:opacity-100"
                           onClick={() => removeFavorite(item.path)}
-                          title="Remove favorite"
+                          title={t('nav.removeFavorite')}
                         >
                           <X className="h-3.5 w-3.5 mx-auto" />
                         </button>
@@ -505,14 +535,14 @@ export function WorkspaceSidebar() {
               className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
               onClick={() => setPinnedExpanded((v) => !v)}
             >
-              <span>Pinned</span>
+              <span>{t('nav.pinned')}</span>
               <ChevronDown className={cn('h-3 w-3 transition-transform', pinnedExpanded && 'rotate-180')} />
             </button>
             {pinnedExpanded && (
               <div className="space-y-1">
                 {pinnedItems.length === 0 ? (
                   <div className="px-2 py-1 text-xs text-muted-foreground">
-                    No pinned items. Star a task, doc, or channel.
+                    {t('nav.noPinned')}
                   </div>
                 ) : (
                   pinnedItems.map((item) => {
@@ -535,7 +565,7 @@ export function WorkspaceSidebar() {
                         <button
                           className="h-6 w-6 rounded text-amber-400 hover:text-amber-500 hover:bg-accent/15 opacity-0 group-hover:opacity-100"
                           onClick={() => unpinFavorite.mutate({ entityType: item.entityType, entityId: item.entityId })}
-                          title="Unpin"
+                          title={t('nav.unpin')}
                         >
                           <Star className="h-3.5 w-3.5 mx-auto fill-amber-400" />
                         </button>
@@ -552,13 +582,13 @@ export function WorkspaceSidebar() {
               className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
               onClick={() => setRecentsExpanded((v) => !v)}
             >
-              <span>Recents</span>
+              <span>{t('nav.recents')}</span>
               <ChevronDown className={cn('h-3 w-3 transition-transform', recentsExpanded && 'rotate-180')} />
             </button>
             {recentsExpanded && (
               <div className="space-y-1">
                 {recentItems.length === 0 ? (
-                  <div className="px-2 py-1 text-xs text-muted-foreground">No recent pages yet.</div>
+                  <div className="px-2 py-1 text-xs text-muted-foreground">{t('nav.noRecents')}</div>
                 ) : (
                   recentItems.map((item) => {
                     const recentActive = isNavPathActive(
@@ -578,12 +608,12 @@ export function WorkspaceSidebar() {
                         )}
                       >
                         <Clock3 className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{item.label}</span>
+                        <span className="truncate">{navLabel(item.label)}</span>
                       </Link>
                       <button
                         className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 flex items-center justify-center"
                         onClick={() => toggleFavorite(item)}
-                        title={favoriteItems.some((f) => pathsEqual(f.path, item.path)) ? 'Remove favorite' : 'Add to favorites'}
+                        title={favoriteItems.some((f) => pathsEqual(f.path, item.path)) ? t('nav.removeFavorite') : t('nav.addFavorite')}
                       >
                         <Star className={cn('h-3.5 w-3.5', favoriteItems.some((f) => pathsEqual(f.path, item.path)) && 'text-amber-400')} />
                       </button>
@@ -600,7 +630,7 @@ export function WorkspaceSidebar() {
               className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
               onClick={() => setBrowseExpanded((v) => !v)}
             >
-              <span>Browse</span>
+              <span>{t('nav.browse')}</span>
               <ChevronDown className={cn('h-3 w-3 transition-transform', browseExpanded && 'rotate-180')} />
             </button>
             {browseExpanded && (
@@ -632,7 +662,7 @@ export function WorkspaceSidebar() {
             className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
             onClick={() => setSpacesExpanded((v) => !v)}
           >
-            <span>Spaces</span>
+            <span>{t('nav.spaces')}</span>
             <ChevronDown className={cn('h-3 w-3 transition-transform', spacesExpanded && 'rotate-180')} />
           </button>
         </div>
@@ -641,11 +671,11 @@ export function WorkspaceSidebar() {
             <div className="space-y-1">
             <div className="px-2 py-1 rounded-md border border-dashed border-border/70 bg-card/40 text-[11px] text-muted-foreground flex items-center gap-1.5">
               <Star className="h-3.5 w-3.5" />
-              Star lists/projects to pin them here
+              {t('nav.starHint')}
             </div>
             <div className="px-2 py-1 rounded-md border border-dashed border-border/70 bg-card/40 text-[11px] text-muted-foreground flex items-center gap-1.5">
               <Clock3 className="h-3.5 w-3.5" />
-              Recent items will appear as you navigate
+              {t('nav.recentHint')}
             </div>
             {spaceTreeQuery.data?.map((space) => {
               const renderProjectNode = (project: (typeof space.projects)[number]) => (
@@ -670,13 +700,13 @@ export function WorkspaceSidebar() {
                       <DropdownMenuTrigger asChild>
                         <button
                           className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
-                          aria-label={`Actions for ${project.name}`}
+                          aria-label={t('nav.actionsFor', { name: project.name })}
                         >
                           <MoreHorizontal className="h-3.5 w-3.5" />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-52">
-                        <DropdownMenuLabel>Move to folder</DropdownMenuLabel>
+                        <DropdownMenuLabel>{t('nav.moveToFolder')}</DropdownMenuLabel>
                         {(space.folders ?? []).map((folder) => (
                           <DropdownMenuItem
                             key={folder.id}
@@ -688,14 +718,14 @@ export function WorkspaceSidebar() {
                           </DropdownMenuItem>
                         ))}
                         {(space.folders ?? []).length === 0 && (
-                          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">No folders in this space yet</div>
+                          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">{t('nav.noFoldersInSpace')}</div>
                         )}
                         {project.folderId && (
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => moveProject(project.id, null)}>
                               <X className="h-3.5 w-3.5" />
-                              Remove from folder
+                              {t('nav.removeFromFolder')}
                             </DropdownMenuItem>
                           </>
                         )}
@@ -738,7 +768,7 @@ export function WorkspaceSidebar() {
                         )
                       })}
                       {project.lists.length === 0 && (
-                        <div className="px-2 py-1 text-[11px] text-muted-foreground">No lists yet</div>
+                        <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.noLists')}</div>
                       )}
                     </div>
                   )}
@@ -780,7 +810,7 @@ export function WorkspaceSidebar() {
                             <div className="ml-4 space-y-0.5">
                               {folderProjects.map((project) => renderProjectNode(project))}
                               {folderProjects.length === 0 && (
-                                <div className="px-2 py-1 text-[11px] text-muted-foreground">Empty folder</div>
+                                <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.emptyFolder')}</div>
                               )}
                             </div>
                           )}
@@ -789,23 +819,23 @@ export function WorkspaceSidebar() {
                     })}
                     {ungrouped.map((project) => renderProjectNode(project))}
                     {space.projects.length === 0 && (
-                      <div className="px-2 py-1 text-[11px] text-muted-foreground">No projects yet</div>
+                      <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.noProjects')}</div>
                     )}
                     <button
                       className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
                       onClick={() => createFolder(space.id)}
                     >
                       <FolderPlus className="h-3.5 w-3.5 shrink-0" />
-                      New folder
+                      {t('nav.newFolder')}
                     </button>
                   </div>
                 )}
               </div>
               )
             })}
-            {spaceTreeQuery.isLoading && <p className="px-2 py-1 text-xs text-muted-foreground">Loading spaces...</p>}
+            {spaceTreeQuery.isLoading && <p className="px-2 py-1 text-xs text-muted-foreground">{t('nav.loadingSpaces')}</p>}
             {!spaceTreeQuery.isLoading && (spacesQuery.data?.length ?? 0) === 0 && (
-              <p className="px-2 py-1 text-xs text-muted-foreground">No spaces yet. Create one from home.</p>
+              <p className="px-2 py-1 text-xs text-muted-foreground">{t('nav.noSpaces')}</p>
             )}
             </div>
           )}
@@ -866,13 +896,13 @@ export function WorkspaceSidebar() {
             )}
             <button
               className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] text-muted-foreground border border-border/60 ml-1 hover:bg-accent/15"
-              title="Dock settings"
+              title={t('nav.dockSettings')}
               onClick={() => setShowDockSettings((v) => !v)}
             >
               ⚙
             </button>
             <div className="h-7 px-2 rounded-full flex items-center justify-center text-[10px] text-muted-foreground border border-border/60 ml-1">
-              drag
+              {t('nav.drag')}
             </div>
           </div>
           {showDockSettings && (
@@ -881,14 +911,14 @@ export function WorkspaceSidebar() {
               style={{ left: dockPos.x, bottom: dockPos.y + 62 }}
             >
               <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-semibold">Dock settings</div>
+                <div className="text-sm font-semibold">{t('nav.dockSettings')}</div>
                 <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setShowDockSettings(false)}>
-                  Close
+                  {t('common.close')}
                 </button>
               </div>
               <div className="space-y-3">
                 <div>
-                  <div className="text-xs text-muted-foreground mb-1">Orientation</div>
+                  <div className="text-xs text-muted-foreground mb-1">{t('nav.orientation')}</div>
                   <div className="flex gap-2">
                     <Button
                       size="sm"
@@ -896,7 +926,7 @@ export function WorkspaceSidebar() {
                       className="h-7 flex-1 text-xs"
                       onClick={() => updateDockConfig({ appearance: { ...appearance, orientation: 'horizontal' } })}
                     >
-                      Horizontal
+                      {t('nav.horizontal')}
                     </Button>
                     <Button
                       size="sm"
@@ -904,13 +934,13 @@ export function WorkspaceSidebar() {
                       className="h-7 flex-1 text-xs"
                       onClick={() => updateDockConfig({ appearance: { ...appearance, orientation: 'vertical' } })}
                     >
-                      Vertical
+                      {t('nav.vertical')}
                     </Button>
                   </div>
                 </div>
                 <div>
                   <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                    <span>Opacity</span>
+                    <span>{t('nav.opacity')}</span>
                     <span>{Math.round((appearance.opacity ?? 0.9) * 100)}%</span>
                   </div>
                   <input
@@ -928,7 +958,7 @@ export function WorkspaceSidebar() {
                   />
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground mb-1">Size</div>
+                  <div className="text-xs text-muted-foreground mb-1">{t('nav.size')}</div>
                   <div className="flex gap-2">
                     {(['sm', 'md', 'lg'] as const).map((size) => (
                       <Button
@@ -953,7 +983,7 @@ export function WorkspaceSidebar() {
                     localStorage.setItem('rundesk.floatingDockPos', JSON.stringify(reset))
                   }}
                 >
-                  Reset position
+                  {t('nav.resetPosition')}
                 </Button>
               </div>
             </div>

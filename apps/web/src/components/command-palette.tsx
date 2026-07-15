@@ -30,7 +30,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type SearchHit = { id: string; entityType: string; title: string; content: string; url: string }
 
@@ -51,13 +51,19 @@ const ENTITY_ICON: Record<string, React.ElementType> = {
   user: Users,
 }
 const ENTITY_ORDER = ['task', 'doc', 'comment', 'channel', 'message', 'user']
-const ENTITY_LABEL: Record<string, string> = {
-  task: 'Tasks',
-  doc: 'Docs',
-  comment: 'Comments',
-  channel: 'Channels',
-  message: 'Messages',
-  user: 'People',
+const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
+  task: 'palette.entityTasks',
+  doc: 'palette.entityDocs',
+  comment: 'palette.entityComments',
+  channel: 'palette.entityChannels',
+  message: 'palette.entityMessages',
+  user: 'palette.entityPeople',
+}
+const PRIORITY_LABEL_KEY: Record<string, TranslationKey> = {
+  urgent: 'palette.priorityUrgent',
+  high: 'palette.priorityHigh',
+  normal: 'palette.priorityNormal',
+  low: 'palette.priorityLow',
 }
 
 export function CommandPalette({
@@ -222,37 +228,37 @@ export function CommandPalette({
         onValueChange={setQuery}
       />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60">
-        <FilterGroup label="Type">
+        <FilterGroup label={t('palette.filterType')}>
           {(['all', 'task', 'doc'] as const).map((v) => (
             <FilterChip key={v} active={typeFilter === v} onClick={() => setTypeFilter(v)}>
-              {v === 'all' ? 'All' : v === 'task' ? 'Tasks' : 'Docs'}
+              {v === 'all' ? t('palette.all') : v === 'task' ? t('palette.entityTasks') : t('palette.entityDocs')}
             </FilterChip>
           ))}
         </FilterGroup>
-        <FilterGroup label="Status">
+        <FilterGroup label={t('palette.filterStatus')}>
           {(['open', 'in_progress', 'closed'] as const).map((v) => (
             <FilterChip
               key={v}
               active={statusFilter === v}
               onClick={() => setStatusFilter((cur) => (cur === v ? '' : v))}
             >
-              {v === 'open' ? 'To do' : v === 'in_progress' ? 'Active' : 'Closed'}
+              {v === 'open' ? t('palette.statusTodo') : v === 'in_progress' ? t('palette.statusActive') : t('palette.statusClosed')}
             </FilterChip>
           ))}
         </FilterGroup>
-        <FilterGroup label="Priority">
+        <FilterGroup label={t('palette.filterPriority')}>
           {(['urgent', 'high', 'normal', 'low'] as const).map((v) => (
             <FilterChip
               key={v}
               active={priorityFilter === v}
               onClick={() => setPriorityFilter((cur) => (cur === v ? '' : v))}
             >
-              {v.charAt(0).toUpperCase() + v.slice(1)}
+              {t(PRIORITY_LABEL_KEY[v])}
             </FilterChip>
           ))}
         </FilterGroup>
         {(labelsQuery.data?.length ?? 0) > 0 && (
-          <FilterGroup label="Label">
+          <FilterGroup label={t('palette.filterLabel')}>
             <select
               value={labelFilter}
               onChange={(e) => setLabelFilter(e.target.value)}
@@ -268,7 +274,7 @@ export function CommandPalette({
           </FilterGroup>
         )}
         {(membersQuery.data?.length ?? 0) > 0 && (
-          <FilterGroup label="Assignee">
+          <FilterGroup label={t('palette.filterAssignee')}>
             <select
               value={assigneeFilter}
               onChange={(e) => setAssigneeFilter(e.target.value)}
@@ -283,12 +289,12 @@ export function CommandPalette({
             </select>
           </FilterGroup>
         )}
-        <FilterGroup label="Due">
+        <FilterGroup label={t('palette.filterDue')}>
           <input
             type="date"
             value={dueAfter}
             onChange={(e) => setDueAfter(e.target.value)}
-            title="Due after"
+            title={t('palette.dueAfter')}
             className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
           />
           <span className="text-[11px] text-muted-foreground/60">→</span>
@@ -296,7 +302,7 @@ export function CommandPalette({
             type="date"
             value={dueBefore}
             onChange={(e) => setDueBefore(e.target.value)}
-            title="Due before"
+            title={t('palette.dueBefore')}
             className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
           />
         </FilterGroup>
@@ -304,7 +310,7 @@ export function CommandPalette({
       {(((savedQuery.data?.length ?? 0) > 0) || hasFilter || query.trim()) && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 -mt-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 mr-0.5">
-            Presets
+            {t('palette.presets')}
           </span>
           {savedQuery.data?.map((s) => (
             <span key={s.id} className="inline-flex items-center rounded-full border border-border/70 text-[11px]">
@@ -317,7 +323,7 @@ export function CommandPalette({
               </button>
               <button
                 type="button"
-                aria-label={`Delete ${s.name}`}
+                aria-label={t('palette.deletePreset', { name: s.name })}
                 onClick={() => deletePreset.mutate(s.id)}
                 className="px-1 py-0.5 text-muted-foreground/60 hover:text-red-500"
               >
@@ -330,12 +336,12 @@ export function CommandPalette({
               type="button"
               disabled={saveCurrent.isPending}
               onClick={() => {
-                const name = window.prompt('Save this search as…')?.trim()
+                const name = window.prompt(t('palette.savePrompt'))?.trim()
                 if (name) saveCurrent.mutate(name)
               }}
               className="rounded-full border border-dashed border-border/70 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/10"
             >
-              + Save current
+              + {t('palette.saveCurrent')}
             </button>
           )}
         </div>
@@ -344,12 +350,12 @@ export function CommandPalette({
         <CommandEmpty>
           {query.trim() ? (
             <span>
-              No matches — try a different keyword, or press <CommandShortcut>↵</CommandShortcut> to create a task.
+              {t('palette.noMatchesBefore')}<CommandShortcut>↵</CommandShortcut>{t('palette.noMatchesAfter')}
             </span>
           ) : hasFilter ? (
-            <span>No items match the selected filters.</span>
+            <span>{t('palette.noFilterMatch')}</span>
           ) : (
-            <span>Start typing to search, or pick a filter above.</span>
+            <span>{t('palette.startTyping')}</span>
           )}
         </CommandEmpty>
 
@@ -369,8 +375,8 @@ export function CommandPalette({
           <>
             <CommandSeparator />
             {/* Results grouped by entity type (§11.1) */}
-            {ENTITY_ORDER.filter((t) => searchQuery.data!.some((h) => h.entityType === t)).map((type) => (
-              <CommandGroup key={type} heading={ENTITY_LABEL[type] ?? type}>
+            {ENTITY_ORDER.filter((et) => searchQuery.data!.some((h) => h.entityType === et)).map((type) => (
+              <CommandGroup key={type} heading={ENTITY_LABEL_KEY[type] ? t(ENTITY_LABEL_KEY[type]) : type}>
                 {searchQuery.data!
                   .filter((h) => h.entityType === type)
                   .map((hit) => {
