@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ReportsService, type ReportDefinition } from './reports.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -127,6 +127,19 @@ export class ReportsController {
     @Body() body: ReportDefinition,
   ) {
     return this.reports.exportCustomReportCsv(workspaceId, body ?? {})
+  }
+
+  @Post('custom/export.pdf')
+  @ApiOperation({ summary: 'Run a custom report and return it as a server-rendered PDF' })
+  async exportCustomPdf(
+    @Param('workspaceId') workspaceId: string,
+    @Body() body: ReportDefinition,
+  ): Promise<StreamableFile> {
+    const buffer = await this.reports.exportCustomReportPdf(workspaceId, body ?? {})
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: 'attachment; filename="rundesk-report.pdf"',
+    })
   }
 
   @Get('custom')

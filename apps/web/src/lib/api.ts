@@ -106,6 +106,28 @@ export async function downloadFile(path: string, filename: string): Promise<void
   URL.revokeObjectURL(url)
 }
 
+/** Like downloadFile, but POSTs a JSON body (e.g. a report definition → PDF). */
+export async function downloadFilePost(path: string, body: unknown, filename: string): Promise<void> {
+  const token = useAuthStore.getState().accessToken
+  const init: RequestInit = { method: 'POST', body: JSON.stringify(body) }
+  let res = await fetchWithAuth(path, init, token)
+  if (res.status === 401 && useAuthStore.getState().refreshToken) {
+    const newToken = await ensureFreshToken()
+    if (newToken) res = await fetchWithAuth(path, init, newToken)
+    else useAuthStore.getState().clear()
+  }
+  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function api<T = unknown>(
   path: string,
   options: ApiOptions = {},

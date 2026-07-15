@@ -17,7 +17,7 @@ import {
   Loader2,
   Trash2,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, downloadFilePost } from '../lib/api'
 
 type Metric = { id: string; label: string; agg: 'count' | 'sum' | 'avg' | 'rate' }
 type Dimension = { id: string; label: string }
@@ -185,6 +185,22 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
     a.download = `${(name || 'report').replace(/[^a-z0-9-_]+/gi, '-')}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  async function exportPdf() {
+    if (!result || result.rows.length === 0) {
+      toast.error('Nothing to export yet')
+      return
+    }
+    try {
+      await downloadFilePost(
+        `/workspaces/${workspaceId}/reports/custom/export.pdf`,
+        definition,
+        `${(name || 'report').replace(/[^a-z0-9-_]+/gi, '-')}.pdf`,
+      )
+    } catch {
+      toast.error('Could not generate PDF')
+    }
   }
 
   return (
@@ -358,6 +374,9 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => aiSummarize.mutate()} disabled={aiSummarize.isPending || !result}>
               {aiSummarize.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} AI summarize
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportPdf}>
+              Export PDF
             </Button>
             <Button variant="outline" size="sm" onClick={exportCsv}>
               Export CSV

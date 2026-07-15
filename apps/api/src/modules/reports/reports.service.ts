@@ -20,6 +20,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { renderReportPdf, tableToLines } from './pdf'
 
 function daysAgo(n: number): Date {
   const d = new Date()
@@ -773,6 +774,16 @@ export class ReportsService {
       lines.push([csvCell(r.label), ...result.metrics.map((m) => csvCell(r.values[m] ?? 0))].join(','))
     }
     return lines.join('\n')
+  }
+
+  /** Render a custom report to a server-generated PDF (Plan §9). */
+  async exportCustomReportPdf(workspaceId: string, def: ReportDefinition): Promise<Buffer> {
+    const result = await this.runCustomReport(workspaceId, def)
+    const header = ['Group', ...result.metrics]
+    const rows = result.rows.map((r) => [r.label, ...result.metrics.map((m) => r.values[m] ?? 0)])
+    const title = `Custom report — by ${result.dimension}`
+    const subtitle = `Generated ${new Date(result.generatedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC`
+    return renderReportPdf(title, [subtitle, '', ...tableToLines(header, rows)])
   }
 
   // ─── Saved report definitions ─────────────────────────────────────────────
