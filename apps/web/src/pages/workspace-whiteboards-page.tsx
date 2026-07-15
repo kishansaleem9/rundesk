@@ -23,6 +23,7 @@ import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { CursorLayer, useCanvasCursors } from '../lib/use-canvas-cursors'
+import { useTranslation } from '../lib/i18n'
 
 type Whiteboard = {
   id: string
@@ -65,6 +66,7 @@ function snap(value: number, enabled: boolean) {
 }
 
 export function WhiteboardsPage() {
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/whiteboards' })
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
@@ -136,9 +138,9 @@ export function WhiteboardsPage() {
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        toast('Board version conflict', {
+        toast(t('whiteboards.conflictTitle'), {
           id: 'whiteboard-canvas-conflict',
-          description: 'Latest version was loaded. Please apply your change again.',
+          description: t('whiteboards.conflictBody'),
         })
       }
       await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'whiteboard'] })
@@ -275,7 +277,7 @@ export function WhiteboardsPage() {
         w: type === 'text' ? 180 : 190,
         h: type === 'shape' ? 110 : 120,
         z: (prev[prev.length - 1]?.z ?? 0) + 1,
-        content: type === 'note' ? 'New note' : type === 'shape' ? '' : 'Heading',
+        content: type === 'note' ? t('whiteboards.seedNote') : type === 'shape' ? '' : t('whiteboards.seedHeading'),
         color: type === 'note' ? '#fde68a' : type === 'shape' ? '#bfdbfe' : '#e9d5ff',
       },
     ])
@@ -320,44 +322,44 @@ export function WhiteboardsPage() {
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
               <Frame className="h-4 w-4" />
             </span>
-            Whiteboards
-            <Badge variant="secondary" className="ml-1">Live</Badge>
+            {t('nav.whiteboards')}
+            <Badge variant="secondary" className="ml-1">{t('whiteboards.live')}</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Drag from the top grip, resize from the corner. Snap-to-grid when enabled.{' '}
-            <kbd className="rounded border px-1 text-[10px]">Del</kbd> removes, <kbd className="rounded border px-1 text-[10px]">⌘D</kbd> duplicates.
+            {t('whiteboards.subtitle')}{' '}
+            <kbd className="rounded border px-1 text-[10px]">Del</kbd> {t('whiteboards.kbdRemoves')}, <kbd className="rounded border px-1 text-[10px]">⌘D</kbd> {t('whiteboards.kbdDuplicates')}.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant="gradient"
-            onClick={() => createBoard.mutate(`Whiteboard ${new Date().toLocaleString()}`)}
+            onClick={() => createBoard.mutate(`${t('whiteboards.untitledPrefix')} ${new Date().toLocaleString()}`)}
           >
-            <Plus className="h-4 w-4" /> New board
+            <Plus className="h-4 w-4" /> {t('whiteboards.newBoard')}
           </Button>
           <Button
             size="sm"
             variant={snapEnabled ? 'secondary' : 'outline'}
             onClick={() => setSnapEnabled((v) => !v)}
-            title="Toggle snap-to-grid"
+            title={t('whiteboards.toggleSnap')}
           >
-            <Grid3x3 className="h-4 w-4" /> {snapEnabled ? 'Snap on' : 'Snap off'}
+            <Grid3x3 className="h-4 w-4" /> {snapEnabled ? t('whiteboards.snapOn') : t('whiteboards.snapOff')}
           </Button>
         </div>
       </header>
 
       {/* Toolbar */}
       <Card className="p-2 flex flex-wrap items-center gap-1.5 bg-card/40">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground px-2">Add</span>
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground px-2">{t('whiteboards.add')}</span>
         <Button size="sm" variant="ghost" onClick={() => addItem('note')}>
-          <StickyNote className="h-4 w-4" /> Note
+          <StickyNote className="h-4 w-4" /> {t('whiteboards.note')}
         </Button>
         <Button size="sm" variant="ghost" onClick={() => addItem('text')}>
-          <Type className="h-4 w-4" /> Text
+          <Type className="h-4 w-4" /> {t('whiteboards.text')}
         </Button>
         <span className="mx-1 h-5 w-px bg-border/60" />
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground px-2">Shapes</span>
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground px-2">{t('whiteboards.shapes')}</span>
         <Button size="sm" variant="ghost" onClick={() => addItem('shape', 'rect')}>
           <Square className="h-4 w-4" />
         </Button>
@@ -378,7 +380,7 @@ export function WhiteboardsPage() {
           <>
             <span className="mx-1 h-5 w-px bg-border/60" />
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground px-2">
-              {selectedIds.length} selected
+              {tCount('whiteboards.selected', selectedIds.length)}
             </span>
             <div className="flex items-center gap-1 px-1">
               {PALETTE.map((c) => (
@@ -390,14 +392,14 @@ export function WhiteboardsPage() {
                   )}
                   style={{ backgroundColor: c }}
                   onClick={() => setItemColor(c)}
-                  aria-label={`Set color ${c}`}
+                  aria-label={t('whiteboards.setColor', { color: c })}
                 />
               ))}
             </div>
-            <Button size="sm" variant="ghost" onClick={bringToFront} title="Bring to front">
+            <Button size="sm" variant="ghost" onClick={bringToFront} title={t('whiteboards.bringToFront')}>
               <MoveUp className="h-4 w-4" />
             </Button>
-            <Button size="sm" variant="ghost" onClick={sendToBack} title="Send to back">
+            <Button size="sm" variant="ghost" onClick={sendToBack} title={t('whiteboards.sendToBack')}>
               <MoveDown className="h-4 w-4" />
             </Button>
             <Button
@@ -408,7 +410,7 @@ export function WhiteboardsPage() {
                 setItems((prev) => prev.filter((p) => !ids.includes(p.id)))
                 setSelectedIds([])
               }}
-              title="Delete (Del)"
+              title={t('whiteboards.deleteTitle')}
             >
               <Trash2 className="h-4 w-4 text-red-400" />
             </Button>
@@ -418,7 +420,7 @@ export function WhiteboardsPage() {
 
       <div className="flex items-center gap-2 max-w-md">
         <Input
-          placeholder="Search boards…"
+          placeholder={t('whiteboards.searchPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -427,7 +429,7 @@ export function WhiteboardsPage() {
       <div className="flex gap-3 min-h-0 flex-1">
         <Card className="w-72 p-2 space-y-1 overflow-auto">
           {boardsQuery.isLoading ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">Loading boards...</div>
+            <div className="px-3 py-2 text-xs text-muted-foreground">{t('whiteboards.loadingList')}</div>
           ) : null}
           {filtered.map((b) => (
             <button
@@ -506,6 +508,7 @@ function DraggableItem({
   onResize: (w: number, h: number) => void
   onContentChange: (value: string) => void
 }) {
+  const { t } = useTranslation()
   const [dragging, setDragging] = useState(false)
   const beginDrag = useCallback(
     (e: React.MouseEvent) => {
@@ -575,7 +578,7 @@ function DraggableItem({
       <div
         className="flex h-8 shrink-0 cursor-grab select-none items-center gap-1 border-b border-black/10 bg-black/10 px-1.5 touch-none"
         onMouseDown={beginDrag}
-        title="Drag"
+        title={t('whiteboards.drag')}
       >
         <GripVertical className="h-4 w-4 shrink-0 text-muted-foreground/90" aria-hidden />
       </div>
@@ -599,7 +602,7 @@ function DraggableItem({
             data-handle="resize"
             onMouseDown={beginResize}
             className="absolute -right-1.5 -bottom-1.5 z-[2] h-4 w-4 cursor-nwse-resize rounded-sm border border-brand-500 bg-card shadow touch-none"
-            aria-label="Resize"
+            aria-label={t('whiteboards.resize')}
           >
             <MoveDiagonal className="h-3 w-3 m-0.5 text-brand-500" />
           </button>

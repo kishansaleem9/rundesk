@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
 
 type Clip = {
   id: string
@@ -51,6 +52,7 @@ type WorkspaceMember = {
 }
 
 export function ClipsPage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/clips' })
   const qc = useQueryClient()
   const workspaces = useAuthStore((s) => s.workspaces)
@@ -137,10 +139,9 @@ export function ClipsPage() {
       setUploadError(null)
 
       if (!navigator.mediaDevices?.getDisplayMedia || !navigator.mediaDevices?.getUserMedia) {
-        const message =
-          'Recording is not available in this browser. Screen and voice recording require a secure (HTTPS) context.'
+        const message = t('clips.recordingUnavailableBody')
         setUploadError(message)
-        toast.error('Recording unavailable', { description: message })
+        toast.error(t('clips.recordingUnavailable'), { description: message })
         return
       }
 
@@ -157,12 +158,12 @@ export function ClipsPage() {
         // no "starting" UI state is left hanging.
         const message =
           mode === 'screen'
-            ? 'Screen recording was blocked or cancelled. It requires HTTPS and screen-share permission — check that you allowed sharing and try again.'
-            : 'Microphone access was blocked or cancelled. Voice recording requires HTTPS and microphone permission — check your browser settings and try again.'
+            ? t('clips.screenBlockedBody')
+            : t('clips.micBlockedBody')
         console.error('Recording failed to start', captureError)
         setUploadError(message)
         toast.error(
-          mode === 'screen' ? 'Screen recording blocked' : 'Microphone blocked',
+          mode === 'screen' ? t('clips.screenBlocked') : t('clips.micBlocked'),
           { description: message },
         )
         // Reset any transient capture/recording state so nothing looks stuck.
@@ -189,8 +190,8 @@ export function ClipsPage() {
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' })
         if (blob.size === 0) {
-          setUploadError('Recording output was empty. Please try again and record for at least a second.')
-          stream.getTracks().forEach((t) => t.stop())
+          setUploadError(t('clips.emptyRecording'))
+          stream.getTracks().forEach((track) => track.stop())
           recordingStartedAtRef.current = null
           setIsRecording(false)
           setRecordingStartedAt(null)
@@ -205,11 +206,11 @@ export function ClipsPage() {
               ? `${workspaceName} screen recording ${Date.now().toString(36)}`
               : `${workspaceName} voice memo ${Date.now().toString(36)}`,
         }).catch((err) => {
-          const message = (err as Error)?.message ?? 'Clip upload failed'
+          const message = (err as Error)?.message ?? t('clips.uploadFailed')
           setUploadError(message)
-          toast.error('Clip upload failed', { description: message })
+          toast.error(t('clips.uploadFailed'), { description: message })
         })
-        stream.getTracks().forEach((t) => t.stop())
+        stream.getTracks().forEach((track) => track.stop())
         recordingStartedAtRef.current = null
         setIsRecording(false)
         setRecordingStartedAt(null)
@@ -224,9 +225,9 @@ export function ClipsPage() {
       // handler and leave the page looking blank/frozen.
       console.error('Recording failed to start', error)
       const message =
-        (error as Error)?.message ?? 'Something went wrong starting the recording. Please try again.'
+        (error as Error)?.message ?? t('clips.startFailedBody')
       setUploadError(message)
-      toast.error('Could not start recording', { description: message })
+      toast.error(t('clips.couldNotStart'), { description: message })
       mediaStreamRef.current = null
       mediaRecorderRef.current = null
       recordingStartedAtRef.current = null
@@ -279,10 +280,16 @@ export function ClipsPage() {
         blob,
         contentType: blob.type || 'video/webm',
         onProgress: (percent) => setUploadProgress(percent),
+        networkErrorMessage: t('clips.networkError'),
       })
       if (!putRes.ok) {
         const details = putRes.responseText
-        throw new Error(`R2 upload failed (${putRes.status}): ${details || putRes.statusText}`)
+        throw new Error(
+          t('clips.storageUploadFailed', {
+            status: putRes.status,
+            details: details || putRes.statusText,
+          }),
+        )
       }
       await qc.invalidateQueries({ queryKey: ['clips', workspaceId] })
       succeeded = true
@@ -308,29 +315,29 @@ export function ClipsPage() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-            Workspace clips
+            {t('clips.eyebrow')}
           </div>
           <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
               <Video className="h-4 w-4" />
             </span>
-            Clips
-            <Badge variant="secondary" className="ml-1">Live</Badge>
+            {t('nav.clips')}
+            <Badge variant="secondary" className="ml-1">{t('clips.live')}</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Record screen, voice or both. Every clip auto-transcribes and you can attach it to any task.
+            {t('clips.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="lg" onClick={() => startRecording('voice')} disabled={isRecording || uploading}>
-            <Mic className="h-4 w-4" /> Voice only
+            <Mic className="h-4 w-4" /> {t('clips.voiceOnly')}
           </Button>
           <Button variant="gradient" size="lg" onClick={() => startRecording('screen')} disabled={isRecording || uploading}>
-            <Monitor className="h-4 w-4" /> Record screen
+            <Monitor className="h-4 w-4" /> {t('clips.recordScreen')}
           </Button>
           {isRecording && (
             <Button variant="destructive" size="lg" onClick={stopRecording}>
-              <Square className="h-4 w-4" /> Stop ({recordingMode} · {recordingLabel})
+              <Square className="h-4 w-4" /> {t('clips.stop')} ({recordingMode === 'screen' ? t('clips.modeScreen') : t('clips.modeVoice')} · {recordingLabel})
             </Button>
           )}
         </div>
@@ -338,7 +345,7 @@ export function ClipsPage() {
 
       <Input
         leadingIcon={<Search className="h-4 w-4" />}
-        placeholder="Search clips by title or transcript…"
+        placeholder={t('clips.searchPlaceholder')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         className="max-w-md"
@@ -351,7 +358,7 @@ export function ClipsPage() {
       {uploading ? (
         <Card className="p-3 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="truncate">Uploading {uploadingFileName || 'clip'}...</span>
+            <span className="truncate">{t('clips.uploading', { name: uploadingFileName || t('clips.clipNoun') })}</span>
             <span className="text-muted-foreground">{uploadProgress}%</span>
           </div>
           <div className="h-2 w-full rounded bg-muted overflow-hidden">
@@ -364,12 +371,12 @@ export function ClipsPage() {
       ) : null}
 
       {clipsQuery.isLoading ? (
-        <Card className="p-6 text-sm text-muted-foreground">Loading clips...</Card>
+        <Card className="p-6 text-sm text-muted-foreground">{t('clips.loading')}</Card>
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Video className="h-6 w-6" />}
-          title="No clips yet"
-          description="Hit Record screen to capture your first walkthrough."
+          title={t('clips.emptyTitle')}
+          description={t('clips.emptyBody')}
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -396,9 +403,9 @@ export function ClipsPage() {
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Share clip</DialogTitle>
+            <DialogTitle>{t('clips.shareTitle')}</DialogTitle>
             <DialogDescription>
-              Share with a workspace member or anyone outside Rundesk.
+              {t('clips.shareDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -412,7 +419,11 @@ export function ClipsPage() {
                     shareMode === mode ? 'bg-accent/15 border-accent/40 text-accent' : 'border-border text-muted-foreground',
                   )}
                 >
-                  {mode}
+                  {mode === 'member'
+                    ? t('clips.shareModeMember')
+                    : mode === 'external'
+                      ? t('clips.shareModeExternal')
+                      : t('clips.shareModePublic')}
                 </button>
               ))}
             </div>
@@ -422,7 +433,7 @@ export function ClipsPage() {
                 value={selectedMemberId}
                 onChange={(e) => setSelectedMemberId(e.target.value)}
               >
-                <option value="">Select workspace member</option>
+                <option value="">{t('clips.selectMember')}</option>
                 {(membersQuery.data ?? []).map((m) => (
                   <option key={m.userId} value={m.userId}>
                     {m.displayName} ({m.email})
@@ -432,7 +443,7 @@ export function ClipsPage() {
             ) : null}
             {shareMode === 'external' ? (
               <Input
-                placeholder="friend@company.com"
+                placeholder={t('clips.externalEmailPlaceholder')}
                 value={externalEmail}
                 onChange={(e) => setExternalEmail(e.target.value)}
               />
@@ -460,7 +471,7 @@ export function ClipsPage() {
                 (shareMode === 'external' && !externalEmail.trim())
               }
             >
-              Generate share
+              {t('clips.generateShare')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -468,16 +479,16 @@ export function ClipsPage() {
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete clip?</DialogTitle>
+            <DialogTitle>{t('clips.deleteTitle')}</DialogTitle>
             <DialogDescription>
               {deleteClip
-                ? `This will permanently remove "${deleteClip.title}". This action cannot be undone.`
-                : 'This will permanently remove this clip. This action cannot be undone.'}
+                ? t('clips.deleteBodyNamed', { title: deleteClip.title })
+                : t('clips.deleteBodyGeneric')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -492,7 +503,7 @@ export function ClipsPage() {
               }}
               disabled={removeClip.isPending}
             >
-              {removeClip.isPending ? 'Deleting...' : 'Delete clip'}
+              {removeClip.isPending ? t('clips.deleting') : t('clips.deleteClip')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -510,6 +521,7 @@ function ClipCard({
   onDelete: () => void
   onShare: () => void
 }) {
+  const { t } = useTranslation()
   const [resolvedDuration, setResolvedDuration] = useState<number>(clip.durationSeconds ?? 0)
   const duration = `${Math.floor((resolvedDuration ?? 0) / 60)}:${String((resolvedDuration ?? 0) % 60).padStart(2, '0')}`
   return (
@@ -537,7 +549,7 @@ function ClipCard({
           {duration}
         </Badge>
         <Badge variant="gradient" className="absolute top-2 left-2 text-[10px]">
-          <Sparkles className="h-3 w-3" /> Uploaded
+          <Sparkles className="h-3 w-3" /> {t('clips.uploaded')}
         </Badge>
       </div>
       <div className="p-4">
@@ -550,7 +562,7 @@ function ClipCard({
           <div className="flex items-center gap-3 shrink-0">
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              {clip.createdAt ? new Date(clip.createdAt).toLocaleDateString() : 'now'}
+              {clip.createdAt ? new Date(clip.createdAt).toLocaleDateString() : t('clips.now')}
             </span>
             <button className="text-muted-foreground hover:text-destructive" onClick={onDelete}>
               <Trash2 className="h-3.5 w-3.5" />
@@ -570,6 +582,7 @@ async function uploadBlobWithProgress(args: {
   blob: Blob
   contentType: string
   onProgress: (percent: number) => void
+  networkErrorMessage?: string
 }): Promise<{ ok: boolean; status: number; statusText: string; responseText: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -580,7 +593,8 @@ async function uploadBlobWithProgress(args: {
       const percent = Math.round((event.loaded / event.total) * 100)
       args.onProgress(Math.min(100, Math.max(0, percent)))
     }
-    xhr.onerror = () => reject(new Error('Network error while uploading clip'))
+    xhr.onerror = () =>
+      reject(new Error(args.networkErrorMessage ?? 'Network error while uploading clip'))
     xhr.onload = () => {
       resolve({
         ok: xhr.status >= 200 && xhr.status < 300,

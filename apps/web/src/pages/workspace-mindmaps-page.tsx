@@ -21,6 +21,7 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react'
+import { useTranslation } from '../lib/i18n'
 
 type MindMap = {
   id: string
@@ -50,6 +51,7 @@ const BRANCH_PALETTE = [
 ]
 
 export function MindMapsPage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/mindmaps' })
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
@@ -57,10 +59,10 @@ export function MindMapsPage() {
   const [activeMapId, setActiveMapId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [nodes, setNodes] = useState<MapNode[]>([
-    { id: 'root', label: 'Root Topic', x: 520, y: 260 },
-    { id: 'n-1', label: 'Goals', x: 320, y: 170, parentId: 'root' },
-    { id: 'n-2', label: 'Risks', x: 710, y: 180, parentId: 'root' },
-    { id: 'n-3', label: 'Ideas', x: 690, y: 360, parentId: 'root' },
+    { id: 'root', label: t('mindmaps.seedRoot'), x: 520, y: 260 },
+    { id: 'n-1', label: t('mindmaps.seedGoals'), x: 320, y: 170, parentId: 'root' },
+    { id: 'n-2', label: t('mindmaps.seedRisks'), x: 710, y: 180, parentId: 'root' },
+    { id: 'n-3', label: t('mindmaps.seedIdeas'), x: 690, y: 360, parentId: 'root' },
   ])
   const [selectedNodeId, setSelectedNodeId] = useState<string>('root')
   const [draftLabel, setDraftLabel] = useState('')
@@ -85,7 +87,7 @@ export function MindMapsPage() {
         body: {
           type: 'mindmap',
           title,
-          data: { nodes: [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }] as MapNode[] },
+          data: { nodes: [{ id: 'root', label: t('mindmaps.seedRoot'), x: 520, y: 260 }] as MapNode[] },
         },
       }),
     onSuccess: (created) => {
@@ -101,16 +103,16 @@ export function MindMapsPage() {
       )
       void qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] })
       setActiveMapId(created.id)
-      setNodes(created.data?.nodes ?? [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }])
+      setNodes(created.data?.nodes ?? [{ id: 'root', label: t('mindmaps.seedRoot'), x: 520, y: 260 }])
       setSelectedNodeId('root')
-      setDraftLabel('Root Topic')
+      setDraftLabel(t('mindmaps.seedRoot'))
     },
     onError: (error) => {
       if (error instanceof ApiError) {
-        toast('Could not create mind map', { description: error.message })
+        toast(t('mindmaps.couldNotCreate'), { description: error.message })
         return
       }
-      toast('Could not create mind map', { description: 'Something went wrong' })
+      toast(t('mindmaps.couldNotCreate'), { description: t('mindmaps.somethingWrong') })
     },
   })
   const updateMap = useMutation({
@@ -138,9 +140,9 @@ export function MindMapsPage() {
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        toast('Mind map version conflict', {
+        toast(t('mindmaps.conflictTitle'), {
           id: 'mindmap-canvas-conflict',
-          description: 'Latest version was loaded. Please retry your last edit.',
+          description: t('mindmaps.conflictBody'),
         })
       }
       await qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'mindmap'] })
@@ -243,7 +245,7 @@ export function MindMapsPage() {
     if (!active) {
       return (
         <div className="p-6 flex min-h-[40vh] items-center justify-center text-muted-foreground text-sm">
-          Loading map…
+          {t('mindmaps.loadingMap')}
         </div>
       )
     }
@@ -276,7 +278,7 @@ export function MindMapsPage() {
               ...prev,
               {
                 id,
-                label: 'New branch',
+                label: t('mindmaps.seedBranch'),
                 x: base.x + 160,
                 y: base.y + 40,
                 parentId: base.id,
@@ -294,7 +296,7 @@ export function MindMapsPage() {
         }}
         onDeleteSelected={() => {
           if (selectedNodeId === 'root') {
-            toast('Root node cannot be deleted')
+            toast(t('mindmaps.rootCannotDelete'))
             return
           }
           setNodes((prev) => {
@@ -326,31 +328,31 @@ export function MindMapsPage() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-            Workspace mind maps
+            {t('mindmaps.eyebrow')}
           </div>
           <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
               <Network className="h-4 w-4" />
             </span>
-            Mind maps
-            <Badge variant="secondary" className="ml-1">Live</Badge>
+            {t('nav.mindMaps')}
+            <Badge variant="secondary" className="ml-1">{t('mindmaps.live')}</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Brainstorm at the speed of thought. Drop nodes, connect them.
+            {t('mindmaps.subtitle')}
           </p>
         </div>
         <Button
           variant="gradient"
           size="lg"
-          onClick={() => createMap.mutate(`Mind map ${new Date().toLocaleString()}`)}
+          onClick={() => createMap.mutate(`${t('mindmaps.untitledPrefix')} ${new Date().toLocaleString()}`)}
         >
-          <Plus className="h-4 w-4" /> New mind map
+          <Plus className="h-4 w-4" /> {t('mindmaps.newMap')}
         </Button>
       </header>
 
       <div className="flex items-center gap-2 max-w-sm">
         <Input
-          placeholder="Search mind maps…"
+          placeholder={t('mindmaps.searchPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -358,21 +360,21 @@ export function MindMapsPage() {
 
       {mapsQuery.isError ? (
         <Card className="p-4 border-destructive/40 bg-destructive/5 max-w-2xl">
-          <div className="font-medium text-destructive">Could not load mind maps</div>
+          <div className="font-medium text-destructive">{t('mindmaps.couldNotLoad')}</div>
           <p className="text-sm text-muted-foreground mt-2">
             {mapsQuery.error instanceof ApiError
               ? mapsQuery.error.message
-              : 'Request failed'}
+              : t('mindmaps.requestFailed')}
           </p>
           <Button variant="secondary" className="mt-4" onClick={() => void mapsQuery.refetch()}>
-            Retry
+            {t('common.retry')}
           </Button>
         </Card>
       ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {mapsQuery.isLoading ? (
-          <Card className="p-4 text-sm text-muted-foreground">Loading maps...</Card>
+          <Card className="p-4 text-sm text-muted-foreground">{t('mindmaps.loadingList')}</Card>
         ) : null}
         {filtered.map((m) => (
           <Card
@@ -381,7 +383,7 @@ export function MindMapsPage() {
             className="cursor-pointer p-0 overflow-hidden transition-all hover:shadow-glow hover:border-accent/40"
             onClick={() => {
               setActiveMapId(m.id)
-              const initialNodes = m.data?.nodes ?? [{ id: 'root', label: 'Root Topic', x: 520, y: 260 }]
+              const initialNodes = m.data?.nodes ?? [{ id: 'root', label: t('mindmaps.seedRoot'), x: 520, y: 260 }]
               setNodes(initialNodes)
               const root = initialNodes[0]
               if (root) {
@@ -395,7 +397,7 @@ export function MindMapsPage() {
             </div>
             <div className="p-4">
               <div className="font-medium truncate">{m.title}</div>
-              <div className="text-xs text-muted-foreground mt-2">Interactive map editor</div>
+              <div className="text-xs text-muted-foreground mt-2">{t('mindmaps.interactiveEditor')}</div>
             </div>
           </Card>
         ))}
@@ -470,6 +472,7 @@ function MindMapEditor({
   onDeleteSelected: () => void
   onAutoLayout: () => void
 }) {
+  const { t, tCount } = useTranslation()
   const nodesById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes])
   const selectedNode = nodes.find((n) => n.id === selectedNodeId)
   const canvasRef = useRef<HTMLDivElement | null>(null)
@@ -497,12 +500,12 @@ function MindMapEditor({
       <header className="flex items-center justify-between gap-4 border-b border-border/40 px-6 py-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={onBack}>
-            ← All maps
+            {t('mindmaps.backToMaps')}
           </Button>
           <div>
             <div className="font-display font-semibold">{map.title}</div>
             <div className="text-xs text-muted-foreground">
-              {nodes.length} nodes · <kbd className="rounded border px-1 text-[10px]">Tab</kbd> add child · <kbd className="rounded border px-1 text-[10px]">Del</kbd> remove
+              {tCount('mindmaps.nodes', nodes.length)} · <kbd className="rounded border px-1 text-[10px]">Tab</kbd> {t('mindmaps.kbdAddChild')} · <kbd className="rounded border px-1 text-[10px]">Del</kbd> {t('mindmaps.kbdRemove')}
             </div>
           </div>
         </div>
@@ -511,16 +514,16 @@ function MindMapEditor({
             value={draftLabel}
             onChange={(e) => onLabelChange(e.target.value)}
             className="w-56 h-8"
-            placeholder="Node label"
+            placeholder={t('mindmaps.nodeLabel')}
           />
           <Button variant="outline" size="sm" onClick={onCreateChild}>
-            <GitBranchPlus className="h-3.5 w-3.5" /> Add child
+            <GitBranchPlus className="h-3.5 w-3.5" /> {t('mindmaps.addChild')}
           </Button>
-          <Button variant="outline" size="sm" onClick={onAutoLayout} title="Radial auto-layout">
-            <Sparkles className="h-3.5 w-3.5" /> Auto-layout
+          <Button variant="outline" size="sm" onClick={onAutoLayout} title={t('mindmaps.autoLayoutTitle')}>
+            <Sparkles className="h-3.5 w-3.5" /> {t('mindmaps.autoLayout')}
           </Button>
           {selectedNodeId !== 'root' && (
-            <Button variant="ghost" size="sm" onClick={onDeleteSelected} title="Delete branch (Del)">
+            <Button variant="ghost" size="sm" onClick={onDeleteSelected} title={t('mindmaps.deleteBranchTitle')}>
               <Trash2 className="h-3.5 w-3.5 text-red-400" />
             </Button>
           )}
@@ -530,14 +533,14 @@ function MindMapEditor({
       {selectedNode && selectedNodeId !== 'root' && (
         <div className="flex items-center gap-2 border-b border-border/40 px-6 py-2 bg-card/20">
           <Palette className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Branch colour</span>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{t('mindmaps.branchColour')}</span>
           <button
             onClick={() => onSetColor(undefined)}
             className={cn(
               'h-5 w-5 rounded-full border border-border/60 bg-card transition-transform hover:scale-110',
               !selectedNode.color && 'ring-2 ring-brand-500',
             )}
-            aria-label="Reset colour"
+            aria-label={t('mindmaps.resetColour')}
           />
           {BRANCH_PALETTE.map((c) => (
             <button
@@ -548,7 +551,7 @@ function MindMapEditor({
                 selectedNode.color === c && 'ring-2 ring-brand-500',
               )}
               style={{ backgroundColor: c }}
-              aria-label={`Set colour ${c}`}
+              aria-label={t('mindmaps.setColour', { color: c })}
             />
           ))}
         </div>
