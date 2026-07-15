@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { BellPlus, Bell, Trash2 } from 'lucide-react'
 import { Button, Input, Popover, PopoverContent, PopoverTrigger, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type Reminder = {
   id: string
@@ -34,6 +35,7 @@ export function TaskReminderButton({
   taskId: string
   className?: string
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [when, setWhen] = useState(defaultRemindAt)
@@ -57,9 +59,9 @@ export function TaskReminderButton({
       void qc.invalidateQueries({ queryKey: key })
       setNote('')
       setWhen(defaultRemindAt())
-      toast.success('Reminder set')
+      toast.success(t('taskReminders.reminderSet'))
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not set reminder'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskReminders.couldNotSet')),
   })
 
   const remove = useMutation({
@@ -74,8 +76,8 @@ export function TaskReminderButton({
       <PopoverTrigger asChild>
         <button
           type="button"
-          title="Remind me"
-          aria-label="Set a reminder"
+          title={t('taskReminders.remindMe')}
+          aria-label={t('taskReminders.setReminderAria')}
           className={cn(
             'inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground',
             pending.length > 0 && 'text-violet-500',
@@ -86,9 +88,9 @@ export function TaskReminderButton({
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-3 space-y-2.5">
-        <div className="text-[13px] font-semibold text-foreground">Remind me about this task</div>
+        <div className="text-[13px] font-semibold text-foreground">{t('taskReminders.heading')}</div>
         <div className="space-y-1.5">
-          <label className="text-[11px] text-muted-foreground">When</label>
+          <label className="text-[11px] text-muted-foreground">{t('taskReminders.whenLabel')}</label>
           <Input
             type="datetime-local"
             value={when}
@@ -96,7 +98,7 @@ export function TaskReminderButton({
             className="h-8 text-[13px]"
           />
           <Input
-            placeholder="Optional note…"
+            placeholder={t('taskReminders.notePlaceholder')}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             className="h-8 text-[13px]"
@@ -107,13 +109,13 @@ export function TaskReminderButton({
             disabled={!valid || !workspaceId || create.isPending}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? 'Setting…' : 'Set reminder'}
+            {create.isPending ? t('taskReminders.setting') : t('taskReminders.setReminder')}
           </Button>
         </div>
 
         {pending.length > 0 && (
           <div className="pt-1 border-t border-border/60 space-y-1">
-            <div className="text-[11px] text-muted-foreground">Pending</div>
+            <div className="text-[11px] text-muted-foreground">{t('taskReminders.pending')}</div>
             {pending.map((r) => (
               <div key={r.id} className="flex items-center gap-2 text-[12px]">
                 <Bell className="h-3.5 w-3.5 shrink-0 text-violet-500" />
@@ -127,7 +129,7 @@ export function TaskReminderButton({
                 </span>
                 <button
                   type="button"
-                  title="Delete reminder"
+                  title={t('taskReminders.deleteReminder')}
                   onClick={() => remove.mutate(r.id)}
                   className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-rose-500"
                 >

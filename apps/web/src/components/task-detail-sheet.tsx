@@ -27,6 +27,59 @@ import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
+
+// Enum → display-label-key maps. The raw identifier stays the persisted/compared
+// value; only the shown label is localized. Unknown values fall back to raw text.
+const PRIORITY_LABEL_KEYS: Record<string, TranslationKey> = {
+  urgent: 'taskDetail.priority.urgent',
+  high: 'taskDetail.priority.high',
+  normal: 'taskDetail.priority.normal',
+  low: 'taskDetail.priority.low',
+}
+const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
+  backlog: 'taskDetail.status.backlog',
+  todo: 'taskDetail.status.todo',
+  in_progress: 'taskDetail.status.inProgress',
+  in_review: 'taskDetail.status.inReview',
+  done: 'taskDetail.status.done',
+  cancelled: 'taskDetail.status.cancelled',
+}
+/** Known task-activity actions (see apps/api tasks.service.ts logActivity calls). */
+const ACTIVITY_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
+  created: 'taskDetail.activity.created',
+  updated: 'taskDetail.activity.updated',
+  archived: 'taskDetail.activity.archived',
+  restored: 'taskDetail.activity.restored',
+  moved: 'taskDetail.activity.moved',
+  assigned: 'taskDetail.activity.assigned',
+  unassigned: 'taskDetail.activity.unassigned',
+  commented: 'taskDetail.activity.commented',
+  subtask_added: 'taskDetail.activity.subtaskAdded',
+  attachment_added: 'taskDetail.activity.attachmentAdded',
+  attachment_removed: 'taskDetail.activity.attachmentRemoved',
+  status_changed: 'taskDetail.activity.statusChanged',
+  priority_changed: 'taskDetail.activity.priorityChanged',
+  due_date_changed: 'taskDetail.activity.dueDateChanged',
+  label_added: 'taskDetail.activity.labelAdded',
+  label_removed: 'taskDetail.activity.labelRemoved',
+  checklist_item_toggled: 'taskDetail.activity.checklistItemToggled',
+  dependency_added: 'taskDetail.activity.dependencyAdded',
+  dependency_removed: 'taskDetail.activity.dependencyRemoved',
+}
+/** Custom-field type identifiers → display labels (the raw type stays canonical). */
+const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
+  text: 'taskDetail.fieldType.text',
+  number: 'taskDetail.fieldType.number',
+  dropdown: 'taskDetail.fieldType.dropdown',
+  date: 'taskDetail.fieldType.date',
+  checkbox: 'taskDetail.fieldType.checkbox',
+  url: 'taskDetail.fieldType.url',
+  email: 'taskDetail.fieldType.email',
+  phone: 'taskDetail.fieldType.phone',
+  money: 'taskDetail.fieldType.money',
+  rating: 'taskDetail.fieldType.rating',
+}
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus =
@@ -150,17 +203,17 @@ type TabKey =
   | 'time'
   | 'fields'
 
-const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'fields', label: 'Fields' },
-  { key: 'subtasks', label: 'Subtasks' },
-  { key: 'checklists', label: 'Checklists' },
-  { key: 'watchers', label: 'Watchers' },
-  { key: 'dependencies', label: 'Dependencies' },
-  { key: 'attachments', label: 'Attachments' },
-  { key: 'comments', label: 'Comments' },
-  { key: 'activity', label: 'Activity' },
-  { key: 'time', label: 'Time' },
+const TABS: Array<{ key: TabKey; labelKey: TranslationKey }> = [
+  { key: 'overview', labelKey: 'taskDetail.tab.overview' },
+  { key: 'fields', labelKey: 'taskDetail.tab.fields' },
+  { key: 'subtasks', labelKey: 'taskDetail.tab.subtasks' },
+  { key: 'checklists', labelKey: 'taskDetail.tab.checklists' },
+  { key: 'watchers', labelKey: 'taskDetail.tab.watchers' },
+  { key: 'dependencies', labelKey: 'taskDetail.tab.dependencies' },
+  { key: 'attachments', labelKey: 'taskDetail.tab.attachments' },
+  { key: 'comments', labelKey: 'taskDetail.tab.comments' },
+  { key: 'activity', labelKey: 'taskDetail.tab.activity' },
+  { key: 'time', labelKey: 'taskDetail.tab.time' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -175,9 +228,10 @@ function isNotWired(err: unknown): boolean {
 }
 
 function NotWiredNote({ children }: { children?: React.ReactNode }) {
+  const { t } = useTranslation()
   return (
     <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-      {children ?? 'Not wired yet — backend endpoint pending.'}
+      {children ?? t('taskDetail.notWired')}
     </div>
   )
 }
@@ -244,6 +298,7 @@ export function TaskDetailSheet({
   onOpenChange: (next: boolean) => void
   workspaceId?: string
 }) {
+  const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const [expanded, setExpanded] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -278,7 +333,7 @@ export function TaskDetailSheet({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not update title')
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTitle'))
     },
   })
 
@@ -292,7 +347,7 @@ export function TaskDetailSheet({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not update cover')
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateCover'))
     },
   })
 
@@ -303,7 +358,7 @@ export function TaskDetailSheet({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not update milestone')
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateMilestone'))
     },
   })
 
@@ -311,12 +366,12 @@ export function TaskDetailSheet({
     mutationFn: () =>
       api(`/workspaces/${fallbackWorkspaceId}/task-templates/duplicate/${taskId}`, { method: 'POST' }),
     onSuccess: async () => {
-      toast.success('Task duplicated')
+      toast.success(t('taskDetail.taskDuplicated'))
       await qc.invalidateQueries()
       onOpenChange(false)
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not duplicate task')
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotDuplicate'))
     },
   })
 
@@ -366,7 +421,7 @@ export function TaskDetailSheet({
         )}
       >
         {!taskId ? null : detailQuery.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading task…</p>
+          <p className="text-sm text-muted-foreground">{t('taskDetail.loadingTask')}</p>
         ) : detailQuery.data ? (
           <>
             {/* Cover band — renders the saved coverColor when set, else the brand gradient. */}
@@ -392,7 +447,7 @@ export function TaskDetailSheet({
                 className="absolute left-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
                 <Copy className="h-3.5 w-3.5" />
-                Duplicate
+                {t('taskDetail.duplicate')}
               </Button>
               <Button
                 type="button"
@@ -403,7 +458,7 @@ export function TaskDetailSheet({
                 className="absolute right-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
                 <ImageIcon className="h-3.5 w-3.5" />
-                Edit cover
+                {t('taskDetail.editCover')}
               </Button>
             </div>
 
@@ -421,12 +476,12 @@ export function TaskDetailSheet({
                 {detailQuery.data.isMilestone && (
                   <Badge variant="soft" className="text-[10px] gap-1 text-amber-600 dark:text-amber-400">
                     <Diamond className="h-3 w-3 fill-amber-400" />
-                    Milestone
+                    {t('taskDetail.milestone')}
                   </Badge>
                 )}
                 {detailQuery.data.dueDate && (
                   <Badge variant="info" className="text-[10px]">
-                    Due {new Date(detailQuery.data.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    {t('taskDetail.dueShort', { date: new Date(detailQuery.data.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) })}
                   </Badge>
                 )}
               </div>
@@ -465,7 +520,7 @@ export function TaskDetailSheet({
                       }
                     }}
                     className="text-2xl font-display leading-tight flex-1 cursor-text rounded-sm hover:bg-muted/40 transition-colors"
-                    title="Click to edit title"
+                    title={t('taskDetail.clickToEditTitle')}
                   >
                     {detailQuery.data.title}
                   </SheetTitle>
@@ -473,7 +528,7 @@ export function TaskDetailSheet({
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    title={detailQuery.data.isMilestone ? 'Unmark milestone' : 'Mark as milestone'}
+                    title={detailQuery.data.isMilestone ? t('taskDetail.unmarkMilestone') : t('taskDetail.markMilestone')}
                     aria-pressed={!!detailQuery.data.isMilestone}
                     disabled={updateMilestone.isPending}
                     onClick={() => updateMilestone.mutate(!detailQuery.data.isMilestone)}
@@ -501,8 +556,8 @@ export function TaskDetailSheet({
                     variant="ghost"
                     onClick={() => setExpanded((prev) => !prev)}
                     className="h-8 w-8"
-                    title={expanded ? 'Collapse panel' : 'Expand panel'}
-                    aria-label={expanded ? 'Collapse panel' : 'Expand panel'}
+                    title={expanded ? t('taskDetail.collapsePanel') : t('taskDetail.expandPanel')}
+                    aria-label={expanded ? t('taskDetail.collapsePanel') : t('taskDetail.expandPanel')}
                   >
                     {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
                   </Button>
@@ -512,16 +567,16 @@ export function TaskDetailSheet({
                   />
                 </div>
               </div>
-              <SheetDescription className="sr-only">Task details</SheetDescription>
+              <SheetDescription className="sr-only">{t('taskDetail.srDescription')}</SheetDescription>
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <Badge variant="secondary" className="capitalize">
-                  {detailQuery.data.status.replace('_', ' ')}
+                  {STATUS_LABEL_KEYS[detailQuery.data.status] ? t(STATUS_LABEL_KEYS[detailQuery.data.status]) : detailQuery.data.status.replace('_', ' ')}
                 </Badge>
                 <Badge
                   variant={detailQuery.data.priority as 'urgent' | 'high' | 'normal' | 'low'}
                   className="capitalize"
                 >
-                  {detailQuery.data.priority}
+                  {PRIORITY_LABEL_KEYS[detailQuery.data.priority] ? t(PRIORITY_LABEL_KEYS[detailQuery.data.priority]) : detailQuery.data.priority}
                 </Badge>
                 {detailQuery.data.labels?.map((l) => (
                   <Badge
@@ -552,7 +607,7 @@ export function TaskDetailSheet({
                         : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
-                    {tab.label}
+                    {t(tab.labelKey)}
                   </button>
                 )
               })}
@@ -609,7 +664,7 @@ export function TaskDetailSheet({
             </div>
           </>
         ) : (
-          <p className="text-sm text-destructive">Task not found.</p>
+          <p className="text-sm text-destructive">{t('taskDetail.notFound')}</p>
         )}
       </SheetContent>
     </Sheet>
@@ -735,6 +790,7 @@ function OverviewPanel({
   taskId: string
   workspaceId?: string
 }) {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const [editingDescription, setEditingDescription] = useState(false)
   const [descriptionDraft, setDescriptionDraft] = useState('')
@@ -806,7 +862,7 @@ function OverviewPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not update description')
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateDescription'))
     },
   })
 
@@ -817,7 +873,7 @@ function OverviewPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not update task')
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTask'))
     },
   })
 
@@ -830,7 +886,7 @@ function OverviewPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not update repeat')
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateRepeat'))
     },
   })
   const recurrenceValue = (() => {
@@ -885,9 +941,9 @@ function OverviewPanel({
       }),
     onSuccess: (r) => {
       patchTask.mutate({ priority: r.priority })
-      toast.success(`AI set priority to ${r.priority}`, { description: r.reasoning })
+      toast.success(t('taskDetail.aiSetPriority', { priority: PRIORITY_LABEL_KEYS[r.priority] ? t(PRIORITY_LABEL_KEYS[r.priority]) : r.priority }), { description: r.reasoning })
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.aiUnavailable')),
   })
   const aiImproveDescription = useMutation({
     mutationFn: (mode: 'improve' | 'format') =>
@@ -898,9 +954,9 @@ function OverviewPanel({
     onSuccess: (r) => {
       setDescriptionDraft(r.improved)
       setEditingDescription(true)
-      toast.success('AI draft ready — review and save')
+      toast.success(t('taskDetail.aiDraftReady'))
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.aiUnavailable')),
   })
   const aiSummarize = useMutation({
     mutationFn: () =>
@@ -912,8 +968,8 @@ function OverviewPanel({
           workspaceId,
         },
       }),
-    onSuccess: (r) => toast.success('Task summary', { description: r.summary, duration: 10000 }),
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+    onSuccess: (r) => toast.success(t('taskDetail.taskSummary'), { description: r.summary, duration: 10000 }),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.aiUnavailable')),
   })
   const aiSuggestDeadline = useMutation({
     mutationFn: () =>
@@ -923,9 +979,9 @@ function OverviewPanel({
       }),
     onSuccess: (r) => {
       patchTask.mutate({ dueDate: r.suggestedDate })
-      toast.success(`AI suggested ${r.suggestedDate}`, { description: r.reasoning })
+      toast.success(t('taskDetail.aiSuggestedDeadline', { date: r.suggestedDate }), { description: r.reasoning })
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'AI is unavailable'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.aiUnavailable')),
   })
 
   // Reset transient edit UI when switching to a different task.
@@ -964,25 +1020,25 @@ function OverviewPanel({
     <div className="space-y-4">
       <section>
         <div className="flex items-center justify-between mb-1.5">
-          <h4 className="text-xs uppercase tracking-wide text-muted-foreground">Description</h4>
+          <h4 className="text-xs uppercase tracking-wide text-muted-foreground">{t('taskDetail.description')}</h4>
           <div className="flex items-center gap-1">
             <button
               type="button"
               disabled={aiImproveDescription.isPending}
               onClick={() => aiImproveDescription.mutate('improve')}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
-              title="Improve description with AI"
+              title={t('taskDetail.improveDescriptionAi')}
             >
-              <Wand2 className="h-3 w-3" /> Improve
+              <Wand2 className="h-3 w-3" /> {t('taskDetail.improve')}
             </button>
             <button
               type="button"
               disabled={aiSummarize.isPending}
               onClick={() => aiSummarize.mutate()}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
-              title="Summarize this task with AI"
+              title={t('taskDetail.summarizeTaskAi')}
             >
-              <Sparkles className="h-3 w-3" /> Summarize
+              <Sparkles className="h-3 w-3" /> {t('taskDetail.summarize')}
             </button>
           </div>
         </div>
@@ -990,19 +1046,19 @@ function OverviewPanel({
           <div>
             <div className="mb-1.5 flex flex-wrap items-center gap-0.5">
               {([
-                ['bold', 'B', 'Bold', 'font-bold'],
-                ['italic', 'I', 'Italic', 'italic'],
-                ['code', '<>', 'Code', 'font-mono text-[11px]'],
-                ['link', '🔗', 'Link', ''],
-                ['h2', 'H', 'Heading', 'font-semibold'],
-                ['ul', '•', 'Bulleted list', ''],
-                ['ol', '1.', 'Numbered list', 'text-[11px]'],
-                ['quote', '❝', 'Quote', ''],
+                ['bold', 'B', 'taskDetail.format.bold', 'font-bold'],
+                ['italic', 'I', 'taskDetail.format.italic', 'italic'],
+                ['code', '<>', 'taskDetail.format.code', 'font-mono text-[11px]'],
+                ['link', '🔗', 'taskDetail.format.link', ''],
+                ['h2', 'H', 'taskDetail.format.heading', 'font-semibold'],
+                ['ul', '•', 'taskDetail.format.bulletedList', ''],
+                ['ol', '1.', 'taskDetail.format.numberedList', 'text-[11px]'],
+                ['quote', '❝', 'taskDetail.format.quote', ''],
               ] as const).map(([kind, glyph, title, cls]) => (
                 <button
                   key={kind}
                   type="button"
-                  title={title}
+                  title={t(title)}
                   // preventDefault on mousedown keeps the textarea selection intact
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => applyDescriptionFormat(kind)}
@@ -1024,10 +1080,10 @@ function OverviewPanel({
               textareaRef={descriptionRef}
               onBlur={commitDescription}
               disabled={updateDescription.isPending}
-              placeholder="Add a description… **markdown** supported, @ to mention"
+              placeholder={t('taskDetail.descriptionPlaceholder')}
               className="text-sm leading-relaxed font-mono"
             />
-            <p className="mt-1 text-[11px] text-muted-foreground">Markdown supported · click away to save</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{t('taskDetail.markdownHint')}</p>
           </div>
         ) : detail.description?.trim() ? (
           <div
@@ -1044,7 +1100,7 @@ function OverviewPanel({
               }
             }}
             className="w-full cursor-text rounded-md px-2 py-1.5 -mx-2 text-sm hover:bg-muted/40 transition-colors"
-            title="Click to edit description"
+            title={t('taskDetail.clickToEditDescription')}
           >
             <Markdown source={detail.description} />
           </div>
@@ -1056,15 +1112,15 @@ function OverviewPanel({
               setEditingDescription(true)
             }}
             className="w-full text-left text-sm leading-relaxed rounded-md px-2 py-1.5 -mx-2 hover:bg-muted/40 transition-colors"
-            title="Click to edit description"
+            title={t('taskDetail.clickToEditDescription')}
           >
-            <span className="text-muted-foreground italic">Add a description…</span>
+            <span className="text-muted-foreground italic">{t('taskDetail.addDescription')}</span>
           </button>
         )}
       </section>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Status">
+        <Field label={t('taskDetail.fieldStatus')}>
           <select
             value={detail.status}
             onChange={(e) => patchTask.mutate({ status: e.target.value })}
@@ -1072,7 +1128,7 @@ function OverviewPanel({
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           >
             {/* Keep the current value selectable even if statuses are still loading */}
-            {statusOptions.length === 0 && <option value={detail.status}>{detail.status.replace('_', ' ')}</option>}
+            {statusOptions.length === 0 && <option value={detail.status}>{STATUS_LABEL_KEYS[detail.status] ? t(STATUS_LABEL_KEYS[detail.status]) : detail.status.replace('_', ' ')}</option>}
             {statusOptions.map((s) => (
               <option key={s.key} value={s.key}>
                 {s.name}
@@ -1080,7 +1136,7 @@ function OverviewPanel({
             ))}
           </select>
         </Field>
-        <Field label="Priority">
+        <Field label={t('taskDetail.fieldPriority')}>
           <div className="flex items-center gap-1">
             <select
               value={detail.priority}
@@ -1093,7 +1149,7 @@ function OverviewPanel({
             >
               {(['urgent', 'high', 'normal', 'low'] as const).map((p) => (
                 <option key={p} value={p}>
-                  {p}
+                  {t(PRIORITY_LABEL_KEYS[p])}
                 </option>
               ))}
             </select>
@@ -1102,7 +1158,7 @@ function OverviewPanel({
               disabled={aiSuggestPriority.isPending}
               onClick={() => aiSuggestPriority.mutate()}
               className="h-8 w-8 shrink-0 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
-              title="Suggest priority with AI"
+              title={t('taskDetail.suggestPriorityAi')}
             >
               <Sparkles className="h-3.5 w-3.5" />
             </button>
@@ -1111,15 +1167,15 @@ function OverviewPanel({
         <Field
           label={
             <span className="flex items-center justify-between">
-              Due date
+              {t('taskDetail.fieldDueDate')}
               <button
                 type="button"
                 disabled={aiSuggestDeadline.isPending}
                 onClick={() => aiSuggestDeadline.mutate()}
                 className="inline-flex items-center gap-1 rounded px-1 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
-                title="Suggest a deadline with AI"
+                title={t('taskDetail.suggestDeadlineAi')}
               >
-                <Sparkles className="h-2.5 w-2.5" /> AI
+                <Sparkles className="h-2.5 w-2.5" /> {t('taskDetail.aiShort')}
               </button>
             </span>
           }
@@ -1132,7 +1188,7 @@ function OverviewPanel({
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
         </Field>
-        <Field label="Start date">
+        <Field label={t('taskDetail.fieldStartDate')}>
           <input
             type="date"
             value={toDateInput(detail.startDate)}
@@ -1141,20 +1197,20 @@ function OverviewPanel({
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
         </Field>
-        <Field label="Repeat">
+        <Field label={t('taskDetail.fieldRepeat')}>
           <select
             value={recurrenceValue}
             onChange={(e) => onRecurrenceChange(e.target.value)}
             disabled={setRecurrence.isPending}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-            title="When completed, auto-create the next occurrence"
+            title={t('taskDetail.repeatTooltip')}
           >
-            <option value="off">Doesn’t repeat</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="biweekly">Every 2 weeks</option>
-            <option value="monthly">Monthly</option>
-            <option value="custom">Custom…</option>
+            <option value="off">{t('taskDetail.repeat.off')}</option>
+            <option value="daily">{t('taskDetail.repeat.daily')}</option>
+            <option value="weekly">{t('taskDetail.repeat.weekly')}</option>
+            <option value="biweekly">{t('taskDetail.repeat.biweekly')}</option>
+            <option value="monthly">{t('taskDetail.repeat.monthly')}</option>
+            <option value="custom">{t('taskDetail.repeat.custom')}</option>
           </select>
           {recurrenceValue === 'custom' && (
             <button
@@ -1162,7 +1218,7 @@ function OverviewPanel({
               onClick={() => setRecurrenceDialogOpen(true)}
               className="mt-1 text-xs text-accent hover:underline"
             >
-              Edit custom schedule
+              {t('taskDetail.editCustomSchedule')}
             </button>
           )}
           <RecurringTaskDialog
@@ -1173,7 +1229,7 @@ function OverviewPanel({
             onSubmit={(rule) => setRecurrence.mutate({ rule })}
           />
         </Field>
-        <Field label="Estimate (hrs)">
+        <Field label={t('taskDetail.fieldEstimate')}>
           <input
             type="number"
             min={0}
@@ -1192,7 +1248,7 @@ function OverviewPanel({
         </Field>
       </div>
 
-      <Field label="Assignees">
+      <Field label={t('taskDetail.fieldAssignees')}>
         {detail.assignees && detail.assignees.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {detail.assignees.map((a) => (
@@ -1200,16 +1256,16 @@ function OverviewPanel({
                 key={a.user.id}
                 onClick={() => removeAssignee.mutate(a.user.id)}
                 className="inline-flex"
-                title="Remove assignee"
+                title={t('taskDetail.removeAssignee')}
               >
                 <Badge variant="secondary">
-                  {a.user.displayName ?? a.user.email ?? 'User'} ✕
+                  {a.user.displayName ?? a.user.email ?? t('taskDetail.userFallback')} ✕
                 </Badge>
               </button>
             ))}
           </div>
         ) : (
-          <span className="text-sm text-muted-foreground">Unassigned</span>
+          <span className="text-sm text-muted-foreground">{t('taskDetail.unassigned')}</span>
         )}
         {workspaceId && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1218,19 +1274,19 @@ function OverviewPanel({
                 key={m.userId}
                 onClick={() => addAssignee.mutate(m.userId)}
                 className="inline-flex"
-                title={`Assign ${m.displayName || m.email}`}
+                title={t('taskDetail.assignMember', { name: m.displayName || m.email })}
               >
                 <Badge variant="outline">+ {m.displayName || m.email}</Badge>
               </button>
             ))}
             {availableMembers.length === 0 && (
-              <span className="text-xs text-muted-foreground">No additional workspace members available</span>
+              <span className="text-xs text-muted-foreground">{t('taskDetail.noMoreMembers')}</span>
             )}
           </div>
         )}
         {(pendingInvitesQuery.data?.length ?? 0) > 0 && (
           <div className="mt-2 text-xs text-muted-foreground">
-            {pendingInvitesQuery.data?.length} invited teammate(s) are pending acceptance and will appear here after joining.
+            {tCount('taskDetail.pendingInvites', pendingInvitesQuery.data?.length ?? 0)}
           </div>
         )}
       </Field>
@@ -1264,6 +1320,7 @@ function SubtasksPanel({
   workspaceId?: string
   inline: Subtask[]
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
@@ -1363,7 +1420,7 @@ function SubtasksPanel({
           <span className="font-medium text-foreground">
             {doneCount}/{subtasks.length}
           </span>
-          <span>subtasks done</span>
+          <span>{t('taskDetail.subtasksDone')}</span>
           <div className="ml-auto h-1.5 w-24 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full bg-emerald-500 transition-all"
@@ -1373,7 +1430,7 @@ function SubtasksPanel({
         </div>
       )}
       {subtasks.length === 0 ? (
-        <EmptyState title="No subtasks yet" hint="Break this task into smaller pieces." />
+        <EmptyState title={t('taskDetail.noSubtasks')} hint={t('taskDetail.noSubtasksHint')} />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
           {subtasks.map((s) => (
@@ -1399,10 +1456,10 @@ function SubtasksPanel({
                     onClick={() => renameSubtask.mutate({ id: s.id, nextTitle: editingSubtaskTitle.trim() })}
                     disabled={!editingSubtaskTitle.trim() || renameSubtask.isPending}
                   >
-                    Save
+                    {t('common.save')}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setEditingSubtaskId(null)}>
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                 </div>
               ) : (
@@ -1416,16 +1473,16 @@ function SubtasksPanel({
                 </span>
               )}
               <Badge variant="outline" className={cn('capitalize text-xs', priorityColor(s.priority))}>
-                {s.priority}
+                {t(PRIORITY_LABEL_KEYS[s.priority])}
               </Badge>
               {editingSubtaskId !== s.id && workspaceId && (
                 <select
                   className="h-7 max-w-[120px] rounded border border-border bg-background px-1 text-[11px]"
                   value={s.assignees?.[0]?.userId ?? ''}
                   onChange={(e) => setAssignee.mutate({ subtask: s, userId: e.target.value || null })}
-                  title="Assignee"
+                  title={t('taskDetail.assigneeTitle')}
                 >
-                  <option value="">Unassigned</option>
+                  <option value="">{t('taskDetail.unassigned')}</option>
                   {(membersQuery.data ?? []).map((m) => (
                     <option key={m.userId} value={m.userId}>
                       {m.displayName || m.email}
@@ -1439,7 +1496,7 @@ function SubtasksPanel({
                   className="h-7 rounded border border-border bg-background px-1 text-[11px] text-muted-foreground"
                   value={s.dueDate ? s.dueDate.slice(0, 10) : ''}
                   onChange={(e) => setDueDate.mutate({ id: s.id, dueDate: e.target.value || null })}
-                  title="Due date"
+                  title={t('taskDetail.dueDateTitle')}
                 />
               )}
               {editingSubtaskId !== s.id && (
@@ -1451,7 +1508,7 @@ function SubtasksPanel({
                     setEditingSubtaskTitle(s.title)
                   }}
                 >
-                  Edit
+                  {t('taskDetail.edit')}
                 </button>
               )}
               <button
@@ -1459,7 +1516,7 @@ function SubtasksPanel({
                 className="text-xs text-rose-500 hover:text-rose-600"
                 onClick={() => deleteSubtask.mutate(s.id)}
               >
-                Delete
+                {t('common.delete')}
               </button>
             </li>
           ))}
@@ -1476,15 +1533,15 @@ function SubtasksPanel({
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="+ Add subtask"
+          placeholder={t('taskDetail.addSubtaskPlaceholder')}
         />
         <Button type="submit" disabled={!title.trim() || create.isPending} size="sm">
-          Add
+          {t('taskDetail.add')}
         </Button>
       </form>
       {create.isError ? (
         <NotWiredNote>
-          Couldn&apos;t create subtask. Please retry.
+          {t('taskDetail.couldNotCreateSubtask')}
         </NotWiredNote>
       ) : null}
     </div>
@@ -1502,6 +1559,7 @@ function ChecklistsPanel({
   taskId: string
   checklists: Checklist[]
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [itemText, setItemText] = useState('')
   const [itemDueDate, setItemDueDate] = useState('')
@@ -1600,7 +1658,7 @@ function ChecklistsPanel({
   return (
     <div className="space-y-3">
       {checklists.length === 0 ? (
-        <EmptyState title="No checklists yet" hint="Add an item below to create one." />
+        <EmptyState title={t('taskDetail.noChecklists')} hint={t('taskDetail.noChecklistsHint')} />
       ) : (
         checklists.map((cl) => (
           <div key={cl.id} className="rounded-md border border-border">
@@ -1617,10 +1675,10 @@ function ChecklistsPanel({
                     onClick={() => renameChecklist.mutate({ checklistId: cl.id, title: editingChecklistTitle.trim() })}
                     disabled={!editingChecklistTitle.trim() || renameChecklist.isPending}
                   >
-                    Save
+                    {t('common.save')}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setEditingChecklistId(null)}>
-                    Cancel
+                    {t('common.cancel')}
                   </Button>
                 </>
               ) : (
@@ -1634,21 +1692,21 @@ function ChecklistsPanel({
                       setEditingChecklistTitle(cl.title)
                     }}
                   >
-                    Rename
+                    {t('taskDetail.rename')}
                   </button>
                   <button
                     type="button"
                     className="text-xs text-rose-500 hover:text-rose-600"
                     onClick={() => deleteChecklist.mutate(cl.id)}
                   >
-                    Delete
+                    {t('common.delete')}
                   </button>
                 </>
               )}
             </div>
             <ul className="divide-y divide-border">
               {cl.items.length === 0 ? (
-                <li className="px-3 py-2 text-xs text-muted-foreground">No items</li>
+                <li className="px-3 py-2 text-xs text-muted-foreground">{t('taskDetail.noItems')}</li>
               ) : (
                 cl.items.map((item) => (
                   <li
@@ -1675,14 +1733,14 @@ function ChecklistsPanel({
                           onClick={() => editItem.mutate({ itemId: item.id, content: editingItemContent.trim() })}
                           disabled={!editingItemContent.trim() || editItem.isPending}
                         >
-                          Save
+                          {t('common.save')}
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
                           onClick={() => setEditingItemId(null)}
                         >
-                          Cancel
+                          {t('common.cancel')}
                         </Button>
                       </div>
                     ) : (
@@ -1704,7 +1762,7 @@ function ChecklistsPanel({
                           setEditingItemContent(item.content)
                         }}
                       >
-                        Edit
+                        {t('taskDetail.edit')}
                       </button>
                     )}
                     <Input
@@ -1718,7 +1776,7 @@ function ChecklistsPanel({
                       className="text-xs text-rose-500 hover:text-rose-600"
                       onClick={() => deleteItem.mutate(item.id)}
                     >
-                      Delete
+                      {t('common.delete')}
                     </button>
                   </li>
                 ))
@@ -1738,7 +1796,7 @@ function ChecklistsPanel({
         <Input
           value={itemText}
           onChange={(e) => setItemText(e.target.value)}
-          placeholder="+ Add checklist item"
+          placeholder={t('taskDetail.addChecklistItemPlaceholder')}
         />
         <Input
           type="date"
@@ -1747,7 +1805,7 @@ function ChecklistsPanel({
           className="w-[155px]"
         />
         <Button type="submit" disabled={!itemText.trim() || addItem.isPending} size="sm">
-          Add
+          {t('taskDetail.add')}
         </Button>
       </form>
     </div>
@@ -1767,6 +1825,7 @@ function WatchersPanel({
   workspaceId?: string
   inline: Watcher[]
 }) {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const currentUser = useAuthStore((s) => s.user)
   const [selectedUserId, setSelectedUserId] = useState('')
@@ -1822,7 +1881,7 @@ function WatchersPanel({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {inline.length} watcher{inline.length === 1 ? '' : 's'}
+          {tCount('taskDetail.watchersCount', inline.length)}
         </p>
         <Button
           size="sm"
@@ -1830,7 +1889,7 @@ function WatchersPanel({
           onClick={() => toggle.mutate()}
           disabled={!currentUser || toggle.isPending}
         >
-          {isWatching ? 'Unwatch' : 'Watch task'}
+          {isWatching ? t('taskDetail.unwatch') : t('taskDetail.watchTask')}
         </Button>
       </div>
       {workspaceId && (
@@ -1840,7 +1899,7 @@ function WatchersPanel({
             onChange={(e) => setSelectedUserId(e.target.value)}
             className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
           >
-            <option value="">Add teammate as watcher…</option>
+            <option value="">{t('taskDetail.addWatcherOption')}</option>
             {addableMembers.map((member) => (
               <option key={member.userId} value={member.userId}>
                 {member.displayName || member.email}
@@ -1852,13 +1911,13 @@ function WatchersPanel({
             onClick={() => addWatcher.mutate(selectedUserId)}
             disabled={!selectedUserId || addWatcher.isPending}
           >
-            Add
+            {t('taskDetail.add')}
           </Button>
         </div>
       )}
 
       {inline.length === 0 ? (
-        <EmptyState title="Nobody is watching yet" hint="Watchers get notified on updates." />
+        <EmptyState title={t('taskDetail.noWatchers')} hint={t('taskDetail.noWatchersHint')} />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
           {inline.map((w) => (
@@ -1879,7 +1938,7 @@ function WatchersPanel({
                 className="text-xs text-rose-500 hover:text-rose-600"
                 onClick={() => removeWatcher.mutate(w.userId)}
               >
-                Remove
+                {t('taskDetail.remove')}
               </button>
             </li>
           ))}
@@ -1904,6 +1963,7 @@ function DependenciesPanel({
   inline: Dependency[]
   onOpenTask: (relatedTaskId: string) => void
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [relatedId, setRelatedId] = useState('')
   const [type, setType] = useState<'blocks' | 'blocked_by' | 'related_to'>('blocks')
@@ -2009,45 +2069,45 @@ function DependenciesPanel({
 
   return (
     <div className="space-y-4">
-      <DepGroup label="Blocking" items={blocking} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
-      <DepGroup label="Waiting on" items={waitingOn} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
+      <DepGroup label={t('taskDetail.dependencies.blocking')} items={blocking} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
+      <DepGroup label={t('taskDetail.dependencies.waitingOn')} items={waitingOn} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
       {related.length > 0 ? (
-        <DepGroup label="Related" items={related} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
+        <DepGroup label={t('taskDetail.dependencies.related')} items={related} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
       ) : null}
       {graphQuery.data ? (
         <div className="rounded-md border border-border bg-card p-3 space-y-3">
-          <div className="text-xs font-medium text-muted-foreground mb-2">Dependency graph insights</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">{t('taskDetail.graphInsights')}</div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-            <div>Nodes: <span className="font-medium text-foreground">{graphQuery.data.metrics.nodeCount}</span></div>
-            <div>Edges: <span className="font-medium text-foreground">{graphQuery.data.metrics.edgeCount}</span></div>
-            <div>Open blockers: <span className="font-medium text-foreground">{graphQuery.data.metrics.blockedByOpenCount}</span></div>
-            <div>Blocking open tasks: <span className="font-medium text-foreground">{graphQuery.data.metrics.blocksOpenCount}</span></div>
-            <div>Upstream chain depth: <span className="font-medium text-foreground">{graphQuery.data.metrics.longestBlockedByChainDepth}</span></div>
-            <div>Downstream chain depth: <span className="font-medium text-foreground">{graphQuery.data.metrics.longestBlocksChainDepth}</span></div>
+            <div>{t('taskDetail.graphNodes')} <span className="font-medium text-foreground">{graphQuery.data.metrics.nodeCount}</span></div>
+            <div>{t('taskDetail.graphEdges')} <span className="font-medium text-foreground">{graphQuery.data.metrics.edgeCount}</span></div>
+            <div>{t('taskDetail.graphOpenBlockers')} <span className="font-medium text-foreground">{graphQuery.data.metrics.blockedByOpenCount}</span></div>
+            <div>{t('taskDetail.graphBlockingOpen')} <span className="font-medium text-foreground">{graphQuery.data.metrics.blocksOpenCount}</span></div>
+            <div>{t('taskDetail.graphUpstreamDepth')} <span className="font-medium text-foreground">{graphQuery.data.metrics.longestBlockedByChainDepth}</span></div>
+            <div>{t('taskDetail.graphDownstreamDepth')} <span className="font-medium text-foreground">{graphQuery.data.metrics.longestBlocksChainDepth}</span></div>
           </div>
           {graphModel ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               <GraphColumn
-                title="Blocking this task"
-                hint="Upstream blockers"
+                title={t('taskDetail.graphBlockingThis')}
+                hint={t('taskDetail.graphUpstreamHint')}
                 nodes={graphModel.upstream}
                 onOpenTask={onOpenTask}
               />
               <div className="rounded-md border border-border/70 bg-muted/20 p-2">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">Current task</div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">{t('taskDetail.currentTask')}</div>
                 <div className="text-sm font-medium">{taskId}</div>
               </div>
               <GraphColumn
-                title="Blocked by this task"
-                hint="Downstream impact"
+                title={t('taskDetail.graphBlockedByThis')}
+                hint={t('taskDetail.graphDownstreamHint')}
                 nodes={graphModel.downstream}
                 onOpenTask={onOpenTask}
               />
               {graphModel.related.length > 0 ? (
                 <div className="md:col-span-3">
                   <GraphColumn
-                    title="Related links"
-                    hint="Non-blocking references"
+                    title={t('taskDetail.graphRelatedLinks')}
+                    hint={t('taskDetail.graphRelatedHint')}
                     nodes={graphModel.related}
                     onOpenTask={onOpenTask}
                   />
@@ -2070,21 +2130,21 @@ function DependenciesPanel({
           onChange={(e) => setType(e.target.value as typeof type)}
           className="h-9 rounded-md border border-border bg-background px-2 text-sm"
         >
-          <option value="blocks">Blocks</option>
-          <option value="blocked_by">Blocked by</option>
-          <option value="related_to">Related</option>
+          <option value="blocks">{t('taskDetail.depOption.blocks')}</option>
+          <option value="blocked_by">{t('taskDetail.depOption.blockedBy')}</option>
+          <option value="related_to">{t('taskDetail.depOption.relatedTo')}</option>
         </select>
         <Input
           value={relatedId}
           onChange={(e) => setRelatedId(e.target.value)}
-          placeholder="Related task ID"
+          placeholder={t('taskDetail.relatedTaskIdPlaceholder')}
         />
         {workspaceId && taskOptions.length > 0 && (
           <div className="min-w-[260px] space-y-1">
             <Input
               value={taskSearch}
               onChange={(e) => setTaskSearch(e.target.value)}
-              placeholder="Search task…"
+              placeholder={t('taskDetail.searchTaskPlaceholder')}
               className="h-8"
             />
             <select
@@ -2092,7 +2152,7 @@ function DependenciesPanel({
               onChange={(e) => setRelatedId(e.target.value)}
               className="h-9 rounded-md border border-border bg-background px-2 text-sm w-full"
             >
-              <option value="">Pick task…</option>
+              <option value="">{t('taskDetail.pickTaskOption')}</option>
               {filteredTaskOptions.slice(0, 200).map((task) => (
                 <option key={task.id} value={task.id}>
                   {task.title} {task.projectName ? `(${task.projectName})` : ''}
@@ -2102,7 +2162,7 @@ function DependenciesPanel({
           </div>
         )}
         <Button type="submit" size="sm" disabled={!relatedId.trim() || add.isPending}>
-          Add
+          {t('taskDetail.add')}
         </Button>
       </form>
     </div>
@@ -2126,13 +2186,14 @@ function GraphColumn({
   } | undefined>
   onOpenTask: (relatedTaskId: string) => void
 }) {
+  const { t } = useTranslation()
   const items = nodes.filter((node): node is NonNullable<typeof node> => Boolean(node))
   return (
     <div className="rounded-md border border-border/70 bg-muted/20 p-2">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{title}</div>
       <div className="text-[11px] text-muted-foreground mb-2">{hint}</div>
       {items.length === 0 ? (
-        <div className="text-xs text-muted-foreground">None</div>
+        <div className="text-xs text-muted-foreground">{t('taskDetail.none')}</div>
       ) : (
         <div className="space-y-1.5">
           {items.map((node) => (
@@ -2144,7 +2205,7 @@ function GraphColumn({
             >
               <div className="text-xs font-medium truncate">{node.title}</div>
               <div className="text-[11px] text-muted-foreground truncate">
-                {node.status} · {node.priority}
+                {STATUS_LABEL_KEYS[node.status] ? t(STATUS_LABEL_KEYS[node.status]) : node.status} · {PRIORITY_LABEL_KEYS[node.priority] ? t(PRIORITY_LABEL_KEYS[node.priority]) : node.priority}
               </div>
             </button>
           ))}
@@ -2165,21 +2226,22 @@ function DepGroup({
   onRemove: (depId: string) => void
   onOpenTask?: (relatedTaskId: string) => void
 }) {
+  const { t } = useTranslation()
   return (
     <section>
       <h4 className="text-xs uppercase tracking-wide text-muted-foreground mb-2">{label}</h4>
       {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">None</p>
+        <p className="text-sm text-muted-foreground">{t('taskDetail.none')}</p>
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
           {items.map((d) => (
             <li key={d.dep.id} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40">
               <span className="flex-1 text-sm truncate">{d.related.title}</span>
               <Badge variant="outline" className={cn('capitalize text-xs', priorityColor(d.related.priority))}>
-                {d.related.priority}
+                {PRIORITY_LABEL_KEYS[d.related.priority] ? t(PRIORITY_LABEL_KEYS[d.related.priority]) : d.related.priority}
               </Badge>
               <Badge variant="secondary" className="capitalize">
-                {d.related.status.replace('_', ' ')}
+                {STATUS_LABEL_KEYS[d.related.status] ? t(STATUS_LABEL_KEYS[d.related.status]) : d.related.status.replace('_', ' ')}
               </Badge>
               {onOpenTask && (
                 <button
@@ -2187,7 +2249,7 @@ function DepGroup({
                   onClick={() => onOpenTask(d.related.id)}
                   className="text-xs text-accent hover:underline"
                 >
-                  Open
+                  {t('taskDetail.open')}
                 </button>
               )}
               <button
@@ -2195,7 +2257,7 @@ function DepGroup({
                 onClick={() => onRemove(d.dep.id)}
                 className="text-xs text-muted-foreground hover:text-destructive"
               >
-                Remove
+                {t('taskDetail.remove')}
               </button>
             </li>
           ))}
@@ -2216,6 +2278,7 @@ function AttachmentsPanel({
   taskId: string
   inline: Attachment[]
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [linkUrl, setLinkUrl] = useState('')
   const [fileName, setFileName] = useState('')
@@ -2258,7 +2321,7 @@ function AttachmentsPanel({
     mutationFn: async () => {
       if (!selectedFile) return
       if (selectedFile.size > MAX_ATTACHMENT_BYTES) {
-        throw new Error(`File is too large. The limit is ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB.`)
+        throw new Error(t('taskDetail.fileTooLarge', { limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }))
       }
       const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
         method: 'POST',
@@ -2274,7 +2337,7 @@ function AttachmentsPanel({
         body: selectedFile,
       })
       // Reject when the storage PUT is blocked/failed so we never record a phantom attachment.
-      if (!putRes.ok) throw new Error('Upload failed (' + putRes.status + ')')
+      if (!putRes.ok) throw new Error(t('taskDetail.uploadFailedStatus', { status: putRes.status }))
       await api(`/tasks/${taskId}/attachments`, {
         method: 'POST',
         body: {
@@ -2292,7 +2355,7 @@ function AttachmentsPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Could not upload file')
+      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.couldNotUpload'))
     },
   })
   const removeAttachment = useMutation({
@@ -2312,14 +2375,14 @@ function AttachmentsPanel({
           'text-sm text-muted-foreground',
         )}
       >
-        Drag and drop files here to upload
+        {t('taskDetail.dragDrop')}
         {!uploadWired ? (
-          <div className="mt-2 text-xs">File uploads are unavailable for this task source.</div>
+          <div className="mt-2 text-xs">{t('taskDetail.uploadsUnavailable')}</div>
         ) : null}
       </div>
       {uploadWired && (
         <div className="rounded-md border border-border bg-card p-3 space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">Upload file</div>
+          <div className="text-xs font-medium text-muted-foreground">{t('taskDetail.uploadFile')}</div>
           <div className="flex flex-col md:flex-row gap-2 md:items-center">
             <Input
               type="file"
@@ -2331,15 +2394,15 @@ function AttachmentsPanel({
               onClick={() => uploadAttachment.mutate()}
               disabled={!selectedFile || uploadAttachment.isPending}
             >
-              Upload
+              {t('taskDetail.upload')}
             </Button>
           </div>
-          <div className="text-xs font-medium text-muted-foreground">Attach by link</div>
+          <div className="text-xs font-medium text-muted-foreground">{t('taskDetail.attachByLink')}</div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             <Input
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
-              placeholder="File name (optional)"
+              placeholder={t('taskDetail.fileNamePlaceholder')}
               className="h-8"
             />
             <Input
@@ -2351,14 +2414,14 @@ function AttachmentsPanel({
           </div>
           <div className="flex justify-end">
             <Button size="sm" onClick={() => addAttachment.mutate()} disabled={!linkUrl.trim() || addAttachment.isPending}>
-              Add attachment
+              {t('taskDetail.addAttachment')}
             </Button>
           </div>
         </div>
       )}
 
       {attachments.length === 0 ? (
-        <EmptyState title="No files attached" hint="Drop files above to get started." />
+        <EmptyState title={t('taskDetail.noFiles')} hint={t('taskDetail.noFilesHint')} />
       ) : (
         <div className="grid grid-cols-2 gap-2">
           {attachments.map((a) => (
@@ -2389,7 +2452,7 @@ function AttachmentsPanel({
               </div>
               {a.url ? (
                 <a href={a.url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">
-                  Open
+                  {t('taskDetail.open')}
                 </a>
               ) : null}
               {uploadWired && (
@@ -2398,7 +2461,7 @@ function AttachmentsPanel({
                   className="text-xs text-rose-500 hover:text-rose-600"
                   onClick={() => removeAttachment.mutate(a.id)}
                 >
-                  Remove
+                  {t('taskDetail.remove')}
                 </button>
               )}
             </div>
@@ -2449,6 +2512,7 @@ function CommentAttachments({
 }
 
 function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: string }) {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const currentUser = useAuthStore((s) => s.user)
   const [text, setText] = useState('')
@@ -2478,8 +2542,8 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
   const mentionCandidates = (membersQuery.data ?? []).filter((m) =>
     (m.displayName || m.email).toLowerCase().includes(mentionQuery),
   )
-  const taskMentionCandidates = (mentionTasksQuery.data ?? []).filter((t) =>
-    `${t.title} ${t.projectName ?? ''} ${t.listName ?? ''}`.toLowerCase().includes(mentionQuery),
+  const taskMentionCandidates = (mentionTasksQuery.data ?? []).filter((task) =>
+    `${task.title} ${task.projectName ?? ''} ${task.listName ?? ''}`.toLowerCase().includes(mentionQuery),
   )
   const docMentionCandidates = (mentionDocsQuery.data ?? []).filter((d) =>
     d.title.toLowerCase().includes(mentionQuery),
@@ -2516,7 +2580,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
       const attachmentIds: string[] = []
       for (const file of commentFiles) {
         if (file.size > MAX_ATTACHMENT_BYTES) {
-          throw new Error(`"${file.name}" exceeds the ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB limit`)
+          throw new Error(t('taskDetail.fileExceedsLimit', { name: file.name, limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }))
         }
         const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
           method: 'POST',
@@ -2527,7 +2591,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
           headers: { 'Content-Type': file.type || 'application/octet-stream' },
           body: file,
         })
-        if (!putRes.ok) throw new Error(`Upload failed for "${file.name}" (${putRes.status})`)
+        if (!putRes.ok) throw new Error(t('taskDetail.uploadFailedFor', { name: file.name, status: putRes.status }))
         const rec = await api<{ id: string }>(`/tasks/${taskId}/attachments`, {
           method: 'POST',
           body: { fileName: file.name, storageKey: presign.storageKey, contentType: file.type || 'application/octet-stream', sizeBytes: file.size },
@@ -2554,7 +2618,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Could not post comment')
+      toast.error(err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.couldNotPostComment'))
     },
   })
   const update = useMutation({
@@ -2608,7 +2672,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
   })
 
   if (commentsQuery.data === null) {
-    return <NotWiredNote>Comments endpoint is not available.</NotWiredNote>
+    return <NotWiredNote>{t('taskDetail.commentsUnavailable')}</NotWiredNote>
   }
 
   const comments = commentsQuery.data ?? []
@@ -2653,7 +2717,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
   return (
     <div className="space-y-3">
       {comments.length === 0 ? (
-        <EmptyState title="No comments yet" hint="Be the first to leave a note." />
+        <EmptyState title={t('taskDetail.noComments')} hint={t('taskDetail.noCommentsHint')} />
       ) : (
         <ul className="space-y-2">
           {roots.map((c) => {
@@ -2662,7 +2726,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
               <li key={c.id} className="rounded-md border border-border p-3 hover:bg-muted/30 transition-colors space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium">
-                    {c.author?.displayName ?? c.author?.email ?? 'User'}
+                    {c.author?.displayName ?? c.author?.email ?? t('taskDetail.userFallback')}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {new Date(c.createdAt).toLocaleString()}
@@ -2672,11 +2736,11 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                 <CommentAttachments files={c.attachments} />
                 <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                   {c.assignee?.displayName && (
-                    <Badge variant="outline" className="text-[10px]">Assigned: {c.assignee.displayName}</Badge>
+                    <Badge variant="outline" className="text-[10px]">{t('taskDetail.assignedBadge', { name: c.assignee.displayName })}</Badge>
                   )}
                   {c.resolvedAt && (
                     <Badge variant="success" className="text-[10px]">
-                      Resolved{c.resolver?.displayName ? ` by ${c.resolver.displayName}` : ''}
+                      {c.resolver?.displayName ? t('taskDetail.resolvedBy', { name: c.resolver.displayName }) : t('taskDetail.resolved')}
                     </Badge>
                   )}
                 </div>
@@ -2686,7 +2750,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     className="text-xs text-muted-foreground hover:text-foreground"
                     onClick={() => setReplyTo(c.id)}
                   >
-                    Reply
+                    {t('taskDetail.reply')}
                   </button>
                   {isAuthor(c) && (
                     <button
@@ -2697,7 +2761,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                         setEditingBody(c.body)
                       }}
                     >
-                      Edit
+                      {t('taskDetail.edit')}
                     </button>
                   )}
                   {canDelete(c) && (
@@ -2706,7 +2770,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                       className="text-xs text-rose-500 hover:text-rose-600"
                       onClick={() => remove.mutate(c.id)}
                     >
-                      Delete
+                      {t('common.delete')}
                     </button>
                   )}
                   <button
@@ -2714,7 +2778,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     className="text-xs text-muted-foreground hover:text-foreground"
                     onClick={() => resolveComment.mutate({ commentId: c.id, resolved: !c.resolvedAt })}
                   >
-                    {c.resolvedAt ? 'Reopen' : 'Resolve'}
+                    {c.resolvedAt ? t('taskDetail.reopen') : t('taskDetail.resolve')}
                   </button>
                   {workspaceId && (
                     <select
@@ -2722,7 +2786,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                       value={c.assignedToUserId ?? ''}
                       onChange={(e) => assign.mutate({ commentId: c.id, userId: e.target.value || null })}
                     >
-                      <option value="">Assign…</option>
+                      <option value="">{t('taskDetail.assignOption')}</option>
                       {(membersQuery.data ?? []).map((member) => (
                         <option key={member.userId} value={member.userId}>
                           {member.displayName || member.email}
@@ -2731,7 +2795,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     </select>
                   )}
                   {replies.length > 0 && (
-                    <span className="text-xs text-accent ml-auto">{replies.length} repl{replies.length === 1 ? 'y' : 'ies'}</span>
+                    <span className="text-xs text-accent ml-auto">{tCount('taskDetail.repliesCount', replies.length)}</span>
                   )}
                 </div>
                 {editingCommentId === c.id && (
@@ -2739,14 +2803,14 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     <Textarea rows={2} value={editingBody} onChange={(e) => setEditingBody(e.target.value)} />
                     <div className="flex justify-end gap-2">
                       <Button size="sm" variant="ghost" onClick={() => setEditingCommentId(null)}>
-                        Cancel
+                        {t('common.cancel')}
                       </Button>
                       <Button
                         size="sm"
                         onClick={() => update.mutate({ commentId: c.id, body: editingBody })}
                         disabled={!editingBody.trim() || update.isPending}
                       >
-                        Save
+                        {t('common.save')}
                       </Button>
                     </div>
                   </div>
@@ -2772,7 +2836,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                       <li key={reply.id} className="rounded border border-border/70 p-2 bg-card/50">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">
-                            {reply.author?.displayName ?? reply.author?.email ?? 'User'}
+                            {reply.author?.displayName ?? reply.author?.email ?? t('taskDetail.userFallback')}
                           </span>
                           <span className="text-xs text-muted-foreground">
                             {new Date(reply.createdAt).toLocaleString()}
@@ -2786,7 +2850,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                             className="text-xs text-muted-foreground hover:text-foreground"
                             onClick={() => setReplyTo(reply.id)}
                           >
-                            Reply
+                            {t('taskDetail.reply')}
                           </button>
                           {isAuthor(reply) && (
                             <button
@@ -2797,7 +2861,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                                 setEditingBody(reply.body)
                               }}
                             >
-                              Edit
+                              {t('taskDetail.edit')}
                             </button>
                           )}
                           {canDelete(reply) && (
@@ -2806,7 +2870,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                               className="text-xs text-rose-500 hover:text-rose-600"
                               onClick={() => remove.mutate(reply.id)}
                             >
-                              Delete
+                              {t('common.delete')}
                             </button>
                           )}
                         </div>
@@ -2815,14 +2879,14 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                             <Textarea rows={2} value={editingBody} onChange={(e) => setEditingBody(e.target.value)} />
                             <div className="flex justify-end gap-2">
                               <Button size="sm" variant="ghost" onClick={() => setEditingCommentId(null)}>
-                                Cancel
+                                {t('common.cancel')}
                               </Button>
                               <Button
                                 size="sm"
                                 onClick={() => update.mutate({ commentId: reply.id, body: editingBody })}
                                 disabled={!editingBody.trim() || update.isPending}
                               >
-                                Save
+                                {t('common.save')}
                               </Button>
                             </div>
                           </div>
@@ -2856,20 +2920,20 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
         {replyTo && (
           <div className="mb-2 flex items-center justify-between rounded border border-border bg-muted/30 px-2 py-1 text-xs">
             <span className="truncate">
-              Replying to {parentPreview?.author?.displayName ?? parentPreview?.author?.email ?? 'comment'}:{' '}
+              {t('taskDetail.replyingTo', { name: parentPreview?.author?.displayName ?? parentPreview?.author?.email ?? t('taskDetail.commentFallback') })}{' '}
               {parentPreview?.body
                 ? formatMentionsPlain(parentPreview.body, namesById)
                 : ''}
             </span>
             <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setReplyTo(null)}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         )}
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Write a comment… use @ to mention"
+          placeholder={t('taskDetail.commentPlaceholder')}
           rows={3}
           onKeyDown={(e) => {
             if (!showMentions || activeCandidates.length === 0) return
@@ -2895,9 +2959,9 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
           <div className="mt-2 rounded-lg border border-border bg-card shadow-lg overflow-hidden">
             <div className="px-2 pt-2 pb-1 border-b border-border/70 flex items-center gap-1">
               {([
-                ['people', 'People'],
-                ['tasks', 'Tasks'],
-                ['docs', 'Docs'],
+                ['people', 'taskDetail.mentionPeople'],
+                ['tasks', 'taskDetail.mentionTasks'],
+                ['docs', 'taskDetail.mentionDocs'],
               ] as const).map(([id, label]) => (
                 <button
                   key={id}
@@ -2911,7 +2975,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     mentionTab === id ? 'bg-accent/15 text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
                   )}
                 >
-                  {label}
+                  {t(label)}
                 </button>
               ))}
             </div>
@@ -2942,7 +3006,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
             {mentionTab === 'tasks' && (
               <div className="max-h-40 overflow-auto">
                 {taskMentionCandidates.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-muted-foreground">No matching tasks.</div>
+                  <div className="px-3 py-3 text-xs text-muted-foreground">{t('taskDetail.noMatchingTasks')}</div>
                 ) : (
                   taskMentionCandidates.slice(0, 8).map((task, idx) => (
                     <button
@@ -2956,7 +3020,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                       onClick={() => insertTaskMention(task)}
                     >
                       <div className="font-medium text-foreground truncate">#{task.title}</div>
-                      <div className="text-muted-foreground truncate">{task.projectName ?? task.listName ?? 'Task'}</div>
+                      <div className="text-muted-foreground truncate">{task.projectName ?? task.listName ?? t('taskDetail.taskFallback')}</div>
                     </button>
                   ))
                 )}
@@ -2965,7 +3029,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
             {mentionTab === 'docs' && (
               <div className="max-h-40 overflow-auto">
                 {docMentionCandidates.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-muted-foreground">No matching docs.</div>
+                  <div className="px-3 py-3 text-xs text-muted-foreground">{t('taskDetail.noMatchingDocs')}</div>
                 ) : (
                   docMentionCandidates.slice(0, 8).map((doc, idx) => (
                     <button
@@ -2979,7 +3043,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                       onClick={() => insertDocMention(doc)}
                     >
                       <div className="font-medium text-foreground truncate">Doc:{doc.title}</div>
-                      <div className="text-muted-foreground truncate">{doc.updatedAt ? new Date(doc.updatedAt).toLocaleDateString() : 'Document'}</div>
+                      <div className="text-muted-foreground truncate">{doc.updatedAt ? new Date(doc.updatedAt).toLocaleDateString() : t('taskDetail.documentFallback')}</div>
                     </button>
                   ))
                 )}
@@ -2998,7 +3062,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                 <span className="max-w-[140px] truncate">{file.name}</span>
                 <button
                   type="button"
-                  aria-label={`Remove ${file.name}`}
+                  aria-label={t('taskDetail.removeFile', { name: file.name })}
                   className="text-muted-foreground hover:text-foreground"
                   onClick={() => setCommentFiles((prev) => prev.filter((_, idx) => idx !== i))}
                 >
@@ -3011,7 +3075,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
         <div className="mt-2 flex items-center justify-between gap-2">
           <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
             <Paperclip className="h-3.5 w-3.5" />
-            Attach
+            {t('taskDetail.attach')}
             <input
               type="file"
               multiple
@@ -3028,7 +3092,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
             onClick={() => create.mutate()}
             disabled={!text.trim() || create.isPending}
           >
-            {create.isPending ? 'Posting…' : 'Comment'}
+            {create.isPending ? t('taskDetail.posting') : t('taskDetail.comment')}
           </Button>
         </div>
       </div>
@@ -3041,6 +3105,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
 // ---------------------------------------------------------------------------
 
 function ActivityPanel({ taskId }: { taskId: string }) {
+  const { t } = useTranslation()
   const activityQuery = useQuery({
     queryKey: ['task', taskId, 'activity'],
     queryFn: async () => {
@@ -3054,14 +3119,18 @@ function ActivityPanel({ taskId }: { taskId: string }) {
   })
 
   if (activityQuery.data === null) {
-    return <NotWiredNote>Activity feed is not available.</NotWiredNote>
+    return <NotWiredNote>{t('taskDetail.activityUnavailable')}</NotWiredNote>
   }
 
   const entries = activityQuery.data ?? []
-  const actionLabel = (action: string) =>
-    action
+  // Map known actions to localized phrasing; fall back to a humanized raw string.
+  const actionLabel = (action: string) => {
+    const key = ACTIVITY_ACTION_LABEL_KEYS[action]
+    if (key) return t(key)
+    return action
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase())
+  }
   const iconForAction = (action: string) => {
     if (action.includes('assigned')) return '👤'
     if (action.includes('comment')) return '💬'
@@ -3074,7 +3143,7 @@ function ActivityPanel({ taskId }: { taskId: string }) {
   }
 
   if (entries.length === 0) {
-    return <EmptyState title="No activity yet" hint="Changes will show up here." />
+    return <EmptyState title={t('taskDetail.noActivity')} hint={t('taskDetail.noActivityHint')} />
   }
 
   return (
@@ -3085,7 +3154,7 @@ function ActivityPanel({ taskId }: { taskId: string }) {
           <div className="text-sm">
             <span className="mr-1">{iconForAction(a.action)}</span>
             <span className="font-medium">
-              {a.actor?.displayName ?? a.actor?.email ?? 'System'}
+              {a.actor?.displayName ?? a.actor?.email ?? t('taskDetail.system')}
             </span>{' '}
             <span className="text-muted-foreground">{actionLabel(a.action)}</span>
           </div>
@@ -3103,6 +3172,7 @@ function ActivityPanel({ taskId }: { taskId: string }) {
 // ---------------------------------------------------------------------------
 
 function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | null }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [manualStart, setManualStart] = useState('')
   const [manualEnd, setManualEnd] = useState('')
@@ -3221,35 +3291,35 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
         <div className="text-sm">
           {running ? (
             <>
-              <span className="font-medium">Timer running</span>{' '}
+              <span className="font-medium">{t('taskDetail.timerRunning')}</span>{' '}
               <span className="text-muted-foreground">
-                since {new Date(running.startedAt).toLocaleTimeString()} · elapsed {formatDuration(nowMs - new Date(running.startedAt).getTime())}
+                {t('taskDetail.timerSince', { time: new Date(running.startedAt).toLocaleTimeString(), duration: formatDuration(nowMs - new Date(running.startedAt).getTime()) })}
               </span>
             </>
           ) : (
-            <span className="text-muted-foreground">No timer running</span>
+            <span className="text-muted-foreground">{t('taskDetail.noTimer')}</span>
           )}
         </div>
         {running ? (
           <Button size="sm" variant="destructive" onClick={() => stop.mutate(running.id)}>
-            Stop
+            {t('taskDetail.stop')}
           </Button>
         ) : (
           <div className="flex items-center gap-2">
             <Input
               value={startDescription}
               onChange={(e) => setStartDescription(e.target.value)}
-              placeholder="What are you working on?"
+              placeholder={t('taskDetail.workingOnPlaceholder')}
               className="h-8 w-[220px]"
             />
             <Button size="sm" onClick={() => start.mutate()} disabled={start.isPending}>
-              Start timer
+              {t('taskDetail.startTimer')}
             </Button>
           </div>
         )}
       </div>
       <div className="rounded-md border border-border/70 bg-card px-3 py-2 text-sm flex items-center justify-between">
-        <span className="text-muted-foreground">Total tracked</span>
+        <span className="text-muted-foreground">{t('taskDetail.totalTracked')}</span>
         <span className="font-mono font-medium">{formatDuration(totalTrackedMs)}</span>
       </div>
 
@@ -3260,7 +3330,7 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
         return (
           <div className="rounded-md border border-border/70 bg-card px-3 py-2 text-sm space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Estimated vs actual</span>
+              <span className="text-muted-foreground">{t('taskDetail.estimatedVsActual')}</span>
               <span className="font-mono text-xs">
                 {formatDuration(totalTrackedMs)} / {formatDuration(estMs)}
                 {over && (
@@ -3279,18 +3349,18 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
       })()}
 
       {entries.length === 0 ? (
-        <EmptyState title="No time logged yet" hint="Start a timer to begin tracking." />
+        <EmptyState title={t('taskDetail.noTime')} hint={t('taskDetail.noTimeHint')} />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border">
           {entries.map((e) => (
             <li key={e.id} className="flex items-center gap-3 px-3 py-2">
               <div className="flex-1 min-w-0">
                 <div className="text-sm truncate">
-                  {e.description?.trim() ? e.description : 'Time entry'}
+                  {e.description?.trim() ? e.description : t('taskDetail.timeEntryFallback')}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {new Date(e.startedAt).toLocaleString()} →{' '}
-                  {e.endedAt ? new Date(e.endedAt).toLocaleTimeString() : 'running'}
+                  {e.endedAt ? new Date(e.endedAt).toLocaleTimeString() : t('taskDetail.running')}
                 </div>
               </div>
               <div className="text-sm font-mono">
@@ -3306,16 +3376,16 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
         </ul>
       )}
       <div className="rounded-md border border-border p-3 space-y-2">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">Add manual entry</div>
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('taskDetail.addManualEntry')}</div>
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <div className="text-[11px] text-muted-foreground mb-1">Quick log (minutes)</div>
+            <div className="text-[11px] text-muted-foreground mb-1">{t('taskDetail.quickLogMinutes')}</div>
             <Input
               type="number"
               min={1}
               value={quickMinutes}
               onChange={(e) => setQuickMinutes(e.target.value)}
-              placeholder="e.g. 30"
+              placeholder={t('taskDetail.quickLogPlaceholder')}
             />
           </div>
           <Button
@@ -3324,7 +3394,7 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
             onClick={() => addQuickDuration.mutate()}
             disabled={!quickMinutes || Number(quickMinutes) <= 0 || addQuickDuration.isPending}
           >
-            Add minutes
+            {t('taskDetail.addMinutes')}
           </Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -3342,16 +3412,16 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
         <Input
           value={manualDescription}
           onChange={(e) => setManualDescription(e.target.value)}
-          placeholder="Description (optional)"
+          placeholder={t('taskDetail.descriptionOptionalPlaceholder')}
         />
         {!manualRangeValid && (manualStart || manualEnd) && (
           <div className="text-xs text-amber-600">
-            End time must be after start time.
+            {t('taskDetail.endAfterStart')}
           </div>
         )}
         {addManual.isError && (
           <div className="text-xs text-rose-600">
-            Couldn&apos;t add manual entry. Please verify dates and try again.
+            {t('taskDetail.couldNotAddManual')}
           </div>
         )}
         <div className="flex justify-end">
@@ -3360,7 +3430,7 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
             onClick={() => addManual.mutate()}
             disabled={!manualRangeValid || addManual.isPending}
           >
-            Add time entry
+            {t('taskDetail.addTimeEntry')}
           </Button>
         </div>
       </div>
@@ -3393,8 +3463,9 @@ function CustomFieldsPanel({
   taskId: string
   workspaceId?: string
 }) {
+  const { t } = useTranslation()
   if (!workspaceId) {
-    return <NotWiredNote>Custom fields require workspace context.</NotWiredNote>
+    return <NotWiredNote>{t('taskDetail.customFieldsNeedWorkspace')}</NotWiredNote>
   }
   return <CustomFieldsPanelInner taskId={taskId} workspaceId={workspaceId} />
 }
@@ -3406,6 +3477,7 @@ function CustomFieldsPanelInner({
   taskId: string
   workspaceId: string
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
 
   const fieldsQuery = useQuery({
@@ -3425,15 +3497,15 @@ function CustomFieldsPanelInner({
   })
 
   if (fieldsQuery.isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading custom fields…</p>
+    return <p className="text-sm text-muted-foreground">{t('taskDetail.loadingCustomFields')}</p>
   }
 
   const fields = fieldsQuery.data ?? []
   if (fields.length === 0) {
     return (
       <EmptyState
-        title="No custom fields yet"
-        hint="Add fields at the project level — they'll appear here for every task."
+        title={t('taskDetail.noCustomFields')}
+        hint={t('taskDetail.noCustomFieldsHint')}
       />
     )
   }
@@ -3445,7 +3517,7 @@ function CustomFieldsPanelInner({
           <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">
             {definition.name}
             {definition.isRequired && <span className="text-destructive">*</span>}
-            <span className="ml-auto text-[10px] opacity-70">{definition.type}</span>
+            <span className="ml-auto text-[10px] opacity-70">{FIELD_TYPE_LABEL_KEYS[definition.type] ? t(FIELD_TYPE_LABEL_KEYS[definition.type]) : definition.type}</span>
           </div>
           <CustomFieldEditor
             definition={definition}
@@ -3470,6 +3542,7 @@ function CustomFieldEditor({
   disabled?: boolean
   onCommit: (next: string | number | boolean | null) => void
 }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState<string>(() => {
     if (value == null) return ''
     if (typeof value === 'boolean') return value ? 'true' : 'false'
@@ -3490,8 +3563,8 @@ function CustomFieldEditor({
           onBlur={() => onCommit(draft.trim() === '' ? null : draft)}
           placeholder={
             definition.type === 'url' ? 'https://...'
-              : definition.type === 'email' ? 'name@example.com'
-              : definition.type === 'phone' ? '+1 555 123 4567'
+              : definition.type === 'email' ? t('taskDetail.emailPlaceholder')
+              : definition.type === 'phone' ? t('taskDetail.phonePlaceholder')
               : ''
           }
         />
@@ -3531,7 +3604,7 @@ function CustomFieldEditor({
               key={star}
               type="button"
               disabled={disabled}
-              title={`${star} / 5`}
+              title={t('taskDetail.ratingStar', { star })}
               onClick={() => onCommit(current === star ? 0 : star)}
               className={cn('text-lg leading-none', star <= current ? 'text-amber-400' : 'text-muted-foreground/30 hover:text-amber-300')}
             >

@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { FileText, Link2, Plus, X } from 'lucide-react'
 import { Button, Input, Popover, PopoverContent, PopoverTrigger, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type LinkedDoc = { id: string; docId: string; title: string; icon: string | null; isArchived: boolean }
 type WorkspaceDoc = { id: string; title: string; icon?: string | null }
@@ -13,6 +14,7 @@ type WorkspaceDoc = { id: string; title: string; icon?: string | null }
  * task, opens them in the docs route, and links/unlinks workspace docs.
  */
 export function LinkedDocsSection({ taskId, workspaceId }: { taskId: string; workspaceId?: string }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -42,24 +44,24 @@ export function LinkedDocsSection({ taskId, workspaceId }: { taskId: string; wor
   const q = search.trim().toLowerCase()
   const candidates = (docsQuery.data ?? [])
     .filter((d) => !linkedIds.has(d.id))
-    .filter((d) => !q || (d.title || 'Untitled').toLowerCase().includes(q))
+    .filter((d) => !q || (d.title || t('taskLinkedDocs.untitled')).toLowerCase().includes(q))
     .slice(0, 30)
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">Linked docs</div>
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">{t('taskLinkedDocs.heading')}</div>
         {workspaceId && (
           <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
             <PopoverTrigger asChild>
               <Button size="sm" variant="ghost" className="h-6 px-1.5 text-xs">
-                <Plus className="h-3.5 w-3.5" /> Link
+                <Plus className="h-3.5 w-3.5" /> {t('taskLinkedDocs.link')}
               </Button>
             </PopoverTrigger>
             <PopoverContent align="end" className="w-64 p-2">
               <Input
                 autoFocus
-                placeholder="Search docs…"
+                placeholder={t('taskLinkedDocs.searchPlaceholder')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="h-8 text-[13px] mb-1.5"
@@ -78,12 +80,12 @@ export function LinkedDocsSection({ taskId, workspaceId }: { taskId: string; wor
                     className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-accent/10"
                   >
                     <span className="text-sm">{d.icon ?? '📄'}</span>
-                    <span className="truncate">{d.title || 'Untitled'}</span>
+                    <span className="truncate">{d.title || t('taskLinkedDocs.untitled')}</span>
                   </button>
                 ))}
                 {docsQuery.isSuccess && candidates.length === 0 && (
                   <p className="px-2 py-2 text-[12px] text-muted-foreground">
-                    {q ? 'No matching docs' : 'No docs to link'}
+                    {q ? t('taskLinkedDocs.noMatching') : t('taskLinkedDocs.noDocsToLink')}
                   </p>
                 )}
               </div>
@@ -93,7 +95,7 @@ export function LinkedDocsSection({ taskId, workspaceId }: { taskId: string; wor
       </div>
 
       {linked.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No linked docs.</p>
+        <p className="text-sm text-muted-foreground">{t('taskLinkedDocs.empty')}</p>
       ) : (
         <div className="space-y-1">
           {linked.map((l) => (
@@ -109,11 +111,11 @@ export function LinkedDocsSection({ taskId, workspaceId }: { taskId: string; wor
                 className={cn('flex items-center gap-1.5 flex-1 min-w-0 hover:underline', l.isArchived && 'text-muted-foreground line-through')}
               >
                 <span>{l.icon ?? '📄'}</span>
-                <span className="truncate">{l.title || 'Untitled'}</span>
+                <span className="truncate">{l.title || t('taskLinkedDocs.untitled')}</span>
               </Link>
               <button
                 type="button"
-                title="Unlink"
+                title={t('taskLinkedDocs.unlink')}
                 disabled={unlink.isPending}
                 onClick={() => unlink.mutate(l.docId)}
                 className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-rose-500"

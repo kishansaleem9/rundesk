@@ -17,6 +17,18 @@ import {
 } from '@rundesk/ui'
 import { FileText, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
+
+/**
+ * Maps a stored priority identifier to its display label key. The raw value is
+ * the canonical persisted identifier; only the shown label is localized.
+ */
+const TEMPLATE_PRIORITY_LABEL_KEYS: Record<string, TranslationKey> = {
+  urgent: 'taskTemplates.priority.urgent',
+  high: 'taskTemplates.priority.high',
+  normal: 'taskTemplates.priority.normal',
+  low: 'taskTemplates.priority.low',
+}
 
 type TaskTemplate = {
   id: string
@@ -52,6 +64,7 @@ type ListRow = { id: string; name: string }
  * see their own saves in the same place.
  */
 export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const [editing, setEditing] = useState<TaskTemplate | null>(null)
   const [applyTarget, setApplyTarget] = useState<TaskTemplate | null>(null)
@@ -65,15 +78,15 @@ export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
     mutationFn: (id: string) =>
       api(`/workspaces/${workspaceId}/task-templates/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      toast.success('Template deleted')
+      toast.success(t('taskTemplates.deleted'))
       qc.invalidateQueries({ queryKey: ['task-templates', workspaceId] })
     },
     onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : 'Failed to delete template'),
+      toast.error(err instanceof ApiError ? err.message : t('taskTemplates.deleteFailed')),
   })
 
   if (templatesQuery.isLoading) {
-    return <Card className="p-6 text-sm text-muted-foreground">Loading your task templates…</Card>
+    return <Card className="p-6 text-sm text-muted-foreground">{t('taskTemplates.loading')}</Card>
   }
 
   const templates = templatesQuery.data ?? []
@@ -84,10 +97,10 @@ export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
         <div>
           <h2 className="font-display text-lg font-semibold flex items-center gap-2">
             <FileText className="h-4 w-4 text-muted-foreground" />
-            Your task templates
+            {t('taskTemplates.heading')}
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Templates you’ve saved from tasks. Click apply to drop them into any list.
+            {t('taskTemplates.subtitle')}
           </p>
         </div>
         <Badge variant="secondary" className="text-[10px]">
@@ -97,60 +110,61 @@ export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
 
       {templates.length === 0 ? (
         <Card className="p-6 text-sm text-muted-foreground">
-          No saved task templates yet. Open any task and click <em>Save as template</em> to capture
-          its title, description, checklists, subtasks, labels, and custom fields for reuse.
+          {t('taskTemplates.emptyBody')}
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {templates.map((t) => (
-            <Card key={t.id} className="p-4 flex flex-col gap-3">
+          {templates.map((tpl) => (
+            <Card key={tpl.id} className="p-4 flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{t.name}</div>
-                  {t.description && (
+                  <div className="text-sm font-medium truncate">{tpl.name}</div>
+                  {tpl.description && (
                     <div className="text-xs text-muted-foreground line-clamp-2 mt-1">
-                      {t.description}
+                      {tpl.description}
                     </div>
                   )}
                 </div>
-                {t.usageCount > 0 && (
+                {tpl.usageCount > 0 && (
                   <Badge variant="soft" className="text-[10px] shrink-0">
-                    {t.usageCount} uses
+                    {tCount('taskTemplates.usesCount', tpl.usageCount)}
                   </Badge>
                 )}
               </div>
               <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
                 <Badge variant="outline" className="capitalize">
-                  {t.payload.priority}
+                  {TEMPLATE_PRIORITY_LABEL_KEYS[tpl.payload.priority]
+                    ? t(TEMPLATE_PRIORITY_LABEL_KEYS[tpl.payload.priority])
+                    : tpl.payload.priority}
                 </Badge>
-                {t.payload.subtasks.length > 0 && (
-                  <Badge variant="outline">{t.payload.subtasks.length} subtasks</Badge>
+                {tpl.payload.subtasks.length > 0 && (
+                  <Badge variant="outline">{tCount('taskTemplates.subtasksCount', tpl.payload.subtasks.length)}</Badge>
                 )}
-                {t.payload.checklists.length > 0 && (
+                {tpl.payload.checklists.length > 0 && (
                   <Badge variant="outline">
-                    {t.payload.checklists.reduce((sum, c) => sum + c.items.length, 0)} checklist
+                    {tCount('taskTemplates.checklistItems', tpl.payload.checklists.reduce((sum, c) => sum + c.items.length, 0))}
                   </Badge>
                 )}
-                {t.payload.labels.length > 0 && (
-                  <Badge variant="outline">{t.payload.labels.length} labels</Badge>
+                {tpl.payload.labels.length > 0 && (
+                  <Badge variant="outline">{tCount('taskTemplates.labelsCount', tpl.payload.labels.length)}</Badge>
                 )}
               </div>
               <div className="flex items-center gap-1.5 mt-auto pt-2 border-t border-border/40">
-                <Button size="sm" onClick={() => setApplyTarget(t)} className="flex-1">
+                <Button size="sm" onClick={() => setApplyTarget(tpl)} className="flex-1">
                   <Play className="h-3.5 w-3.5 mr-1.5" />
-                  Apply
+                  {t('taskTemplates.apply')}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditing(t)} title="Rename">
+                <Button size="sm" variant="ghost" onClick={() => setEditing(tpl)} title={t('taskTemplates.rename')}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => {
-                    if (window.confirm(`Delete template "${t.name}"?`)) remove.mutate(t.id)
+                    if (window.confirm(t('taskTemplates.confirmDelete', { name: tpl.name }))) remove.mutate(tpl.id)
                   }}
                   className="text-destructive hover:bg-destructive/10"
-                  title="Delete"
+                  title={t('common.delete')}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -188,6 +202,7 @@ function EditTemplateDialog({
   onClose: () => void
   onSaved: () => void
 }) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
 
@@ -208,31 +223,30 @@ function EditTemplateDialog({
         },
       }),
     onSuccess: () => {
-      toast.success('Template updated')
+      toast.success(t('taskTemplates.updated'))
       onSaved()
       onClose()
     },
     onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : 'Failed to update template'),
+      toast.error(err instanceof ApiError ? err.message : t('taskTemplates.updateFailed')),
   })
 
   return (
     <Dialog open={Boolean(template)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit template</DialogTitle>
+          <DialogTitle>{t('taskTemplates.editTitle')}</DialogTitle>
           <DialogDescription>
-            Update the template’s name and description. The captured payload (title, checklists,
-            subtasks, custom fields) stays untouched.
+            {t('taskTemplates.editDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>Name</Label>
+            <Label>{t('taskTemplates.nameLabel')}</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </div>
           <div>
-            <Label>Description (optional)</Label>
+            <Label>{t('taskTemplates.descriptionOptional')}</Label>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -241,13 +255,13 @@ function EditTemplateDialog({
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={onClose}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={() => save.mutate()}
               disabled={!name.trim() || save.isPending}
             >
-              {save.isPending ? 'Saving…' : 'Save'}
+              {save.isPending ? t('common.saving') : t('common.save')}
             </Button>
           </div>
         </div>
@@ -267,6 +281,7 @@ function ApplyTemplateDialog({
   template: TaskTemplate | null
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [spaceId, setSpaceId] = useState<string>('')
   const [projectId, setProjectId] = useState<string>('')
@@ -310,7 +325,7 @@ function ApplyTemplateDialog({
         },
       ),
     onSuccess: () => {
-      toast.success('Task created from template')
+      toast.success(t('taskTemplates.taskCreated'))
       qc.invalidateQueries({ queryKey: ['task-templates', workspaceId] })
       // Conservative invalidation — re-fetch any list view that might
       // hold the new task. The list/board/calendar views all use
@@ -319,7 +334,7 @@ function ApplyTemplateDialog({
       onClose()
     },
     onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : 'Failed to apply template'),
+      toast.error(err instanceof ApiError ? err.message : t('taskTemplates.applyFailed')),
   })
 
   const lists = listsQuery.data ?? []
@@ -328,16 +343,15 @@ function ApplyTemplateDialog({
     <Dialog open={Boolean(template)} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Apply template: {template?.name}</DialogTitle>
+          <DialogTitle>{t('taskTemplates.applyTitle', { name: template?.name ?? '' })}</DialogTitle>
           <DialogDescription>
-            Pick a destination list. The template will create a task with all captured subtasks,
-            checklists, labels, and custom-field values.
+            {t('taskTemplates.applyDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <Label className="text-xs">Space</Label>
+              <Label className="text-xs">{t('taskTemplates.spaceLabel')}</Label>
               <select
                 value={spaceId}
                 onChange={(e) => {
@@ -349,7 +363,7 @@ function ApplyTemplateDialog({
                   'h-10 w-full rounded-md border border-border bg-background px-3 text-sm',
                 )}
               >
-                <option value="">Select…</option>
+                <option value="">{t('taskTemplates.selectPlaceholder')}</option>
                 {spacesQuery.data?.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -358,7 +372,7 @@ function ApplyTemplateDialog({
               </select>
             </div>
             <div>
-              <Label className="text-xs">Project</Label>
+              <Label className="text-xs">{t('taskTemplates.projectLabel')}</Label>
               <select
                 value={projectId}
                 onChange={(e) => {
@@ -370,7 +384,7 @@ function ApplyTemplateDialog({
                   'h-10 w-full rounded-md border border-border bg-background px-3 text-sm',
                 )}
               >
-                <option value="">Select…</option>
+                <option value="">{t('taskTemplates.selectPlaceholder')}</option>
                 {projectsQuery.data?.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -379,7 +393,7 @@ function ApplyTemplateDialog({
               </select>
             </div>
             <div>
-              <Label className="text-xs">List</Label>
+              <Label className="text-xs">{t('taskTemplates.listLabel')}</Label>
               <select
                 value={listId}
                 onChange={(e) => setListId(e.target.value)}
@@ -388,7 +402,7 @@ function ApplyTemplateDialog({
                   'h-10 w-full rounded-md border border-border bg-background px-3 text-sm',
                 )}
               >
-                <option value="">Select…</option>
+                <option value="">{t('taskTemplates.selectPlaceholder')}</option>
                 {lists.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.name}
@@ -399,9 +413,9 @@ function ApplyTemplateDialog({
           </div>
 
           <div>
-            <Label className="text-xs">Task title (optional override)</Label>
+            <Label className="text-xs">{t('taskTemplates.titleOverrideLabel')}</Label>
             <Input
-              placeholder={template?.payload.title || 'Use template title'}
+              placeholder={template?.payload.title || t('taskTemplates.useTemplateTitle')}
               value={titleOverride}
               onChange={(e) => setTitleOverride(e.target.value)}
             />
@@ -409,10 +423,10 @@ function ApplyTemplateDialog({
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={onClose}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button onClick={() => apply.mutate()} disabled={!listId || apply.isPending}>
-              {apply.isPending ? 'Applying…' : 'Apply'}
+              {apply.isPending ? t('taskTemplates.applying') : t('taskTemplates.apply')}
             </Button>
           </div>
         </div>
@@ -439,6 +453,7 @@ export function SaveTaskAsTemplateDialog({
   open: boolean
   onOpenChange: (next: boolean) => void
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -460,49 +475,48 @@ export function SaveTaskAsTemplateDialog({
         },
       ),
     onSuccess: () => {
-      toast.success('Task saved as template')
+      toast.success(t('taskTemplates.savedAsTemplate'))
       qc.invalidateQueries({ queryKey: ['task-templates', workspaceId] })
       onOpenChange(false)
     },
     onError: (err) =>
-      toast.error(err instanceof ApiError ? err.message : 'Failed to save template'),
+      toast.error(err instanceof ApiError ? err.message : t('taskTemplates.saveFailed')),
   })
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Save as task template</DialogTitle>
+          <DialogTitle>{t('taskTemplates.saveTitle')}</DialogTitle>
           <DialogDescription>
-            Capture this task — title, description, priority, checklists, subtasks, labels, and
-            custom-field values — as a reusable template for this workspace.
+            {t('taskTemplates.saveDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>Template name</Label>
+            <Label>{t('taskTemplates.templateNameLabel')}</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Bug report intake"
+              placeholder={t('taskTemplates.namePlaceholder')}
               autoFocus
             />
           </div>
           <div>
-            <Label>Description (optional)</Label>
+            <Label>{t('taskTemplates.descriptionOptional')}</Label>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              placeholder="When should teammates use this template?"
+              placeholder={t('taskTemplates.descriptionPlaceholder')}
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button onClick={() => save.mutate()} disabled={!name.trim() || save.isPending}>
-              {save.isPending ? 'Saving…' : 'Save template'}
+              {save.isPending ? t('common.saving') : t('taskTemplates.saveTemplate')}
             </Button>
           </div>
         </div>
@@ -522,13 +536,14 @@ export function SaveAsTemplateButton({
   workspaceId?: string
   taskId: string
 }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   if (!workspaceId) return null
   return (
     <>
-      <Button size="sm" variant="ghost" onClick={() => setOpen(true)} title="Save as template">
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)} title={t('taskTemplates.saveAsTemplate')}>
         <Plus className="h-3.5 w-3.5 mr-1" />
-        Save as template
+        {t('taskTemplates.saveAsTemplate')}
       </Button>
       <SaveTaskAsTemplateDialog
         workspaceId={workspaceId}
