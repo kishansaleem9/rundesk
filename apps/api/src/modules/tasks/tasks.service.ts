@@ -14,6 +14,8 @@ import {
   taskCommentReactions,
   taskAttachments,
   timeEntries,
+  taskDocLinks,
+  docs,
   users,
   lists,
   projects,
@@ -462,6 +464,50 @@ export class TasksService {
       taskid: taskId,
     })
     return { uploadUrl, storageKey: key }
+  }
+
+  // --- Linked docs (Plan §4 relationships) ---------------------------------
+
+  /** Docs linked to a task, most-recent first. Requires task read access. */
+  async listLinkedDocs(taskId: string, userId: string) {
+    await this.assertTaskWriteAccess(taskId, userId)
+    return this.db
+      .select({
+        id: taskDocLinks.id,
+        docId: docs.id,
+        title: docs.title,
+        icon: docs.icon,
+        isArchived: docs.isArchived,
+        linkedAt: taskDocLinks.createdAt,
+      })
+      .from(taskDocLinks)
+      .innerJoin(docs, eq(docs.id, taskDocLinks.docId))
+      .where(eq(taskDocLinks.taskId, taskId))
+      .orderBy(desc(taskDocLinks.createdAt))
+  }
+
+  /** Link a doc to a task. Both must live in the same workspace. */
+  async linkDoc(taskId: string, docId: string, userId: string) {
+    const ctx = await this.assertTaskWriteAccess(taskId, userId)
+    const [doc] = await this.db.select({ workspaceId: docs.workspaceId }).from(docs).where(eq(docs.id, docId)).limit(1)
+    if (!doc) throw new NotFoundException('Doc not found')
+    if (doc.workspaceId !== ctx.workspaceId) throw new BadRequestException('Doc belongs to a different workspace')
+    const [row] = await this.db
+      .insert(taskDocLinks)
+      .values({ taskId, docId, createdById: userId })
+      .onConflictDoNothing()
+      .returning()
+    // onConflictDoNothing returns nothing when the link already exists.
+    return row ?? { id: null, taskId, docId, alreadyLinked: true }
+  }
+
+  /** Remove a task↔doc link. */
+  async unlinkDoc(taskId: string, docId: string, userId: string) {
+    await this.assertTaskWriteAccess(taskId, userId)
+    await this.db
+      .delete(taskDocLinks)
+      .where(and(eq(taskDocLinks.taskId, taskId), eq(taskDocLinks.docId, docId)))
+    return { ok: true }
   }
 
   // --- Task CRUD -----------------------------------------------------------

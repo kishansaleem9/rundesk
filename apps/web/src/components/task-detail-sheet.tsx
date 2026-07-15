@@ -18,6 +18,7 @@ import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2, Paperclip, Diam
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
+import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
@@ -1233,6 +1234,8 @@ function OverviewPanel({
           </div>
         )}
       </Field>
+
+      <LinkedDocsSection taskId={taskId} workspaceId={workspaceId} />
     </div>
   )
 }

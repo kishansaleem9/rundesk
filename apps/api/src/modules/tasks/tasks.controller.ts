@@ -287,6 +287,30 @@ export class TasksController {
     return this.tasks.removeLabel(taskId, labelId, user.id)
   }
 
+  // --- Linked docs --------------------------------------------------------
+  @Get(':taskId/linked-docs')
+  async listLinkedDocs(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.tasks.listLinkedDocs(taskId, user.id)
+  }
+
+  @Post(':taskId/linked-docs')
+  async linkDoc(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { docId: string },
+  ) {
+    return this.tasks.linkDoc(taskId, body.docId, user.id)
+  }
+
+  @Delete(':taskId/linked-docs/:docId')
+  async unlinkDoc(
+    @Param('taskId') taskId: string,
+    @Param('docId') docId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.tasks.unlinkDoc(taskId, docId, user.id)
+  }
+
   // --- Watchers -----------------------------------------------------------
   @Post(':taskId/watchers')
   async addWatcher(
