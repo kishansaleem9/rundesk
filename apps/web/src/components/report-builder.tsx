@@ -18,44 +18,53 @@ import {
   Trash2,
 } from 'lucide-react'
 import { api, downloadFilePost } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
-type Metric = { id: string; label: string; agg: 'count' | 'sum' | 'avg' | 'rate' }
-type Dimension = { id: string; label: string }
+type Metric = { id: string; labelKey: TranslationKey; agg: 'count' | 'sum' | 'avg' | 'rate' }
+type Dimension = { id: string; labelKey: TranslationKey }
 type Filter = { field: string; op: string; value: string }
 
 const METRICS: Metric[] = [
-  { id: 'tasks-count', label: 'Tasks count', agg: 'count' },
-  { id: 'tasks-completed', label: 'Tasks completed', agg: 'count' },
-  { id: 'on-time-rate', label: 'On-time completion %', agg: 'rate' },
-  { id: 'cycle-time', label: 'Avg cycle time (days)', agg: 'avg' },
-  { id: 'time-logged', label: 'Hours logged', agg: 'sum' },
-  { id: 'billable-hours', label: 'Billable hours', agg: 'sum' },
-  { id: 'sprint-velocity', label: 'Sprint velocity (pts)', agg: 'sum' },
+  { id: 'tasks-count', labelKey: 'reportBuilder.metricTasksCount', agg: 'count' },
+  { id: 'tasks-completed', labelKey: 'reportBuilder.metricTasksCompleted', agg: 'count' },
+  { id: 'on-time-rate', labelKey: 'reportBuilder.metricOnTimeRate', agg: 'rate' },
+  { id: 'cycle-time', labelKey: 'reportBuilder.metricCycleTime', agg: 'avg' },
+  { id: 'time-logged', labelKey: 'reportBuilder.metricTimeLogged', agg: 'sum' },
+  { id: 'billable-hours', labelKey: 'reportBuilder.metricBillableHours', agg: 'sum' },
+  { id: 'sprint-velocity', labelKey: 'reportBuilder.metricSprintVelocity', agg: 'sum' },
 ]
+
+// Aggregation badge labels; keyed by the raw agg identifier (uppercased by CSS).
+const AGG_LABEL_KEYS: Record<Metric['agg'], TranslationKey> = {
+  count: 'reportBuilder.aggCount',
+  sum: 'reportBuilder.aggSum',
+  avg: 'reportBuilder.aggAvg',
+  rate: 'reportBuilder.aggRate',
+}
 
 const DIMENSIONS: Dimension[] = [
-  { id: 'assignee', label: 'Assignee' },
-  { id: 'status', label: 'Status' },
-  { id: 'priority', label: 'Priority' },
-  { id: 'project', label: 'Project' },
-  { id: 'sprint', label: 'Sprint' },
-  { id: 'label', label: 'Label' },
-  { id: 'date-week', label: 'Week' },
-  { id: 'date-month', label: 'Month' },
+  { id: 'assignee', labelKey: 'reportBuilder.dimAssignee' },
+  { id: 'status', labelKey: 'reportBuilder.dimStatus' },
+  { id: 'priority', labelKey: 'reportBuilder.dimPriority' },
+  { id: 'project', labelKey: 'reportBuilder.dimProject' },
+  { id: 'sprint', labelKey: 'reportBuilder.dimSprint' },
+  { id: 'label', labelKey: 'reportBuilder.dimLabel' },
+  { id: 'date-week', labelKey: 'reportBuilder.dimWeek' },
+  { id: 'date-month', labelKey: 'reportBuilder.dimMonth' },
 ]
 
-const VIZ: Array<{ id: 'bar' | 'line' | 'pie' | 'table'; label: string; icon: React.ElementType }> = [
-  { id: 'bar', label: 'Bar', icon: BarChart3 },
-  { id: 'line', label: 'Line', icon: TrendingUp },
-  { id: 'pie', label: 'Pie', icon: PieChart },
-  { id: 'table', label: 'Table', icon: TableIcon },
+const VIZ: Array<{ id: 'bar' | 'line' | 'pie' | 'table'; labelKey: TranslationKey; icon: React.ElementType }> = [
+  { id: 'bar', labelKey: 'reportBuilder.chartBar', icon: BarChart3 },
+  { id: 'line', labelKey: 'reportBuilder.chartLine', icon: TrendingUp },
+  { id: 'pie', labelKey: 'reportBuilder.chartPie', icon: PieChart },
+  { id: 'table', labelKey: 'reportBuilder.chartTable', icon: TableIcon },
 ]
 
-const RANGES = [
-  { days: 7, label: '7d' },
-  { days: 30, label: '30d' },
-  { days: 90, label: '90d' },
-  { days: 365, label: '1y' },
+const RANGES: Array<{ days: number; labelKey: TranslationKey }> = [
+  { days: 7, labelKey: 'reportBuilder.range7d' },
+  { days: 30, labelKey: 'reportBuilder.range30d' },
+  { days: 90, labelKey: 'reportBuilder.range90d' },
+  { days: 365, labelKey: 'reportBuilder.range1y' },
 ]
 
 const FILTER_FIELDS = ['priority', 'status', 'project', 'assignee'] as const
@@ -64,16 +73,23 @@ type ReportRow = { key: string; label: string; values: Record<string, number> }
 type ReportResult = { dimension: string; metrics: string[]; generatedAt: string; rows: ReportRow[] }
 type SavedReport = { id: string; name: string; definition: any; createdAt: string }
 
-const metricLabel = (id: string) => METRICS.find((m) => m.id === id)?.label ?? id
-const dimensionLabel = (id: string) => DIMENSIONS.find((d) => d.id === id)?.label ?? id
+const metricLabel = (t: (k: TranslationKey) => string, id: string) => {
+  const m = METRICS.find((x) => x.id === id)
+  return m ? t(m.labelKey) : id
+}
+const dimensionLabel = (t: (k: TranslationKey) => string, id: string) => {
+  const d = DIMENSIONS.find((x) => x.id === id)
+  return d ? t(d.labelKey) : id
+}
 const csvCell = (v: string | number) => {
   const s = String(v ?? '')
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
-  const [name, setName] = useState('Untitled report')
+  const [name, setName] = useState(() => t('reportBuilder.untitledName'))
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(['tasks-completed', 'on-time-rate'])
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>(['assignee'])
   const [filters, setFilters] = useState<Filter[]>([])
@@ -117,9 +133,9 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
     onSuccess: (row) => {
       if (row?.id) setActiveSavedId(row.id)
       qc.invalidateQueries({ queryKey: ['custom-reports', workspaceId] })
-      toast.success('Report saved')
+      toast.success(t('reportBuilder.toastSaved'))
     },
-    onError: () => toast.error('Could not save report'),
+    onError: () => toast.error(t('reportBuilder.toastSaveError')),
   })
 
   const deleteMutation = useMutation({
@@ -128,7 +144,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
       qc.invalidateQueries({ queryKey: ['custom-reports', workspaceId] })
       if (activeSavedId === id) {
         setActiveSavedId(null)
-        setName('Untitled report')
+        setName(t('reportBuilder.untitledName'))
       }
     },
   })
@@ -140,7 +156,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
         body: { content: reportAsText(name, result), type: 'project' },
       }),
     onSuccess: (r) => setAiSummary(r.summary),
-    onError: () => toast.error('AI summarize is unavailable'),
+    onError: () => toast.error(t('reportBuilder.toastAiUnavailable')),
   })
 
   function toggleMetric(id: string) {
@@ -165,15 +181,15 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
   }
   function newReport() {
     setActiveSavedId(null)
-    setName('Untitled report')
+    setName(t('reportBuilder.untitledName'))
     setAiSummary(null)
   }
   function exportCsv() {
     if (!result || result.rows.length === 0) {
-      toast.error('Nothing to export yet')
+      toast.error(t('reportBuilder.toastNothingExport'))
       return
     }
-    const header = ['group', ...result.metrics.map(metricLabel)]
+    const header = [t('reportBuilder.groupColumn'), ...result.metrics.map((m) => metricLabel(t, m))]
     const lines = [header.map(csvCell).join(',')]
     for (const row of result.rows) {
       lines.push([csvCell(row.label), ...result.metrics.map((m) => csvCell(row.values[m] ?? 0))].join(','))
@@ -189,7 +205,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
 
   async function exportPdf() {
     if (!result || result.rows.length === 0) {
-      toast.error('Nothing to export yet')
+      toast.error(t('reportBuilder.toastNothingExport'))
       return
     }
     try {
@@ -199,7 +215,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
         `${(name || 'report').replace(/[^a-z0-9-_]+/gi, '-')}.pdf`,
       )
     } catch {
-      toast.error('Could not generate PDF')
+      toast.error(t('reportBuilder.toastPdfError'))
     }
   }
 
@@ -209,45 +225,45 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
       <Card variant="glass" className="overflow-hidden p-0 flex flex-col">
         <div className="px-4 py-3 border-b border-border/40 space-y-2">
           <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Report name
+            {t('reportBuilder.reportName')}
           </Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} className="h-9" />
         </div>
         <div className="flex-1 overflow-auto">
-          <Section title="Metrics" icon={Sigma}>
+          <Section title={t('reportBuilder.sectionMetrics')} icon={Sigma}>
             <div className="space-y-1">
               {METRICS.map((m) => (
                 <PickRow
                   key={m.id}
-                  label={m.label}
-                  hint={m.agg.toUpperCase()}
+                  label={t(m.labelKey)}
+                  hint={t(AGG_LABEL_KEYS[m.agg])}
                   active={selectedMetrics.includes(m.id)}
                   onToggle={() => toggleMetric(m.id)}
                 />
               ))}
             </div>
           </Section>
-          <Section title="Group by" icon={Layers}>
+          <Section title={t('reportBuilder.sectionGroupBy')} icon={Layers}>
             <div className="space-y-1">
               {DIMENSIONS.map((d) => (
                 <PickRow
                   key={d.id}
-                  label={d.label}
+                  label={t(d.labelKey)}
                   active={selectedDimensions[0] === d.id}
                   onToggle={() => toggleDimension(d.id)}
                 />
               ))}
             </div>
           </Section>
-          <Section title="Filters" icon={FilterIcon}>
+          <Section title={t('reportBuilder.sectionFilters')} icon={FilterIcon}>
             <ul className="space-y-1.5 mb-2">
               {filters.map((f, i) => (
                 <li
                   key={i}
                   className="flex items-center gap-1.5 rounded-md border border-border/40 bg-card/40 px-2 py-1.5 text-xs"
                 >
-                  <span className="font-medium capitalize">{f.field}</span>
-                  <span className="text-muted-foreground">{f.op}</span>
+                  <span className="font-medium">{dimensionLabel(t, f.field)}</span>
+                  <span className="text-muted-foreground">{f.op === 'is' ? t('reportBuilder.filterOpIs') : f.op}</span>
                   <span className="font-mono truncate">{f.value}</span>
                   <button
                     onClick={() => setFilters((arr) => arr.filter((_, idx) => idx !== i))}
@@ -266,14 +282,14 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
               >
                 {FILTER_FIELDS.map((f) => (
                   <option key={f} value={f}>
-                    {f}
+                    {dimensionLabel(t, f)}
                   </option>
                 ))}
               </select>
               <Input
                 value={draftFilter.value}
                 onChange={(e) => setDraftFilter((f) => ({ ...f, value: e.target.value }))}
-                placeholder="value"
+                placeholder={t('reportBuilder.filterValuePlaceholder')}
                 className="h-7 text-xs"
               />
               <Button
@@ -290,7 +306,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
               </Button>
             </div>
           </Section>
-          <Section title="Date range" icon={TrendingUp}>
+          <Section title={t('reportBuilder.sectionDateRange')} icon={TrendingUp}>
             <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1">
               {RANGES.map((r) => (
                 <button
@@ -301,12 +317,12 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
                     days === r.days ? 'bg-brand-gradient text-white' : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  {r.label}
+                  {t(r.labelKey)}
                 </button>
               ))}
             </div>
           </Section>
-          <Section title="Saved reports" icon={Save}>
+          <Section title={t('reportBuilder.sectionSavedReports')} icon={Save}>
             {savedQuery.data && savedQuery.data.length > 0 ? (
               <ul className="space-y-1">
                 {savedQuery.data.map((r) => (
@@ -325,7 +341,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
                     <button
                       className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
                       onClick={() => deleteMutation.mutate(r.id)}
-                      title="Delete report"
+                      title={t('reportBuilder.deleteReportTitle')}
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -333,13 +349,13 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
                 ))}
               </ul>
             ) : (
-              <p className="text-xs text-muted-foreground px-1">No saved reports yet.</p>
+              <p className="text-xs text-muted-foreground px-1">{t('reportBuilder.noSavedReports')}</p>
             )}
           </Section>
         </div>
         <div className="border-t border-border/40 p-3 flex items-center gap-2">
           <Button variant="outline" size="sm" className="flex-1" onClick={newReport}>
-            New
+            {t('reportBuilder.newButton')}
           </Button>
           <Button
             variant="gradient"
@@ -348,7 +364,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending}
           >
-            <Save className="h-3.5 w-3.5" /> {activeSavedId ? 'Update' : 'Save'}
+            <Save className="h-3.5 w-3.5" /> {activeSavedId ? t('reportBuilder.update') : t('common.save')}
           </Button>
         </div>
       </Card>
@@ -367,19 +383,19 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
                 )}
               >
                 <v.icon className="h-3.5 w-3.5" />
-                {v.label}
+                {t(v.labelKey)}
               </button>
             ))}
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => aiSummarize.mutate()} disabled={aiSummarize.isPending || !result}>
-              {aiSummarize.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} AI summarize
+              {aiSummarize.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} {t('reportBuilder.aiSummarize')}
             </Button>
             <Button variant="outline" size="sm" onClick={exportPdf}>
-              Export PDF
+              {t('reportBuilder.exportPdf')}
             </Button>
             <Button variant="outline" size="sm" onClick={exportCsv}>
-              Export CSV
+              {t('reportBuilder.exportCsv')}
             </Button>
           </div>
         </div>
@@ -391,18 +407,18 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
           <div className="flex flex-wrap gap-1.5 mb-5">
             {selectedMetrics.map((m) => (
               <Badge key={m} variant="info" className="text-[10px]">
-                <Sigma className="h-3 w-3" /> {metricLabel(m)}
+                <Sigma className="h-3 w-3" /> {metricLabel(t, m)}
               </Badge>
             ))}
             <Badge variant="soft" className="text-[10px]">
-              <Users className="h-3 w-3" /> by {dimensionLabel(dimension)}
+              <Users className="h-3 w-3" /> {t('reportBuilder.byDimension', { dimension: dimensionLabel(t, dimension) })}
             </Badge>
           </div>
 
           {aiSummary && (
             <div className="mb-5 rounded-lg border border-accent/30 bg-accent/5 p-4 text-sm">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-accent mb-1">
-                <Sparkles className="h-3.5 w-3.5" /> AI summary
+                <Sparkles className="h-3.5 w-3.5" /> {t('reportBuilder.aiSummary')}
               </div>
               {aiSummary}
             </div>
@@ -410,12 +426,12 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
 
           {runQuery.isError ? (
             <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-5 text-sm text-destructive">
-              Could not run this report. Try a different metric or range.
+              {t('reportBuilder.runError')}
             </div>
           ) : selectedMetrics.length === 0 ? (
-            <Empty text="Pick at least one metric to build a report." />
+            <Empty text={t('reportBuilder.emptyNoMetric')} />
           ) : !result || result.rows.length === 0 ? (
-            <Empty text={runQuery.isLoading ? 'Running…' : 'No data for this report yet.'} />
+            <Empty text={runQuery.isLoading ? t('reportBuilder.running') : t('reportBuilder.noData')} />
           ) : (
             <div className="rounded-xl border border-border/40 bg-card/40 p-5">
               {viz === 'bar' && <ResultBars result={result} primary={primary} />}
@@ -495,11 +511,12 @@ function Empty({ text }: { text: string }) {
 // ─── Real-data visualizations ───────────────────────────────────────────────
 
 function ResultBars({ result, primary }: { result: ReportResult; primary: string }) {
+  const { t } = useTranslation()
   const rows = result.rows.slice(0, 12)
   const max = Math.max(1, ...rows.map((r) => r.values[primary] ?? 0))
   return (
     <div>
-      <div className="text-xs text-muted-foreground mb-3">{metricLabel(primary)} by {dimensionLabel(result.dimension)}</div>
+      <div className="text-xs text-muted-foreground mb-3">{t('reportBuilder.metricByDimension', { metric: metricLabel(t, primary), dimension: dimensionLabel(t, result.dimension) })}</div>
       <div className="flex items-end gap-2 h-64">
         {rows.map((r) => (
           <div key={r.key} className="flex-1 flex flex-col items-center gap-1.5 min-w-0">
@@ -519,13 +536,14 @@ function ResultBars({ result, primary }: { result: ReportResult; primary: string
 }
 
 function ResultLine({ result, primary }: { result: ReportResult; primary: string }) {
+  const { t } = useTranslation()
   const rows = result.rows.slice(0, 24)
   const points = rows.map((r) => r.values[primary] ?? 0)
   const max = Math.max(1, ...points)
   if (points.length < 2) return <ResultBars result={result} primary={primary} />
   return (
     <div>
-      <div className="text-xs text-muted-foreground mb-3">{metricLabel(primary)} by {dimensionLabel(result.dimension)}</div>
+      <div className="text-xs text-muted-foreground mb-3">{t('reportBuilder.metricByDimension', { metric: metricLabel(t, primary), dimension: dimensionLabel(t, result.dimension) })}</div>
       <svg viewBox="0 0 320 200" className="w-full h-64">
         <defs>
           <linearGradient id="rb-grad" x1="0" x2="0" y1="0" y2="1">
@@ -594,14 +612,15 @@ function ResultPie({ result, primary }: { result: ReportResult; primary: string 
 }
 
 function ResultTable({ result }: { result: ReportResult }) {
+  const { t } = useTranslation()
   return (
     <table className="w-full text-sm">
       <thead>
         <tr className="text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border/40">
-          <th className="px-2 py-2 text-left">{dimensionLabel(result.dimension)}</th>
+          <th className="px-2 py-2 text-left">{dimensionLabel(t, result.dimension)}</th>
           {result.metrics.map((m) => (
             <th key={m} className="px-2 py-2 text-right">
-              {metricLabel(m)}
+              {metricLabel(t, m)}
             </th>
           ))}
         </tr>

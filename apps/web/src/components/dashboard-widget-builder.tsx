@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api, ApiError } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import {
   Card,
   Button,
@@ -46,21 +47,21 @@ type WidgetType =
 
 const WIDGET_CATALOG: Array<{
   type: WidgetType
-  name: string
-  description: string
+  labelKey: TranslationKey
+  descKey: TranslationKey
   icon: React.ElementType
   category: 'metrics' | 'lists' | 'charts'
 }> = [
-  { type: 'tasks-due', name: 'Tasks due today', description: 'Quick number tile.', icon: CheckCircle2, category: 'metrics' },
-  { type: 'overdue', name: 'Overdue tasks', description: 'Counter + list.', icon: Clock, category: 'metrics' },
-  { type: 'completion', name: 'Completion rate', description: '7- or 30-day completion %.', icon: TrendingUp, category: 'metrics' },
-  { type: 'activity', name: 'Activity feed', description: 'Latest workspace updates.', icon: Activity, category: 'lists' },
-  { type: 'team-load', name: 'Team capacity', description: 'Per-person workload bars.', icon: Users, category: 'lists' },
-  { type: 'sprint-burndown', name: 'Sprint burndown', description: 'Active sprint progress.', icon: BarChart3, category: 'charts' },
-  { type: 'goals', name: 'Goals progress', description: 'Active OKRs with rollup.', icon: Target, category: 'lists' },
-  { type: 'time', name: 'Hours logged', description: 'Total + billable this week.', icon: Calendar, category: 'metrics' },
-  { type: 'pie-status', name: 'Tasks by status', description: 'Pie chart.', icon: PieChart, category: 'charts' },
-  { type: 'bar-priority', name: 'Tasks by priority', description: 'Stacked bars.', icon: BarChart3, category: 'charts' },
+  { type: 'tasks-due', labelKey: 'dashboardWidget.name.tasksDue', descKey: 'dashboardWidget.desc.tasksDue', icon: CheckCircle2, category: 'metrics' },
+  { type: 'overdue', labelKey: 'dashboardWidget.name.overdue', descKey: 'dashboardWidget.desc.overdue', icon: Clock, category: 'metrics' },
+  { type: 'completion', labelKey: 'dashboardWidget.name.completion', descKey: 'dashboardWidget.desc.completion', icon: TrendingUp, category: 'metrics' },
+  { type: 'activity', labelKey: 'dashboardWidget.name.activity', descKey: 'dashboardWidget.desc.activity', icon: Activity, category: 'lists' },
+  { type: 'team-load', labelKey: 'dashboardWidget.name.teamLoad', descKey: 'dashboardWidget.desc.teamLoad', icon: Users, category: 'lists' },
+  { type: 'sprint-burndown', labelKey: 'dashboardWidget.name.sprintBurndown', descKey: 'dashboardWidget.desc.sprintBurndown', icon: BarChart3, category: 'charts' },
+  { type: 'goals', labelKey: 'dashboardWidget.name.goals', descKey: 'dashboardWidget.desc.goals', icon: Target, category: 'lists' },
+  { type: 'time', labelKey: 'dashboardWidget.name.time', descKey: 'dashboardWidget.desc.time', icon: Calendar, category: 'metrics' },
+  { type: 'pie-status', labelKey: 'dashboardWidget.name.pieStatus', descKey: 'dashboardWidget.desc.pieStatus', icon: PieChart, category: 'charts' },
+  { type: 'bar-priority', labelKey: 'dashboardWidget.name.barPriority', descKey: 'dashboardWidget.desc.barPriority', icon: BarChart3, category: 'charts' },
 ]
 
 type Widget = { id: string; type: WidgetType; w: 1 | 2 | 3; h: 1 | 2 }
@@ -77,6 +78,7 @@ const DEFAULT_LAYOUT: Widget[] = [
 ]
 
 export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; workspaceId: string }) {
+  const { t, tCount } = useTranslation()
   const [widgets, setWidgets] = useState<Widget[]>(preset?.layout || DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
   const [paletteFilter, setPaletteFilter] = useState('')
@@ -125,7 +127,7 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
       api<{ widgets: string[]; reasoning: string }>('/ai/dashboard/suggest-layout', {
         method: 'POST',
         body: {
-          availableWidgets: WIDGET_CATALOG.map((c) => ({ type: c.type, label: c.name })),
+          availableWidgets: WIDGET_CATALOG.map((c) => ({ type: c.type, label: t(c.labelKey) })),
           context: `Workspace dashboard with ${widgets.length} widgets currently in use: ${widgets
             .map((w) => w.type)
             .join(', ')}`,
@@ -133,9 +135,9 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
       }),
     onSuccess: (res) => {
       const valid = WIDGET_CATALOG.map((c) => c.type)
-      const ordered = res.widgets.filter((t): t is WidgetType => valid.includes(t as WidgetType))
+      const ordered = res.widgets.filter((wt): wt is WidgetType => valid.includes(wt as WidgetType))
       if (ordered.length === 0) {
-        toast('No layout suggestion available', { description: res.reasoning || 'Try again later.' })
+        toast(t('dashboardWidget.noSuggestion'), { description: res.reasoning || t('dashboardWidget.tryAgainLater') })
         return
       }
       setWidgets((arr) => {
@@ -149,11 +151,11 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
         })
       })
       setEditing(true)
-      toast.success('AI suggested a new layout', { description: res.reasoning || undefined })
+      toast.success(t('dashboardWidget.suggestedNewLayout'), { description: res.reasoning || undefined })
     },
     onError: (err: unknown) => {
-      toast.error('Could not suggest a layout', {
-        description: err instanceof ApiError ? err.message : 'Something went wrong.',
+      toast.error(t('dashboardWidget.couldNotSuggest'), {
+        description: err instanceof ApiError ? err.message : t('dashboardWidget.somethingWrong'),
       })
     },
   })
@@ -167,27 +169,27 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
         // instead of silently discarding the changes on remount.
         await api('/dashboards', {
           method: 'POST',
-          body: { workspaceId, name: 'My dashboard', layout: widgets, isDefault: true },
+          body: { workspaceId, name: t('dashboardWidget.myDashboard'), layout: widgets, isDefault: true },
         })
       }
       await qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] })
-      toast.success('Dashboard layout saved')
+      toast.success(t('dashboardWidget.layoutSaved'))
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : 'Could not save layout')
+      toast.error(e instanceof ApiError ? e.message : t('dashboardWidget.couldNotSaveLayout'))
       return
     }
     setEditing(false)
   }
 
-  const filtered = WIDGET_CATALOG.filter((c) => c.name.toLowerCase().includes(paletteFilter.toLowerCase()))
+  const filtered = WIDGET_CATALOG.filter((c) => t(c.labelKey).toLowerCase().includes(paletteFilter.toLowerCase()))
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-4">
       <div className="space-y-3">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge variant="soft" className="text-[10px] uppercase">{widgets.length} widgets</Badge>
-            {editing && <Badge variant="gradient" className="text-[10px] uppercase">Edit mode</Badge>}
+            <Badge variant="soft" className="text-[10px] uppercase">{tCount('dashboardWidget.widgetCount', widgets.length)}</Badge>
+            {editing && <Badge variant="gradient" className="text-[10px] uppercase">{t('dashboardWidget.editMode')}</Badge>}
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             <Button
@@ -201,16 +203,16 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
               ) : (
                 <Sparkles className="h-3.5 w-3.5" />
               )}
-              AI suggest layout
+              {t('dashboardWidget.aiSuggestLayout')}
             </Button>
             {editing ? (
               <div className="flex items-center gap-1.5">
-                <Button variant="ghost" size="sm" onClick={() => { setWidgets(preset?.layout || DEFAULT_LAYOUT); setEditing(false); }}>Cancel</Button>
-                <Button variant="gradient" size="sm" onClick={handleSaveLayout}>Save layout</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setWidgets(preset?.layout || DEFAULT_LAYOUT); setEditing(false); }}>{t('common.cancel')}</Button>
+                <Button variant="gradient" size="sm" onClick={handleSaveLayout}>{t('dashboardWidget.saveLayout')}</Button>
               </div>
             ) : (
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                <SettingsIcon className="h-3.5 w-3.5" /> Edit dashboard
+                <SettingsIcon className="h-3.5 w-3.5" /> {t('dashboardWidget.editDashboard')}
               </Button>
             )}
           </div>
@@ -239,7 +241,7 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
               onClick={() => addWidget('tasks-due')}
               className="col-span-1 row-span-1 flex items-center justify-center rounded-xl border-2 border-dashed border-border/60 hover:border-accent hover:bg-card/30 transition-colors text-muted-foreground hover:text-foreground gap-2 text-sm"
             >
-              <Plus className="h-4 w-4" /> Add widget
+              <Plus className="h-4 w-4" /> {t('dashboardWidget.addWidget')}
             </button>
           )}
         </div>
@@ -250,13 +252,13 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
         <Card variant="glass" className="p-0 overflow-hidden flex flex-col h-fit max-h-[640px] xl:sticky xl:top-4">
           <div className="px-4 py-3 border-b border-border/40 flex items-center gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex-1">
-              Widget catalog
+              {t('dashboardWidget.widgetCatalog')}
             </span>
           </div>
           <div className="px-3 py-2 border-b border-border/40">
             <Input
               leadingIcon={<Search className="h-3.5 w-3.5" />}
-              placeholder="Search widgets…"
+              placeholder={t('dashboardWidget.searchWidgets')}
               value={paletteFilter}
               onChange={(e) => setPaletteFilter(e.target.value)}
               className="h-8 text-xs"
@@ -273,8 +275,8 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
                   <c.icon className="h-3.5 w-3.5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate">{c.name}</div>
-                  <div className="text-[10px] text-muted-foreground line-clamp-1">{c.description}</div>
+                  <div className="text-sm font-medium truncate">{t(c.labelKey)}</div>
+                  <div className="text-[10px] text-muted-foreground line-clamp-1">{t(c.descKey)}</div>
                 </div>
                 <Plus className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity mt-1.5" />
               </button>
@@ -311,6 +313,7 @@ function WidgetCell({
   onDragEnd: () => void
   onDrop: () => void
 }) {
+  const { t, tCount } = useTranslation()
   const meta = WIDGET_CATALOG.find((c) => c.type === widget.type)
   const Icon = meta?.icon ?? CheckCircle2
   const nextWidth: Widget['w'] = widget.w >= 3 ? 1 : ((widget.w + 1) as Widget['w'])
@@ -349,7 +352,7 @@ function WidgetCell({
         <>
           <div
             className="absolute top-1.5 left-1.5 cursor-grab active:cursor-grabbing p-1 rounded hover:bg-card/70 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
-            aria-label="Drag to reorder"
+            aria-label={t('dashboardWidget.dragToReorder')}
           >
             <GripVertical className="h-3.5 w-3.5" />
           </div>
@@ -357,8 +360,8 @@ function WidgetCell({
             <button
               type="button"
               onClick={() => onResize({ w: nextWidth })}
-              title={`Width: ${widget.w} → ${nextWidth} column${nextWidth === 1 ? '' : 's'}`}
-              aria-label="Cycle widget width"
+              title={t('dashboardWidget.widthTooltip', { from: widget.w, cols: tCount('dashboardWidget.widthColumns', nextWidth) })}
+              aria-label={t('dashboardWidget.cycleWidth')}
               className="p-1 rounded bg-card/70 hover:bg-card text-muted-foreground hover:text-foreground"
             >
               {widget.w >= 3 ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
@@ -366,8 +369,8 @@ function WidgetCell({
             <button
               type="button"
               onClick={() => onResize({ h: widget.h === 2 ? 1 : 2 })}
-              title={widget.h === 2 ? 'Shrink height' : 'Grow height'}
-              aria-label="Toggle widget height"
+              title={widget.h === 2 ? t('dashboardWidget.shrinkHeight') : t('dashboardWidget.growHeight')}
+              aria-label={t('dashboardWidget.toggleHeight')}
               className="p-1 rounded bg-card/70 hover:bg-card text-muted-foreground hover:text-foreground"
             >
               {widget.h === 2 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -410,35 +413,36 @@ function WidgetPreview({
 }
 
 function BarPriorityWidget({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   type ProjectBreakdown = { byPriority?: Record<string, number> }
   const q = useQuery({
     queryKey: ['reports-priority-breakdown', workspaceId],
     queryFn: () => api<ProjectBreakdown>(`/workspaces/${workspaceId}/reports/overview`),
   })
   const breakdown = (q.data?.byPriority ?? {}) as Record<string, number>
-  const entries = [
-    { l: 'Urgent', v: breakdown.urgent ?? 0, c: 'bg-destructive' },
-    { l: 'High', v: breakdown.high ?? 0, c: 'bg-warning' },
-    { l: 'Normal', v: breakdown.normal ?? 0, c: 'bg-accent' },
-    { l: 'Low', v: breakdown.low ?? 0, c: 'bg-muted-foreground' },
+  const entries: Array<{ key: string; labelKey: TranslationKey; v: number; c: string }> = [
+    { key: 'urgent', labelKey: 'dashboardWidget.priorityUrgent', v: breakdown.urgent ?? 0, c: 'bg-destructive' },
+    { key: 'high', labelKey: 'dashboardWidget.priorityHigh', v: breakdown.high ?? 0, c: 'bg-warning' },
+    { key: 'normal', labelKey: 'dashboardWidget.priorityNormal', v: breakdown.normal ?? 0, c: 'bg-accent' },
+    { key: 'low', labelKey: 'dashboardWidget.priorityLow', v: breakdown.low ?? 0, c: 'bg-muted-foreground' },
   ]
   const max = Math.max(1, ...entries.map((b) => b.v))
   if (q.isError) {
     return (
       <div className="flex flex-col h-full">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">By priority</div>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">{t('dashboardWidget.byPriority')}</div>
         <div className="flex-1 flex items-center justify-center text-[11px] text-muted-foreground">
-          Couldn’t load priority breakdown
+          {t('dashboardWidget.priorityLoadError')}
         </div>
       </div>
     )
   }
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">By priority</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{t('dashboardWidget.byPriority')}</div>
       <div className="flex items-end gap-2 mt-2 h-16">
         {entries.map((b) => (
-          <div key={b.l} className="flex-1 flex flex-col items-center gap-1">
+          <div key={b.key} className="flex-1 flex flex-col items-center gap-1">
             <div className="w-full rounded-t flex items-end h-full">
               <div
                 className={cn('w-full rounded-t', b.c)}
@@ -446,7 +450,7 @@ function BarPriorityWidget({ workspaceId }: { workspaceId: string }) {
               />
             </div>
             <span className="text-[9px] text-muted-foreground">
-              {b.l} · {b.v}
+              {t(b.labelKey)} · {b.v}
             </span>
           </div>
         ))}
@@ -456,6 +460,7 @@ function BarPriorityWidget({ workspaceId }: { workspaceId: string }) {
 }
 
 function TasksDueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['reports-overview', workspaceId],
     queryFn: () =>
@@ -465,15 +470,16 @@ function TasksDueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspac
   })
   return (
     <Tile
-      label="Due today"
+      label={t('dashboardWidget.dueToday')}
       value={q.data?.dueToday ?? '—'}
-      hint={q.data ? `of ${q.data.total} total` : 'Loading…'}
+      hint={q.data ? t('dashboardWidget.ofTotal', { total: q.data.total }) : t('common.loading')}
       Icon={Icon}
     />
   )
 }
 
 function OverdueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['reports-overview', workspaceId],
     queryFn: () =>
@@ -482,9 +488,9 @@ function OverdueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspace
   const overdue = q.data?.overdue ?? 0
   return (
     <Tile
-      label="Overdue"
+      label={t('dashboardWidget.overdue')}
       value={overdue}
-      hint={overdue === 0 ? 'All caught up' : 'Reschedule them?'}
+      hint={overdue === 0 ? t('dashboardWidget.allCaughtUp') : t('dashboardWidget.rescheduleThem')}
       Icon={Icon}
       tone={overdue > 0 ? 'warning' : undefined}
     />
@@ -492,6 +498,7 @@ function OverdueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspace
 }
 
 function CompletionTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['reports-overview', workspaceId],
     queryFn: () =>
@@ -499,9 +506,9 @@ function CompletionTile({ Icon, workspaceId }: { Icon: React.ElementType; worksp
   })
   return (
     <Tile
-      label="Completion"
+      label={t('dashboardWidget.completion')}
       value={q.data ? `${q.data.completionRate}%` : '—'}
-      hint="All-time"
+      hint={t('dashboardWidget.allTime')}
       Icon={Icon}
       tone="success"
     />
@@ -509,6 +516,7 @@ function CompletionTile({ Icon, workspaceId }: { Icon: React.ElementType; worksp
 }
 
 function TimeTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['reports-time', workspaceId, 7],
     queryFn: () =>
@@ -522,15 +530,16 @@ function TimeTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId:
   )
   return (
     <Tile
-      label="This week"
+      label={t('dashboardWidget.thisWeek')}
       value={`${totals.totalHours.toFixed(0)}h`}
-      hint={`${totals.billableHours.toFixed(0)}h billable`}
+      hint={t('dashboardWidget.hoursBillable', { hours: totals.billableHours.toFixed(0) })}
       Icon={Icon}
     />
   )
 }
 
 function TeamLoadWidget({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['workload-report', workspaceId, 7],
     queryFn: () =>
@@ -541,28 +550,28 @@ function TeamLoadWidget({ workspaceId }: { workspaceId: string }) {
   const team = (q.data ?? []).slice(0, 6).map((p) => {
     const avgLoad = p.dailyLoads.reduce((s, v) => s + v, 0) / Math.max(1, p.dailyLoads.length)
     const ratio = Math.round((avgLoad / Math.max(1, p.capacity)) * 100)
-    return { name: p.name || 'Unknown', load: ratio }
+    return { name: p.name || t('dashboardWidget.unknown'), load: ratio }
   })
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Team capacity</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">{t('dashboardWidget.name.teamLoad')}</div>
       <ul className="flex-1 space-y-1.5">
         {team.length === 0 && (
-          <li className="text-[11px] text-muted-foreground">No assignments this week</li>
+          <li className="text-[11px] text-muted-foreground">{t('dashboardWidget.noAssignments')}</li>
         )}
-        {team.map((t) => (
-          <li key={t.name} className="flex items-center gap-2 text-[11px]">
-            <span className="w-16 truncate">{t.name.split(' ')[0]}</span>
+        {team.map((member) => (
+          <li key={member.name} className="flex items-center gap-2 text-[11px]">
+            <span className="w-16 truncate">{member.name.split(' ')[0]}</span>
             <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
               <div
                 className={cn(
                   'h-full rounded-full',
-                  t.load > 100 ? 'bg-destructive' : t.load > 85 ? 'bg-warning' : 'bg-success',
+                  member.load > 100 ? 'bg-destructive' : member.load > 85 ? 'bg-warning' : 'bg-success',
                 )}
-                style={{ width: `${Math.min(110, t.load)}%` }}
+                style={{ width: `${Math.min(110, member.load)}%` }}
               />
             </div>
-            <span className="tabular-nums w-9 text-right">{t.load}%</span>
+            <span className="tabular-nums w-9 text-right">{member.load}%</span>
           </li>
         ))}
       </ul>
@@ -571,6 +580,7 @@ function TeamLoadWidget({ workspaceId }: { workspaceId: string }) {
 }
 
 function PieStatusWidget({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['reports-completion', workspaceId, 30],
     queryFn: () =>
@@ -592,7 +602,7 @@ function PieStatusWidget({ workspaceId }: { workspaceId: string }) {
   let offset = 0
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">By status (30d)</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{t('dashboardWidget.byStatus30d')}</div>
       <div className="flex items-center gap-3 flex-1">
         <svg viewBox="0 0 36 36" className="h-20 w-20 -rotate-90">
           <circle cx="18" cy="18" r="14" fill="none" stroke="hsl(var(--muted))" strokeWidth="6" />
@@ -634,6 +644,7 @@ function PieStatusWidget({ workspaceId }: { workspaceId: string }) {
 }
 
 function GoalsWidget({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['reports-goals', workspaceId],
     queryFn: () =>
@@ -644,10 +655,10 @@ function GoalsWidget({ workspaceId }: { workspaceId: string }) {
   const goals = (q.data?.goals ?? []).slice(0, 3)
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">Goals</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">{t('dashboardWidget.goals')}</div>
       <div className="space-y-2 flex-1">
         {goals.length === 0 && (
-          <div className="text-[11px] text-muted-foreground">No goals yet</div>
+          <div className="text-[11px] text-muted-foreground">{t('dashboardWidget.noGoals')}</div>
         )}
         {goals.map((g) => (
           <div key={g.id}>
@@ -688,6 +699,7 @@ function Tile({ label, value, hint, Icon, tone }: any) {
 }
 
 function SprintBurndownWidget({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const sprintsQ = useQuery({
     queryKey: ['sprints', workspaceId],
     queryFn: () =>
@@ -717,18 +729,18 @@ function SprintBurndownWidget({ workspaceId }: { workspaceId: string }) {
   if (!active) {
     return (
       <div className="flex flex-col h-full justify-center text-[11px] text-muted-foreground">
-        No active sprint
+        {t('dashboardWidget.noActiveSprint')}
       </div>
     )
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Sprint burndown</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">{t('dashboardWidget.name.sprintBurndown')}</div>
       <div className="flex items-baseline gap-2">
         <div className="font-display text-3xl font-semibold tabular-nums">{remaining ?? '—'}</div>
         <div className="text-[10px] text-muted-foreground">
-          / {detailQ.data?.totalPoints ?? 0} pts remaining
+          {t('dashboardWidget.ptsRemaining', { points: detailQ.data?.totalPoints ?? 0 })}
         </div>
       </div>
       {points.length > 1 ? (
@@ -762,12 +774,13 @@ function SprintBurndownWidget({ workspaceId }: { workspaceId: string }) {
           />
         </svg>
       ) : (
-        <p className="text-[10px] text-muted-foreground mt-2">Add story points to tasks in the sprint.</p>
+        <p className="text-[10px] text-muted-foreground mt-2">{t('dashboardWidget.addStoryPoints')}</p>
       )}
     </div>
   )
 }
 function ActivityWidget() {
+  const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['notifications', 'feed'],
     queryFn: () =>
@@ -778,10 +791,10 @@ function ActivityWidget() {
   const items = (q.data ?? []).slice(0, 6)
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">Recent activity</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">{t('dashboardWidget.recentActivity')}</div>
       <ul className="flex-1 space-y-1 text-[11px] overflow-hidden">
         {items.length === 0 && (
-          <li className="text-muted-foreground">No recent activity</li>
+          <li className="text-muted-foreground">{t('dashboardWidget.noRecentActivity')}</li>
         )}
         {items.map((n) => {
           const minutes = Math.max(1, Math.round((Date.now() - new Date(n.createdAt).getTime()) / 60000))
