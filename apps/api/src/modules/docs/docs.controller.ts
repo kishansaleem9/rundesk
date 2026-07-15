@@ -99,11 +99,19 @@ export class DocsController {
   }
 
   @Get('docs/:docId/export')
-  async exportMarkdown(
+  async exportDoc(
     @Param('docId') docId: string,
     @CurrentUser() user: CurrentUserPayload,
     @Res() res: any,
+    @Query('format') format?: string,
   ) {
+    if (format === 'pdf') {
+      const { fileName, pdf } = await this.docs.exportDocPdf(docId, user.id)
+      res.header('Content-Type', 'application/pdf')
+      res.header('Content-Disposition', `attachment; filename="${fileName}"`)
+      res.send(pdf)
+      return
+    }
     const { fileName, markdown } = await this.docs.exportDocMarkdown(docId, user.id)
     res.header('Content-Type', 'text/markdown; charset=utf-8')
     res.header('Content-Disposition', `attachment; filename="${fileName}"`)

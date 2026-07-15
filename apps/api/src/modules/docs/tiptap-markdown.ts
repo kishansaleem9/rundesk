@@ -110,6 +110,100 @@ function renderBlock(node: Node, depth = 0): string {
   }
 }
 
+/** Plain text of an inline run (marks stripped), hard breaks as newlines. */
+function plainInline(nodes: Node[] = []): string {
+  return nodes
+    .map((n) => {
+      if (n.type === 'text') return n.text ?? ''
+      if (n.type === 'hardBreak') return '\n'
+      if (n.content) return plainInline(n.content)
+      return ''
+    })
+    .join('')
+}
+
+function linesForList(node: Node, ordered: boolean, depth: number, out: string[]): void {
+  const pad = '  '.repeat(depth)
+  ;(node.content ?? []).forEach((item, i) => {
+    let marker: string
+    if (node.type === 'taskList') marker = item.attrs?.checked === true ? '[x] ' : '[ ] '
+    else marker = ordered ? `${i + 1}. ` : '- '
+    for (const child of item.content ?? []) {
+      if (child.type === 'bulletList' || child.type === 'orderedList' || child.type === 'taskList') {
+        linesForList(child, child.type === 'orderedList', depth + 1, out)
+      } else {
+        const text = plainInline(child.content).split('\n')
+        text.forEach((t, ti) => out.push(ti === 0 ? `${pad}${marker}${t}` : `${pad}   ${t}`))
+      }
+    }
+  })
+}
+
+function linesForBlock(node: Node, out: string[]): void {
+  switch (node.type) {
+    case 'heading': {
+      const text = plainInline(node.content)
+      const level = Math.min(Math.max(Number(node.attrs?.level ?? 1), 1), 6)
+      out.push('')
+      out.push(text)
+      if (level === 1) out.push('='.repeat(Math.min(text.length, 72)))
+      else if (level === 2) out.push('-'.repeat(Math.min(text.length, 72)))
+      break
+    }
+    case 'paragraph': {
+      const text = plainInline(node.content)
+      text.split('\n').forEach((t) => out.push(t))
+      out.push('')
+      break
+    }
+    case 'bulletList':
+      linesForList(node, false, 0, out); out.push('')
+      break
+    case 'orderedList':
+      linesForList(node, true, 0, out); out.push('')
+      break
+    case 'taskList':
+      linesForList(node, false, 0, out); out.push('')
+      break
+    case 'blockquote':
+      for (const c of node.content ?? []) {
+        const before = out.length
+        linesForBlock(c, out)
+        for (let i = before; i < out.length; i++) if (out[i]) out[i] = `> ${out[i]}`
+      }
+      break
+    case 'codeBlock':
+      for (const l of (node.content ?? []).map((c) => c.text ?? '').join('').split('\n')) out.push(`    ${l}`)
+      out.push('')
+      break
+    case 'horizontalRule':
+      out.push('─'.repeat(40)); out.push('')
+      break
+    default:
+      if (node.content) for (const c of node.content) linesForBlock(c, out)
+  }
+}
+
+/**
+ * Flatten a Tiptap doc to plain text lines for the line-based PDF writer.
+ * Marks are stripped; headings are underlined; lists get plain markers.
+ */
+export function tiptapToPlainLines(content: unknown): string[] {
+  if (!content || typeof content !== 'object') return []
+  const root = content as Node
+  const out: string[] = []
+  for (const b of root.content ?? []) linesForBlock(b, out)
+  // Trim leading/trailing blanks and collapse 2+ consecutive blank lines.
+  const collapsed: string[] = []
+  for (const l of out) {
+    if (l === '' && collapsed[collapsed.length - 1] === '') continue
+    collapsed.push(l)
+  }
+  while (collapsed[0] === '') collapsed.shift()
+  while (collapsed[collapsed.length - 1] === '') collapsed.pop()
+  return collapsed
+}
+
 export function tiptapToMarkdown(content: unknown): string {
   if (!content || typeof content !== 'object') return ''
   const root = content as Node

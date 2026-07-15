@@ -581,6 +581,19 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               <Button
                 size="sm"
                 variant="ghost"
+                title="Export as PDF"
+                onClick={() => {
+                  const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
+                  void downloadFile(`/docs/${activeDoc.id}/export?format=pdf`, `${base}.pdf`).catch(() =>
+                    toast.error('Could not export the doc'),
+                  )
+                }}
+              >
+                <FileText className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
                 onClick={() => editor?.chain().focus().toggleBold().run()}
                 disabled={!editor}
               >

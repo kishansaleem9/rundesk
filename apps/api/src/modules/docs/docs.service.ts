@@ -8,7 +8,8 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { tiptapToMarkdown } from './tiptap-markdown'
+import { tiptapToMarkdown, tiptapToPlainLines } from './tiptap-markdown'
+import { renderReportPdf } from '../reports/pdf'
 
 type TiptapNode = { type: string; content?: TiptapNode[]; text?: string; attrs?: Record<string, unknown> }
 
@@ -119,6 +120,16 @@ export class DocsService {
     const markdown = body.startsWith('# ') ? body : `# ${doc.title}\n\n${body}`
     const base = (doc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
     return { fileName: `${base}.md`, markdown }
+  }
+
+  /** Export a doc as a (line-based) PDF. Access-checked. */
+  async exportDocPdf(docId: string, userId: string) {
+    await this.assertDocAccess(docId, userId)
+    const [doc] = await this.db.select().from(docs).where(eq(docs.id, docId)).limit(1)
+    if (!doc) throw new NotFoundException('Doc not found')
+    const pdf = renderReportPdf(doc.title || 'Untitled', tiptapToPlainLines(doc.content))
+    const base = (doc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
+    return { fileName: `${base}.pdf`, pdf }
   }
 
   // ─── Doc templates ─────────────────────────────────────────────────────────
