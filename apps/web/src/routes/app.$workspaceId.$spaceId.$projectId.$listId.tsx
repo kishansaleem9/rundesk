@@ -21,6 +21,7 @@ import {
   Archive,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 import { criticalPath } from '../lib/gantt'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { ListStatusesManager } from '../components/list-statuses-manager'
@@ -220,6 +221,7 @@ function useOrderedStatuses(): ListStatus[] {
 function ListDetail() {
   const { workspaceId, spaceId, projectId, listId } = Route.useParams()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
@@ -484,11 +486,11 @@ function ListDetail() {
   }
 
   const viewTabs: { id: typeof activeView; label: string }[] = [
-    { id: 'list', label: 'List' },
-    { id: 'board', label: 'Board' },
-    { id: 'table', label: 'Table' },
-    { id: 'calendar', label: 'Calendar' },
-    { id: 'gantt', label: 'Gantt' },
+    { id: 'list', label: t('list.viewList') },
+    { id: 'board', label: t('list.viewBoard') },
+    { id: 'table', label: t('list.viewTable') },
+    { id: 'calendar', label: t('list.viewCalendar') },
+    { id: 'gantt', label: t('list.viewGantt') },
   ]
 
   const statusOptions = listStatuses.length
@@ -524,7 +526,7 @@ function ListDetail() {
           <>
             <Input
               ref={quickAddRef}
-              placeholder="Quick add task…"
+              placeholder={t('list.quickAdd')}
               value={newTaskTitle}
               onChange={(e) => setNewTaskTitle(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateTask()}
@@ -563,7 +565,7 @@ function ListDetail() {
               value={statusFilter}
               onChange={(v) => setStatusFilter(v as 'all' | TaskStatus)}
             >
-              <option value="all">All statuses</option>
+              <option value="all">{t('list.allStatuses')}</option>
               {statusOptions.map((status) => (
                 <option key={status.key} value={status.key}>
                   {status.name}
@@ -571,14 +573,14 @@ function ListDetail() {
               ))}
             </WorkFilterSelect>
             <WorkFilterSelect value={sortBy} onChange={(v) => setSortBy(v as typeof sortBy)}>
-              <option value="created">Newest</option>
+              <option value="created">{t('list.sortNewest')}</option>
               <option value="due">Due date</option>
               <option value="priority">Priority</option>
             </WorkFilterSelect>
             <WorkFilterSelect value={groupBy} onChange={(v) => setGroupBy(v as typeof groupBy)}>
-              <option value="status">By status</option>
-              <option value="priority">By priority</option>
-              <option value="assignee">By assignee</option>
+              <option value="status">{t('list.groupByStatus')}</option>
+              <option value="priority">{t('list.groupByPriority')}</option>
+              <option value="assignee">{t('list.groupByAssignee')}</option>
             </WorkFilterSelect>
             {activeView === 'table' && projectFields.length > 0 && (
               <details className="relative">
@@ -606,7 +608,7 @@ function ListDetail() {
                       <span className="truncate">{f.name}</span>
                     </label>
                   ))}
-                  <p className="px-2 pt-1 text-[11px] text-muted-foreground">Save the view to persist.</p>
+                  <p className="px-2 pt-1 text-[11px] text-muted-foreground">{t('list.saveToPersist')}</p>
                 </div>
               </details>
             )}
@@ -617,7 +619,7 @@ function ListDetail() {
                 applyView(v)
               }}
             >
-              <option value="">Saved views</option>
+              <option value="">{t('list.savedViews')}</option>
               {savedViews.map((view) => (
                 <option key={view.id} value={view.id}>
                   {view.name}
@@ -627,7 +629,7 @@ function ListDetail() {
             <Input
               value={saveAsName}
               onChange={(e) => setSaveAsName(e.target.value)}
-              placeholder="View name…"
+              placeholder={t('list.viewName')}
               className="h-8 w-28 text-[12px] border-border/80"
             />
             <Button
@@ -712,7 +714,7 @@ function ListDetail() {
           </div>
         ) : visibleTasks.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/80 bg-[#fbfbfc]/60 dark:bg-[#16181d]/40 p-12 text-center">
-            <p className="text-[15px] font-medium text-foreground mb-1">No tasks yet</p>
+            <p className="text-[15px] font-medium text-foreground mb-1">{t('list.noTasksYet')}</p>
             <p className="text-[13px] text-muted-foreground mb-4">
               Add your first task with the field above, or press{' '}
               <kbd className="px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono">C</kbd> to quick-add.
