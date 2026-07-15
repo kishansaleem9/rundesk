@@ -8,13 +8,13 @@ import {
   Copy,
   Archive,
   Trash2,
-  ExternalLink,
   ToggleLeft,
   ToggleRight,
   Settings,
   Eye,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type FormSummary = {
   id: string
@@ -29,11 +29,11 @@ type FormSummary = {
 }
 
 export function FormsPage() {
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/forms' })
   const qc = useQueryClient()
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
 
   const formsQuery = useQuery({
     queryKey: ['forms', workspaceId],
@@ -83,13 +83,13 @@ export function FormsPage() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-accent" />
-          <h1 className="text-lg font-semibold">Forms</h1>
+          <h1 className="text-lg font-semibold">{t('nav.forms')}</h1>
           <span className="text-xs text-muted-foreground ml-1">
-            {forms.length} form{forms.length !== 1 ? 's' : ''}
+            {tCount('forms.count', forms.length)}
           </span>
         </div>
         <Button size="sm" onClick={() => setCreating(true)} className="gap-1.5">
-          <Plus className="h-4 w-4" /> New form
+          <Plus className="h-4 w-4" /> {t('forms.newForm')}
         </Button>
       </div>
 
@@ -97,13 +97,13 @@ export function FormsPage() {
         {/* New form input */}
         {creating && (
           <Card className="p-4 mb-4 border-brand-300">
-            <p className="text-sm font-medium mb-2">Form title</p>
+            <p className="text-sm font-medium mb-2">{t('forms.formTitle')}</p>
             <div className="flex gap-2">
               <Input
                 autoFocus
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="e.g. Bug report, Feature request…"
+                placeholder={t('forms.titlePlaceholder')}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && newTitle.trim()) createForm.mutate(newTitle.trim())
                   if (e.key === 'Escape') { setCreating(false); setNewTitle('') }
@@ -114,10 +114,10 @@ export function FormsPage() {
                 disabled={!newTitle.trim() || createForm.isPending}
                 onClick={() => createForm.mutate(newTitle.trim())}
               >
-                Create
+                {t('common.create')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => { setCreating(false); setNewTitle('') }}>
-                Cancel
+                {t('common.cancel')}
               </Button>
             </div>
           </Card>
@@ -134,10 +134,10 @@ export function FormsPage() {
         {!formsQuery.isLoading && forms.length === 0 && !creating && (
           <div className="flex flex-col items-center justify-center h-64 text-center text-muted-foreground">
             <FileText className="h-12 w-12 mb-3 opacity-30" />
-            <p className="font-medium">No forms yet</p>
-            <p className="text-sm mt-1">Create a form to collect requests from your team or external users.</p>
+            <p className="font-medium">{t('forms.emptyTitle')}</p>
+            <p className="text-sm mt-1">{t('forms.emptyBody')}</p>
             <Button className="mt-4" onClick={() => setCreating(true)}>
-              <Plus className="h-4 w-4 mr-1" /> Create your first form
+              <Plus className="h-4 w-4 mr-1" /> {t('forms.createFirst')}
             </Button>
           </div>
         )}
@@ -153,7 +153,7 @@ export function FormsPage() {
                 onDuplicate={() => duplicateForm.mutate(form.id)}
                 onArchive={() => archiveForm.mutate(form.id)}
                 onDelete={() => {
-                  if (confirm(`Delete "${form.title}"? This cannot be undone.`)) {
+                  if (confirm(t('forms.confirmDelete', { title: form.title }))) {
                     deleteForm.mutate(form.id)
                   }
                 }}
@@ -181,6 +181,7 @@ function FormCard({
   onArchive: () => void
   onDelete: () => void
 }) {
+  const { t, tCount } = useTranslation()
   const publicUrl = `${window.location.origin}/submit/${form.slug}`
   const [copied, setCopied] = useState(false)
 
@@ -202,7 +203,7 @@ function FormCard({
         <button
           onClick={() => onToggle(!form.isEnabled)}
           className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground"
-          title={form.isEnabled ? 'Disable form' : 'Enable form'}
+          title={form.isEnabled ? t('forms.disableForm') : t('forms.enableForm')}
         >
           {form.isEnabled ? (
             <ToggleRight className="h-5 w-5 text-emerald-500" />
@@ -219,7 +220,7 @@ function FormCard({
             form.isPublic ? 'bg-brand-200 text-accent' : 'bg-surface-100 text-muted-foreground',
           )}
         >
-          {form.isPublic ? 'Public' : 'Internal'}
+          {form.isPublic ? t('forms.public') : t('forms.internal')}
         </span>
         <Link
           to="/app/$workspaceId/forms/$formId"
@@ -227,7 +228,7 @@ function FormCard({
           search={{ tab: 'submissions' }}
           className="hover:text-foreground hover:underline"
         >
-          {form.submissionCount} submission{form.submissionCount !== 1 ? 's' : ''}
+          {tCount('forms.submissions', form.submissionCount)}
         </Link>
       </div>
 
@@ -235,7 +236,7 @@ function FormCard({
       <div
         className="flex items-center gap-1.5 bg-muted rounded px-2 py-1.5 cursor-pointer hover:bg-muted/80"
         onClick={copyLink}
-        title="Copy public link"
+        title={t('forms.copyLink')}
       >
         <span className="text-xs text-muted-foreground flex-1 truncate font-mono">/submit/{form.slug}</span>
         <Copy className={cn('h-3.5 w-3.5 shrink-0 transition-colors', copied ? 'text-emerald-500' : 'text-muted-foreground')} />
@@ -248,7 +249,7 @@ function FormCard({
           className="flex-1"
         >
           <Button variant="ghost" size="sm" className="w-full gap-1.5 text-xs">
-            <Settings className="h-3.5 w-3.5" /> Edit
+            <Settings className="h-3.5 w-3.5" /> {t('forms.edit')}
           </Button>
         </Link>
         <Link
@@ -256,14 +257,14 @@ function FormCard({
           params={{ slug: form.slug }}
           target="_blank"
         >
-          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" title="Preview public form">
+          <Button variant="ghost" size="sm" className="gap-1.5 text-xs" title={t('forms.previewForm')}>
             <Eye className="h-3.5 w-3.5" />
           </Button>
         </Link>
-        <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onDuplicate} title="Duplicate">
+        <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onDuplicate} title={t('forms.duplicate')}>
           <Copy className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onArchive} title="Archive">
+        <Button variant="ghost" size="sm" className="gap-1.5 text-xs" onClick={onArchive} title={t('forms.archive')}>
           <Archive className="h-3.5 w-3.5" />
         </Button>
         <Button
@@ -271,7 +272,7 @@ function FormCard({
           size="sm"
           className="gap-1.5 text-xs text-destructive hover:text-destructive"
           onClick={onDelete}
-          title="Delete"
+          title={t('common.delete')}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>

@@ -18,6 +18,7 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,50 +44,55 @@ type AutomationRun = {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+// `labelKey` / `paramLabelKey` reference i18n catalog entries; the raw `value`
+// and `paramKey` are the locale-independent identifiers persisted to the API.
 
 const TRIGGER_OPTIONS = [
-  { value: 'task.created', label: 'Task is created' },
-  { value: 'task.status_changed', label: 'Task status changes' },
-  { value: 'task.due_passed', label: 'Task due date passes' },
-  { value: 'task.comment_added', label: 'Comment is added to task' },
-  { value: 'task.assignee_changed', label: 'Task assignee changes' },
-  { value: 'task.overdue', label: 'Task becomes overdue' },
-]
+  { value: 'task.created', labelKey: 'automations.trigger.created' },
+  { value: 'task.status_changed', labelKey: 'automations.trigger.statusChanged' },
+  { value: 'task.due_passed', labelKey: 'automations.trigger.duePassed' },
+  { value: 'task.comment_added', labelKey: 'automations.trigger.commentAdded' },
+  { value: 'task.assignee_changed', labelKey: 'automations.trigger.assigneeChanged' },
+  { value: 'task.overdue', labelKey: 'automations.trigger.overdue' },
+] as const
 
 const ACTION_OPTIONS = [
-  { value: 'change_status', label: 'Change task status', paramLabel: 'New status', paramKey: 'status' },
-  { value: 'set_priority', label: 'Set task priority', paramLabel: 'Priority', paramKey: 'priority' },
-  { value: 'send_notification', label: 'Send notification', paramLabel: 'Message', paramKey: 'message' },
-  { value: 'create_subtask', label: 'Create a subtask', paramLabel: 'Subtask title', paramKey: 'title' },
-  { value: 'assign_member', label: 'Assign member', paramLabel: 'User ID', paramKey: 'userId' },
-]
+  { value: 'change_status', labelKey: 'automations.action.changeStatus', paramLabelKey: 'automations.param.status', paramKey: 'status' },
+  { value: 'set_priority', labelKey: 'automations.action.setPriority', paramLabelKey: 'automations.param.priority', paramKey: 'priority' },
+  { value: 'send_notification', labelKey: 'automations.action.sendNotification', paramLabelKey: 'automations.param.message', paramKey: 'message' },
+  { value: 'create_subtask', labelKey: 'automations.action.createSubtask', paramLabelKey: 'automations.param.title', paramKey: 'title' },
+  { value: 'assign_member', labelKey: 'automations.action.assignMember', paramLabelKey: 'automations.param.userId', paramKey: 'userId' },
+] as const
 
 const RECIPES = [
   {
-    name: 'Auto-notify on overdue',
+    labelKey: 'automations.recipe.autoNotify',
     trigger: { type: 'task.overdue', filters: {} },
     actions: [{ type: 'send_notification', params: { message: 'A task is overdue!' } }],
   },
   {
-    name: 'Close completed tasks',
+    labelKey: 'automations.recipe.closeCompleted',
     trigger: { type: 'task.status_changed', filters: { toStatus: 'done' } },
     actions: [{ type: 'change_status', params: { status: 'done' } }],
   },
   {
-    name: 'Create follow-up on comment',
+    labelKey: 'automations.recipe.followUp',
     trigger: { type: 'task.comment_added', filters: {} },
     actions: [{ type: 'create_subtask', params: { title: 'Follow-up required' } }],
   },
   {
-    name: 'Escalate overdue to urgent',
+    labelKey: 'automations.recipe.escalate',
     trigger: { type: 'task.overdue', filters: {} },
     actions: [{ type: 'set_priority', params: { priority: 'urgent' } }],
   },
-]
+] as const
+
+type Recipe = (typeof RECIPES)[number]
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function AutomationsPage() {
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/automations' })
   const qc = useQueryClient()
   const [showBuilder, setShowBuilder] = useState(false)
@@ -108,8 +114,11 @@ export function AutomationsPage() {
   })
 
   const createFromRecipe = useMutation({
-    mutationFn: (recipe: { name: string; trigger: TriggerDef; actions: ActionDef[] }) =>
-      api<Automation>(`/workspaces/${workspaceId}/automations`, { method: 'POST', body: recipe }),
+    mutationFn: (recipe: Recipe) =>
+      api<Automation>(`/workspaces/${workspaceId}/automations`, {
+        method: 'POST',
+        body: { name: t(recipe.labelKey), trigger: recipe.trigger, actions: recipe.actions },
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['automations', workspaceId] }),
   })
 
@@ -120,14 +129,14 @@ export function AutomationsPage() {
       <header className="px-6 py-4 border-b border-border bg-card">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-            <h1 className="font-display text-2xl font-semibold text-foreground">Automations</h1>
+            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">{t('common.workspace')}</div>
+            <h1 className="font-display text-2xl font-semibold text-foreground">{t('nav.automations')}</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              When-this-then-that rules that run automatically.
+              {t('automations.subtitle')}
             </p>
           </div>
           <Button onClick={() => setShowBuilder(true)}>
-            <Plus className="h-4 w-4 mr-1" /> New automation
+            <Plus className="h-4 w-4 mr-1" /> {t('automations.newAutomation')}
           </Button>
         </div>
       </header>
@@ -147,13 +156,13 @@ export function AutomationsPage() {
         {/* Active automations */}
         <section>
           <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide mb-3">
-            Your automations ({automations.length})
+            {t('automations.yourAutomations', { count: automations.length })}
           </h2>
           {automations.length === 0 && !query.isLoading ? (
             <Card className="p-6 text-center border-dashed">
               <Zap className="h-8 w-8 text-brand-500 mx-auto mb-2" />
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                No automations yet. Pick a recipe below or build your own.
+                {t('automations.emptyBody')}
               </p>
             </Card>
           ) : (
@@ -165,7 +174,7 @@ export function AutomationsPage() {
                   workspaceId={workspaceId}
                   onToggle={(en) => toggleAuto.mutate({ id: a.id, isEnabled: en })}
                   onDelete={() => {
-                    if (confirm(`Delete "${a.name}"?`)) deleteAuto.mutate(a.id)
+                    if (confirm(t('automations.confirmDelete', { name: a.name }))) deleteAuto.mutate(a.id)
                   }}
                 />
               ))}
@@ -176,8 +185,8 @@ export function AutomationsPage() {
         {/* Recipes */}
         <section>
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">Recipes</h2>
-            <span className="text-xs text-muted-foreground">Quick-start templates</span>
+            <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">{t('automations.recipes')}</h2>
+            <span className="text-xs text-muted-foreground">{t('automations.quickStart')}</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {RECIPES.map((r, i) => (
@@ -187,7 +196,7 @@ export function AutomationsPage() {
                     <Sparkles className="h-4 w-4 text-amber-700" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-sm">{r.name}</h3>
+                    <h3 className="font-semibold text-sm">{t(r.labelKey)}</h3>
                     <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground flex-wrap">
                       <code className="px-1.5 py-0.5 rounded bg-muted">{r.trigger.type}</code>
                       <ArrowRight className="h-3 w-3" />
@@ -203,7 +212,7 @@ export function AutomationsPage() {
                     onClick={() => createFromRecipe.mutate(r)}
                     disabled={createFromRecipe.isPending}
                   >
-                    Use
+                    {t('automations.use')}
                   </Button>
                 </div>
               </Card>
@@ -228,6 +237,7 @@ function AutomationRow({
   onToggle: (en: boolean) => void
   onDelete: () => void
 }) {
+  const { t, tCount } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const runsQuery = useQuery({
     queryKey: ['automation-runs', automation.id],
@@ -235,10 +245,12 @@ function AutomationRow({
     enabled: expanded,
   })
 
-  const triggerLabel = TRIGGER_OPTIONS.find((t) => t.value === automation.trigger.type)?.label ?? automation.trigger.type
-  const actionLabels = automation.actions.map(
-    (a) => ACTION_OPTIONS.find((o) => o.value === a.type)?.label ?? a.type,
-  )
+  const triggerOpt = TRIGGER_OPTIONS.find((o) => o.value === automation.trigger.type)
+  const triggerLabel = triggerOpt ? t(triggerOpt.labelKey) : automation.trigger.type
+  const actionLabels = automation.actions.map((a) => {
+    const opt = ACTION_OPTIONS.find((o) => o.value === a.type)
+    return opt ? t(opt.labelKey) : a.type
+  })
 
   return (
     <Card className={cn('overflow-hidden', automation.isEnabled ? '' : 'opacity-60')}>
@@ -262,7 +274,7 @@ function AutomationRow({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-muted-foreground tabular-nums">{automation.runCount} runs</span>
+          <span className="text-xs text-muted-foreground tabular-nums">{tCount('automations.runsCount', automation.runCount)}</span>
           {automation.lastRunAt && (
             <span className="text-xs text-muted-foreground hidden sm:block">
               <Clock className="h-3 w-3 inline mr-0.5" />
@@ -290,10 +302,10 @@ function AutomationRow({
 
       {expanded && (
         <div className="border-t border-border px-4 py-3 bg-muted/30">
-          <p className="text-xs font-medium text-muted-foreground mb-2">Run history (last 20)</p>
-          {runsQuery.isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
+          <p className="text-xs font-medium text-muted-foreground mb-2">{t('automations.runHistory')}</p>
+          {runsQuery.isLoading && <p className="text-xs text-muted-foreground">{t('common.loading')}</p>}
           {!runsQuery.isLoading && (!runsQuery.data || runsQuery.data.length === 0) && (
-            <p className="text-xs text-muted-foreground">No runs yet.</p>
+            <p className="text-xs text-muted-foreground">{t('automations.noRuns')}</p>
           )}
           {runsQuery.data && runsQuery.data.length > 0 && (
             <div className="space-y-1">
@@ -331,6 +343,7 @@ function AutomationBuilder({
   onClose: () => void
   onCreated: () => void
 }) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [triggerType, setTriggerType] = useState('task.created')
   const [toStatus, setToStatus] = useState('')
@@ -343,7 +356,7 @@ function AutomationBuilder({
       api<Automation>(`/workspaces/${workspaceId}/automations`, {
         method: 'POST',
         body: {
-          name: name.trim() || 'New automation',
+          name: name.trim() || t('automations.newAutomation'),
           trigger: {
             type: triggerType,
             filters: toStatus ? { toStatus } : {},
@@ -370,7 +383,7 @@ function AutomationBuilder({
     <div className="border-b border-border bg-card shadow-sm">
       <div className="px-6 py-4 max-w-2xl">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold">New automation</h2>
+          <h2 className="font-semibold">{t('automations.newAutomation')}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
@@ -379,31 +392,31 @@ function AutomationBuilder({
         <div className="space-y-4">
           {/* Name */}
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="My automation" />
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('automations.name')}</label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('automations.namePlaceholder')} />
           </div>
 
           {/* Trigger */}
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              When (trigger)
+              {t('automations.whenTrigger')}
             </label>
             <select
               className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
               value={triggerType}
               onChange={(e) => setTriggerType(e.target.value)}
             >
-              {TRIGGER_OPTIONS.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
+              {TRIGGER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
               ))}
             </select>
             {triggerType === 'task.status_changed' && (
               <div className="mt-2">
-                <label className="text-xs text-muted-foreground mb-1 block">To status (optional)</label>
+                <label className="text-xs text-muted-foreground mb-1 block">{t('automations.toStatus')}</label>
                 <Input
                   value={toStatus}
                   onChange={(e) => setToStatus(e.target.value)}
-                  placeholder="e.g. done"
+                  placeholder={t('automations.toStatusPlaceholder')}
                 />
               </div>
             )}
@@ -411,7 +424,7 @@ function AutomationBuilder({
 
           {/* Actions */}
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Then (actions)</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('automations.thenActions')}</label>
             <div className="space-y-2">
               {actions.map((action, i) => {
                 const meta = ACTION_OPTIONS.find((o) => o.value === action.type)
@@ -426,7 +439,7 @@ function AutomationBuilder({
                       }}
                     >
                       {ACTION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
+                        <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
                       ))}
                     </select>
                     {meta && (
@@ -436,7 +449,7 @@ function AutomationBuilder({
                         onChange={(e) =>
                           updateAction(i, { params: { ...action.params, [meta.paramKey]: e.target.value } })
                         }
-                        placeholder={meta.paramLabel}
+                        placeholder={t(meta.paramLabelKey)}
                       />
                     )}
                     {actions.length > 1 && (
@@ -451,7 +464,7 @@ function AutomationBuilder({
                 onClick={addAction}
                 className="text-xs text-accent hover:underline flex items-center gap-1"
               >
-                <Plus className="h-3.5 w-3.5" /> Add another action
+                <Plus className="h-3.5 w-3.5" /> {t('automations.addAction')}
               </button>
             </div>
           </div>
@@ -461,9 +474,9 @@ function AutomationBuilder({
               disabled={createMutation.isPending}
               onClick={() => createMutation.mutate()}
             >
-              {createMutation.isPending ? 'Creating…' : 'Create automation'}
+              {createMutation.isPending ? t('automations.creating') : t('automations.createAutomation')}
             </Button>
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button variant="ghost" onClick={onClose}>{t('common.cancel')}</Button>
           </div>
         </div>
       </div>
