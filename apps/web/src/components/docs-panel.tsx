@@ -43,6 +43,7 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import TextAlign from '@tiptap/extension-text-align'
 import { api, ApiError, downloadFile } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 import { getRealtimeSocket } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
 import { MentionText } from './mention-text'
@@ -81,6 +82,7 @@ type DocComment = {
 
 export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   // Honor a ?doc=<id> deep link (e.g. from global search) by preselecting it.
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -452,7 +454,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
             <button
               type="button"
               className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-card/80 text-muted-foreground shrink-0"
-              title="Add sub-page"
+              title={t('docs.addSubPage')}
               onClick={() => createDoc.mutate({ parentDocId: node.id })}
             >
               <Plus className="h-3 w-3" />
@@ -493,7 +495,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           <Input
             value={newDocName}
             onChange={(e) => setNewDocName(e.target.value)}
-            placeholder="New page name"
+            placeholder={t('docs.newPageName')}
             className="h-9"
           />
           <div className="flex gap-2">
@@ -509,10 +511,10 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
             <Button
               size="sm"
               variant="ghost"
-              title="Create from a template"
+              title={t('docs.createFromTemplate')}
               onClick={() => setTemplatesOpen(true)}
             >
-              <Layers className="h-3.5 w-3.5" /> Templates
+              <Layers className="h-3.5 w-3.5" /> {t('nav.templates')}
             </Button>
           </div>
         </div>
@@ -548,7 +550,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       <div className="flex flex-col min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-border/60">
           <h3 className="font-display text-base font-semibold truncate">
-            {activeDoc?.title ?? 'Select a doc'}
+            {activeDoc?.title ?? t('docs.selectADoc')}
           </h3>
           {activeDoc && (
             <div className="flex flex-wrap gap-1.5">
@@ -556,7 +558,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               <Button
                 size="sm"
                 variant="ghost"
-                title="Save this doc as a reusable template"
+                title={t('docs.saveAsTemplateTip')}
                 disabled={saveAsTemplate.isPending}
                 onClick={() => {
                   const name = window.prompt('Template name', activeDoc.title)?.trim()
@@ -568,7 +570,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               <Button
                 size="sm"
                 variant="ghost"
-                title="Export as Markdown"
+                title={t('docs.exportMarkdown')}
                 onClick={() => {
                   const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
                   void downloadFile(`/docs/${activeDoc.id}/export`, `${base}.md`).catch(() =>
@@ -581,7 +583,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               <Button
                 size="sm"
                 variant="ghost"
-                title="Export as PDF"
+                title={t('docs.exportPdf')}
                 onClick={() => {
                   const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
                   void downloadFile(`/docs/${activeDoc.id}/export?format=pdf`, `${base}.pdf`).catch(() =>
@@ -612,7 +614,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('underline') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleUnderline().run()}
                 disabled={!editor}
-                title="Underline"
+                title={t('docs.underline')}
               >
                 <Underline className="h-3.5 w-3.5" />
               </Button>
@@ -621,7 +623,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('strike') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleStrike().run()}
                 disabled={!editor}
-                title="Strikethrough"
+                title={t('docs.strikethrough')}
               >
                 <Strikethrough className="h-3.5 w-3.5" />
               </Button>
@@ -630,7 +632,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('link') ? 'secondary' : 'ghost'}
                 onClick={toggleLink}
                 disabled={!editor}
-                title="Link"
+                title={t('docs.link')}
               >
                 <Link className="h-3.5 w-3.5" />
               </Button>
@@ -639,7 +641,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('heading', { level: 1 }) ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
                 disabled={!editor}
-                title="Heading 1"
+                title={t('docs.heading1')}
               >
                 <Heading1 className="h-3.5 w-3.5" />
               </Button>
@@ -648,7 +650,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('heading', { level: 2 }) ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
                 disabled={!editor}
-                title="Heading 2"
+                title={t('docs.heading2')}
               >
                 H2
               </Button>
@@ -657,7 +659,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('heading', { level: 3 }) ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
                 disabled={!editor}
-                title="Heading 3"
+                title={t('docs.heading3')}
               >
                 <Heading3 className="h-3.5 w-3.5" />
               </Button>
@@ -666,7 +668,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('paragraph') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().setParagraph().run()}
                 disabled={!editor}
-                title="Normal text"
+                title={t('docs.normalText')}
               >
                 <Pilcrow className="h-3.5 w-3.5" />
               </Button>
@@ -675,7 +677,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('bulletList') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleBulletList().run()}
                 disabled={!editor}
-                title="Bullet list"
+                title={t('docs.bulletList')}
               >
                 List
               </Button>
@@ -684,7 +686,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('orderedList') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleOrderedList().run()}
                 disabled={!editor}
-                title="Numbered list"
+                title={t('docs.numberedList')}
               >
                 <ListOrdered className="h-3.5 w-3.5" />
               </Button>
@@ -693,7 +695,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('taskList') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleTaskList().run()}
                 disabled={!editor}
-                title="Todo list"
+                title={t('docs.todoList')}
               >
                 Todo
               </Button>
@@ -702,7 +704,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={editor?.isActive('codeBlock') ? 'secondary' : 'ghost'}
                 onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
                 disabled={!editor}
-                title="Code block"
+                title={t('docs.codeBlock')}
               >
                 Code
               </Button>
@@ -713,7 +715,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                   variant={colorOpen ? 'secondary' : 'ghost'}
                   onClick={() => setColorOpen((v) => !v)}
                   disabled={!editor}
-                  title="Text color"
+                  title={t('docs.textColor')}
                 >
                   <Palette className="h-3.5 w-3.5" />
                 </Button>
@@ -748,16 +750,16 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 )}
               </span>
               {/* Alignment */}
-              <Button size="sm" variant={editor?.isActive({ textAlign: 'left' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('left')} disabled={!editor} title="Align left">
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'left' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('left')} disabled={!editor} title={t('docs.alignLeft')}>
                 <AlignLeft className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" variant={editor?.isActive({ textAlign: 'center' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('center')} disabled={!editor} title="Align center">
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'center' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('center')} disabled={!editor} title={t('docs.alignCenter')}>
                 <AlignCenter className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" variant={editor?.isActive({ textAlign: 'right' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('right')} disabled={!editor} title="Align right">
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'right' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('right')} disabled={!editor} title={t('docs.alignRight')}>
                 <AlignRight className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" variant={editor?.isActive({ textAlign: 'justify' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('justify')} disabled={!editor} title="Justify">
+              <Button size="sm" variant={editor?.isActive({ textAlign: 'justify' }) ? 'secondary' : 'ghost'} onClick={() => setAlign('justify')} disabled={!editor} title={t('docs.justify')}>
                 <AlignJustify className="h-3.5 w-3.5" />
               </Button>
               {/* Insert menu */}
@@ -767,7 +769,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                   variant={insertOpen ? 'secondary' : 'ghost'}
                   onClick={() => setInsertOpen((v) => !v)}
                   disabled={!editor}
-                  title="Insert"
+                  title={t('docs.insert')}
                 >
                   <Plus className="h-3.5 w-3.5 mr-0.5" /> Insert <ChevronDown className="h-3 w-3 ml-0.5" />
                 </Button>
@@ -783,14 +785,14 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                       <Plus className="h-3.5 w-3.5" /> Create task from selection
                     </button>
                     <div className="border-t border-border max-h-40 overflow-auto">
-                      <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-muted-foreground">Embed doc</div>
+                      <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-muted-foreground">{t('docs.embedDoc')}</div>
                       {(docsQuery.data ?? []).filter((d) => d.id !== selectedDocId).slice(0, 20).map((d) => (
                         <button key={d.id} className="w-full text-left px-3 py-1.5 text-sm hover:bg-surface-50 truncate flex items-center gap-2" onClick={() => embedDoc(d)}>
                           <FileText className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{d.title || 'Untitled'}</span>
                         </button>
                       ))}
                       {(docsQuery.data ?? []).filter((d) => d.id !== selectedDocId).length === 0 && (
-                        <div className="px-3 py-1.5 text-xs text-muted-foreground">No other docs to embed</div>
+                        <div className="px-3 py-1.5 text-xs text-muted-foreground">{t('docs.noOtherDocs')}</div>
                       )}
                     </div>
                   </div>
@@ -837,7 +839,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                   variant="ghost"
                   onClick={() => runAi('improve')}
                   disabled={!editor || improving}
-                  title="Improve writing with AI"
+                  title={t('docs.improveWritingAi')}
                 >
                   <Sparkles className="h-3.5 w-3.5 mr-1" />
                   {improving ? 'Working…' : 'AI'}
@@ -847,16 +849,16 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                   variant={aiMenuOpen ? 'secondary' : 'ghost'}
                   onClick={() => setAiMenuOpen((v) => !v)}
                   disabled={!editor || improving}
-                  title="More AI actions"
+                  title={t('docs.moreAiActions')}
                 >
                   <ChevronDown className="h-3 w-3" />
                 </Button>
                 {aiMenuOpen && (
                   <div className="absolute z-40 top-9 right-0 w-44 rounded-md border border-border bg-card shadow-lg overflow-hidden">
-                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('improve')}>Improve writing</button>
-                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('shorten')}>Make shorter</button>
-                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('expand')}>Expand</button>
-                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('format')}>Fix grammar &amp; format</button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('improve')}>{t('docs.improveWriting')}</button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('shorten')}>{t('docs.makeShorter')}</button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('expand')}>{t('docs.expand')}</button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50" onClick={() => runAi('format')}>{t('docs.fixGrammar')}</button>
                   </div>
                 )}
               </span>
@@ -866,7 +868,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 onClick={() => saveDoc.mutate()}
                 disabled={saveDoc.isPending}
               >
-                {saveDoc.isPending ? 'Saving…' : 'Save'}
+                {saveDoc.isPending ? t('common.saving') : t('common.save')}
               </Button>
             </div>
           )}
