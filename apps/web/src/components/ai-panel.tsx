@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -27,15 +28,18 @@ type AiPanelProps = {
   className?: string
 }
 
-const SUGGESTED_PROMPTS = [
-  'What tasks are due this week?',
-  'Summarize the status of my projects',
-  'Help me write a task description',
-  'Create tasks for launching a new feature',
-  "What's blocking my team?",
-]
+// Stable catalog-key identifiers; the localized text is both shown and sent
+// as the chat message when a suggestion is clicked.
+const SUGGESTED_PROMPT_KEYS = [
+  'aiPanel.suggestion.dueThisWeek',
+  'aiPanel.suggestion.summarizeProjects',
+  'aiPanel.suggestion.writeDescription',
+  'aiPanel.suggestion.createTasks',
+  'aiPanel.suggestion.whatsBlocking',
+] as const
 
 export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
+  const { t } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -124,7 +128,7 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
           ...prev,
           {
             role: 'assistant',
-            content: 'Sorry, I encountered an error. Please try again.',
+            content: t('aiPanel.errorMessage'),
             id: Date.now().toString(),
           },
         ])
@@ -159,7 +163,7 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
         <div className="flex-1">
           <p className="text-sm font-semibold">Rundesk AI</p>
           <p className="text-xs text-muted-foreground">
-            {aiAvailable ? 'Online — Claude' : 'Not configured'}
+            {aiAvailable ? t('aiPanel.statusOnline') : t('aiPanel.statusNotConfigured')}
           </p>
         </div>
         {onClose && (
@@ -178,18 +182,18 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
                 <Bot className="h-3.5 w-3.5 text-white" />
               </div>
               <div className="bg-muted rounded-xl rounded-tl-sm px-3 py-2 text-sm max-w-xs">
-                Hi! I&apos;m Rundesk AI. I can help you manage tasks, summarize projects, draft content, and more.
+                {t('aiPanel.greeting')}
               </div>
             </div>
             <div className="space-y-2">
-              <p className="text-xs text-muted-foreground px-8">Try asking:</p>
-              {SUGGESTED_PROMPTS.map((p) => (
+              <p className="text-xs text-muted-foreground px-8">{t('aiPanel.tryAsking')}</p>
+              {SUGGESTED_PROMPT_KEYS.map((promptKey) => (
                 <button
-                  key={p}
-                  onClick={() => sendMessage(p)}
+                  key={promptKey}
+                  onClick={() => sendMessage(t(promptKey))}
                   className="w-full text-left text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted/50 transition-colors ml-8"
                 >
-                  {p}
+                  {t(promptKey)}
                 </button>
               ))}
             </div>
@@ -230,14 +234,14 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
         {!aiAvailable && (
           <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
             <Wand2 className="h-3.5 w-3.5" />
-            Add ANTHROPIC_API_KEY to your .env to enable AI features.
+            {t('aiPanel.configHint')}
           </p>
         )}
         <div className="flex gap-2">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask Rundesk AI anything…"
+            placeholder={t('aiPanel.inputPlaceholder')}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -248,7 +252,7 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
             className="text-sm"
           />
           {isStreaming ? (
-            <Button variant="outline" size="icon" onClick={stopStreaming} title="Stop">
+            <Button variant="outline" size="icon" onClick={stopStreaming} title={t('aiPanel.stop')}>
               <X className="h-4 w-4" />
             </Button>
           ) : (
@@ -267,6 +271,7 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
 }
 
 function MessageBubble({ message }: { message: Message }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
 
@@ -304,7 +309,7 @@ function MessageBubble({ message }: { message: Message }) {
         <button
           onClick={copy}
           className="absolute -bottom-4 right-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-          title="Copy"
+          title={t('aiPanel.copy')}
         >
           {copied ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />

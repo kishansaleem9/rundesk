@@ -2,6 +2,7 @@ import { Link, useRouter } from '@tanstack/react-router'
 import { Button, Card } from '@rundesk/ui'
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
 import { useEffect } from 'react'
+import { useTranslation } from '../lib/i18n'
 
 interface RouteErrorBoundaryProps {
   error: unknown
@@ -29,6 +30,7 @@ interface RouteErrorBoundaryProps {
  * because that's usually a useful one-line clue.
  */
 export function RouteErrorBoundary({ error, reset }: RouteErrorBoundaryProps) {
+  const { t } = useTranslation()
   const router = useRouter()
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export function RouteErrorBoundary({ error, reset }: RouteErrorBoundaryProps) {
       ? error.message
       : typeof error === 'string'
         ? error
-        : 'An unexpected error occurred while rendering this page.'
+        : t('routeError.fallbackMessage')
 
   const handleRetry = () => {
     if (reset) {
@@ -59,7 +61,7 @@ export function RouteErrorBoundary({ error, reset }: RouteErrorBoundaryProps) {
           <AlertTriangle className="h-6 w-6" />
         </div>
         <h1 className="font-display text-2xl font-semibold text-foreground mb-2">
-          Something went wrong
+          {t('routeError.title')}
         </h1>
         <p className="text-sm text-muted-foreground mb-6 break-words">
           {message}
@@ -67,12 +69,12 @@ export function RouteErrorBoundary({ error, reset }: RouteErrorBoundaryProps) {
         <div className="flex flex-col sm:flex-row gap-2 justify-center">
           <Button onClick={handleRetry} className="gap-2">
             <RefreshCw className="h-4 w-4" />
-            Try again
+            {t('common.retry')}
           </Button>
           <Button variant="outline" asChild className="gap-2">
             <Link to="/">
               <Home className="h-4 w-4" />
-              Go home
+              {t('routeError.goHome')}
             </Link>
           </Button>
         </div>

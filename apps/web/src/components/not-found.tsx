@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { Button, Card } from '@rundesk/ui'
 import { Compass, Home } from 'lucide-react'
+import { useTranslation } from '../lib/i18n'
 
 /**
  * Rendered by the root route's `notFoundComponent` whenever the router
@@ -10,6 +11,7 @@ import { Compass, Home } from 'lucide-react'
  * navigable instead of disappearing into a void.
  */
 export function NotFound() {
+  const { t } = useTranslation()
   return (
     <div className="min-h-screen flex items-center justify-center p-6 bg-background">
       <Card className="max-w-lg w-full p-8 text-center bg-card/80 backdrop-blur">
@@ -17,15 +19,15 @@ export function NotFound() {
           <Compass className="h-6 w-6" />
         </div>
         <h1 className="font-display text-2xl font-semibold text-foreground mb-2">
-          We couldn&rsquo;t find that page
+          {t('notFound.title')}
         </h1>
         <p className="text-sm text-muted-foreground mb-6">
-          The URL may have changed, or you may not have access. Try going home and navigating from there.
+          {t('notFound.body')}
         </p>
         <Button asChild className="gap-2">
           <Link to="/">
             <Home className="h-4 w-4" />
-            Go home
+            {t('notFound.goHome')}
           </Link>
         </Button>
       </Card>

@@ -20,6 +20,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 /**
  * Empty-workspace welcome card with a one-click "Load demo data" CTA.
@@ -36,6 +37,7 @@ export function DemoDataEmptyState({
   workspaceId: string
   children?: React.ReactNode
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [dismissed, setDismissed] = useState<boolean>(() => {
@@ -62,7 +64,12 @@ export function DemoDataEmptyState({
     onSuccess: (res) => {
       const s = res.summary
       toast.success(
-        `Demo loaded: ${s.spaces} spaces, ${s.projects} projects, ${s.tasks} tasks, ${s.docs} docs.`,
+        t('demoData.loadedToast', {
+          spaces: s.spaces,
+          projects: s.projects,
+          tasks: s.tasks,
+          docs: s.docs,
+        }),
       )
       // Nuke every workspace-scoped query so the freshly seeded data
       // surfaces everywhere immediately.
@@ -70,7 +77,7 @@ export function DemoDataEmptyState({
       setConfirmOpen(false)
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to load demo data')
+      toast.error(err instanceof ApiError ? err.message : t('demoData.loadError'))
     },
   })
 
@@ -87,18 +94,17 @@ export function DemoDataEmptyState({
           <Sparkles className="h-7 w-7" />
         </div>
         <h1 className="font-display text-3xl font-semibold mb-2">
-          Welcome to your workspace
+          {t('demoData.welcomeTitle')}
         </h1>
         <p className="text-muted-foreground max-w-md mx-auto mb-7">
-          This workspace is empty. Load a curated demo so you can explore tasks, custom statuses,
-          docs, goals, and labels right away — or start from scratch.
+          {t('demoData.welcomeBody')}
         </p>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-7 text-left max-w-2xl mx-auto">
-          <Feature icon={FolderTree} label="3 spaces, 6 projects" />
-          <Feature icon={CheckCircle2} label="40+ tasks with subtasks" />
-          <Feature icon={FileText} label="4 starter docs" />
-          <Feature icon={Target} label="3 quarterly goals" />
+          <Feature icon={FolderTree} labelKey="demoData.feature.spaces" />
+          <Feature icon={CheckCircle2} labelKey="demoData.feature.tasks" />
+          <Feature icon={FileText} labelKey="demoData.feature.docs" />
+          <Feature icon={Target} labelKey="demoData.feature.goals" />
         </div>
 
         <div className="flex items-center justify-center gap-3">
@@ -113,7 +119,7 @@ export function DemoDataEmptyState({
             ) : (
               <Sparkles className="h-4 w-4" />
             )}
-            Load demo data
+            {t('demoData.loadCta')}
           </Button>
           <Button
             size="lg"
@@ -129,7 +135,7 @@ export function DemoDataEmptyState({
               setDismissed(true)
             }}
           >
-            Start from scratch
+            {t('demoData.startScratch')}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -138,16 +144,14 @@ export function DemoDataEmptyState({
       <Dialog open={confirmOpen} onOpenChange={(v) => !seed.isPending && setConfirmOpen(v)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Load demo data?</DialogTitle>
+            <DialogTitle>{t('demoData.confirmTitle')}</DialogTitle>
             <DialogDescription>
-              This adds 3 spaces (Engineering, Design, Marketing) with realistic projects, lists,
-              tasks, subtasks, labels, checklists, docs and goals — all owned by you. The action
-              is one-shot: it only runs while the workspace is empty.
+              {t('demoData.confirmBody')}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={seed.isPending}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               variant="gradient"
@@ -157,10 +161,10 @@ export function DemoDataEmptyState({
               {seed.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Loading…
+                  {t('common.loading')}
                 </>
               ) : (
-                'Load demo data'
+                t('demoData.loadCta')
               )}
             </Button>
           </div>
@@ -170,11 +174,12 @@ export function DemoDataEmptyState({
   )
 }
 
-function Feature({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+function Feature({ icon: Icon, labelKey }: { icon: React.ElementType; labelKey: TranslationKey }) {
+  const { t } = useTranslation()
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-border/40 bg-card/40 px-3 py-2 text-xs">
       <Icon className="h-4 w-4 text-accent shrink-0" />
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-muted-foreground">{t(labelKey)}</span>
     </div>
   )
 }

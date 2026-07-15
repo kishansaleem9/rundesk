@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Download, X, WifiOff } from 'lucide-react'
 import { Button } from '@rundesk/ui'
+import { useTranslation } from '../lib/i18n'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -16,6 +17,7 @@ const DISMISS_DURATION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
  * a 7-day dismiss snooze.
  */
 export function PwaInstallPrompt() {
+  const { t } = useTranslation()
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
 
@@ -63,7 +65,7 @@ export function PwaInstallPrompt() {
       {!isOnline && (
         <div className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-amber-950 text-xs font-medium px-3 py-1.5 flex items-center justify-center gap-2 shadow">
           <WifiOff className="h-3.5 w-3.5" />
-          You&apos;re offline — recently viewed data still works.
+          {t('pwaInstall.offline')}
         </div>
       )}
 
@@ -74,24 +76,24 @@ export function PwaInstallPrompt() {
           </div>
           <div className="flex-1 space-y-2">
             <div>
-              <div className="text-sm font-semibold">Install Rundesk</div>
+              <div className="text-sm font-semibold">{t('pwaInstall.title')}</div>
               <div className="text-xs text-muted-foreground">
-                Get a faster, offline-capable workspace on your home screen.
+                {t('pwaInstall.body')}
               </div>
             </div>
             <div className="flex gap-2">
               <Button size="sm" onClick={install}>
-                Install
+                {t('pwaInstall.install')}
               </Button>
               <Button size="sm" variant="ghost" onClick={dismiss}>
-                Not now
+                {t('pwaInstall.notNow')}
               </Button>
             </div>
           </div>
           <button
             onClick={dismiss}
             className="text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Dismiss"
+            aria-label={t('pwaInstall.dismiss')}
           >
             <X className="h-4 w-4" />
           </button>

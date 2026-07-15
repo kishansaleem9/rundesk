@@ -6,57 +6,61 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@rundesk/ui'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
-type Shortcut = { keys: string[]; description: string }
+// `titleKey` / `descKey` reference i18n catalog entries; the key glyphs
+// themselves (⌘, K, Esc, …) stay literal since they are not localizable.
+type Shortcut = { keys: string[]; descKey: TranslationKey }
 
-const GROUPS: Array<{ title: string; items: Shortcut[] }> = [
+const GROUPS: Array<{ titleKey: TranslationKey; items: Shortcut[] }> = [
   {
-    title: 'Navigation',
+    titleKey: 'shortcuts.section.navigation',
     items: [
-      { keys: ['⌘', 'K'], description: 'Open command palette' },
-      { keys: ['?'], description: 'Show this shortcuts overlay' },
-      { keys: ['G', 'D'], description: 'Go to dashboard' },
-      { keys: ['G', 'I'], description: 'Go to inbox' },
-      { keys: ['G', 'C'], description: 'Go to chat' },
-      { keys: ['G', 'T'], description: 'Go to timeline' },
-      { keys: ['G', 'O'], description: 'Go to docs' },
+      { keys: ['⌘', 'K'], descKey: 'shortcuts.openCommandPalette' },
+      { keys: ['?'], descKey: 'shortcuts.showOverlay' },
+      { keys: ['G', 'D'], descKey: 'shortcuts.goToDashboard' },
+      { keys: ['G', 'I'], descKey: 'shortcuts.goToInbox' },
+      { keys: ['G', 'C'], descKey: 'shortcuts.goToChat' },
+      { keys: ['G', 'T'], descKey: 'shortcuts.goToTimeline' },
+      { keys: ['G', 'O'], descKey: 'shortcuts.goToDocs' },
     ],
   },
   {
-    title: 'Tasks (in list view)',
+    titleKey: 'shortcuts.section.tasks',
     items: [
-      { keys: ['Shift', 'click'], description: 'Add task to multi-select' },
-      { keys: ['Esc'], description: 'Clear multi-select' },
-      { keys: ['⌘', 'A'], description: 'Select all visible tasks' },
-      { keys: ['Del'], description: 'Archive selected tasks' },
+      { keys: ['Shift', 'click'], descKey: 'shortcuts.addTaskMultiSelect' },
+      { keys: ['Esc'], descKey: 'shortcuts.clearMultiSelect' },
+      { keys: ['⌘', 'A'], descKey: 'shortcuts.selectAllTasks' },
+      { keys: ['Del'], descKey: 'shortcuts.archiveSelected' },
     ],
   },
   {
-    title: 'Whiteboards',
+    titleKey: 'shortcuts.section.whiteboards',
     items: [
-      { keys: ['Shift', 'click'], description: 'Add item to multi-select' },
-      { keys: ['⌘', 'D'], description: 'Duplicate selection' },
-      { keys: ['Del'], description: 'Delete selected items' },
+      { keys: ['Shift', 'click'], descKey: 'shortcuts.addItemMultiSelect' },
+      { keys: ['⌘', 'D'], descKey: 'shortcuts.duplicateSelection' },
+      { keys: ['Del'], descKey: 'shortcuts.deleteSelectedItems' },
     ],
   },
   {
-    title: 'Mind maps',
+    titleKey: 'shortcuts.section.mindMaps',
     items: [
-      { keys: ['Tab'], description: 'Add child branch under selected node' },
-      { keys: ['Del'], description: 'Remove selected branch + descendants' },
+      { keys: ['Tab'], descKey: 'shortcuts.addChildBranch' },
+      { keys: ['Del'], descKey: 'shortcuts.removeBranch' },
     ],
   },
   {
-    title: 'Docs editor',
+    titleKey: 'shortcuts.section.docsEditor',
     items: [
-      { keys: ['@'], description: 'Mention a teammate' },
-      { keys: ['⌘', 'B'], description: 'Bold' },
-      { keys: ['⌘', 'I'], description: 'Italic' },
+      { keys: ['@'], descKey: 'shortcuts.mentionTeammate' },
+      { keys: ['⌘', 'B'], descKey: 'shortcuts.bold' },
+      { keys: ['⌘', 'I'], descKey: 'shortcuts.italic' },
     ],
   },
 ]
 
 export function ShortcutsOverlay() {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
 
   useEffect(() => {
@@ -82,24 +86,24 @@ export function ShortcutsOverlay() {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
+          <DialogTitle>{t('shortcuts.title')}</DialogTitle>
           <DialogDescription>
-            Press <Kbd>?</Kbd> any time to toggle this overlay.
+            {t('shortcuts.toggleHintBefore')} <Kbd>?</Kbd> {t('shortcuts.toggleHintAfter')}
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-6 mt-2">
           {GROUPS.map((group) => (
-            <section key={group.title}>
+            <section key={group.titleKey}>
               <h4 className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2">
-                {group.title}
+                {t(group.titleKey)}
               </h4>
               <ul className="space-y-1.5">
                 {group.items.map((shortcut, idx) => (
                   <li
-                    key={`${group.title}-${idx}`}
+                    key={`${group.titleKey}-${idx}`}
                     className="flex items-center justify-between gap-3 text-sm"
                   >
-                    <span className="text-foreground/80">{shortcut.description}</span>
+                    <span className="text-foreground/80">{t(shortcut.descKey)}</span>
                     <span className="flex items-center gap-1">
                       {shortcut.keys.map((k, i) => (
                         <Kbd key={i}>{k}</Kbd>
