@@ -23,11 +23,13 @@ import {
   Calendar,
 } from 'lucide-react'
 import { CalendarSyncWizard } from '../components/calendar-sync-wizard'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 type Integration = {
   id: string
   name: string
-  description: string
+  descKey: TranslationKey
   category: 'comms' | 'storage' | 'dev' | 'calendar' | 'analytics' | 'crm' | 'ai'
   popular?: boolean
   comingSoon?: boolean
@@ -38,53 +40,54 @@ type Integration = {
 type ConnectionHealth = 'healthy' | 'expiring' | 'expired' | 'disconnected'
 
 const INTEGRATIONS: Integration[] = [
-  { id: 'slack', name: 'Slack', description: 'Get task updates in any channel, create tasks from messages.', category: 'comms', popular: true, brandColor: '#4A154B', logo: 'S' },
-  { id: 'discord', name: 'Discord', description: 'Receive notifications and slash-create tasks from chat.', category: 'comms', brandColor: '#5865F2', logo: 'D' },
-  { id: 'teams', name: 'Microsoft Teams', description: 'Pin tasks to channels and get presence-aware notifications.', category: 'comms', brandColor: '#5059C9', logo: 'T' },
+  { id: 'slack', name: 'Slack', descKey: 'integrations.desc.slack', category: 'comms', popular: true, brandColor: '#4A154B', logo: 'S' },
+  { id: 'discord', name: 'Discord', descKey: 'integrations.desc.discord', category: 'comms', brandColor: '#5865F2', logo: 'D' },
+  { id: 'teams', name: 'Microsoft Teams', descKey: 'integrations.desc.teams', category: 'comms', brandColor: '#5059C9', logo: 'T' },
 
-  { id: 'google-drive', name: 'Google Drive', description: 'Attach Drive files inline, preview without leaving Rundesk.', category: 'storage', popular: true, brandColor: '#1FA463', logo: 'G' },
-  { id: 'dropbox', name: 'Dropbox', description: 'Browse and attach Dropbox files from any task.', category: 'storage', brandColor: '#0061FF', logo: 'D' },
-  { id: 'onedrive', name: 'OneDrive', description: 'Sync OneDrive files to Rundesk attachments.', category: 'storage', brandColor: '#0078D4', logo: 'O' },
-  { id: 'figma', name: 'Figma', description: 'Embed live Figma frames inside docs and tasks.', category: 'storage', popular: true, brandColor: '#F24E1E', logo: 'F' },
+  { id: 'google-drive', name: 'Google Drive', descKey: 'integrations.desc.googleDrive', category: 'storage', popular: true, brandColor: '#1FA463', logo: 'G' },
+  { id: 'dropbox', name: 'Dropbox', descKey: 'integrations.desc.dropbox', category: 'storage', brandColor: '#0061FF', logo: 'D' },
+  { id: 'onedrive', name: 'OneDrive', descKey: 'integrations.desc.onedrive', category: 'storage', brandColor: '#0078D4', logo: 'O' },
+  { id: 'figma', name: 'Figma', descKey: 'integrations.desc.figma', category: 'storage', popular: true, brandColor: '#F24E1E', logo: 'F' },
 
-  { id: 'github', name: 'GitHub', description: 'Link commits/PRs/issues. PR state badge on tasks.', category: 'dev', popular: true, brandColor: '#181717', logo: 'G' },
-  { id: 'gitlab', name: 'GitLab', description: 'Same as GitHub — works with self-managed instances.', category: 'dev', brandColor: '#FC6D26', logo: 'G' },
-  { id: 'sentry', name: 'Sentry', description: 'Auto-create tasks from production errors.', category: 'dev', brandColor: '#362D59', logo: 'S' },
-  { id: 'linear', name: 'Linear', description: 'Two-way sync issues between Linear and Rundesk.', category: 'dev', brandColor: '#5E6AD2', logo: 'L' },
+  { id: 'github', name: 'GitHub', descKey: 'integrations.desc.github', category: 'dev', popular: true, brandColor: '#181717', logo: 'G' },
+  { id: 'gitlab', name: 'GitLab', descKey: 'integrations.desc.gitlab', category: 'dev', brandColor: '#FC6D26', logo: 'G' },
+  { id: 'sentry', name: 'Sentry', descKey: 'integrations.desc.sentry', category: 'dev', brandColor: '#362D59', logo: 'S' },
+  { id: 'linear', name: 'Linear', descKey: 'integrations.desc.linear', category: 'dev', brandColor: '#5E6AD2', logo: 'L' },
 
-  { id: 'gcal', name: 'Google Calendar', description: 'Two-way sync due dates as calendar events.', category: 'calendar', popular: true, brandColor: '#4285F4', logo: 'C' },
-  { id: 'outlook', name: 'Outlook Calendar', description: 'Sync due dates with your Microsoft calendar.', category: 'calendar', brandColor: '#0078D4', logo: 'O' },
-  { id: 'cal', name: 'Cal.com', description: 'Schedule meetings inline — auto-create prep doc.', category: 'calendar', brandColor: '#000', logo: 'C' },
+  { id: 'gcal', name: 'Google Calendar', descKey: 'integrations.desc.gcal', category: 'calendar', popular: true, brandColor: '#4285F4', logo: 'C' },
+  { id: 'outlook', name: 'Outlook Calendar', descKey: 'integrations.desc.outlook', category: 'calendar', brandColor: '#0078D4', logo: 'O' },
+  { id: 'cal', name: 'Cal.com', descKey: 'integrations.desc.cal', category: 'calendar', brandColor: '#000', logo: 'C' },
 
-  { id: 'amplitude', name: 'Amplitude', description: 'Track product analytics events from Rundesk widgets.', category: 'analytics', brandColor: '#1F71F4', logo: 'A' },
-  { id: 'mixpanel', name: 'Mixpanel', description: 'Pipe usage events to your dashboard.', category: 'analytics', brandColor: '#7856FF', logo: 'M' },
-  { id: 'posthog', name: 'PostHog', description: 'Self-hostable analytics for product teams.', category: 'analytics', brandColor: '#1D4AFF', logo: 'P' },
+  { id: 'amplitude', name: 'Amplitude', descKey: 'integrations.desc.amplitude', category: 'analytics', brandColor: '#1F71F4', logo: 'A' },
+  { id: 'mixpanel', name: 'Mixpanel', descKey: 'integrations.desc.mixpanel', category: 'analytics', brandColor: '#7856FF', logo: 'M' },
+  { id: 'posthog', name: 'PostHog', descKey: 'integrations.desc.posthog', category: 'analytics', brandColor: '#1D4AFF', logo: 'P' },
 
-  { id: 'stripe', name: 'Stripe', description: 'Track billable client work and create invoices from time logs.', category: 'crm', brandColor: '#635BFF', logo: 'S' },
-  { id: 'hubspot', name: 'HubSpot', description: 'Sync deals and contacts as Rundesk tasks.', category: 'crm', brandColor: '#FF7A59', logo: 'H' },
-  { id: 'salesforce', name: 'Salesforce', description: 'Bidirectional opportunity sync.', category: 'crm', brandColor: '#00A1E0', logo: 'S' },
+  { id: 'stripe', name: 'Stripe', descKey: 'integrations.desc.stripe', category: 'crm', brandColor: '#635BFF', logo: 'S' },
+  { id: 'hubspot', name: 'HubSpot', descKey: 'integrations.desc.hubspot', category: 'crm', brandColor: '#FF7A59', logo: 'H' },
+  { id: 'salesforce', name: 'Salesforce', descKey: 'integrations.desc.salesforce', category: 'crm', brandColor: '#00A1E0', logo: 'S' },
 
-  { id: 'zapier', name: 'Zapier', description: '5,000+ apps — wire Rundesk into your existing stack.', category: 'dev', popular: true, brandColor: '#FF4F00', logo: 'Z' },
-  { id: 'make', name: 'Make (Integromat)', description: 'Visual workflow automation between Rundesk and the web.', category: 'dev', brandColor: '#6D00CC', logo: 'M' },
-  { id: 'webhook', name: 'Custom webhooks', description: 'Build your own integration with the Rundesk webhook API.', category: 'dev', brandColor: '#0c215d', logo: 'W' },
+  { id: 'zapier', name: 'Zapier', descKey: 'integrations.desc.zapier', category: 'dev', popular: true, brandColor: '#FF4F00', logo: 'Z' },
+  { id: 'make', name: 'Make (Integromat)', descKey: 'integrations.desc.make', category: 'dev', brandColor: '#6D00CC', logo: 'M' },
+  { id: 'webhook', name: 'Custom webhooks', descKey: 'integrations.desc.webhook', category: 'dev', brandColor: '#0c215d', logo: 'W' },
 
-  { id: 'openai', name: 'OpenAI', description: 'Use GPT models alongside Claude for specific workflows.', category: 'ai', brandColor: '#10A37F', logo: 'A' },
-  { id: 'gemini', name: 'Google Gemini', description: 'Bring Gemini Pro into your AI-powered automations.', category: 'ai', brandColor: '#1F71F4', logo: 'G' },
+  { id: 'openai', name: 'OpenAI', descKey: 'integrations.desc.openai', category: 'ai', brandColor: '#10A37F', logo: 'A' },
+  { id: 'gemini', name: 'Google Gemini', descKey: 'integrations.desc.gemini', category: 'ai', brandColor: '#1F71F4', logo: 'G' },
 ]
 
-const CATEGORIES: Array<{ id: Integration['category'] | 'all' | 'installed'; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'installed', label: 'Installed' },
-  { id: 'comms', label: 'Communication' },
-  { id: 'storage', label: 'Files & assets' },
-  { id: 'dev', label: 'Developer' },
-  { id: 'calendar', label: 'Calendar' },
-  { id: 'analytics', label: 'Analytics' },
-  { id: 'crm', label: 'CRM & sales' },
-  { id: 'ai', label: 'AI' },
+const CATEGORIES: Array<{ id: Integration['category'] | 'all' | 'installed'; labelKey: TranslationKey }> = [
+  { id: 'all', labelKey: 'integrations.category.all' },
+  { id: 'installed', labelKey: 'integrations.category.installed' },
+  { id: 'comms', labelKey: 'integrations.category.comms' },
+  { id: 'storage', labelKey: 'integrations.category.storage' },
+  { id: 'dev', labelKey: 'integrations.category.dev' },
+  { id: 'calendar', labelKey: 'integrations.category.calendar' },
+  { id: 'analytics', labelKey: 'integrations.category.analytics' },
+  { id: 'crm', labelKey: 'integrations.category.crm' },
+  { id: 'ai', labelKey: 'integrations.category.ai' },
 ]
 
 export function IntegrationsMarketplacePage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/integrations' })
   const qc = useQueryClient()
   const [query, setQuery] = useState('')
@@ -255,7 +258,7 @@ export function IntegrationsMarketplacePage() {
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['integration-access-requests', workspaceId] })
-      toast.success('Access request submitted to workspace admins.')
+      toast.success(t('integrations.toastAccessRequested'))
     },
   })
   const serverConnected = useMemo(() => {
@@ -304,7 +307,7 @@ export function IntegrationsMarketplacePage() {
     if (filter !== 'all' && i.category !== filter) return false
     return (
       i.name.toLowerCase().includes(query.toLowerCase()) ||
-      i.description.toLowerCase().includes(query.toLowerCase())
+      t(i.descKey).toLowerCase().includes(query.toLowerCase())
     )
   })
 
@@ -331,7 +334,7 @@ export function IntegrationsMarketplacePage() {
     if (oauthProviders.has(activeIntegration.id)) {
       const readiness = providerAvailability.get(activeIntegration.id)
       if (readiness && !readiness.available) {
-        toast.error(readiness.reason ?? 'Provider setup is incomplete on backend.')
+        toast.error(readiness.reason ?? t('integrations.providerSetupIncomplete'))
         return
       }
       setActiveProvider(activeIntegration.id)
@@ -348,31 +351,31 @@ export function IntegrationsMarketplacePage() {
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
       {oauthStatus?.oauth === 'success' ? (
         <Card className="p-3 border-emerald-500/30 bg-emerald-500/5 text-sm">
-          Connected `{oauthStatus.provider}` successfully.
+          {t('integrations.connectedSuccess', { provider: oauthStatus.provider })}
         </Card>
       ) : oauthStatus?.oauth === 'error' ? (
         <Card className="p-3 border-rose-500/30 bg-rose-500/5 text-sm">
-          OAuth connection failed{oauthStatus.reason ? `: ${oauthStatus.reason}` : '.'}
+          {t('integrations.oauthFailed')}{oauthStatus.reason ? `: ${oauthStatus.reason}` : '.'}
         </Card>
       ) : null}
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-            Workspace integrations
+            {t('integrations.eyebrow')}
           </div>
           <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
               <Plug className="h-4 w-4" />
             </span>
-            Integrations
-            <Badge variant="secondary" className="ml-1">Live</Badge>
+            {t('nav.integrations')}
+            <Badge variant="secondary" className="ml-1">{t('integrations.liveBadge')}</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Connect Rundesk to the tools your team already uses. {installed.length} active.
+            {t('integrations.subtitle', { count: installed.length })}
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setCalendarSyncOpen(true)}>
-          <Calendar className="h-3.5 w-3.5 mr-1" /> Calendar sync
+          <Calendar className="h-3.5 w-3.5 mr-1" /> {t('integrations.calendarSync')}
         </Button>
       </header>
       <CalendarSyncWizard
@@ -384,7 +387,7 @@ export function IntegrationsMarketplacePage() {
       <div className="flex flex-col md:flex-row md:items-center gap-3">
         <Input
           leadingIcon={<Search className="h-4 w-4" />}
-          placeholder="Search integrations…"
+          placeholder={t('integrations.searchPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="max-w-sm"
@@ -401,7 +404,7 @@ export function IntegrationsMarketplacePage() {
                   : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
               )}
             >
-              {c.label}
+              {t(c.labelKey)}
             </button>
           ))}
         </div>
@@ -467,15 +470,15 @@ export function IntegrationsMarketplacePage() {
       <Dialog open={Boolean(activeIntegration)} onOpenChange={(open) => !open && setActiveIntegration(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Connect {activeIntegration?.name}</DialogTitle>
+            <DialogTitle>{t('integrations.connectDialogTitle', { name: activeIntegration?.name ?? '' })}</DialogTitle>
             <DialogDescription>
               {activeIntegration?.id === 'slack'
-                ? 'Provide Slack incoming webhook details for workspace notifications.'
+                ? t('integrations.slackDialogDesc')
                 : oauthProviders.has(activeIntegration?.id ?? '') && providerAvailability.get(activeIntegration?.id ?? '')?.available === false
-                ? providerAvailability.get(activeIntegration?.id ?? '')?.reason ?? 'Provider setup is required on backend before connecting.'
+                ? providerAvailability.get(activeIntegration?.id ?? '')?.reason ?? t('integrations.providerSetupRequired')
                 : oauthProviders.has(activeIntegration?.id ?? '')
-                ? 'You will be redirected to the provider OAuth screen and returned after authorization.'
-                : 'This provider is not available in your current backend integration catalog.'}
+                ? t('integrations.oauthRedirectDesc')
+                : t('integrations.notInCatalog')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -487,45 +490,45 @@ export function IntegrationsMarketplacePage() {
                   onChange={(e) => setSlackWebhookUrl(e.target.value)}
                 />
                 <Input
-                  placeholder="Channel name (optional)"
+                  placeholder={t('integrations.channelNamePlaceholder')}
                   value={slackChannelName}
                   onChange={(e) => setSlackChannelName(e.target.value)}
                 />
                 {slackQuery.data?.webhookUrlHint ? (
                   <p className="text-xs text-muted-foreground">
-                    Current webhook: <span className="font-mono">{slackQuery.data.webhookUrlHint}</span>
+                    {t('integrations.currentWebhook')} <span className="font-mono">{slackQuery.data.webhookUrlHint}</span>
                   </p>
                 ) : null}
 
                 {slackQuery.data ? (
                   <div className="mt-2 rounded-md border border-border/60 p-3 space-y-2">
-                    <div className="text-xs font-medium">Per-channel routing rules</div>
+                    <div className="text-xs font-medium">{t('integrations.routingRulesTitle')}</div>
                     <p className="text-[11px] text-muted-foreground">
-                      Route specific events (and optionally one project) to a different channel/webhook.
+                      {t('integrations.routingRulesDesc')}
                     </p>
                     {(slackRulesQuery.data ?? []).map((r) => (
                       <div key={r.id} className="flex items-center gap-2 text-xs rounded border border-border/50 px-2 py-1.5">
                         <span className="font-mono">{r.webhookUrlHint}</span>
                         <span className="text-muted-foreground">
-                          {r.eventFilters.length ? r.eventFilters.join(', ') : 'all events'}
-                          {r.projectId ? ' · 1 project' : ''}
+                          {r.eventFilters.length ? r.eventFilters.join(', ') : t('integrations.allEvents')}
+                          {r.projectId ? ` · ${t('integrations.oneProject')}` : ''}
                         </span>
                         <button
                           className="ml-auto text-rose-500 hover:text-rose-600"
                           onClick={() => removeSlackRule.mutate(r.id)}
                         >
-                          Remove
+                          {t('integrations.remove')}
                         </button>
                       </div>
                     ))}
                     <Input
-                      placeholder="https://hooks.slack.com/services/... (rule webhook)"
+                      placeholder={t('integrations.ruleWebhookPlaceholder')}
                       value={ruleWebhook}
                       onChange={(e) => setRuleWebhook(e.target.value)}
                       className="h-8 text-xs"
                     />
                     <Input
-                      placeholder="Events, comma-separated (e.g. task.created, task.status_changed) — blank = all"
+                      placeholder={t('integrations.eventsPlaceholder')}
                       value={ruleEvents}
                       onChange={(e) => setRuleEvents(e.target.value)}
                       className="h-8 text-xs"
@@ -539,7 +542,7 @@ export function IntegrationsMarketplacePage() {
                         }}
                         className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-xs"
                       >
-                        <option value="">All projects</option>
+                        <option value="">{t('integrations.allProjects')}</option>
                         {(ruleSpacesQuery.data ?? []).map((s) => (
                           <option key={s.id} value={s.id}>{s.name}</option>
                         ))}
@@ -550,7 +553,7 @@ export function IntegrationsMarketplacePage() {
                         disabled={!ruleSpaceId}
                         className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
                       >
-                        <option value="">Whole space</option>
+                        <option value="">{t('integrations.wholeSpace')}</option>
                         {(ruleProjectsQuery.data ?? []).map((p) => (
                           <option key={p.id} value={p.id}>{p.name}</option>
                         ))}
@@ -562,7 +565,7 @@ export function IntegrationsMarketplacePage() {
                         disabled={!ruleWebhook.trim() || addSlackRule.isPending}
                         onClick={() => addSlackRule.mutate()}
                       >
-                        Add rule
+                        {t('integrations.addRule')}
                       </Button>
                     </div>
                   </div>
@@ -571,13 +574,13 @@ export function IntegrationsMarketplacePage() {
             ) : null}
             <div className="flex items-center justify-end gap-2">
               <Button variant="outline" onClick={() => setActiveIntegration(null)}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 onClick={runConnectFlow}
                 title={
                   activeIntegration && !isSupportedIntegration(activeIntegration)
-                    ? 'This integration is not available yet.'
+                    ? t('integrations.notAvailableYetTitle')
                     : undefined
                 }
                 disabled={
@@ -587,10 +590,10 @@ export function IntegrationsMarketplacePage() {
                 }
               >
                 {startOAuth.isPending || connectSlack.isPending
-                  ? 'Connecting…'
+                  ? t('integrations.connecting')
                   : activeIntegration && !isSupportedIntegration(activeIntegration)
-                  ? 'Not available yet'
-                  : 'Authorize & Connect'}
+                  ? t('integrations.notAvailableYet')
+                  : t('integrations.authorizeConnect')}
               </Button>
             </div>
           </div>
@@ -631,6 +634,7 @@ function IntegrationCard({
     updatedAt?: string
   }
 }) {
+  const { t } = useTranslation()
   return (
     <Card variant="glass" className="p-4 group transition-all hover:border-accent/40">
       <div className="flex items-start gap-3">
@@ -645,33 +649,33 @@ function IntegrationCard({
             <span className="font-medium truncate flex-1">{integration.name}</span>
             <div className="flex items-center gap-1.5 shrink-0">
               {integration.popular && !connected && (
-                <Badge variant="info" className="text-[9px] uppercase">Popular</Badge>
+                <Badge variant="info" className="text-[9px] uppercase">{t('integrations.popular')}</Badge>
               )}
               {integration.comingSoon ? (
-                <Badge variant="soft" className="text-[9px] uppercase">Soon</Badge>
+                <Badge variant="soft" className="text-[9px] uppercase">{t('integrations.soon')}</Badge>
               ) : !supported && accessRequest?.status === 'rejected' ? (
-                <Badge variant="destructive" className="text-[9px] uppercase">Rejected</Badge>
+                <Badge variant="destructive" className="text-[9px] uppercase">{t('integrations.rejected')}</Badge>
               ) : !supported && accessRequest?.status === 'approved' ? (
-                <Badge variant="success" className="text-[9px] uppercase">Approved</Badge>
+                <Badge variant="success" className="text-[9px] uppercase">{t('integrations.approved')}</Badge>
               ) : !supported && accessRequest?.status === 'pending' ? (
-                <Badge variant="info" className="text-[9px] uppercase">Requested</Badge>
+                <Badge variant="info" className="text-[9px] uppercase">{t('integrations.requested')}</Badge>
               ) : !supported ? (
-                <Badge variant="secondary" className="text-[9px] uppercase">Unavailable</Badge>
+                <Badge variant="secondary" className="text-[9px] uppercase">{t('integrations.unavailable')}</Badge>
               ) : !providerReady ? (
-                <Badge variant="warning" className="text-[9px] uppercase">Setup required</Badge>
+                <Badge variant="warning" className="text-[9px] uppercase">{t('integrations.setupRequired')}</Badge>
               ) : connection?.health === 'expired' ? (
-                <Badge variant="destructive" className="text-[9px] uppercase">Expired</Badge>
+                <Badge variant="destructive" className="text-[9px] uppercase">{t('integrations.expired')}</Badge>
               ) : connection?.health === 'expiring' ? (
-                <Badge variant="warning" className="text-[9px] uppercase">Expiring</Badge>
+                <Badge variant="warning" className="text-[9px] uppercase">{t('integrations.expiring')}</Badge>
               ) : connected ? (
                 <Badge variant="success" className="text-[9px] uppercase">
-                  <CheckCircle2 className="h-2.5 w-2.5" /> Connected
+                  <CheckCircle2 className="h-2.5 w-2.5" /> {t('integrations.connected')}
                 </Badge>
               ) : null}
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
-            {integration.description}
+            {t(integration.descKey)}
           </p>
           {supported && !providerReady && setupReason && (
             <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
@@ -680,22 +684,22 @@ function IntegrationCard({
           )}
           {supported && connection?.externalAccountEmail && (
             <p className="text-[11px] text-muted-foreground mt-1 truncate">
-              Account: {connection.externalAccountEmail}
+              {t('integrations.accountLabel')} {connection.externalAccountEmail}
             </p>
           )}
           {supported && connection?.tokenExpiresAt && (
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              Token expires: {new Date(connection.tokenExpiresAt).toLocaleString()}
+              {t('integrations.tokenExpires')} {new Date(connection.tokenExpiresAt).toLocaleString()}
             </p>
           )}
           {!supported && accessRequest?.note ? (
             <p className="text-[11px] text-muted-foreground mt-1 truncate">
-              Admin note: {accessRequest.note}
+              {t('integrations.adminNote')} {accessRequest.note}
             </p>
           ) : null}
           {!supported && accessRequest?.updatedAt ? (
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              Decision updated: {new Date(accessRequest.updatedAt).toLocaleString()}
+              {t('integrations.decisionUpdated')} {new Date(accessRequest.updatedAt).toLocaleString()}
             </p>
           ) : null}
           <div className="mt-3 flex items-center justify-between">
@@ -724,15 +728,15 @@ function IntegrationCard({
             >
               {!supported && !integration.comingSoon
                 ? accessRequest?.status === 'rejected'
-                  ? 'Request again'
+                  ? t('integrations.requestAgain')
                   : accessRequest?.status === 'approved'
-                  ? 'Approved'
+                  ? t('integrations.approved')
                   : accessRequest?.status === 'pending'
-                  ? 'Requested'
-                  : 'Request access'
+                  ? t('integrations.requested')
+                  : t('integrations.requestAccess')
                 : connected
-                ? 'Configure'
-                : 'Connect'}
+                ? t('integrations.configure')
+                : t('integrations.connect')}
             </Button>
           </div>
         </div>

@@ -31,6 +31,8 @@ import {
 import { useAuthStore } from '../store/auth'
 import { api } from '../lib/api'
 import { PasswordChecklist, passwordPolicyError } from '../lib/password'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 type Step = 0 | 1 | 2 | 3 | 4
 
@@ -57,6 +59,7 @@ type WizardState = {
 }
 
 export function SignUpWizard() {
+  const { t } = useTranslation()
   const [step, setStep] = useState<Step>(0)
   const [state, setState] = useState<WizardState>({
     fullName: '',
@@ -105,8 +108,8 @@ export function SignUpWizard() {
 
       setSession(res.user, res.accessToken, res.refreshToken, res.organizations, res.workspaces)
       
-      toast.success('Workspace created — welcome to Rundesk')
-      
+      toast.success(t('signUp.toastCreated'))
+
       // Redirect to the newly created workspace
       const wsId = res.workspaces[0]?.id
       if (wsId) {
@@ -115,7 +118,7 @@ export function SignUpWizard() {
         setStep(4)
       }
     } catch (err: any) {
-      toast.error('Signup failed', { description: err.message })
+      toast.error(t('signUp.toastFailed'), { description: err.message })
     } finally {
       setLoading(false)
     }
@@ -138,7 +141,7 @@ export function SignUpWizard() {
           to="/login"
           className="text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          Already have an account? <span className="text-foreground underline-offset-4 hover:underline">Sign in</span>
+          {t('auth.haveAccount')} <span className="text-foreground underline-offset-4 hover:underline">{t('auth.signIn')}</span>
         </Link>
       </header>
 
@@ -147,7 +150,7 @@ export function SignUpWizard() {
         {step < 4 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs font-medium uppercase tracking-widest text-muted-foreground">
-              <span>Step {step + 1} of {totalSteps}</span>
+              <span>{t('signUp.stepOf', { current: step + 1, total: totalSteps })}</span>
               <span>{Math.round(progressValue)}%</span>
             </div>
             <Progress value={progressValue} className="h-1.5" />
@@ -182,12 +185,12 @@ export function SignUpWizard() {
               disabled={step === 0}
               className="text-muted-foreground"
             >
-              <ArrowLeft className="h-4 w-4" /> Back
+              <ArrowLeft className="h-4 w-4" /> {t('common.back')}
             </Button>
             <div className="flex items-center gap-2">
               {step === 3 && (
                 <Button variant="ghost" onClick={finish}>
-                  Skip for now
+                  {t('signUp.skipForNow')}
                 </Button>
               )}
               <Button
@@ -199,11 +202,11 @@ export function SignUpWizard() {
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating...
+                    {t('signUp.creating')}
                   </>
                 ) : (
                   <>
-                    {step === 3 ? 'Create workspace' : 'Continue'}
+                    {step === 3 ? t('signUp.createWorkspace') : t('signUp.continue')}
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -213,7 +216,7 @@ export function SignUpWizard() {
         )}
 
         <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-          <ShieldCheck className="h-3 w-3" /> By continuing you agree to our terms & privacy policy.
+          <ShieldCheck className="h-3 w-3" /> {t('signUp.terms')}
         </p>
       </main>
     </div>
@@ -232,30 +235,31 @@ function canAdvance(step: Step, s: WizardState): boolean {
 // ---------------------------------------------------------------------------
 const EMAIL_RE = /^.+@.+\..+$/
 
-function validateFullName(value: string): string | null {
+function validateFullName(value: string): TranslationKey | null {
   const v = value.trim()
-  if (!v) return 'Please enter your full name.'
-  if (v.length < 2) return 'Name must be at least 2 characters.'
+  if (!v) return 'signUp.errNameRequired'
+  if (v.length < 2) return 'signUp.errNameShort'
   return null
 }
 
-function validateEmail(value: string): string | null {
+function validateEmail(value: string): TranslationKey | null {
   const v = value.trim()
-  if (!v) return 'Email is required.'
-  if (!EMAIL_RE.test(v)) return 'Enter a valid email address.'
+  if (!v) return 'signUp.errEmailRequired'
+  if (!EMAIL_RE.test(v)) return 'signUp.errEmailInvalid'
   return null
 }
 
-function validateWorkspaceName(value: string): string | null {
+function validateWorkspaceName(value: string): TranslationKey | null {
   const v = value.trim()
-  if (!v) return 'Workspace name is required.'
-  if (v.length < 2) return 'Workspace name must be at least 2 characters.'
+  if (!v) return 'signUp.errWorkspaceRequired'
+  if (v.length < 2) return 'signUp.errWorkspaceShort'
   return null
 }
 
-function FieldError({ message }: { message: string | null }) {
-  if (!message) return null
-  return <p className="text-xs text-destructive">{message}</p>
+function FieldError({ messageKey }: { messageKey: TranslationKey | null }) {
+  const { t } = useTranslation()
+  if (!messageKey) return null
+  return <p className="text-xs text-destructive">{t(messageKey)}</p>
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +272,7 @@ function StepAccount({
   state: WizardState
   update: (p: Partial<WizardState>) => void
 }) {
+  const { t } = useTranslation()
   const [touched, setTouched] = useState({
     fullName: false,
     email: false,
@@ -282,52 +287,52 @@ function StepAccount({
     <div className="space-y-6">
       <header className="space-y-1.5">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Let&apos;s get you set up
+          {t('signUp.accountTitle')}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Start with the basics — we&apos;ll have your workspace ready in under two minutes.
+          {t('signUp.accountSubtitle')}
         </p>
       </header>
 
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="name">Full name</Label>
+          <Label htmlFor="name">{t('auth.fullName')}</Label>
           <Input
             id="name"
-            placeholder="Ada Lovelace"
+            placeholder={t('auth.fullNamePlaceholder')}
             leadingIcon={<User className="h-4 w-4" />}
             value={state.fullName}
             onChange={(e) => update({ fullName: e.target.value })}
-            onBlur={() => setTouched((t) => ({ ...t, fullName: true }))}
+            onBlur={() => setTouched((prev) => ({ ...prev, fullName: true }))}
             aria-invalid={touched.fullName && nameError ? true : undefined}
             autoFocus
           />
-          {touched.fullName && <FieldError message={nameError} />}
+          {touched.fullName && <FieldError messageKey={nameError} />}
         </div>
         <div className="space-y-2">
-          <Label htmlFor="email">Work email</Label>
+          <Label htmlFor="email">{t('signUp.workEmail')}</Label>
           <Input
             id="email"
             type="email"
-            placeholder="ada@analytics.io"
+            placeholder={t('signUp.emailPlaceholder')}
             leadingIcon={<Mail className="h-4 w-4" />}
             value={state.email}
             onChange={(e) => update({ email: e.target.value })}
-            onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+            onBlur={() => setTouched((prev) => ({ ...prev, email: true }))}
             aria-invalid={touched.email && emailError ? true : undefined}
           />
-          {touched.email && <FieldError message={emailError} />}
+          {touched.email && <FieldError messageKey={emailError} />}
         </div>
         <div className="space-y-2">
-          <Label htmlFor="password">Create a password</Label>
+          <Label htmlFor="password">{t('signUp.createPassword')}</Label>
           <Input
             id="password"
             type="password"
-            placeholder="At least 10 characters"
+            placeholder={t('auth.newPasswordPlaceholder')}
             leadingIcon={<Lock className="h-4 w-4" />}
             value={state.password}
             onChange={(e) => update({ password: e.target.value })}
-            onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+            onBlur={() => setTouched((prev) => ({ ...prev, password: true }))}
             aria-invalid={touched.password && passwordError ? true : undefined}
           />
           <PasswordChecklist value={state.password} />
@@ -347,6 +352,7 @@ function StepWorkspace({
   state: WizardState
   update: (p: Partial<WizardState>) => void
 }) {
+  const { t } = useTranslation()
   const [touched, setTouched] = useState({
     workspaceName: false,
     industry: false,
@@ -354,6 +360,21 @@ function StepWorkspace({
   })
 
   const workspaceNameError = validateWorkspaceName(state.workspaceName)
+
+  const industryOptions = [
+    { value: 'Software', labelKey: 'signUp.industrySoftware' },
+    { value: 'Marketing', labelKey: 'signUp.industryMarketing' },
+    { value: 'Design', labelKey: 'signUp.industryDesign' },
+    { value: 'Operations', labelKey: 'signUp.industryOperations' },
+    { value: 'Other', labelKey: 'signUp.industryOther' },
+  ] as const
+  const teamSizeOptions = [
+    { value: 'Just me', labelKey: 'signUp.teamJustMe' },
+    { value: '2–10', labelKey: 'signUp.team2to10' },
+    { value: '11–50', labelKey: 'signUp.team11to50' },
+    { value: '51–200', labelKey: 'signUp.team51to200' },
+    { value: '200+', labelKey: 'signUp.team200plus' },
+  ] as const
 
   function setName(name: string) {
     const slug = name
@@ -369,32 +390,32 @@ function StepWorkspace({
     <div className="space-y-6">
       <header className="space-y-1.5">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Name your workspace
+          {t('signUp.workspaceTitle')}
         </h1>
         <p className="text-sm text-muted-foreground">
-          This is the home base for your team — usually your company or department.
+          {t('signUp.workspaceSubtitle')}
         </p>
       </header>
 
       <div className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="ws-name">Workspace name</Label>
+          <Label htmlFor="ws-name">{t('signUp.workspaceName')}</Label>
           <Input
             id="ws-name"
-            placeholder="Acme HQ"
+            placeholder={t('signUp.workspaceNamePlaceholder')}
             leadingIcon={<Building2 className="h-4 w-4" />}
             value={state.workspaceName}
             onChange={(e) => setName(e.target.value)}
-            onBlur={() => setTouched((t) => ({ ...t, workspaceName: true }))}
+            onBlur={() => setTouched((prev) => ({ ...prev, workspaceName: true }))}
             aria-invalid={touched.workspaceName && workspaceNameError ? true : undefined}
             autoFocus
           />
-          {touched.workspaceName && <FieldError message={workspaceNameError} />}
+          {touched.workspaceName && <FieldError messageKey={workspaceNameError} />}
         </div>
 
         {state.workspaceSlug && (
           <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">Your URL will be</span>
+            <span className="text-muted-foreground">{t('signUp.urlWillBe')}</span>
             <span className="font-mono text-foreground">
               rundesk.app/<span className="text-brand-gradient">{state.workspaceSlug}</span>
             </span>
@@ -403,56 +424,50 @@ function StepWorkspace({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label>What&apos;s your industry?</Label>
+            <Label>{t('signUp.industryLabel')}</Label>
             <RadioGroup
               value={state.industry}
               onValueChange={(v) => {
                 update({ industry: v })
-                setTouched((t) => ({ ...t, industry: true }))
+                setTouched((prev) => ({ ...prev, industry: true }))
               }}
               className="grid gap-1.5"
             >
-              {[
-                'Software',
-                'Marketing',
-                'Design',
-                'Operations',
-                'Other',
-              ].map((i) => (
+              {industryOptions.map((opt) => (
                 <SelectableRow
-                  key={i}
-                  label={i}
-                  value={i}
-                  selected={state.industry === i}
+                  key={opt.value}
+                  label={t(opt.labelKey)}
+                  value={opt.value}
+                  selected={state.industry === opt.value}
                 />
               ))}
             </RadioGroup>
             {touched.industry && state.industry === '' && (
-              <FieldError message="Please select an industry." />
+              <FieldError messageKey="signUp.errIndustry" />
             )}
           </div>
 
           <div className="space-y-2">
-            <Label>Team size</Label>
+            <Label>{t('signUp.teamSizeLabel')}</Label>
             <RadioGroup
               value={state.teamSize}
               onValueChange={(v) => {
                 update({ teamSize: v })
-                setTouched((t) => ({ ...t, teamSize: true }))
+                setTouched((prev) => ({ ...prev, teamSize: true }))
               }}
               className="grid gap-1.5"
             >
-              {['Just me', '2–10', '11–50', '51–200', '200+'].map((s) => (
+              {teamSizeOptions.map((opt) => (
                 <SelectableRow
-                  key={s}
-                  label={s}
-                  value={s}
-                  selected={state.teamSize === s}
+                  key={opt.value}
+                  label={t(opt.labelKey)}
+                  value={opt.value}
+                  selected={state.teamSize === opt.value}
                 />
               ))}
             </RadioGroup>
             {touched.teamSize && state.teamSize === '' && (
-              <FieldError message="Please select a team size." />
+              <FieldError messageKey="signUp.errTeamSize" />
             )}
           </div>
         </div>
@@ -490,19 +505,19 @@ function SelectableRow({
 // STEP 2 — Features
 // ---------------------------------------------------------------------------
 const FEATURE_PILLS = [
-  { key: 'core', label: 'Tasks & Projects', icon: '✓', desc: 'Lists, boards, custom fields' },
-  { key: 'views', label: 'Multiple views', icon: '⬚', desc: 'Calendar, Gantt, Workload' },
-  { key: 'docs', label: 'Docs & wikis', icon: '📄', desc: 'Notion-style editor' },
-  { key: 'chat', label: 'Chat & DMs', icon: '💬', desc: 'Channels, threads, pins' },
-  { key: 'ai', label: 'AI agents', icon: '✨', desc: 'Powered by Claude' },
-  { key: 'goals', label: 'Goals & OKRs', icon: '🎯', desc: 'Auto-progress from tasks' },
-  { key: 'sprints', label: 'Sprints', icon: '⚡', desc: 'Burndown + velocity' },
-  { key: 'time_tracking', label: 'Time tracking', icon: '⏱', desc: 'Timers + timesheets' },
-  { key: 'forms', label: 'Forms', icon: '📋', desc: 'Public intake → tasks' },
-  { key: 'reporting', label: 'Reports', icon: '📊', desc: 'Custom dashboards' },
-  { key: 'integrations', label: 'Integrations', icon: '🔌', desc: 'Slack, Drive, GitHub' },
-  { key: 'mobile', label: 'Mobile (PWA)', icon: '📱', desc: 'Install on any device' },
-]
+  { key: 'core', labelKey: 'signUp.featCoreLabel', icon: '✓', descKey: 'signUp.featCoreDesc' },
+  { key: 'views', labelKey: 'signUp.featViewsLabel', icon: '⬚', descKey: 'signUp.featViewsDesc' },
+  { key: 'docs', labelKey: 'signUp.featDocsLabel', icon: '📄', descKey: 'signUp.featDocsDesc' },
+  { key: 'chat', labelKey: 'signUp.featChatLabel', icon: '💬', descKey: 'signUp.featChatDesc' },
+  { key: 'ai', labelKey: 'signUp.featAiLabel', icon: '✨', descKey: 'signUp.featAiDesc' },
+  { key: 'goals', labelKey: 'signUp.featGoalsLabel', icon: '🎯', descKey: 'signUp.featGoalsDesc' },
+  { key: 'sprints', labelKey: 'signUp.featSprintsLabel', icon: '⚡', descKey: 'signUp.featSprintsDesc' },
+  { key: 'time_tracking', labelKey: 'signUp.featTimeLabel', icon: '⏱', descKey: 'signUp.featTimeDesc' },
+  { key: 'forms', labelKey: 'signUp.featFormsLabel', icon: '📋', descKey: 'signUp.featFormsDesc' },
+  { key: 'reporting', labelKey: 'signUp.featReportingLabel', icon: '📊', descKey: 'signUp.featReportingDesc' },
+  { key: 'integrations', labelKey: 'signUp.featIntegrationsLabel', icon: '🔌', descKey: 'signUp.featIntegrationsDesc' },
+  { key: 'mobile', labelKey: 'signUp.featMobileLabel', icon: '📱', descKey: 'signUp.featMobileDesc' },
+] as const
 
 function StepFeatures({
   state,
@@ -511,6 +526,7 @@ function StepFeatures({
   state: WizardState
   update: (p: Partial<WizardState>) => void
 }) {
+  const { t } = useTranslation()
   function toggle(key: string) {
     update({
       features: state.features.includes(key)
@@ -523,11 +539,10 @@ function StepFeatures({
     <div className="space-y-6">
       <header className="space-y-1.5">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          What does your team need?
+          {t('signUp.featuresTitle')}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Pick what you&apos;ll use — we&apos;ll turn the rest off so the workspace stays uncluttered.
-          You can always change this later in Admin → Features.
+          {t('signUp.featuresSubtitle')}
         </p>
       </header>
 
@@ -556,10 +571,10 @@ function StepFeatures({
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium">{f.label}</span>
+                  <span className="text-sm font-medium">{t(f.labelKey)}</span>
                   {active && <Check className="h-3.5 w-3.5 text-accent" />}
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">{f.desc}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{t(f.descKey)}</p>
               </div>
             </button>
           )
@@ -568,7 +583,7 @@ function StepFeatures({
 
       <p className="text-xs text-muted-foreground">
         <Sparkles className="mr-1 inline h-3 w-3" />
-        Selected: <strong className="text-foreground">{state.features.length}</strong> features
+        {t('signUp.selectedLabel')} <strong className="text-foreground">{state.features.length}</strong> {t('signUp.featuresWord')}
       </p>
     </div>
   )
@@ -577,9 +592,9 @@ function StepFeatures({
 // ---------------------------------------------------------------------------
 // STEP 3 — Invites
 // ---------------------------------------------------------------------------
-const ROLES: Array<{ value: Invitee['orgRole']; label: string; description: string }> = [
-  { value: 'admin', label: 'Admin', description: 'Full access — manage members, billing, integrations.' },
-  { value: 'member', label: 'Member', description: 'Default. Create & edit tasks, comment, log time.' },
+const ROLES: Array<{ value: Invitee['orgRole']; labelKey: TranslationKey; descKey: TranslationKey }> = [
+  { value: 'admin', labelKey: 'signUp.roleAdminLabel', descKey: 'signUp.roleAdminDesc' },
+  { value: 'member', labelKey: 'signUp.roleMemberLabel', descKey: 'signUp.roleMemberDesc' },
 ]
 
 function StepInvites({
@@ -589,29 +604,30 @@ function StepInvites({
   state: WizardState
   update: (p: Partial<WizardState>) => void
 }) {
+  const { t } = useTranslation()
   const [emailDraft, setEmailDraft] = useState('')
   const [roleDraft, setRoleDraft] = useState<Invitee['orgRole']>('member')
   const [emailTouched, setEmailTouched] = useState(false)
 
   const trimmedDraft = emailDraft.trim()
-  const draftError =
+  const draftError: TranslationKey | null =
     trimmedDraft === ''
       ? null
       : !EMAIL_RE.test(trimmedDraft)
-        ? 'Enter a valid email address.'
+        ? 'signUp.errEmailInvalid'
         : state.invites.some((i) => i.email === trimmedDraft)
-          ? 'This email is already on the list.'
+          ? 'signUp.errEmailDuplicate'
           : null
 
   function add() {
     const e = emailDraft.trim()
     setEmailTouched(true)
     if (!/^.+@.+\..+$/.test(e)) {
-      toast.error('That doesn\'t look like a valid email')
+      toast.error(t('signUp.toastInvalidEmail'))
       return
     }
     if (state.invites.some((i) => i.email === e)) {
-      toast.warning(`${e} is already on the list`)
+      toast.warning(t('signUp.toastDuplicate', { email: e }))
       return
     }
     update({
@@ -636,10 +652,10 @@ function StepInvites({
     <div className="space-y-6">
       <header className="space-y-1.5">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Invite your team
+          {t('signUp.invitesTitle')}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Add a few teammates now — you can invite the rest from Settings → Members later.
+          {t('signUp.invitesSubtitle')}
         </p>
       </header>
 
@@ -651,7 +667,7 @@ function StepInvites({
         className="grid gap-x-2 gap-y-1.5 sm:grid-cols-[1fr_180px_auto]"
       >
         <Input
-          placeholder="teammate@company.com"
+          placeholder={t('signUp.inviteEmailPlaceholder')}
           leadingIcon={<Mail className="h-4 w-4" />}
           value={emailDraft}
           onChange={(e) => setEmailDraft(e.target.value)}
@@ -665,16 +681,16 @@ function StepInvites({
         >
           {ROLES.map((r) => (
             <option key={r.value} value={r.value}>
-              {r.label}
+              {t(r.labelKey)}
             </option>
           ))}
         </select>
         <Button type="submit" variant="outline">
-          <Plus className="h-4 w-4" /> Add
+          <Plus className="h-4 w-4" /> {t('signUp.add')}
         </Button>
         {emailTouched && draftError && (
           <div className="sm:col-span-3">
-            <FieldError message={draftError} />
+            <FieldError messageKey={draftError} />
           </div>
         )}
       </form>
@@ -682,14 +698,14 @@ function StepInvites({
       {/* Role explanation */}
       <details className="group rounded-lg border border-border/50 bg-muted/20 px-4 py-3 text-sm">
         <summary className="flex cursor-pointer items-center justify-between gap-3 font-medium">
-          What can each role do?
+          {t('signUp.roleExplain')}
           <span className="text-muted-foreground transition-transform group-open:rotate-180">▾</span>
         </summary>
         <ul className="mt-3 space-y-2 text-xs text-muted-foreground">
           {ROLES.map((r) => (
             <li key={r.value} className="flex gap-2">
-              <span className="w-16 shrink-0 font-medium text-foreground">{r.label}</span>
-              <span>{r.description}</span>
+              <span className="w-16 shrink-0 font-medium text-foreground">{t(r.labelKey)}</span>
+              <span>{t(r.descKey)}</span>
             </li>
           ))}
         </ul>
@@ -698,7 +714,7 @@ function StepInvites({
       {/* Invitee list */}
       {state.invites.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border/50 bg-muted/10 p-6 text-center text-sm text-muted-foreground">
-          No invitees yet. Add the people you collaborate with most.
+          {t('signUp.noInvitees')}
         </div>
       ) : (
         <ul className="space-y-2">
@@ -714,13 +730,13 @@ function StepInvites({
                 <PersonAvatar name={inv.email} size="sm" />
                 <span className="flex-1 truncate text-sm">{inv.email}</span>
                 <Badge variant="soft" className="text-[10px] capitalize">
-                  {inv.orgRole}
+                  {t(ROLES.find((r) => r.value === inv.orgRole)?.labelKey ?? 'signUp.roleMemberLabel')}
                 </Badge>
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => remove(inv.email)}
-                  aria-label={`Remove ${inv.email}`}
+                  aria-label={t('signUp.removeInvite', { email: inv.email })}
                 >
                   <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
@@ -737,6 +753,7 @@ function StepInvites({
 // STEP 4 — Done
 // ---------------------------------------------------------------------------
 function StepDone({ state }: { state: WizardState }) {
+  const { t, tCount } = useTranslation()
   return (
     <div className="space-y-6 text-center">
       <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-brand-gradient shadow-glow">
@@ -744,19 +761,19 @@ function StepDone({ state }: { state: WizardState }) {
       </div>
       <header className="space-y-1.5">
         <h1 className="font-display text-3xl font-semibold tracking-tight">
-          Welcome to {state.workspaceName || 'Rundesk'}
+          {t('signUp.doneTitle', { name: state.workspaceName || 'Rundesk' })}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Your workspace is ready. {state.invites.length > 0 && `We sent ${state.invites.length} invite${state.invites.length === 1 ? '' : 's'} on your behalf.`}
+          {t('signUp.doneSubtitle')}{state.invites.length > 0 ? ` ${tCount('signUp.doneInvitesSent', state.invites.length)}` : ''}
         </p>
       </header>
       <div className="flex justify-center gap-2 pt-2">
         <Button variant="glass" asChild>
-          <Link to="/login">Back to sign in</Link>
+          <Link to="/login">{t('signUp.backToSignIn')}</Link>
         </Button>
         <Button variant="gradient" asChild>
           <Link to="/login">
-            Open my workspace <ArrowRight className="h-4 w-4" />
+            {t('signUp.openWorkspace')} <ArrowRight className="h-4 w-4" />
           </Link>
         </Button>
       </div>

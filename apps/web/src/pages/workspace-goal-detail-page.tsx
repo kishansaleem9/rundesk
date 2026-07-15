@@ -23,6 +23,8 @@ import {
   Check,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 type GoalStatus = 'on_track' | 'at_risk' | 'off_track' | 'completed'
 
@@ -50,17 +52,18 @@ type GoalDetail = {
   keyResults: KeyResult[]
 }
 
-const STATUS_META: Record<GoalStatus, { label: string; badge: 'success' | 'warning' | 'destructive'; icon: typeof TrendingUp }> = {
-  on_track: { label: 'On track', badge: 'success', icon: TrendingUp },
-  at_risk: { label: 'At risk', badge: 'warning', icon: AlertTriangle },
-  off_track: { label: 'Off track', badge: 'destructive', icon: AlertTriangle },
-  completed: { label: 'Completed', badge: 'success', icon: CheckCircle2 },
+const STATUS_META: Record<GoalStatus, { labelKey: TranslationKey; badge: 'success' | 'warning' | 'destructive'; icon: typeof TrendingUp }> = {
+  on_track: { labelKey: 'goalDetail.status.onTrack', badge: 'success', icon: TrendingUp },
+  at_risk: { labelKey: 'goalDetail.status.atRisk', badge: 'warning', icon: AlertTriangle },
+  off_track: { labelKey: 'goalDetail.status.offTrack', badge: 'destructive', icon: AlertTriangle },
+  completed: { labelKey: 'goalDetail.status.completed', badge: 'success', icon: CheckCircle2 },
 }
 
 const pctOf = (cur: number, target: number) => (target > 0 ? Math.min(100, Math.round((cur / target) * 100)) : 0)
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : null)
 
 export function GoalDetailPage() {
+  const { t, tCount } = useTranslation()
   const { goalId } = useParams({ from: '/app/$workspaceId/goals/$goalId' })
   const qc = useQueryClient()
   const goalQuery = useQuery({
@@ -75,36 +78,36 @@ export function GoalDetailPage() {
 
   const setGoalProgress = useMutation({
     mutationFn: (currentValue: number) => api(`/goals/${goalId}`, { method: 'PATCH', body: JSON.stringify({ currentValue }) }),
-    onSuccess: () => { invalidate(); setEditingProgress(false); toast.success('Progress updated') },
-    onError: () => toast.error('Could not update progress'),
+    onSuccess: () => { invalidate(); setEditingProgress(false); toast.success(t('goalDetail.toastProgressUpdated')) },
+    onError: () => toast.error(t('goalDetail.toastProgressError')),
   })
   const addKr = useMutation({
     mutationFn: (body: { title: string; targetValue: number; unit?: string }) =>
       api(`/goals/${goalId}/key-results`, { method: 'POST', body: JSON.stringify(body) }),
-    onSuccess: () => { invalidate(); setAddingKr(false); toast.success('Key result added') },
-    onError: () => toast.error('Could not add key result'),
+    onSuccess: () => { invalidate(); setAddingKr(false); toast.success(t('goalDetail.toastKrAdded')) },
+    onError: () => toast.error(t('goalDetail.toastKrAddError')),
   })
   const updateKr = useMutation({
     mutationFn: ({ id, currentValue }: { id: string; currentValue: number }) =>
       api(`/goals/${goalId}/key-results/${id}`, { method: 'PATCH', body: JSON.stringify({ currentValue }) }),
     onSuccess: invalidate,
-    onError: () => toast.error('Could not update key result'),
+    onError: () => toast.error(t('goalDetail.toastKrUpdateError')),
   })
   const deleteKr = useMutation({
     mutationFn: (id: string) => api(`/goals/${goalId}/key-results/${id}`, { method: 'DELETE' }),
     onSuccess: invalidate,
-    onError: () => toast.error('Could not remove key result'),
+    onError: () => toast.error(t('goalDetail.toastKrRemoveError')),
   })
 
   if (goalQuery.isLoading) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading goal…</div>
+    return <div className="p-6 text-sm text-muted-foreground">{t('goalDetail.loading')}</div>
   }
   if (goalQuery.isError || !goalQuery.data) {
     return (
       <div className="p-6 space-y-3">
         <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground"><Link to="..">
-          <ArrowLeft className="h-3.5 w-3.5" /> All goals</Link></Button>
-        <p className="text-sm text-muted-foreground">This goal could not be found.</p>
+          <ArrowLeft className="h-3.5 w-3.5" /> {t('goalDetail.allGoals')}</Link></Button>
+        <p className="text-sm text-muted-foreground">{t('goalDetail.notFound')}</p>
       </div>
     )
   }
@@ -117,15 +120,15 @@ export function GoalDetailPage() {
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <Button variant="ghost" size="sm" asChild className="-ml-2 text-muted-foreground">
         <Link to="..">
-          <ArrowLeft className="h-3.5 w-3.5" /> All goals
+          <ArrowLeft className="h-3.5 w-3.5" /> {t('goalDetail.allGoals')}
         </Link>
       </Button>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1 flex items-center gap-2">
-            Objective
-            <Badge variant={meta.badge} className="text-[9px] uppercase">{meta.label}</Badge>
+            {t('goalDetail.objective')}
+            <Badge variant={meta.badge} className="text-[9px] uppercase">{t(meta.labelKey)}</Badge>
           </div>
           <h1 className="font-display text-3xl font-semibold flex items-start gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow shrink-0 mt-1">
@@ -146,15 +149,15 @@ export function GoalDetailPage() {
             {goal.dueDate && (
               <>
                 <span>·</span>
-                <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> due {fmt(goal.dueDate)}</span>
+                <span className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {t('goalDetail.due', { date: fmt(goal.dueDate) ?? '' })}</span>
               </>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setEditingProgress((v) => !v)}>Update progress</Button>
+          <Button variant="outline" size="sm" onClick={() => setEditingProgress((v) => !v)}>{t('goalDetail.updateProgress')}</Button>
           <Button variant="gradient" size="sm" onClick={() => setAddingKr((v) => !v)}>
-            <Plus className="h-3.5 w-3.5" /> Add key result
+            <Plus className="h-3.5 w-3.5" /> {t('goalDetail.addKeyResult')}
           </Button>
         </div>
       </div>
@@ -163,14 +166,14 @@ export function GoalDetailPage() {
       <Card variant="glass" className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Objective progress</div>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t('goalDetail.objectiveProgress')}</div>
             <div className="font-display text-3xl font-semibold tabular-nums">
               {progress}%
               <span className="text-sm font-normal text-muted-foreground ml-2 tabular-nums">
                 {goal.currentValue} / {goal.targetValue}{goal.unit ? ` ${goal.unit}` : ''}
               </span>
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">{goal.keyResults.length} key results</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{tCount('goalDetail.keyResultsCount', goal.keyResults.length)}</div>
           </div>
           {editingProgress && (
             <ProgressEditor
@@ -187,7 +190,7 @@ export function GoalDetailPage() {
 
       {/* Key results */}
       <section>
-        <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">Key results</h2>
+        <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">{t('goalDetail.keyResultsHeading')}</h2>
 
         {addingKr && (
           <AddKeyResultForm
@@ -199,7 +202,7 @@ export function GoalDetailPage() {
 
         {goal.keyResults.length === 0 && !addingKr ? (
           <Card variant="glass" className="p-6 text-center">
-            <p className="text-sm text-muted-foreground">No key results yet. Add measurable outcomes that define this goal.</p>
+            <p className="text-sm text-muted-foreground">{t('goalDetail.emptyKeyResults')}</p>
           </Card>
         ) : (
           <div className="relative pl-6">
@@ -225,6 +228,7 @@ export function GoalDetailPage() {
 function ProgressEditor({ initial, target, pending, onSave, onCancel }: {
   initial: number; target: number; pending: boolean; onSave: (v: number) => void; onCancel: () => void
 }) {
+  const { t } = useTranslation()
   const [val, setVal] = useState(String(initial))
   return (
     <div className="flex items-center gap-2">
@@ -236,8 +240,8 @@ function ProgressEditor({ initial, target, pending, onSave, onCancel }: {
         autoFocus
       />
       <span className="text-xs text-muted-foreground">/ {target}</span>
-      <Button size="sm" variant="gradient" disabled={pending} onClick={() => onSave(Number(val) || 0)}>Save</Button>
-      <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+      <Button size="sm" variant="gradient" disabled={pending} onClick={() => onSave(Number(val) || 0)}>{t('common.save')}</Button>
+      <Button size="sm" variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
     </div>
   )
 }
@@ -245,24 +249,25 @@ function ProgressEditor({ initial, target, pending, onSave, onCancel }: {
 function AddKeyResultForm({ pending, onAdd, onCancel }: {
   pending: boolean; onAdd: (b: { title: string; targetValue: number; unit?: string }) => void; onCancel: () => void
 }) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState('')
   const [target, setTarget] = useState('100')
   const [unit, setUnit] = useState('%')
   return (
     <Card variant="glass" className="p-4 mb-3 space-y-2">
-      <Input placeholder="Key result (e.g. Reach 90% weekly active users)" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+      <Input placeholder={t('goalDetail.keyResultPlaceholder')} value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
       <div className="flex items-center gap-2">
-        <Input type="number" placeholder="Target" value={target} onChange={(e) => setTarget(e.target.value)} className="w-28" />
-        <Input placeholder="Unit (%, count…)" value={unit} onChange={(e) => setUnit(e.target.value)} className="w-32" />
+        <Input type="number" placeholder={t('goalDetail.targetPlaceholder')} value={target} onChange={(e) => setTarget(e.target.value)} className="w-28" />
+        <Input placeholder={t('goalDetail.unitPlaceholder')} value={unit} onChange={(e) => setUnit(e.target.value)} className="w-32" />
         <div className="flex-1" />
-        <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
         <Button
           size="sm"
           variant="gradient"
           disabled={pending || !title.trim()}
           onClick={() => onAdd({ title: title.trim(), targetValue: Number(target) || 100, unit: unit.trim() || undefined })}
         >
-          Add
+          {t('goalDetail.add')}
         </Button>
       </div>
     </Card>
@@ -272,6 +277,7 @@ function AddKeyResultForm({ pending, onAdd, onCancel }: {
 function KeyResultCard({ kr, index, onUpdate, onDelete }: {
   kr: KeyResult; index: number; onUpdate: (v: number) => void; onDelete: () => void
 }) {
+  const { t } = useTranslation()
   const meta = STATUS_META[kr.status] ?? STATUS_META.on_track
   const StatusIcon = meta.icon
   const pct = pctOf(kr.currentValue, kr.targetValue)
@@ -284,15 +290,15 @@ function KeyResultCard({ kr, index, onUpdate, onDelete }: {
       </div>
       <Card variant="glass" className="p-4 hover:border-accent/40 transition-colors">
         <div className="flex items-start gap-4">
-          <Badge variant="soft" className="font-mono text-[9px] uppercase mt-0.5">KR{index + 1}</Badge>
+          <Badge variant="soft" className="font-mono text-[9px] uppercase mt-0.5">{t('goalDetail.krBadge', { num: index + 1 })}</Badge>
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
               <span className="font-medium">{kr.title}</span>
               <div className="flex items-center gap-1.5 shrink-0">
                 <Badge variant={meta.badge} className="text-[9px] uppercase">
-                  <StatusIcon className="h-2.5 w-2.5" /> {meta.label}
+                  <StatusIcon className="h-2.5 w-2.5" /> {t(meta.labelKey)}
                 </Badge>
-                <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={onDelete} title="Remove key result">
+                <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive" onClick={onDelete} title={t('goalDetail.removeKeyResult')}>
                   <Trash2 className="h-3 w-3" />
                 </Button>
               </div>
@@ -302,12 +308,12 @@ function KeyResultCard({ kr, index, onUpdate, onDelete }: {
                 <span className="flex items-center gap-1.5">
                   <Input type="number" value={val} onChange={(e) => setVal(e.target.value)} className="h-7 w-24" autoFocus />
                   <span>/ {kr.targetValue}{kr.unit ? ` ${kr.unit}` : ''}</span>
-                  <Button size="icon" variant="gradient" className="h-7 w-7" onClick={() => { onUpdate(Number(val) || 0); setEditing(false) }} title="Save">
+                  <Button size="icon" variant="gradient" className="h-7 w-7" onClick={() => { onUpdate(Number(val) || 0); setEditing(false) }} title={t('common.save')}>
                     <Check className="h-3 w-3" />
                   </Button>
                 </span>
               ) : (
-                <button type="button" className="hover:text-foreground" onClick={() => { setVal(String(kr.currentValue)); setEditing(true) }} title="Click to update">
+                <button type="button" className="hover:text-foreground" onClick={() => { setVal(String(kr.currentValue)); setEditing(true) }} title={t('goalDetail.clickToUpdate')}>
                   <span className="text-foreground font-medium tabular-nums">
                     {kr.currentValue} / {kr.targetValue}{kr.unit ? ` ${kr.unit}` : ''}
                   </span>

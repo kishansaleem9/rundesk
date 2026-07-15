@@ -5,6 +5,7 @@ import { User, Lock, ShieldCheck, Bell, Globe } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
+import { useTranslation } from '../lib/i18n'
 
 type Profile = {
   id: string
@@ -18,12 +19,13 @@ type Profile = {
 }
 
 const TABS = [
-  { id: 'general', label: 'General', icon: User },
-  { id: 'security', label: 'Security', icon: Lock },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
+  { id: 'general', labelKey: 'profile.tabGeneral', icon: User },
+  { id: 'security', labelKey: 'profile.tabSecurity', icon: Lock },
+  { id: 'notifications', labelKey: 'profile.tabNotifications', icon: Bell },
 ] as const
 
 export function ProfilePage() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('general')
   const profileQuery = useQuery({
     queryKey: ['users', 'me'],
@@ -33,33 +35,33 @@ export function ProfilePage() {
   return (
     <div className="h-full flex flex-col">
       <header className="px-6 py-4 border-b border-border bg-card">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Account</div>
-        <h1 className="font-display text-2xl font-semibold text-foreground">Your profile</h1>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">{t('profile.eyebrow')}</div>
+        <h1 className="font-display text-2xl font-semibold text-foreground">{t('profile.title')}</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Manage how others see you and how you sign in.
+          {t('profile.subtitle')}
         </p>
       </header>
 
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl mx-auto grid grid-cols-[200px_1fr] gap-8">
           <nav className="space-y-1">
-            {TABS.map((t) => (
+            {TABS.map((navTab) => (
               <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
+                key={navTab.id}
+                onClick={() => setTab(navTab.id)}
                 className={cn(
                   'w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
-                  tab === t.id ? 'bg-accent/15 text-foreground font-medium' : 'hover:bg-surface-50 text-muted-foreground',
+                  tab === navTab.id ? 'bg-accent/15 text-foreground font-medium' : 'hover:bg-surface-50 text-muted-foreground',
                 )}
               >
-                <t.icon className="h-4 w-4" />
-                {t.label}
+                <navTab.icon className="h-4 w-4" />
+                {t(navTab.labelKey)}
               </button>
             ))}
           </nav>
 
           <div>
-            {profileQuery.isLoading && <Card className="p-6 text-sm text-muted-foreground">Loading…</Card>}
+            {profileQuery.isLoading && <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>}
             {profileQuery.data && tab === 'general' && <GeneralTab profile={profileQuery.data} />}
             {profileQuery.data && tab === 'security' && <SecurityTab />}
             {tab === 'notifications' && <NotificationsTab />}
@@ -71,6 +73,7 @@ export function ProfilePage() {
 }
 
 function GeneralTab({ profile }: { profile: Profile }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const setUser = useAuthStore((s) => s.setUser)
   const [displayName, setDisplayName] = useState(profile.displayName)
@@ -114,35 +117,35 @@ function GeneralTab({ profile }: { profile: Profile }) {
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="displayName">Display name</Label>
+        <Label htmlFor="displayName">{t('profile.displayName')}</Label>
         <Input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="bio">Bio</Label>
+        <Label htmlFor="bio">{t('profile.bio')}</Label>
         <textarea
           id="bio"
           rows={3}
           value={bio}
           onChange={(e) => setBio(e.target.value)}
           className="w-full px-3 py-2 rounded-md border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          placeholder="A short blurb your teammates will see."
+          placeholder={t('profile.bioPlaceholder')}
         />
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="timezone">Timezone</Label>
+        <Label htmlFor="timezone">{t('profile.timezone')}</Label>
         <Input id="timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
-        <p className="text-xs text-muted-foreground">e.g. America/New_York, Asia/Karachi, Europe/London.</p>
+        <p className="text-xs text-muted-foreground">{t('profile.timezoneHelp')}</p>
       </div>
 
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <span className="text-xs text-muted-foreground">
-          {save.isSuccess && 'Saved.'}
+          {save.isSuccess && t('profile.saved')}
           {save.error instanceof ApiError && <span className="text-destructive">{save.error.message}</span>}
         </span>
         <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending} size="sm">
-          {save.isPending ? 'Saving…' : 'Save changes'}
+          {save.isPending ? t('common.saving') : t('profile.saveChanges')}
         </Button>
       </div>
     </Card>
@@ -150,6 +153,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
 }
 
 function SecurityTab() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const refreshToken = useAuthStore((s) => s.refreshToken)
   const clear = useAuthStore((s) => s.clear)
@@ -202,33 +206,33 @@ function SecurityTab() {
   return (
     <div className="space-y-5">
       <Card className="p-6">
-        <h2 className="font-semibold mb-1">Change password</h2>
+        <h2 className="font-semibold mb-1">{t('profile.changePassword')}</h2>
         <p className="text-xs text-muted-foreground mb-4">
-          Use at least 8 characters. Mix letters, numbers, and symbols.
+          {t('profile.passwordHint')}
         </p>
         <div className="space-y-3">
           <div className="space-y-1">
-            <Label>Current password</Label>
+            <Label>{t('profile.currentPassword')}</Label>
             <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label>New password</Label>
+            <Label>{t('profile.newPassword')}</Label>
             <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
           </div>
           <div className="space-y-1">
-            <Label>Confirm new password</Label>
+            <Label>{t('profile.confirmNewPassword')}</Label>
             <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
             {next && confirm && next !== confirm && (
-              <p className="text-xs text-destructive">Passwords don&apos;t match.</p>
+              <p className="text-xs text-destructive">{t('profile.passwordsMismatch')}</p>
             )}
           </div>
           <div className="flex items-center justify-between pt-2 border-t border-border">
             <span className="text-xs">
-              {change.isSuccess && <span className="text-emerald-600">Password updated.</span>}
+              {change.isSuccess && <span className="text-emerald-600">{t('profile.passwordUpdated')}</span>}
               {change.error instanceof ApiError && <span className="text-destructive">{change.error.message}</span>}
             </span>
             <Button onClick={() => change.mutate()} disabled={!valid || change.isPending} size="sm">
-              {change.isPending ? 'Updating…' : 'Update password'}
+              {change.isPending ? t('profile.updating') : t('profile.updatePassword')}
             </Button>
           </div>
         </div>
@@ -241,10 +245,10 @@ function SecurityTab() {
           <div>
             <h2 className="font-semibold mb-1 flex items-center gap-2">
               <Globe className="h-4 w-4 text-muted-foreground" />
-              Active sessions
+              {t('profile.activeSessions')}
             </h2>
             <p className="text-sm text-muted-foreground">
-              See where you&apos;re signed in and sign out of other devices.
+              {t('profile.sessionsSubtitle')}
             </p>
           </div>
           <Button
@@ -253,27 +257,27 @@ function SecurityTab() {
             onClick={() => revokeOthers.mutate()}
             disabled={revokeOthers.isPending || !sessionsQuery.data?.some((s) => !s.isCurrent && !s.isRevoked)}
           >
-            {revokeOthers.isPending ? 'Revoking…' : 'Sign out other devices'}
+            {revokeOthers.isPending ? t('profile.revoking') : t('profile.signOutOthers')}
           </Button>
         </div>
         <div className="mt-4 space-y-2">
           {sessionsQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading sessions...</p>
+            <p className="text-sm text-muted-foreground">{t('profile.loadingSessions')}</p>
           ) : (sessionsQuery.data ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No active sessions found.</p>
+            <p className="text-sm text-muted-foreground">{t('profile.noSessions')}</p>
           ) : (
             (sessionsQuery.data ?? []).map((session) => (
               <div key={session.id} className="flex items-center gap-3 border border-border rounded-md p-3">
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">
-                    {session.userAgent || 'Unknown device'} {session.isCurrent ? '(current)' : ''}
+                    {session.userAgent || t('profile.unknownDevice')} {session.isCurrent ? t('profile.current') : ''}
                   </div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {session.ipAddress || 'Unknown IP'} · {new Date(session.createdAt).toLocaleString()}
+                    {session.ipAddress || t('profile.unknownIp')} · {new Date(session.createdAt).toLocaleString()}
                   </div>
                 </div>
                 {session.isRevoked ? (
-                  <span className="text-xs text-muted-foreground">Revoked</span>
+                  <span className="text-xs text-muted-foreground">{t('profile.revoked')}</span>
                 ) : (
                   <Button
                     variant="ghost"
@@ -285,7 +289,7 @@ function SecurityTab() {
                     }}
                     disabled={revokeSession.isPending}
                   >
-                    Revoke
+                    {t('profile.revoke')}
                   </Button>
                 )}
               </div>
@@ -298,6 +302,7 @@ function SecurityTab() {
 }
 
 function TotpCard() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [step, setStep] = useState<'idle' | 'setup' | 'verify' | 'done' | 'backup'>('idle')
   const [setupData, setSetupData] = useState<{ qrCodeUrl: string; secret: string } | null>(null)
@@ -345,57 +350,57 @@ function TotpCard() {
         <div>
           <h2 className="font-semibold mb-1 flex items-center gap-2">
             <ShieldCheck className={cn('h-4 w-4', enabled ? 'text-emerald-600' : 'text-muted-foreground')} />
-            Two-factor authentication
-            {enabled && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Enabled</span>}
+            {t('profile.twoFactor')}
+            {enabled && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">{t('profile.enabled')}</span>}
           </h2>
           <p className="text-sm text-muted-foreground">
-            Add an extra layer of security with a TOTP authenticator app (Google Authenticator, Authy, etc.).
+            {t('profile.twoFactorDesc')}
           </p>
         </div>
         {!enabled && step === 'idle' && (
           <Button variant="outline" size="sm" onClick={() => setupMutation.mutate()} disabled={setupMutation.isPending}>
-            {setupMutation.isPending ? 'Loading…' : 'Set up 2FA'}
+            {setupMutation.isPending ? t('common.loading') : t('profile.setup2fa')}
           </Button>
         )}
         {enabled && (
           <Button variant="outline" size="sm" className="text-destructive" onClick={() => disableMutation.mutate()} disabled={disableMutation.isPending}>
-            Disable
+            {t('profile.disable')}
           </Button>
         )}
       </div>
 
       {step === 'setup' && setupData && (
         <div className="mt-4 space-y-3 border-t border-border pt-4">
-          <p className="text-sm font-medium">Scan with your authenticator app:</p>
-          <img src={setupData.qrCodeUrl} alt="TOTP QR code" className="h-40 w-40 border border-border rounded" />
-          <p className="text-xs text-muted-foreground">Can&apos;t scan? Enter this code manually: <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{setupData.secret}</code></p>
+          <p className="text-sm font-medium">{t('profile.scanQr')}</p>
+          <img src={setupData.qrCodeUrl} alt={t('profile.qrAlt')} className="h-40 w-40 border border-border rounded" />
+          <p className="text-xs text-muted-foreground">{t('profile.cantScan')} <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{setupData.secret}</code></p>
           <div className="flex gap-2">
             <Input
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="6-digit code"
+              placeholder={t('profile.sixDigitCode')}
               maxLength={6}
               className="w-36"
               onKeyDown={(e) => { if (e.key === 'Enter' && code.length === 6) verifyMutation.mutate() }}
             />
             <Button size="sm" onClick={() => verifyMutation.mutate()} disabled={code.length !== 6 || verifyMutation.isPending}>
-              {verifyMutation.isPending ? 'Verifying…' : 'Verify'}
+              {verifyMutation.isPending ? t('profile.verifying') : t('profile.verify')}
             </Button>
           </div>
-          {verifyMutation.isError && <p className="text-xs text-destructive">Invalid code. Try again.</p>}
+          {verifyMutation.isError && <p className="text-xs text-destructive">{t('profile.invalidCode')}</p>}
         </div>
       )}
 
       {step === 'backup' && (
         <div className="mt-4 space-y-3 border-t border-border pt-4">
-          <p className="text-sm font-semibold text-emerald-600">2FA enabled! Save your backup codes:</p>
-          <p className="text-xs text-muted-foreground">These one-time backup codes can be used if you lose access to your authenticator app. Store them securely.</p>
+          <p className="text-sm font-semibold text-emerald-600">{t('profile.twoFactorEnabledSave')}</p>
+          <p className="text-xs text-muted-foreground">{t('profile.backupCodesDesc')}</p>
           <div className="grid grid-cols-2 gap-1">
             {backupCodes.map((c) => (
               <code key={c} className="bg-muted px-2 py-1 rounded text-xs font-mono">{c}</code>
             ))}
           </div>
-          <Button variant="outline" size="sm" onClick={() => setStep('idle')}>Done</Button>
+          <Button variant="outline" size="sm" onClick={() => setStep('idle')}>{t('profile.done')}</Button>
         </div>
       )}
     </Card>

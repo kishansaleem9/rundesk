@@ -18,27 +18,28 @@ import {
   Link2,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 const FIELD_TYPES = [
-  { value: 'short_text', label: 'Short text' },
-  { value: 'long_text', label: 'Long text' },
-  { value: 'email', label: 'Email' },
-  { value: 'number', label: 'Number' },
-  { value: 'date', label: 'Date' },
-  { value: 'dropdown', label: 'Dropdown' },
-  { value: 'multi_select', label: 'Multi-select' },
-  { value: 'file', label: 'File upload' },
-]
+  { value: 'short_text', labelKey: 'formBuilder.fieldType.shortText' },
+  { value: 'long_text', labelKey: 'formBuilder.fieldType.longText' },
+  { value: 'email', labelKey: 'formBuilder.fieldType.email' },
+  { value: 'number', labelKey: 'formBuilder.fieldType.number' },
+  { value: 'date', labelKey: 'formBuilder.fieldType.date' },
+  { value: 'dropdown', labelKey: 'formBuilder.fieldType.dropdown' },
+  { value: 'multi_select', labelKey: 'formBuilder.fieldType.multiSelect' },
+  { value: 'file', labelKey: 'formBuilder.fieldType.file' },
+] as const
 
 const TASK_FIELDS = [
-  { value: '', label: '— No mapping —' },
-  { value: 'title', label: 'Task title' },
-  { value: 'description', label: 'Task description' },
-  { value: 'priority', label: 'Priority' },
-  { value: 'dueDate', label: 'Due date' },
-  { value: 'targetListId', label: 'Routing target list' },
-  { value: 'assigneeEmail', label: 'Assignee (by email)' },
-]
+  { value: '', labelKey: 'formBuilder.taskField.none' },
+  { value: 'title', labelKey: 'formBuilder.taskField.title' },
+  { value: 'description', labelKey: 'formBuilder.taskField.description' },
+  { value: 'priority', labelKey: 'formBuilder.taskField.priority' },
+  { value: 'dueDate', labelKey: 'formBuilder.taskField.dueDate' },
+  { value: 'targetListId', labelKey: 'formBuilder.taskField.targetListId' },
+  { value: 'assigneeEmail', labelKey: 'formBuilder.taskField.assigneeEmail' },
+] as const
 
 type FormField = {
   id: string
@@ -86,6 +87,7 @@ function safeCsv(value: string): string {
 }
 
 export function FormBuilderPage() {
+  const { t } = useTranslation()
   const { workspaceId, formId } = useParams({ from: '/app/$workspaceId/forms/$formId' })
   const search = useSearch({ from: '/app/$workspaceId/forms/$formId' })
   const navigate = useNavigate()
@@ -202,7 +204,7 @@ export function FormBuilderPage() {
     },
     onError: (e: unknown, _orderedIds, context) => {
       if (context?.previous) qc.setQueryData(['form', formId], context.previous)
-      toast.error(e instanceof ApiError ? e.message : 'Failed to reorder fields')
+      toast.error(e instanceof ApiError ? e.message : t('formBuilder.reorderError'))
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['form', formId] }),
   })
@@ -224,10 +226,10 @@ export function FormBuilderPage() {
 
   const form = formQuery.data
   if (!form && formQuery.isLoading) {
-    return <div className="p-6 text-muted-foreground">Loading form…</div>
+    return <div className="p-6 text-muted-foreground">{t('formBuilder.loadingForm')}</div>
   }
   if (!form) {
-    return <div className="p-6 text-muted-foreground">Form not found.</div>
+    return <div className="p-6 text-muted-foreground">{t('formBuilder.formNotFound')}</div>
   }
 
   const publicUrl = `${window.location.origin}/submit/${form.slug}`
@@ -251,14 +253,14 @@ export function FormBuilderPage() {
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
             {form.isEnabled ? (
-              <><ToggleRight className="h-5 w-5 text-emerald-500" /> Enabled</>
+              <><ToggleRight className="h-5 w-5 text-emerald-500" /> {t('formBuilder.enabled')}</>
             ) : (
-              <><ToggleLeft className="h-5 w-5" /> Disabled</>
+              <><ToggleLeft className="h-5 w-5" /> {t('formBuilder.disabled')}</>
             )}
           </button>
           <a href={publicUrl} target="_blank" rel="noopener noreferrer">
             <Button variant="outline" size="sm" className="gap-1.5">
-              <Eye className="h-3.5 w-3.5" /> Preview
+              <Eye className="h-3.5 w-3.5" /> {t('formBuilder.preview')}
             </Button>
           </a>
         </div>
@@ -277,7 +279,7 @@ export function FormBuilderPage() {
                 : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
           >
-            {tab}
+            {tab === 'builder' ? t('formBuilder.tabBuilder') : tab === 'settings' ? t('formBuilder.tabSettings') : t('formBuilder.tabSubmissions')}
             {tab === 'submissions' && submissionsQuery.data && (
               <span className="ml-1.5 text-xs bg-brand-200 text-accent rounded-full px-1.5 py-0.5">
                 {submissionsQuery.data.length}
@@ -328,22 +330,22 @@ export function FormBuilderPage() {
             {/* Add field */}
             {addingField ? (
               <Card className="p-4 border-brand-300">
-                <p className="text-sm font-medium mb-2">Add field</p>
+                <p className="text-sm font-medium mb-2">{t('formBuilder.addField')}</p>
                 <div className="space-y-2">
                   <select
                     className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
                     value={newFieldType}
                     onChange={(e) => setNewFieldType(e.target.value)}
                   >
-                    {FIELD_TYPES.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
+                    {FIELD_TYPES.map((ft) => (
+                      <option key={ft.value} value={ft.value}>{t(ft.labelKey)}</option>
                     ))}
                   </select>
                   <Input
                     autoFocus
                     value={newFieldLabel}
                     onChange={(e) => setNewFieldLabel(e.target.value)}
-                    placeholder="Field label"
+                    placeholder={t('formBuilder.fieldLabelPlaceholder')}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && newFieldLabel.trim()) {
                         addField.mutate({ type: newFieldType, label: newFieldLabel.trim() })
@@ -357,10 +359,10 @@ export function FormBuilderPage() {
                       disabled={!newFieldLabel.trim() || addField.isPending}
                       onClick={() => addField.mutate({ type: newFieldType, label: newFieldLabel.trim() })}
                     >
-                      Add field
+                      {t('formBuilder.addField')}
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => { setAddingField(false); setNewFieldLabel('') }}>
-                      Cancel
+                      {t('common.cancel')}
                     </Button>
                   </div>
                 </div>
@@ -370,7 +372,7 @@ export function FormBuilderPage() {
                 onClick={() => setAddingField(true)}
                 className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-border rounded-lg text-sm text-muted-foreground hover:border-brand-300 hover:text-accent transition-colors"
               >
-                <Plus className="h-4 w-4" /> Add field
+                <Plus className="h-4 w-4" /> {t('formBuilder.addField')}
               </button>
             )}
           </div>
@@ -441,7 +443,9 @@ function FieldCard({
   onDragEnd: () => void
   onDrop: () => void
 }) {
-  const typeLabel = FIELD_TYPES.find((t) => t.value === field.type)?.label ?? field.type
+  const { t } = useTranslation()
+  const typeMeta = FIELD_TYPES.find((ft) => ft.value === field.type)
+  const typeLabel = typeMeta ? t(typeMeta.labelKey) : field.type
   const supportsListRouting = field.type === 'dropdown' || field.type === 'multi_select'
   const mappedRoutingCount = (field.options ?? []).filter((opt) => opt.value.startsWith('list:')).length
   const totalRoutingOptions = field.options?.length ?? 0
@@ -480,8 +484,8 @@ function FieldCard({
           }}
           onDragEnd={onDragEnd}
           onClick={(e) => e.stopPropagation()}
-          aria-label="Drag to reorder field"
-          title="Drag to reorder"
+          aria-label={t('formBuilder.dragReorderAria')}
+          title={t('formBuilder.dragReorderTitle')}
           className="shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"
         >
           <GripVertical className="h-4 w-4" />
@@ -497,21 +501,21 @@ function FieldCard({
       {expanded && (
         <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Label</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.label')}</label>
             <Input
               defaultValue={field.label}
               onBlur={(e) => onUpdate({ label: e.target.value })}
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Placeholder</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.placeholder')}</label>
             <Input
               defaultValue={field.placeholder ?? ''}
               onBlur={(e) => onUpdate({ placeholder: e.target.value || null })}
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Help text</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.helpText')}</label>
             <Input
               defaultValue={field.helpText ?? ''}
               onBlur={(e) => onUpdate({ helpText: e.target.value || null })}
@@ -519,7 +523,7 @@ function FieldCard({
           </div>
           {(field.type === 'dropdown' || field.type === 'multi_select') && (
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Options</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.options')}</label>
               <div className="space-y-2">
                 {(field.options ?? []).map((opt, idx) => (
                   <div key={`${field.id}-opt-${idx}`} className="grid grid-cols-12 gap-2">
@@ -531,7 +535,7 @@ function FieldCard({
                         next[idx] = { ...next[idx], label: e.target.value }
                         onUpdate({ options: next })
                       }}
-                      placeholder="Option label"
+                      placeholder={t('formBuilder.optionLabelPlaceholder')}
                     />
                     <Input
                       className="col-span-5"
@@ -541,7 +545,7 @@ function FieldCard({
                         next[idx] = { ...next[idx], value: e.target.value }
                         onUpdate({ options: next })
                       }}
-                      placeholder="Option value"
+                      placeholder={t('formBuilder.optionValuePlaceholder')}
                     />
                     <Button
                       variant="ghost"
@@ -566,13 +570,13 @@ function FieldCard({
                     onUpdate({ options: next })
                   }}
                 >
-                  <Plus className="h-3.5 w-3.5 mr-1" /> Add option
+                  <Plus className="h-3.5 w-3.5 mr-1" /> {t('formBuilder.addOption')}
                 </Button>
               </div>
             </div>
           )}
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Maps to task field</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.mapsToTaskField')}</label>
             <select
               className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
               defaultValue={field.taskField ?? ''}
@@ -589,20 +593,20 @@ function FieldCard({
                 onUpdate({ taskField: nextTaskField })
               }}
             >
-              {TASK_FIELDS.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
+              {TASK_FIELDS.map((tf) => (
+                <option key={tf.value} value={tf.value}>{t(tf.labelKey)}</option>
               ))}
             </select>
           </div>
           {field.taskField === 'targetListId' && (
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">Routing targets</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.routingTargets')}</label>
               <p className="text-[11px] text-muted-foreground mb-2">
-                This field should use dropdown or multi-select options whose values point to list targets.
+                {t('formBuilder.routingHelp')}
               </p>
               {!['dropdown', 'multi_select'].includes(field.type) && (
                 <p className="text-[11px] text-amber-700 dark:text-amber-300 mb-2">
-                  Change this field type to Dropdown or Multi-select for safer routing.
+                  {t('formBuilder.routingChangeTypeHint')}
                 </p>
               )}
               {!supportsListRouting && (
@@ -617,7 +621,7 @@ function FieldCard({
                     })
                   }
                 >
-                  Convert to dropdown for list routing
+                  {t('formBuilder.convertToDropdown')}
                 </Button>
               )}
               <Button
@@ -626,17 +630,17 @@ function FieldCard({
                 onClick={() => onUpdate({ options: workspaceListOptions })}
                 disabled={workspaceListOptions.length === 0}
               >
-                Populate options from workspace lists
+                {t('formBuilder.populateFromLists')}
               </Button>
               {supportsListRouting && totalRoutingOptions > 0 && (
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  {mappedRoutingCount}/{totalRoutingOptions} options mapped to a list target.
+                  {t('formBuilder.optionsMapped', { mapped: mappedRoutingCount, total: totalRoutingOptions })}
                 </p>
               )}
               {supportsListRouting && hasInvalidRoutingValues && (
                 <div className="mt-2 flex items-center gap-2">
                   <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                    Some option values are not list targets and will not route submissions.
+                    {t('formBuilder.invalidRoutingWarning')}
                   </p>
                   <Button
                     variant="ghost"
@@ -652,16 +656,16 @@ function FieldCard({
                       })
                     }
                   >
-                    Clear invalid values
+                    {t('formBuilder.clearInvalidValues')}
                   </Button>
                 </div>
               )}
               {supportsListRouting && (field.options?.length ?? 0) > 0 && workspaceListOptions.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  <p className="text-[11px] text-muted-foreground">Route each option to a list</p>
+                  <p className="text-[11px] text-muted-foreground">{t('formBuilder.routeEachOption')}</p>
                   {(field.options ?? []).map((opt, idx) => (
                     <div key={`${field.id}-route-${idx}`} className="grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-4 text-xs truncate">{opt.label || `Option ${idx + 1}`}</div>
+                      <div className="col-span-4 text-xs truncate">{opt.label || t('formBuilder.optionFallback', { num: idx + 1 })}</div>
                       <select
                         className="col-span-8 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
                         value={opt.value.startsWith('list:') ? opt.value : ''}
@@ -671,7 +675,7 @@ function FieldCard({
                           onUpdate({ options: next })
                         }}
                       >
-                        <option value="">No routing target</option>
+                        <option value="">{t('formBuilder.noRoutingTarget')}</option>
                         {workspaceListOptions.map((listOpt) => (
                           <option key={listOpt.value} value={listOpt.value}>{listOpt.label}</option>
                         ))}
@@ -682,7 +686,7 @@ function FieldCard({
               )}
               {supportsListRouting && totalRoutingOptions > 0 && (
                 <div className="mt-3 rounded-md border border-border p-2">
-                  <p className="text-[11px] font-medium mb-1">Routing preview</p>
+                  <p className="text-[11px] font-medium mb-1">{t('formBuilder.routingPreview')}</p>
                   <div className="space-y-1.5">
                     {(field.options ?? []).map((opt, idx) => {
                       const routeLabel = workspaceRoutingLookup.get(opt.value)
@@ -690,11 +694,11 @@ function FieldCard({
                       const isUnknownTarget = Boolean(opt.value) && opt.value.startsWith('list:') && !routeLabel
                       return (
                         <div key={`${field.id}-routing-preview-${idx}`} className="flex items-start justify-between gap-2 text-[11px]">
-                          <span className="truncate">{opt.label || `Option ${idx + 1}`}</span>
+                          <span className="truncate">{opt.label || t('formBuilder.optionFallback', { num: idx + 1 })}</span>
                           {isUnmapped ? (
-                            <span className="text-amber-700 dark:text-amber-300">Unmapped</span>
+                            <span className="text-amber-700 dark:text-amber-300">{t('formBuilder.unmapped')}</span>
                           ) : isUnknownTarget ? (
-                            <span className="text-destructive">Invalid target</span>
+                            <span className="text-destructive">{t('formBuilder.invalidTarget')}</span>
                           ) : (
                             <span className="text-muted-foreground truncate">{routeLabel}</span>
                           )}
@@ -705,12 +709,12 @@ function FieldCard({
                 </div>
               )}
               {workspaceListOptions.length === 0 && (
-                <p className="text-[11px] text-muted-foreground mt-1">No lists found yet.</p>
+                <p className="text-[11px] text-muted-foreground mt-1">{t('formBuilder.noListsFound')}</p>
               )}
             </div>
           )}
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Conditional visibility (optional)</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.conditionalVisibility')}</label>
             <div className="mb-2">
               <select
                 className="rounded-md border border-border bg-background px-2 py-1.5 text-xs"
@@ -718,8 +722,8 @@ function FieldCard({
                 onChange={(e) => onUpdate({ visibilityMode: e.target.value as 'all' | 'any' })}
                 disabled={(field.visibilityRules?.length ?? 0) <= 1}
               >
-                <option value="all">Match all rules (AND)</option>
-                <option value="any">Match any rule (OR)</option>
+                <option value="all">{t('formBuilder.matchAll')}</option>
+                <option value="any">{t('formBuilder.matchAny')}</option>
               </select>
             </div>
             <div className="space-y-2">
@@ -734,7 +738,7 @@ function FieldCard({
                       onUpdate({ visibilityRules: next })
                     }}
                   >
-                    <option value="">Select field</option>
+                    <option value="">{t('formBuilder.selectField')}</option>
                     {allFields
                       .filter((f) => f.id !== field.id)
                       .map((f) => (
@@ -750,10 +754,10 @@ function FieldCard({
                       onUpdate({ visibilityRules: next })
                     }}
                   >
-                    <option value="equals">Equals</option>
-                    <option value="not_equals">Not equals</option>
-                    <option value="contains">Contains</option>
-                    <option value="not_contains">Not contains</option>
+                    <option value="equals">{t('formBuilder.opEquals')}</option>
+                    <option value="not_equals">{t('formBuilder.opNotEquals')}</option>
+                    <option value="contains">{t('formBuilder.opContains')}</option>
+                    <option value="not_contains">{t('formBuilder.opNotContains')}</option>
                   </select>
                   <Input
                     className="col-span-4"
@@ -763,7 +767,7 @@ function FieldCard({
                       next[idx] = { ...rule, value: e.target.value }
                       onUpdate({ visibilityRules: next })
                     }}
-                    placeholder="match value"
+                    placeholder={t('formBuilder.matchValuePlaceholder')}
                   />
                   <Button
                     variant="ghost"
@@ -791,7 +795,7 @@ function FieldCard({
                   onUpdate({ visibilityRules: next })
                 }}
               >
-                <Plus className="h-3.5 w-3.5 mr-1" /> Add visibility rule
+                <Plus className="h-3.5 w-3.5 mr-1" /> {t('formBuilder.addVisibilityRule')}
               </Button>
             </div>
           </div>
@@ -803,13 +807,13 @@ function FieldCard({
                 onChange={(e) => onUpdate({ isRequired: e.target.checked })}
                 className="rounded"
               />
-              Required
+              {t('formBuilder.required')}
             </label>
             <button
               onClick={onDelete}
               className="text-xs text-destructive hover:underline flex items-center gap-1"
             >
-              <Trash2 className="h-3.5 w-3.5" /> Remove
+              <Trash2 className="h-3.5 w-3.5" /> {t('formBuilder.remove')}
             </button>
           </div>
         </div>
@@ -821,6 +825,7 @@ function FieldCard({
 // ─── FormSettings ────────────────────────────────────────────────────────────
 
 function FormSettings({ form, onUpdate }: { form: FormDetail; onUpdate: (patch: any) => void }) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState(form.title)
   const [desc, setDesc] = useState(form.description ?? '')
   const [confirmMsg, setConfirmMsg] = useState(form.confirmationMsg ?? '')
@@ -828,35 +833,35 @@ function FormSettings({ form, onUpdate }: { form: FormDetail; onUpdate: (patch: 
   return (
     <div className="max-w-xl space-y-5">
       <Card className="p-4 space-y-3">
-        <h3 className="font-medium text-sm">General</h3>
+        <h3 className="font-medium text-sm">{t('formBuilder.general')}</h3>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Title</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.title')}</label>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => onUpdate({ title })} />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Description</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.description')}</label>
           <Input
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             onBlur={() => onUpdate({ description: desc || null })}
-            placeholder="Optional — shown at the top of the form"
+            placeholder={t('formBuilder.descriptionPlaceholder')}
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-muted-foreground mb-1 block">Confirmation message</label>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('formBuilder.confirmationMessage')}</label>
           <Input
             value={confirmMsg}
             onChange={(e) => setConfirmMsg(e.target.value)}
             onBlur={() => onUpdate({ confirmationMsg: confirmMsg })}
-            placeholder="Thank you! Your request has been submitted."
+            placeholder={t('formBuilder.confirmationPlaceholder')}
           />
         </div>
       </Card>
 
       <Card className="p-4 space-y-3">
-        <h3 className="font-medium text-sm">Visibility</h3>
+        <h3 className="font-medium text-sm">{t('formBuilder.visibility')}</h3>
         <label className="flex items-center justify-between">
-          <span className="text-sm">Public form (no login required)</span>
+          <span className="text-sm">{t('formBuilder.publicForm')}</span>
           <input
             type="checkbox"
             defaultChecked={form.isPublic}
@@ -865,7 +870,7 @@ function FormSettings({ form, onUpdate }: { form: FormDetail; onUpdate: (patch: 
           />
         </label>
         <label className="flex items-center justify-between">
-          <span className="text-sm">Form enabled</span>
+          <span className="text-sm">{t('formBuilder.formEnabled')}</span>
           <input
             type="checkbox"
             defaultChecked={form.isEnabled}
@@ -876,7 +881,7 @@ function FormSettings({ form, onUpdate }: { form: FormDetail; onUpdate: (patch: 
       </Card>
 
       <Card className="p-4">
-        <h3 className="font-medium text-sm mb-2">Shareable link</h3>
+        <h3 className="font-medium text-sm mb-2">{t('formBuilder.shareableLink')}</h3>
         <div className="flex items-center gap-2">
           <code className="flex-1 text-xs bg-muted px-3 py-2 rounded font-mono">
             {window.location.origin}/submit/{form.slug}
@@ -917,6 +922,15 @@ function SubmissionsTab({
   onClearRetryHistory: (submissionId: string) => Promise<void>
   onRefresh: () => Promise<void>
 }) {
+  const { t, tCount } = useTranslation()
+  const filterLabel = (f: SubmissionFilter) =>
+    f === 'all'
+      ? t('formBuilder.filterAll')
+      : f === 'success'
+        ? t('formBuilder.filterSuccess')
+        : f === 'unmapped'
+          ? t('formBuilder.filterUnmapped')
+          : t('formBuilder.filterInvalid')
   const storageKeyBase = `form-submissions-ops:${formId}`
 
   const readFilterFromUrl = (): SubmissionFilter => {
@@ -987,12 +1001,12 @@ function SubmissionsTab({
     window.history.replaceState(null, '', nextUrl)
   }, [filter, preset])
 
-  if (loading) return <div className="text-muted-foreground text-sm">Loading…</div>
+  if (loading) return <div className="text-muted-foreground text-sm">{t('common.loading')}</div>
   if (submissions.length === 0) {
     return (
       <div className="text-center text-muted-foreground py-16">
-        <p className="font-medium">No submissions yet</p>
-        <p className="text-sm mt-1">Share your form link to start collecting responses.</p>
+        <p className="font-medium">{t('formBuilder.noSubmissionsTitle')}</p>
+        <p className="text-sm mt-1">{t('formBuilder.noSubmissionsBody')}</p>
       </div>
     )
   }
@@ -1116,11 +1130,11 @@ function SubmissionsTab({
       ),
     )
     if (emails.length === 0) {
-      setBulkFeedback('No submitter emails found in current filter.')
+      setBulkFeedback(t('formBuilder.noEmailsFound'))
       return
     }
     await navigator.clipboard.writeText(emails.join(', '))
-    setBulkFeedback(`Copied ${emails.length} submitter email${emails.length === 1 ? '' : 's'}.`)
+    setBulkFeedback(tCount('formBuilder.copiedEmails', emails.length))
   }
   const revalidateFilteredRouting = () => {
     const summary = filteredSubmissions.reduce(
@@ -1135,13 +1149,19 @@ function SubmissionsTab({
       { success: 0, unmapped: 0, invalid: 0, other: 0 },
     )
     setBulkFeedback(
-      `Recounted ${filteredSubmissions.length} submissions: ${summary.success} success, ${summary.unmapped} unmapped, ${summary.invalid} invalid, ${summary.other} other.`,
+      t('formBuilder.recounted', {
+        total: filteredSubmissions.length,
+        success: summary.success,
+        unmapped: summary.unmapped,
+        invalid: summary.invalid,
+        other: summary.other,
+      }),
     )
   }
   const retryFilteredRouting = async () => {
     const retryCandidates = filteredSubmissions.filter((submission) => !submission.createdTaskId)
     if (retryCandidates.length === 0) {
-      setBulkFeedback('No eligible submissions to retry in current selection.')
+      setBulkFeedback(t('formBuilder.noEligibleRetry'))
       return
     }
     setRetryingRouting(true)
@@ -1154,19 +1174,19 @@ function SubmissionsTab({
       try {
         await onRetryRouting(submission.id)
         success += 1
-        nextRetryState[submission.id] = { status: 'ok', message: 'Routing retry succeeded.' }
+        nextRetryState[submission.id] = { status: 'ok', message: t('formBuilder.routingRetrySucceeded') }
       } catch {
         failed += 1
-        nextRetryState[submission.id] = { status: 'error', message: 'Retry failed. Check routing target and field values.' }
+        nextRetryState[submission.id] = { status: 'error', message: t('formBuilder.retryFailed') }
       }
       setRowRetryState((prev) => ({ ...prev, [submission.id]: nextRetryState[submission.id] }))
     }
     setRetryingRouting(false)
     await onRefresh()
     setSessionRetrySuccessCount((prev) => prev + success)
-    setLastBulkRunSummary(`Retry routing: ${success} succeeded, ${failed} failed.`)
+    setLastBulkRunSummary(t('formBuilder.retryRoutingSummary', { success, failed }))
     setBulkFeedback(
-      `Retry routing finished: ${success} succeeded, ${failed} failed (from ${retryCandidates.length} attempted).`,
+      t('formBuilder.retryRoutingFinished', { success, failed, attempted: retryCandidates.length }),
     )
   }
   const retrySingleRouting = async (submissionId: string) => {
@@ -1175,21 +1195,21 @@ function SubmissionsTab({
       await onRetryRouting(submissionId)
       await onRefresh()
       setSessionRetrySuccessCount((prev) => prev + 1)
-      setRowRetryState((prev) => ({ ...prev, [submissionId]: { status: 'ok', message: 'Routing retry succeeded.' } }))
+      setRowRetryState((prev) => ({ ...prev, [submissionId]: { status: 'ok', message: t('formBuilder.routingRetrySucceeded') } }))
     } catch {
       setRowRetryState((prev) => ({
         ...prev,
-        [submissionId]: { status: 'error', message: 'Retry failed. Check routing target and field values.' },
+        [submissionId]: { status: 'error', message: t('formBuilder.retryFailed') },
       }))
     }
   }
   const clearFilteredHistory = async () => {
     const targets = filteredSubmissions.filter((submission) => (submission.retryHistory?.length ?? 0) > 0)
     if (targets.length === 0) {
-      setBulkFeedback('No retry history found in current selection.')
+      setBulkFeedback(t('formBuilder.noRetryHistory'))
       return
     }
-    const confirmed = window.confirm(`Clear retry history for ${targets.length} submission(s)?`)
+    const confirmed = window.confirm(tCount('formBuilder.confirmClearHistory', targets.length))
     if (!confirmed) return
 
     setClearingHistory(true)
@@ -1205,8 +1225,8 @@ function SubmissionsTab({
     }
     setClearingHistory(false)
     await onRefresh()
-    setLastBulkRunSummary(`Bulk clear history: ${success} succeeded, ${failed} failed.`)
-    setBulkFeedback(`Bulk clear history finished: ${success} succeeded, ${failed} failed.`)
+    setLastBulkRunSummary(t('formBuilder.bulkClearSummary', { success, failed }))
+    setBulkFeedback(t('formBuilder.bulkClearFinished', { success, failed }))
   }
   const retryAndClearStaleErrors = async () => {
     setOnlyActionable(true)
@@ -1214,7 +1234,7 @@ function SubmissionsTab({
       (submission) => submission.retryMeta?.status === 'error' && !submission.createdTaskId,
     )
     if (retryCandidates.length === 0) {
-      setBulkFeedback('No failed routing submissions eligible for retry in current selection.')
+      setBulkFeedback(t('formBuilder.noFailedEligible'))
       return
     }
 
@@ -1243,10 +1263,10 @@ function SubmissionsTab({
     await onRefresh()
     setSessionRetrySuccessCount((prev) => prev + retrySucceeded)
     setLastBulkRunSummary(
-      `Retry+clear: retries ${retrySucceeded} succeeded, ${retryFailed} failed; history cleared ${historyCleared}, clear failed ${historyClearFailed}.`,
+      t('formBuilder.retryClearSummary', { retrySucceeded, retryFailed, historyCleared, historyClearFailed }),
     )
     setBulkFeedback(
-      `Retry+clear finished: retries ${retrySucceeded} succeeded, ${retryFailed} failed; history cleared ${historyCleared}, clear failed ${historyClearFailed}.`,
+      t('formBuilder.retryClearFinished', { retrySucceeded, retryFailed, historyCleared, historyClearFailed }),
     )
   }
   const copySegmentLink = async () => {
@@ -1257,27 +1277,27 @@ function SubmissionsTab({
     const query = params.toString()
     const shareUrl = `${window.location.origin}${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
     await navigator.clipboard.writeText(shareUrl)
-    setBulkFeedback(`Copied segment link for "${filter}" filter.`)
+    setBulkFeedback(t('formBuilder.copiedSegmentLink', { filter: filterLabel(filter) }))
   }
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
         <Card className="p-3">
-          <p className="text-[11px] text-muted-foreground">Actionable now</p>
+          <p className="text-[11px] text-muted-foreground">{t('formBuilder.actionableNow')}</p>
           <p className="text-lg font-semibold">{actionableCount}</p>
         </Card>
         <Card className="p-3">
-          <p className="text-[11px] text-muted-foreground">Session retry successes</p>
+          <p className="text-[11px] text-muted-foreground">{t('formBuilder.sessionRetrySuccesses')}</p>
           <p className="text-lg font-semibold">{sessionRetrySuccessCount}</p>
         </Card>
         <Card className="p-3">
-          <p className="text-[11px] text-muted-foreground">Last bulk run</p>
-          <p className="text-xs">{lastBulkRunSummary || 'No bulk action executed yet.'}</p>
+          <p className="text-[11px] text-muted-foreground">{t('formBuilder.lastBulkRun')}</p>
+          <p className="text-xs">{lastBulkRunSummary || t('formBuilder.noBulkAction')}</p>
         </Card>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground">{submissions.length} submission{submissions.length !== 1 ? 's' : ''}</p>
+        <p className="text-sm text-muted-foreground">{tCount('formBuilder.submissionCount', submissions.length)}</p>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
@@ -1285,7 +1305,7 @@ function SubmissionsTab({
             onClick={copyFilteredSubmitterEmails}
             disabled={filteredSubmissions.length === 0}
           >
-            Copy emails
+            {t('formBuilder.copyEmails')}
           </Button>
           <Button
             variant="outline"
@@ -1293,7 +1313,7 @@ function SubmissionsTab({
             onClick={revalidateFilteredRouting}
             disabled={filteredSubmissions.length === 0}
           >
-            Recount routing
+            {t('formBuilder.recountRouting')}
           </Button>
           <Button
             variant="outline"
@@ -1301,14 +1321,14 @@ function SubmissionsTab({
             onClick={exportFilteredSubmissions}
             disabled={filteredSubmissions.length === 0}
           >
-            <Download className="h-3.5 w-3.5 mr-1.5" /> Export CSV
+            <Download className="h-3.5 w-3.5 mr-1.5" /> {t('formBuilder.exportCsv')}
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={copySegmentLink}
           >
-            <Link2 className="h-3.5 w-3.5 mr-1.5" /> Copy segment link
+            <Link2 className="h-3.5 w-3.5 mr-1.5" /> {t('formBuilder.copySegmentLink')}
           </Button>
           <Button
             variant="outline"
@@ -1316,7 +1336,7 @@ function SubmissionsTab({
             onClick={retryFilteredRouting}
             disabled={filteredSubmissions.length === 0 || retryingRouting}
           >
-            Retry routing
+            {t('formBuilder.retryRouting')}
           </Button>
           <Button
             variant="outline"
@@ -1324,7 +1344,7 @@ function SubmissionsTab({
             onClick={clearFilteredHistory}
             disabled={filteredSubmissions.length === 0 || clearingHistory}
           >
-            {clearingHistory ? 'Clearing history...' : 'Bulk clear history'}
+            {clearingHistory ? t('formBuilder.clearingHistory') : t('formBuilder.bulkClearHistory')}
           </Button>
           <Button
             variant="outline"
@@ -1332,7 +1352,7 @@ function SubmissionsTab({
             onClick={retryAndClearStaleErrors}
             disabled={filteredSubmissions.length === 0 || retryAndClearRunning}
           >
-            {retryAndClearRunning ? 'Retrying + clearing...' : 'Retry + clear stale errors'}
+            {retryAndClearRunning ? t('formBuilder.retryingClearing') : t('formBuilder.retryClearStale')}
           </Button>
         </div>
       </div>
@@ -1340,22 +1360,22 @@ function SubmissionsTab({
       {routingField && (
         <div className="flex flex-wrap gap-2">
           <Button variant={filter === 'all' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('all')}>
-            All ({submissions.length})
+            {t('formBuilder.filterAll')} ({submissions.length})
           </Button>
           <Button variant={filter === 'success' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('success')}>
-            Routed success ({counts.success})
+            {t('formBuilder.filterSuccess')} ({counts.success})
           </Button>
           <Button variant={filter === 'unmapped' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('unmapped')}>
-            Unmapped ({counts.unmapped})
+            {t('formBuilder.filterUnmapped')} ({counts.unmapped})
           </Button>
           <Button variant={filter === 'invalid' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('invalid')}>
-            Invalid ({counts.invalid})
+            {t('formBuilder.filterInvalid')} ({counts.invalid})
           </Button>
         </div>
       )}
       <div className="flex flex-wrap gap-2">
         <Button variant={preset === 'all' ? 'default' : 'outline'} size="sm" onClick={() => applyPreset('all')}>
-          All submissions ({submissions.length})
+          {t('formBuilder.presetAll')} ({submissions.length})
         </Button>
         <Button
           variant={preset === 'needs_routing_fix' ? 'default' : 'outline'}
@@ -1363,14 +1383,14 @@ function SubmissionsTab({
           onClick={() => applyPreset('needs_routing_fix')}
           disabled={!hasTargetListRouting}
         >
-          Needs Routing Fix ({counts.unmapped + counts.invalid})
+          {t('formBuilder.presetNeedsRouting')} ({counts.unmapped + counts.invalid})
         </Button>
         <Button
           variant={preset === 'no_task_created' ? 'default' : 'outline'}
           size="sm"
           onClick={() => applyPreset('no_task_created')}
         >
-          No Task Created ({noTaskCreatedCount})
+          {t('formBuilder.presetNoTask')} ({noTaskCreatedCount})
         </Button>
         <Button
           variant={preset === 'successful' ? 'default' : 'outline'}
@@ -1378,48 +1398,48 @@ function SubmissionsTab({
           onClick={() => applyPreset('successful')}
           disabled={!hasTargetListRouting}
         >
-          Successful ({counts.success})
+          {t('formBuilder.presetSuccessful')} ({counts.success})
         </Button>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button variant={historyFilter === 'all' ? 'default' : 'outline'} size="sm" onClick={() => setHistoryFilter('all')}>
-          History: all ({routingFilteredSubmissions.length})
+          {t('formBuilder.historyAll')} ({routingFilteredSubmissions.length})
         </Button>
         <Button
           variant={historyFilter === 'with_history' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setHistoryFilter('with_history')}
         >
-          With history ({withHistoryCount})
+          {t('formBuilder.withHistory')} ({withHistoryCount})
         </Button>
         <Button
           variant={historyFilter === 'history_failures' ? 'default' : 'outline'}
           size="sm"
           onClick={() => setHistoryFilter('history_failures')}
         >
-          History failures ({historyFailuresCount})
+          {t('formBuilder.historyFailures')} ({historyFailuresCount})
         </Button>
         <Button
           variant={onlyActionable ? 'default' : 'outline'}
           size="sm"
           onClick={() => setOnlyActionable((prev) => !prev)}
         >
-          Only actionable ({actionableCount})
+          {t('formBuilder.onlyActionable')} ({actionableCount})
         </Button>
       </div>
       {presetSubmissions.length !== filteredSubmissions.length && (
         <p className="text-xs text-muted-foreground">
-          Preset narrows to {presetSubmissions.length} submission{presetSubmissions.length === 1 ? '' : 's'} before routing filter.
+          {tCount('formBuilder.presetNarrows', presetSubmissions.length)}
         </p>
       )}
       {filteredSubmissions.length === 0 && (
-        <p className="text-xs text-muted-foreground">No submissions match this routing filter.</p>
+        <p className="text-xs text-muted-foreground">{t('formBuilder.noMatchFilter')}</p>
       )}
       {filteredSubmissions.map((sub) => (
         <Card key={sub.id} className="p-4">
           <div className="flex items-start justify-between mb-2">
             <div>
-              <p className="font-medium text-sm">{sub.submitterName || 'Anonymous'}</p>
+              <p className="font-medium text-sm">{sub.submitterName || t('formBuilder.anonymous')}</p>
               {sub.submitterEmail && <p className="text-xs text-muted-foreground">{sub.submitterEmail}</p>}
             </div>
             <p className="text-xs text-muted-foreground">{new Date(sub.submittedAt).toLocaleString()}</p>
@@ -1437,7 +1457,7 @@ function SubmissionsTab({
                 onClick={() => retrySingleRouting(sub.id)}
                 disabled={rowRetryState[sub.id]?.status === 'retrying'}
               >
-                {rowRetryState[sub.id]?.status === 'retrying' ? 'Retrying...' : 'Retry'}
+                {rowRetryState[sub.id]?.status === 'retrying' ? t('formBuilder.retrying') : t('formBuilder.retry')}
               </Button>
               {rowRetryState[sub.id]?.message && (
                 <p
@@ -1466,7 +1486,7 @@ function SubmissionsTab({
           {(sub.retryHistory?.length ?? 0) > 0 && (
             <div className="mb-2 rounded-md border border-border p-2">
               <div className="mb-1 flex items-center justify-between gap-2">
-                <p className="text-[11px] font-medium">Retry history</p>
+                <p className="text-[11px] font-medium">{t('formBuilder.retryHistory')}</p>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1474,10 +1494,10 @@ function SubmissionsTab({
                   onClick={async () => {
                     await onClearRetryHistory(sub.id)
                     await onRefresh()
-                    setRowRetryState((prev) => ({ ...prev, [sub.id]: { status: 'idle', message: 'Retry history cleared.' } }))
+                    setRowRetryState((prev) => ({ ...prev, [sub.id]: { status: 'idle', message: t('formBuilder.retryHistoryCleared') } }))
                   }}
                 >
-                  Clear history
+                  {t('formBuilder.clearHistory')}
                 </Button>
               </div>
               <div className="space-y-1">
@@ -1488,7 +1508,7 @@ function SubmissionsTab({
                       entry.status === 'error' ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-300'
                     }`}
                   >
-                    {entry.status === 'error' ? 'Failed' : 'Succeeded'}: {entry.message} ({new Date(entry.at).toLocaleString()})
+                    {entry.status === 'error' ? t('formBuilder.failed') : t('formBuilder.succeeded')}: {entry.message} ({new Date(entry.at).toLocaleString()})
                   </p>
                 ))}
               </div>
@@ -1546,6 +1566,7 @@ function SubmissionRoutingStatus({
   fields: FormField[]
   workspaceListOptions: Array<{ label: string; value: string }>
 }) {
+  const { t } = useTranslation()
   const routingField = fields.find((field) => field.taskField === 'targetListId')
   if (!routingField) return null
 
@@ -1558,19 +1579,19 @@ function SubmissionRoutingStatus({
   const targetLabel = normalized ? lookup.get(normalized) : undefined
 
   let toneClass = 'text-muted-foreground'
-  let message = 'Routing: no target selected'
+  let message = t('formBuilder.routingNoTarget')
   if (!normalized) {
     toneClass = 'text-amber-700 dark:text-amber-300'
-    message = 'Routing: unmapped target'
+    message = t('formBuilder.routingUnmapped')
   } else if (!targetLabel) {
     toneClass = 'text-destructive'
-    message = 'Routing: invalid target'
+    message = t('formBuilder.routingInvalid')
   } else if (submission.createdTaskId) {
     toneClass = 'text-emerald-700 dark:text-emerald-300'
-    message = `Routing: created in ${targetLabel}`
+    message = t('formBuilder.routingCreatedIn', { target: targetLabel })
   } else {
     toneClass = 'text-amber-700 dark:text-amber-300'
-    message = `Routing: target ${targetLabel}, task not created`
+    message = t('formBuilder.routingTaskNotCreated', { target: targetLabel })
   }
 
   return <p className={`mb-2 text-xs ${toneClass}`}>{message}</p>
