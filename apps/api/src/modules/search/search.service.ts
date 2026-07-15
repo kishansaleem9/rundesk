@@ -4,7 +4,7 @@ import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, desc, inArray, gte, lte, type SQL } from 'drizzle-orm'
 import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, docs, lists, projects, spaces,
-  savedSearches, users, workspaceMembers, chatChannels, chatMessages,
+  savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -143,6 +143,7 @@ export class SearchService implements OnModuleInit {
 
   async search(
     workspaceId: string,
+    userId: string,
     query: string,
     limit = 10,
     filters: SearchFilters = {},
@@ -179,7 +180,7 @@ export class SearchService implements OnModuleInit {
         url: h.url,
       }))
       // Meili only indexes tasks/docs — add the other entity types from Postgres.
-      const extras = filters.types ? [] : await this.searchExtras(workspaceId, `%${trimmed}%`, limit)
+      const extras = filters.types ? [] : await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit)
       return [...meiliHits, ...extras]
     }
 
@@ -245,7 +246,7 @@ export class SearchService implements OnModuleInit {
       : []
 
     // Extras only for a general text search (no type/task-specific filter).
-    const extras = like && !filters.types ? await this.searchExtras(workspaceId, like, limit) : []
+    const extras = like && !filters.types ? await this.searchExtras(workspaceId, userId, like, limit) : []
 
     return [
       ...taskHits.map((t) => ({
@@ -267,7 +268,20 @@ export class SearchService implements OnModuleInit {
   }
 
   /** Search users, comments, channels, and messages (Plan §11.1). */
-  private async searchExtras(workspaceId: string, like: string, limit: number) {
+  private async searchExtras(workspaceId: string, userId: string, like: string, limit: number) {
+    // Chat search must respect channel access (Plan §6): a user may only see
+    // hits from public channels or channels they belong to — never from private
+    // channels or DMs they're not a member of. Compute their channels once and
+    // scope both the channel-name and message-body searches to accessible ones.
+    const memberRows = await this.db
+      .select({ channelId: chatChannelMembers.channelId })
+      .from(chatChannelMembers)
+      .where(eq(chatChannelMembers.userId, userId))
+    const memberChannelIds = memberRows.map((r) => r.channelId)
+    const publicChannel = and(eq(chatChannels.isPrivate, false), eq(chatChannels.isDm, false))
+    const accessibleChannel =
+      memberChannelIds.length > 0 ? or(publicChannel, inArray(chatChannels.id, memberChannelIds)) : publicChannel
+
     const [userHits, commentHits, channelHits, messageHits] = await Promise.all([
       this.db
         .select({ id: users.id, displayName: users.displayName, email: users.email })
@@ -288,13 +302,13 @@ export class SearchService implements OnModuleInit {
       this.db
         .select({ id: chatChannels.id, name: chatChannels.name })
         .from(chatChannels)
-        .where(and(eq(chatChannels.workspaceId, workspaceId), ilike(chatChannels.name, like)))
+        .where(and(eq(chatChannels.workspaceId, workspaceId), ilike(chatChannels.name, like), accessibleChannel))
         .limit(limit),
       this.db
         .select({ id: chatMessages.id, body: chatMessages.body, channelId: chatMessages.channelId })
         .from(chatMessages)
         .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
-        .where(and(eq(chatChannels.workspaceId, workspaceId), ilike(chatMessages.body, like)))
+        .where(and(eq(chatChannels.workspaceId, workspaceId), ilike(chatMessages.body, like), accessibleChannel))
         .orderBy(desc(chatMessages.createdAt))
         .limit(limit),
     ])

@@ -19,6 +19,7 @@ export class SearchController {
   @Get(':workspaceId')
   query(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
     @Query('q') q: string,
     @Query('limit') limit?: string,
     @Query('types') types?: string,
@@ -52,7 +53,7 @@ export class SearchController {
     }
     filters.dueAfter = parseDate(dueAfter)
     filters.dueBefore = parseDate(dueBefore)
-    return this.search.search(workspaceId, q ?? '', limit ? Number(limit) : 10, filters)
+    return this.search.search(workspaceId, user.id, q ?? '', limit ? Number(limit) : 10, filters)
   }
 
   @Post(':workspaceId/reindex')
