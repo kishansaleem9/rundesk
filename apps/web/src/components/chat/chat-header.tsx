@@ -15,9 +15,11 @@ import {
 } from '@rundesk/ui'
 import type { ChatChannel, ChatMember } from './chat-types'
 import { initials } from './chat-utils'
+import { useFavorites, useToggleFavorite } from '../../lib/use-favorites'
 
 export function ChatHeader({
   channel,
+  workspaceId,
   memberCount,
   members,
   showPinnedPanel,
@@ -33,6 +35,7 @@ export function ChatHeader({
   onRemoveMember,
 }: {
   channel: ChatChannel | null
+  workspaceId?: string
   memberCount: number
   members: ChatMember[]
   showPinnedPanel: boolean
@@ -55,23 +58,19 @@ export function ChatHeader({
     : channel?.name ?? 'Select a channel'
 
   const [searchOpen, setSearchOpen] = useState(false)
-  const [starred, setStarred] = useState(false)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
 
-  const starKey = channel ? `rundesk.chat.starred.${channel.id}` : null
-
-  // Load persisted star state when the active channel changes.
-  useEffect(() => {
-    if (!starKey) {
-      setStarred(false)
-      return
-    }
-    try {
-      setStarred(localStorage.getItem(starKey) === '1')
-    } catch {
-      setStarred(false)
-    }
-  }, [starKey])
+  // Durable channel favorites (Plan §2). Only regular channels are favoritable
+  // from here — DMs live in their own sidebar section and their #dm-… name
+  // wouldn't read well as a pinned label.
+  const { data: favorites } = useFavorites(workspaceId)
+  const toggleFavorite = useToggleFavorite(workspaceId)
+  const canFavorite = !!channel && !channel.isDm
+  const starred = canFavorite && !!favorites?.some((f) => f.entityType === 'channel' && f.entityId === channel!.id)
+  const toggleStar = () => {
+    if (!canFavorite || !channel) return
+    toggleFavorite.mutate({ entityType: 'channel', entityId: channel.id })
+  }
 
   // Reset the inline search field when switching channels.
   useEffect(() => {
@@ -83,19 +82,6 @@ export function ChatHeader({
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
-
-  const toggleStar = () => {
-    if (!starKey) return
-    const next = !starred
-    setStarred(next)
-    try {
-      if (next) localStorage.setItem(starKey, '1')
-      else localStorage.removeItem(starKey)
-    } catch {
-      // ignore localStorage failures
-    }
-    toast(next ? 'Channel added to favorites' : 'Removed from favorites')
-  }
 
   const copyLink = () => {
     try {
@@ -252,13 +238,15 @@ export function ChatHeader({
           disabled={!channel}
           onClick={onToggleSaved}
         />
-        <IconBtn
-          icon={Star}
-          title={starred ? 'Unfavorite' : 'Favorite'}
-          active={starred}
-          disabled={!channel}
-          onClick={toggleStar}
-        />
+        {canFavorite && (
+          <IconBtn
+            icon={Star}
+            title={starred ? 'Unfavorite' : 'Favorite'}
+            active={starred}
+            disabled={toggleFavorite.isPending}
+            onClick={toggleStar}
+          />
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -275,10 +263,12 @@ export function ChatHeader({
               <LinkIcon className="h-4 w-4" />
               Copy link
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={toggleStar}>
-              {starred ? <Check className="h-4 w-4" /> : <Star className="h-4 w-4" />}
-              {starred ? 'Remove from favorites' : 'Add to favorites'}
-            </DropdownMenuItem>
+            {canFavorite && (
+              <DropdownMenuItem onClick={toggleStar}>
+                {starred ? <Check className="h-4 w-4" /> : <Star className="h-4 w-4" />}
+                {starred ? 'Remove from favorites' : 'Add to favorites'}
+              </DropdownMenuItem>
+            )}
             {onSetNotificationLevel && (
               <>
                 <DropdownMenuSeparator />

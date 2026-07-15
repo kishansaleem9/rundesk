@@ -22,6 +22,8 @@ import {
   Layers,
   PlugZap,
   Star,
+  Hash,
+  CheckSquare,
   Clock3,
   ArrowUp,
   ArrowDown,
@@ -40,6 +42,7 @@ import {
   DropdownMenuTrigger,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
@@ -57,6 +60,18 @@ function normalizePath(path: string) {
 
 function pathsEqual(a: string, b: string) {
   return normalizePath(a) === normalizePath(b)
+}
+
+/** Icon for a pinned entity by its type (Plan §2 quick access). */
+function pinnedIcon(entityType: FavoriteEntityType) {
+  switch (entityType) {
+    case 'space': return Layers
+    case 'list': return ClipboardList
+    case 'task': return CheckSquare
+    case 'doc': return FileText
+    case 'channel': return Hash
+    default: return Star
+  }
 }
 
 /** True when pathname matches a nav target (exact for workspace home). */
@@ -222,6 +237,10 @@ export function WorkspaceSidebar() {
     queryFn: () => api<any>(`/dashboards/dock/${workspaceId}`),
     enabled: !!workspaceId,
   })
+  // Durable pinned items (spaces/lists/tasks/docs/channels) — Plan §2.
+  const { data: pinnedItems = [] } = useFavorites(workspaceId)
+  const unpinFavorite = useToggleFavorite(workspaceId)
+  const [pinnedExpanded, setPinnedExpanded] = useState(true)
   const appearance = dockConfigQuery.data?.appearance ?? {
     size: 'md',
     opacity: 0.9,
@@ -470,6 +489,53 @@ export function WorkspaceSidebar() {
                           title="Remove favorite"
                         >
                           <X className="h-3.5 w-3.5 mx-auto" />
+                        </button>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-1">
+            <button
+              className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
+              onClick={() => setPinnedExpanded((v) => !v)}
+            >
+              <span>Pinned</span>
+              <ChevronDown className={cn('h-3 w-3 transition-transform', pinnedExpanded && 'rotate-180')} />
+            </button>
+            {pinnedExpanded && (
+              <div className="space-y-1">
+                {pinnedItems.length === 0 ? (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">
+                    No pinned items. Star a task, doc, or channel.
+                  </div>
+                ) : (
+                  pinnedItems.map((item) => {
+                    const Icon = pinnedIcon(item.entityType)
+                    const active = isNavPathActive(pathname, item.url, false)
+                    return (
+                      <div key={item.id} className="group flex items-center gap-1 rounded-md px-1 py-0.5 hover:bg-accent/10">
+                        <Link
+                          to={item.url as any}
+                          className={cn(
+                            'flex items-center gap-2 rounded-md px-1 py-1 text-[13px] flex-1 min-w-0',
+                            active
+                              ? 'bg-accent/15 text-foreground font-medium'
+                              : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate flex-1">{item.label}</span>
+                        </Link>
+                        <button
+                          className="h-6 w-6 rounded text-amber-400 hover:text-amber-500 hover:bg-accent/15 opacity-0 group-hover:opacity-100"
+                          onClick={() => unpinFavorite.mutate({ entityType: item.entityType, entityId: item.entityId })}
+                          title="Unpin"
+                        >
+                          <Star className="h-3.5 w-3.5 mx-auto fill-amber-400" />
                         </button>
                       </div>
                     )

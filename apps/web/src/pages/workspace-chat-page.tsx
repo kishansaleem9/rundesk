@@ -751,6 +751,7 @@ export function ChatPage() {
         <div className="flex-1 flex flex-col min-w-0">
         <ChatHeader
           channel={selectedChannel}
+          workspaceId={workspaceId}
           memberCount={
             selectedChannel?.isDm ? membersQuery.data?.length ?? 0 : channelMembersQuery.data?.length ?? 0
           }
