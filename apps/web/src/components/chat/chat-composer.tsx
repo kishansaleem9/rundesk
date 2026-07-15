@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent, type ReactNode } from 'react'
-import { AtSign, Paperclip, Send, Smile, Sparkles } from 'lucide-react'
+import { AtSign, Bold, Code, Italic, Paperclip, Send, Smile, Sparkles } from 'lucide-react'
 import { Button, Popover, PopoverContent, PopoverTrigger, Textarea, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../../lib/api'
 import { formatMentionsPlain } from '../../lib/mentions'
@@ -58,6 +58,21 @@ function ComposerBox({
 
   const handleMention = () => {
     insertAtCursor('@')
+  }
+
+  // Wrap the current selection (or a placeholder) in a markdown marker.
+  const wrapSelection = (marker: string, placeholder: string) => {
+    const el = textareaRef.current
+    const start = el?.selectionStart ?? value.length
+    const end = el?.selectionEnd ?? value.length
+    const selected = value.slice(start, end) || placeholder
+    const next = value.slice(0, start) + marker + selected + marker + value.slice(end)
+    onChange(next)
+    requestAnimationFrame(() => {
+      el?.focus()
+      const s = start + marker.length
+      el?.setSelectionRange(s, s + selected.length)
+    })
   }
 
   const handleEmoji = (emoji: string) => {
@@ -153,6 +168,9 @@ function ComposerBox({
               </div>
             </PopoverContent>
           </Popover>
+          <ToolBtn icon={Bold} title="Bold" disabled={disabled} onClick={() => wrapSelection('**', 'bold')} />
+          <ToolBtn icon={Italic} title="Italic" disabled={disabled} onClick={() => wrapSelection('*', 'italic')} />
+          <ToolBtn icon={Code} title="Code" disabled={disabled} onClick={() => wrapSelection('`', 'code')} />
           <ToolBtn icon={Paperclip} title="Attach" disabled={disabled} onClick={handleAttachClick} />
           <ToolBtn icon={AtSign} title="Mention" disabled={disabled} onClick={handleMention} />
           <ToolBtn

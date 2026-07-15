@@ -22,6 +22,10 @@ function safeHref(raw: string): string | null {
 
 // Inline parsing → React nodes. Order matters: code spans first (their content
 // is literal), then links, then bold, then italic.
+export function renderInlineMarkdown(text: string, keyPrefix = 'i'): ReactNode[] {
+  return parseInline(text, keyPrefix)
+}
+
 function parseInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = []
   let rest = text

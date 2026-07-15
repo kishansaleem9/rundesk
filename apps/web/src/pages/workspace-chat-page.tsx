@@ -33,6 +33,7 @@ import { api, ApiError } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
+import { ChatMessageBody } from '../components/chat/chat-message-body'
 
 type Channel = {
   id: string
@@ -895,7 +896,7 @@ export function ChatPage() {
                         </div>
                       ) : (
                         <div className="text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90">
-                          <MentionText text={m.body} namesById={namesById} />
+                          <ChatMessageBody text={m.body} namesById={namesById} />
                           {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">(edited)</span>}
                         </div>
                       )}
