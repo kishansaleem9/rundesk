@@ -1661,6 +1661,11 @@ export class TasksService {
           projectId: ctx.projectId,
           listId: taskRow.listId,
         })
+        // Outgoing webhook (Plan §12): comment.created now actually dispatches.
+        await this.webhooks.fire(ctx.workspaceId, 'comment.created', {
+          comment: { id: comment.id, taskId, authorId, body: body.slice(0, 2000) },
+          projectId: ctx.projectId,
+        })
       } catch {
         /* best-effort */
       }
@@ -2229,6 +2234,7 @@ export class TasksService {
       .set({ endedAt, durationSec, updatedAt: new Date() })
       .where(eq(timeEntries.id, entryId))
       .returning()
+    this.fireTimeLogged(updated)
     return updated
   }
 
@@ -2245,7 +2251,37 @@ export class TasksService {
       .insert(timeEntries)
       .values({ ...data, durationSec })
       .returning()
+    this.fireTimeLogged(entry)
     return entry
+  }
+
+  /** Fire the outgoing 'time.logged' webhook (Plan §12), best-effort. */
+  private fireTimeLogged(entry: {
+    id: string
+    taskId: string
+    userId: string
+    durationSec: number | null
+    isBillable: boolean
+  }): void {
+    void (async () => {
+      try {
+        const ctx = await this.resolveTaskContext(entry.taskId)
+        if (!ctx) return
+        await this.webhooks.fire(ctx.space.workspaceId, 'time.logged', {
+          timeEntry: {
+            id: entry.id,
+            taskId: entry.taskId,
+            userId: entry.userId,
+            durationSec: entry.durationSec ?? 0,
+            isBillable: entry.isBillable,
+          },
+          task: { id: ctx.task.id, title: ctx.task.title },
+          projectId: ctx.project.id,
+        })
+      } catch {
+        // best-effort
+      }
+    })()
   }
 
   async listTimeEntries(taskId: string) {

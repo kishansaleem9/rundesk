@@ -11,11 +11,13 @@ const WEBHOOK_EVENTS = [
   'task.deleted',
   'task.status_changed',
   'task.assigned',
+  'task.assignee_changed',
   'comment.created',
   'project.created',
   'project.updated',
   'member.invited',
   'member.removed',
+  'time.logged',
   'form.submitted',
 ]
 
