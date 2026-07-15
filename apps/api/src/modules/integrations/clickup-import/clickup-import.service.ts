@@ -1,5 +1,6 @@
 import { Injectable, Inject, BadRequestException } from '@nestjs/common'
-import { spaces, projects, lists, tasks } from '@rundesk/db'
+import { and, eq } from 'drizzle-orm'
+import { spaces, projects, lists, tasks, taskAssignees, labels, taskLabelAssignments, workspaceMembers, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 
@@ -11,10 +12,15 @@ type ImportSummary = {
   projectsCreated: number
   listsCreated: number
   tasksCreated: number
+  labelsCreated: number
+  assigneesLinked: number
+  subtasksLinked: number
   errors: string[]
 }
 
 type ParsedTask = {
+  taskId?: string
+  parentId?: string
   title: string
   description?: string
   status?: string
@@ -45,6 +51,9 @@ export class ClickUpImportService {
       projectsCreated: 0,
       listsCreated: 0,
       tasksCreated: 0,
+      labelsCreated: 0,
+      assigneesLinked: 0,
+      subtasksLinked: 0,
       errors: [],
     }
 
@@ -89,32 +98,91 @@ export class ClickUpImportService {
       byList.set(listName, arr)
     }
 
-    // Create lists + tasks
+    // Preload workspace members so we can map ClickUp assignees to real users.
+    const memberRows = await this.db
+      .select({ userId: users.id, displayName: users.displayName, email: users.email })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+    const memberByKey = new Map<string, string>()
+    for (const m of memberRows) {
+      if (m.displayName) memberByKey.set(m.displayName.trim().toLowerCase(), m.userId)
+      if (m.email) memberByKey.set(m.email.trim().toLowerCase(), m.userId)
+    }
+
+    const labelCache = new Map<string, string>() // lowercased name -> labelId
+    const ensureLabel = async (name: string): Promise<string | null> => {
+      const key = name.trim().toLowerCase()
+      if (!key) return null
+      if (labelCache.has(key)) return labelCache.get(key)!
+      const [existing] = await this.db
+        .select({ id: labels.id })
+        .from(labels)
+        .where(and(eq(labels.workspaceId, workspaceId), eq(labels.name, name.trim())))
+        .limit(1)
+      if (existing) {
+        labelCache.set(key, existing.id)
+        return existing.id
+      }
+      const [row] = await this.db
+        .insert(labels)
+        .values({ workspaceId, name: name.trim().slice(0, 60), color: '#8b5cf6' })
+        .onConflictDoNothing()
+        .returning()
+      const id = row?.id ?? (await this.db.select({ id: labels.id }).from(labels).where(and(eq(labels.workspaceId, workspaceId), eq(labels.name, name.trim()))).limit(1))[0]?.id
+      if (id) {
+        if (row) summary.labelsCreated++
+        labelCache.set(key, id)
+        return id
+      }
+      return null
+    }
+
+    // Track ClickUp task id -> our created task id + its declared parent, so a
+    // second pass can wire subtasks (capped at one level).
+    const created = new Map<string, { ourId: string; parentId?: string }>()
+
     let listPosition = 0
     for (const [listName, listRows] of byList) {
       try {
         const [list] = await this.db
           .insert(lists)
-          .values({
-            projectId: project.id,
-            name: listName,
-            position: listPosition++,
-          })
+          .values({ projectId: project.id, name: listName, position: listPosition++ })
           .returning()
         summary.listsCreated++
 
         for (const t of listRows) {
           try {
-            await this.db.insert(tasks).values({
-              listId: list.id,
-              createdById: userId,
-              title: t.title.slice(0, 500),
-              description: t.description ?? null,
-              status: this.mapStatus(t.status),
-              priority: this.mapPriority(t.priority),
-              dueDate: t.dueDate ? this.safeDate(t.dueDate) : undefined,
-            })
+            const [task] = await this.db
+              .insert(tasks)
+              .values({
+                listId: list.id,
+                createdById: userId,
+                title: t.title.slice(0, 500),
+                description: t.description ?? null,
+                status: this.mapStatus(t.status),
+                priority: this.mapPriority(t.priority),
+                dueDate: t.dueDate ? this.safeDate(t.dueDate) : undefined,
+              })
+              .returning()
             summary.tasksCreated++
+            if (t.taskId) created.set(t.taskId, { ourId: task.id, parentId: t.parentId })
+
+            // Assignees → task_assignees (match by name/email).
+            for (const who of this.splitList(t.assignees)) {
+              const uid = memberByKey.get(who.toLowerCase())
+              if (uid) {
+                await this.db.insert(taskAssignees).values({ taskId: task.id, userId: uid }).onConflictDoNothing()
+                summary.assigneesLinked++
+              }
+            }
+            // Tags → labels.
+            for (const tag of this.splitList(t.tags)) {
+              const labelId = await ensureLabel(tag)
+              if (labelId) {
+                await this.db.insert(taskLabelAssignments).values({ taskId: task.id, labelId }).onConflictDoNothing()
+              }
+            }
           } catch (e: any) {
             summary.errors.push(`Task "${t.title}": ${e?.message ?? 'unknown error'}`)
           }
@@ -124,7 +192,30 @@ export class ClickUpImportService {
       }
     }
 
+    // Second pass: link subtasks to their parent, one level only (a subtask
+    // whose parent is itself a subtask stays top-level).
+    for (const [, entry] of created) {
+      if (!entry.parentId) continue
+      const parent = created.get(entry.parentId)
+      if (!parent || parent.parentId) continue // parent missing or itself a subtask
+      try {
+        await this.db.update(tasks).set({ parentTaskId: parent.ourId }).where(eq(tasks.id, entry.ourId))
+        summary.subtasksLinked++
+      } catch {
+        // ignore — leave as top-level
+      }
+    }
+
     return summary
+  }
+
+  /** Split a ClickUp multi-value cell (comma or newline separated). */
+  private splitList(value?: string): string[] {
+    if (!value) return []
+    return value
+      .split(/[,\n;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
   }
 
   // ── CSV parsing ─────────────────────────────────────────────────────────────
@@ -144,6 +235,9 @@ export class ClickUpImportService {
     const fIdx = idx('folder')
     const aIdx = idx('assignee') !== -1 ? idx('assignee') : idx('assignees')
     const tagIdx = idx('tags')
+    const idIdx = idx('task id') !== -1 ? idx('task id') : idx('id')
+    const parentIdx =
+      idx('parent id') !== -1 ? idx('parent id') : idx('parent') !== -1 ? idx('parent') : idx('parent task id')
 
     const out: ParsedTask[] = []
     for (let i = 1; i < lines.length; i++) {
@@ -152,6 +246,8 @@ export class ClickUpImportService {
       const title = (tIdx !== -1 ? cols[tIdx] : '').trim()
       if (!title) continue
       out.push({
+        taskId: idIdx !== -1 ? cols[idIdx]?.trim() || undefined : undefined,
+        parentId: parentIdx !== -1 ? cols[parentIdx]?.trim() || undefined : undefined,
         title,
         description: dIdx !== -1 ? cols[dIdx]?.trim() : undefined,
         status: sIdx !== -1 ? cols[sIdx]?.trim() : undefined,
