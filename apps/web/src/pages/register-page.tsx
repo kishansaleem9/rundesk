@@ -45,7 +45,7 @@ export function RegisterPage() {
       setSession(data.user, data.accessToken, data.refreshToken)
       navigate({ to: '/app' })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Registration failed')
+      setError(err instanceof ApiError ? err.message : t('auth.registrationFailed'))
     } finally {
       setLoading(false)
     }

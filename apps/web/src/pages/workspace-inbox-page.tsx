@@ -6,7 +6,7 @@ import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Notification = {
   id: string
@@ -30,17 +30,27 @@ type Notification = {
   target?: { url?: string; entityType?: string; entityId?: string } | null
 }
 
-const TYPE_META: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  task_mentioned: { icon: AtSign, color: 'text-accent', label: 'Mentioned you' },
-  task_commented: { icon: MessageSquare, color: 'text-blue-500', label: 'Commented' },
-  doc_mentioned: { icon: AtSign, color: 'text-accent', label: 'Mentioned you' },
-  doc_commented: { icon: MessageSquare, color: 'text-blue-500', label: 'Commented' },
-  task_assigned: { icon: UserPlus, color: 'text-emerald-500', label: 'Assigned you' },
-  task_due_soon: { icon: Bell, color: 'text-amber-500', label: 'Due soon' },
-  task_overdue: { icon: Bell, color: 'text-red-500', label: 'Overdue' },
-  chat_message: { icon: MessageSquare, color: 'text-indigo-500', label: 'New message' },
-  task_status_changed: { icon: RefreshCw, color: 'text-cyan-500', label: 'Status changed' },
-  task_updated: { icon: RefreshCw, color: 'text-cyan-500', label: 'Task updated' },
+// Notification-type → display metadata. `labelKey` is a translation key resolved
+// at render; the raw type id stays the data key. Unknown types fall back to a
+// humanized version of the id (see humanizeType).
+const TYPE_META: Record<string, { icon: React.ElementType; color: string; labelKey: TranslationKey }> = {
+  task_mentioned: { icon: AtSign, color: 'text-accent', labelKey: 'inbox.type.mentioned' },
+  task_commented: { icon: MessageSquare, color: 'text-blue-500', labelKey: 'inbox.type.commented' },
+  doc_mentioned: { icon: AtSign, color: 'text-accent', labelKey: 'inbox.type.mentioned' },
+  doc_commented: { icon: MessageSquare, color: 'text-blue-500', labelKey: 'inbox.type.commented' },
+  task_assigned: { icon: UserPlus, color: 'text-emerald-500', labelKey: 'inbox.type.assigned' },
+  task_due_soon: { icon: Bell, color: 'text-amber-500', labelKey: 'inbox.type.dueSoon' },
+  task_overdue: { icon: Bell, color: 'text-red-500', labelKey: 'inbox.type.overdue' },
+  chat_message: { icon: MessageSquare, color: 'text-indigo-500', labelKey: 'inbox.type.newMessage' },
+  task_status_changed: { icon: RefreshCw, color: 'text-cyan-500', labelKey: 'inbox.type.statusChanged' },
+  task_updated: { icon: RefreshCw, color: 'text-cyan-500', labelKey: 'inbox.type.taskUpdated' },
+}
+
+/** Humanize an unknown notification-type id (e.g. `task_foo` → `Task foo`) for display. */
+function humanizeType(type: string): string {
+  const spaced = type.replace(/[_-]+/g, ' ').trim()
+  if (!spaced) return type
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
 // Comment/mention notification types the backend actually emits (see
@@ -238,8 +248,11 @@ function NotificationRow({
   onOpen?: () => void | Promise<void>
   onResolve?: () => void | Promise<void>
 }) {
-  const meta = TYPE_META[notif.type] ?? { icon: Bell, color: 'text-muted-foreground', label: notif.type }
-  const Icon = meta.icon
+  const { t } = useTranslation()
+  const meta = TYPE_META[notif.type]
+  const Icon = meta?.icon ?? Bell
+  const iconColor = meta?.color ?? 'text-muted-foreground'
+  const label = meta ? t(meta.labelKey) : humanizeType(notif.type)
   return (
     <Card
       variant="glass"
@@ -253,7 +266,7 @@ function NotificationRow({
         <PersonAvatar name={notif.actor.displayName} size="sm" />
       ) : (
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-muted">
-          <Icon className={cn('h-3.5 w-3.5', meta.color)} />
+          <Icon className={cn('h-3.5 w-3.5', iconColor)} />
         </div>
       )}
       <div className="flex-1 min-w-0">
@@ -262,8 +275,8 @@ function NotificationRow({
             <span className="font-medium text-sm">{notif.actor.displayName}</span>
           )}
           <Badge variant="soft" className="text-[10px]">
-            <Icon className={cn('h-3 w-3', meta.color)} />
-            {meta.label}
+            <Icon className={cn('h-3 w-3', iconColor)} />
+            {label}
           </Badge>
           <span className="text-xs text-muted-foreground ml-auto tabular-nums shrink-0">
             {formatDistanceToNowStrict(new Date(notif.createdAt), { addSuffix: true })}
@@ -285,7 +298,7 @@ function NotificationRow({
                 void onResolve()
               }}
             >
-              Resolve
+              {t('inbox.resolve')}
             </button>
           </div>
         )}

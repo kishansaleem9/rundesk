@@ -11,25 +11,26 @@ import { Mail, Lock, ArrowRight, ShieldCheck, KeyRound } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { PasswordChecklist, passwordPolicyError } from '../lib/password'
 import { useAuthStore } from '../store/auth'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { LanguageSwitcher } from '../components/language-switcher'
 
 type SsoLookupResponse = {
   connection: { workspaceId: string; provider: 'oidc' | 'saml'; displayName: string } | null
 }
 
-// Per-field validation helpers — return an error string, or null when valid.
+// Per-field validation helpers — return a translation key, or null when valid.
+// The caller resolves the key with t(...) at the display site.
 const EMAIL_RE = /^.+@.+\..+$/
 
-function validateEmail(value: string): string | null {
+function validateEmail(value: string): TranslationKey | null {
   const v = value.trim()
-  if (!v) return 'Email is required.'
-  if (!EMAIL_RE.test(v)) return 'Enter a valid email address.'
+  if (!v) return 'auth.emailRequired'
+  if (!EMAIL_RE.test(v)) return 'auth.emailInvalid'
   return null
 }
 
-function validatePassword(value: string): string | null {
-  if (!value) return 'Password is required.'
+function validatePassword(value: string): TranslationKey | null {
+  if (!value) return 'auth.passwordRequired'
   return null
 }
 
@@ -37,9 +38,9 @@ function validateNewPassword(value: string): string | null {
   return passwordPolicyError(value)
 }
 
-function validateConfirmPassword(value: string, original: string): string | null {
-  if (!value) return 'Please confirm your password.'
-  if (value !== original) return 'Passwords do not match.'
+function validateConfirmPassword(value: string, original: string): TranslationKey | null {
+  if (!value) return 'auth.confirmPasswordRequired'
+  if (value !== original) return 'auth.passwordsMismatch'
   return null
 }
 
@@ -146,7 +147,7 @@ export function LoginPage() {
         navigate({ to: '/app' })
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Login failed')
+      setError(err instanceof ApiError ? err.message : t('auth.loginFailed'))
     } finally {
       setLoading(false)
     }
@@ -165,7 +166,7 @@ export function LoginPage() {
       })
       setNotice(t('auth.resetLinkSent'))
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not send reset link')
+      setError(err instanceof ApiError ? err.message : t('auth.resetLinkFailed'))
     } finally {
       setLoading(false)
     }
@@ -174,7 +175,7 @@ export function LoginPage() {
   async function handleResetSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!resetToken) {
-      setError('Missing reset token')
+      setError(t('auth.missingResetToken'))
       return
     }
     // Surface field-level problems inline rather than in the shared block.
@@ -196,7 +197,7 @@ export function LoginPage() {
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not reset password')
+      setError(err instanceof ApiError ? err.message : t('auth.resetPasswordFailed'))
     } finally {
       setLoading(false)
     }
@@ -319,7 +320,7 @@ export function LoginPage() {
                   placeholder={t('auth.emailPlaceholder')}
                   disabled={mode === 'reset'}
                 />
-                {mode !== 'reset' && touched.email && <FieldError message={emailError} />}
+                {mode !== 'reset' && touched.email && <FieldError message={emailError ? t(emailError) : null} />}
               </div>
 
               {mode === 'login' && (
@@ -345,7 +346,7 @@ export function LoginPage() {
                     aria-invalid={touched.password && passwordError ? true : undefined}
                     placeholder="••••••••"
                   />
-                  {touched.password && <FieldError message={passwordError} />}
+                  {touched.password && <FieldError message={passwordError ? t(passwordError) : null} />}
                 </div>
               )}
 
@@ -381,7 +382,7 @@ export function LoginPage() {
                       aria-invalid={touched.confirmPassword && confirmPasswordError ? true : undefined}
                       placeholder={t('auth.confirmPasswordPlaceholder')}
                     />
-                    {touched.confirmPassword && <FieldError message={confirmPasswordError} />}
+                    {touched.confirmPassword && <FieldError message={confirmPasswordError ? t(confirmPasswordError) : null} />}
                   </div>
                 </>
               )}
@@ -414,12 +415,12 @@ export function LoginPage() {
 
               {showSeededLogins && (
                 <div className="rounded-lg border border-border/70 bg-card/40 p-3 text-xs space-y-2">
-                  <div className="font-medium text-foreground">Seeded test logins</div>
+                  <div className="font-medium text-foreground">{t('auth.seededLogins')}</div>
                   <div className="text-muted-foreground">
-                    Super admin: <span className="text-foreground">admin@rundesk.internal / Admin@123!</span>
+                    {t('topbar.superAdmin')}: <span className="text-foreground">admin@rundesk.internal / Admin@123!</span>
                   </div>
                   <div className="text-muted-foreground">
-                    Organization admin: <span className="text-foreground">org-admin@rundesk.internal / OrgAdmin@123!</span>
+                    {t('auth.seededOrgAdmin')}: <span className="text-foreground">org-admin@rundesk.internal / OrgAdmin@123!</span>
                   </div>
                 </div>
               )}
