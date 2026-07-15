@@ -4,6 +4,7 @@ import { Button, Input, cn } from '@rundesk/ui'
 import type { ChatChannel, ChatMember } from './chat-types'
 import { initials } from './chat-utils'
 import { usePresence, presenceDotClass, type PresenceStatus } from '../../lib/use-presence'
+import { useTranslation } from '../../lib/i18n'
 
 type PendingInvite = { id: string; email: string }
 
@@ -55,6 +56,7 @@ export function ChatSidebar({
   channelsLoading: boolean
 }) {
   const { statusOf } = usePresence(workspaceId)
+  const { t } = useTranslation()
 
   // Multi-select DM composer: pick one teammate for a 1:1, or several for a
   // group DM (Plan §6.2). Selection is local to the sidebar.
@@ -72,13 +74,13 @@ export function ChatSidebar({
   return (
     <aside className="hidden md:flex w-[272px] shrink-0 flex-col border-r border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]">
       <div className="shrink-0 border-b border-border/80 px-3 py-3 space-y-2.5">
-        <h2 className="text-[15px] font-semibold text-foreground tracking-tight">Chat</h2>
+        <h2 className="text-[15px] font-semibold text-foreground tracking-tight">{t('chat.title')}</h2>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={channelSearch}
             onChange={(e) => onChannelSearchChange(e.target.value)}
-            placeholder="Search channels..."
+            placeholder={t('chat.searchChannels')}
             className="h-8 pl-8 text-[13px] bg-background/80 border-border/70 rounded-md"
           />
         </div>
@@ -94,7 +96,7 @@ export function ChatSidebar({
               type="button"
               className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
               onClick={onToggleCreate}
-              title="Create channel"
+              title={t('chat.createChannel')}
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -104,7 +106,7 @@ export function ChatSidebar({
             <div className="mb-2 px-1 space-y-1.5">
               <Input
                 autoFocus
-                placeholder="e.g. general"
+                placeholder={t('chat.channelNamePlaceholder')}
                 value={newName}
                 onChange={(e) => onNewNameChange(e.target.value)}
                 className="h-8 text-[13px] rounded-md"
@@ -120,7 +122,7 @@ export function ChatSidebar({
                   onChange={(e) => onNewPrivateChange(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-border"
                 />
-                Private channel
+                {t('chat.privateChannel')}
               </label>
               <Button
                 size="sm"
@@ -151,7 +153,7 @@ export function ChatSidebar({
               />
             ))}
             {filteredChannels.length === 0 && !channelsLoading && (
-              <p className="px-2 py-2 text-[12px] text-muted-foreground">No channels found</p>
+              <p className="px-2 py-2 text-[12px] text-muted-foreground">{t('chat.noChannels')}</p>
             )}
           </div>
         </section>
@@ -165,7 +167,7 @@ export function ChatSidebar({
               type="button"
               className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
               onClick={onToggleStartDm}
-              title="New message"
+              title={t('chat.newMessage')}
             >
               <MessageSquarePlus className="h-3.5 w-3.5" />
             </button>
@@ -255,7 +257,7 @@ export function ChatSidebar({
               />
             ))}
             {filteredDms.length === 0 && !channelsLoading && (
-              <p className="px-2 py-2 text-[12px] text-muted-foreground">No direct messages</p>
+              <p className="px-2 py-2 text-[12px] text-muted-foreground">{t('chat.noDms')}</p>
             )}
           </div>
         </section>

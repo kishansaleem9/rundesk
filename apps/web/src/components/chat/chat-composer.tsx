@@ -2,6 +2,7 @@ import { useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import { AtSign, Bold, Code, FileText, Italic, Loader2, Paperclip, Send, Smile, Sparkles, X } from 'lucide-react'
 import { Button, Popover, PopoverContent, PopoverTrigger, Textarea, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../../lib/api'
+import { useTranslation } from '../../lib/i18n'
 import { formatMentionsPlain } from '../../lib/mentions'
 import type { ChatAttachment, ChatMessage } from './chat-types'
 
@@ -56,6 +57,7 @@ function ComposerBox({
   onRemoveAttachment?: (id: string) => void
   uploading?: boolean
 }) {
+  const { t } = useTranslation()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
@@ -179,7 +181,7 @@ function ComposerBox({
               {att.sizeBytes > 0 && <span className="text-muted-foreground shrink-0">{formatBytes(att.sizeBytes)}</span>}
               <button
                 type="button"
-                title="Remove"
+                title={t('chat.remove')}
                 onClick={() => onRemoveAttachment?.(att.id)}
                 className="ml-0.5 h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
               >
@@ -201,7 +203,7 @@ function ComposerBox({
             <PopoverTrigger asChild>
               <button
                 type="button"
-                title="Emoji"
+                title={t('chat.emoji')}
                 disabled={disabled}
                 className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -223,16 +225,16 @@ function ComposerBox({
               </div>
             </PopoverContent>
           </Popover>
-          <ToolBtn icon={Bold} title="Bold" disabled={disabled} onClick={() => wrapSelection('**', 'bold')} />
-          <ToolBtn icon={Italic} title="Italic" disabled={disabled} onClick={() => wrapSelection('*', 'italic')} />
-          <ToolBtn icon={Code} title="Code" disabled={disabled} onClick={() => wrapSelection('`', 'code')} />
+          <ToolBtn icon={Bold} title={t('chat.bold')} disabled={disabled} onClick={() => wrapSelection('**', 'bold')} />
+          <ToolBtn icon={Italic} title={t('chat.italic')} disabled={disabled} onClick={() => wrapSelection('*', 'italic')} />
+          <ToolBtn icon={Code} title={t('chat.code')} disabled={disabled} onClick={() => wrapSelection('`', 'code')} />
           {canAttach && (
-            <ToolBtn icon={Paperclip} title="Attach file" disabled={disabled || uploading} loading={uploading} onClick={handleAttachClick} />
+            <ToolBtn icon={Paperclip} title={t('chat.attachFile')} disabled={disabled || uploading} loading={uploading} onClick={handleAttachClick} />
           )}
-          <ToolBtn icon={AtSign} title="Mention" disabled={disabled} onClick={handleMention} />
+          <ToolBtn icon={AtSign} title={t('chat.mention')} disabled={disabled} onClick={handleMention} />
           <ToolBtn
             icon={Sparkles}
-            title="Ask AI"
+            title={t('chat.askAi')}
             disabled={disabled || improving}
             loading={improving}
             onClick={() => void handleAskAi()}
@@ -282,11 +284,12 @@ export function ChatComposer({
   onRemoveAttachment?: (id: string) => void
   uploading?: boolean
 }) {
+  const { t } = useTranslation()
   return (
     <div className="shrink-0 border-t border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] px-4 py-3">
       {replyTo && (
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-2 text-[12px]">
-          <span className="text-muted-foreground shrink-0">Replying to</span>
+          <span className="text-muted-foreground shrink-0">{t('chat.replyingTo')}</span>
           <span className="font-medium text-foreground truncate flex-1">
             {replyTo.authorName ?? 'message'}: {formatMentionsPlain(replyTo.body, replyNamesById)}
           </span>

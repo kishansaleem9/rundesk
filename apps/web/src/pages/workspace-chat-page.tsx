@@ -30,6 +30,7 @@ import {
   X,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
@@ -139,6 +140,7 @@ type MemberActivityItem = {
 }
 
 export function ChatPage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/chat' })
   const deepLink = useSearch({ from: '/app/$workspaceId/chat' }) as { channel?: string; message?: string }
   const navigate = useNavigate()
@@ -797,7 +799,7 @@ export function ChatPage() {
           >
             <Card className="w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-sm">Custom emoji</h3>
+                <h3 className="font-semibold text-sm">{t('chat.customEmoji')}</h3>
                 <button className="text-muted-foreground hover:text-foreground" onClick={() => setEmojiManagerOpen(false)}>
                   <X className="h-4 w-4" />
                 </button>
@@ -842,7 +844,7 @@ export function ChatPage() {
                       <button
                         type="button"
                         className="text-muted-foreground hover:text-red-500"
-                        title="Remove emoji"
+                        title={t('chat.removeEmoji')}
                         onClick={() => deleteCustomEmojiMutation.mutate(ce.id)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -948,7 +950,7 @@ export function ChatPage() {
                         </div>
                       )}
                       {m.deletedAt ? (
-                        <div className="text-[13px] italic text-muted-foreground/80">This message was deleted</div>
+                        <div className="text-[13px] italic text-muted-foreground/80">{t('chat.messageDeleted')}</div>
                       ) : editingMessageId === m.id ? (
                         <div className="mt-0.5">
                           <textarea
@@ -1003,7 +1005,7 @@ export function ChatPage() {
                         <div className="relative rounded-lg border border-border/80 bg-background shadow-md px-1 py-0.5 flex items-center gap-0.5">
                           <button
                             type="button"
-                            title="React"
+                            title={t('chat.react')}
                             className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
                             onClick={() => setReactionPickerFor((prev) => (prev === m.id ? null : m.id))}
                           >
@@ -1063,7 +1065,7 @@ export function ChatPage() {
                           </button>
                           <button
                             type="button"
-                            title="Create task from message"
+                            title={t('chat.createTaskFromMessage')}
                             disabled={createTaskFromMessage.isPending}
                             className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center disabled:opacity-50"
                             onClick={() => createTaskFromMessage.mutate(m.id)}
@@ -1072,7 +1074,7 @@ export function ChatPage() {
                           </button>
                           <button
                             type="button"
-                            title="Like"
+                            title={t('chat.like')}
                             className={cn(
                               'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center',
                               m.reactions?.some((r) => r.emoji === '👍' && r.reacted)
@@ -1086,7 +1088,7 @@ export function ChatPage() {
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
                             type="button"
-                            title="Reply"
+                            title={t('chat.reply')}
                             className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
                             onClick={() => {
                               setReplyTo(m)
@@ -1097,7 +1099,7 @@ export function ChatPage() {
                           </button>
                           <button
                             type="button"
-                            title="Forward"
+                            title={t('chat.forward')}
                             className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
                             onClick={() => setForwardPickerFor((prev) => (prev === m.id ? null : m.id))}
                           >
@@ -1105,7 +1107,7 @@ export function ChatPage() {
                           </button>
                           {forwardPickerFor === m.id && (
                             <div className="absolute right-0 top-8 z-20 w-60 rounded-lg border border-border bg-card shadow-lg p-1.5 space-y-1">
-                              <div className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground">Forward to</div>
+                              <div className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.forwardTo')}</div>
                               {[...publicChannels, ...dmChannels].slice(0, 10).map((channel) => (
                                 <button
                                   key={`fwd-${m.id}-${channel.id}`}
@@ -1165,7 +1167,7 @@ export function ChatPage() {
                               <span className="mx-0.5 h-4 w-px bg-border/70" />
                               <button
                                 type="button"
-                                title="Edit message"
+                                title={t('chat.editMessage')}
                                 className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
                                 onClick={() => {
                                   setEditingMessageId(m.id)

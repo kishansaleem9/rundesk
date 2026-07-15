@@ -17,6 +17,7 @@ import type { ChatChannel, ChatMember } from './chat-types'
 import { initials } from './chat-utils'
 import { useFavorites, useToggleFavorite } from '../../lib/use-favorites'
 import { usePresence, presenceDotClass } from '../../lib/use-presence'
+import { useTranslation } from '../../lib/i18n'
 
 export function ChatHeader({
   channel,
@@ -68,6 +69,7 @@ export function ChatHeader({
   const toggleFavorite = useToggleFavorite(workspaceId)
   // Presence for a 1:1 DM peer (group DMs have no single status).
   const { statusOf } = usePresence(workspaceId)
+  const { t } = useTranslation()
   const dmPeerStatus = channel?.isDm && !channel.dmIsGroup ? statusOf(channel.dmPeerId) : null
   const canFavorite = !!channel && !channel.isDm
   const starred = canFavorite && !!favorites?.some((f) => f.entityType === 'channel' && f.entityId === channel!.id)
@@ -129,7 +131,7 @@ export function ChatHeader({
             ref={searchInputRef}
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search messages…"
+            placeholder={t('chat.searchMessages')}
             className="h-8 pl-7 pr-7 text-[13px]"
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
@@ -140,7 +142,7 @@ export function ChatHeader({
           />
           <button
             type="button"
-            title="Close search"
+            title={t('chat.closeSearch')}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             onClick={() => {
               onSearchChange('')
@@ -158,7 +160,7 @@ export function ChatHeader({
             type="button"
             onClick={onAddPeople}
             className="hidden sm:flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12px] text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-            title="Add people"
+            title={t('chat.addPeople')}
           >
             <UserPlus className="h-3.5 w-3.5" />
             <span>Add</span>
@@ -170,7 +172,7 @@ export function ChatHeader({
               <button
                 type="button"
                 className="hidden sm:flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12px] text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] mr-1"
-                title="Members"
+                title={t('chat.members')}
               >
                 <Users className="h-3.5 w-3.5" />
                 <span>{memberCount}</span>
@@ -182,7 +184,7 @@ export function ChatHeader({
               </div>
               <div className="max-h-72 overflow-y-auto p-1.5">
                 {members.length === 0 ? (
-                  <div className="px-2 py-1.5 text-[12px] text-muted-foreground">No members to show.</div>
+                  <div className="px-2 py-1.5 text-[12px] text-muted-foreground">{t('chat.noMembers')}</div>
                 ) : (
                   members.map((member) => (
                     <div
@@ -208,7 +210,7 @@ export function ChatHeader({
                         member.userId !== currentUserId && (
                           <button
                             type="button"
-                            title="Remove from channel"
+                            title={t('chat.removeFromChannel')}
                             className="shrink-0 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-500/10"
                             onClick={() => {
                               if (window.confirm(`Remove ${member.displayName || member.email} from this channel?`)) {
@@ -228,21 +230,21 @@ export function ChatHeader({
         )}
         <IconBtn
           icon={Search}
-          title="Search"
+          title={t('chat.search')}
           active={searchOpen}
           disabled={!channel}
           onClick={() => setSearchOpen((v) => !v)}
         />
         <IconBtn
           icon={Pin}
-          title="Pinned messages"
+          title={t('chat.pinnedMessages')}
           active={showPinnedPanel}
           disabled={!channel}
           onClick={onTogglePinned}
         />
         <IconBtn
           icon={Bookmark}
-          title="Saved messages"
+          title={t('chat.savedMessages')}
           active={showSavedPanel}
           disabled={!channel}
           onClick={onToggleSaved}
@@ -260,7 +262,7 @@ export function ChatHeader({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              title="More"
+              title={t('chat.more')}
               disabled={!channel}
               className="h-8 w-8 rounded-md flex items-center justify-center transition-colors text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06] disabled:opacity-50 disabled:cursor-not-allowed"
             >
