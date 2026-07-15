@@ -48,6 +48,13 @@ export class WorkspacesController {
     return this.workspacesService.update(workspaceId, body, { id: user.id, email: user.email })
   }
 
+  @Post(':workspaceId/verify-domain')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Verify the workspace custom domain via DNS TXT' })
+  async verifyDomain(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
+    return this.workspacesService.verifyCustomDomain(workspaceId)
+  }
+
   @Delete(':workspaceId')
   @UseGuards(WorkspaceAdminGuard)
   @ApiOperation({ summary: 'Archive (soft-delete) a workspace' })

@@ -39,6 +39,9 @@ export const workspaces = pgTable('workspaces', {
   logoUrl:        text('logo_url'),
   primaryColor:   text('primary_color'),
   customDomain:   text('custom_domain'),
+  // Custom-domain verification (Plan §13): a TXT token the owner adds to DNS.
+  customDomainToken:    text('custom_domain_token'),
+  customDomainVerified: boolean('custom_domain_verified').notNull().default(false),
   isArchived:     boolean('is_archived').notNull().default(false),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

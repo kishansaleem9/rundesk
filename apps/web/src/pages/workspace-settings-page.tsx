@@ -17,6 +17,8 @@ type Workspace = {
   logoUrl?: string | null
   primaryColor?: string | null
   customDomain?: string | null
+  customDomainToken?: string | null
+  customDomainVerified?: boolean | null
 }
 
 type Member = {
@@ -177,6 +179,11 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     },
   })
 
+  const verifyDomain = useMutation({
+    mutationFn: () => api<{ verified: boolean }>(`/workspaces/${workspaceId}/verify-domain`, { method: 'POST' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workspace', workspaceId] }),
+  })
+
   const archive = useMutation({
     mutationFn: () => api(`/workspaces/${workspaceId}`, { method: 'DELETE' }),
     onSuccess: async () => {
@@ -232,7 +239,35 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
       </div>
       <div>
         <Label htmlFor="domain">Custom domain</Label>
-        <Input id="domain" value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="rundesk.example.com" />
+        <div className="flex items-center gap-2">
+          <Input id="domain" value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="rundesk.example.com" />
+          {wsQuery.data.customDomain && (
+            wsQuery.data.customDomainVerified ? (
+              <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600">Verified</span>
+            ) : (
+              <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">Unverified</span>
+            )
+          )}
+        </div>
+        {wsQuery.data.customDomain && !wsQuery.data.customDomainVerified && wsQuery.data.customDomainToken && (
+          <div className="mt-2 rounded-md border border-border/60 bg-card/40 p-3 text-xs space-y-1.5">
+            <div className="text-muted-foreground">
+              Add this DNS TXT record, then click Verify:
+            </div>
+            <div className="font-mono">
+              <div>Host: <span className="text-foreground">_rundesk-verify.{wsQuery.data.customDomain}</span></div>
+              <div>Value: <span className="text-foreground">{wsQuery.data.customDomainToken}</span></div>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <Button size="sm" variant="outline" onClick={() => verifyDomain.mutate()} disabled={verifyDomain.isPending}>
+                {verifyDomain.isPending ? 'Checking…' : 'Verify'}
+              </Button>
+              {verifyDomain.data && !verifyDomain.data.verified && (
+                <span className="text-amber-600">TXT record not found yet — DNS can take a few minutes.</span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between pt-3 border-t border-border">

@@ -1,5 +1,7 @@
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, asc, eq } from 'drizzle-orm'
+import * as crypto from 'crypto'
+import * as dns from 'dns'
 import { organizationMembers, organizations, workspaces, workspaceMembers, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -90,9 +92,25 @@ export class WorkspacesService {
     patch: { name?: string; logoUrl?: string | null; primaryColor?: string | null; customDomain?: string | null },
     actor?: { id: string; email?: string },
   ) {
+    const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
+    // Changing the custom domain (re)mints a verification token and resets the
+    // verified flag (Plan §13).
+    if ('customDomain' in patch) {
+      const [current] = await this.db
+        .select({ customDomain: workspaces.customDomain })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId))
+        .limit(1)
+      const nextDomain = (patch.customDomain ?? '').trim() || null
+      set.customDomain = nextDomain
+      if ((current?.customDomain ?? null) !== nextDomain) {
+        set.customDomainToken = nextDomain ? `rundesk-verify=${crypto.randomBytes(16).toString('hex')}` : null
+        set.customDomainVerified = false
+      }
+    }
     const [row] = await this.db
       .update(workspaces)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(workspaces.id, workspaceId))
       .returning()
     if (!row) throw new NotFoundException('Workspace not found')
@@ -112,6 +130,31 @@ export class WorkspacesService {
       },
     })
     return row
+  }
+
+  /**
+   * Verify a workspace's custom domain by looking for the verification token in
+   * a TXT record at _rundesk-verify.<domain> (Plan §13).
+   */
+  async verifyCustomDomain(workspaceId: string) {
+    const [ws] = await this.db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1)
+    if (!ws) throw new NotFoundException('Workspace not found')
+    if (!ws.customDomain || !ws.customDomainToken) {
+      throw new BadRequestException('Set a custom domain first')
+    }
+    const host = `_rundesk-verify.${ws.customDomain}`
+    let verified = false
+    try {
+      const records = await dns.promises.resolveTxt(host)
+      verified = records.some((chunks) => chunks.join('').includes(ws.customDomainToken!))
+    } catch {
+      verified = false
+    }
+    await this.db
+      .update(workspaces)
+      .set({ customDomainVerified: verified, updatedAt: new Date() })
+      .where(eq(workspaces.id, workspaceId))
+    return { verified, host, expectedTxt: ws.customDomainToken }
   }
 
   async listMembers(workspaceId: string) {
