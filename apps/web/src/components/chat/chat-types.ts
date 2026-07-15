@@ -12,6 +12,10 @@ export type ChatChannel = {
   dmPeerId?: string
   dmPeerName?: string | null
   dmPeerAvatarUrl?: string | null
+  // Group DMs (§6.2): every other participant + a combined label.
+  dmIsGroup?: boolean
+  dmPeers?: Array<{ userId: string; displayName: string | null; avatarUrl: string | null }>
+  dmLabel?: string | null
 }
 
 export type ChatMessage = {

@@ -51,7 +51,7 @@ export function ChatHeader({
   // admins; the control is shown to the creator).
   const canRemoveMembers = !!channel?.createdById && channel.createdById === currentUserId
   const title = channel?.isDm
-    ? channel.dmPeerName ?? 'Direct message'
+    ? channel.dmLabel ?? channel.dmPeerName ?? 'Direct message'
     : channel?.name ?? 'Select a channel'
 
   const [searchOpen, setSearchOpen] = useState(false)
@@ -110,7 +110,7 @@ export function ChatHeader({
     <header className="shrink-0 h-[52px] px-4 border-b border-border/80 bg-background flex items-center gap-3">
       {channel?.isDm ? (
         <div className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white text-xs font-semibold flex items-center justify-center shrink-0">
-          {initials(channel.dmPeerName)}
+          {channel.dmIsGroup ? <Users className="h-4 w-4" /> : initials(channel.dmPeerName)}
         </div>
       ) : (
         <div className="h-8 w-8 rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-300 flex items-center justify-center shrink-0">

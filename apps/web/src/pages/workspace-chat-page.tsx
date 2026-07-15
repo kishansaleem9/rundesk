@@ -48,6 +48,9 @@ type Channel = {
   dmPeerId?: string
   dmPeerName?: string | null
   dmPeerAvatarUrl?: string | null
+  dmIsGroup?: boolean
+  dmPeers?: Array<{ userId: string; displayName: string | null; avatarUrl: string | null }>
+  dmLabel?: string | null
 }
 
 type WorkspaceMember = {
@@ -500,6 +503,28 @@ export function ChatPage() {
     },
   })
 
+  // Group DM (§6.2): 2+ peers → a shared DM channel. Reuses the same success
+  // path as the 1:1 DM (select the channel, close the composer).
+  const createGroupDmMutation = useMutation({
+    mutationFn: (peerUserIds: string[]) =>
+      api<Channel>(`/workspaces/${workspaceId}/chat/group-dms`, {
+        method: 'POST',
+        body: JSON.stringify({ peerUserIds }),
+      }),
+    onSuccess: async (channel) => {
+      await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      setSelectedId(channel.id)
+      setStartingDm(false)
+    },
+  })
+
+  // One entry point for the sidebar composer: 1 peer → 1:1 DM, 2+ → group DM.
+  const startDm = (userIds: string[]) => {
+    if (userIds.length === 0) return
+    if (userIds.length === 1) createDmMutation.mutate(userIds[0])
+    else createGroupDmMutation.mutate(userIds)
+  }
+
   const toggleReactionMutation = useMutation({
     mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string }) =>
       api(`/chat/messages/${messageId}/reactions`, {
@@ -688,7 +713,7 @@ export function ChatPage() {
   }
 
   const channelLabel = selectedChannel?.isDm
-    ? selectedChannel.dmPeerName ?? 'DM'
+    ? selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? 'DM'
     : selectedChannel
       ? `#${selectedChannel.name}`
       : ''
@@ -716,8 +741,8 @@ export function ChatPage() {
         startingDm={startingDm}
         onToggleStartDm={() => setStartingDm((v) => !v)}
         dmCandidates={dmCandidates}
-        onStartDm={(userId) => createDmMutation.mutate(userId)}
-        startDmPending={createDmMutation.isPending}
+        onStartDm={startDm}
+        startDmPending={createDmMutation.isPending || createGroupDmMutation.isPending}
         pendingInvites={pendingInvites}
         channelsLoading={channelsQuery.isLoading}
       />
@@ -840,7 +865,7 @@ export function ChatPage() {
               </div>
               <h3 className="text-[18px] font-semibold text-foreground mb-1">
                 {selectedChannel?.isDm
-                  ? `Message ${selectedChannel.dmPeerName ?? 'teammate'}`
+                  ? `Message ${selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? 'teammate'}`
                   : `Welcome to #${selectedChannel?.name ?? 'channel'}`}
               </h3>
               <p className="text-[14px] text-muted-foreground leading-relaxed">
@@ -1091,7 +1116,7 @@ export function ChatPage() {
                                     })
                                   }
                                 >
-                                  {channel.isDm ? channel.dmPeerName ?? 'Direct message' : `#${channel.name}`}
+                                  {channel.isDm ? channel.dmLabel ?? channel.dmPeerName ?? 'Direct message' : `#${channel.name}`}
                                 </button>
                               ))}
                             </div>

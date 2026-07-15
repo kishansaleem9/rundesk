@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { Hash, Lock, MessageSquarePlus, Plus, Search } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
+import { Check, Hash, Lock, MessageSquarePlus, Plus, Search, Users } from 'lucide-react'
 import { Button, Input, cn } from '@rundesk/ui'
 import type { ChatChannel, ChatMember } from './chat-types'
 import { initials } from './chat-utils'
@@ -46,18 +46,23 @@ export function ChatSidebar({
   startingDm: boolean
   onToggleStartDm: () => void
   dmCandidates: ChatMember[]
-  onStartDm: (userId: string) => void
+  onStartDm: (userIds: string[]) => void
   startDmPending: boolean
   pendingInvites: PendingInvite[]
   channelsLoading: boolean
 }) {
+  // Multi-select DM composer: pick one teammate for a 1:1, or several for a
+  // group DM (Plan §6.2). Selection is local to the sidebar.
+  const [selectedPeers, setSelectedPeers] = useState<string[]>([])
+  const togglePeer = (userId: string) =>
+    setSelectedPeers((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]))
+
   const q = channelSearch.trim().toLowerCase()
   const filteredChannels = q
     ? channels.filter((c) => c.name.toLowerCase().includes(q))
     : channels
-  const filteredDms = q
-    ? dmChannels.filter((c) => (c.dmPeerName ?? '').toLowerCase().includes(q))
-    : dmChannels
+  const dmName = (c: ChatChannel) => (c.dmLabel ?? c.dmPeerName ?? '').toLowerCase()
+  const filteredDms = q ? dmChannels.filter((c) => dmName(c).includes(q)) : dmChannels
 
   return (
     <aside className="hidden md:flex w-[272px] shrink-0 flex-col border-r border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]">
@@ -162,7 +167,7 @@ export function ChatSidebar({
           </div>
 
           {startingDm && (
-            <div className="mb-2 px-1 space-y-1 max-h-48 overflow-y-auto">
+            <div className="mb-2 px-1 space-y-1">
               {dmCandidates.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground px-1 py-2 leading-relaxed">
                   {pendingInvites.length > 0
@@ -170,20 +175,57 @@ export function ChatSidebar({
                     : 'Invite teammates from Settings → Members.'}
                 </p>
               ) : (
-                dmCandidates.map((m) => (
-                  <button
-                    key={m.userId}
-                    type="button"
-                    disabled={startDmPending}
-                    onClick={() => onStartDm(m.userId)}
-                    className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-violet-500/10 disabled:opacity-60"
+                <>
+                  <p className="text-[11px] text-muted-foreground px-1 pb-0.5">
+                    Select one teammate, or several for a group message.
+                  </p>
+                  <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                    {dmCandidates.map((m) => {
+                      const checked = selectedPeers.includes(m.userId)
+                      return (
+                        <button
+                          key={m.userId}
+                          type="button"
+                          disabled={startDmPending}
+                          onClick={() => togglePeer(m.userId)}
+                          className={cn(
+                            'w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left disabled:opacity-60',
+                            checked ? 'bg-violet-500/12' : 'hover:bg-violet-500/10',
+                          )}
+                        >
+                          <MemberAvatar label={initials(m.displayName || m.email)} online />
+                          <span className="text-[13px] font-medium truncate text-foreground flex-1 min-w-0">
+                            {m.displayName || m.email}
+                          </span>
+                          <span
+                            className={cn(
+                              'h-4 w-4 shrink-0 rounded border flex items-center justify-center',
+                              checked ? 'bg-violet-600 border-violet-600 text-white' : 'border-border',
+                            )}
+                          >
+                            {checked && <Check className="h-3 w-3" />}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <Button
+                    size="sm"
+                    className="h-7 w-full text-xs"
+                    disabled={selectedPeers.length === 0 || startDmPending}
+                    onClick={() => {
+                      if (selectedPeers.length === 0) return
+                      onStartDm(selectedPeers)
+                      setSelectedPeers([])
+                    }}
                   >
-                    <MemberAvatar label={initials(m.displayName || m.email)} online />
-                    <span className="text-[13px] font-medium truncate text-foreground flex-1 min-w-0">
-                      {m.displayName || m.email}
-                    </span>
-                  </button>
-                ))
+                    {startDmPending
+                      ? 'Starting…'
+                      : selectedPeers.length > 1
+                        ? `Message ${selectedPeers.length} people`
+                        : 'Message'}
+                  </Button>
+                </>
               )}
             </div>
           )}
@@ -194,8 +236,16 @@ export function ChatSidebar({
                 key={c.id}
                 active={selectedId === c.id}
                 onClick={() => onSelectChannel(c.id)}
-                icon={<MemberAvatar label={initials(c.dmPeerName)} size="sm" />}
-                label={c.dmPeerName ?? 'Direct message'}
+                icon={
+                  c.dmIsGroup ? (
+                    <span className="h-5 w-5 shrink-0 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white flex items-center justify-center">
+                      <Users className="h-3 w-3" />
+                    </span>
+                  ) : (
+                    <MemberAvatar label={initials(c.dmPeerName)} size="sm" />
+                  )
+                }
+                label={c.dmLabel ?? c.dmPeerName ?? 'Direct message'}
                 unread={c.unreadCount ?? 0}
               />
             ))}

@@ -47,6 +47,16 @@ export class ChatController {
     return this.chat.ensureDmChannel(workspaceId, user.id, body.peerUserId)
   }
 
+  @Post('workspaces/:workspaceId/chat/group-dms')
+  @UseGuards(WorkspaceMemberGuard)
+  createGroupDm(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { peerUserIds: string[] },
+  ) {
+    return this.chat.createGroupDm(workspaceId, user.id, body.peerUserIds ?? [])
+  }
+
   @Get('workspaces/:workspaceId/chat/unread')
   @UseGuards(WorkspaceMemberGuard)
   unread(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {

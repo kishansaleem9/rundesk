@@ -264,12 +264,19 @@ export class ChatService {
 
     return visible.map((channel) => {
       if (!channel.isDm) return channel
-      const peer = members.find((m) => m.channelId === channel.id && m.userId !== userId)
+      // A DM can have >2 members (group DM, Plan §6.2). Label with every other
+      // participant; keep the single dmPeer* fields (first peer) for the 1:1 UI.
+      const peers = members.filter((m) => m.channelId === channel.id && m.userId !== userId)
+      const primary = peers[0]
+      const isGroup = peers.length > 1
       return {
         ...channel,
-        dmPeerId: peer?.userId,
-        dmPeerName: peer?.displayName ?? null,
-        dmPeerAvatarUrl: peer?.avatarUrl ?? null,
+        dmPeerId: primary?.userId,
+        dmPeerName: primary?.displayName ?? null,
+        dmPeerAvatarUrl: primary?.avatarUrl ?? null,
+        dmIsGroup: isGroup,
+        dmPeers: peers.map((p) => ({ userId: p.userId, displayName: p.displayName ?? null, avatarUrl: p.avatarUrl ?? null })),
+        dmLabel: isGroup ? peers.map((p) => p.displayName ?? 'Member').join(', ') : (primary?.displayName ?? null),
       }
     })
   }
@@ -381,6 +388,68 @@ export class ChatService {
         { channelId: row.id, userId: currentUserId },
         { channelId: row.id, userId: peerUserId },
       ])
+      .onConflictDoNothing()
+
+    this.realtime.emitToWorkspace(workspaceId, {
+      type: 'chat.channel.created',
+      workspaceId,
+      channel: row,
+    })
+    return row
+  }
+
+  /**
+   * Create (or reuse) a group DM among the current user and 2+ peers (Plan §6.2).
+   * A group DM is an isDm channel with 3+ members; dedup is by the exact member
+   * set so re-opening the same group returns the existing channel. A single peer
+   * falls back to the 1:1 ensureDmChannel path.
+   */
+  async createGroupDm(workspaceId: string, currentUserId: string, peerUserIds: string[]) {
+    const peers = [...new Set((peerUserIds ?? []).filter(Boolean))].filter((id) => id !== currentUserId)
+    if (peers.length === 0) throw new BadRequestException('Select at least one other person for a direct message')
+    if (peers.length === 1) return this.ensureDmChannel(workspaceId, currentUserId, peers[0])
+
+    // Every participant (creator + peers) must belong to the workspace.
+    const participants = [currentUserId, ...peers]
+    const wsMembers = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), inArray(workspaceMembers.userId, participants)))
+    const validIds = new Set(wsMembers.map((m) => m.userId))
+    if (!validIds.has(currentUserId)) throw new ForbiddenException('Workspace membership required')
+    if (participants.some((id) => !validIds.has(id))) {
+      throw new ForbiddenException('All participants must belong to this workspace')
+    }
+
+    // Reuse an existing group DM whose member set is exactly these participants.
+    const target = new Set(participants)
+    const dmChannels = await this.db
+      .select({ id: chatChannels.id })
+      .from(chatChannels)
+      .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatChannels.isDm, true), isNull(chatChannels.archivedAt)))
+    for (const channel of dmChannels) {
+      const rows = await this.db
+        .select({ userId: chatChannelMembers.userId })
+        .from(chatChannelMembers)
+        .where(eq(chatChannelMembers.channelId, channel.id))
+      const ids = new Set(rows.map((r) => r.userId))
+      if (ids.size === target.size && [...target].every((id) => ids.has(id))) return channel
+    }
+
+    const [row] = await this.db
+      .insert(chatChannels)
+      .values({
+        workspaceId,
+        name: `dm-group-${currentUserId.slice(0, 8)}-${target.size}`,
+        isPrivate: true,
+        isDm: true,
+        createdById: currentUserId,
+      })
+      .returning()
+
+    await this.db
+      .insert(chatChannelMembers)
+      .values([...target].map((userId) => ({ channelId: row.id, userId })))
       .onConflictDoNothing()
 
     this.realtime.emitToWorkspace(workspaceId, {
