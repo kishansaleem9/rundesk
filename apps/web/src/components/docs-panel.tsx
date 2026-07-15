@@ -182,7 +182,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Placeholder.configure({ placeholder: 'Write your doc... type @ to mention' }),
+      Placeholder.configure({ placeholder: t('docs.editorPlaceholder') }),
       TaskList,
       TaskItem.configure({ nested: true }),
       TextStyle,
@@ -269,7 +269,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       setSelectedDocId(doc.id)
       await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not create from template'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('docs.couldNotCreateFromTemplate')),
   })
 
   // Save the open doc as a reusable workspace template.
@@ -280,10 +280,10 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
         body: { docId: selectedDocId, name },
       }),
     onSuccess: async () => {
-      toast.success('Saved as a template')
+      toast.success(t('docs.savedAsTemplate'))
       await qc.invalidateQueries({ queryKey: ['doc-templates', workspaceId] })
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not save template'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('docs.couldNotSaveTemplate')),
   })
 
   const saveDoc = useMutation({
@@ -297,8 +297,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        toast('Doc updated by teammate', {
-          description: 'Latest content was loaded. Re-apply your change and save again.',
+        toast(t('docs.docUpdatedByTeammate'), {
+          description: t('docs.docUpdatedDescription'),
         })
       }
       await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
@@ -341,7 +341,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       editor.chain().focus().unsetLink().run()
       return
     }
-    const url = window.prompt('Link URL')
+    const url = window.prompt(t('docs.linkUrlPrompt'))
     if (url) {
       editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
     }
@@ -359,7 +359,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       ? editor.state.doc.textBetween(from, to, '\n', '\n')
       : editor.getText()
     if (!text.trim()) {
-      toast.error('Nothing to edit — add or select some text first.')
+      toast.error(t('docs.nothingToEdit'))
       return
     }
     setImproving(true)
@@ -374,7 +374,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
         editor.commands.setContent(result.improved)
       }
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : 'AI request failed')
+      toast.error(error instanceof ApiError ? error.message : t('docs.aiRequestFailed'))
     } finally {
       setImproving(false)
     }
@@ -410,11 +410,11 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   }
 
   const slashItems = [
-    { id: 'h2' as const, label: 'Heading 2' },
-    { id: 'todo' as const, label: 'Todo list' },
-    { id: 'bullet' as const, label: 'Bullet list' },
-    { id: 'quote' as const, label: 'Quote block' },
-    { id: 'code' as const, label: 'Code block' },
+    { id: 'h2' as const, label: t('docs.heading2') },
+    { id: 'todo' as const, label: t('docs.todoList') },
+    { id: 'bullet' as const, label: t('docs.bulletList') },
+    { id: 'quote' as const, label: t('docs.quoteBlock') },
+    { id: 'code' as const, label: t('docs.codeBlock') },
   ].filter((item) => item.label.toLowerCase().includes(slashFilter.toLowerCase()))
 
   const renderDocNodes = (parentId: string | null, depth: number): React.ReactNode =>
@@ -437,7 +437,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 type="button"
                 className="p-0.5 text-muted-foreground/70 hover:text-foreground shrink-0"
                 onClick={() => toggleExpanded(node.id)}
-                title={isOpen ? 'Collapse' : 'Expand'}
+                title={isOpen ? t('docs.collapse') : t('docs.expandNode')}
               >
                 {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               </button>
@@ -480,13 +480,13 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       <div className="border-b md:border-b-0 md:border-r border-border/60 bg-card/30 flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
           <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-            Pages
+            {t('docs.pages')}
           </span>
         </div>
         <div className="flex-1 overflow-auto px-2 py-2 space-y-0.5">
           {docsQuery.data?.length === 0 && (
             <p className="px-2 py-3 text-xs text-muted-foreground">
-              No docs yet — create your first page below.
+              {t('docs.noDocsYet')}
             </p>
           )}
           {renderDocNodes(null, 0)}
@@ -506,7 +506,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               onClick={() => createDoc.mutate({})}
               disabled={createDoc.isPending}
             >
-              <Plus className="h-3.5 w-3.5" /> Add page
+              <Plus className="h-3.5 w-3.5" /> {t('docs.addPage')}
             </Button>
             <Button
               size="sm"
@@ -524,7 +524,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
         open={templatesOpen}
         onOpenChange={setTemplatesOpen}
         workspaceId={workspaceId}
-        onPick={(t: DocTemplate) => createDoc.mutate({ title: t.title, content: t.content })}
+        onPick={(tpl: DocTemplate) => createDoc.mutate({ title: tpl.title, content: tpl.content })}
         onPickSaved={(templateId) => createFromTemplate.mutate(templateId)}
       />
 
@@ -561,7 +561,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 title={t('docs.saveAsTemplateTip')}
                 disabled={saveAsTemplate.isPending}
                 onClick={() => {
-                  const name = window.prompt('Template name', activeDoc.title)?.trim()
+                  const name = window.prompt(t('docs.templateNamePrompt'), activeDoc.title)?.trim()
                   if (name) saveAsTemplate.mutate(name)
                 }}
               >
@@ -574,7 +574,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 onClick={() => {
                   const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
                   void downloadFile(`/docs/${activeDoc.id}/export`, `${base}.md`).catch(() =>
-                    toast.error('Could not export the doc'),
+                    toast.error(t('docs.couldNotExport')),
                   )
                 }}
               >
@@ -587,7 +587,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 onClick={() => {
                   const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
                   void downloadFile(`/docs/${activeDoc.id}/export?format=pdf`, `${base}.pdf`).catch(() =>
-                    toast.error('Could not export the doc'),
+                    toast.error(t('docs.couldNotExport')),
                   )
                 }}
               >
@@ -679,7 +679,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 disabled={!editor}
                 title={t('docs.bulletList')}
               >
-                List
+                {t('docs.listShort')}
               </Button>
               <Button
                 size="sm"
@@ -697,7 +697,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 disabled={!editor}
                 title={t('docs.todoList')}
               >
-                Todo
+                {t('docs.todoShort')}
               </Button>
               <Button
                 size="sm"
@@ -706,7 +706,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 disabled={!editor}
                 title={t('docs.codeBlock')}
               >
-                Code
+                {t('docs.codeShort')}
               </Button>
               {/* Font color */}
               <span className="relative inline-flex">
@@ -735,7 +735,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <label className="text-[11px] text-muted-foreground flex items-center gap-1 cursor-pointer">
-                        Custom
+                        {t('docs.custom')}
                         <input
                           type="color"
                           className="h-6 w-6 cursor-pointer rounded border border-border bg-transparent p-0"
@@ -743,7 +743,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                         />
                       </label>
                       <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground" onClick={clearColor}>
-                        Clear
+                        {t('docs.clear')}
                       </button>
                     </div>
                   </div>
@@ -771,24 +771,24 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                   disabled={!editor}
                   title={t('docs.insert')}
                 >
-                  <Plus className="h-3.5 w-3.5 mr-0.5" /> Insert <ChevronDown className="h-3 w-3 ml-0.5" />
+                  <Plus className="h-3.5 w-3.5 mr-0.5" /> {t('docs.insert')} <ChevronDown className="h-3 w-3 ml-0.5" />
                 </Button>
                 {insertOpen && (
                   <div className="absolute z-40 top-9 left-0 w-56 rounded-md border border-border bg-card shadow-lg overflow-hidden">
                     <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); toggleLink() }}>
-                      <Link className="h-3.5 w-3.5" /> Link
+                      <Link className="h-3.5 w-3.5" /> {t('docs.link')}
                     </button>
                     <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); editor?.chain().focus().toggleTaskList().run() }}>
-                      <CheckSquare className="h-3.5 w-3.5" /> Checklist
+                      <CheckSquare className="h-3.5 w-3.5" /> {t('docs.checklist')}
                     </button>
                     <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={openCreateTaskFromSelection}>
-                      <Plus className="h-3.5 w-3.5" /> Create task from selection
+                      <Plus className="h-3.5 w-3.5" /> {t('docs.createTaskFromSelection')}
                     </button>
                     <div className="border-t border-border max-h-40 overflow-auto">
                       <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-muted-foreground">{t('docs.embedDoc')}</div>
                       {(docsQuery.data ?? []).filter((d) => d.id !== selectedDocId).slice(0, 20).map((d) => (
                         <button key={d.id} className="w-full text-left px-3 py-1.5 text-sm hover:bg-surface-50 truncate flex items-center gap-2" onClick={() => embedDoc(d)}>
-                          <FileText className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{d.title || 'Untitled'}</span>
+                          <FileText className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{d.title || t('docs.untitled')}</span>
                         </button>
                       ))}
                       {(docsQuery.data ?? []).filter((d) => d.id !== selectedDocId).length === 0 && (
@@ -820,7 +820,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={commentsOpen ? 'secondary' : 'ghost'}
                 onClick={() => setCommentsOpen((v) => !v)}
                 disabled={!activeDoc}
-                title={commentsOpen ? 'Hide comments' : 'Show comments'}
+                title={commentsOpen ? t('docs.hideComments') : t('docs.showComments')}
               >
                 <MessagesSquare className="h-3.5 w-3.5" />
               </Button>
@@ -829,7 +829,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 variant={historyOpen ? 'secondary' : 'ghost'}
                 onClick={() => setHistoryOpen((v) => !v)}
                 disabled={!activeDoc}
-                title={historyOpen ? 'Hide version history' : 'Version history'}
+                title={historyOpen ? t('docs.hideVersionHistory') : t('docs.versionHistory')}
               >
                 <History className="h-3.5 w-3.5" />
               </Button>
@@ -842,7 +842,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                   title={t('docs.improveWritingAi')}
                 >
                   <Sparkles className="h-3.5 w-3.5 mr-1" />
-                  {improving ? 'Working…' : 'AI'}
+                  {improving ? t('docs.working') : t('docs.ai')}
                 </Button>
                 <Button
                   size="sm"
@@ -877,12 +877,12 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           {activeDoc ? (
             <EditorContent editor={editor} />
           ) : (
-            <p className="text-sm text-muted-foreground">Pick a page on the left to start editing.</p>
+            <p className="text-sm text-muted-foreground">{t('docs.pickAPage')}</p>
           )}
           {slashOpen && activeDoc && (
             <div className="absolute top-4 right-4 z-30 w-52 rounded-md border border-border bg-card shadow-lg overflow-hidden">
               <div className="px-2.5 py-1.5 text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border flex items-center gap-1">
-                <Slash className="h-3 w-3" /> Slash menu
+                <Slash className="h-3 w-3" /> {t('docs.slashMenu')}
               </div>
               {slashItems.map((item) => (
                 <button
@@ -894,7 +894,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 </button>
               ))}
               {slashItems.length === 0 && (
-                <div className="px-3 py-2 text-xs text-muted-foreground">No commands</div>
+                <div className="px-3 py-2 text-xs text-muted-foreground">{t('docs.noCommands')}</div>
               )}
             </div>
           )}
@@ -948,6 +948,7 @@ function DocHistoryPane({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const revisionsQuery = useQuery({
     queryKey: ['doc-revisions', docId],
     queryFn: () => api<DocRevision[]>(`/docs/${docId}/revisions`),
@@ -958,25 +959,25 @@ function DocHistoryPane({
     onSuccess: (doc) => {
       onRestored(doc.content)
       qc.invalidateQueries({ queryKey: ['doc-revisions', docId] })
-      toast.success('Version restored')
+      toast.success(t('docs.versionRestored'))
     },
-    onError: () => toast.error('Could not restore that version'),
+    onError: () => toast.error(t('docs.couldNotRestoreVersion')),
   })
   const revs = revisionsQuery.data ?? []
   return (
     <div className="border-l border-border/60 bg-card/40 flex flex-col min-h-0">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
         <div className="flex items-center gap-2 text-sm font-semibold">
-          <History className="h-4 w-4" /> Version history
+          <History className="h-4 w-4" /> {t('docs.versionHistory')}
         </div>
-        <Button size="sm" variant="ghost" onClick={onClose} title="Close">
+        <Button size="sm" variant="ghost" onClick={onClose} title={t('common.close')}>
           ✕
         </Button>
       </div>
       <div className="flex-1 overflow-auto p-2 space-y-1.5">
-        {revisionsQuery.isLoading && <p className="text-xs text-muted-foreground px-2 py-1">Loading…</p>}
+        {revisionsQuery.isLoading && <p className="text-xs text-muted-foreground px-2 py-1">{t('common.loading')}</p>}
         {!revisionsQuery.isLoading && revs.length === 0 && (
-          <p className="text-xs text-muted-foreground px-2 py-1">No saved versions yet.</p>
+          <p className="text-xs text-muted-foreground px-2 py-1">{t('docs.noSavedVersions')}</p>
         )}
         {revs.map((r, i) => (
           <div
@@ -985,10 +986,10 @@ function DocHistoryPane({
           >
             <div className="min-w-0">
               <div className="text-xs font-medium truncate">
-                {i === 0 ? 'Current version' : `Version ${revs.length - i}`}
+                {i === 0 ? t('docs.currentVersion') : t('docs.versionN', { n: revs.length - i })}
               </div>
               <div className="text-[11px] text-muted-foreground truncate">
-                {r.editor?.displayName ?? 'Unknown'} · {relativeTime(r.updatedAt)}
+                {r.editor?.displayName ?? t('docs.unknown')} · {relativeTime(r.updatedAt)}
               </div>
             </div>
             {i !== 0 && (
@@ -997,7 +998,7 @@ function DocHistoryPane({
                 variant="outline"
                 disabled={restore.isPending}
                 onClick={() => restore.mutate(r.id)}
-                title="Restore this version"
+                title={t('docs.restoreThisVersion')}
               >
                 <RotateCcw className="h-3 w-3" />
               </Button>
@@ -1011,6 +1012,7 @@ function DocHistoryPane({
 
 function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: string }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { namesById } = useMentionNames(workspaceId)
   const [showResolved, setShowResolved] = useState(false)
   const [newBody, setNewBody] = useState('')
@@ -1077,22 +1079,22 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
     <aside className="border-t md:border-t-0 md:border-l border-border/60 bg-card/30 flex flex-col">
       <header className="flex items-center justify-between px-4 py-3 border-b border-border/60">
         <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-          <MessageCircle className="h-3 w-3" /> Comments
+          <MessageCircle className="h-3 w-3" /> {t('docs.comments')}
         </span>
         <button
           onClick={() => setShowResolved((v) => !v)}
           className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
         >
-          {showResolved ? 'Hide resolved' : 'Show resolved'}
+          {showResolved ? t('docs.hideResolved') : t('docs.showResolved')}
         </button>
       </header>
       <div className="flex-1 overflow-auto px-3 py-3 space-y-3">
         {commentsQuery.isLoading && (
-          <p className="text-xs text-muted-foreground">Loading…</p>
+          <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
         )}
         {!commentsQuery.isLoading && grouped.roots.length === 0 && (
           <p className="text-xs text-muted-foreground">
-            No comments yet. Start a thread below.
+            {t('docs.noComments')}
           </p>
         )}
         {grouped.roots.map((c) => (
@@ -1137,7 +1139,7 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
                   onChange={(e) => setReplyBody(e.target.value)}
                   rows={2}
                   className="w-full text-xs px-2 py-1.5 rounded border border-border bg-card focus:outline-none focus:ring-1 focus:ring-ring"
-                  placeholder="Write a reply…"
+                  placeholder={t('docs.writeReply')}
                   autoFocus
                 />
                 <div className="flex justify-end gap-1.5">
@@ -1149,10 +1151,10 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
                       setReplyBody('')
                     }}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <Button type="submit" size="sm" disabled={!replyBody.trim() || createComment.isPending}>
-                    Reply
+                    {t('docs.reply')}
                   </Button>
                 </div>
               </form>
@@ -1165,7 +1167,7 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
                 }}
                 className="text-[11px] text-muted-foreground hover:text-foreground"
               >
-                Reply
+                {t('docs.reply')}
               </button>
             )}
           </article>
@@ -1182,7 +1184,7 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
           value={newBody}
           onChange={(e) => setNewBody(e.target.value)}
           rows={2}
-          placeholder="Add a comment…"
+          placeholder={t('docs.addComment')}
           className="w-full text-xs px-2 py-1.5 rounded border border-border bg-card focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <Button
@@ -1192,7 +1194,7 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
           className="w-full"
           disabled={!newBody.trim() || createComment.isPending}
         >
-          {createComment.isPending ? 'Posting…' : 'Post comment'}
+          {createComment.isPending ? t('docs.posting') : t('docs.postComment')}
         </Button>
       </form>
     </aside>
@@ -1210,6 +1212,7 @@ function CommentBody({
   onResolveToggle: () => void
   onDelete: () => void
 }) {
+  const { t } = useTranslation()
   const initials = (comment.authorName ?? comment.authorEmail ?? 'U').slice(0, 1).toUpperCase()
   return (
     <div className="space-y-1.5">
@@ -1220,7 +1223,7 @@ function CommentBody({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-medium truncate">
-              {comment.authorName ?? comment.authorEmail ?? 'Member'}
+              {comment.authorName ?? comment.authorEmail ?? t('docs.member')}
             </p>
             <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
               {new Date(comment.createdAt).toLocaleString(undefined, {
@@ -1245,14 +1248,14 @@ function CommentBody({
               }`}
             >
               {comment.isResolved ? <CheckCircle2 className="h-3 w-3" /> : <Check className="h-3 w-3" />}
-              {comment.isResolved ? 'Resolved' : 'Resolve'}
+              {comment.isResolved ? t('docs.resolved') : t('docs.resolve')}
             </button>
             <button
               onClick={onDelete}
               className="text-[10px] uppercase tracking-widest text-muted-foreground hover:text-destructive flex items-center gap-1"
             >
               <Trash2 className="h-3 w-3" />
-              Delete
+              {t('common.delete')}
             </button>
           </div>
         </div>
@@ -1272,6 +1275,7 @@ function CreateTaskFromDocDialog({
   onClose: () => void
   onCreated: (task: { id: string; title: string }, taskPath: string) => void
 }) {
+  const { t } = useTranslation()
   const [title, setTitle] = useState(initialTitle)
   const [spaceId, setSpaceId] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -1296,11 +1300,11 @@ function CreateTaskFromDocDialog({
     mutationFn: () =>
       api<{ id: string; title: string }>(`/tasks`, { method: 'POST', body: { listId, title: title.trim() } }),
     onSuccess: (task) => {
-      toast.success('Task created')
+      toast.success(t('docs.taskCreated'))
       onCreated(task, `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${task.id}`)
       onClose()
     },
-    onError: (e) => toast.error(e instanceof ApiError ? e.message : 'Could not create task'),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('docs.couldNotCreateTask')),
   })
 
   const selectCls =
@@ -1313,14 +1317,14 @@ function CreateTaskFromDocDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-base font-semibold">Create task from selection</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" title="Close">
+          <h3 className="font-display text-base font-semibold">{t('docs.createTaskFromSelection')}</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" title={t('common.close')}>
             ✕
           </button>
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">Task title</label>
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" />
+          <label className="text-xs text-muted-foreground">{t('docs.taskTitle')}</label>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('docs.taskTitle')} />
         </div>
         <div className="grid grid-cols-1 gap-2">
           <select
@@ -1332,7 +1336,7 @@ function CreateTaskFromDocDialog({
               setListId('')
             }}
           >
-            <option value="">Select space…</option>
+            <option value="">{t('docs.selectSpace')}</option>
             {(spaces.data ?? []).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -1348,7 +1352,7 @@ function CreateTaskFromDocDialog({
               setListId('')
             }}
           >
-            <option value="">Select project…</option>
+            <option value="">{t('docs.selectProject')}</option>
             {(projects.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -1356,7 +1360,7 @@ function CreateTaskFromDocDialog({
             ))}
           </select>
           <select className={selectCls} value={listId} disabled={!projectId} onChange={(e) => setListId(e.target.value)}>
-            <option value="">Select list…</option>
+            <option value="">{t('docs.selectList')}</option>
             {(lists.data ?? []).map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
@@ -1366,14 +1370,14 @@ function CreateTaskFromDocDialog({
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             variant="gradient"
             disabled={!title.trim() || !listId || create.isPending}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? 'Creating…' : 'Create task'}
+            {create.isPending ? t('docs.creating') : t('docs.createTask')}
           </Button>
         </div>
       </div>
@@ -1388,6 +1392,7 @@ function ShareDocButton({
   doc: Doc
   onShareChange: () => void
 }) {
+  const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
   const isShared = Boolean(doc.publicShareId)
   const shareUrl = isShared ? `${window.location.origin}/d/${doc.publicShareId}` : null
@@ -1397,18 +1402,18 @@ function ShareDocButton({
     try {
       if (isShared) {
         await api(`/docs/${doc.id}/share`, { method: 'DELETE' })
-        toast.success('Public share disabled')
+        toast.success(t('docs.publicShareDisabled'))
       } else {
         const result = await api<{ publicShareId: string }>(`/docs/${doc.id}/share`, {
           method: 'POST',
         })
         const url = `${window.location.origin}/d/${result.publicShareId}`
         await navigator.clipboard.writeText(url).catch(() => undefined)
-        toast.success('Public link copied to clipboard')
+        toast.success(t('docs.publicLinkCopiedClipboard'))
       }
       onShareChange()
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to toggle share')
+      toast.error(err instanceof ApiError ? err.message : t('docs.failedToggleShare'))
     } finally {
       setBusy(false)
     }
@@ -1417,7 +1422,7 @@ function ShareDocButton({
   const copy = async () => {
     if (!shareUrl) return
     await navigator.clipboard.writeText(shareUrl)
-    toast.success('Public link copied')
+    toast.success(t('docs.publicLinkCopied'))
   }
 
   return (
@@ -1427,12 +1432,12 @@ function ShareDocButton({
         variant={isShared ? 'secondary' : 'ghost'}
         onClick={toggle}
         disabled={busy}
-        title={isShared ? 'Disable public share' : 'Share doc publicly'}
+        title={isShared ? t('docs.disablePublicShare') : t('docs.shareDocPublicly')}
       >
         {isShared ? <Globe className="h-3.5 w-3.5" /> : <GlobeLock className="h-3.5 w-3.5" />}
       </Button>
       {isShared && (
-        <Button size="sm" variant="ghost" onClick={copy} title="Copy public link">
+        <Button size="sm" variant="ghost" onClick={copy} title={t('docs.copyPublicLink')}>
           <Link2 className="h-3.5 w-3.5" />
         </Button>
       )}

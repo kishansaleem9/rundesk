@@ -124,7 +124,7 @@ function ComposerBox({
   const handleAskAi = async () => {
     const text = value.trim()
     if (!text) {
-      toast('Type a message first, then Ask AI to improve it.')
+      toast(t('chat.askAiEmpty'))
       return
     }
     setImproving(true)
@@ -136,7 +136,7 @@ function ComposerBox({
       onChange(result.improved)
       textareaRef.current?.focus()
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : 'Could not improve writing')
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotImproveWriting'))
     } finally {
       setImproving(false)
     }
@@ -192,7 +192,7 @@ function ComposerBox({
           {uploading && (
             <span className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-[12px] text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Uploading…
+              {t('chat.uploading')}
             </span>
           )}
         </div>
@@ -291,14 +291,14 @@ export function ChatComposer({
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-2 text-[12px]">
           <span className="text-muted-foreground shrink-0">{t('chat.replyingTo')}</span>
           <span className="font-medium text-foreground truncate flex-1">
-            {replyTo.authorName ?? 'message'}: {formatMentionsPlain(replyTo.body, replyNamesById)}
+            {replyTo.authorName ?? t('chat.messageAuthorFallback')}: {formatMentionsPlain(replyTo.body, replyNamesById)}
           </span>
           <button
             type="button"
             className="text-[11px] text-muted-foreground hover:text-foreground shrink-0"
             onClick={onCancelReply}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       )}
@@ -311,7 +311,7 @@ export function ChatComposer({
         onSend={onSend}
         disabled={disabled}
         sending={sending}
-        placeholder={channelLabel ? `Message ${channelLabel}` : 'Select a channel'}
+        placeholder={channelLabel ? t('chat.messageSomeone', { name: channelLabel }) : t('chat.selectAChannel')}
         attachments={attachments}
         onFilesSelected={onFilesSelected}
         onRemoveAttachment={onRemoveAttachment}
@@ -319,8 +319,8 @@ export function ChatComposer({
       />
 
       <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">
-        <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">Enter</kbd> to send ·{' '}
-        <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">Shift + Enter</kbd> new line
+        <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">Enter</kbd> {t('chat.toSend')} ·{' '}
+        <kbd className="px-1 py-0.5 rounded bg-muted text-[10px]">Shift + Enter</kbd> {t('chat.newLine')}
       </p>
     </div>
   )
@@ -344,6 +344,7 @@ export function ThreadReplyComposer({
   disabled: boolean
   sending: boolean
 }) {
+  const { t } = useTranslation()
   return (
     <ComposerBox
       value={value}
@@ -351,8 +352,8 @@ export function ThreadReplyComposer({
       onSend={onSend}
       disabled={disabled}
       sending={sending}
-      placeholder="Reply in thread..."
-      sendLabel="Reply"
+      placeholder={t('chat.replyInThread')}
+      sendLabel={t('chat.reply')}
     />
   )
 }

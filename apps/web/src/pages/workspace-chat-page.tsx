@@ -448,7 +448,7 @@ export function ChatPage() {
     try {
       for (const file of files) {
         if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
-          toast.error(`"${file.name}" exceeds the ${MAX_CHAT_ATTACHMENT_BYTES / (1024 * 1024)} MB limit`)
+          toast.error(t('chat.fileExceedsLimit', { name: file.name, limit: MAX_CHAT_ATTACHMENT_BYTES / (1024 * 1024) }))
           continue
         }
         const contentType = file.type || 'application/octet-stream'
@@ -469,7 +469,7 @@ export function ChatPage() {
           })
           setPendingAttachments((prev) => [...prev, rec])
         } catch (err) {
-          toast.error(err instanceof ApiError ? err.message : `Could not upload "${file.name}"`)
+          toast.error(err instanceof ApiError ? err.message : t('chat.couldNotUploadFile', { name: file.name }))
         }
       }
     } finally {
@@ -547,15 +547,15 @@ export function ChatPage() {
       setNewEmojiCode('')
       setNewEmojiUrl('')
       qc.invalidateQueries({ queryKey: ['chat-custom-emoji', workspaceId] })
-      toast.success('Custom emoji added')
+      toast.success(t('chat.customEmojiAdded'))
     },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not add emoji'),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotAddEmoji')),
   })
 
   const deleteCustomEmojiMutation = useMutation({
     mutationFn: (emojiId: string) => api(`/chat/custom-emoji/${emojiId}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['chat-custom-emoji', workspaceId] }),
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not remove emoji'),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotRemoveEmoji')),
   })
 
   const forwardMutation = useMutation({
@@ -574,14 +574,14 @@ export function ChatPage() {
     mutationFn: async (messageId: string) => {
       // Resolve a target list (first space → first project → first list).
       const spaces = await api<Array<{ id: string }>>(`/spaces/workspace/${workspaceId}`)
-      if (!spaces[0]) throw new Error('Create a space and list first')
+      if (!spaces[0]) throw new Error(t('chat.needSpaceAndList'))
       const projects = await api<Array<{ id: string }>>(`/projects/space/${spaces[0].id}`)
-      if (!projects[0]) throw new Error('Create a project and list first')
+      if (!projects[0]) throw new Error(t('chat.needProjectAndList'))
       const lists = await api<Array<{ id: string }>>(`/lists/project/${projects[0].id}`)
-      if (!lists[0]) throw new Error('Create a list first')
+      if (!lists[0]) throw new Error(t('chat.needList'))
       return api(`/chat/messages/${messageId}/create-task`, { method: 'POST', body: { listId: lists[0].id } })
     },
-    onSuccess: () => toast.success('Task created from message'),
+    onSuccess: () => toast.success(t('chat.taskCreatedFromMessage')),
     onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
   })
 
@@ -599,7 +599,7 @@ export function ChatPage() {
       }
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'Could not update pin')
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdatePin'))
     },
   })
 
@@ -611,7 +611,7 @@ export function ChatPage() {
       setEditingBody('')
       if (selectedId) qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
     },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not edit message'),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotEditMessage')),
   })
 
   const deleteMessageMutation = useMutation({
@@ -622,7 +622,7 @@ export function ChatPage() {
         qc.invalidateQueries({ queryKey: ['chat-pinned', selectedId] })
       }
     },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : 'Could not delete message'),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotDeleteMessage')),
   })
 
   const setSavedMutation = useMutation({
@@ -632,7 +632,7 @@ export function ChatPage() {
       qc.invalidateQueries({ queryKey: ['chat-saved', workspaceId] })
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'Could not update saved')
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateSaved'))
     },
   })
 
@@ -641,11 +641,11 @@ export function ChatPage() {
       api(`/chat/channels/${channelId}/leave`, { method: 'POST' }),
     onSuccess: async (_, channelId) => {
       await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
-      toast.success('You left the channel')
+      toast.success(t('chat.youLeftChannel'))
       if (selectedId === channelId) setSelectedId(null)
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'Could not leave channel')
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotLeaveChannel'))
     },
   })
 
@@ -654,10 +654,10 @@ export function ChatPage() {
       api(`/chat/channels/${channelId}/members/${userId}`, { method: 'DELETE' }),
     onSuccess: async (_, { channelId }) => {
       await qc.invalidateQueries({ queryKey: ['chat-channel-members', channelId] })
-      toast.success('Member removed from channel')
+      toast.success(t('chat.memberRemoved'))
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'Could not remove member')
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotRemoveMember'))
     },
   })
 
@@ -666,10 +666,10 @@ export function ChatPage() {
       api(`/chat/channels/${channelId}/notifications`, { method: 'PATCH', body: { level } }),
     onSuccess: async (_, { level }) => {
       await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
-      toast.success(level === 'none' ? 'Channel muted' : level === 'mentions' ? 'Notifying on @mentions only' : 'Notifying on all messages')
+      toast.success(level === 'none' ? t('chat.channelMuted') : level === 'mentions' ? t('chat.notifyingMentionsOnly') : t('chat.notifyingAll'))
     },
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'Could not update notifications')
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateNotifications'))
     },
   })
 
@@ -715,7 +715,7 @@ export function ChatPage() {
   }
 
   const channelLabel = selectedChannel?.isDm
-    ? selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? 'DM'
+    ? selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? t('chat.dm')
     : selectedChannel
       ? `#${selectedChannel.name}`
       : ''
@@ -806,7 +806,7 @@ export function ChatPage() {
               </div>
               <div className="flex items-end gap-2">
                 <label className="flex-1 text-[11px] text-muted-foreground">
-                  Shortcode
+                  {t('chat.shortcode')}
                   <input
                     value={newEmojiCode}
                     onChange={(e) => setNewEmojiCode(e.target.value)}
@@ -815,7 +815,7 @@ export function ChatPage() {
                   />
                 </label>
                 <label className="flex-[1.4] text-[11px] text-muted-foreground">
-                  Image URL
+                  {t('chat.imageUrl')}
                   <input
                     value={newEmojiUrl}
                     onChange={(e) => setNewEmojiUrl(e.target.value)}
@@ -828,13 +828,13 @@ export function ChatPage() {
                   disabled={!newEmojiCode.trim() || !newEmojiUrl.trim() || addCustomEmojiMutation.isPending}
                   onClick={() => addCustomEmojiMutation.mutate({ shortcode: newEmojiCode.trim(), imageUrl: newEmojiUrl.trim() })}
                 >
-                  Add
+                  {t('chat.add')}
                 </Button>
               </div>
               <div className="mt-4 max-h-64 overflow-y-auto space-y-1">
                 {customEmoji.length === 0 ? (
                   <div className="text-xs text-muted-foreground py-3 text-center">
-                    No custom emoji yet. Add one above — use it as <code>:shortcode:</code> to react.
+                    {t('chat.noCustomEmojiPre')} <code>:shortcode:</code> {t('chat.noCustomEmojiPost')}
                   </div>
                 ) : (
                   customEmoji.map((ce) => (
@@ -869,17 +869,17 @@ export function ChatPage() {
               </div>
               <h3 className="text-[18px] font-semibold text-foreground mb-1">
                 {selectedChannel?.isDm
-                  ? `Message ${selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? 'teammate'}`
-                  : `Welcome to #${selectedChannel?.name ?? 'channel'}`}
+                  ? t('chat.messageSomeone', { name: selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? t('chat.teammate') })
+                  : t('chat.welcomeToChannel', { name: selectedChannel?.name ?? t('chat.channelFallback') })}
               </h3>
               <p className="text-[14px] text-muted-foreground leading-relaxed">
-                This is the beginning of your conversation. Send a message to get started.
+                {t('chat.conversationStart')}
               </p>
             </div>
           ) : visibleRootMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
               <p className="text-[14px] text-muted-foreground">
-                No messages match “{messageSearch.trim()}”.
+                {t('chat.noMessagesMatch', { query: messageSearch.trim() })}
               </p>
             </div>
           ) : (
@@ -935,7 +935,7 @@ export function ChatPage() {
                               setProfileTab('activity')
                             }}
                           >
-                            {m.authorName ?? 'Unknown'}
+                            {m.authorName ?? t('chat.unknownUser')}
                           </button>
                           <span className="text-[10px] text-muted-foreground/90 tabular-nums">
                             {formatMessageTime(m.createdAt)}
@@ -945,7 +945,7 @@ export function ChatPage() {
                       {m.pinnedAt && !m.deletedAt && (
                         <div className="flex items-center gap-1 text-[10px] font-medium text-violet-600 dark:text-violet-300 mb-0.5">
                           <Pin className="h-2.5 w-2.5" />
-                          Pinned{m.pinnedByName ? ` by ${m.pinnedByName}` : ''}
+                          {t('chat.pinned')}{m.pinnedByName ? ` ${t('chat.pinnedBy', { name: m.pinnedByName })}` : ''}
                           {m.pinnedAt ? ` · ${formatMessageTime(m.pinnedAt)}` : ''}
                         </div>
                       )}
@@ -976,7 +976,7 @@ export function ChatPage() {
                               className="text-violet-600 dark:text-violet-300 hover:underline"
                               onClick={() => editingBody.trim() && editMessageMutation.mutate({ messageId: m.id, body: editingBody.trim() })}
                             >
-                              Save
+                              {t('common.save')}
                             </button>
                             <button
                               type="button"
@@ -986,15 +986,15 @@ export function ChatPage() {
                                 setEditingBody('')
                               }}
                             >
-                              Cancel
+                              {t('common.cancel')}
                             </button>
-                            <span>· Enter to save, Esc to cancel</span>
+                            <span>· {t('chat.editHint')}</span>
                           </div>
                         </div>
                       ) : (
                         <div className="text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90">
                           {m.body && <ChatMessageBody text={m.body} namesById={namesById} />}
-                          {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">(edited)</span>}
+                          {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">{t('chat.edited')}</span>}
                           {!m.deletedAt && m.attachments && m.attachments.length > 0 && (
                             <ChatAttachmentList attachments={m.attachments} />
                           )}
@@ -1050,14 +1050,14 @@ export function ChatPage() {
                                   setReactionPickerFor(null)
                                 }}
                               >
-                                ＋ Add custom emoji…
+                                ＋ {t('chat.addCustomEmoji')}
                               </button>
                             </div>
                           )}
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
                             type="button"
-                            title="Ask AI"
+                            title={t('chat.askAi')}
                             className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
                             onClick={() => setInput((prev) => `${prev ? `${prev}\n` : ''}/ai summarize: ${m.body.slice(0, 120)}`)}
                           >
@@ -1120,7 +1120,7 @@ export function ChatPage() {
                                     })
                                   }
                                 >
-                                  {channel.isDm ? channel.dmLabel ?? channel.dmPeerName ?? 'Direct message' : `#${channel.name}`}
+                                  {channel.isDm ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage') : `#${channel.name}`}
                                 </button>
                               ))}
                             </div>
@@ -1128,7 +1128,7 @@ export function ChatPage() {
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
                             type="button"
-                            title={savedIds.has(m.id) ? 'Remove from saved' : 'Save message'}
+                            title={savedIds.has(m.id) ? t('chat.removeFromSaved') : t('chat.saveMessage')}
                             disabled={setSavedMutation.isPending}
                             className={cn(
                               'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center disabled:opacity-50',
@@ -1140,7 +1140,7 @@ export function ChatPage() {
                           </button>
                           <button
                             type="button"
-                            title={m.pinnedAt ? 'Unpin from channel' : 'Pin to channel'}
+                            title={m.pinnedAt ? t('chat.unpinFromChannel') : t('chat.pinToChannel')}
                             disabled={setPinnedMutation.isPending}
                             className={cn(
                               'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center disabled:opacity-50',
@@ -1154,7 +1154,7 @@ export function ChatPage() {
                           </button>
                           <button
                             type="button"
-                            title="Assign / Open profile"
+                            title={t('chat.assignOpenProfile')}
                             className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
                             onClick={() =>
                               setInput((prev) => `${prev ? `${prev} ` : ''}<@${m.authorId}> `)
@@ -1178,11 +1178,11 @@ export function ChatPage() {
                               </button>
                               <button
                                 type="button"
-                                title="Delete message"
+                                title={t('chat.deleteMessage')}
                                 disabled={deleteMessageMutation.isPending}
                                 className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-red-500 hover:bg-red-500/10 flex items-center justify-center disabled:opacity-50"
                                 onClick={() => {
-                                  if (window.confirm('Delete this message?')) deleteMessageMutation.mutate(m.id)
+                                  if (window.confirm(t('chat.deleteMessageConfirm'))) deleteMessageMutation.mutate(m.id)
                                 }}
                               >
                                 <Trash2 className="h-3 w-3" />
@@ -1225,7 +1225,7 @@ export function ChatPage() {
                           className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-300 hover:underline"
                           onClick={() => setThreadParentId(m.id)}
                         >
-                          View thread ({replyCount})
+                          {t('chat.viewThread', { count: replyCount })}
                         </button>
                       )}
                     </div>
@@ -1239,7 +1239,7 @@ export function ChatPage() {
 
         {seenByNames.length > 0 && (
           <div className="px-5 pb-1 text-right text-[10px] text-muted-foreground">
-            Seen by{' '}
+            {t('chat.seenBy')}{' '}
             {seenByNames.length <= 3
               ? seenByNames.join(', ')
               : `${seenByNames.slice(0, 2).join(', ')} +${seenByNames.length - 2}`}
@@ -1360,33 +1360,34 @@ function PinnedPanel({
   onClose: () => void
   onOpenThread: (id: string) => void
 }) {
+  const { t } = useTranslation()
   return (
     <aside className="hidden xl:flex w-80 border-l border-border flex-col">
       <div className="h-12 border-b border-border px-3 flex items-center justify-between">
-        <div className="text-sm font-semibold">Pinned</div>
+        <div className="text-sm font-semibold">{t('chat.pinned')}</div>
         <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onClose}>
-          Close
+          {t('common.close')}
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {loading ? (
-          <div className="text-xs text-muted-foreground">Loading…</div>
+          <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
         ) : messages.length === 0 ? (
-          <div className="text-xs text-muted-foreground">No pinned messages yet.</div>
+          <div className="text-xs text-muted-foreground">{t('chat.noPinnedMessages')}</div>
         ) : (
           messages.map((m) => (
             <Card key={m.id} className="p-3">
-              <div className="text-xs text-muted-foreground">{m.authorName ?? 'Unknown'}</div>
+              <div className="text-xs text-muted-foreground">{m.authorName ?? t('chat.unknownUser')}</div>
               <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
               {(m.pinnedByName || m.pinnedAt) && (
                 <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
                   <Pin className="h-2.5 w-2.5" />
-                  Pinned{m.pinnedByName ? ` by ${m.pinnedByName}` : ''}
+                  {t('chat.pinned')}{m.pinnedByName ? ` ${t('chat.pinnedBy', { name: m.pinnedByName })}` : ''}
                   {m.pinnedAt ? ` · ${formatMessageTime(m.pinnedAt)}` : ''}
                 </div>
               )}
               <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id)}>
-                Open thread
+                {t('chat.openThread')}
               </button>
             </Card>
           ))
@@ -1411,40 +1412,41 @@ function SavedPanel({
   onOpenThread: (id: string, channelId: string) => void
   onUnsave: (id: string) => void
 }) {
+  const { t } = useTranslation()
   return (
     <aside className="hidden xl:flex w-80 border-l border-border flex-col">
       <div className="h-12 border-b border-border px-3 flex items-center justify-between">
         <div className="text-sm font-semibold flex items-center gap-1.5">
-          <Bookmark className="h-3.5 w-3.5" /> Saved
+          <Bookmark className="h-3.5 w-3.5" /> {t('chat.saved')}
         </div>
         <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onClose}>
-          Close
+          {t('common.close')}
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {loading ? (
-          <div className="text-xs text-muted-foreground">Loading…</div>
+          <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
         ) : messages.length === 0 ? (
-          <div className="text-xs text-muted-foreground">No saved messages yet. Hover a message and click the bookmark to save it.</div>
+          <div className="text-xs text-muted-foreground">{t('chat.noSavedMessages')}</div>
         ) : (
           messages.map((m) => (
             <Card key={m.id} className="p-3 group">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs text-muted-foreground truncate">
-                  {m.authorName ?? 'Unknown'}
+                  {m.authorName ?? t('chat.unknownUser')}
                   {m.channelName ? <span className="opacity-70"> · #{m.channelName}</span> : null}
                 </div>
                 <button
                   className="text-[11px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={() => onUnsave(m.id)}
-                  title="Remove from saved"
+                  title={t('chat.removeFromSaved')}
                 >
-                  Remove
+                  {t('chat.remove')}
                 </button>
               </div>
               <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
               <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id, m.channelId)}>
-                Open thread
+                {t('chat.openThread')}
               </button>
             </Card>
           ))
@@ -1470,10 +1472,11 @@ function ThreadPanel({
   namesById: Record<string, string>
 }) {
   const [draft, setDraft] = useState('')
+  const { t } = useTranslation()
   return (
     <aside className="hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col">
       <div className="h-[52px] shrink-0 border-b border-border/80 px-4 flex items-center justify-between bg-background">
-        <div className="text-[14px] font-semibold text-foreground">Thread</div>
+        <div className="text-[14px] font-semibold text-foreground">{t('chat.thread')}</div>
         <button
           type="button"
           className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
@@ -1484,17 +1487,17 @@ function ThreadPanel({
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white dark:bg-[#0f1114]">
         <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
-          <div className="text-[12px] font-semibold text-foreground mb-1">{parent.authorName ?? 'Unknown'}</div>
+          <div className="text-[12px] font-semibold text-foreground mb-1">{parent.authorName ?? t('chat.unknownUser')}</div>
           <MentionText text={parent.body} namesById={namesById} className="text-[14px] leading-relaxed" />
         </div>
         {replies.map((reply) => (
           <div key={reply.id} className="rounded-lg border border-border/70 bg-background p-3">
-            <div className="text-[12px] font-semibold text-foreground mb-1">{reply.authorName ?? 'Unknown'}</div>
+            <div className="text-[12px] font-semibold text-foreground mb-1">{reply.authorName ?? t('chat.unknownUser')}</div>
             <MentionText text={reply.body} namesById={namesById} className="text-[14px] leading-relaxed" />
           </div>
         ))}
         {replies.length === 0 && (
-          <p className="text-[12px] text-muted-foreground text-center py-6">No replies yet — start the thread.</p>
+          <p className="text-[12px] text-muted-foreground text-center py-6">{t('chat.noRepliesYet')}</p>
         )}
       </div>
       <div className="shrink-0 border-t border-border/80 p-3 bg-[#fbfbfc] dark:bg-[#16181d]">
@@ -1539,10 +1542,11 @@ function ProfilePanel({
   onOpenTask: (task: ProfileTask) => void
   onClose: () => void
 }) {
+  const { t, tCount } = useTranslation()
   return (
     <aside className="hidden xl:flex w-[320px] border-l border-border bg-card/80 flex-col animate-in slide-in-from-right-4 duration-200">
       <div className="h-12 border-b border-border px-3 flex items-center justify-between">
-        <div className="text-sm font-semibold">Profile</div>
+        <div className="text-sm font-semibold">{t('chat.profile')}</div>
         <button
           className="h-7 w-7 rounded hover:bg-muted text-muted-foreground flex items-center justify-center"
           onClick={onClose}
@@ -1561,27 +1565,27 @@ function ProfilePanel({
           </div>
         </div>
         <div className="rounded-lg border border-border/70 bg-background px-3 py-2">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Status</div>
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('chat.status')}</div>
           <div className="mt-1 text-sm text-foreground flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            Online
+            {t('chat.online')}
           </div>
-          <div className="mt-1 text-xs text-muted-foreground">{stats.totalMessages} messages in current chat context</div>
+          <div className="mt-1 text-xs text-muted-foreground">{tCount('chat.messagesInContext', stats.totalMessages)}</div>
         </div>
         <div className="flex gap-2">
           <Button size="sm" className="flex-1" onClick={onAssign}>
-            Assign
+            {t('chat.assign')}
           </Button>
           <Button size="sm" variant="secondary" className="flex-1" onClick={onStartDm}>
-            Message
+            {t('chat.message')}
           </Button>
         </div>
         <div className="rounded-lg border border-border/70 bg-background">
           <div className="border-b border-border/70 p-1 flex items-center gap-1">
             {([
-              ['activity', 'Activity'],
-              ['tasks', 'Tasks'],
-              ['comments', 'Comments'],
+              ['activity', t('chat.tabActivity')],
+              ['tasks', t('chat.tabTasks')],
+              ['comments', t('chat.tabComments')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -1600,7 +1604,7 @@ function ProfilePanel({
             {tab === 'activity' && (
               <div className="space-y-1.5">
                 {stats.recentMessages.length === 0 ? (
-                  <div>No recent activity in loaded messages.</div>
+                  <div>{t('chat.noRecentActivity')}</div>
                 ) : (
                   stats.recentMessages.slice(0, 4).map((message) => (
                     <button
@@ -1618,7 +1622,7 @@ function ProfilePanel({
             {tab === 'tasks' && (
               <div className="space-y-1.5">
                 {tasks.length === 0 ? (
-                  <div>No assigned tasks found in this workspace.</div>
+                  <div>{t('chat.noAssignedTasks')}</div>
                 ) : (
                   tasks.slice(0, 6).map((task) => (
                     <button
@@ -1639,7 +1643,7 @@ function ProfilePanel({
             {tab === 'comments' && (
               <div className="space-y-1.5">
                 {stats.recentReplies.length === 0 ? (
-                  <div>No thread replies yet from this member.</div>
+                  <div>{t('chat.noThreadReplies')}</div>
                 ) : (
                   stats.recentReplies.slice(0, 4).map((reply) => (
                     <button

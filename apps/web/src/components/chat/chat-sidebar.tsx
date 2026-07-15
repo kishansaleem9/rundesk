@@ -56,7 +56,7 @@ export function ChatSidebar({
   channelsLoading: boolean
 }) {
   const { statusOf } = usePresence(workspaceId)
-  const { t } = useTranslation()
+  const { t, tCount } = useTranslation()
 
   // Multi-select DM composer: pick one teammate for a 1:1, or several for a
   // group DM (Plan §6.2). Selection is local to the sidebar.
@@ -90,7 +90,7 @@ export function ChatSidebar({
         <section>
           <div className="flex items-center justify-between px-1.5 mb-1">
             <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              Channels
+              {t('chat.channels')}
             </span>
             <button
               type="button"
@@ -130,7 +130,7 @@ export function ChatSidebar({
                 disabled={!newName.trim() || createPending}
                 onClick={onCreateChannel}
               >
-                {createPending ? 'Creating…' : 'Create channel'}
+                {createPending ? t('chat.creating') : t('chat.createChannel')}
               </Button>
             </div>
           )}
@@ -161,7 +161,7 @@ export function ChatSidebar({
         <section>
           <div className="flex items-center justify-between px-1.5 mb-1">
             <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
-              Direct messages
+              {t('chat.directMessages')}
             </span>
             <button
               type="button"
@@ -178,13 +178,13 @@ export function ChatSidebar({
               {dmCandidates.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground px-1 py-2 leading-relaxed">
                   {pendingInvites.length > 0
-                    ? `${pendingInvites.length} invite(s) pending.`
-                    : 'Invite teammates from Settings → Members.'}
+                    ? tCount('chat.invitesPending', pendingInvites.length)
+                    : t('chat.inviteTeammates')}
                 </p>
               ) : (
                 <>
                   <p className="text-[11px] text-muted-foreground px-1 pb-0.5">
-                    Select one teammate, or several for a group message.
+                    {t('chat.selectTeammates')}
                   </p>
                   <div className="space-y-0.5 max-h-48 overflow-y-auto">
                     {dmCandidates.map((m) => {
@@ -227,10 +227,10 @@ export function ChatSidebar({
                     }}
                   >
                     {startDmPending
-                      ? 'Starting…'
+                      ? t('chat.starting')
                       : selectedPeers.length > 1
-                        ? `Message ${selectedPeers.length} people`
-                        : 'Message'}
+                        ? tCount('chat.messagePeople', selectedPeers.length)
+                        : t('chat.message')}
                   </Button>
                 </>
               )}
@@ -252,7 +252,7 @@ export function ChatSidebar({
                     <MemberAvatar label={initials(c.dmPeerName)} size="sm" status={statusOf(c.dmPeerId)} />
                   )
                 }
-                label={c.dmLabel ?? c.dmPeerName ?? 'Direct message'}
+                label={c.dmLabel ?? c.dmPeerName ?? t('chat.directMessage')}
                 unread={c.unreadCount ?? 0}
               />
             ))}
@@ -313,6 +313,7 @@ function MemberAvatar({
   status?: PresenceStatus
   size?: 'sm' | 'md'
 }) {
+  const { t } = useTranslation()
   const dim = size === 'sm' ? 'h-5 w-5 text-[9px]' : 'h-7 w-7 text-[11px]'
   return (
     <div className="relative shrink-0">
@@ -330,7 +331,7 @@ function MemberAvatar({
             'absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-[#fbfbfc] dark:border-[#16181d]',
             presenceDotClass(status),
           )}
-          title={status === 'online' ? 'Online' : 'Away'}
+          title={status === 'online' ? t('chat.online') : t('chat.away')}
         />
       )}
     </div>

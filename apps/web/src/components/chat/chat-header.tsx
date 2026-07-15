@@ -55,9 +55,10 @@ export function ChatHeader({
   // The channel creator may remove other members (backend also allows workspace
   // admins; the control is shown to the creator).
   const canRemoveMembers = !!channel?.createdById && channel.createdById === currentUserId
+  const { t } = useTranslation()
   const title = channel?.isDm
-    ? channel.dmLabel ?? channel.dmPeerName ?? 'Direct message'
-    : channel?.name ?? 'Select a channel'
+    ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage')
+    : channel?.name ?? t('chat.selectAChannel')
 
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
@@ -69,7 +70,6 @@ export function ChatHeader({
   const toggleFavorite = useToggleFavorite(workspaceId)
   // Presence for a 1:1 DM peer (group DMs have no single status).
   const { statusOf } = usePresence(workspaceId)
-  const { t } = useTranslation()
   const dmPeerStatus = channel?.isDm && !channel.dmIsGroup ? statusOf(channel.dmPeerId) : null
   const canFavorite = !!channel && !channel.isDm
   const starred = canFavorite && !!favorites?.some((f) => f.entityType === 'channel' && f.entityId === channel!.id)
@@ -92,9 +92,9 @@ export function ChatHeader({
   const copyLink = () => {
     try {
       void navigator.clipboard.writeText(window.location.href)
-      toast.success('Channel link copied')
+      toast.success(t('chat.channelLinkCopied'))
     } catch {
-      toast.error('Could not copy link')
+      toast.error(t('chat.couldNotCopyLink'))
     }
   }
 
@@ -117,7 +117,7 @@ export function ChatHeader({
         {dmPeerStatus ? (
           <p className="text-[12px] text-muted-foreground truncate flex items-center gap-1.5">
             <span className={cn('h-1.5 w-1.5 rounded-full', presenceDotClass(dmPeerStatus))} />
-            {dmPeerStatus === 'online' ? 'Active now' : dmPeerStatus === 'away' ? 'Away' : 'Offline'}
+            {dmPeerStatus === 'online' ? t('chat.activeNow') : dmPeerStatus === 'away' ? t('chat.away') : t('chat.offline')}
           </p>
         ) : channel?.description ? (
           <p className="text-[12px] text-muted-foreground truncate">{channel.description}</p>
@@ -163,7 +163,7 @@ export function ChatHeader({
             title={t('chat.addPeople')}
           >
             <UserPlus className="h-3.5 w-3.5" />
-            <span>Add</span>
+            <span>{t('chat.add')}</span>
           </button>
         )}
         {!channel?.isDm && memberCount > 0 && (
@@ -180,7 +180,7 @@ export function ChatHeader({
             </PopoverTrigger>
             <PopoverContent align="end" className="w-64 p-0">
               <div className="px-3 py-2 border-b border-border/60 text-[12px] font-semibold text-foreground">
-                Members · {memberCount}
+                {t('chat.members')} · {memberCount}
               </div>
               <div className="max-h-72 overflow-y-auto p-1.5">
                 {members.length === 0 ? (
@@ -198,7 +198,7 @@ export function ChatHeader({
                         <div className="font-medium text-foreground truncate">
                           {member.displayName || member.email}
                           {member.userId === channel?.createdById && (
-                            <span className="ml-1 text-[10px] text-muted-foreground">· owner</span>
+                            <span className="ml-1 text-[10px] text-muted-foreground">· {t('chat.owner')}</span>
                           )}
                         </div>
                         {member.displayName && (
@@ -213,7 +213,7 @@ export function ChatHeader({
                             title={t('chat.removeFromChannel')}
                             className="shrink-0 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-500/10"
                             onClick={() => {
-                              if (window.confirm(`Remove ${member.displayName || member.email} from this channel?`)) {
+                              if (window.confirm(t('chat.removeMemberConfirm', { name: member.displayName || member.email }))) {
                                 onRemoveMember?.(member.userId)
                               }
                             }}
@@ -252,7 +252,7 @@ export function ChatHeader({
         {canFavorite && (
           <IconBtn
             icon={Star}
-            title={starred ? 'Unfavorite' : 'Favorite'}
+            title={starred ? t('chat.unfavorite') : t('chat.favorite')}
             active={starred}
             disabled={toggleFavorite.isPending}
             onClick={toggleStar}
@@ -272,21 +272,21 @@ export function ChatHeader({
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={copyLink}>
               <LinkIcon className="h-4 w-4" />
-              Copy link
+              {t('chat.copyLink')}
             </DropdownMenuItem>
             {canFavorite && (
               <DropdownMenuItem onClick={toggleStar}>
                 {starred ? <Check className="h-4 w-4" /> : <Star className="h-4 w-4" />}
-                {starred ? 'Remove from favorites' : 'Add to favorites'}
+                {starred ? t('chat.removeFromFavorites') : t('chat.addToFavorites')}
               </DropdownMenuItem>
             )}
             {onSetNotificationLevel && (
               <>
                 <DropdownMenuSeparator />
                 {([
-                  ['all', 'All messages'],
-                  ['mentions', 'Only @mentions'],
-                  ['none', 'Mute'],
+                  ['all', t('chat.allMessages')],
+                  ['mentions', t('chat.onlyMentions')],
+                  ['none', t('chat.mute')],
                 ] as const).map(([level, label]) => (
                   <DropdownMenuItem key={level} onClick={() => onSetNotificationLevel(level)}>
                     {(channel?.notificationLevel ?? 'all') === level ? (
@@ -304,7 +304,7 @@ export function ChatHeader({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem destructive onClick={onLeaveChannel}>
                   <LogOut className="h-4 w-4" />
-                  Leave channel
+                  {t('chat.leaveChannel')}
                 </DropdownMenuItem>
               </>
             )}
