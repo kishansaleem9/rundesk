@@ -11,6 +11,8 @@ import { Mail, Lock, ArrowRight, ShieldCheck, KeyRound } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { PasswordChecklist, passwordPolicyError } from '../lib/password'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
+import { LanguageSwitcher } from '../components/language-switcher'
 
 type SsoLookupResponse = {
   connection: { workspaceId: string; provider: 'oidc' | 'saml'; displayName: string } | null
@@ -56,6 +58,7 @@ type LoginResponse = {
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const { setSession } = useAuthStore()
   const searchParams = useMemo(
     () => new URLSearchParams(window.location.search),
@@ -160,7 +163,7 @@ export function LoginPage() {
         body: { email },
         skipAuth: true,
       })
-      setNotice('If this account exists, we sent a reset link to your email.')
+      setNotice(t('auth.resetLinkSent'))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not send reset link')
     } finally {
@@ -176,7 +179,7 @@ export function LoginPage() {
     }
     // Surface field-level problems inline rather than in the shared block.
     if (newPasswordError || confirmPasswordError) {
-      setTouched((t) => ({ ...t, newPassword: true, confirmPassword: true }))
+      setTouched((prev) => ({ ...prev, newPassword: true, confirmPassword: true }))
       return
     }
     setLoading(true)
@@ -188,7 +191,7 @@ export function LoginPage() {
         body: { token: resetToken, password: newPassword },
         skipAuth: true,
       })
-      setNotice('Password updated. You can sign in now.')
+      setNotice(t('auth.passwordUpdated'))
       window.history.replaceState({}, '', '/login')
       setNewPassword('')
       setConfirmPassword('')
@@ -212,21 +215,16 @@ export function LoginPage() {
 
           <div className="max-w-md space-y-6 animate-fade-in">
             <h1 className="font-display text-5xl font-semibold leading-tight tracking-tight">
-              Run work
+              {t('auth.heroTitle1')}
               <br />
-              <span className="text-brand-gradient">the way it should feel.</span>
+              <span className="text-brand-gradient">{t('auth.heroTitle2')}</span>
             </h1>
             <p className="text-base leading-relaxed text-muted-foreground">
-              Rundesk brings every task, doc, and conversation into one calm place —
-              powered by Claude, designed for teams who care about the details.
+              {t('auth.heroDesc')}
             </p>
 
             <ul className="space-y-3 pt-2 text-sm text-muted-foreground">
-              {[
-                'AI agents trained on your workspace',
-                'Real-time collaboration with your team',
-                'Every feature, exactly when you need it',
-              ].map((line) => (
+              {[t('auth.heroFeature1'), t('auth.heroFeature2'), t('auth.heroFeature3')].map((line) => (
                 <li key={line} className="flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-gradient text-[10px] text-white">
                     ✓
@@ -239,12 +237,15 @@ export function LoginPage() {
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <ShieldCheck className="h-3.5 w-3.5" />
-            SOC 2 Type II · Data residency in your region · Encrypted at rest
+            {t('auth.heroSecurity')}
           </div>
         </div>
 
         {/* Right form */}
-        <div className="flex flex-col items-center justify-center px-6 py-12 sm:px-12">
+        <div className="relative flex flex-col items-center justify-center px-6 py-12 sm:px-12">
+          <div className="absolute right-4 top-4 rtl:right-auto rtl:left-4">
+            <LanguageSwitcher />
+          </div>
           <div className="w-full max-w-sm space-y-7 animate-slide-up">
             <div className="flex flex-col items-center gap-2 lg:hidden">
               <LogoWordmark gradient />
@@ -252,14 +253,14 @@ export function LoginPage() {
 
             <header className="space-y-1.5">
               <h2 className="font-display text-3xl font-semibold tracking-tight">
-                Welcome back
+                {t('auth.signInTitle')}
               </h2>
               <p className="text-sm text-muted-foreground">
                 {mode === 'forgot'
-                  ? 'We will email a password reset link.'
+                  ? t('auth.forgotSubtitle')
                   : mode === 'reset'
-                    ? 'Create a new password for your account.'
-                    : 'Sign in to keep work flowing.'}
+                    ? t('auth.resetSubtitle')
+                    : t('auth.loginSubtitle')}
               </p>
             </header>
 
@@ -274,22 +275,22 @@ export function LoginPage() {
                   type="button"
                 >
                   <KeyRound className="h-4 w-4" />
-                  Continue with {ssoHint.displayName}
+                  {t('auth.continueWithProvider', { provider: ssoHint.displayName })}
                 </Button>
               )}
               <Button variant="glass" size="lg" className="w-full justify-center" type="button" disabled>
                 <GoogleIcon />
-                Continue with Google
+                {t('auth.continueWithGoogle')}
               </Button>
               <Button variant="glass" size="lg" className="w-full justify-center" type="button" disabled>
                 <MicrosoftIcon />
-                Continue with Microsoft
+                {t('auth.continueWithMicrosoft')}
               </Button>
             </div>
 
             <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
               <Separator className="flex-1" />
-              or with email
+              {t('auth.orWithEmail')}
               <Separator className="flex-1" />
             </div>
 
@@ -304,7 +305,7 @@ export function LoginPage() {
               className="space-y-4"
             >
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t('auth.email')}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -313,9 +314,9 @@ export function LoginPage() {
                   leadingIcon={<Mail className="h-4 w-4" />}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                  onBlur={() => setTouched((prev) => ({ ...prev, email: true }))}
                   aria-invalid={mode !== 'reset' && touched.email && emailError ? true : undefined}
-                  placeholder="you@company.com"
+                  placeholder={t('auth.emailPlaceholder')}
                   disabled={mode === 'reset'}
                 />
                 {mode !== 'reset' && touched.email && <FieldError message={emailError} />}
@@ -324,12 +325,12 @@ export function LoginPage() {
               {mode === 'login' && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="password">Password</Label>
+                    <Label htmlFor="password">{t('auth.password')}</Label>
                     <a
                       href="/login?mode=forgot"
                       className="text-xs text-muted-foreground hover:text-foreground"
                     >
-                      Forgot?
+                      {t('auth.forgotShort')}
                     </a>
                   </div>
                   <Input
@@ -340,7 +341,7 @@ export function LoginPage() {
                     leadingIcon={<Lock className="h-4 w-4" />}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    onBlur={() => setTouched((t) => ({ ...t, password: true }))}
+                    onBlur={() => setTouched((prev) => ({ ...prev, password: true }))}
                     aria-invalid={touched.password && passwordError ? true : undefined}
                     placeholder="••••••••"
                   />
@@ -351,7 +352,7 @@ export function LoginPage() {
               {mode === 'reset' && (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="newPassword">New password</Label>
+                    <Label htmlFor="newPassword">{t('auth.newPassword')}</Label>
                     <Input
                       id="newPassword"
                       type="password"
@@ -360,14 +361,14 @@ export function LoginPage() {
                       leadingIcon={<Lock className="h-4 w-4" />}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      onBlur={() => setTouched((t) => ({ ...t, newPassword: true }))}
+                      onBlur={() => setTouched((prev) => ({ ...prev, newPassword: true }))}
                       aria-invalid={touched.newPassword && newPasswordError ? true : undefined}
-                      placeholder="At least 10 characters"
+                      placeholder={t('auth.newPasswordPlaceholder')}
                     />
                     <PasswordChecklist value={newPassword} />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="confirmPassword">Confirm password</Label>
+                    <Label htmlFor="confirmPassword">{t('auth.confirmPassword')}</Label>
                     <Input
                       id="confirmPassword"
                       type="password"
@@ -376,9 +377,9 @@ export function LoginPage() {
                       leadingIcon={<Lock className="h-4 w-4" />}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      onBlur={() => setTouched((t) => ({ ...t, confirmPassword: true }))}
+                      onBlur={() => setTouched((prev) => ({ ...prev, confirmPassword: true }))}
                       aria-invalid={touched.confirmPassword && confirmPasswordError ? true : undefined}
-                      placeholder="Repeat password"
+                      placeholder={t('auth.confirmPasswordPlaceholder')}
                     />
                     {touched.confirmPassword && <FieldError message={confirmPasswordError} />}
                   </div>
@@ -399,16 +400,16 @@ export function LoginPage() {
               <Button type="submit" variant="gradient" size="lg" className="w-full" disabled={loading}>
                 {loading
                   ? mode === 'login'
-                    ? 'Signing in…'
+                    ? t('auth.signingIn')
                     : mode === 'forgot'
-                      ? 'Sending…'
-                      : 'Updating…'
+                      ? t('auth.sending')
+                      : t('auth.updating')
                   : mode === 'login'
-                    ? 'Sign in'
+                    ? t('auth.signIn')
                     : mode === 'forgot'
-                      ? 'Send reset link'
-                      : 'Update password'}
-                {!loading && mode === 'login' && <ArrowRight className="h-4 w-4" />}
+                      ? t('auth.sendResetLink')
+                      : t('auth.updatePassword')}
+                {!loading && mode === 'login' && <ArrowRight className="h-4 w-4 rtl:rotate-180" />}
               </Button>
 
               {showSeededLogins && (
@@ -427,17 +428,17 @@ export function LoginPage() {
             <p className="text-center text-sm text-muted-foreground">
               {mode === 'login' ? (
                 <>
-                  New to Rundesk?{' '}
+                  {t('auth.newToRundesk')}{' '}
                   <Link
                     to="/sign-up"
                     className="font-medium text-foreground underline-offset-4 hover:underline"
                   >
-                    Create your workspace
+                    {t('auth.createWorkspace')}
                   </Link>
                 </>
               ) : (
                 <a href="/login" className="font-medium text-foreground underline-offset-4 hover:underline">
-                  Back to login
+                  {t('auth.backToLogin')}
                 </a>
               )}
             </p>

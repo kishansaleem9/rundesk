@@ -414,6 +414,13 @@
       "when": 1900000055000,
       "tag": "0058_custom_field_types",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1900000056000,
+      "tag": "0059_user_locale",
+      "breakpoints": true
     }
   ]
 }

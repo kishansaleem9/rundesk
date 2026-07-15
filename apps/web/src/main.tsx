@@ -9,6 +9,7 @@ import { routeTree } from './routeTree.gen'
 import { queryClient } from './lib/query'
 import { useAuthStore } from './store/auth'
 import { PwaInstallPrompt } from './components/pwa-install-prompt'
+import { I18nProvider } from './lib/i18n'
 
 const router = createRouter({
   routeTree,
@@ -40,7 +41,9 @@ function App() {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <I18nProvider>
+        <App />
+      </I18nProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

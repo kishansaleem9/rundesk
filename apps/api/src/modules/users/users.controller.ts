@@ -21,7 +21,7 @@ export class UsersController {
   @Patch('me')
   updateProfile(
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { displayName?: string; bio?: string | null; timezone?: string; avatarUrl?: string | null },
+    @Body() body: { displayName?: string; bio?: string | null; timezone?: string; avatarUrl?: string | null; locale?: string },
   ) {
     return this.users.updateProfile(user.id, body)
   }

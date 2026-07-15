@@ -13,6 +13,8 @@ import {
 } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
+import { LanguageSwitcher } from '../components/language-switcher'
 
 type RegisterResponse = {
   accessToken: string
@@ -23,6 +25,7 @@ type RegisterResponse = {
 
 export function RegisterPage() {
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const setSession = useAuthStore((s) => s.setSession)
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
@@ -51,31 +54,32 @@ export function RegisterPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-surface-50 via-brand-200/40 to-brand-300/30 p-4">
       <div className="w-full max-w-md space-y-6 animate-fade-in">
-        <div className="flex justify-center">
+        <div className="flex items-center justify-between">
           <LogoWordmark />
+          <LanguageSwitcher />
         </div>
 
         <Card className="border-brand-200/80 shadow-xl shadow-brand-500/10">
           <CardHeader className="space-y-2 text-center">
-            <CardTitle>Create your account</CardTitle>
+            <CardTitle>{t('auth.signUpTitle')}</CardTitle>
             <CardDescription>
-              Join your team on Rundesk
+              {t('auth.registerSubtitle')}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="displayName">Display name</Label>
+                <Label htmlFor="displayName">{t('auth.displayName')}</Label>
                 <Input
                   id="displayName"
                   required
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Jane Doe"
+                  placeholder={t('auth.displayNamePlaceholder')}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t('auth.email')}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -83,11 +87,11 @@ export function RegisterPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
+                  placeholder={t('auth.emailPlaceholder')}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t('auth.password')}</Label>
                 <Input
                   id="password"
                   type="password"
@@ -106,17 +110,17 @@ export function RegisterPage() {
               )}
 
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? 'Creating account...' : 'Create account'}
+                {loading ? t('auth.creatingAccount') : t('auth.createAccount')}
               </Button>
             </form>
 
             <p className="mt-6 text-center text-sm text-muted-foreground">
-              Already have an account?{' '}
+              {t('auth.haveAccount')}{' '}
               <Link
                 to="/login"
                 className="font-medium text-primary hover:underline"
               >
-                Sign in
+                {t('auth.signInLink')}
               </Link>
             </p>
           </CardContent>

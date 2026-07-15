@@ -5,6 +5,10 @@ import { users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
+/** Locales the web app ships translations for (Plan §13). */
+export const SUPPORTED_LOCALES = ['en', 'es', 'ar'] as const
+export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
+
 @Injectable()
 export class UsersService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
@@ -26,8 +30,11 @@ export class UsersService {
 
   async updateProfile(
     userId: string,
-    patch: { displayName?: string; bio?: string | null; timezone?: string; avatarUrl?: string | null },
+    patch: { displayName?: string; bio?: string | null; timezone?: string; avatarUrl?: string | null; locale?: string },
   ) {
+    if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
+      throw new BadRequestException(`Unsupported locale: ${patch.locale}`)
+    }
     const [row] = await this.db
       .update(users)
       .set({ ...patch, updatedAt: new Date() })

@@ -42,6 +42,7 @@ import {
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { applyBrandColor } from '../lib/branding'
+import { LanguageSwitcher } from './language-switcher'
 import { api, ApiError } from '../lib/api'
 import { QuickCreateModal } from './quick-create-modal'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -91,6 +92,7 @@ export function AppTopbar({
       <TimerIndicator />
       <SearchBar onCommandOpen={onCommandOpen} />
       <QuickCreateButton />
+      <LanguageSwitcher withIcon={false} className="hidden sm:inline-flex" />
       <ThemeToggle />
       <NotificationsBell workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
       <UserMenu workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />

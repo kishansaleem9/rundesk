@@ -43,6 +43,9 @@ export const users = pgTable('users', {
   // Presence heartbeat (Plan §6.2): refreshed while a realtime socket is open;
   // "online/away/offline" is derived from how recently this was touched.
   lastSeenAt:    timestamp('last_seen_at', { withTimezone: true }),
+  // UI language (Plan §13 i18n). BCP-47 short code; the web app localizes +
+  // sets text direction (RTL for ar/he/fa) from this.
+  locale:        text('locale').notNull().default('en'),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
