@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2, Paperclip, X as XIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
+import { TaskReminderButton } from './task-reminders'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
@@ -451,6 +452,11 @@ export function TaskDetailSheet({
                   </SheetTitle>
                 )}
                 <div className="flex items-center gap-1 shrink-0">
+                  <TaskReminderButton
+                    workspaceId={fallbackWorkspaceId}
+                    taskId={detailQuery.data.id}
+                    className="h-8 w-8"
+                  />
                   <FavoriteStar
                     workspaceId={fallbackWorkspaceId}
                     entityType="task"

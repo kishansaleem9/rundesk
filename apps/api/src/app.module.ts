@@ -19,6 +19,7 @@ import { DocsModule } from './modules/docs/docs.module'
 import { ChatModule } from './modules/chat/chat.module'
 import { GoalsModule } from './modules/goals/goals.module'
 import { FavoritesModule } from './modules/favorites/favorites.module'
+import { RemindersModule } from './modules/reminders/reminders.module'
 import { PersonalTasksModule } from './modules/personal-tasks/personal-tasks.module'
 import { SprintsModule } from './modules/sprints/sprints.module'
 import { TimeEntriesModule } from './modules/time-entries/time-entries.module'
@@ -88,6 +89,7 @@ import { SampleDataModule } from './modules/sample-data/sample-data.module'
     ChatModule,
     GoalsModule,
     FavoritesModule,
+    RemindersModule,
     PersonalTasksModule,
     SprintsModule,
     TimeEntriesModule,
