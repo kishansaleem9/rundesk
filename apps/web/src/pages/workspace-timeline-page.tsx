@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
 import { GanttChart, Diamond } from 'lucide-react'
 import { api } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type TimelineTask = {
   id: string
@@ -41,6 +41,19 @@ const STATUS_OPACITY: Record<string, string> = {
   in_review: 'opacity-95',
   todo: 'opacity-90',
   backlog: 'opacity-70',
+}
+
+const ZOOM_LABEL: Record<Zoom, TranslationKey> = {
+  day: 'timeline.zoomDay',
+  week: 'timeline.zoomWeek',
+  month: 'timeline.zoomMonth',
+}
+
+const PRIORITY_LABEL: Record<string, TranslationKey> = {
+  urgent: 'timeline.priorityUrgent',
+  high: 'timeline.priorityHigh',
+  normal: 'timeline.priorityNormal',
+  low: 'timeline.priorityLow',
 }
 
 export function TimelinePage() {
@@ -170,7 +183,7 @@ export function TimelinePage() {
                     : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
                 )}
               >
-                {z}
+                {t(ZOOM_LABEL[z])}
               </button>
             ))}
           </div>
@@ -179,13 +192,13 @@ export function TimelinePage() {
 
       {tasksQuery.isLoading ? (
         <Card variant="glass" className="p-12 text-center text-sm text-muted-foreground">
-          Loading timeline…
+          {t('timeline.loading')}
         </Card>
       ) : tasks.length === 0 ? (
         <EmptyState
           icon={<GanttChart className="h-6 w-6" />}
-          title="No tasks with dates yet"
-          description="Add a start or due date to any task and it'll appear here."
+          title={t('timeline.emptyTitle')}
+          description={t('timeline.emptyDesc')}
         />
       ) : (
         <Card variant="glass" className="overflow-hidden p-0">
@@ -201,7 +214,7 @@ export function TimelinePage() {
                   className="sticky left-0 z-30 shrink-0 border-r border-border/60 bg-card/95 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
                   style={{ width: TASK_COL_WIDTH }}
                 >
-                  Task
+                  {t('timeline.taskColumn')}
                 </div>
                 {/* Date axis */}
                 <div className="relative" style={{ width: totalWidth, height: 38 }}>
@@ -335,6 +348,7 @@ function TaskRow({
   onPatchDates: (next: { startDate?: string | null; dueDate?: string | null }) => void
   onPersistDates: (next: { startDate?: string | null; dueDate?: string | null }) => void
 }) {
+  const { t } = useTranslation()
   const start = task.startDate ? new Date(task.startDate).getTime() : null
   const due = task.dueDate ? new Date(task.dueDate).getTime() : null
   const barStartMs = start ?? due!
@@ -360,7 +374,7 @@ function TaskRow({
         </div>
         <div className="text-[10px] text-muted-foreground truncate flex items-center gap-1.5 mt-0.5">
           <Badge variant={task.priority as 'urgent' | 'high' | 'normal' | 'low'} className="px-1.5 py-0 text-[9px] capitalize">
-            {task.priority}
+            {PRIORITY_LABEL[task.priority] ? t(PRIORITY_LABEL[task.priority]) : task.priority}
           </Badge>
           <span>·</span>
           <span className="truncate">{task.listName}</span>
@@ -376,7 +390,7 @@ function TaskRow({
             isDragging && 'ring-2 ring-white/70',
           )}
           style={{ left, width }}
-          title={`${task.isMilestone ? 'Milestone · ' : ''}${task.title} · ${task.startDate ?? '?'} → ${task.dueDate ?? '?'}`}
+          title={`${task.isMilestone ? t('timeline.milestonePrefix') : ''}${task.title} · ${task.startDate ?? '?'} → ${task.dueDate ?? '?'}`}
           onMouseDown={(e) => {
             if (e.button !== 0) return
             const target = e.target as HTMLElement

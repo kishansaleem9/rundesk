@@ -53,18 +53,18 @@ export function WorkloadPage() {
     return workloadQuery.data.map((p) => ({
       userId: p.userId,
       name: p.name,
-      role: p.role ?? 'Member',
+      role: p.role ?? t('workload.defaultRole'),
       capacity: p.capacity || 8,
       weeklyCapacityHours: p.weeklyCapacityHours ?? Math.round((p.capacity || 8) * 5),
       dailyLoads: p.dailyLoads,
     }))
-  }, [workloadQuery.data])
+  }, [workloadQuery.data, t])
   const overloadedCount = people.filter((p) => p.dailyLoads.some((load) => load > p.capacity)).length
 
   const exportCsv = () => {
     if (people.length === 0) return
     const fmtDate = (d: Date) => d.toISOString().slice(0, 10)
-    const header = ['Member', 'Role', 'Daily capacity (h)', 'Weekly capacity (h)', ...dates.map(fmtDate), 'Total (h)']
+    const header = [t('workload.csvMember'), t('workload.csvRole'), t('workload.csvDailyCapacity'), t('workload.csvWeeklyCapacity'), ...dates.map(fmtDate), t('workload.csvTotal')]
     const rows = people.map((p) => [
       p.name,
       p.role,
@@ -94,7 +94,7 @@ export function WorkloadPage() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-            Workspace workload
+            {t('workload.eyebrow')}
           </div>
           <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
@@ -129,7 +129,7 @@ export function WorkloadPage() {
                     : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
                 )}
               >
-                {v.replace('d', ' days')}
+                {t('workload.nDays', { count: parseInt(v, 10) })}
               </button>
             ))}
           </div>
@@ -236,7 +236,7 @@ export function WorkloadPage() {
                             {d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                           </div>
                           <div>
-                            {load.toFixed(1)}h / {p.capacity}h capacity
+                            {t('workload.capacityTooltip', { load: load.toFixed(1), capacity: p.capacity })}
                           </div>
                         </div>
                       </TooltipContent>
@@ -253,7 +253,7 @@ export function WorkloadPage() {
         <EmptyState
           icon={<Calendar className="h-6 w-6" />}
           title={t('workload.noTeammates')}
-          description="Once tasks have assignees and time estimates, this view will show capacity per person, per day."
+          description={t('workload.noTeammatesDesc')}
         />
       )}
     </div>

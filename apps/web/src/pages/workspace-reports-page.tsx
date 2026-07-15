@@ -17,7 +17,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { ReportBuilder } from '../components/report-builder'
 
 type Tab = 'overview' | 'productivity' | 'completion' | 'time' | 'sprints' | 'goals' | 'custom'
@@ -50,7 +50,11 @@ function escapeHtml(value: string | number): string {
  * window and open the browser print dialog — where "Save as PDF" produces the
  * PDF export. Reuses the same rows each tab registers for CSV.
  */
-function printReport(title: string, rows: (string | number)[][]) {
+function printReport(
+  title: string,
+  rows: (string | number)[][],
+  t: ReturnType<typeof useTranslation>['t'],
+) {
   if (rows.length === 0) return
   const [header, ...body] = rows
   const win = window.open('', '_blank', 'width=900,height=700')
@@ -73,7 +77,7 @@ function printReport(title: string, rows: (string | number)[][]) {
   @media print { body { margin: 12mm; } }
 </style></head><body>
   <h1>${escapeHtml(title)}</h1>
-  <div class="meta">Rundesk · generated ${escapeHtml(generatedOn)}</div>
+  <div class="meta">Rundesk · ${escapeHtml(t('reports.printGenerated', { date: generatedOn }))}</div>
   <table><thead>${thead}</thead><tbody>${tbody}</tbody></table>
 </body></html>`)
   win.document.close()
@@ -105,19 +109,19 @@ export function ReportsPage() {
   }
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
-    { id: 'overview', label: 'Overview', icon: BarChart3 },
-    { id: 'productivity', label: 'Productivity', icon: Users },
-    { id: 'completion', label: 'Completion', icon: CheckCircle2 },
-    { id: 'time', label: 'Time', icon: Clock },
-    { id: 'sprints', label: 'Sprints', icon: Zap },
-    { id: 'goals', label: 'Goals', icon: Target },
-    { id: 'custom', label: 'Custom', icon: SlidersHorizontal },
+    { id: 'overview', label: t('reports.tabOverview'), icon: BarChart3 },
+    { id: 'productivity', label: t('reports.tabProductivity'), icon: Users },
+    { id: 'completion', label: t('reports.tabCompletion'), icon: CheckCircle2 },
+    { id: 'time', label: t('reports.tabTime'), icon: Clock },
+    { id: 'sprints', label: t('reports.tabSprints'), icon: Zap },
+    { id: 'goals', label: t('reports.tabGoals'), icon: Target },
+    { id: 'custom', label: t('reports.tabCustom'), icon: SlidersHorizontal },
   ]
 
-  const activeLabel = tabs.find((t) => t.id === activeTab)?.label ?? 'Report'
+  const activeLabel = tabs.find((tab) => tab.id === activeTab)?.label ?? t('reports.reportFallback')
   const handlePrint = () => {
     if (!exportPayload) return
-    printReport(`${activeLabel} report · last ${days} days`, exportPayload.rows)
+    printReport(t('reports.printTitle', { label: activeLabel, days }), exportPayload.rows, t)
   }
 
   return (
@@ -144,9 +148,9 @@ export function ReportsPage() {
               className="gap-1.5"
               onClick={handleExport}
               disabled={!exportPayload}
-              title={exportPayload ? 'Download current report as CSV' : 'No data to export yet'}
+              title={exportPayload ? t('reports.exportTooltip') : t('reports.noExportTooltip')}
             >
-              <Download className="h-3.5 w-3.5" /> Export CSV
+              <Download className="h-3.5 w-3.5" /> {t('reports.exportCsv')}
             </Button>
             <Button
               variant="outline"
@@ -154,9 +158,9 @@ export function ReportsPage() {
               className="gap-1.5"
               onClick={handlePrint}
               disabled={!exportPayload}
-              title={exportPayload ? 'Open a printable view — choose “Save as PDF”' : 'No data to export yet'}
+              title={exportPayload ? t('reports.printTooltip') : t('reports.noExportTooltip')}
             >
-              <Printer className="h-3.5 w-3.5" /> Print / PDF
+              <Printer className="h-3.5 w-3.5" /> {t('reports.printPdf')}
             </Button>
           </div>
         </div>
@@ -213,6 +217,7 @@ function StatCard({
   icon: React.ElementType
   color?: string
 }) {
+  const { t } = useTranslation()
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus
 
   return (
@@ -230,7 +235,7 @@ function StatCard({
       {trend && (
         <div className={cn('flex items-center gap-1 mt-2 text-xs', trend === 'up' ? 'text-emerald-600' : trend === 'down' ? 'text-red-600' : 'text-muted-foreground')}>
           <TrendIcon className="h-3.5 w-3.5" />
-          <span>{trend === 'up' ? 'Improving' : trend === 'down' ? 'Declining' : 'Stable'}</span>
+          <span>{trend === 'up' ? t('reports.trendImproving') : trend === 'down' ? t('reports.trendDeclining') : t('reports.trendStable')}</span>
         </div>
       )}
     </Card>
@@ -261,23 +266,23 @@ function OverviewTab({
     registerExport({
       filename: `workspace-overview-${workspaceId}.csv`,
       rows: [
-        ['Metric', 'Value'],
-        ['Total tasks', d.total],
-        ['Completed', d.completed],
-        ['Overdue', d.overdue],
-        ['Due today', d.dueToday],
-        ['Completion rate (%)', d.completionRate],
+        [t('reports.csvMetric'), t('reports.csvValue')],
+        [t('reports.totalTasks'), d.total],
+        [t('reports.completed'), d.completed],
+        [t('reports.overdue'), d.overdue],
+        [t('reports.dueToday'), d.dueToday],
+        [t('reports.completionRatePct'), d.completionRate],
       ],
     })
-  }, [d, workspaceId, registerExport])
+  }, [d, workspaceId, registerExport, t])
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total tasks" value={d?.total ?? '—'} icon={BarChart3} />
-        <StatCard label="Completed" value={d?.completed ?? '—'} icon={CheckCircle2} trend="up" />
-        <StatCard label="Overdue" value={d?.overdue ?? '—'} icon={TrendingDown} trend={d && d.overdue > 5 ? 'down' : 'neutral'} />
-        <StatCard label="Due today" value={d?.dueToday ?? '—'} icon={Clock} />
+        <StatCard label={t('reports.totalTasks')} value={d?.total ?? '—'} icon={BarChart3} />
+        <StatCard label={t('reports.completed')} value={d?.completed ?? '—'} icon={CheckCircle2} trend="up" />
+        <StatCard label={t('reports.overdue')} value={d?.overdue ?? '—'} icon={TrendingDown} trend={d && d.overdue > 5 ? 'down' : 'neutral'} />
+        <StatCard label={t('reports.dueToday')} value={d?.dueToday ?? '—'} icon={Clock} />
       </div>
 
       {d && (
@@ -323,6 +328,10 @@ function ProductivityTab({
   const [spaceFilter, setSpaceFilter] = useState('')
   const [projectFilter, setProjectFilter] = useState('')
   const [bucket, setBucket] = useState<'week' | 'month'>('week')
+  const BUCKET_LABEL: Record<'week' | 'month', TranslationKey> = {
+    week: 'reports.bucketWeek',
+    month: 'reports.bucketMonth',
+  }
 
   const spacesQuery = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -355,7 +364,7 @@ function ProductivityTab({
     registerExport({
       filename: `workspace-productivity-${days}d-${workspaceId}.csv`,
       rows: [
-        ['Member', 'Email', 'Assigned', 'Completed', 'Created', 'Completion rate (%)'],
+        [t('reports.member'), t('reports.email'), t('reports.assigned'), t('reports.completed'), t('reports.created'), t('reports.completionRatePct')],
         ...rows.map((row) => [
           row.displayName,
           row.email,
@@ -366,7 +375,7 @@ function ProductivityTab({
         ]),
       ],
     })
-  }, [rows, days, workspaceId, registerExport])
+  }, [rows, days, workspaceId, registerExport, t])
 
   return (
     <div className="space-y-4">
@@ -404,16 +413,16 @@ function ProductivityTab({
             <button
               key={b}
               onClick={() => setBucket(b)}
-              className={cn('px-2 py-0.5 rounded capitalize', bucket === b ? 'bg-brand-700 text-white' : 'text-muted-foreground')}
+              className={cn('px-2 py-0.5 rounded', bucket === b ? 'bg-brand-700 text-white' : 'text-muted-foreground')}
             >
-              {b}
+              {t(BUCKET_LABEL[b])}
             </button>
           ))}
         </div>
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-foreground mb-2">Completed tasks trend ({bucket})</h3>
+        <h3 className="text-sm font-semibold text-foreground mb-2">{t('reports.completedTasksTrend', { period: t(BUCKET_LABEL[bucket]) })}</h3>
         {trend.length === 0 ? (
           <div className="text-center text-muted-foreground py-6 text-sm">{t('reports.noCompletedTasks')}</div>
         ) : (
@@ -442,7 +451,7 @@ function ProductivityTab({
               <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.assigned')}</th>
               <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.completed')}</th>
               <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.created')}</th>
-              <th className="text-right py-2 pl-4 text-muted-foreground font-medium">Rate</th>
+              <th className="text-right py-2 pl-4 text-muted-foreground font-medium">{t('reports.rate')}</th>
             </tr>
           </thead>
           <tbody>
@@ -531,19 +540,19 @@ function CompletionTab({
     registerExport({
       filename: `workspace-completion-${days}d-${workspaceId}.csv`,
       rows: [
-        ['Section', 'Label', 'Value'],
-        ['summary', 'Total tasks', d.total],
-        ['summary', 'Completed', d.completed],
-        ['summary', 'On time', d.onTime],
-        ['summary', 'Late', d.late],
-        ['summary', 'On-time rate (%)', d.onTimeRate],
+        [t('reports.csvSection'), t('reports.csvLabel'), t('reports.csvValue')],
+        ['summary', t('reports.totalTasks'), d.total],
+        ['summary', t('reports.completed'), d.completed],
+        ['summary', t('reports.onTime'), d.onTime],
+        ['summary', t('reports.late'), d.late],
+        ['summary', t('reports.onTimeRatePct'), d.onTimeRate],
         ...d.trend.map((point) => ['trend', point.date, point.count] as (string | number)[]),
         ...Object.entries(d.statusBreakdown).map(
           ([status, count]) => ['status', status, count] as (string | number)[],
         ),
       ],
     })
-  }, [d, days, workspaceId, registerExport])
+  }, [d, days, workspaceId, registerExport, t])
 
   const STATUS_COLORS: Record<string, string> = {
     todo: 'bg-gray-400',
@@ -556,10 +565,10 @@ function CompletionTab({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total tasks" value={d?.total ?? '—'} icon={BarChart3} />
-        <StatCard label="Completed" value={d?.completed ?? '—'} icon={CheckCircle2} />
-        <StatCard label="On time" value={d?.onTime ?? '—'} icon={TrendingUp} />
-        <StatCard label="On-time rate" value={d ? `${d.onTimeRate}%` : '—'} icon={Target} trend={d && d.onTimeRate >= 70 ? 'up' : 'down'} />
+        <StatCard label={t('reports.totalTasks')} value={d?.total ?? '—'} icon={BarChart3} />
+        <StatCard label={t('reports.completed')} value={d?.completed ?? '—'} icon={CheckCircle2} />
+        <StatCard label={t('reports.onTime')} value={d?.onTime ?? '—'} icon={TrendingUp} />
+        <StatCard label={t('reports.onTimeRate')} value={d ? `${d.onTimeRate}%` : '—'} icon={Target} trend={d && d.onTimeRate >= 70 ? 'up' : 'down'} />
       </div>
 
       {d && (
@@ -611,7 +620,7 @@ function CompletionTab({
         <Card className="p-4">
           <h3 className="text-sm font-medium mb-1">{t('reports.avgTimeInStatus')}</h3>
           <p className="text-xs text-muted-foreground mb-3">
-            Where tasks spend the most time — the longest bars are your bottlenecks.
+            {t('reports.bottleneckHint')}
           </p>
           <div className="space-y-2">
             {durations.map((row) => (
@@ -686,7 +695,7 @@ function TimeTab({
     registerExport({
       filename: `workspace-time-${days}d-${workspaceId}.csv`,
       rows: [
-        ['Member', 'Email', 'Total hours', 'Billable hours', 'Entries'],
+        [t('reports.member'), t('reports.email'), t('reports.totalHours'), t('reports.billableHours'), t('reports.entries')],
         ...rows.map((row) => [
           row.displayName,
           row.email,
@@ -696,15 +705,15 @@ function TimeTab({
         ]),
       ],
     })
-  }, [rows, days, workspaceId, registerExport])
+  }, [rows, days, workspaceId, registerExport, t])
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-3 gap-4">
-        <StatCard label="Total hours" value={totalHours.toFixed(1)} icon={Clock} />
-        <StatCard label="Billable hours" value={billableHours.toFixed(1)} icon={CheckCircle2} />
+        <StatCard label={t('reports.totalHours')} value={totalHours.toFixed(1)} icon={Clock} />
+        <StatCard label={t('reports.billableHours')} value={billableHours.toFixed(1)} icon={CheckCircle2} />
         <StatCard
-          label="Billable rate"
+          label={t('reports.billableRate')}
           value={totalHours > 0 ? `${Math.round((billableHours / totalHours) * 100)}%` : '—'}
           icon={Target}
         />
@@ -801,7 +810,7 @@ function SprintsTab({
     registerExport({
       filename: `workspace-sprints-${workspaceId}.csv`,
       rows: [
-        ['Sprint', 'Status', 'Start', 'End', 'Tasks', 'Points'],
+        [t('reports.sprint'), t('reports.status'), t('reports.start'), t('reports.end'), t('reports.tasks'), t('reports.points')],
         ...rows.map((row) => [
           row.name,
           row.status,
@@ -812,11 +821,17 @@ function SprintsTab({
         ]),
       ],
     })
-  }, [rows, workspaceId, registerExport])
+  }, [rows, workspaceId, registerExport, t])
+
+  const SPRINT_STATUS_LABEL: Record<string, TranslationKey> = {
+    active: 'reports.statusActive',
+    completed: 'reports.completed',
+    planned: 'reports.statusPlanned',
+  }
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Sprint velocity (last 10 sprints)</p>
+      <p className="text-sm text-muted-foreground">{t('reports.sprintVelocity')}</p>
       {rows.length === 0 && !query.isLoading && (
         <div className="text-center text-muted-foreground py-8">{t('reports.noSprints')}</div>
       )}
@@ -825,9 +840,9 @@ function SprintsTab({
           <thead>
             <tr className="border-b border-border">
               <th className="text-left py-2 pr-4 text-muted-foreground font-medium">{t('reports.sprint')}</th>
-              <th className="text-left py-2 px-4 text-muted-foreground font-medium">Status</th>
-              <th className="text-right py-2 px-4 text-muted-foreground font-medium">Tasks</th>
-              <th className="text-right py-2 pl-4 text-muted-foreground font-medium">Points</th>
+              <th className="text-left py-2 px-4 text-muted-foreground font-medium">{t('reports.status')}</th>
+              <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.tasks')}</th>
+              <th className="text-right py-2 pl-4 text-muted-foreground font-medium">{t('reports.points')}</th>
             </tr>
           </thead>
           <tbody>
@@ -850,7 +865,7 @@ function SprintsTab({
                       row.status === 'planned' && 'bg-gray-100 text-gray-700',
                     )}
                   >
-                    {row.status}
+                    {SPRINT_STATUS_LABEL[row.status] ? t(SPRINT_STATUS_LABEL[row.status]) : row.status}
                   </span>
                 </td>
                 <td className="text-right py-2 px-4 tabular-nums">{row.taskCount}</td>
@@ -873,6 +888,7 @@ function GoalsTab({
   workspaceId: string
   registerExport: ExportRegistrar
 }) {
+  const { t } = useTranslation()
   type GoalsData = {
     byStatus: { on_track: number; at_risk: number; off_track: number; completed: number }
     avgProgress: number
@@ -897,47 +913,49 @@ function GoalsTab({
     registerExport({
       filename: `workspace-goals-${workspaceId}.csv`,
       rows: [
-        ['Section', 'Label', 'Value'],
-        ['summary', 'Total goals', d.total],
-        ['summary', 'Average progress (%)', d.avgProgress],
-        ['summary', 'On track', d.byStatus.on_track],
-        ['summary', 'At risk', d.byStatus.at_risk],
-        ['summary', 'Off track', d.byStatus.off_track],
-        ['summary', 'Completed', d.byStatus.completed],
+        [t('reports.csvSection'), t('reports.csvLabel'), t('reports.csvValue')],
+        ['summary', t('reports.totalGoals'), d.total],
+        ['summary', t('reports.avgProgressPct'), d.avgProgress],
+        ['summary', t('reports.onTrack'), d.byStatus.on_track],
+        ['summary', t('reports.atRisk'), d.byStatus.at_risk],
+        ['summary', t('reports.offTrack'), d.byStatus.off_track],
+        ['summary', t('reports.completed'), d.byStatus.completed],
         ...d.goals.map(
           (goal) => ['goal', goal.title, `${goal.status} · ${goal.progress}%`] as (string | number)[],
         ),
       ],
     })
-  }, [d, workspaceId, registerExport])
-  const STATUS_META: Record<string, { label: string; color: string }> = {
-    on_track: { label: 'On track', color: 'bg-emerald-100 text-emerald-700' },
-    at_risk: { label: 'At risk', color: 'bg-amber-100 text-amber-700' },
-    off_track: { label: 'Off track', color: 'bg-red-100 text-red-700' },
-    completed: { label: 'Completed', color: 'bg-blue-100 text-blue-700' },
+  }, [d, workspaceId, registerExport, t])
+  const STATUS_META: Record<string, { labelKey: TranslationKey; color: string }> = {
+    on_track: { labelKey: 'reports.onTrack', color: 'bg-emerald-100 text-emerald-700' },
+    at_risk: { labelKey: 'reports.atRisk', color: 'bg-amber-100 text-amber-700' },
+    off_track: { labelKey: 'reports.offTrack', color: 'bg-red-100 text-red-700' },
+    completed: { labelKey: 'reports.completed', color: 'bg-blue-100 text-blue-700' },
   }
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Total goals" value={d?.total ?? '—'} icon={Target} />
-        <StatCard label="On track" value={d?.byStatus.on_track ?? '—'} icon={TrendingUp} trend="up" />
-        <StatCard label="At risk" value={d?.byStatus.at_risk ?? '—'} icon={TrendingDown} />
-        <StatCard label="Avg progress" value={d ? `${d.avgProgress}%` : '—'} icon={BarChart3} />
+        <StatCard label={t('reports.totalGoals')} value={d?.total ?? '—'} icon={Target} />
+        <StatCard label={t('reports.onTrack')} value={d?.byStatus.on_track ?? '—'} icon={TrendingUp} trend="up" />
+        <StatCard label={t('reports.atRisk')} value={d?.byStatus.at_risk ?? '—'} icon={TrendingDown} />
+        <StatCard label={t('reports.avgProgress')} value={d ? `${d.avgProgress}%` : '—'} icon={BarChart3} />
       </div>
 
       {d && d.goals.length > 0 && (
         <div className="space-y-2">
           {d.goals.map((goal) => {
-            const meta = STATUS_META[goal.status] ?? { label: goal.status, color: 'bg-gray-100 text-gray-700' }
+            const meta = STATUS_META[goal.status]
+            const statusLabel = meta ? t(meta.labelKey) : goal.status
+            const statusColor = meta?.color ?? 'bg-gray-100 text-gray-700'
             return (
               <Card key={goal.id} className="p-3">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-sm truncate">{goal.title}</span>
-                      <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0', meta.color)}>
-                        {meta.label}
+                      <span className={cn('text-xs px-1.5 py-0.5 rounded-full font-medium shrink-0', statusColor)}>
+                        {statusLabel}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 mt-1.5">
@@ -958,7 +976,7 @@ function GoalsTab({
       )}
 
       {d && d.goals.length === 0 && (
-        <div className="text-center text-muted-foreground py-8">No goals found</div>
+        <div className="text-center text-muted-foreground py-8">{t('reports.noGoals')}</div>
       )}
     </div>
   )

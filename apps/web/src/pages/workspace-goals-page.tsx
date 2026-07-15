@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Target, TrendingUp, CheckCircle2, AlertTriangle, Plus } from 'lucide-react'
 import { api } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Goal = {
   id: string
@@ -17,15 +17,15 @@ type Goal = {
   ownerId?: string | null
 }
 
-const STATUS_META: Record<Goal['status'], { label: string; color: string; icon: React.ElementType }> = {
-  on_track: { label: 'On track', color: 'bg-emerald-500', icon: TrendingUp },
-  at_risk: { label: 'At risk', color: 'bg-amber-500', icon: AlertTriangle },
-  off_track: { label: 'Off track', color: 'bg-red-500', icon: AlertTriangle },
-  completed: { label: 'Completed', color: 'bg-brand-700', icon: CheckCircle2 },
+const STATUS_META: Record<Goal['status'], { labelKey: TranslationKey; color: string; icon: React.ElementType }> = {
+  on_track: { labelKey: 'goals.statusOnTrack', color: 'bg-emerald-500', icon: TrendingUp },
+  at_risk: { labelKey: 'goals.statusAtRisk', color: 'bg-amber-500', icon: AlertTriangle },
+  off_track: { labelKey: 'goals.statusOffTrack', color: 'bg-red-500', icon: AlertTriangle },
+  completed: { labelKey: 'goals.statusCompleted', color: 'bg-brand-700', icon: CheckCircle2 },
 }
 
 export function GoalsPage() {
-  const { t } = useTranslation()
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/goals' })
   const qc = useQueryClient()
   const [creating, setCreating] = useState(false)
@@ -104,7 +104,7 @@ export function GoalsPage() {
         <section>
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="font-display text-lg font-semibold text-foreground">{t('goals.activeGoals')}</h2>
-            <span className="text-xs text-muted-foreground tabular-nums">{goals.length} goals</span>
+            <span className="text-xs text-muted-foreground tabular-nums">{tCount('goals.count', goals.length)}</span>
           </div>
 
           {goals.length === 0 ? (
@@ -112,8 +112,7 @@ export function GoalsPage() {
               <Target className="h-10 w-10 text-brand-500 mx-auto mb-2" />
               <h3 className="font-display text-lg font-semibold text-foreground mb-1">{t('goals.emptyTitle')}</h3>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                Goals give your team a north star. Each goal tracks progress toward a measurable outcome —
-                a percentage, a number, or simple done/not-done.
+                {t('goals.emptyDesc')}
               </p>
               <Button onClick={() => setCreating(true)} className="mt-4">
                 {t('goals.createFirst')}
@@ -139,6 +138,7 @@ function clampPct(v: unknown): number {
 }
 
 function GoalCard({ goal }: { goal: Goal }) {
+  const { t } = useTranslation()
   const meta = STATUS_META[goal.status]
   const Icon = meta.icon
   const { workspaceId } = useParams({ from: '/app/$workspaceId/goals' })
@@ -171,8 +171,8 @@ function GoalCard({ goal }: { goal: Goal }) {
             </div>
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
               <Icon className="h-3 w-3" />
-              <span>{meta.label}</span>
-              {goal.dueDate && <span>· due {new Date(goal.dueDate).toLocaleDateString()}</span>}
+              <span>{t(meta.labelKey)}</span>
+              {goal.dueDate && <span>· {t('goals.due', { date: new Date(goal.dueDate).toLocaleDateString() })}</span>}
             </div>
           </div>
         </div>
