@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input } from '@rundesk/ui'
 import { Users, Search, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 type WorkspaceEntry = {
   workspace: { id: string; name: string; slug: string }
@@ -16,9 +18,17 @@ type Member = {
   role: string
 }
 
-const ROLES = ['workspace_admin', 'manager', 'member', 'guest']
+// `labelKey` references an i18n catalog entry; the raw `value` is the
+// locale-independent role identifier persisted to / compared against the API.
+const ROLES: { value: string; labelKey: TranslationKey }[] = [
+  { value: 'workspace_admin', labelKey: 'adminUsers.role.workspaceAdmin' },
+  { value: 'manager', labelKey: 'adminUsers.role.manager' },
+  { value: 'member', labelKey: 'adminUsers.role.member' },
+  { value: 'guest', labelKey: 'adminUsers.role.guest' },
+]
 
 export function AdminUsersPage() {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [workspaceId, setWorkspaceId] = useState('')
@@ -66,9 +76,9 @@ export function AdminUsersPage() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Users className="h-5 w-5 text-accent" />
-          Admin users
+          {t('adminUsers.title')}
         </h1>
-        <p className="text-sm text-muted-foreground">Manage members and roles for any workspace you can access.</p>
+        <p className="text-sm text-muted-foreground">{t('adminUsers.subtitle')}</p>
       </header>
 
       <Card className="p-4 space-y-3">
@@ -87,7 +97,7 @@ export function AdminUsersPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, email, role..."
+            placeholder={t('adminUsers.searchPlaceholder')}
             leadingIcon={<Search className="h-4 w-4" />}
           />
         </div>
@@ -95,12 +105,12 @@ export function AdminUsersPage() {
 
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border text-sm font-medium">
-          Members · {filtered.length}
+          {tCount('adminUsers.membersCount', filtered.length)}
         </div>
         {members.isLoading ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">Loading members...</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminUsers.loadingMembers')}</div>
         ) : filtered.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">No matching members.</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminUsers.noMatchingMembers')}</div>
         ) : (
           <ul className="divide-y divide-border">
             {filtered.map((member) => (
@@ -115,7 +125,7 @@ export function AdminUsersPage() {
                   className="rounded border border-border bg-card px-2 py-1 text-xs"
                 >
                   {ROLES.map((role) => (
-                    <option key={role} value={role}>{role}</option>
+                    <option key={role.value} value={role.value}>{t(role.labelKey)}</option>
                   ))}
                 </select>
                 <Button

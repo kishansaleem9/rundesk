@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card } from '@rundesk/ui'
 import { Settings } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 import { FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
 
@@ -20,17 +22,20 @@ type OverrideRow = {
   updatedAt: string
 }
 
-const WORKSPACE_SCOPED_FLAGS: FlagKey[] = [
-  FLAGS.INTEGRATIONS,
-  FLAGS.TIME_TRACKING,
-  FLAGS.REPORTING,
-  FLAGS.DOCS,
-  FLAGS.GOALS,
-  FLAGS.SPRINTS,
-  FLAGS.FORMS,
+// `labelKey` references an i18n catalog entry; the raw `value` is the
+// locale-independent flag identifier persisted to / compared against the API.
+const WORKSPACE_SCOPED_FLAGS: { value: FlagKey; labelKey: TranslationKey }[] = [
+  { value: FLAGS.INTEGRATIONS, labelKey: 'adminSettings.flag.integrations' },
+  { value: FLAGS.TIME_TRACKING, labelKey: 'adminSettings.flag.timeTracking' },
+  { value: FLAGS.REPORTING, labelKey: 'adminSettings.flag.reporting' },
+  { value: FLAGS.DOCS, labelKey: 'adminSettings.flag.docs' },
+  { value: FLAGS.GOALS, labelKey: 'adminSettings.flag.goals' },
+  { value: FLAGS.SPRINTS, labelKey: 'adminSettings.flag.sprints' },
+  { value: FLAGS.FORMS, labelKey: 'adminSettings.flag.forms' },
 ]
 
 export function AdminSettingsPage() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [workspaceId, setWorkspaceId] = useState('')
 
@@ -74,9 +79,9 @@ export function AdminSettingsPage() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Settings className="h-5 w-5 text-accent" />
-          Admin settings
+          {t('adminSettings.title')}
         </h1>
-        <p className="text-sm text-muted-foreground">Workspace-level controls for feature availability.</p>
+        <p className="text-sm text-muted-foreground">{t('adminSettings.subtitle')}</p>
       </header>
 
       <Card className="p-4">
@@ -95,27 +100,29 @@ export function AdminSettingsPage() {
 
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border text-sm font-medium">
-          Workspace feature switches
+          {t('adminSettings.featureSwitches')}
         </div>
         <ul className="divide-y divide-border">
-          {WORKSPACE_SCOPED_FLAGS.map((flagKey) => {
-            const row = latestByFlag.get(flagKey)
+          {WORKSPACE_SCOPED_FLAGS.map((flag) => {
+            const row = latestByFlag.get(flag.value)
             const enabled = row?.enabled ?? false
             return (
-              <li key={flagKey} className="px-4 py-3 flex items-center gap-3">
+              <li key={flag.value} className="px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium">{flagKey}</div>
+                  <div className="text-sm font-medium">{t(flag.labelKey)}</div>
                   <div className="text-xs text-muted-foreground">
-                    {row?.updatedAt ? `Updated ${new Date(row.updatedAt).toLocaleString()}` : 'No workspace override yet'}
+                    {row?.updatedAt
+                      ? t('adminSettings.updatedAt', { date: new Date(row.updatedAt).toLocaleString() })
+                      : t('adminSettings.noOverride')}
                   </div>
                 </div>
                 <Button
                   size="sm"
                   variant={enabled ? 'default' : 'outline'}
-                  onClick={() => setWorkspaceFlag.mutate({ key: flagKey, enabled: !enabled })}
+                  onClick={() => setWorkspaceFlag.mutate({ key: flag.value, enabled: !enabled })}
                   disabled={setWorkspaceFlag.isPending || !resolvedWorkspaceId}
                 >
-                  {enabled ? 'Enabled' : 'Disabled'}
+                  {enabled ? t('adminSettings.enabled') : t('adminSettings.disabled')}
                 </Button>
               </li>
             )

@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Webhook, Plus, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 type WorkspaceEntry = {
   workspace: { id: string; name: string; slug: string }
@@ -18,8 +20,32 @@ type Hook = {
   failureCount: number
 }
 
+// Display labels for the server's webhook event identifiers. The raw event
+// string stays the canonical value sent to / stored by the API; only the
+// rendered label is localized. Unknown events fall back to their raw id.
+const EVENT_LABEL_KEYS: Record<string, TranslationKey> = {
+  'task.created': 'adminWebhooks.event.taskCreated',
+  'task.updated': 'adminWebhooks.event.taskUpdated',
+  'task.deleted': 'adminWebhooks.event.taskDeleted',
+  'task.status_changed': 'adminWebhooks.event.taskStatusChanged',
+  'task.assigned': 'adminWebhooks.event.taskAssigned',
+  'task.assignee_changed': 'adminWebhooks.event.taskAssigneeChanged',
+  'comment.created': 'adminWebhooks.event.commentCreated',
+  'project.created': 'adminWebhooks.event.projectCreated',
+  'project.updated': 'adminWebhooks.event.projectUpdated',
+  'member.invited': 'adminWebhooks.event.memberInvited',
+  'member.removed': 'adminWebhooks.event.memberRemoved',
+  'time.logged': 'adminWebhooks.event.timeLogged',
+  'form.submitted': 'adminWebhooks.event.formSubmitted',
+}
+
 export function AdminWebhooksPage() {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
+  const eventLabel = (event: string) => {
+    const key = EVENT_LABEL_KEYS[event]
+    return key ? t(key) : event
+  }
   const [workspaceId, setWorkspaceId] = useState('')
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -70,9 +96,9 @@ export function AdminWebhooksPage() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Webhook className="h-5 w-5 text-accent" />
-          Admin webhooks
+          {t('adminWebhooks.title')}
         </h1>
-        <p className="text-sm text-muted-foreground">Create, test, and remove workspace outbound webhook endpoints.</p>
+        <p className="text-sm text-muted-foreground">{t('adminWebhooks.subtitle')}</p>
       </header>
 
       <Card className="p-4 space-y-3">
@@ -89,8 +115,8 @@ export function AdminWebhooksPage() {
         </select>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Webhook name" />
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://endpoint.example/hook" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('adminWebhooks.namePlaceholder')} />
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('adminWebhooks.urlPlaceholder')} />
         </div>
         <div className="flex flex-wrap gap-1">
           {(eventCatalog.data ?? []).map((eventName) => {
@@ -106,7 +132,7 @@ export function AdminWebhooksPage() {
                   selected ? 'bg-brand-700 border-brand-700 text-white' : 'border-border text-muted-foreground',
                 )}
               >
-                {eventName}
+                {eventLabel(eventName)}
               </button>
             )
           })}
@@ -117,18 +143,18 @@ export function AdminWebhooksPage() {
           disabled={!name.trim() || !url.trim() || events.length === 0 || createHook.isPending}
         >
           <Plus className="h-3.5 w-3.5 mr-1" />
-          Create webhook
+          {t('adminWebhooks.createWebhook')}
         </Button>
       </Card>
 
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border text-sm font-medium">
-          Configured webhooks · {(hooks.data ?? []).length}
+          {tCount('adminWebhooks.configuredCount', (hooks.data ?? []).length)}
         </div>
         {hooks.isLoading ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">Loading webhooks...</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminWebhooks.loadingWebhooks')}</div>
         ) : (hooks.data ?? []).length === 0 ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">No webhooks configured.</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminWebhooks.noWebhooks')}</div>
         ) : (
           <ul className="divide-y divide-border">
             {(hooks.data ?? []).map((hook) => (
@@ -136,13 +162,13 @@ export function AdminWebhooksPage() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate">{hook.name}</div>
                   <div className="text-xs font-mono text-muted-foreground truncate">{hook.url}</div>
-                  <div className="text-xs text-muted-foreground truncate">{hook.events.join(', ')}</div>
+                  <div className="text-xs text-muted-foreground truncate">{hook.events.map(eventLabel).join(', ')}</div>
                 </div>
                 <div className="text-xs text-muted-foreground shrink-0">
                   <span className="text-emerald-600">{hook.successCount}✓</span> <span className="text-destructive">{hook.failureCount}✗</span>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => testHook.mutate(hook.id)} disabled={testHook.isPending}>
-                  Test
+                  {t('adminWebhooks.test')}
                 </Button>
                 <Button size="sm" variant="ghost" className="text-destructive" onClick={() => deleteHook.mutate(hook.id)}>
                   <Trash2 className="h-3.5 w-3.5" />
