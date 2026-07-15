@@ -59,6 +59,40 @@ export class DocsController {
     })
   }
 
+  // ─── Doc templates ─────────────────────────────────────────────────────────
+  @Get('workspaces/:workspaceId/doc-templates')
+  @UseGuards(WorkspaceMemberGuard)
+  listTemplates(@Param('workspaceId') workspaceId: string) {
+    return this.docs.listDocTemplates(workspaceId)
+  }
+
+  @Post('workspaces/:workspaceId/doc-templates')
+  @UseGuards(WorkspaceMemberGuard)
+  saveTemplate(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { docId: string; name: string; description?: string },
+  ) {
+    return this.docs.saveDocAsTemplate(workspaceId, user.id, body)
+  }
+
+  @Post('workspaces/:workspaceId/doc-templates/:templateId/create-doc')
+  @UseGuards(WorkspaceMemberGuard)
+  createFromTemplate(
+    @Param('workspaceId') workspaceId: string,
+    @Param('templateId') templateId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { spaceId?: string | null; title?: string },
+  ) {
+    return this.docs.createDocFromTemplate(workspaceId, user.id, templateId, body)
+  }
+
+  @Delete('workspaces/:workspaceId/doc-templates/:templateId')
+  @UseGuards(WorkspaceMemberGuard)
+  deleteTemplate(@Param('workspaceId') workspaceId: string, @Param('templateId') templateId: string) {
+    return this.docs.deleteDocTemplate(workspaceId, templateId)
+  }
+
   @Get('docs/:docId')
   get(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.docs.getForUser(docId, user.id)

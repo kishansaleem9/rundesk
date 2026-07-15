@@ -256,6 +256,34 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     },
   })
 
+  // Create a doc from a saved workspace template (content copied server-side).
+  const createFromTemplate = useMutation({
+    mutationFn: (templateId: string) =>
+      api<Doc>(`/workspaces/${workspaceId}/doc-templates/${templateId}/create-doc`, {
+        method: 'POST',
+        body: {},
+      }),
+    onSuccess: async (doc) => {
+      setSelectedDocId(doc.id)
+      await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not create from template'),
+  })
+
+  // Save the open doc as a reusable workspace template.
+  const saveAsTemplate = useMutation({
+    mutationFn: (name: string) =>
+      api(`/workspaces/${workspaceId}/doc-templates`, {
+        method: 'POST',
+        body: { docId: selectedDocId, name },
+      }),
+    onSuccess: async () => {
+      toast.success('Saved as a template')
+      await qc.invalidateQueries({ queryKey: ['doc-templates', workspaceId] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Could not save template'),
+  })
+
   const saveDoc = useMutation({
     mutationFn: async () => {
       if (!selectedDocId || !editor) return
@@ -493,7 +521,9 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       <DocTemplatesDialog
         open={templatesOpen}
         onOpenChange={setTemplatesOpen}
+        workspaceId={workspaceId}
         onPick={(t: DocTemplate) => createDoc.mutate({ title: t.title, content: t.content })}
+        onPickSaved={(templateId) => createFromTemplate.mutate(templateId)}
       />
 
       {createTask.open && (
@@ -523,6 +553,18 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           {activeDoc && (
             <div className="flex flex-wrap gap-1.5">
               <ShareDocButton doc={activeDoc} onShareChange={() => docsQuery.refetch()} />
+              <Button
+                size="sm"
+                variant="ghost"
+                title="Save this doc as a reusable template"
+                disabled={saveAsTemplate.isPending}
+                onClick={() => {
+                  const name = window.prompt('Template name', activeDoc.title)?.trim()
+                  if (name) saveAsTemplate.mutate(name)
+                }}
+              >
+                <Layers className="h-3.5 w-3.5" />
+              </Button>
               <Button
                 size="sm"
                 variant="ghost"

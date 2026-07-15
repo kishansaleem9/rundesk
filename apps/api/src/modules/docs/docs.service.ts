@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common'
 import { eq, and, asc, isNull, desc, inArray, isNotNull } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { docs, docComments, docRevisions, users } from '@rundesk/db'
+import { docs, docComments, docRevisions, docTemplates, users } from '@rundesk/db'
 import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -104,6 +104,88 @@ export class DocsService {
     this.realtime.emitToWorkspace(data.workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
     void this.indexDocInSearch(row.id)
     return row
+  }
+
+  // ─── Doc templates ─────────────────────────────────────────────────────────
+
+  /** Reusable doc templates in a workspace, most-recent first. */
+  async listDocTemplates(workspaceId: string) {
+    return this.db
+      .select({
+        id: docTemplates.id,
+        name: docTemplates.name,
+        description: docTemplates.description,
+        icon: docTemplates.icon,
+        createdById: docTemplates.createdById,
+        createdAt: docTemplates.createdAt,
+        updatedAt: docTemplates.updatedAt,
+      })
+      .from(docTemplates)
+      .where(eq(docTemplates.workspaceId, workspaceId))
+      .orderBy(desc(docTemplates.updatedAt))
+  }
+
+  /** Snapshot an existing doc's content into a reusable template. */
+  async saveDocAsTemplate(
+    workspaceId: string,
+    userId: string,
+    data: { docId: string; name: string; description?: string },
+  ) {
+    const name = data.name?.trim()
+    if (!name) throw new ForbiddenException('Template name is required')
+    const [doc] = await this.db.select().from(docs).where(eq(docs.id, data.docId)).limit(1)
+    if (!doc || doc.workspaceId !== workspaceId) throw new NotFoundException('Doc not found in this workspace')
+    const [row] = await this.db
+      .insert(docTemplates)
+      .values({
+        workspaceId,
+        name,
+        description: data.description?.trim() || null,
+        icon: doc.icon,
+        content: doc.content,
+        plaintext: doc.plaintext,
+        createdById: userId,
+      })
+      .returning()
+    return row
+  }
+
+  /** Create a brand-new doc from a template's snapshot content. */
+  async createDocFromTemplate(
+    workspaceId: string,
+    userId: string,
+    templateId: string,
+    opts: { spaceId?: string | null; title?: string } = {},
+  ) {
+    const [template] = await this.db.select().from(docTemplates).where(eq(docTemplates.id, templateId)).limit(1)
+    if (!template || template.workspaceId !== workspaceId) throw new NotFoundException('Template not found in this workspace')
+
+    const [row] = await this.db
+      .insert(docs)
+      .values({
+        workspaceId,
+        spaceId: opts.spaceId ?? null,
+        title: opts.title?.trim() || template.name,
+        icon: template.icon,
+        createdById: userId,
+        content: template.content,
+        plaintext: template.plaintext,
+      })
+      .returning()
+    await this.snapshotRevision(row, userId)
+    this.realtime.emitToWorkspace(workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
+    void this.indexDocInSearch(row.id)
+    return row
+  }
+
+  /** Delete a doc template (workspace-scoped). */
+  async deleteDocTemplate(workspaceId: string, templateId: string) {
+    const [row] = await this.db
+      .delete(docTemplates)
+      .where(and(eq(docTemplates.id, templateId), eq(docTemplates.workspaceId, workspaceId)))
+      .returning({ id: docTemplates.id })
+    if (!row) throw new NotFoundException('Template not found')
+    return { ok: true }
   }
 
   async update(

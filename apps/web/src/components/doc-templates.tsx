@@ -5,7 +5,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@rundesk/ui'
-import { Layers } from 'lucide-react'
+import { Layers, Trash2 } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '../lib/api'
+
+type SavedDocTemplate = {
+  id: string
+  name: string
+  description: string | null
+  icon: string | null
+}
 
 // ── ProseMirror/TipTap content helpers ──────────────────────────────────────
 type Node = Record<string, unknown>
@@ -157,11 +166,28 @@ export function DocTemplatesDialog({
   open,
   onOpenChange,
   onPick,
+  workspaceId,
+  onPickSaved,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   onPick: (template: DocTemplate) => void
+  // Workspace-saved templates (durable, created from real docs).
+  workspaceId?: string
+  onPickSaved?: (templateId: string) => void
 }) {
+  const qc = useQueryClient()
+  const savedQuery = useQuery({
+    queryKey: ['doc-templates', workspaceId],
+    enabled: open && !!workspaceId && !!onPickSaved,
+    queryFn: () => api<SavedDocTemplate[]>(`/workspaces/${workspaceId}/doc-templates`),
+  })
+  const deleteTemplate = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/doc-templates/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['doc-templates', workspaceId] }),
+  })
+  const saved = savedQuery.data ?? []
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
@@ -170,24 +196,66 @@ export function DocTemplatesDialog({
             <Layers className="h-4 w-4 text-accent" /> Pick a doc template
           </DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-2">
-          {DOC_TEMPLATES.map((t) => (
-            <button
-              key={t.id}
-              className="text-left rounded-lg border border-border/50 bg-card/40 p-3 hover:border-accent/40 hover:bg-card/70 transition-all"
-              onClick={() => {
-                onPick(t)
-                onOpenChange(false)
-              }}
-            >
-              <div className="flex items-center gap-2.5 mb-1">
-                <span className="text-lg">{t.emoji}</span>
-                <span className="text-sm font-medium">{t.name}</span>
-              </div>
-              <p className="text-xs text-muted-foreground line-clamp-2">{t.desc}</p>
-            </button>
-          ))}
+
+        {saved.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Your templates</p>
+            <div className="grid grid-cols-2 gap-2">
+              {saved.map((t) => (
+                <div
+                  key={t.id}
+                  className="group relative text-left rounded-lg border border-border/50 bg-card/40 p-3 hover:border-accent/40 hover:bg-card/70 transition-all"
+                >
+                  <button
+                    className="block w-full text-left"
+                    onClick={() => {
+                      onPickSaved?.(t.id)
+                      onOpenChange(false)
+                    }}
+                  >
+                    <div className="flex items-center gap-2.5 mb-1">
+                      <span className="text-lg">{t.icon ?? '📄'}</span>
+                      <span className="text-sm font-medium truncate">{t.name}</span>
+                    </div>
+                    {t.description && <p className="text-xs text-muted-foreground line-clamp-2">{t.description}</p>}
+                  </button>
+                  <button
+                    title="Delete template"
+                    className="absolute top-2 right-2 h-6 w-6 rounded flex items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-rose-500"
+                    onClick={() => deleteTemplate.mutate(t.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {saved.length > 0 && (
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Built-in</p>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            {DOC_TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                className="text-left rounded-lg border border-border/50 bg-card/40 p-3 hover:border-accent/40 hover:bg-card/70 transition-all"
+                onClick={() => {
+                  onPick(t)
+                  onOpenChange(false)
+                }}
+              >
+                <div className="flex items-center gap-2.5 mb-1">
+                  <span className="text-lg">{t.emoji}</span>
+                  <span className="text-sm font-medium">{t.name}</span>
+                </div>
+                <p className="text-xs text-muted-foreground line-clamp-2">{t.desc}</p>
+              </button>
+            ))}
+          </div>
         </div>
+
         <div className="border-t border-border/40 pt-3 mt-1 flex items-center justify-end">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Cancel
