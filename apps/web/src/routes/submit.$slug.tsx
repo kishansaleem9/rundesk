@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Button, Card, Input } from '@rundesk/ui'
-import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
+import { CheckCircle2, AlertCircle, Loader2, Upload, FileText, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 
 export const Route = createFileRoute('/submit/$slug')({
@@ -184,6 +184,7 @@ function PublicFormPage() {
               <FormFieldRenderer
                 key={field.id}
                 field={field}
+                slug={slug}
                 value={formData[field.id]}
                 error={errors[field.id]}
                 onChange={(val) => setFieldValue(field.id, val)}
@@ -216,17 +217,45 @@ function PublicFormPage() {
 
 function FormFieldRenderer({
   field,
+  slug,
   value,
   error,
   onChange,
 }: {
   field: FormField
+  slug: string
   value: string | string[] | undefined
   error?: string
   onChange: (val: string | string[]) => void
 }) {
   const strValue = typeof value === 'string' ? value : ''
   const arrValue = Array.isArray(value) ? value : []
+  const [uploading, setUploading] = useState(false)
+  const [uploadName, setUploadName] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+
+  // Presign → PUT → store the object key as this field's value (public intake).
+  const handleFileUpload = async (file: File) => {
+    setUploadError(null)
+    setUploading(true)
+    try {
+      const contentType = file.type || 'application/octet-stream'
+      const presign = await api<{ uploadUrl: string; storageKey: string; fileName: string }>(
+        `/forms/${slug}/attachments/presign`,
+        { method: 'POST', skipAuth: true, body: { fileName: file.name, contentType, sizeBytes: file.size } },
+      )
+      const putRes = await fetch(presign.uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: file })
+      if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`)
+      setUploadName(file.name)
+      onChange(presign.storageKey)
+    } catch (err) {
+      onChange('')
+      setUploadName(null)
+      setUploadError(err instanceof ApiError ? err.message : 'Upload failed — please try again')
+    } finally {
+      setUploading(false)
+    }
+  }
 
   return (
     <div>
@@ -323,8 +352,44 @@ function FormFieldRenderer({
       )}
 
       {field.type === 'file' && (
-        <div className="border-2 border-dashed border-border rounded-md p-4 text-center text-sm text-muted-foreground">
-          File upload not available in preview
+        <div className="space-y-2">
+          {strValue ? (
+            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
+              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate">{uploadName ?? 'Uploaded file'}</span>
+              <button
+                type="button"
+                title="Remove file"
+                onClick={() => { onChange(''); setUploadName(null) }}
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <label
+              className={`flex items-center justify-center gap-2 border-2 border-dashed rounded-md p-4 text-sm cursor-pointer transition-colors ${
+                error ? 'border-destructive' : 'border-border hover:border-foreground/30'
+              } ${uploading ? 'opacity-60 pointer-events-none' : ''}`}
+            >
+              {uploading ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</>
+              ) : (
+                <><Upload className="h-4 w-4" /> Choose a file <span className="text-muted-foreground">(max 25 MB)</span></>
+              )}
+              <input
+                type="file"
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) void handleFileUpload(f)
+                }}
+              />
+            </label>
+          )}
+          {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
         </div>
       )}
 

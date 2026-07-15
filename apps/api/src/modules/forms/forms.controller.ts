@@ -116,6 +116,17 @@ export class WorkspaceFormsController {
     return this.formsService.listSubmissions(formId)
   }
 
+  @Get(':formId/submissions/:submissionId/files/:fieldId')
+  @ApiOperation({ summary: 'Signed download URL for a file a submitter uploaded' })
+  submissionFile(
+    @Param('formId') formId: string,
+    @Param('submissionId') submissionId: string,
+    @Param('fieldId') fieldId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.formsService.getSubmissionFileUrl(formId, submissionId, fieldId, user.id)
+  }
+
   @Post(':formId/submissions/:submissionId/retry-routing')
   retrySubmissionRouting(
     @Param('formId') formId: string,
@@ -152,5 +163,14 @@ export class PublicFormsController {
     @Body() body: SubmitFormDto,
   ) {
     return this.formsService.submitForm(slug, body.data ?? {}, body.submitterEmail, body.submitterName)
+  }
+
+  @Post(':slug/attachments/presign')
+  @ApiOperation({ summary: 'Presign a file upload for a public form field (no auth required)' })
+  presignUpload(
+    @Param('slug') slug: string,
+    @Body() body: { fileName: string; contentType: string; sizeBytes?: number },
+  ) {
+    return this.formsService.createUploadUrl(slug, body)
   }
 }

@@ -3,6 +3,10 @@ import { and, eq, desc, sql } from 'drizzle-orm'
 import { forms, formFields, formSubmissions, tasks, lists, projects, spaces, users, workspaceMembers, taskAssignees } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { R2Service } from '../../common/storage/r2.service'
+
+/** Hard cap on a single form-upload file (public intake). */
+export const MAX_FORM_UPLOAD_BYTES = 25 * 1024 * 1024 // 25 MB
 
 function slugify(s: string): string {
   return s
@@ -26,7 +30,10 @@ async function uniqueSlug(db: Db, base: string): Promise<string> {
 
 @Injectable()
 export class FormsService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private r2: R2Service,
+  ) {}
   private readonly routingMetaKey = '__routingMeta'
   private readonly maxRoutingHistory = 10
   private readonly legacyRoutingMetaKey = '__routingMetaLegacy'
@@ -352,6 +359,72 @@ export class FormsService {
     }
   }
 
+  // ─── Public file uploads (form intake) ─────────────────────────────────────
+
+  private sanitizeFileName(input: string): string {
+    return (input || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
+  }
+
+  /** Object-key prefix owning a form's uploaded files. */
+  private formUploadPrefix(formId: string): string {
+    return `forms/${formId}/uploads/`
+  }
+
+  /**
+   * Presign a direct-to-R2 upload for a public form file field. Scoped to the
+   * form (which must be live + have a file field) and size-capped. No auth —
+   * public intake forms accept anonymous submissions by design.
+   */
+  async createUploadUrl(slug: string, body: { fileName: string; contentType: string; sizeBytes?: number }) {
+    const form = await this.getFormBySlug(slug) // throws if missing / archived / disabled
+    if (!form.fields.some((f) => f.type === 'file')) {
+      throw new BadRequestException('This form does not accept file uploads')
+    }
+    if (!this.r2.configured) throw new BadRequestException('File storage is not configured')
+    if (body.sizeBytes != null && Number.isFinite(body.sizeBytes) && body.sizeBytes > MAX_FORM_UPLOAD_BYTES) {
+      throw new BadRequestException(`File exceeds the ${Math.round(MAX_FORM_UPLOAD_BYTES / (1024 * 1024))} MB limit`)
+    }
+    const fileName = this.sanitizeFileName(body.fileName)
+    const key = `${this.formUploadPrefix(form.id)}${Date.now()}-${fileName}`
+    const uploadUrl = await this.r2.presignPutObject(key, body.contentType || 'application/octet-stream', {
+      formid: form.id,
+    })
+    return { uploadUrl, storageKey: key, fileName }
+  }
+
+  /**
+   * A short-lived signed download URL for a file a submitter uploaded. Only a
+   * member of the form's workspace may resolve it; the stored value must be a
+   * key owned by this form (guards against tampered/foreign keys).
+   */
+  async getSubmissionFileUrl(formId: string, submissionId: string, fieldId: string, actorId: string) {
+    const [form] = await this.db.select().from(forms).where(eq(forms.id, formId)).limit(1)
+    if (!form) throw new NotFoundException('Form not found')
+    const [membership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, form.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    if (!membership) throw new ForbiddenException('Workspace membership required')
+
+    const [submission] = await this.db
+      .select()
+      .from(formSubmissions)
+      .where(and(eq(formSubmissions.id, submissionId), eq(formSubmissions.formId, formId)))
+      .limit(1)
+    if (!submission) throw new NotFoundException('Submission not found')
+
+    const data = this.toSubmissionDataRecord(submission.data)
+    const value = data[fieldId]
+    const key = typeof value === 'string' ? value : null
+    if (!key || !key.startsWith(this.formUploadPrefix(formId))) {
+      throw new NotFoundException('No file for that field')
+    }
+    if (!this.r2.configured) throw new BadRequestException('File storage is not configured')
+    const url = await this.r2.getObjectUrl(key)
+    return { url, fileName: key.split('/').pop() ?? 'file' }
+  }
+
   // ─── Create form ──────────────────────────────────────────────────────────
   async createForm(
     workspaceId: string,
@@ -575,6 +648,14 @@ export class FormsService {
       }
       if (field.type === 'date' && typeof value === 'string') {
         if (Number.isNaN(Date.parse(value))) throw new BadRequestException(`Field "${field.label}" must be a valid date`)
+      }
+      // A file field stores the R2 object key produced by createUploadUrl. Only
+      // accept a key owned by this form so a submitter can't point the answer at
+      // an arbitrary/foreign object.
+      if (field.type === 'file') {
+        if (typeof value !== 'string' || !value.startsWith(this.formUploadPrefix(formWithFields.id))) {
+          throw new BadRequestException(`Field "${field.label}" must be an uploaded file`)
+        }
       }
       const unpacked = this.unpackFieldOptions(field.options)
       if ((field.type === 'dropdown' || field.type === 'multi_select') && unpacked.choices.length) {

@@ -385,6 +385,7 @@ export function FormBuilderPage() {
         {activeTab === 'submissions' && (
           <SubmissionsTab
             formId={form.id}
+            workspaceId={workspaceId}
             submissions={submissionsQuery.data ?? []}
             fields={form.fields}
             loading={submissionsQuery.isLoading}
@@ -897,6 +898,7 @@ function FormSettings({ form, onUpdate }: { form: FormDetail; onUpdate: (patch: 
 
 function SubmissionsTab({
   formId,
+  workspaceId,
   submissions,
   fields,
   loading,
@@ -906,6 +908,7 @@ function SubmissionsTab({
   onRefresh,
 }: {
   formId: string
+  workspaceId: string
   submissions: Submission[]
   fields: FormField[]
   loading: boolean
@@ -1494,7 +1497,31 @@ function SubmissionsTab({
           <div className="space-y-1">
             {fields.map((field) => {
               const val = sub.data[field.id]
-              if (val === undefined) return null
+              if (val === undefined || val === '') return null
+              if (field.type === 'file' && typeof val === 'string') {
+                return (
+                  <div key={field.id} className="text-sm">
+                    <span className="text-muted-foreground">{field.label}: </span>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-brand-700 hover:underline align-baseline"
+                      onClick={async () => {
+                        try {
+                          const res = await api<{ url: string }>(
+                            `/workspaces/${workspaceId}/forms/${formId}/submissions/${sub.id}/files/${field.id}`,
+                          )
+                          window.open(res.url, '_blank', 'noopener')
+                        } catch {
+                          // ignore — the file may have expired or storage is unconfigured
+                        }
+                      }}
+                    >
+                      <Download className="h-3 w-3" />
+                      {val.split('/').pop()}
+                    </button>
+                  </div>
+                )
+              }
               const display = Array.isArray(val) ? val.join(', ') : val
               return (
                 <div key={field.id} className="text-sm">
