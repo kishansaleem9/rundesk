@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Target, TrendingUp, CheckCircle2, AlertTriangle, Plus } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type Goal = {
   id: string
@@ -24,6 +25,7 @@ const STATUS_META: Record<Goal['status'], { label: string; color: string; icon: 
 }
 
 export function GoalsPage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/goals' })
   const qc = useQueryClient()
   const [creating, setCreating] = useState(false)
@@ -58,14 +60,14 @@ export function GoalsPage() {
       <header className="px-6 py-4 border-b border-border bg-card">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
-            <h1 className="font-display text-2xl font-semibold text-foreground">Goals &amp; OKRs</h1>
+            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">{t('common.workspace')}</div>
+            <h1 className="font-display text-2xl font-semibold text-foreground">{t('goals.title')}</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Align the team around measurable outcomes.
+              {t('goals.subtitle')}
             </p>
           </div>
           <Button onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4 mr-1" /> New goal
+            <Plus className="h-4 w-4 mr-1" /> {t('goals.newGoal')}
           </Button>
         </div>
       </header>
@@ -76,7 +78,7 @@ export function GoalsPage() {
             <div className="space-y-3">
               <Input
                 autoFocus
-                placeholder="Goal title (e.g. Ship v1.0 by end of Q2)"
+                placeholder={t('goals.titlePlaceholder')}
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
                 onKeyDown={(e) => {
@@ -89,10 +91,10 @@ export function GoalsPage() {
               />
               <div className="flex gap-2">
                 <Button onClick={() => createGoal.mutate()} disabled={!newTitle.trim() || createGoal.isPending}>
-                  Create
+                  {t('common.create')}
                 </Button>
                 <Button variant="ghost" onClick={() => { setCreating(false); setNewTitle('') }}>
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
               </div>
             </div>
@@ -101,20 +103,20 @@ export function GoalsPage() {
 
         <section>
           <div className="flex items-baseline justify-between mb-3">
-            <h2 className="font-display text-lg font-semibold text-foreground">Active goals</h2>
+            <h2 className="font-display text-lg font-semibold text-foreground">{t('goals.activeGoals')}</h2>
             <span className="text-xs text-muted-foreground tabular-nums">{goals.length} goals</span>
           </div>
 
           {goals.length === 0 ? (
             <Card className="p-10 text-center">
               <Target className="h-10 w-10 text-brand-500 mx-auto mb-2" />
-              <h3 className="font-display text-lg font-semibold text-foreground mb-1">No goals yet</h3>
+              <h3 className="font-display text-lg font-semibold text-foreground mb-1">{t('goals.emptyTitle')}</h3>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
                 Goals give your team a north star. Each goal tracks progress toward a measurable outcome —
                 a percentage, a number, or simple done/not-done.
               </p>
               <Button onClick={() => setCreating(true)} className="mt-4">
-                Create your first goal
+                {t('goals.createFirst')}
               </Button>
             </Card>
           ) : (

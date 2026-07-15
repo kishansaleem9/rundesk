@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
 import { GanttChart, Diamond } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type TimelineTask = {
   id: string
@@ -43,6 +44,7 @@ const STATUS_OPACITY: Record<string, string> = {
 }
 
 export function TimelinePage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/timeline' })
   const qc = useQueryClient()
   const [zoom, setZoom] = useState<Zoom>('week')
@@ -127,17 +129,17 @@ export function TimelinePage() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-            Workspace timeline
+            {t('timeline.eyebrow')}
           </div>
           <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
               <GanttChart className="h-4 w-4" />
             </span>
-            Timeline
-            <Badge variant="secondary" className="ml-1">Live</Badge>
+            {t('timeline.title')}
+            <Badge variant="secondary" className="ml-1">{t('timeline.live')}</Badge>
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            All tasks with start or due dates, grouped by project. Drag the area below to scroll.
+            {t('timeline.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -146,9 +148,9 @@ export function TimelinePage() {
               value={projectFilter}
               onChange={(e) => setProjectFilter(e.target.value)}
               className="text-xs h-8 px-2.5 rounded-md border border-border/60 bg-card/60 text-foreground backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40"
-              title="Filter by project"
+              title={t('timeline.filterByProject')}
             >
-              <option value="all">All projects</option>
+              <option value="all">{t('reports.allProjects')}</option>
               {projectOptions.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}

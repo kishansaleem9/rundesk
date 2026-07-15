@@ -243,6 +243,29 @@ export const en = {
   'reports.noSprints': 'No sprints found',
   'reports.sprint': 'Sprint',
 
+  // Common (extra)
+  'common.workspace': 'Workspace',
+
+  // Goals
+  'goals.title': 'Goals & OKRs',
+  'goals.subtitle': 'Align the team around measurable outcomes.',
+  'goals.newGoal': 'New goal',
+  'goals.titlePlaceholder': 'Goal title (e.g. Ship v1.0 by end of Q2)',
+  'goals.activeGoals': 'Active goals',
+  'goals.emptyTitle': 'No goals yet',
+  'goals.emptyDesc': 'Goals give your team a north star. Each goal tracks progress toward a measurable outcome — a percentage, a number, or simple done/not-done.',
+  'goals.createFirst': 'Create your first goal',
+
+  // Timeline
+  'timeline.eyebrow': 'Workspace timeline',
+  'timeline.title': 'Timeline',
+  'timeline.live': 'Live',
+  'timeline.subtitle': 'All tasks with start or due dates, grouped by project. Drag the area below to scroll.',
+  'timeline.filterByProject': 'Filter by project',
+  'timeline.zoomDay': 'Day',
+  'timeline.zoomWeek': 'Week',
+  'timeline.zoomMonth': 'Month',
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -561,6 +584,26 @@ export const es: Record<TranslationKey, string> = {
   'reports.noSprints': 'No se encontraron sprints',
   'reports.sprint': 'Sprint',
 
+  'common.workspace': 'Espacio de trabajo',
+
+  'goals.title': 'Objetivos y OKR',
+  'goals.subtitle': 'Alinea al equipo en torno a resultados medibles.',
+  'goals.newGoal': 'Nuevo objetivo',
+  'goals.titlePlaceholder': 'Título del objetivo (p. ej. Lanzar v1.0 antes de fin de Q2)',
+  'goals.activeGoals': 'Objetivos activos',
+  'goals.emptyTitle': 'Aún no hay objetivos',
+  'goals.emptyDesc': 'Los objetivos dan a tu equipo un norte. Cada objetivo mide el progreso hacia un resultado medible: un porcentaje, un número o simplemente hecho/no hecho.',
+  'goals.createFirst': 'Crea tu primer objetivo',
+
+  'timeline.eyebrow': 'Cronograma del espacio',
+  'timeline.title': 'Cronograma',
+  'timeline.live': 'En vivo',
+  'timeline.subtitle': 'Todas las tareas con fecha de inicio o vencimiento, agrupadas por proyecto. Arrastra el área de abajo para desplazarte.',
+  'timeline.filterByProject': 'Filtrar por proyecto',
+  'timeline.zoomDay': 'Día',
+  'timeline.zoomWeek': 'Semana',
+  'timeline.zoomMonth': 'Mes',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -870,6 +913,26 @@ export const ar: Record<TranslationKey, string> = {
   'reports.client': 'العميل',
   'reports.noSprints': 'لا توجد سباقات',
   'reports.sprint': 'سباق',
+
+  'common.workspace': 'مساحة العمل',
+
+  'goals.title': 'الأهداف و OKR',
+  'goals.subtitle': 'وحِّد الفريق حول نتائج قابلة للقياس.',
+  'goals.newGoal': 'هدف جديد',
+  'goals.titlePlaceholder': 'عنوان الهدف (مثال: إطلاق الإصدار 1.0 قبل نهاية الربع الثاني)',
+  'goals.activeGoals': 'الأهداف النشطة',
+  'goals.emptyTitle': 'لا أهداف بعد',
+  'goals.emptyDesc': 'تمنح الأهداف فريقك بوصلة. كل هدف يتتبّع التقدّم نحو نتيجة قابلة للقياس — نسبة مئوية أو رقم أو ببساطة منجز/غير منجز.',
+  'goals.createFirst': 'أنشئ هدفك الأول',
+
+  'timeline.eyebrow': 'الجدول الزمني لمساحة العمل',
+  'timeline.title': 'الجدول الزمني',
+  'timeline.live': 'مباشر',
+  'timeline.subtitle': 'جميع المهام التي لها تاريخ بدء أو استحقاق، مجمّعة حسب المشروع. اسحب المنطقة أدناه للتمرير.',
+  'timeline.filterByProject': 'تصفية حسب المشروع',
+  'timeline.zoomDay': 'يوم',
+  'timeline.zoomWeek': 'أسبوع',
+  'timeline.zoomMonth': 'شهر',
 
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
