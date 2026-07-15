@@ -43,6 +43,7 @@ import {
 } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
+import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
@@ -237,6 +238,7 @@ export function WorkspaceSidebar() {
     queryFn: () => api<any>(`/dashboards/dock/${workspaceId}`),
     enabled: !!workspaceId,
   })
+  const { t } = useTranslation()
   // Durable pinned items (spaces/lists/tasks/docs/channels) — Plan §2.
   const { data: pinnedItems = [] } = useFavorites(workspaceId)
   const unpinFavorite = useToggleFavorite(workspaceId)
@@ -433,7 +435,7 @@ export function WorkspaceSidebar() {
       <div className="flex-1 min-h-0 overflow-y-auto">
         {workspaceId && (
           <div className="p-2 space-y-2">
-          <NavLink to="/app/$workspaceId" params={{ workspaceId }} icon={Home} label="Home" />
+          <NavLink to="/app/$workspaceId" params={{ workspaceId }} icon={Home} label={t('nav.home')} />
 
           <div className="pt-1">
             <button
@@ -603,21 +605,21 @@ export function WorkspaceSidebar() {
             </button>
             {browseExpanded && (
               <div className="space-y-1">
-                <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label="AI" compact />
-                <NavLink to="/app/$workspaceId/whiteboards" params={{ workspaceId }} icon={Frame} label="Whiteboards" compact />
-                <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label="Forms" compact />
-                <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label="Automations" compact />
-                <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label="Workload" compact />
-                <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label="Timeline" compact />
-                <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label="Goals" compact />
-                <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label="Reports" compact />
-                <NavLink to={"/app/$workspaceId/time" as any} params={{ workspaceId }} icon={Clock3} label="Time" compact />
-                <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label="Templates" compact />
-                <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label="Integrations" compact />
-                <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label="Mind maps" compact />
-                <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label="Clips" compact />
+                <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact />
+                <NavLink to="/app/$workspaceId/whiteboards" params={{ workspaceId }} icon={Frame} label={t('nav.whiteboards')} compact />
+                <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label={t('nav.forms')} compact />
+                <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label={t('nav.automations')} compact />
+                <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label={t('nav.workload')} compact />
+                <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label={t('nav.timeline')} compact />
+                <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label={t('nav.goals')} compact />
+                <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label={t('nav.reports')} compact />
+                <NavLink to={"/app/$workspaceId/time" as any} params={{ workspaceId }} icon={Clock3} label={t('nav.time')} compact />
+                <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label={t('nav.templates')} compact />
+                <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label={t('nav.integrations')} compact />
+                <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label={t('nav.mindMaps')} compact />
+                <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label={t('nav.clips')} compact />
                 {isAdmin && (
-                  <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label="Settings" compact />
+                  <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label={t('nav.settings')} compact />
                 )}
               </div>
             )}
@@ -853,14 +855,14 @@ export function WorkspaceSidebar() {
               window.addEventListener('mouseup', up)
             }}
           >
-            <DockLink to="/app/$workspaceId" params={{ workspaceId: workspaceId! }} icon={Home} label="Home" />
-            <DockLink to="/app/$workspaceId/inbox" params={{ workspaceId: workspaceId! }} icon={Inbox} label="Inbox" />
-            <DockLink to="/app/$workspaceId/chat" params={{ workspaceId: workspaceId! }} icon={MessageCircle} label="Teams" />
-            <DockLink to="/app/$workspaceId/ai" params={{ workspaceId: workspaceId! }} icon={Bot} label="AI" />
-            <DockLink to="/app/$workspaceId/docs" params={{ workspaceId: workspaceId! }} icon={FileText} label="Docs" />
-            <DockLink to="/app/$workspaceId/dashboard" params={{ workspaceId: workspaceId! }} icon={LayoutDashboard} label="Dashboards" />
+            <DockLink to="/app/$workspaceId" params={{ workspaceId: workspaceId! }} icon={Home} label={t('nav.home')} />
+            <DockLink to="/app/$workspaceId/inbox" params={{ workspaceId: workspaceId! }} icon={Inbox} label={t('nav.inbox')} />
+            <DockLink to="/app/$workspaceId/chat" params={{ workspaceId: workspaceId! }} icon={MessageCircle} label={t('nav.chat')} />
+            <DockLink to="/app/$workspaceId/ai" params={{ workspaceId: workspaceId! }} icon={Bot} label={t('nav.ai')} />
+            <DockLink to="/app/$workspaceId/docs" params={{ workspaceId: workspaceId! }} icon={FileText} label={t('nav.docs')} />
+            <DockLink to="/app/$workspaceId/dashboard" params={{ workspaceId: workspaceId! }} icon={LayoutDashboard} label={t('nav.dashboards')} />
             {isAdmin && (
-              <DockLink to="/app/$workspaceId/settings" params={{ workspaceId: workspaceId! }} icon={Settings} label="Settings" />
+              <DockLink to="/app/$workspaceId/settings" params={{ workspaceId: workspaceId! }} icon={Settings} label={t('nav.settings')} />
             )}
             <button
               className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] text-muted-foreground border border-border/60 ml-1 hover:bg-accent/15"
