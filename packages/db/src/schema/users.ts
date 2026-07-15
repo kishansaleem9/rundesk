@@ -40,6 +40,9 @@ export const users = pgTable('users', {
       activity: { inApp: true, web: true, mobile: false, email: true },
     },
   }),
+  // Presence heartbeat (Plan §6.2): refreshed while a realtime socket is open;
+  // "online/away/offline" is derived from how recently this was touched.
+  lastSeenAt:    timestamp('last_seen_at', { withTimezone: true }),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

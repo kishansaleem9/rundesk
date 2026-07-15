@@ -16,6 +16,7 @@ import {
 import type { ChatChannel, ChatMember } from './chat-types'
 import { initials } from './chat-utils'
 import { useFavorites, useToggleFavorite } from '../../lib/use-favorites'
+import { usePresence, presenceDotClass } from '../../lib/use-presence'
 
 export function ChatHeader({
   channel,
@@ -65,6 +66,9 @@ export function ChatHeader({
   // wouldn't read well as a pinned label.
   const { data: favorites } = useFavorites(workspaceId)
   const toggleFavorite = useToggleFavorite(workspaceId)
+  // Presence for a 1:1 DM peer (group DMs have no single status).
+  const { statusOf } = usePresence(workspaceId)
+  const dmPeerStatus = channel?.isDm && !channel.dmIsGroup ? statusOf(channel.dmPeerId) : null
   const canFavorite = !!channel && !channel.isDm
   const starred = canFavorite && !!favorites?.some((f) => f.entityType === 'channel' && f.entityId === channel!.id)
   const toggleStar = () => {
@@ -108,9 +112,14 @@ export function ChatHeader({
         <h1 className="text-[15px] font-semibold text-foreground leading-tight truncate">
           {channel?.isDm ? title : `#${title}`}
         </h1>
-        {channel?.description && (
+        {dmPeerStatus ? (
+          <p className="text-[12px] text-muted-foreground truncate flex items-center gap-1.5">
+            <span className={cn('h-1.5 w-1.5 rounded-full', presenceDotClass(dmPeerStatus))} />
+            {dmPeerStatus === 'online' ? 'Active now' : dmPeerStatus === 'away' ? 'Away' : 'Offline'}
+          </p>
+        ) : channel?.description ? (
           <p className="text-[12px] text-muted-foreground truncate">{channel.description}</p>
-        )}
+        ) : null}
       </div>
 
       {searchOpen && (

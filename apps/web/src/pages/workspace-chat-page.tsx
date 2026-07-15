@@ -723,6 +723,7 @@ export function ChatPage() {
       <ChatSidebar
         channels={publicChannels}
         dmChannels={dmChannels}
+        workspaceId={workspaceId}
         selectedId={selectedId}
         onSelectChannel={setSelectedId}
         channelSearch={channelSearch}

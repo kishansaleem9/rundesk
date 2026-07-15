@@ -15,6 +15,7 @@ import { and, eq } from 'drizzle-orm'
 import { workspaceMembers, lists, projects, spaces, tasks, docs, workspaceCanvases } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { PresenceService } from '../presence/presence.service'
 
 /**
  * Room taxonomy:
@@ -97,6 +98,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     @Inject(DB_TOKEN) private readonly db: Db,
+    private readonly presence: PresenceService,
   ) {}
 
   /** Resolve the owning workspace for a room key, or null if it can't be resolved. */
@@ -173,6 +175,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       ;(client.data as { userId: string; email: string; role: string }).role  = payload.role
       // Auto-join the user's private channel.
       client.join(`user:${payload.sub}`)
+      // Presence heartbeat: mark online as soon as the socket authenticates.
+      void this.presence.recordHeartbeat(payload.sub).catch(() => undefined)
       this.logger.debug(`connected ${client.id} -> user:${payload.sub}`)
     } catch {
       client.emit('error', { message: 'Invalid token' })
@@ -198,6 +202,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       }
     }
     this.logger.debug(`disconnected ${client.id}`)
+  }
+
+  /** Keep-alive heartbeat from the client (~every 60s) so presence stays fresh. */
+  @SubscribeMessage('presence.ping')
+  handlePresencePing(@ConnectedSocket() client: Socket) {
+    const userId = (client.data as { userId?: string })?.userId
+    if (userId) void this.presence.recordHeartbeat(userId).catch(() => undefined)
   }
 
   @SubscribeMessage('subscribe')

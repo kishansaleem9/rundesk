@@ -3,12 +3,14 @@ import { Check, Hash, Lock, MessageSquarePlus, Plus, Search, Users } from 'lucid
 import { Button, Input, cn } from '@rundesk/ui'
 import type { ChatChannel, ChatMember } from './chat-types'
 import { initials } from './chat-utils'
+import { usePresence, presenceDotClass, type PresenceStatus } from '../../lib/use-presence'
 
 type PendingInvite = { id: string; email: string }
 
 export function ChatSidebar({
   channels,
   dmChannels,
+  workspaceId,
   selectedId,
   onSelectChannel,
   channelSearch,
@@ -31,6 +33,7 @@ export function ChatSidebar({
 }: {
   channels: ChatChannel[]
   dmChannels: ChatChannel[]
+  workspaceId?: string
   selectedId: string | null
   onSelectChannel: (id: string) => void
   channelSearch: string
@@ -51,6 +54,8 @@ export function ChatSidebar({
   pendingInvites: PendingInvite[]
   channelsLoading: boolean
 }) {
+  const { statusOf } = usePresence(workspaceId)
+
   // Multi-select DM composer: pick one teammate for a 1:1, or several for a
   // group DM (Plan §6.2). Selection is local to the sidebar.
   const [selectedPeers, setSelectedPeers] = useState<string[]>([])
@@ -193,7 +198,7 @@ export function ChatSidebar({
                             checked ? 'bg-violet-500/12' : 'hover:bg-violet-500/10',
                           )}
                         >
-                          <MemberAvatar label={initials(m.displayName || m.email)} online />
+                          <MemberAvatar label={initials(m.displayName || m.email)} status={statusOf(m.userId)} />
                           <span className="text-[13px] font-medium truncate text-foreground flex-1 min-w-0">
                             {m.displayName || m.email}
                           </span>
@@ -242,7 +247,7 @@ export function ChatSidebar({
                       <Users className="h-3 w-3" />
                     </span>
                   ) : (
-                    <MemberAvatar label={initials(c.dmPeerName)} size="sm" />
+                    <MemberAvatar label={initials(c.dmPeerName)} size="sm" status={statusOf(c.dmPeerId)} />
                   )
                 }
                 label={c.dmLabel ?? c.dmPeerName ?? 'Direct message'}
@@ -299,11 +304,11 @@ function ChannelRow({
 
 function MemberAvatar({
   label,
-  online,
+  status,
   size = 'md',
 }: {
   label: string
-  online?: boolean
+  status?: PresenceStatus
   size?: 'sm' | 'md'
 }) {
   const dim = size === 'sm' ? 'h-5 w-5 text-[9px]' : 'h-7 w-7 text-[11px]'
@@ -317,8 +322,14 @@ function MemberAvatar({
       >
         {label}
       </div>
-      {online && (
-        <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-[#fbfbfc] dark:border-[#16181d] bg-emerald-500" />
+      {status && status !== 'offline' && (
+        <span
+          className={cn(
+            'absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-[#fbfbfc] dark:border-[#16181d]',
+            presenceDotClass(status),
+          )}
+          title={status === 'online' ? 'Online' : 'Away'}
+        />
       )}
     </div>
   )
