@@ -13,6 +13,7 @@ import {
 } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
 
 export const Route = createFileRoute('/app/')({
   component: WorkspacePicker,
@@ -24,6 +25,7 @@ type WorkspaceEntry = {
 }
 
 function WorkspacePicker() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
@@ -64,18 +66,18 @@ function WorkspacePicker() {
       await queryClient.invalidateQueries({ queryKey: ['workspaces'] })
       navigate({ to: '/app/$workspaceId', params: { workspaceId: ws.id } })
     } catch (err) {
-      setCreateError(err instanceof ApiError ? err.message : 'Could not create workspace')
+      setCreateError(err instanceof ApiError ? err.message : t('appIndex.createError'))
     } finally {
       setCreating(false)
     }
   }
 
   if (isLoading) {
-    return <p className="text-muted-foreground p-8">Loading workspaces…</p>
+    return <p className="text-muted-foreground p-8">{t('appIndex.loadingWorkspaces')}</p>
   }
 
   if (error) {
-    return <p className="text-destructive p-8">Failed to load workspaces.</p>
+    return <p className="text-destructive p-8">{t('appIndex.loadError')}</p>
   }
 
   const hasWorkspaces = (data?.length ?? 0) > 0
@@ -84,12 +86,12 @@ function WorkspacePicker() {
     <div className="mx-auto max-w-3xl space-y-8 p-8">
       <div className="space-y-2">
         <h1 className="font-display text-4xl font-semibold text-foreground">
-          {hasWorkspaces ? 'Your workspaces' : 'Create your first workspace'}
+          {hasWorkspaces ? t('appIndex.yourWorkspaces') : t('appIndex.createFirstTitle')}
         </h1>
         <p className="text-muted-foreground">
           {hasWorkspaces
-            ? 'Pick a workspace to get started.'
-            : 'A workspace is a home for your team, spaces, projects, and tasks.'}
+            ? t('appIndex.pickPrompt')
+            : t('appIndex.createFirstBody')}
         </p>
       </div>
 
@@ -109,7 +111,7 @@ function WorkspacePicker() {
               <CardHeader>
                 <CardTitle className="text-xl">{entry.workspace.name}</CardTitle>
                 <CardDescription className="capitalize">
-                  Role: {entry.role.replace('_', ' ')}
+                  {t('appIndex.role', { role: entry.role.replace('_', ' ') })}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -124,25 +126,25 @@ function WorkspacePicker() {
 
       <Card className="border-dashed">
         <CardHeader>
-          <CardTitle>{hasWorkspaces ? 'Create another workspace' : 'New workspace'}</CardTitle>
+          <CardTitle>{hasWorkspaces ? t('appIndex.createAnother') : t('appIndex.newWorkspace')}</CardTitle>
           <CardDescription>
-            You&apos;ll become the workspace admin automatically.
+            {t('appIndex.adminNote')}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleCreate} className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="flex-1 space-y-2">
-              <Label htmlFor="workspace-name">Name</Label>
+              <Label htmlFor="workspace-name">{t('appIndex.nameLabel')}</Label>
               <Input
                 id="workspace-name"
                 required
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="Acme Inc"
+                placeholder={t('appIndex.namePlaceholder')}
               />
             </div>
             <Button type="submit" disabled={creating || !newName.trim()}>
-              {creating ? 'Creating…' : 'Create workspace'}
+              {creating ? t('appIndex.creating') : t('appIndex.createWorkspace')}
             </Button>
           </form>
           {createError && (

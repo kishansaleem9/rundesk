@@ -19,6 +19,7 @@ import { formatDistanceToNowStrict, isToday, isPast } from 'date-fns'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
+import { useTranslation } from '../lib/i18n'
 
 type Notification = {
   id: string
@@ -71,6 +72,7 @@ function WorkspaceShell() {
 }
 
 function WorkspaceHome() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { workspaceId } = Route.useParams()
   const user = useAuthStore((s) => s.user)
@@ -131,8 +133,8 @@ function WorkspaceHome() {
     },
   })
   const togglePersonalTask = useMutation({
-    mutationFn: (t: PersonalTask) =>
-      api(`/personal-tasks/${t.id}`, { method: 'PATCH', body: { done: !t.done } }),
+    mutationFn: (task: PersonalTask) =>
+      api(`/personal-tasks/${task.id}`, { method: 'PATCH', body: { done: !task.done } }),
     onSuccess: () => void invalidatePersonal(),
   })
   const deletePersonalTask = useMutation({
@@ -146,10 +148,10 @@ function WorkspaceHome() {
   const replies = notifications.filter((n) => ['task_commented', 'comment'].includes(n.type))
   const assignedComments = notifications.filter((n) => ['task_mentioned', 'mention'].includes(n.type))
   const myTasks = myTasksQuery.data ?? []
-  const assignedToMe = myTasks.filter((t) => !['done', 'cancelled'].includes(t.status))
-  const todayAndOverdue = myTasks.filter((t) => {
-    if (!t.dueDate) return false
-    const due = new Date(t.dueDate)
+  const assignedToMe = myTasks.filter((task) => !['done', 'cancelled'].includes(task.status))
+  const todayAndOverdue = myTasks.filter((task) => {
+    if (!task.dueDate) return false
+    const due = new Date(task.dueDate)
     return isToday(due) || isPast(due)
   })
   const personalTasks = personalTasksQuery.data ?? []
@@ -221,7 +223,7 @@ function WorkspaceHome() {
                   void api(`/workspaces/${workspaceId}/announcements/${visibleAnnouncement.id}/view`, { method: 'POST' })
                 }}
               >
-                Mark seen
+                {t('appWorkspace.markSeen')}
               </Button>
               <Button
                 size="sm"
@@ -233,7 +235,7 @@ function WorkspaceHome() {
                     })
                 }}
               >
-                Dismiss
+                {t('appWorkspace.dismiss')}
               </Button>
             </div>
           </div>
@@ -241,16 +243,16 @@ function WorkspaceHome() {
       )}
       <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-4">
         <Card variant="glass" className="p-3 h-fit">
-          <h1 className="text-3xl font-display font-semibold mb-3">Home</h1>
+          <h1 className="text-3xl font-display font-semibold mb-3">{t('appWorkspace.home')}</h1>
           <div className="space-y-1">
-            <HomeItem icon={Bell} label="Inbox" active={section === 'inbox'} onClick={() => setSection('inbox')} count={unread.length} />
-            <HomeItem icon={MessageCircleReply} label="Replies" active={section === 'replies'} onClick={() => setSection('replies')} count={replies.filter((n) => !n.readAt).length} />
-            <HomeItem icon={UserRoundCheck} label="Assigned Comments" active={section === 'assigned-comments'} onClick={() => setSection('assigned-comments')} count={assignedComments.filter((n) => !n.readAt).length} />
-            <div className="pt-2 pb-1 text-xs uppercase tracking-wider text-muted-foreground">My Tasks</div>
-            <HomeItem icon={CircleCheck} label="Assigned to me" active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} />
-            <HomeItem icon={CalendarClock} label="Today & Overdue" active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} />
-            <HomeItem icon={ListChecks} label="Personal List" active={section === 'personal-list'} onClick={() => setSection('personal-list')} count={personalTasks.filter((t) => !t.done).length} />
-            <HomeItem icon={MoreHorizontal} label="More" active={section === 'more'} onClick={() => setSection('more')} />
+            <HomeItem icon={Bell} label={t('appWorkspace.inbox')} active={section === 'inbox'} onClick={() => setSection('inbox')} count={unread.length} />
+            <HomeItem icon={MessageCircleReply} label={t('appWorkspace.replies')} active={section === 'replies'} onClick={() => setSection('replies')} count={replies.filter((n) => !n.readAt).length} />
+            <HomeItem icon={UserRoundCheck} label={t('appWorkspace.assignedComments')} active={section === 'assigned-comments'} onClick={() => setSection('assigned-comments')} count={assignedComments.filter((n) => !n.readAt).length} />
+            <div className="pt-2 pb-1 text-xs uppercase tracking-wider text-muted-foreground">{t('appWorkspace.myTasks')}</div>
+            <HomeItem icon={CircleCheck} label={t('appWorkspace.assignedToMe')} active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} />
+            <HomeItem icon={CalendarClock} label={t('appWorkspace.todayOverdue')} active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} />
+            <HomeItem icon={ListChecks} label={t('appWorkspace.personalList')} active={section === 'personal-list'} onClick={() => setSection('personal-list')} count={personalTasks.filter((task) => !task.done).length} />
+            <HomeItem icon={MoreHorizontal} label={t('appWorkspace.more')} active={section === 'more'} onClick={() => setSection('more')} />
           </div>
         </Card>
 
@@ -260,8 +262,8 @@ function WorkspaceHome() {
               {selectedItems.length === 0 ? (
                 <EmptyStateCard
                   icon={<Bell className="h-6 w-6" />}
-                  title="Nothing here yet"
-                  description="When activity happens, it will show up here."
+                  title={t('appWorkspace.emptyInboxTitle')}
+                  description={t('appWorkspace.emptyInboxBody')}
                 />
               ) : (
                 selectedItems.map((n) => (
@@ -299,7 +301,7 @@ function WorkspaceHome() {
                             void markRead.mutateAsync(n.id)
                           }}
                         >
-                          Resolve
+                          {t('appWorkspace.resolve')}
                         </Button>
                       )}
                     </div>
@@ -311,22 +313,22 @@ function WorkspaceHome() {
 
           {(section === 'assigned-to-me' || section === 'today-overdue') && (
             <div className="space-y-2">
-              {(section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).map((t) => (
+              {(section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).map((task) => (
                 <Link
-                  key={t.id}
+                  key={task.id}
                   to="/app/$workspaceId/$spaceId/$projectId/$listId"
-                  params={{ workspaceId, spaceId: t.spaceId, projectId: t.projectId, listId: t.listId }}
-                  search={{ task: t.id } as any}
+                  params={{ workspaceId, spaceId: task.spaceId, projectId: task.projectId, listId: task.listId }}
+                  search={{ task: task.id } as any}
                   className="block"
                 >
                   <Card variant="glass" className="p-3 hover:border-accent/30">
-                    <div className="text-sm font-medium">{t.title}</div>
-                    <div className="text-xs text-muted-foreground mt-1">{t.listName} · {t.status}</div>
+                    <div className="text-sm font-medium">{task.title}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{task.listName} · {task.status}</div>
                   </Card>
                 </Link>
               ))}
               {(section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).length === 0 && (
-                <EmptyStateCard icon={<ListChecks className="h-6 w-6" />} title="No tasks here" description="Tasks that match this section will appear here." />
+                <EmptyStateCard icon={<ListChecks className="h-6 w-6" />} title={t('appWorkspace.emptyTasksTitle')} description={t('appWorkspace.emptyTasksBody')} />
               )}
             </div>
           )}
@@ -336,51 +338,51 @@ function WorkspaceHome() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
-                  const t = newPersonalTitle.trim()
-                  if (t) addPersonalTask.mutate(t)
+                  const trimmed = newPersonalTitle.trim()
+                  if (trimmed) addPersonalTask.mutate(trimmed)
                 }}
                 className="flex items-center gap-2"
               >
                 <input
                   value={newPersonalTitle}
                   onChange={(e) => setNewPersonalTitle(e.target.value)}
-                  placeholder="Add a personal task…"
+                  placeholder={t('appWorkspace.addPersonalTaskPlaceholder')}
                   className="flex-1 h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm outline-none focus:border-accent/50"
                 />
                 <Button type="submit" size="sm" disabled={!newPersonalTitle.trim() || addPersonalTask.isPending}>
-                  <Plus className="h-4 w-4" /> Add
+                  <Plus className="h-4 w-4" /> {t('appWorkspace.add')}
                 </Button>
               </form>
               {personalTasks.length === 0 ? (
                 <EmptyStateCard
                   icon={<ListChecks className="h-6 w-6" />}
-                  title="No personal tasks yet"
-                  description="Add private to-dos that only you can see."
+                  title={t('appWorkspace.emptyPersonalTitle')}
+                  description={t('appWorkspace.emptyPersonalBody')}
                 />
               ) : (
                 <div className="space-y-1.5">
-                  {personalTasks.map((t) => (
-                    <Card key={t.id} variant="glass" className="p-2.5 flex items-center gap-2.5">
+                  {personalTasks.map((task) => (
+                    <Card key={task.id} variant="glass" className="p-2.5 flex items-center gap-2.5">
                       <button
                         type="button"
-                        onClick={() => togglePersonalTask.mutate(t)}
+                        onClick={() => togglePersonalTask.mutate(task)}
                         className="shrink-0 text-muted-foreground hover:text-foreground"
-                        aria-label={t.done ? 'Mark not done' : 'Mark done'}
+                        aria-label={task.done ? t('appWorkspace.markNotDone') : t('appWorkspace.markDone')}
                       >
-                        {t.done ? (
+                        {task.done ? (
                           <CircleCheck className="h-4 w-4 text-emerald-500" />
                         ) : (
                           <Circle className="h-4 w-4" />
                         )}
                       </button>
-                      <span className={`flex-1 text-sm ${t.done ? 'line-through text-muted-foreground' : ''}`}>
-                        {t.title}
+                      <span className={`flex-1 text-sm ${task.done ? 'line-through text-muted-foreground' : ''}`}>
+                        {task.title}
                       </span>
                       <button
                         type="button"
-                        onClick={() => deletePersonalTask.mutate(t.id)}
+                        onClick={() => deletePersonalTask.mutate(task.id)}
                         className="shrink-0 text-muted-foreground hover:text-destructive"
-                        aria-label="Delete personal task"
+                        aria-label={t('appWorkspace.deletePersonalTask')}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -394,7 +396,7 @@ function WorkspaceHome() {
           {section === 'more' && (
             <div className="space-y-2">
               <Button variant="outline" onClick={() => navigate({ to: '/app/$workspaceId/inbox', params: { workspaceId } })}>
-                Open full Inbox page
+                {t('appWorkspace.openFullInbox')}
               </Button>
             </div>
           )}

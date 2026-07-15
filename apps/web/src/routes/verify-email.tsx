@@ -3,12 +3,14 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { LogoWordmark, Button } from '@rundesk/ui'
 import { CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 export const Route = createFileRoute('/verify-email')({
   component: VerifyEmailPage,
 })
 
 function VerifyEmailPage() {
+  const { t } = useTranslation()
   const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying')
   const [message, setMessage] = useState('')
 
@@ -17,7 +19,7 @@ function VerifyEmailPage() {
       const token = new URLSearchParams(window.location.search).get('token') ?? ''
       if (!token) {
         setStatus('error')
-        setMessage('This verification link is missing its token.')
+        setMessage(t('verifyEmail.missingToken'))
         return
       }
       try {
@@ -28,7 +30,7 @@ function VerifyEmailPage() {
         setMessage(
           err instanceof ApiError
             ? err.message
-            : 'Verification failed — the link may have expired.',
+            : t('verifyEmail.failedFallback'),
         )
       }
     }
@@ -43,28 +45,28 @@ function VerifyEmailPage() {
         {status === 'verifying' && (
           <>
             <Loader2 className="h-10 w-10 text-muted-foreground animate-spin" />
-            <h1 className="font-display text-2xl font-semibold">Verifying your email…</h1>
+            <h1 className="font-display text-2xl font-semibold">{t('verifyEmail.verifying')}</h1>
           </>
         )}
         {status === 'success' && (
           <>
             <CheckCircle2 className="h-10 w-10 text-emerald-500" />
-            <h1 className="font-display text-2xl font-semibold">Email verified</h1>
+            <h1 className="font-display text-2xl font-semibold">{t('verifyEmail.successTitle')}</h1>
             <p className="text-sm text-muted-foreground">
-              Your email address is confirmed. You&apos;re all set.
+              {t('verifyEmail.successBody')}
             </p>
             <Button variant="gradient" asChild>
-              <Link to="/login">Continue to sign in</Link>
+              <Link to="/login">{t('verifyEmail.continueToSignIn')}</Link>
             </Button>
           </>
         )}
         {status === 'error' && (
           <>
             <AlertTriangle className="h-10 w-10 text-amber-400" />
-            <h1 className="font-display text-2xl font-semibold">Verification failed</h1>
+            <h1 className="font-display text-2xl font-semibold">{t('verifyEmail.failedTitle')}</h1>
             <p className="text-sm text-muted-foreground">{message}</p>
             <Button variant="glass" asChild>
-              <Link to="/login">Back to sign in</Link>
+              <Link to="/login">{t('verifyEmail.backToSignIn')}</Link>
             </Button>
           </>
         )}

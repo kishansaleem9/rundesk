@@ -22,6 +22,7 @@ import {
 import { api } from '../lib/api'
 import { PasswordChecklist, isPasswordStrong } from '../lib/password'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
 
 export const Route = createFileRoute('/accept-invite')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -47,6 +48,7 @@ type ClaimResponse = {
 }
 
 function AcceptInvite() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { token } = Route.useSearch()
   const [loading, setLoading] = useState(true)
@@ -60,7 +62,7 @@ function AcceptInvite() {
 
   useEffect(() => {
     if (!token) {
-      toast.error('Missing invitation token')
+      toast.error(t('acceptInvite.missingToken'))
       navigate({ to: '/login' })
       return
     }
@@ -70,7 +72,7 @@ function AcceptInvite() {
         const data = await api<InvitePreview>(`/invitations/preview?token=${token}`, { skipAuth: true })
         setInvite(data)
       } catch (err: any) {
-        toast.error('Invalid invitation', { description: err.message })
+        toast.error(t('acceptInvite.invalidInvitation'), { description: err.message })
         navigate({ to: '/login' })
       } finally {
         setLoading(false)
@@ -82,7 +84,7 @@ function AcceptInvite() {
 
   async function handleClaim() {
     if (!invite?.requiresAccountCreation && !isAuthenticated()) {
-      toast.info('Please sign in first to accept this invite')
+      toast.info(t('acceptInvite.signInFirst'))
       window.location.href = `/login?next=${encodeURIComponent(`/accept-invite?token=${token}`)}`
       return
     }
@@ -106,12 +108,12 @@ function AcceptInvite() {
         session.workspaces,
       )
 
-      toast.success('Invitation accepted!')
+      toast.success(t('acceptInvite.acceptedToast'))
       const wsId = session.workspaces[0]?.id
       if (wsId) navigate({ to: '/app/$workspaceId', params: { workspaceId: wsId } })
       else navigate({ to: '/login' })
     } catch (err: any) {
-      toast.error('Failed to accept invitation', { description: err.message })
+      toast.error(t('acceptInvite.failedToast'), { description: err.message })
     } finally {
       setClaiming(false)
     }
@@ -148,10 +150,10 @@ function AcceptInvite() {
             </div>
             <div className="space-y-1.5">
               <h1 className="font-display text-2xl font-semibold tracking-tight">
-                You&apos;re invited!
+                {t('acceptInvite.title')}
               </h1>
               <p className="text-sm text-muted-foreground">
-                <strong>{invite.inviterName}</strong> invited you to join <strong>{invite.orgName}</strong> on Rundesk.
+                {t('acceptInvite.invitedBody', { inviter: invite.inviterName, org: invite.orgName })}
               </p>
             </div>
           </div>
@@ -163,32 +165,32 @@ function AcceptInvite() {
             </div>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
               <Calendar className="h-4 w-4" />
-              <span>Expires {new Date(invite.expiresAt).toLocaleDateString()}</span>
+              <span>{t('acceptInvite.expires', { date: new Date(invite.expiresAt).toLocaleDateString() })}</span>
             </div>
           </div>
 
           {invite.requiresAccountCreation ? (
             <div className="space-y-4 pt-2">
               <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Create your account to join
+                {t('acceptInvite.createAccountPrompt')}
               </p>
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Full name</Label>
+                  <Label htmlFor="name">{t('acceptInvite.fullName')}</Label>
                   <Input
                     id="name"
-                    placeholder="Ada Lovelace"
+                    placeholder={t('acceptInvite.fullNamePlaceholder')}
                     leadingIcon={<User className="h-4 w-4" />}
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="password">Create a password</Label>
+                  <Label htmlFor="password">{t('acceptInvite.createPassword')}</Label>
                   <Input
                     id="password"
                     type="password"
-                    placeholder="At least 10 characters"
+                    placeholder={t('acceptInvite.passwordPlaceholder')}
                     leadingIcon={<Lock className="h-4 w-4" />}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -199,7 +201,7 @@ function AcceptInvite() {
             </div>
           ) : (
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 text-sm text-blue-200">
-              You already have an account with this email. Click accept to join the organization.
+              {t('acceptInvite.existingAccount')}
             </div>
           )}
 
@@ -213,11 +215,11 @@ function AcceptInvite() {
             {claiming ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Joining...
+                {t('acceptInvite.joining')}
               </>
             ) : (
               <>
-                Accept Invitation
+                {t('acceptInvite.acceptButton')}
                 <ArrowRight className="ml-2 h-4 w-4" />
               </>
             )}
@@ -225,7 +227,7 @@ function AcceptInvite() {
         </motion.div>
 
         <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-          <ShieldCheck className="h-3 w-3" /> Secure invitation link valid for 7 days.
+          <ShieldCheck className="h-3 w-3" /> {t('acceptInvite.secureFooter')}
         </p>
       </main>
     </div>

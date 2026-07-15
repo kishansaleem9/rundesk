@@ -4,6 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { Button, Card, Input } from '@rundesk/ui'
 import { CheckCircle2, AlertCircle, Loader2, Upload, FileText, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 export const Route = createFileRoute('/submit/$slug')({
   component: PublicFormPage,
@@ -36,6 +37,7 @@ type SubmitResult = {
 }
 
 function PublicFormPage() {
+  const { t } = useTranslation()
   const { slug } = Route.useParams()
   const [formData, setFormData] = useState<Record<string, string | string[]>>({})
   const [submitterEmail, setSubmitterEmail] = useState('')
@@ -81,7 +83,7 @@ function PublicFormPage() {
       if (!isFieldVisible(field)) continue
       const val = formData[field.id]
       if (field.isRequired && (!val || (Array.isArray(val) ? val.length === 0 : val.trim() === ''))) {
-        errs[field.id] = 'This field is required'
+        errs[field.id] = t('submitForm.requiredField')
       }
     }
     setErrors(errs)
@@ -112,9 +114,9 @@ function PublicFormPage() {
       <div className="min-h-screen bg-surface-50 dark:bg-background flex items-center justify-center">
         <div className="text-center">
           <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-          <h2 className="text-lg font-semibold">Form not found</h2>
+          <h2 className="text-lg font-semibold">{t('submitForm.notFoundTitle')}</h2>
           <p className="text-muted-foreground text-sm mt-1">
-            This form doesn&apos;t exist or has been disabled.
+            {t('submitForm.notFoundBody')}
           </p>
         </div>
       </div>
@@ -128,9 +130,9 @@ function PublicFormPage() {
       <div className="min-h-screen bg-surface-50 dark:bg-background flex items-center justify-center px-4">
         <Card className="max-w-md w-full p-8 text-center">
           <CheckCircle2 className="h-12 w-12 text-emerald-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold mb-2">Submitted!</h2>
+          <h2 className="text-xl font-semibold mb-2">{t('submitForm.successTitle')}</h2>
           <p className="text-muted-foreground">
-            {submitted.confirmationMsg ?? 'Thank you! Your request has been submitted.'}
+            {submitted.confirmationMsg ?? t('submitForm.successBody')}
           </p>
         </Card>
       </div>
@@ -159,20 +161,20 @@ function PublicFormPage() {
             {/* Submitter info */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm font-medium block mb-1">Your name</label>
+                <label className="text-sm font-medium block mb-1">{t('submitForm.yourName')}</label>
                 <Input
                   value={submitterName}
                   onChange={(e) => setSubmitterName(e.target.value)}
-                  placeholder="Jane Doe"
+                  placeholder={t('submitForm.namePlaceholder')}
                 />
               </div>
               <div>
-                <label className="text-sm font-medium block mb-1">Your email</label>
+                <label className="text-sm font-medium block mb-1">{t('submitForm.yourEmail')}</label>
                 <Input
                   type="email"
                   value={submitterEmail}
                   onChange={(e) => setSubmitterEmail(e.target.value)}
-                  placeholder="jane@example.com"
+                  placeholder={t('submitForm.emailPlaceholder')}
                 />
               </div>
             </div>
@@ -197,15 +199,15 @@ function PublicFormPage() {
               disabled={submitMutation.isPending}
             >
               {submitMutation.isPending ? (
-                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Submitting…</>
-              ) : 'Submit'}
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> {t('submitForm.submitting')}</>
+              ) : t('submitForm.submit')}
             </Button>
 
             {submitMutation.isError && (
               <p className="text-sm text-destructive text-center" role="alert">
                 {submitMutation.error instanceof ApiError
                   ? submitMutation.error.message
-                  : 'Submission failed. Please try again.'}
+                  : t('submitForm.submitError')}
               </p>
             )}
           </Card>
@@ -228,6 +230,7 @@ function FormFieldRenderer({
   error?: string
   onChange: (val: string | string[]) => void
 }) {
+  const { t } = useTranslation()
   const strValue = typeof value === 'string' ? value : ''
   const arrValue = Array.isArray(value) ? value : []
   const [uploading, setUploading] = useState(false)
@@ -251,7 +254,7 @@ function FormFieldRenderer({
     } catch (err) {
       onChange('')
       setUploadName(null)
-      setUploadError(err instanceof ApiError ? err.message : 'Upload failed — please try again')
+      setUploadError(err instanceof ApiError ? err.message : t('submitForm.uploadError'))
     } finally {
       setUploading(false)
     }
@@ -290,7 +293,7 @@ function FormFieldRenderer({
           type="email"
           value={strValue}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={field.placeholder ?? 'email@example.com'}
+          placeholder={field.placeholder ?? t('submitForm.emailFieldPlaceholder')}
           className={error ? 'border-destructive' : ''}
         />
       )}
@@ -322,7 +325,7 @@ function FormFieldRenderer({
             error ? 'border-destructive' : 'border-border'
           }`}
         >
-          <option value="">— Select —</option>
+          <option value="">{t('submitForm.selectOption')}</option>
           {(field.options ?? []).map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
@@ -356,10 +359,10 @@ function FormFieldRenderer({
           {strValue ? (
             <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
               <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="flex-1 truncate">{uploadName ?? 'Uploaded file'}</span>
+              <span className="flex-1 truncate">{uploadName ?? t('submitForm.uploadedFile')}</span>
               <button
                 type="button"
-                title="Remove file"
+                title={t('submitForm.removeFile')}
                 onClick={() => { onChange(''); setUploadName(null) }}
                 className="text-muted-foreground hover:text-destructive"
               >
@@ -373,9 +376,9 @@ function FormFieldRenderer({
               } ${uploading ? 'opacity-60 pointer-events-none' : ''}`}
             >
               {uploading ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Uploading…</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> {t('submitForm.uploading')}</>
               ) : (
-                <><Upload className="h-4 w-4" /> Choose a file <span className="text-muted-foreground">(max 25 MB)</span></>
+                <><Upload className="h-4 w-4" /> {t('submitForm.chooseFile')} <span className="text-muted-foreground">{t('submitForm.maxFileSize')}</span></>
               )}
               <input
                 type="file"
