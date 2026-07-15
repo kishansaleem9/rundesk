@@ -6,6 +6,7 @@ import { Play, Pause, Clock, DollarSign, Download, Pencil, Trash2, Check, X, Sen
 import { format, startOfWeek, addDays } from 'date-fns'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
 
 type TimeEntry = {
   id: string
@@ -64,6 +65,7 @@ function formatMonth(month: string): string {
 }
 
 export function TimePage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/time' })
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
@@ -140,12 +142,12 @@ export function TimePage() {
         body: { weekStart: weekStartIso },
       }),
     onSuccess: async () => {
-      toast('Timesheet submitted', { description: 'Your week is now awaiting manager approval.' })
+      toast(t('time.submitToast'), { description: t('time.submitToastDesc') })
       await qc.invalidateQueries({ queryKey: ['time-approvals', workspaceId] })
     },
     onError: (err) =>
-      toast('Could not submit timesheet', {
-        description: err instanceof ApiError ? err.message : 'Please try again.',
+      toast(t('time.submitError'), {
+        description: err instanceof ApiError ? err.message : t('time.tryAgain'),
       }),
   })
 
@@ -234,29 +236,29 @@ export function TimePage() {
       <header className="px-6 py-4 border-b border-border bg-card">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">Workspace</div>
+            <div className="text-xs uppercase tracking-wider text-muted-foreground mb-0.5">{t('common.workspace')}</div>
             <h1 className="font-display text-2xl font-semibold text-foreground flex items-center gap-2">
-              Time tracking
-              <Badge variant="secondary">Live</Badge>
+              {t('time.title')}
+              <Badge variant="secondary">{t('time.live')}</Badge>
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Log time, build timesheets, invoice billable hours.</p>
+            <p className="text-sm text-muted-foreground mt-0.5">{t('time.subtitle')}</p>
           </div>
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={entries.length === 0}>
-            <Download className="h-3.5 w-3.5 mr-1.5" /> Export CSV
+            <Download className="h-3.5 w-3.5 mr-1.5" /> {t('time.exportCsv')}
           </Button>
         </div>
         <div className="mt-3 flex items-center gap-1 -mb-[1px]">
-          {(['timesheet', 'timer', 'monthly', 'reports'] as const).map((t) => (
+          {(['timesheet', 'timer', 'monthly', 'reports'] as const).map((tabId) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
+              key={tabId}
+              onClick={() => setTab(tabId)}
               className={cn(
-                'relative px-3 py-2 text-sm font-medium capitalize',
-                tab === t ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                'relative px-3 py-2 text-sm font-medium',
+                tab === tabId ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
               )}
             >
-              {t}
-              {tab === t && <span className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-brand-700 rounded-t" />}
+              {t(`time.tab.${tabId}`)}
+              {tab === tabId && <span className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-brand-700 rounded-t" />}
             </button>
           ))}
         </div>
@@ -264,9 +266,9 @@ export function TimePage() {
 
       <div className="flex-1 overflow-auto p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <StatCard icon={Clock} label="Total this week" value={formatHours(totalBySeconds)} />
-          <StatCard icon={DollarSign} label="Billable" value={formatHours(billableSeconds)} />
-          <StatCard icon={Clock} label="Entries" value={`${entries.length}`} />
+          <StatCard icon={Clock} label={t('time.stat.totalThisWeek')} value={formatHours(totalBySeconds)} />
+          <StatCard icon={DollarSign} label={t('time.billable')} value={formatHours(billableSeconds)} />
+          <StatCard icon={Clock} label={t('time.entries')} value={`${entries.length}`} />
         </div>
 
         {tab === 'timer' && (
@@ -276,9 +278,9 @@ export function TimePage() {
             </div>
             <div className="font-display text-4xl font-semibold text-foreground tabular-nums">{formatTimer(elapsedSec)}</div>
             {activeTimer ? (
-              <p className="text-sm text-muted-foreground mt-2">Active task: {entries.find((e) => e.taskId === activeTimer.taskId)?.taskTitle ?? 'Task'}</p>
+              <p className="text-sm text-muted-foreground mt-2">{t('time.activeTask', { task: entries.find((e) => e.taskId === activeTimer.taskId)?.taskTitle ?? t('time.taskFallback') })}</p>
             ) : (
-              <p className="text-sm text-muted-foreground mt-2">Start a timer from recent tasks.</p>
+              <p className="text-sm text-muted-foreground mt-2">{t('time.startFromRecent')}</p>
             )}
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               {activeTimer ? (
@@ -288,7 +290,7 @@ export function TimePage() {
                   variant="outline"
                 >
                   <Pause className="h-4 w-4 mr-1.5" />
-                  {stopTimer.isPending ? 'Stopping…' : 'Stop timer'}
+                  {stopTimer.isPending ? t('time.stopping') : t('time.stopTimer')}
                 </Button>
               ) : (
                 quickStartTasks.map((task) => (
@@ -300,7 +302,7 @@ export function TimePage() {
                     disabled={startTimer.isPending}
                   >
                     <Play className="h-3.5 w-3.5 mr-1" />
-                    {task.taskTitle ?? 'Task'}
+                    {task.taskTitle ?? t('time.taskFallback')}
                   </Button>
                 ))
               )}
@@ -312,17 +314,17 @@ export function TimePage() {
           <>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
             <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Week of</span>
+              <span className="text-muted-foreground">{t('time.weekOf')}</span>
               <span className="font-medium text-foreground">{format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')}</span>
-              {myWeekStatus === 'submitted' && <Badge variant="warning" className="text-[10px] uppercase">Submitted</Badge>}
-              {myWeekStatus === 'approved' && <Badge variant="success" className="text-[10px] uppercase">Approved</Badge>}
-              {myWeekStatus === 'rejected' && <Badge variant="destructive" className="text-[10px] uppercase">Rejected — resubmit</Badge>}
+              {myWeekStatus === 'submitted' && <Badge variant="warning" className="text-[10px] uppercase">{t('time.status.submitted')}</Badge>}
+              {myWeekStatus === 'approved' && <Badge variant="success" className="text-[10px] uppercase">{t('time.status.approved')}</Badge>}
+              {myWeekStatus === 'rejected' && <Badge variant="destructive" className="text-[10px] uppercase">{t('time.status.rejectedResubmit')}</Badge>}
             </div>
             <div className="flex items-center gap-2">
               {canModerate && (
                 <Button variant="outline" size="sm" asChild>
                   <Link to="/app/$workspaceId/time/approvals" params={{ workspaceId }} search={{ tab: 'pending', historyFilter: 'all' }}>
-                    <ClipboardCheck className="h-3.5 w-3.5 mr-1.5" /> Approvals
+                    <ClipboardCheck className="h-3.5 w-3.5 mr-1.5" /> {t('time.approvals')}
                   </Link>
                 </Button>
               )}
@@ -333,20 +335,20 @@ export function TimePage() {
               >
                 <Send className="h-3.5 w-3.5 mr-1.5" />
                 {myWeekStatus === 'submitted'
-                  ? 'Awaiting approval'
+                  ? t('time.awaitingApproval')
                   : myWeekStatus === 'approved'
-                  ? 'Approved'
+                  ? t('time.status.approved')
                   : submitTimesheet.isPending
-                  ? 'Submitting…'
+                  ? t('time.submitting')
                   : myWeekStatus === 'rejected'
-                  ? 'Resubmit for approval'
-                  : 'Submit for approval'}
+                  ? t('time.resubmitForApproval')
+                  : t('time.submitForApproval')}
               </Button>
             </div>
           </div>
           <Card className="p-4">
             <div className="grid grid-cols-8 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              <div className="col-span-1">Task</div>
+              <div className="col-span-1">{t('time.col.task')}</div>
               {days.map((d) => (
                 <div key={d.toISOString()} className="text-center">
                   {format(d, 'EEE')}
@@ -356,13 +358,13 @@ export function TimePage() {
             </div>
             {entries.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
-                No time logged this week. Start a timer on any task to populate your timesheet.
+                {t('time.noTimeThisWeek')}
               </div>
             ) : (
               <div className="space-y-1">
                 {entries.slice(0, 10).map((e) => (
                   <div key={e.id} className="grid grid-cols-8 gap-2 items-center py-1.5 text-sm border-b border-border/40">
-                    <div className="col-span-1 truncate">{e.taskTitle ?? 'Task'}</div>
+                    <div className="col-span-1 truncate">{e.taskTitle ?? t('time.taskFallback')}</div>
                     {days.map((d) => {
                       const key = format(d, 'yyyy-MM-dd')
                       const entryKey = format(new Date(e.loggedAt), 'yyyy-MM-dd')
@@ -378,7 +380,7 @@ export function TimePage() {
               </div>
             )}
             <div className="mt-3 pt-3 border-t border-border grid grid-cols-8 gap-2 text-sm font-semibold text-foreground">
-              <div className="col-span-1">Total</div>
+              <div className="col-span-1">{t('time.total')}</div>
               {days.map((d) => {
                 const key = format(d, 'yyyy-MM-dd')
                 const sec = byDay.get(key) ?? 0
@@ -393,12 +395,12 @@ export function TimePage() {
 
           <Card className="p-4 mt-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-foreground">Entries</h3>
-              <span className="text-xs text-muted-foreground">{entries.length} total</span>
+              <h3 className="text-sm font-semibold text-foreground">{t('time.entries')}</h3>
+              <span className="text-xs text-muted-foreground">{t('time.entriesTotal', { count: entries.length })}</span>
             </div>
             {entries.length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground">
-                No entries yet. Start a timer or log time on a task.
+                {t('time.noEntries')}
               </div>
             ) : (
               <div className="divide-y divide-border/40">
@@ -420,19 +422,19 @@ export function TimePage() {
           <Card className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <CalendarRange className="h-4 w-4 text-accent" />
-              <h3 className="text-sm font-semibold text-foreground">Monthly timesheet</h3>
-              <span className="text-xs text-muted-foreground">Last 6 months{canModerate ? ' · all members' : ''}</span>
+              <h3 className="text-sm font-semibold text-foreground">{t('time.monthlyTitle')}</h3>
+              <span className="text-xs text-muted-foreground">{t('time.last6Months')}{canModerate ? ` · ${t('time.allMembers')}` : ''}</span>
             </div>
             <div className={cn('grid grid-cols-4 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider', !canModerate && 'grid-cols-3')}>
-              <div>Month</div>
-              {canModerate && <div>Member</div>}
-              <div className="text-center">Total hours</div>
-              <div className="text-center">Billable hours</div>
+              <div>{t('time.col.month')}</div>
+              {canModerate && <div>{t('time.member')}</div>}
+              <div className="text-center">{t('time.col.totalHours')}</div>
+              <div className="text-center">{t('time.col.billableHours')}</div>
             </div>
             {monthlyQuery.isLoading ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>
+              <div className="py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
             ) : (monthlyQuery.data ?? []).length === 0 ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">No time logged in the last 6 months.</div>
+              <div className="py-6 text-center text-sm text-muted-foreground">{t('time.noMonthly')}</div>
             ) : (
               <div className="space-y-1">
                 {(monthlyQuery.data ?? []).map((row) => (
@@ -441,7 +443,7 @@ export function TimePage() {
                     className={cn('grid grid-cols-4 gap-2 py-1.5 text-sm border-b border-border/40', !canModerate && 'grid-cols-3')}
                   >
                     <div className="tabular-nums">{formatMonth(row.month)}</div>
-                    {canModerate && <div className="truncate">{row.displayName || 'Member'}</div>}
+                    {canModerate && <div className="truncate">{row.displayName || t('time.member')}</div>}
                     <div className="text-center tabular-nums">{row.totalHours.toFixed(1)}h</div>
                     <div className="text-center tabular-nums text-success">{row.billableHours.toFixed(1)}h</div>
                   </div>
@@ -454,18 +456,18 @@ export function TimePage() {
         {tab === 'reports' && (
           <Card className="p-4">
             <div className="grid grid-cols-4 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              <div>Member</div>
-              <div className="text-center">Entries</div>
-              <div className="text-center">Total hours</div>
-              <div className="text-center">Billable hours</div>
+              <div>{t('time.member')}</div>
+              <div className="text-center">{t('time.entries')}</div>
+              <div className="text-center">{t('time.col.totalHours')}</div>
+              <div className="text-center">{t('time.col.billableHours')}</div>
             </div>
             {(reportQuery.data ?? []).length === 0 ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">No time report rows yet.</div>
+              <div className="py-6 text-center text-sm text-muted-foreground">{t('time.noReport')}</div>
             ) : (
               <div className="space-y-1">
                 {(reportQuery.data ?? []).map((row) => (
                   <div key={row.userId} className="grid grid-cols-4 gap-2 py-1.5 text-sm border-b border-border/40">
-                    <div className="truncate">{row.displayName || 'Member'}</div>
+                    <div className="truncate">{row.displayName || t('time.member')}</div>
                     <div className="text-center tabular-nums">{row.entryCount}</div>
                     <div className="text-center tabular-nums">{row.totalHours.toFixed(1)}h</div>
                     <div className="text-center tabular-nums">{row.billableHours.toFixed(1)}h</div>
@@ -489,6 +491,7 @@ function EntryRow({
   workspaceId: string
   editable: boolean
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [durationMin, setDurationMin] = useState(String(Math.round(entry.durationSeconds / 60)))
@@ -504,7 +507,7 @@ function EntryRow({
   const save = useMutation({
     mutationFn: () => {
       const minutes = Number(durationMin)
-      if (!Number.isFinite(minutes) || minutes < 0) throw new Error('Enter a valid duration in minutes')
+      if (!Number.isFinite(minutes) || minutes < 0) throw new Error(t('time.invalidDuration'))
       return api(`/time-entries/${entry.id}`, {
         method: 'PATCH',
         body: {
@@ -518,13 +521,13 @@ function EntryRow({
       setEditing(false)
       await invalidate()
     },
-    onError: (err) => window.alert(err instanceof Error ? err.message : 'Could not save entry'),
+    onError: (err) => window.alert(err instanceof Error ? err.message : t('time.couldNotSave')),
   })
 
   const del = useMutation({
     mutationFn: () => api(`/time-entries/${entry.id}`, { method: 'DELETE' }),
     onSuccess: () => invalidate(),
-    onError: (err) => window.alert(err instanceof Error ? err.message : 'Could not delete entry'),
+    onError: (err) => window.alert(err instanceof Error ? err.message : t('time.couldNotDelete')),
   })
 
   const startEdit = () => {
@@ -537,7 +540,7 @@ function EntryRow({
   if (editing) {
     return (
       <div className="flex flex-wrap items-center gap-2 py-2 text-sm">
-        <span className="min-w-0 flex-1 truncate text-foreground">{entry.taskTitle ?? 'Task'}</span>
+        <span className="min-w-0 flex-1 truncate text-foreground">{entry.taskTitle ?? t('time.taskFallback')}</span>
         <label className="flex items-center gap-1 text-xs text-muted-foreground">
           <input
             type="number"
@@ -546,17 +549,17 @@ function EntryRow({
             onChange={(e) => setDurationMin(e.target.value)}
             className="w-16 h-8 rounded-md border border-border/80 bg-background px-2 tabular-nums"
           />
-          min
+          {t('time.minutesShort')}
         </label>
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Description"
+          placeholder={t('time.descriptionPlaceholder')}
           className="h-8 flex-1 min-w-[8rem] rounded-md border border-border/80 bg-background px-2"
         />
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <input type="checkbox" checked={billable} onChange={(e) => setBillable(e.target.checked)} />
-          Billable
+          {t('time.billable')}
         </label>
         <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
           <Check className="h-3.5 w-3.5" />
@@ -571,7 +574,7 @@ function EntryRow({
   return (
     <div className="flex items-center gap-3 py-2 text-sm group">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-foreground">{entry.taskTitle ?? 'Task'}</p>
+        <p className="truncate text-foreground">{entry.taskTitle ?? t('time.taskFallback')}</p>
         <p className="truncate text-xs text-muted-foreground">
           {format(new Date(entry.loggedAt), 'MMM d, yyyy')}
           {!editable && entry.userName ? ` · ${entry.userName}` : ''}
@@ -580,7 +583,7 @@ function EntryRow({
       </div>
       {entry.billable && (
         <Badge variant="secondary" className="shrink-0">
-          Billable
+          {t('time.billable')}
         </Badge>
       )}
       <span className="w-16 shrink-0 text-right tabular-nums text-muted-foreground">
@@ -590,17 +593,17 @@ function EntryRow({
         <>
           <button
             onClick={startEdit}
-            aria-label="Edit entry"
+            aria-label={t('time.editEntry')}
             className="p-1.5 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-foreground hover:bg-accent/10"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => {
-              if (window.confirm('Delete this time entry?')) del.mutate()
+              if (window.confirm(t('time.confirmDelete'))) del.mutate()
             }}
             disabled={del.isPending}
-            aria-label="Delete entry"
+            aria-label={t('time.deleteEntry')}
             className="p-1.5 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-500 hover:bg-red-500/10"
           >
             <Trash2 className="h-3.5 w-3.5" />

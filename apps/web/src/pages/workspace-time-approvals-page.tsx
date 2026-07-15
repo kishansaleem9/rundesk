@@ -21,6 +21,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Timesheet = {
   id: string
@@ -51,17 +52,18 @@ function isCurrentWeek(weekOfLabel: string) {
   return end >= now
 }
 
-function historyFilterLabel(filter: 'all' | 'approved' | 'rejected' | 'this_week') {
-  if (filter === 'all') return 'All'
-  if (filter === 'approved') return 'Approved'
-  if (filter === 'rejected') return 'Rejected'
-  return 'This week'
+function historyFilterLabel(filter: 'all' | 'approved' | 'rejected' | 'this_week'): TranslationKey {
+  if (filter === 'all') return 'timeApprovals.filter.all'
+  if (filter === 'approved') return 'timeApprovals.filter.approved'
+  if (filter === 'rejected') return 'timeApprovals.filter.rejected'
+  return 'timeApprovals.filter.thisWeek'
 }
 
 type ApprovalsTab = 'pending' | 'history'
 type ApprovalsHistoryFilter = 'all' | 'approved' | 'rejected' | 'this_week'
 
 export function TimeApprovalsPage() {
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/time/approvals' })
   const search = useSearch({ from: '/app/$workspaceId/time/approvals' }) as { tab: ApprovalsTab; historyFilter: ApprovalsHistoryFilter }
   const navigate = useNavigate()
@@ -220,21 +222,21 @@ export function TimeApprovalsPage() {
     <div className="p-6 space-y-5 max-w-6xl mx-auto">
       <header>
         <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-          Time tracking
+          {t('timeApprovals.eyebrow')}
         </div>
         <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
             <ClipboardCheck className="h-4 w-4" />
           </span>
-          Approvals
+          {t('timeApprovals.title')}
           <Badge variant={canModerateApprovals ? 'success' : 'secondary'} className="ml-1 text-[10px] uppercase">
-            {canModerateApprovals ? 'Admin reviewer' : 'Read-only'}
+            {canModerateApprovals ? t('timeApprovals.adminReviewer') : t('timeApprovals.readOnly')}
           </Badge>
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
           {canModerateApprovals
-            ? 'Review and approve weekly timesheets from your team.'
-            : 'View weekly timesheets. Approval actions are available to workspace admins.'}
+            ? t('timeApprovals.subtitleMod')
+            : t('timeApprovals.subtitleView')}
         </p>
       </header>
 
@@ -249,7 +251,7 @@ export function TimeApprovalsPage() {
                 : 'hover:bg-card/60 text-muted-foreground',
             )}
           >
-            Pending ({pending.length})
+            {t('timeApprovals.pendingTab', { count: pending.length })}
           </button>
           <button
             onClick={() => setTab('history')}
@@ -260,29 +262,24 @@ export function TimeApprovalsPage() {
                 : 'hover:bg-card/60 text-muted-foreground',
             )}
           >
-            History ({history.length})
+            {t('timeApprovals.historyTab', { count: history.length })}
           </button>
         </div>
         {tab === 'history' ? (
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'approved', label: 'Approved' },
-                { id: 'rejected', label: 'Rejected' },
-                { id: 'this_week', label: 'This week' },
-              ].map((item) => (
+              {(['all', 'approved', 'rejected', 'this_week'] as const).map((filterId) => (
                 <button
-                  key={item.id}
-                  onClick={() => setHistoryFilter(item.id as typeof historyFilter)}
+                  key={filterId}
+                  onClick={() => setHistoryFilter(filterId)}
                   className={cn(
                     'text-xs px-3 py-1.5 rounded-md font-medium transition-all',
-                    historyFilter === item.id
+                    historyFilter === filterId
                       ? 'bg-brand-gradient text-white shadow-sm'
                       : 'hover:bg-card/60 text-muted-foreground',
                   )}
                 >
-                  {item.label} ({historyCounts[item.id as keyof typeof historyCounts]})
+                  {t(historyFilterLabel(filterId))} ({historyCounts[filterId]})
                 </button>
               ))}
             </div>
@@ -297,25 +294,25 @@ export function TimeApprovalsPage() {
               }}
               disabled={historyFilter === 'all'}
             >
-              Reset
+              {t('timeApprovals.reset')}
             </Button>
           </div>
         ) : null}
         {tab === 'pending' && canModerateApprovals && selected.size > 0 && (
           <div className="flex items-center gap-2 animate-fade-in">
-            <span className="text-xs text-muted-foreground">{selected.size} selected</span>
+            <span className="text-xs text-muted-foreground">{tCount('timeApprovals.selected', selected.size)}</span>
             <Button variant="outline" size="sm" onClick={() => setRejecting('bulk')}>
-              <X className="h-3.5 w-3.5" /> Reject
+              <X className="h-3.5 w-3.5" /> {t('timeApprovals.reject')}
             </Button>
             <Button variant="gradient" size="sm" onClick={approveSelected} disabled={approveMutation.isPending}>
-              <CheckCheck className="h-3.5 w-3.5" /> Approve all
+              <CheckCheck className="h-3.5 w-3.5" /> {t('timeApprovals.approveAll')}
             </Button>
           </div>
         )}
       </div>
       {!canModerateApprovals && pending.length > 0 ? (
         <Card className="p-3 border-border/60 bg-card/40 text-xs text-muted-foreground">
-          You can review submitted timesheets here, but only workspace admins can approve or reject entries.
+          {t('timeApprovals.readOnlyNote')}
         </Card>
       ) : null}
 
@@ -323,148 +320,148 @@ export function TimeApprovalsPage() {
         tab === 'history' && history.length > 0 ? (
           <EmptyState
             icon={<ClipboardCheck className="h-6 w-6" />}
-            title="No results for this filter"
-            description={`No timesheets match "${historyFilterLabel(historyFilter)}" right now.`}
+            title={t('timeApprovals.noResultsTitle')}
+            description={t('timeApprovals.noFilterResults', { filter: t(historyFilterLabel(historyFilter)) })}
           />
         ) : (
         accessDenied || !canModerateApprovals ? (
           <EmptyState
             icon={<ClipboardCheck className="h-6 w-6" />}
-            title="Approvals require admin access"
-            description="Ask a workspace admin to review and moderate submitted timesheets."
+            title={t('timeApprovals.adminRequiredTitle')}
+            description={t('timeApprovals.adminRequiredDesc')}
           />
         ) : (
           <EmptyState
             icon={<ClipboardCheck className="h-6 w-6" />}
-            title="No timesheets to review"
-            description={tab === 'pending' ? 'You\'re caught up. New submissions land here.' : 'Once you process timesheets, they\'ll appear here.'}
+            title={t('timeApprovals.emptyTitle')}
+            description={tab === 'pending' ? t('timeApprovals.emptyPending') : t('timeApprovals.emptyHistory')}
           />
         )
         )
       ) : (
         <div className="space-y-2.5">
-          {list.map((t) => (
-            <Card key={t.id} variant="glass" className="overflow-hidden p-0">
+          {list.map((sheet) => (
+            <Card key={sheet.id} variant="glass" className="overflow-hidden p-0">
               <div
                 className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-card/40 transition-colors"
-                onClick={() => toggleExpand(t.id)}
+                onClick={() => toggleExpand(sheet.id)}
               >
                 {tab === 'pending' && canModerateApprovals && (
                   <input
                     type="checkbox"
-                    checked={selected.has(t.id)}
-                    onChange={() => toggleSelect(t.id)}
+                    checked={selected.has(sheet.id)}
+                    onChange={() => toggleSelect(sheet.id)}
                     onClick={(e) => e.stopPropagation()}
                     className="h-4 w-4 rounded"
                   />
                 )}
-                <PersonAvatar name={t.name} size="md" />
+                <PersonAvatar name={sheet.name} size="md" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">{t.name}</span>
-                    {t.status === 'pending' && (
-                      <Badge variant="secondary" className="text-[9px] uppercase">Draft</Badge>
+                    <span className="font-medium">{sheet.name}</span>
+                    {sheet.status === 'pending' && (
+                      <Badge variant="secondary" className="text-[9px] uppercase">{t('timeApprovals.status.draft')}</Badge>
                     )}
-                    {t.status === 'submitted' && (
-                      <Badge variant="warning" className="text-[9px] uppercase">Submitted</Badge>
+                    {sheet.status === 'submitted' && (
+                      <Badge variant="warning" className="text-[9px] uppercase">{t('timeApprovals.status.submitted')}</Badge>
                     )}
-                    {t.status === 'approved' && (
+                    {sheet.status === 'approved' && (
                       <Badge variant="success" className="text-[9px] uppercase">
-                        <Check className="h-2.5 w-2.5" /> Approved
+                        <Check className="h-2.5 w-2.5" /> {t('timeApprovals.status.approved')}
                       </Badge>
                     )}
-                    {t.status === 'rejected' && (
+                    {sheet.status === 'rejected' && (
                       <Badge variant="destructive" className="text-[9px] uppercase">
-                        <AlertTriangle className="h-2.5 w-2.5" /> Rejected
+                        <AlertTriangle className="h-2.5 w-2.5" /> {t('timeApprovals.status.rejected')}
                       </Badge>
                     )}
                   </div>
                   <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
                     <Clock className="h-3 w-3" />
-                    Week of {t.weekOf}
+                    {t('timeApprovals.weekOf', { week: sheet.weekOf })}
                     <span>·</span>
-                    <span className="text-foreground tabular-nums">{t.total}h</span>
-                    <span className="text-success tabular-nums">{t.billable}h billable</span>
+                    <span className="text-foreground tabular-nums">{sheet.total}h</span>
+                    <span className="text-success tabular-nums">{t('timeApprovals.billableHours', { hours: sheet.billable })}</span>
                   </div>
-                  {t.status !== 'pending' && (t.approvedAt || t.approvedById) ? (
+                  {sheet.status !== 'pending' && (sheet.approvedAt || sheet.approvedById) ? (
                     <div className="text-[11px] text-muted-foreground mt-0.5">
-                      Last reviewed
-                      {t.approvedAt ? ` ${new Date(t.approvedAt).toLocaleString()}` : ''}
-                      {t.approvedById
-                        ? ` by ${t.reviewerName || t.reviewerEmail || t.approvedById}`
+                      {t('timeApprovals.lastReviewed')}
+                      {sheet.approvedAt ? ` ${new Date(sheet.approvedAt).toLocaleString()}` : ''}
+                      {sheet.approvedById
+                        ? ` ${t('timeApprovals.byPerson', { name: sheet.reviewerName || sheet.reviewerEmail || sheet.approvedById })}`
                         : ''}
                     </div>
                   ) : null}
                 </div>
                 {tab === 'pending' && canModerateApprovals && (
                   <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <Button variant="ghost" size="sm" onClick={() => setRejecting(t.id)}>
-                      <X className="h-3.5 w-3.5" /> Reject
+                    <Button variant="ghost" size="sm" onClick={() => setRejecting(sheet.id)}>
+                      <X className="h-3.5 w-3.5" /> {t('timeApprovals.reject')}
                     </Button>
                     <Button
                       variant="gradient"
                       size="sm"
                       onClick={async () => {
-                        const parsed = parseSheetId(t.id)
+                        const parsed = parseSheetId(sheet.id)
                         if (!parsed) return
                         await approveMutation.mutateAsync(parsed)
                       }}
                       disabled={approveMutation.isPending}
                     >
-                      <Check className="h-3.5 w-3.5" /> Approve
+                      <Check className="h-3.5 w-3.5" /> {t('timeApprovals.approve')}
                     </Button>
                   </div>
                 )}
-                {expanded.has(t.id) ? (
+                {expanded.has(sheet.id) ? (
                   <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
                 ) : (
                   <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                 )}
               </div>
 
-              {expanded.has(t.id) && (
+              {expanded.has(sheet.id) && (
                 <div className="border-t border-border/30 bg-card/20 p-4 space-y-2 animate-fade-in">
-                  {(t.approvedAt || t.approvedById) && (
+                  {(sheet.approvedAt || sheet.approvedById) && (
                     <div className="rounded-md border border-border/40 bg-card/40 p-2.5 text-xs text-muted-foreground">
-                      Reviewed
-                      {t.approvedAt ? ` at ${new Date(t.approvedAt).toLocaleString()}` : ''}
-                      {t.approvedById
-                        ? ` by ${t.reviewerName || t.reviewerEmail || t.approvedById}`
+                      {t('timeApprovals.reviewed')}
+                      {sheet.approvedAt ? ` ${t('timeApprovals.atTime', { time: new Date(sheet.approvedAt).toLocaleString() })}` : ''}
+                      {sheet.approvedById
+                        ? ` ${t('timeApprovals.byPerson', { name: sheet.reviewerName || sheet.reviewerEmail || sheet.approvedById })}`
                         : ''}
                     </div>
                   )}
-                  {t.rejectionReason && (
+                  {sheet.rejectionReason && (
                     <div className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs">
-                      <span className="font-medium text-destructive">Rejection reason: </span>
-                      {t.rejectionReason}
+                      <span className="font-medium text-destructive">{t('timeApprovals.rejectionReasonLabel')} </span>
+                      {sheet.rejectionReason}
                     </div>
                   )}
                   <ul className="divide-y divide-border/30">
-                    {t.entries.map((e, i) => (
+                    {sheet.entries.map((e, i) => (
                       <li key={i} className="flex items-center gap-3 py-2">
                         <div className="flex-1 min-w-0 text-sm">
                           <div className="truncate">{e.project}</div>
                           {e.note && <div className="text-xs text-muted-foreground truncate">{e.note}</div>}
                         </div>
                         {e.billable && (
-                          <Badge variant="success" className="text-[9px] uppercase">Billable</Badge>
+                          <Badge variant="success" className="text-[9px] uppercase">{t('timeApprovals.billable')}</Badge>
                         )}
                         <span className="font-medium tabular-nums w-16 text-right shrink-0">{e.hours}h</span>
                       </li>
                     ))}
                   </ul>
 
-                  {(rejecting === t.id || rejecting === 'bulk') && (
+                  {(rejecting === sheet.id || rejecting === 'bulk') && (
                     <div className="rounded-md border border-border/40 bg-card/40 p-3 mt-3 space-y-2">
                       <Textarea
                         value={reason}
                         onChange={(e) => setReason(e.target.value)}
-                        placeholder="Tell them what to fix…"
+                        placeholder={t('timeApprovals.rejectPlaceholder')}
                         rows={2}
                       />
                       <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="sm" onClick={() => { setRejecting(null); setReason('') }}>
-                          Cancel
+                          {t('common.cancel')}
                         </Button>
                         <Button
                           variant="destructive"
@@ -474,7 +471,7 @@ export function TimeApprovalsPage() {
                               await rejectSelected()
                               return
                             }
-                            const parsed = parseSheetId(t.id)
+                            const parsed = parseSheetId(sheet.id)
                             if (!parsed || !reason.trim()) return
                             await rejectMutation.mutateAsync({ ...parsed, rejectReason: reason.trim() })
                             setRejecting(null)
@@ -482,7 +479,7 @@ export function TimeApprovalsPage() {
                           }}
                           disabled={rejectMutation.isPending || reason.trim().length === 0}
                         >
-                          {rejectMutation.isPending ? 'Sending…' : 'Send rejection'}
+                          {rejectMutation.isPending ? t('timeApprovals.sending') : t('timeApprovals.sendRejection')}
                         </Button>
                       </div>
                     </div>
