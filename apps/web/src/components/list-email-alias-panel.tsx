@@ -11,7 +11,7 @@ import {
   Input,
   cn,
 } from '@rundesk/ui'
-import { Check, Copy, Mail, RefreshCcw, Trash2 } from 'lucide-react'
+import { Check, Copy, Mail, RefreshCcw, Trash2, Webhook } from 'lucide-react'
 import { api } from '../lib/api'
 
 type Alias = {
@@ -59,6 +59,22 @@ export function ListEmailAliasPanel({
     mutationFn: () => api(`/lists/${listId}/inbound-email`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['list-email-alias', listId] }),
   })
+
+  const { data: webhooks = [] } = useQuery({
+    queryKey: ['list-inbound-webhooks', listId],
+    queryFn: () => api<Array<{ id: string; name: string; token: string }>>(`/lists/${listId}/inbound-webhooks`),
+    enabled: open,
+  })
+  const createWebhook = useMutation({
+    mutationFn: () => api(`/lists/${listId}/inbound-webhooks`, { method: 'POST', body: { name: 'Inbound webhook' } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['list-inbound-webhooks', listId] }),
+  })
+  const deleteWebhook = useMutation({
+    mutationFn: (id: string) => api(`/lists/${listId}/inbound-webhooks/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['list-inbound-webhooks', listId] }),
+  })
+  const webhookUrl = (token: string) =>
+    `${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/inbound/webhook/${token}`
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -115,12 +131,66 @@ export function ListEmailAliasPanel({
           )}
         </div>
 
+        <div className="mt-4 border-t border-border/60 pt-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium flex items-center gap-1.5">
+                <Webhook className="h-3.5 w-3.5" /> Inbound webhook
+              </div>
+              <div className="text-xs text-muted-foreground">
+                POST JSON <code className="font-mono">{'{ title, description?, priority?, dueDate? }'}</code> to create a task.
+              </div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => createWebhook.mutate()} disabled={createWebhook.isPending}>
+              {createWebhook.isPending ? 'Creating…' : 'New webhook'}
+            </Button>
+          </div>
+          {webhooks.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border/70 p-3 text-xs text-muted-foreground">
+              No inbound webhooks yet.
+            </div>
+          ) : (
+            webhooks.map((w) => <WebhookRow key={w.id} url={webhookUrl(w.token)} onDelete={() => deleteWebhook.mutate(w.id)} />)
+          )}
+        </div>
+
         <DialogFooter>
           <Button variant="outline" onClick={() => void refetch()}>Refresh</Button>
           <Button onClick={() => onOpenChange(false)}>Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function WebhookRow({ url, onDelete }: { url: string; onDelete: () => void }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch {
+      // clipboard unavailable
+    }
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="h-8 text-xs font-mono" />
+      <Button variant="outline" size="sm" className="h-8 text-xs" onClick={copy}>
+        {copied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
+        {copied ? 'Copied' : 'Copy'}
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 text-xs text-rose-600 hover:text-rose-700"
+        onClick={onDelete}
+        title="Delete this webhook"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+    </div>
   )
 }
 

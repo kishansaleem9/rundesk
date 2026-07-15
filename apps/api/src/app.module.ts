@@ -30,6 +30,7 @@ import { ReportsModule } from './modules/reports/reports.module'
 import { SecurityModule } from './modules/security/security.module'
 import { ExportModule } from './modules/export/export.module'
 import { WebhooksModule } from './modules/webhooks/webhooks.module'
+import { InboundWebhooksModule } from './modules/inbound-webhooks/inbound-webhooks.module'
 import { SlackModule } from './modules/integrations/slack/slack.module'
 import { ClickUpImportModule } from './modules/integrations/clickup-import/clickup-import.module'
 import { IntegrationConnectionsModule } from './modules/integrations/connections/integration-connections.module'
@@ -97,6 +98,7 @@ import { SampleDataModule } from './modules/sample-data/sample-data.module'
     SecurityModule,
     ExportModule,
     WebhooksModule,
+    InboundWebhooksModule,
     SlackModule,
     ClickUpImportModule,
     IntegrationConnectionsModule,
