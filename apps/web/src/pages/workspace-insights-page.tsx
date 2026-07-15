@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
 
 type HealthRow = {
   project: string
@@ -37,12 +38,13 @@ type AiInsights = {
 }
 
 export function InsightsPage() {
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/insights' })
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const hour = new Date().getHours()
   const greeting =
-    hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+    hour < 12 ? t('insights.greetingMorning') : hour < 18 ? t('insights.greetingAfternoon') : t('insights.greetingEvening')
 
   // Dismissed workload suggestions, keyed by the overloaded member's name and
   // persisted per-workspace (a per-device preference) so they survive reload.
@@ -164,13 +166,13 @@ export function InsightsPage() {
     if (overview?.completionRate && overview.completionRate >= 50) {
       highlights.push({
         kind: 'win',
-        text: `${overview.completionRate}% of workspace tasks are complete.`,
+        text: t('insights.highlightCompletion', { rate: overview.completionRate }),
       })
     }
     if (overview?.overdue && overview.overdue > 0) {
       highlights.push({
         kind: 'risk',
-        text: `${overview.overdue} task${overview.overdue === 1 ? '' : 's'} overdue — review due dates.`,
+        text: tCount('insights.highlightOverdue', overview.overdue),
       })
     }
     const overloaded = (workloadQ.data ?? []).filter((p) =>
@@ -179,20 +181,27 @@ export function InsightsPage() {
     if (overloaded[0]) {
       highlights.push({
         kind: 'flag',
-        text: `${overloaded[0].name} is over capacity this week — consider rebalancing.`,
+        text: t('insights.highlightOverCapacity', { name: overloaded[0].name }),
       })
     }
 
-    let summary = `${overview?.total ?? 0} open tasks across the workspace.`
+    let summary = tCount('insights.summaryOpenTasks', overview?.total ?? 0)
     if (activeSprint) {
-      summary = `${activeSprint.name}: ${activeSprint.completedPoints} of ${activeSprint.totalPoints} story points complete.`
+      summary = t('insights.summarySprint', {
+        name: activeSprint.name,
+        completed: activeSprint.completedPoints,
+        total: activeSprint.totalPoints,
+      })
     }
     if (overview?.dueToday) {
-      summary += ` ${overview.dueToday} due today.`
+      summary += ` ${t('insights.summaryDueToday', { count: overview.dueToday })}`
     }
 
     return {
-      greeting: `${greeting}, ${user?.displayName?.split(' ')[0] ?? 'there'}.`,
+      greeting: t('insights.greeting', {
+        greeting,
+        name: user?.displayName?.split(' ')[0] ?? t('insights.thereFallback'),
+      }),
       date: new Date().toLocaleDateString(undefined, {
         weekday: 'long',
         month: 'long',
@@ -201,16 +210,16 @@ export function InsightsPage() {
       summary,
       highlights,
     }
-  }, [greeting, user, overview, activeSprint, workloadQ.data])
+  }, [greeting, user, overview, activeSprint, workloadQ.data, t, tCount])
 
   const health: HealthRow[] = useMemo(() => {
     const byProject = new Map<string, { total: number; done: number; overdue: number }>()
-    for (const t of tasksQ.data ?? []) {
-      const cur = byProject.get(t.projectName) ?? { total: 0, done: 0, overdue: 0 }
+    for (const task of tasksQ.data ?? []) {
+      const cur = byProject.get(task.projectName) ?? { total: 0, done: 0, overdue: 0 }
       cur.total += 1
-      if (t.statusCategory === 'closed' || t.status === 'done') cur.done += 1
-      if (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'done') cur.overdue += 1
-      byProject.set(t.projectName, cur)
+      if (task.statusCategory === 'closed' || task.status === 'done') cur.done += 1
+      if (task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'done') cur.overdue += 1
+      byProject.set(task.projectName, cur)
     }
     return [...byProject.entries()]
       .map(([project, stats]) => {
@@ -252,21 +261,21 @@ export function InsightsPage() {
   const fallbackSuggestions = useMemo(() => {
     const items: Array<{ text: string; cta: string }> = []
     if (overview?.overdue) {
-      items.push({ text: `Review ${overview.overdue} overdue tasks and reschedule or close them.`, cta: 'View overdue' })
+      items.push({ text: tCount('insights.fallbackReviewOverdue', overview.overdue), cta: t('insights.ctaViewOverdue') })
     }
     if (activeSprint && activeSprint.completedPoints < activeSprint.totalPoints * 0.5) {
-      items.push({ text: `${activeSprint.name} is under 50% complete — add tasks or adjust scope.`, cta: 'Open sprint' })
+      items.push({ text: t('insights.fallbackSprintUnder', { name: activeSprint.name }), cta: t('insights.ctaOpenSprint') })
     }
     const underloaded = (workloadQ.data ?? []).find((p) => p.dailyLoads.every((l) => l < p.capacity * 0.6))
     const overloaded = (workloadQ.data ?? []).find((p) => p.dailyLoads.some((l) => l > p.capacity))
     if (underloaded && overloaded) {
-      items.push({ text: `Move work from ${overloaded.name} to ${underloaded.name} to balance load.`, cta: 'Workload' })
+      items.push({ text: t('insights.fallbackMoveWork', { from: overloaded.name, to: underloaded.name }), cta: t('insights.ctaWorkload') })
     }
     return items.slice(0, 3)
-  }, [overview, activeSprint, workloadQ.data])
+  }, [overview, activeSprint, workloadQ.data, t, tCount])
 
   const shownSuggestions = ai?.suggestions?.length
-    ? ai.suggestions.map((s) => ({ text: s.detail || s.title, cta: s.cta ?? 'Open' }))
+    ? ai.suggestions.map((s) => ({ text: s.detail || s.title, cta: s.cta ?? t('insights.ctaOpen') }))
     : fallbackSuggestions
 
   const workloadSuggestions = useMemo(() => {
@@ -288,11 +297,11 @@ export function InsightsPage() {
         fromLoad,
         to: to.name,
         toLoad,
-        reasoning: `${from.name} is above daily capacity; ${to.name} has bandwidth this week.`,
+        reasoning: t('insights.workloadReasoning', { from: from.name, to: to.name }),
       })
     }
     return pairs
-  }, [workloadQ.data])
+  }, [workloadQ.data, t])
 
   const visibleWorkload = workloadSuggestions.filter((s) => !dismissedWorkload.has(s.from))
 
@@ -300,17 +309,17 @@ export function InsightsPage() {
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
       <header>
         <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-          Insights
+          {t('insights.eyebrow')}
         </div>
         <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient text-white shadow-glow animate-glow">
             <Sparkles className="h-4 w-4" />
           </span>
-          Insights
+          {t('insights.title')}
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-          Your daily briefing, project health, and team contribution analytics
-          {ai ? ' — summary and suggestions generated by Claude.' : '.'}
+          {t('insights.subtitle')}
+          {ai ? t('insights.subtitleAiSuffix') : '.'}
         </p>
       </header>
 
@@ -323,14 +332,14 @@ export function InsightsPage() {
               <Sun className="h-3.5 w-3.5 text-amber" />
               {briefing.date}
               <Badge variant="gradient" className="text-[9px] uppercase ml-1">
-                Daily briefing
+                {t('insights.dailyBriefing')}
               </Badge>
             </div>
             <h2 className="font-display text-2xl font-semibold mb-2">{briefing.greeting}</h2>
             <p className="text-sm leading-relaxed text-foreground/90">{ai?.summary ?? briefing.summary}</p>
             {ai?.health && (
               <div className="mt-2 text-xs text-muted-foreground">
-                Workspace health:{' '}
+                {t('insights.workspaceHealth')}{' '}
                 <span className="font-medium text-foreground capitalize">{ai.health.label.replace('_', ' ')}</span>{' '}
                 ({ai.health.score}/100) — {ai.health.reasoning}
               </div>
@@ -354,11 +363,11 @@ export function InsightsPage() {
           <div className="space-y-2">
             <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1">
               {ai ? <Sparkles className="h-3 w-3" /> : null}
-              {ai ? 'AI suggestions' : 'Suggestions'}
+              {ai ? t('insights.aiSuggestions') : t('insights.suggestions')}
             </div>
             {shownSuggestions.length === 0 ? (
               <div className="text-xs text-muted-foreground">
-                {aiQ.isError ? 'AI suggestions unavailable.' : 'Nothing needs attention right now.'}
+                {aiQ.isError ? t('insights.aiUnavailable') : t('insights.nothingNeedsAttention')}
               </div>
             ) : (
               shownSuggestions.map((s, i) => (
@@ -388,20 +397,20 @@ export function InsightsPage() {
           <div>
             <h2 className="font-display text-xl font-semibold flex items-center gap-2">
               <Heart className="h-4 w-4 text-pink" />
-              Project health
+              {t('insights.projectHealth')}
             </h2>
             <p className="text-xs text-muted-foreground">
-              0–100 score · on-time %, activity, blockers
+              {t('insights.projectHealthDesc')}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={goToReports}>
-            See trend in Reports
+            {t('insights.seeTrendInReports')}
           </Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           {health.length === 0 ? (
             <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
-              No project data yet. Create tasks in your spaces to see health scores.
+              {t('insights.noProjectData')}
             </Card>
           ) : (
             health.map((p) => <HealthCard key={p.project} project={p} />)
@@ -415,32 +424,32 @@ export function InsightsPage() {
           <div>
             <h2 className="font-display text-xl font-semibold flex items-center gap-2">
               <Award className="h-4 w-4 text-amber" />
-              Contribution analytics
+              {t('insights.contributionAnalytics')}
             </h2>
             <p className="text-xs text-muted-foreground">
-              Last 30 days · completed tasks and on-time rate
+              {t('insights.contributionDesc')}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => window.print()}>
-              <Printer className="h-3.5 w-3.5" /> Export PDF
+              <Printer className="h-3.5 w-3.5" /> {t('insights.exportPdf')}
             </Button>
             <Button variant="ghost" size="sm" onClick={goToReports}>
-              Open in Reports
+              {t('insights.openInReports')}
             </Button>
           </div>
         </div>
         <Card variant="glass" className="overflow-hidden p-0">
           <div className="grid grid-cols-[1fr_70px_120px_80px] text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border/40 px-4 py-2">
-            <div>Person</div>
-            <div className="text-right">Tasks</div>
-            <div className="text-right">On-time</div>
-            <div className="text-right">Open</div>
+            <div>{t('insights.colPerson')}</div>
+            <div className="text-right">{t('insights.colTasks')}</div>
+            <div className="text-right">{t('insights.colOnTime')}</div>
+            <div className="text-right">{t('insights.colOpen')}</div>
           </div>
           <ul className="divide-y divide-border/30">
             {contrib.length === 0 ? (
               <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-                No team activity in the last 30 days.
+                {t('insights.noTeamActivity')}
               </li>
             ) : (
               contrib.map((c, i) => (
@@ -480,15 +489,15 @@ export function InsightsPage() {
           <div>
             <h2 className="font-display text-lg font-semibold flex items-center gap-2">
               <Target className="h-4 w-4 text-mint" />
-              Workload balancing
+              {t('insights.workloadBalancing')}
             </h2>
-            <p className="text-xs text-muted-foreground">Redistribution opportunities from current capacity</p>
+            <p className="text-xs text-muted-foreground">{t('insights.workloadDesc')}</p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {visibleWorkload.length === 0 ? (
             <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
-              Team workload looks balanced for the next two weeks.
+              {t('insights.workloadBalanced')}
             </Card>
           ) : (
             visibleWorkload.map((s, i) => (
@@ -511,10 +520,10 @@ export function InsightsPage() {
                     className="h-6 text-[10px] flex-1"
                     onClick={() => dismissWorkload(s.from)}
                   >
-                    Dismiss
+                    {t('insights.dismiss')}
                   </Button>
                   <Button variant="gradient" size="sm" className="h-6 text-[10px] flex-1" onClick={goToReports}>
-                    Open workload
+                    {t('insights.openWorkload')}
                   </Button>
                 </div>
               </Card>
@@ -527,7 +536,14 @@ export function InsightsPage() {
 }
 
 function HealthCard({ project }: { project: HealthRow }) {
+  const { t } = useTranslation()
   const positive = project.delta.startsWith('+')
+  const blockerLabel =
+    project.dim.blockers === 'high'
+      ? t('insights.levelHigh')
+      : project.dim.blockers === 'medium'
+        ? t('insights.levelMedium')
+        : t('insights.levelLow')
   const ringColor =
     project.score >= 85 ? 'hsl(var(--success))'
     : project.score >= 70 ? 'hsl(var(--accent-violet))'
@@ -554,7 +570,7 @@ function HealthCard({ project }: { project: HealthRow }) {
           />
         </svg>
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Score</div>
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t('insights.score')}</div>
           <div className="font-display text-2xl font-semibold tabular-nums">{project.score}</div>
           <span
             className={cn(
@@ -568,9 +584,9 @@ function HealthCard({ project }: { project: HealthRow }) {
       </div>
       <div className="text-sm font-medium truncate">{project.project}</div>
       <div className="grid grid-cols-2 gap-1 mt-2 text-[10px] text-muted-foreground">
-        <span>On-time: {project.dim.onTime}%</span>
-        <span>Activity: {project.dim.activity}</span>
-        <span className="capitalize col-span-2">Blockers: {project.dim.blockers}</span>
+        <span>{t('insights.onTime', { value: project.dim.onTime })}</span>
+        <span>{t('insights.activity', { value: project.dim.activity })}</span>
+        <span className="capitalize col-span-2">{t('insights.blockers', { value: blockerLabel })}</span>
       </div>
     </Card>
   )

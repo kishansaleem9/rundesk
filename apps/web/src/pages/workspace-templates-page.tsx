@@ -3,6 +3,7 @@ import { useParams, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TaskTemplatesSection } from '../components/task-templates-section'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 import {
   Card,
   Button,
@@ -74,11 +75,12 @@ function iconFor(name: string | null): React.ElementType {
 function coverFor(name: string | null): string {
   return (name && COVERS[name]) || FALLBACK_COVER
 }
-function taskCount(t: ProjectTemplate): number {
-  return t.payload?.lists?.reduce((n, l) => n + (l.tasks?.length ?? 0), 0) ?? 0
+function taskCount(tpl: ProjectTemplate): number {
+  return tpl.payload?.lists?.reduce((n, l) => n + (l.tasks?.length ?? 0), 0) ?? 0
 }
 
 export function TemplatesPage() {
+  const { t, tCount } = useTranslation()
   const params = useParams({ from: '/app/$workspaceId/templates' }) as { workspaceId?: string }
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : null
   const [query, setQuery] = useState('')
@@ -96,16 +98,16 @@ export function TemplatesPage() {
   const counts = useMemo(
     () => ({
       all: templates.length,
-      builtin: templates.filter((t) => t.isBuiltIn).length,
-      custom: templates.filter((t) => !t.isBuiltIn).length,
+      builtin: templates.filter((tpl) => tpl.isBuiltIn).length,
+      custom: templates.filter((tpl) => !tpl.isBuiltIn).length,
     }),
     [templates],
   )
-  const filtered = templates.filter((t) => {
-    if (filter === 'builtin' && !t.isBuiltIn) return false
-    if (filter === 'custom' && t.isBuiltIn) return false
+  const filtered = templates.filter((tpl) => {
+    if (filter === 'builtin' && !tpl.isBuiltIn) return false
+    if (filter === 'custom' && tpl.isBuiltIn) return false
     const q = query.toLowerCase()
-    return t.name.toLowerCase().includes(q) || (t.description ?? '').toLowerCase().includes(q)
+    return tpl.name.toLowerCase().includes(q) || (tpl.description ?? '').toLowerCase().includes(q)
   })
 
   return (
@@ -113,27 +115,27 @@ export function TemplatesPage() {
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
-            Workspace templates
+            {t('templates.eyebrow')}
           </div>
           <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
               <LayoutTemplate className="h-4 w-4" />
             </span>
-            Templates
+            {t('nav.templates')}
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Spin up a project from a battle-tested starting point, or save an existing project as a reusable template.
+            {t('templates.subtitle')}
           </p>
         </div>
         <Button variant="gradient" size="lg" onClick={() => setSaveOpen(true)} disabled={!workspaceId}>
-          <LayoutTemplate className="h-4 w-4" /> Save project as template
+          <LayoutTemplate className="h-4 w-4" /> {t('templates.saveAsTemplate')}
         </Button>
       </header>
 
       <div className="flex flex-wrap items-center gap-3">
         <Input
           leadingIcon={<Search className="h-4 w-4" />}
-          placeholder="Search templates…"
+          placeholder={t('templates.searchPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="max-w-sm"
@@ -150,7 +152,7 @@ export function TemplatesPage() {
                   : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
               )}
             >
-              {f === 'all' ? 'All' : f === 'builtin' ? 'Built-in' : 'Custom'} ({counts[f]})
+              {f === 'all' ? t('templates.filterAll') : f === 'builtin' ? t('templates.builtin') : t('templates.custom')} ({counts[f]})
             </button>
           ))}
         </div>
@@ -160,22 +162,22 @@ export function TemplatesPage() {
 
       <div className="space-y-3">
         <div className="flex items-baseline justify-between">
-          <h2 className="font-display text-lg font-semibold">Project templates</h2>
-          <Badge variant="secondary" className="text-[10px]">{templates.length} available</Badge>
+          <h2 className="font-display text-lg font-semibold">{t('templates.projectTemplates')}</h2>
+          <Badge variant="secondary" className="text-[10px]">{tCount('templates.available', templates.length)}</Badge>
         </div>
 
         {templatesQuery.isLoading ? (
-          <Card variant="glass" className="p-6 text-sm text-muted-foreground">Loading templates…</Card>
+          <Card variant="glass" className="p-6 text-sm text-muted-foreground">{t('templates.loading')}</Card>
         ) : filtered.length === 0 ? (
           <Card variant="glass" className="p-6 text-sm text-muted-foreground">
             {query || filter !== 'all'
-              ? 'No templates match your search.'
-              : 'No templates yet. Save a project as a template to get started.'}
+              ? t('templates.noMatch')
+              : t('templates.empty')}
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((t) => (
-              <TemplateCard key={t.id} template={t} onUse={() => setApplyTemplate(t)} />
+            {filtered.map((tpl) => (
+              <TemplateCard key={tpl.id} template={tpl} onUse={() => setApplyTemplate(tpl)} />
             ))}
           </div>
         )}
@@ -200,6 +202,7 @@ export function TemplatesPage() {
 }
 
 function TemplateCard({ template, onUse }: { template: ProjectTemplate; onUse: () => void }) {
+  const { t, tCount } = useTranslation()
   const Icon = iconFor(template.icon)
   const lists = template.payload?.lists?.length ?? 0
   const tasks = taskCount(template)
@@ -212,7 +215,7 @@ function TemplateCard({ template, onUse }: { template: ProjectTemplate; onUse: (
           variant="soft"
           className="absolute top-2 right-2 text-[10px] backdrop-blur-sm bg-black/30 text-white border-transparent"
         >
-          {template.isBuiltIn ? 'Built-in' : 'Custom'}
+          {template.isBuiltIn ? t('templates.builtin') : t('templates.custom')}
         </Badge>
       </div>
       <div className="p-4">
@@ -224,10 +227,10 @@ function TemplateCard({ template, onUse }: { template: ProjectTemplate; onUse: (
         </p>
         <div className="mt-4 flex items-center justify-between gap-2">
           <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
-            <ListTree className="h-3 w-3" /> {lists} {lists === 1 ? 'list' : 'lists'} · {tasks} {tasks === 1 ? 'task' : 'tasks'}
+            <ListTree className="h-3 w-3" /> {tCount('templates.listsCount', lists)} · {tCount('templates.tasksCount', tasks)}
           </span>
           <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onUse}>
-            Use template
+            {t('templates.useTemplate')}
           </Button>
         </div>
       </div>
@@ -244,6 +247,7 @@ function ApplyTemplateDialog({
   template: ProjectTemplate | null
   onClose: () => void
 }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const open = Boolean(template)
 
@@ -268,14 +272,14 @@ function ApplyTemplateDialog({
         { method: 'POST', body: { templateId: template!.id, targetSpaceId: effectiveSpace, projectName: effectiveName } },
       ),
     onSuccess: (res) => {
-      toast.success(`Created “${effectiveName}” (${res.listsCreated} lists, ${res.tasksCreated} tasks)`)
+      toast.success(t('templates.appliedToast', { name: effectiveName, lists: res.listsCreated, tasks: res.tasksCreated }))
       handleClose()
       navigate({
         to: '/app/$workspaceId/$spaceId/$projectId',
         params: { workspaceId, spaceId: effectiveSpace, projectId: res.project.id },
       })
     },
-    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : 'Failed to apply template'),
+    onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('templates.applyError')),
   })
 
   function handleClose() {
@@ -288,26 +292,26 @@ function ApplyTemplateDialog({
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Use template: {template?.name}</DialogTitle>
+          <DialogTitle>{t('templates.useTemplateTitle', { name: template?.name ?? '' })}</DialogTitle>
           <DialogDescription>
-            Creates a new project — with all lists and task stubs — inside the space you pick.
+            {t('templates.applyDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label>Project name</Label>
+            <Label>{t('templates.projectName')}</Label>
             <Input
-              placeholder="Name for the new project"
+              placeholder={t('templates.projectNamePlaceholder')}
               value={effectiveName}
               onChange={(e) => setProjectName(e.target.value)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Target space</Label>
+            <Label>{t('templates.targetSpace')}</Label>
             {spacesQuery.isLoading ? (
-              <p className="text-xs text-muted-foreground">Loading spaces…</p>
+              <p className="text-xs text-muted-foreground">{t('templates.loadingSpaces')}</p>
             ) : spaces.length === 0 ? (
-              <p className="text-xs text-warning">No spaces yet — create a space first, then apply a template.</p>
+              <p className="text-xs text-warning">{t('templates.noSpaces')}</p>
             ) : (
               <select
                 value={effectiveSpace}
@@ -322,12 +326,12 @@ function ApplyTemplateDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>Cancel</Button>
+          <Button variant="outline" onClick={handleClose}>{t('common.cancel')}</Button>
           <Button
             onClick={() => apply.mutate()}
             disabled={apply.isPending || !effectiveName.trim() || !effectiveSpace}
           >
-            <Check className="h-3.5 w-3.5" /> {apply.isPending ? 'Applying…' : 'Apply template'}
+            <Check className="h-3.5 w-3.5" /> {apply.isPending ? t('templates.applying') : t('templates.applyTemplate')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -344,6 +348,7 @@ function SaveTemplateDialog({
   open: boolean
   onOpenChange: (v: boolean) => void
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [spaceId, setSpaceId] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -373,13 +378,13 @@ function SaveTemplateDialog({
         body: { projectId: effectiveProject, name: name.trim(), description: description.trim() || undefined },
       }),
     onSuccess: () => {
-      toast.success('Saved as template')
+      toast.success(t('templates.savedToast'))
       qc.invalidateQueries({ queryKey: ['project-templates', workspaceId] })
       reset()
       onOpenChange(false)
     },
     onError: (e: unknown) =>
-      toast.error(e instanceof ApiError ? e.message : 'Failed to save template'),
+      toast.error(e instanceof ApiError ? e.message : t('templates.saveError')),
   })
 
   function reset() {
@@ -393,16 +398,16 @@ function SaveTemplateDialog({
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o) }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Save project as template</DialogTitle>
+          <DialogTitle>{t('templates.saveAsTemplate')}</DialogTitle>
           <DialogDescription>
-            Snapshot an existing project’s lists and tasks into a reusable template (admin only).
+            {t('templates.saveDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label>Space</Label>
+            <Label>{t('templates.space')}</Label>
             {spaces.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{spacesQuery.isLoading ? 'Loading…' : 'No spaces yet.'}</p>
+              <p className="text-xs text-muted-foreground">{spacesQuery.isLoading ? t('common.loading') : t('templates.noSpacesShort')}</p>
             ) : (
               <select
                 value={effectiveSpace}
@@ -414,11 +419,11 @@ function SaveTemplateDialog({
             )}
           </div>
           <div className="space-y-1.5">
-            <Label>Project</Label>
+            <Label>{t('templates.project')}</Label>
             {projectsQuery.isLoading ? (
-              <p className="text-xs text-muted-foreground">Loading projects…</p>
+              <p className="text-xs text-muted-foreground">{t('templates.loadingProjects')}</p>
             ) : projects.length === 0 ? (
-              <p className="text-xs text-warning">No projects in this space.</p>
+              <p className="text-xs text-warning">{t('templates.noProjects')}</p>
             ) : (
               <select
                 value={effectiveProject}
@@ -430,21 +435,21 @@ function SaveTemplateDialog({
             )}
           </div>
           <div className="space-y-1.5">
-            <Label>Template name</Label>
-            <Input placeholder="e.g. Engineering sprint" value={name} onChange={(e) => setName(e.target.value)} />
+            <Label>{t('templates.templateName')}</Label>
+            <Input placeholder={t('templates.templateNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-1.5">
-            <Label>Description (optional)</Label>
-            <Input placeholder="What is this template for?" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Label>{t('templates.descriptionOptional')}</Label>
+            <Input placeholder={t('templates.descriptionPlaceholder')} value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => { reset(); onOpenChange(false) }}>Cancel</Button>
+          <Button variant="outline" onClick={() => { reset(); onOpenChange(false) }}>{t('common.cancel')}</Button>
           <Button
             onClick={() => save.mutate()}
             disabled={save.isPending || !effectiveProject || !name.trim()}
           >
-            <Check className="h-3.5 w-3.5" /> {save.isPending ? 'Saving…' : 'Save template'}
+            <Check className="h-3.5 w-3.5" /> {save.isPending ? t('common.saving') : t('templates.saveTemplate')}
           </Button>
         </DialogFooter>
       </DialogContent>

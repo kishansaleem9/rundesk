@@ -4,6 +4,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Button, Card, Input } from '@rundesk/ui'
 import { Upload, FileText, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type Preview = {
   totalRows: number
@@ -25,6 +26,7 @@ type ImportResult = {
 }
 
 export function ImportPage() {
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
   const [csv, setCsv] = useState<string>('')
   const [filename, setFilename] = useState<string>('')
@@ -66,16 +68,16 @@ export function ImportPage() {
   return (
     <div className="container mx-auto max-w-4xl p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Import from ClickUp</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t('import.title')}</h1>
         <p className="text-muted-foreground mt-1">
-          Upload a CSV exported from ClickUp and we&apos;ll recreate your spaces, lists, and tasks here.
+          {t('import.subtitle')}
         </p>
       </div>
 
       <Card className="p-6 space-y-4">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Upload className="h-4 w-4" />
-          1. Upload your ClickUp CSV export
+          {t('import.step1Title')}
         </div>
         <input
           type="file"
@@ -86,7 +88,7 @@ export function ImportPage() {
         {filename && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <FileText className="h-4 w-4" />
-            {filename} ({(csv.length / 1024).toFixed(1)} KB)
+            {t('import.fileInfo', { name: filename, size: (csv.length / 1024).toFixed(1) })}
           </div>
         )}
         <Button
@@ -97,7 +99,7 @@ export function ImportPage() {
           {previewMut.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin mr-2" />
           ) : null}
-          Preview
+          {t('import.preview')}
         </Button>
         {previewMut.isError && (
           <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
@@ -111,17 +113,17 @@ export function ImportPage() {
         <Card className="p-6 space-y-4">
           <div className="flex items-center gap-2 text-sm font-medium">
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-            2. Review preview
+            {t('import.step2Title')}
           </div>
           <div className="grid grid-cols-3 gap-4">
-            <Stat label="Total rows" value={preview.totalRows} />
-            <Stat label="Lists detected" value={preview.uniqueLists.length} />
-            <Stat label="Sample shown" value={preview.sample.length} />
+            <Stat label={t('import.totalRows')} value={preview.totalRows} />
+            <Stat label={t('import.listsDetected')} value={preview.uniqueLists.length} />
+            <Stat label={t('import.sampleShown')} value={preview.sample.length} />
           </div>
           {preview.uniqueLists.length > 0 && (
             <div>
               <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
-                Lists to create
+                {t('import.listsToCreate')}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {preview.uniqueLists.map((l) => (
@@ -137,7 +139,7 @@ export function ImportPage() {
           )}
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
-              Sample tasks
+              {t('import.sampleTasks')}
             </div>
             <div className="rounded-md border divide-y">
               {preview.sample.map((s, i) => (
@@ -155,7 +157,7 @@ export function ImportPage() {
           </div>
 
           <div className="space-y-2 pt-2">
-            <label className="text-sm font-medium">Project name</label>
+            <label className="text-sm font-medium">{t('import.projectName')}</label>
             <Input
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
@@ -171,10 +173,10 @@ export function ImportPage() {
             {importMut.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Importing {preview.totalRows} tasks...
+                {tCount('import.importing', preview.totalRows)}
               </>
             ) : (
-              `Start import (${preview.totalRows} tasks)`
+              tCount('import.startImport', preview.totalRows)
             )}
           </Button>
           {importMut.isError && (
@@ -190,18 +192,18 @@ export function ImportPage() {
         <Card className="p-6 space-y-4">
           <div className="flex items-center gap-2 text-sm font-medium">
             <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-            Import complete!
+            {t('import.completeTitle')}
           </div>
           <div className="grid grid-cols-4 gap-4">
-            <Stat label="Spaces" value={result.spacesCreated} />
-            <Stat label="Projects" value={result.projectsCreated} />
-            <Stat label="Lists" value={result.listsCreated} />
-            <Stat label="Tasks" value={result.tasksCreated} />
+            <Stat label={t('import.spaces')} value={result.spacesCreated} />
+            <Stat label={t('import.projects')} value={result.projectsCreated} />
+            <Stat label={t('import.lists')} value={result.listsCreated} />
+            <Stat label={t('import.tasks')} value={result.tasksCreated} />
           </div>
           {result.errors.length > 0 && (
             <details className="rounded-md border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm">
               <summary className="font-medium cursor-pointer">
-                {result.errors.length} row{result.errors.length === 1 ? '' : 's'} skipped
+                {tCount('import.rowsSkipped', result.errors.length)}
               </summary>
               <ul className="mt-2 space-y-1 list-disc list-inside text-xs text-muted-foreground">
                 {result.errors.slice(0, 50).map((e, i) => (
@@ -220,7 +222,7 @@ export function ImportPage() {
                 setResult(null)
               }}
             >
-              Import another file
+              {t('import.importAnother')}
             </Button>
           </div>
         </Card>

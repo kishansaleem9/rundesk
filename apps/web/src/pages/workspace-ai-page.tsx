@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type GeneratedTask = {
   title: string
@@ -34,7 +35,43 @@ type ExtractedTask = {
 }
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 
+// `labelKey` references an i18n catalog entry; the raw `value` is the
+// locale-independent priority identifier persisted to / compared against the API.
+const PRIORITY_OPTIONS = [
+  { value: 'urgent', labelKey: 'ai.priorityUrgent' },
+  { value: 'high', labelKey: 'ai.priorityHigh' },
+  { value: 'normal', labelKey: 'ai.priorityNormal' },
+  { value: 'low', labelKey: 'ai.priorityLow' },
+] as const
+
+function priorityLabelKey(value: string): TranslationKey {
+  switch (value) {
+    case 'urgent':
+      return 'ai.priorityUrgent'
+    case 'high':
+      return 'ai.priorityHigh'
+    case 'low':
+      return 'ai.priorityLow'
+    default:
+      return 'ai.priorityNormal'
+  }
+}
+
+// Writing-assistant modes. `id` is the locale-independent value sent to the API;
+// `labelKey` is the translated button/label text.
+const WRITING_MODES = [
+  { id: 'improve', labelKey: 'ai.modeImprove' },
+  { id: 'shorten', labelKey: 'ai.modeShorten' },
+  { id: 'expand', labelKey: 'ai.modeExpand' },
+  { id: 'format', labelKey: 'ai.modeFormat' },
+] as const
+
+function writingModeLabelKey(mode: string): TranslationKey {
+  return WRITING_MODES.find((m) => m.id === mode)?.labelKey ?? 'ai.modeImprove'
+}
+
 export function AiPage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
   const [activeTab, setActiveTab] = useState<'chat' | 'generate' | 'notes' | 'writing'>('chat')
 
@@ -46,9 +83,9 @@ export function AiPage() {
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="font-display text-2xl font-semibold leading-tight">Rundesk AI</h1>
+            <h1 className="font-display text-2xl font-semibold leading-tight">{t('ai.title')}</h1>
             <p className="text-xs text-muted-foreground">
-              Powered by Claude — knows everything in your workspace
+              {t('ai.subtitle')}
             </p>
           </div>
         </div>
@@ -58,10 +95,10 @@ export function AiPage() {
       <div className="flex border-b border-border/40 px-6 gap-1 overflow-x-auto scrollbar-none">
         {(
           [
-            { id: 'chat', label: 'Chat', icon: MessageSquare },
-            { id: 'generate', label: 'Generate task', icon: Wand2 },
-            { id: 'notes', label: 'Meeting notes', icon: FileText },
-            { id: 'writing', label: 'Writing', icon: Zap },
+            { id: 'chat', labelKey: 'ai.tabChat', icon: MessageSquare },
+            { id: 'generate', labelKey: 'ai.tabGenerate', icon: Wand2 },
+            { id: 'notes', labelKey: 'ai.tabNotes', icon: FileText },
+            { id: 'writing', labelKey: 'ai.tabWriting', icon: Zap },
           ] as const
         ).map((tab) => (
           <button
@@ -75,7 +112,7 @@ export function AiPage() {
             )}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {tab.label}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>
@@ -95,6 +132,7 @@ export function AiPage() {
 // ─── Task Generator ───────────────────────────────────────────────────────────
 
 function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const [prompt, setPrompt] = useState('')
   const [result, setResult] = useState<GeneratedTask | null>(null)
   const [saving, setSaving] = useState(false)
@@ -136,9 +174,9 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
     <div className="p-6 max-w-2xl overflow-auto h-full">
       <div className="space-y-4">
         <div>
-          <h2 className="font-semibold mb-1">Generate task from prompt</h2>
+          <h2 className="font-semibold mb-1">{t('ai.generateTitle')}</h2>
           <p className="text-sm text-muted-foreground">
-            Describe what you want to do in plain language — AI will generate a complete task with subtasks, priority, and description.
+            {t('ai.generateDesc')}
           </p>
         </div>
 
@@ -146,7 +184,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
           <Input
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Fix the login page timeout bug on mobile"
+            placeholder={t('ai.generatePlaceholder')}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && prompt.trim()) generate.mutate()
             }}
@@ -174,7 +212,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
                     result.priority === 'low' && 'bg-gray-100 text-gray-700',
                   )}
                 >
-                  {result.priority}
+                  {t(priorityLabelKey(result.priority))}
                 </span>
                 {result.estimatedHours && (
                   <span className="ml-2 text-xs text-muted-foreground">~{result.estimatedHours}h</span>
@@ -188,7 +226,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
 
             {result.subtasks.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">Subtasks</p>
+                <p className="text-xs font-medium text-muted-foreground mb-1">{t('ai.subtasks')}</p>
                 <ul className="space-y-1">
                   {result.subtasks.map((s, i) => (
                     <li key={i} className="text-sm flex items-start gap-2">
@@ -207,11 +245,11 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
                 disabled={saving || saved}
               >
                 {saved ? (
-                  <><CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-500" /> Saved</>
+                  <><CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-500" /> {t('ai.saved')}</>
                 ) : saving ? (
-                  <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> Saving…</>
+                  <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> {t('common.saving')}</>
                 ) : (
-                  'Save as task'
+                  t('ai.saveAsTask')
                 )}
               </Button>
               <Button
@@ -219,7 +257,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
                 size="sm"
                 onClick={() => generate.mutate()}
               >
-                Regenerate
+                {t('ai.regenerate')}
               </Button>
             </div>
           </Card>
@@ -232,6 +270,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
 // ─── Meeting Notes ────────────────────────────────────────────────────────────
 
 function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
+  const { t, tCount } = useTranslation()
   const [notes, setNotes] = useState('')
   const [tasks, setTasks] = useState<ExtractedTask[] | null>(null)
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -360,7 +399,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
   async function saveSelectedTasks() {
     if (!tasks || selected.size === 0) return
     if (!targetListId) {
-      setSaveError('Select a destination list before saving tasks.')
+      setSaveError(t('ai.errorSelectList'))
       return
     }
     setSaving(true)
@@ -394,13 +433,13 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
           failedIndexes.add(idx)
           failures.push({
             title: task.title,
-            reason: error instanceof Error ? error.message : 'Task creation failed',
+            reason: error instanceof Error ? error.message : t('ai.taskCreationFailed'),
           })
         }
       }
       if (failures.length > 0) {
         setFailedItems(failures)
-        setSaveError(`${failures.length} task${failures.length === 1 ? '' : 's'} failed to save.`)
+        setSaveError(tCount('ai.tasksFailed', failures.length))
       }
       setSavedCount(successCount)
       setSelected(failedIndexes)
@@ -436,16 +475,16 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="p-6 max-w-2xl overflow-auto h-full space-y-4">
       <div>
-        <h2 className="font-semibold mb-1">Meeting notes → tasks</h2>
+        <h2 className="font-semibold mb-1">{t('ai.notesTitle')}</h2>
         <p className="text-sm text-muted-foreground">
-          Paste your meeting notes and AI will extract all action items as tasks.
+          {t('ai.notesDesc')}
         </p>
       </div>
 
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="Paste meeting notes here…&#10;&#10;e.g.&#10;- John will fix the login bug by Friday&#10;- Sarah needs to review the design mockups&#10;- Follow up with client about requirements"
+        placeholder={t('ai.notesPlaceholder')}
         rows={8}
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
       />
@@ -455,15 +494,15 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
         disabled={!notes.trim() || extract.isPending}
       >
         {extract.isPending ? (
-          <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> Extracting…</>
+          <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> {t('ai.extracting')}</>
         ) : (
-          <><Wand2 className="h-4 w-4 mr-1.5" /> Extract action items</>
+          <><Wand2 className="h-4 w-4 mr-1.5" /> {t('ai.extractActionItems')}</>
         )}
       </Button>
 
       {tasks && tasks.length === 0 && (
         <Card className="p-4 text-center text-muted-foreground text-sm">
-          No action items found in these notes.
+          {t('ai.noActionItems')}
         </Card>
       )}
 
@@ -473,26 +512,26 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
             <div className="space-y-3">
               <Card className="p-3">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                  Save preview
+                  {t('ai.savePreview')}
                 </p>
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  <p>Selected: <span className="font-medium text-foreground">{selected.size}</span></p>
-                  <p>Manual assignee: <span className="font-medium text-foreground">{previewSummary.manualAssignee}</span></p>
-                  <p>Auto assignee: <span className="font-medium text-foreground">{previewSummary.autoAssignee}</span></p>
-                  <p>Unassigned: <span className="font-medium text-foreground">{previewSummary.unassigned}</span></p>
-                  <p>Due overrides: <span className="font-medium text-foreground">{previewSummary.dueOverride}</span></p>
-                  <p>Priority overrides: <span className="font-medium text-foreground">{previewSummary.priorityOverride}</span></p>
+                  <p>{t('ai.previewSelected')} <span className="font-medium text-foreground">{selected.size}</span></p>
+                  <p>{t('ai.previewManualAssignee')} <span className="font-medium text-foreground">{previewSummary.manualAssignee}</span></p>
+                  <p>{t('ai.previewAutoAssignee')} <span className="font-medium text-foreground">{previewSummary.autoAssignee}</span></p>
+                  <p>{t('ai.previewUnassigned')} <span className="font-medium text-foreground">{previewSummary.unassigned}</span></p>
+                  <p>{t('ai.previewDueOverrides')} <span className="font-medium text-foreground">{previewSummary.dueOverride}</span></p>
+                  <p>{t('ai.previewPriorityOverrides')} <span className="font-medium text-foreground">{previewSummary.priorityOverride}</span></p>
                 </div>
               </Card>
               <div className="space-y-1">
-                <p className="text-sm font-medium">Bulk assignee override for selected</p>
+                <p className="text-sm font-medium">{t('ai.bulkAssignee')}</p>
                 <div className="flex items-center gap-2">
                   <select
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                     value={bulkAssigneeOverride}
                     onChange={(e) => setBulkAssigneeOverride(e.target.value)}
                   >
-                    <option value="">Choose member</option>
+                    <option value="">{t('ai.chooseMember')}</option>
                     {(membersQuery.data ?? []).map((member) => (
                       <option key={member.userId} value={member.userId}>
                         {member.displayName || member.email}
@@ -514,7 +553,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                       })
                     }}
                   >
-                    Apply
+                    {t('ai.apply')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -529,12 +568,12 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                       })
                     }}
                   >
-                    Clear
+                    {t('ai.clear')}
                   </Button>
                 </div>
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-medium">Bulk due date override for selected</p>
+                <p className="text-sm font-medium">{t('ai.bulkDueDate')}</p>
                 <div className="flex items-center gap-2">
                   <Input
                     type="date"
@@ -556,7 +595,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                       })
                     }}
                   >
-                    Apply
+                    {t('ai.apply')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -571,22 +610,21 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                       })
                     }}
                   >
-                    Clear
+                    {t('ai.clear')}
                   </Button>
                 </div>
               </div>
               <div className="space-y-1">
-                <p className="text-sm font-medium">Bulk priority override for selected</p>
+                <p className="text-sm font-medium">{t('ai.bulkPriority')}</p>
                 <div className="flex items-center gap-2">
                   <select
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                     value={bulkPriorityOverride}
                     onChange={(e) => setBulkPriorityOverride(e.target.value as TaskPriority)}
                   >
-                    <option value="urgent">Urgent</option>
-                    <option value="high">High</option>
-                    <option value="normal">Normal</option>
-                    <option value="low">Low</option>
+                    {PRIORITY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+                    ))}
                   </select>
                   <Button
                     variant="outline"
@@ -599,7 +637,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                       })
                     }
                   >
-                    Apply
+                    {t('ai.apply')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -612,20 +650,20 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                       })
                     }
                   >
-                    Clear
+                    {t('ai.clear')}
                   </Button>
                 </div>
               </div>
             </div>
           )}
           <div className="space-y-1">
-            <p className="text-sm font-medium">Destination list</p>
+            <p className="text-sm font-medium">{t('ai.destinationList')}</p>
               <select
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                 value={targetListId}
                 onChange={(e) => setTargetListId(e.target.value)}
               >
-                <option value="">Select destination list</option>
+                <option value="">{t('ai.selectDestinationList')}</option>
                 {(listOptionsQuery.data ?? []).map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
@@ -633,7 +671,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                 ))}
               </select>
               <p className="text-[11px] text-muted-foreground">
-                This selection is remembered for future meeting-note saves in this workspace.
+                {t('ai.destinationRemembered')}
               </p>
               <div className="pt-1">
                 <Button
@@ -652,12 +690,12 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                     }
                   }}
                 >
-                  Reset defaults
+                  {t('ai.resetDefaults')}
                 </Button>
               </div>
           </div>
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">{tasks.length} action items found</p>
+            <p className="text-sm font-medium">{tCount('ai.actionItemsFound', tasks.length)}</p>
             <Button
               variant="ghost"
               size="sm"
@@ -667,7 +705,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                   : setSelected(new Set(tasks.map((_, i) => i)))
               }
             >
-              {selected.size === tasks.length ? 'Deselect all' : 'Select all'}
+              {selected.size === tasks.length ? t('ai.deselectAll') : t('ai.selectAll')}
             </Button>
           </div>
           {tasks.map((task, i) => (
@@ -692,20 +730,20 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                   <p className="font-medium text-sm">{task.title}</p>
                   {task.assigneeName && (
                     <p className="text-xs text-muted-foreground">
-                      Assigned to: {task.assigneeName}
+                      {t('ai.assignedTo')} {task.assigneeName}
                       {resolveAssignee(task.assigneeName) ? (
                         <span className="ml-1 text-emerald-600 dark:text-emerald-400">
                           → {resolveAssignee(task.assigneeName)?.displayName}
                         </span>
                       ) : (
                         <span className="ml-1 text-amber-700 dark:text-amber-300">
-                          (unmatched)
+                          {t('ai.unmatched')}
                         </span>
                       )}
                     </p>
                   )}
                   <div className="mt-1">
-                    <label className="text-[11px] text-muted-foreground block mb-1">Assignee override</label>
+                    <label className="text-[11px] text-muted-foreground block mb-1">{t('ai.assigneeOverride')}</label>
                     <select
                       className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
                       value={assigneeOverrides[i] ?? ''}
@@ -716,7 +754,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                         }))
                       }
                     >
-                      <option value="">Auto (use extracted/matched)</option>
+                      <option value="">{t('ai.autoUseExtracted')}</option>
                       {(membersQuery.data ?? []).map((member) => (
                         <option key={member.userId} value={member.userId}>
                           {member.displayName || member.email}
@@ -725,7 +763,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                     </select>
                   </div>
                   <div className="mt-1">
-                    <label className="text-[11px] text-muted-foreground block mb-1">Due date override</label>
+                    <label className="text-[11px] text-muted-foreground block mb-1">{t('ai.dueDateOverride')}</label>
                     <Input
                       type="date"
                       value={dueDateOverrides[i] ?? ''}
@@ -738,7 +776,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                     />
                   </div>
                   <div className="mt-1">
-                    <label className="text-[11px] text-muted-foreground block mb-1">Priority override</label>
+                    <label className="text-[11px] text-muted-foreground block mb-1">{t('ai.priorityOverride')}</label>
                     <select
                       className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
                       value={priorityOverrides[i] ?? ''}
@@ -749,15 +787,14 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                         }))
                       }
                     >
-                      <option value="">Auto ({task.priority})</option>
-                      <option value="urgent">Urgent</option>
-                      <option value="high">High</option>
-                      <option value="normal">Normal</option>
-                      <option value="low">Low</option>
+                      <option value="">{t('ai.autoPriority', { priority: t(priorityLabelKey(task.priority)) })}</option>
+                      {PRIORITY_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+                      ))}
                     </select>
                   </div>
                   {task.dueDate && (
-                    <p className="text-xs text-muted-foreground">Due: {task.dueDate}</p>
+                    <p className="text-xs text-muted-foreground">{t('ai.due', { date: task.dueDate })}</p>
                   )}
                 </div>
                 <span
@@ -769,7 +806,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
                     task.priority === 'low' && 'bg-gray-100 text-gray-700',
                   )}
                 >
-                  {task.priority}
+                  {t(priorityLabelKey(task.priority))}
                 </span>
               </div>
             </Card>
@@ -778,19 +815,19 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
             <div className="flex items-center gap-2">
               <Button onClick={saveSelectedTasks} disabled={saving || !targetListId}>
                 {saving ? (
-                  <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> Saving…</>
+                  <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> {t('common.saving')}</>
                 ) : (
-                  `Save ${selected.size} task${selected.size !== 1 ? 's' : ''}`
+                  tCount('ai.saveTasks', selected.size)
                 )}
               </Button>
               {!targetListId && (
                 <span className="text-xs text-amber-700 dark:text-amber-300">
-                  Select a destination list to enable saving.
+                  {t('ai.selectListToEnable')}
                 </span>
               )}
               {savedCount > 0 && (
                 <span className="text-xs text-emerald-600 dark:text-emerald-400">
-                  Saved {savedCount} task{savedCount !== 1 ? 's' : ''}.
+                  {tCount('ai.savedTasks', savedCount)}
                 </span>
               )}
             </div>
@@ -802,7 +839,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
           )}
           {failedItems.length > 0 && (
             <Card className="p-3 space-y-1">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Failed items</p>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('ai.failedItems')}</p>
               {failedItems.map((item, idx) => (
                 <p key={`${item.title}-${idx}`} className="text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">{item.title}</span>: {item.reason}
@@ -819,6 +856,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
 // ─── Writing Assistant ────────────────────────────────────────────────────────
 
 function WritingTab() {
+  const { t } = useTranslation()
   const [text, setText] = useState('')
   const [mode, setMode] = useState<'improve' | 'shorten' | 'expand' | 'format'>('improve')
   const [result, setResult] = useState('')
@@ -838,21 +876,14 @@ function WritingTab() {
   return (
     <div className="p-6 max-w-2xl overflow-auto h-full space-y-4">
       <div>
-        <h2 className="font-semibold mb-1">Writing assistant</h2>
+        <h2 className="font-semibold mb-1">{t('ai.writingTitle')}</h2>
         <p className="text-sm text-muted-foreground">
-          Paste any text and let AI improve it for you.
+          {t('ai.writingDesc')}
         </p>
       </div>
 
       <div className="flex gap-2">
-        {(
-          [
-            { id: 'improve', label: 'Improve' },
-            { id: 'shorten', label: 'Shorten' },
-            { id: 'expand', label: 'Expand' },
-            { id: 'format', label: 'Format' },
-          ] as const
-        ).map((m) => (
+        {WRITING_MODES.map((m) => (
           <button
             key={m.id}
             onClick={() => setMode(m.id)}
@@ -863,7 +894,7 @@ function WritingTab() {
                 : 'border-border text-muted-foreground hover:text-foreground',
             )}
           >
-            {m.label}
+            {t(m.labelKey)}
           </button>
         ))}
       </div>
@@ -871,7 +902,7 @@ function WritingTab() {
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="Paste your text here…"
+        placeholder={t('ai.writingPlaceholder')}
         rows={6}
         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
       />
@@ -881,9 +912,9 @@ function WritingTab() {
         disabled={!text.trim() || improve.isPending}
       >
         {improve.isPending ? (
-          <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> Processing…</>
+          <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> {t('ai.processing')}</>
         ) : (
-          <><Wand2 className="h-4 w-4 mr-1.5" /> {mode.charAt(0).toUpperCase() + mode.slice(1)}</>
+          <><Wand2 className="h-4 w-4 mr-1.5" /> {t(writingModeLabelKey(mode))}</>
         )}
       </Button>
 
@@ -893,13 +924,13 @@ function WritingTab() {
           <div className="flex gap-2 mt-3">
             <Button variant="outline" size="sm" onClick={copy}>
               {copied ? (
-                <><CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-500" /> Copied</>
+                <><CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-500" /> {t('ai.copied')}</>
               ) : (
-                <><Copy className="h-3.5 w-3.5 mr-1" /> Copy</>
+                <><Copy className="h-3.5 w-3.5 mr-1" /> {t('ai.copy')}</>
               )}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => { setText(result); setResult('') }}>
-              Use this text
+              {t('ai.useThisText')}
             </Button>
           </div>
         </Card>
