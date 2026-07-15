@@ -351,6 +351,13 @@
       "when": 1900000046000,
       "tag": "0049_custom_domain_verify",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1900000047000,
+      "tag": "0050_slack_routing_rules",
+      "breakpoints": true
     }
   ]
 }

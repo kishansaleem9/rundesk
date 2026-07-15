@@ -131,7 +131,9 @@ export class TasksService {
       console.error(`[webhooks.fire] ${eventType} failed:`, e)
     }
     try {
-      await this.slack.notify(workspaceId, eventType, this.formatSlackMessage(eventType, payload))
+      await this.slack.notify(workspaceId, eventType, this.formatSlackMessage(eventType, payload), {
+        projectId: triggerCtx.projectId,
+      })
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error(`[slack.notify] ${eventType} failed:`, e)

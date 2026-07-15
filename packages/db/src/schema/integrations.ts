@@ -24,6 +24,29 @@ export const slackIntegrations = pgTable('slack_integrations', {
   updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+/**
+ * Per-channel Slack routing rules (Plan §12): route events (optionally scoped to
+ * one project) to different Slack channels/webhooks, in addition to the single
+ * default integration above. projectId FK is declared in the migration to avoid
+ * a projects<->integrations import cycle.
+ */
+export const slackRoutingRules = pgTable('slack_routing_rules', {
+  id:           uuid('id').primaryKey().defaultRandom(),
+  workspaceId:  uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  webhookUrl:   text('webhook_url').notNull(),
+  channelName:  text('channel_name'),
+  // Null = every project; otherwise only events for this project.
+  projectId:    uuid('project_id'),
+  eventFilters: text('event_filters').array().notNull().default([]),
+  isEnabled:    boolean('is_enabled').notNull().default(true),
+  createdById:  uuid('created_by_id').references(() => users.id),
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const slackRoutingRulesRelations = relations(slackRoutingRules, ({ one }) => ({
+  workspace: one(workspaces, { fields: [slackRoutingRules.workspaceId], references: [workspaces.id] }),
+}))
+
 export const slackIntegrationsRelations = relations(slackIntegrations, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [slackIntegrations.workspaceId],

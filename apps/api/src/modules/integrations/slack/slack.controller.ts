@@ -53,4 +53,28 @@ export class SlackController {
   test(@Param('workspaceId') workspaceId: string) {
     return this.slack.test(workspaceId)
   }
+
+  @Get('rules')
+  @ApiOperation({ summary: 'List per-channel Slack routing rules' })
+  listRules(@Param('workspaceId') workspaceId: string) {
+    return this.slack.listRules(workspaceId)
+  }
+
+  @Post('rules')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Add a per-channel Slack routing rule (admin only)' })
+  addRule(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
+    @Body() body: { webhookUrl: string; channelName?: string; projectId?: string | null; eventFilters?: string[] },
+  ) {
+    return this.slack.addRule(workspaceId, user.id, body)
+  }
+
+  @Delete('rules/:ruleId')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Delete a Slack routing rule (admin only)' })
+  removeRule(@Param('workspaceId') workspaceId: string, @Param('ruleId') ruleId: string) {
+    return this.slack.removeRule(ruleId, workspaceId)
+  }
 }

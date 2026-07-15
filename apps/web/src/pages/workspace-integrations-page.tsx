@@ -93,6 +93,11 @@ export function IntegrationsMarketplacePage() {
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [slackWebhookUrl, setSlackWebhookUrl] = useState('')
   const [slackChannelName, setSlackChannelName] = useState('')
+  // Per-channel routing rule draft.
+  const [ruleWebhook, setRuleWebhook] = useState('')
+  const [ruleEvents, setRuleEvents] = useState('')
+  const [ruleSpaceId, setRuleSpaceId] = useState('')
+  const [ruleProjectId, setRuleProjectId] = useState('')
   const [calendarSyncOpen, setCalendarSyncOpen] = useState(false)
   const providersQuery = useQuery({
     queryKey: ['integration-provider-catalog', workspaceId],
@@ -179,6 +184,46 @@ export function IntegrationsMarketplacePage() {
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['integration-connections', workspaceId] })
     },
+  })
+  const slackRulesQuery = useQuery({
+    queryKey: ['slack-rules', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; channelName: string | null; projectId: string | null; eventFilters: string[]; webhookUrlHint: string }>>(
+        `/workspaces/${workspaceId}/integrations/slack/rules`,
+      ),
+    enabled: !!slackQuery.data,
+  })
+  const ruleSpacesQuery = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
+    enabled: !!slackQuery.data,
+  })
+  const ruleProjectsQuery = useQuery({
+    queryKey: ['projects', ruleSpaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/projects/space/${ruleSpaceId}`),
+    enabled: !!ruleSpaceId,
+  })
+  const addSlackRule = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/integrations/slack/rules`, {
+        method: 'POST',
+        body: {
+          webhookUrl: ruleWebhook,
+          projectId: ruleProjectId || null,
+          eventFilters: ruleEvents.split(',').map((s) => s.trim()).filter(Boolean),
+        },
+      }),
+    onSuccess: async () => {
+      setRuleWebhook('')
+      setRuleEvents('')
+      setRuleSpaceId('')
+      setRuleProjectId('')
+      await qc.invalidateQueries({ queryKey: ['slack-rules', workspaceId] })
+    },
+  })
+  const removeSlackRule = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/integrations/slack/rules/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['slack-rules', workspaceId] }),
   })
   const connectSlack = useMutation({
     mutationFn: () =>
@@ -450,6 +495,77 @@ export function IntegrationsMarketplacePage() {
                   <p className="text-xs text-muted-foreground">
                     Current webhook: <span className="font-mono">{slackQuery.data.webhookUrlHint}</span>
                   </p>
+                ) : null}
+
+                {slackQuery.data ? (
+                  <div className="mt-2 rounded-md border border-border/60 p-3 space-y-2">
+                    <div className="text-xs font-medium">Per-channel routing rules</div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Route specific events (and optionally one project) to a different channel/webhook.
+                    </p>
+                    {(slackRulesQuery.data ?? []).map((r) => (
+                      <div key={r.id} className="flex items-center gap-2 text-xs rounded border border-border/50 px-2 py-1.5">
+                        <span className="font-mono">{r.webhookUrlHint}</span>
+                        <span className="text-muted-foreground">
+                          {r.eventFilters.length ? r.eventFilters.join(', ') : 'all events'}
+                          {r.projectId ? ' · 1 project' : ''}
+                        </span>
+                        <button
+                          className="ml-auto text-rose-500 hover:text-rose-600"
+                          onClick={() => removeSlackRule.mutate(r.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <Input
+                      placeholder="https://hooks.slack.com/services/... (rule webhook)"
+                      value={ruleWebhook}
+                      onChange={(e) => setRuleWebhook(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                    <Input
+                      placeholder="Events, comma-separated (e.g. task.created, task.status_changed) — blank = all"
+                      value={ruleEvents}
+                      onChange={(e) => setRuleEvents(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={ruleSpaceId}
+                        onChange={(e) => {
+                          setRuleSpaceId(e.target.value)
+                          setRuleProjectId('')
+                        }}
+                        className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-xs"
+                      >
+                        <option value="">All projects</option>
+                        {(ruleSpacesQuery.data ?? []).map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={ruleProjectId}
+                        onChange={(e) => setRuleProjectId(e.target.value)}
+                        disabled={!ruleSpaceId}
+                        className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
+                      >
+                        <option value="">Whole space</option>
+                        {(ruleProjectsQuery.data ?? []).map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        disabled={!ruleWebhook.trim() || addSlackRule.isPending}
+                        onClick={() => addSlackRule.mutate()}
+                      >
+                        Add rule
+                      </Button>
+                    </div>
+                  </div>
                 ) : null}
               </>
             ) : null}

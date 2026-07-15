@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { eq } from 'drizzle-orm'
-import { slackIntegrations } from '@rundesk/db'
+import { and, eq } from 'drizzle-orm'
+import { slackIntegrations, slackRoutingRules } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 
@@ -114,33 +114,93 @@ export class SlackService {
    * event is worth notifying about. Resolves the workspace's Slack
    * integration if any, applies event filters, and posts.
    */
-  async notify(workspaceId: string, event: string, message: string) {
+  private matches(filters: string[], event: string): boolean {
+    return filters.length === 0 || filters.includes(event) || filters.includes('*')
+  }
+
+  async notify(workspaceId: string, event: string, message: string, opts: { projectId?: string } = {}) {
+    // 1) The default single integration (all projects).
     const [row] = await this.db
       .select()
       .from(slackIntegrations)
       .where(eq(slackIntegrations.workspaceId, workspaceId))
       .limit(1)
-    if (!row || !row.isEnabled) return
-
-    const filters = row.eventFilters as string[]
-    if (filters.length > 0 && !filters.includes(event) && !filters.includes('*')) return
-
-    try {
-      await this.post(row.webhookUrl, { text: message })
-      await this.db
-        .update(slackIntegrations)
-        .set({
-          successCount: row.successCount + 1,
-          lastNotifiedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(slackIntegrations.id, row.id))
-    } catch {
-      await this.db
-        .update(slackIntegrations)
-        .set({ failureCount: row.failureCount + 1, updatedAt: new Date() })
-        .where(eq(slackIntegrations.id, row.id))
+    if (row && row.isEnabled && this.matches(row.eventFilters as string[], event)) {
+      try {
+        await this.post(row.webhookUrl, { text: message })
+        await this.db
+          .update(slackIntegrations)
+          .set({ successCount: row.successCount + 1, lastNotifiedAt: new Date(), updatedAt: new Date() })
+          .where(eq(slackIntegrations.id, row.id))
+      } catch {
+        await this.db
+          .update(slackIntegrations)
+          .set({ failureCount: row.failureCount + 1, updatedAt: new Date() })
+          .where(eq(slackIntegrations.id, row.id))
+      }
     }
+
+    // 2) Per-channel routing rules — event filter + optional project scope (§12).
+    const rules = await this.db
+      .select()
+      .from(slackRoutingRules)
+      .where(eq(slackRoutingRules.workspaceId, workspaceId))
+    for (const rule of rules) {
+      if (!rule.isEnabled) continue
+      if (!this.matches(rule.eventFilters as string[], event)) continue
+      if (rule.projectId && rule.projectId !== opts.projectId) continue
+      try {
+        await this.post(rule.webhookUrl, { text: message })
+      } catch {
+        // best-effort per rule
+      }
+    }
+  }
+
+  // ── Per-channel routing rules ─────────────────────────────────────────────
+  listRules(workspaceId: string) {
+    return this.db
+      .select({
+        id: slackRoutingRules.id,
+        channelName: slackRoutingRules.channelName,
+        projectId: slackRoutingRules.projectId,
+        eventFilters: slackRoutingRules.eventFilters,
+        isEnabled: slackRoutingRules.isEnabled,
+        webhookUrl: slackRoutingRules.webhookUrl,
+        createdAt: slackRoutingRules.createdAt,
+      })
+      .from(slackRoutingRules)
+      .where(eq(slackRoutingRules.workspaceId, workspaceId))
+      .then((rows) => rows.map((r) => ({ ...r, webhookUrl: undefined, webhookUrlHint: this.hint(r.webhookUrl) })))
+  }
+
+  async addRule(
+    workspaceId: string,
+    userId: string,
+    dto: { webhookUrl: string; channelName?: string; projectId?: string | null; eventFilters?: string[] },
+  ) {
+    if (!/^https:\/\/hooks\.slack\.com\//.test(dto.webhookUrl ?? '')) {
+      throw new BadRequestException('Invalid Slack incoming webhook URL')
+    }
+    const [rule] = await this.db
+      .insert(slackRoutingRules)
+      .values({
+        workspaceId,
+        webhookUrl: dto.webhookUrl,
+        channelName: dto.channelName ?? null,
+        projectId: dto.projectId ?? null,
+        eventFilters: dto.eventFilters ?? [],
+        createdById: userId,
+      })
+      .returning()
+    return { ...rule, webhookUrl: undefined, webhookUrlHint: this.hint(rule.webhookUrl) }
+  }
+
+  async removeRule(id: string, workspaceId: string) {
+    await this.db
+      .delete(slackRoutingRules)
+      .where(and(eq(slackRoutingRules.id, id), eq(slackRoutingRules.workspaceId, workspaceId)))
+    return { ok: true }
   }
 
   private async post(url: string, body: object) {
