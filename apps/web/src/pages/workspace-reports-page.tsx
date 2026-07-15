@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 import { ReportBuilder } from '../components/report-builder'
 
 type Tab = 'overview' | 'productivity' | 'completion' | 'time' | 'sprints' | 'goals' | 'custom'
@@ -82,6 +83,7 @@ function printReport(title: string, rows: (string | number)[][]) {
 }
 
 export function ReportsPage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/reports' })
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [days, setDays] = useState(30)
@@ -124,7 +126,7 @@ export function ReportsPage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart3 className="h-5 w-5 text-accent" />
-            <h1 className="text-lg font-semibold">Reports</h1>
+            <h1 className="text-lg font-semibold">{t('reports.title')}</h1>
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -132,9 +134,9 @@ export function ReportsPage() {
               value={days}
               onChange={(e) => setDays(parseInt(e.target.value, 10))}
             >
-              <option value={7}>Last 7 days</option>
-              <option value={30}>Last 30 days</option>
-              <option value={90}>Last 90 days</option>
+              <option value={7}>{t('reports.last7Days')}</option>
+              <option value={30}>{t('reports.last30Days')}</option>
+              <option value={90}>{t('reports.last90Days')}</option>
             </select>
             <Button
               variant="outline"
@@ -244,6 +246,7 @@ function OverviewTab({
   workspaceId: string
   registerExport: ExportRegistrar
 }) {
+  const { t } = useTranslation()
   const query = useQuery({
     queryKey: ['reports-overview', workspaceId],
     queryFn: () =>
@@ -279,7 +282,7 @@ function OverviewTab({
 
       {d && (
         <Card className="p-4">
-          <p className="text-sm font-medium mb-3">Completion rate</p>
+          <p className="text-sm font-medium mb-3">{t('reports.completionRate')}</p>
           <div className="flex items-center gap-4">
             <div className="flex-1 bg-muted rounded-full h-3 overflow-hidden">
               <div
@@ -306,6 +309,7 @@ function ProductivityTab({
   days: number
   registerExport: ExportRegistrar
 }) {
+  const { t } = useTranslation()
   type Row = {
     userId: string
     displayName: string
@@ -375,7 +379,7 @@ function ProductivityTab({
           }}
           className="h-8 rounded-md border border-border bg-background px-2 text-sm"
         >
-          <option value="">All spaces</option>
+          <option value="">{t('reports.allSpaces')}</option>
           {(spacesQuery.data ?? []).map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -388,7 +392,7 @@ function ProductivityTab({
           disabled={!spaceFilter}
           className="h-8 rounded-md border border-border bg-background px-2 text-sm disabled:opacity-50"
         >
-          <option value="">All projects</option>
+          <option value="">{t('reports.allProjects')}</option>
           {(projectsQuery.data ?? []).map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -411,7 +415,7 @@ function ProductivityTab({
       <div>
         <h3 className="text-sm font-semibold text-foreground mb-2">Completed tasks trend ({bucket})</h3>
         {trend.length === 0 ? (
-          <div className="text-center text-muted-foreground py-6 text-sm">No completed tasks in this range.</div>
+          <div className="text-center text-muted-foreground py-6 text-sm">{t('reports.noCompletedTasks')}</div>
         ) : (
           <div className="flex items-end gap-1.5 h-32 border-b border-border pb-0">
             {trend.map((t) => (
@@ -434,10 +438,10 @@ function ProductivityTab({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Member</th>
-              <th className="text-right py-2 px-4 text-muted-foreground font-medium">Assigned</th>
-              <th className="text-right py-2 px-4 text-muted-foreground font-medium">Completed</th>
-              <th className="text-right py-2 px-4 text-muted-foreground font-medium">Created</th>
+              <th className="text-left py-2 pr-4 text-muted-foreground font-medium">{t('reports.member')}</th>
+              <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.assigned')}</th>
+              <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.completed')}</th>
+              <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.created')}</th>
               <th className="text-right py-2 pl-4 text-muted-foreground font-medium">Rate</th>
             </tr>
           </thead>
@@ -478,7 +482,7 @@ function ProductivityTab({
           </tbody>
         </table>
         {rows.length === 0 && !query.isLoading && (
-          <div className="text-center text-muted-foreground py-8">No data available</div>
+          <div className="text-center text-muted-foreground py-8">{t('reports.noData')}</div>
         )}
       </div>
     </div>
@@ -496,6 +500,7 @@ function CompletionTab({
   days: number
   registerExport: ExportRegistrar
 }) {
+  const { t } = useTranslation()
   type Data = {
     total: number
     completed: number
@@ -559,7 +564,7 @@ function CompletionTab({
 
       {d && (
         <Card className="p-4">
-          <h3 className="text-sm font-medium mb-3">Completions per day</h3>
+          <h3 className="text-sm font-medium mb-3">{t('reports.completionsPerDay')}</h3>
           <div className="flex items-end gap-0.5 h-20">
             {d.trend.map((point) => {
               const max = Math.max(...d.trend.map((p) => p.count), 1)
@@ -583,7 +588,7 @@ function CompletionTab({
 
       {d && Object.keys(d.statusBreakdown).length > 0 && (
         <Card className="p-4">
-          <h3 className="text-sm font-medium mb-3">Status breakdown</h3>
+          <h3 className="text-sm font-medium mb-3">{t('reports.statusBreakdown')}</h3>
           <div className="space-y-2">
             {Object.entries(d.statusBreakdown).map(([status, count]) => {
               const pct = d.total > 0 ? Math.round((count / d.total) * 100) : 0
@@ -604,7 +609,7 @@ function CompletionTab({
 
       {durations.length > 0 && (
         <Card className="p-4">
-          <h3 className="text-sm font-medium mb-1">Avg time in each status</h3>
+          <h3 className="text-sm font-medium mb-1">{t('reports.avgTimeInStatus')}</h3>
           <p className="text-xs text-muted-foreground mb-3">
             Where tasks spend the most time — the longest bars are your bottlenecks.
           </p>
@@ -642,6 +647,7 @@ function TimeTab({
   days: number
   registerExport: ExportRegistrar
 }) {
+  const { t } = useTranslation()
   type Row = {
     userId: string
     displayName: string
@@ -708,10 +714,10 @@ function TimeTab({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Member</th>
-              <th className="text-right py-2 px-4 text-muted-foreground font-medium">Total hours</th>
-              <th className="text-right py-2 px-4 text-muted-foreground font-medium">Billable</th>
-              <th className="text-right py-2 pl-4 text-muted-foreground font-medium">Entries</th>
+              <th className="text-left py-2 pr-4 text-muted-foreground font-medium">{t('reports.member')}</th>
+              <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.totalHours')}</th>
+              <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.billable')}</th>
+              <th className="text-right py-2 pl-4 text-muted-foreground font-medium">{t('reports.entries')}</th>
             </tr>
           </thead>
           <tbody>
@@ -729,21 +735,21 @@ function TimeTab({
           </tbody>
         </table>
         {rows.length === 0 && !query.isLoading && (
-          <div className="text-center text-muted-foreground py-8">No time entries recorded</div>
+          <div className="text-center text-muted-foreground py-8">{t('reports.noTimeEntries')}</div>
         )}
       </div>
 
       {projectRows.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-foreground mb-2">Billable by project</h3>
+          <h3 className="text-sm font-semibold text-foreground mb-2">{t('reports.billableByProject')}</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Project</th>
-                  <th className="text-left py-2 px-4 text-muted-foreground font-medium">Client</th>
-                  <th className="text-right py-2 px-4 text-muted-foreground font-medium">Total hours</th>
-                  <th className="text-right py-2 pl-4 text-muted-foreground font-medium">Billable</th>
+                  <th className="text-left py-2 pr-4 text-muted-foreground font-medium">{t('reports.project')}</th>
+                  <th className="text-left py-2 px-4 text-muted-foreground font-medium">{t('reports.client')}</th>
+                  <th className="text-right py-2 px-4 text-muted-foreground font-medium">{t('reports.totalHours')}</th>
+                  <th className="text-right py-2 pl-4 text-muted-foreground font-medium">{t('reports.billable')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -773,6 +779,7 @@ function SprintsTab({
   workspaceId: string
   registerExport: ExportRegistrar
 }) {
+  const { t } = useTranslation()
   type SprintRow = {
     sprintId: string
     name: string
@@ -811,13 +818,13 @@ function SprintsTab({
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">Sprint velocity (last 10 sprints)</p>
       {rows.length === 0 && !query.isLoading && (
-        <div className="text-center text-muted-foreground py-8">No sprints found</div>
+        <div className="text-center text-muted-foreground py-8">{t('reports.noSprints')}</div>
       )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border">
-              <th className="text-left py-2 pr-4 text-muted-foreground font-medium">Sprint</th>
+              <th className="text-left py-2 pr-4 text-muted-foreground font-medium">{t('reports.sprint')}</th>
               <th className="text-left py-2 px-4 text-muted-foreground font-medium">Status</th>
               <th className="text-right py-2 px-4 text-muted-foreground font-medium">Tasks</th>
               <th className="text-right py-2 pl-4 text-muted-foreground font-medium">Points</th>

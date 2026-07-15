@@ -14,8 +14,10 @@ import {
 } from '@rundesk/ui'
 import { Users, Calendar, AlertTriangle, Download } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 export function WorkloadPage() {
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/workload' })
   const [view, setView] = useState<'7d' | '14d' | '30d'>('14d')
   const days = view === '7d' ? 7 : view === '14d' ? 14 : 30
@@ -98,10 +100,10 @@ export function WorkloadPage() {
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
               <Users className="h-4 w-4" />
             </span>
-            Workload
+            {t('nav.workload')}
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
-            Capacity heat-map across your team. Cells turn red when someone is overloaded.
+            {t('workload.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -113,7 +115,7 @@ export function WorkloadPage() {
             className="gap-1.5"
           >
             <Download className="h-3.5 w-3.5" />
-            Export CSV
+            {t('workload.exportCsv')}
           </Button>
           <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1 backdrop-blur-sm">
             {(['7d', '14d', '30d'] as const).map((v) => (
@@ -136,12 +138,12 @@ export function WorkloadPage() {
 
       {/* Legend */}
       <Card variant="glass" className="flex flex-wrap items-center gap-4 p-3 px-4 text-xs">
-        <span className="text-muted-foreground">Workload</span>
+        <span className="text-muted-foreground">{t('nav.workload')}</span>
         {[
-          { label: 'Light', cls: 'bg-mint/40' },
-          { label: 'Balanced', cls: 'bg-mint/70' },
-          { label: 'Full', cls: 'bg-warning/70' },
-          { label: 'Over', cls: 'bg-destructive/80' },
+          { label: t('workload.legendLight'), cls: 'bg-mint/40' },
+          { label: t('workload.legendBalanced'), cls: 'bg-mint/70' },
+          { label: t('workload.legendFull'), cls: 'bg-warning/70' },
+          { label: t('workload.legendOver'), cls: 'bg-destructive/80' },
         ].map((l) => (
           <div key={l.label} className="flex items-center gap-1.5">
             <div className={`h-3 w-5 rounded ${l.cls}`} />
@@ -150,7 +152,7 @@ export function WorkloadPage() {
         ))}
         <span className="ml-auto text-muted-foreground flex items-center gap-1">
           <AlertTriangle className="h-3 w-3" />
-          {overloadedCount} people overloaded this period
+          {t('workload.overloaded', { count: overloadedCount })}
         </span>
       </Card>
 
@@ -161,7 +163,7 @@ export function WorkloadPage() {
             {/* Header row */}
             <div className="flex border-b border-border/60 sticky top-0 bg-card/95 backdrop-blur-sm z-10">
               <div className="w-[200px] shrink-0 px-4 py-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground border-r border-border/60">
-                Teammate
+                {t('workload.teammate')}
               </div>
               {dates.map((d, i) => {
                 const isWeekend = d.getDay() === 0 || d.getDay() === 6
@@ -250,7 +252,7 @@ export function WorkloadPage() {
       {people.length === 0 && (
         <EmptyState
           icon={<Calendar className="h-6 w-6" />}
-          title="No teammates with assigned tasks"
+          title={t('workload.noTeammates')}
           description="Once tasks have assignees and time estimates, this view will show capacity per person, per day."
         />
       )}
