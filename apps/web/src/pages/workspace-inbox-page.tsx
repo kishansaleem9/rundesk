@@ -6,6 +6,7 @@ import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
+import { useTranslation } from '../lib/i18n'
 
 type Notification = {
   id: string
@@ -59,6 +60,7 @@ function isCommentOrMention(type: string): boolean {
 export function InboxPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/inbox' })
   const notifsQuery = useQuery({
     queryKey: ['notifications', workspaceId],
@@ -135,17 +137,17 @@ export function InboxPage() {
             <Bell className="h-4 w-4" />
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Inbox</div>
-            <h1 className="font-display text-2xl font-semibold leading-tight">Notifications</h1>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{t('nav.inbox')}</div>
+            <h1 className="font-display text-2xl font-semibold leading-tight">{t('inbox.title')}</h1>
           </div>
           {unread.length > 0 && (
             <Badge variant="gradient" className="ml-auto text-[10px]">
-              {unread.length} new
+              {t('inbox.new', { count: unread.length })}
             </Badge>
           )}
         </div>
         <p className="text-sm text-muted-foreground mt-0.5 max-w-xl">
-          Mentions, comments, and updates across every workspace you&apos;re part of.
+          {t('inbox.subtitle')}
         </p>
       </header>
 
@@ -154,15 +156,15 @@ export function InboxPage() {
           {notifs.length === 0 ? (
             <EmptyState
               icon={<Bell className="h-6 w-6" />}
-              title="You&apos;re all caught up"
-              description="Mentions, task assignments and replies will land here. Take a breath."
+              title={t('inbox.emptyTitle')}
+              description={t('inbox.emptyDesc')}
             />
           ) : (
             <>
               {unread.length > 0 && (
                 <section>
                   <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                    Unread · {unread.length}
+                    {t('inbox.unread')} · {unread.length}
                   </h2>
                   <div className="space-y-1">
                     {unread.map((n) => (
@@ -191,7 +193,7 @@ export function InboxPage() {
               {read.length > 0 && (
                 <section>
                   <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                    Earlier
+                    {t('inbox.earlier')}
                   </h2>
                   <div className="space-y-1">
                     {read.map((n) => (

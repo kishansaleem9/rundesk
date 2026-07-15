@@ -56,6 +56,15 @@ export const en = {
   'topbar.notifications': 'Notifications',
   'topbar.markAllRead': 'Mark all read',
 
+  // Inbox
+  'inbox.title': 'Notifications',
+  'inbox.subtitle': "Mentions, comments, and updates across every workspace you're part of.",
+  'inbox.new': '{{count}} new',
+  'inbox.emptyTitle': "You're all caught up",
+  'inbox.emptyDesc': 'Mentions, task assignments and replies will land here. Take a breath.',
+  'inbox.unread': 'Unread',
+  'inbox.earlier': 'Earlier',
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -195,6 +204,14 @@ export const es: Record<TranslationKey, string> = {
   'topbar.notifications': 'Notificaciones',
   'topbar.markAllRead': 'Marcar todo como leído',
 
+  'inbox.title': 'Notificaciones',
+  'inbox.subtitle': 'Menciones, comentarios y novedades de todos los espacios en los que participas.',
+  'inbox.new': '{{count}} nuevas',
+  'inbox.emptyTitle': 'Estás al día',
+  'inbox.emptyDesc': 'Las menciones, asignaciones de tareas y respuestas aparecerán aquí. Respira.',
+  'inbox.unread': 'Sin leer',
+  'inbox.earlier': 'Anteriores',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -325,6 +342,14 @@ export const ar: Record<TranslationKey, string> = {
   'topbar.superAdmin': 'مشرف عام',
   'topbar.notifications': 'الإشعارات',
   'topbar.markAllRead': 'تعليم الكل كمقروء',
+
+  'inbox.title': 'الإشعارات',
+  'inbox.subtitle': 'الإشارات والتعليقات والتحديثات عبر كل مساحات العمل التي تشارك فيها.',
+  'inbox.new': '{{count}} جديدة',
+  'inbox.emptyTitle': 'أنت على اطّلاع بكل شيء',
+  'inbox.emptyDesc': 'ستظهر هنا الإشارات وإسنادات المهام والردود. خذ نفسًا.',
+  'inbox.unread': 'غير مقروءة',
+  'inbox.earlier': 'سابقة',
 
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
