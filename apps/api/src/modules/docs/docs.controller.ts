@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Res, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -96,6 +96,18 @@ export class DocsController {
   @Get('docs/:docId')
   get(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.docs.getForUser(docId, user.id)
+  }
+
+  @Get('docs/:docId/export')
+  async exportMarkdown(
+    @Param('docId') docId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Res() res: any,
+  ) {
+    const { fileName, markdown } = await this.docs.exportDocMarkdown(docId, user.id)
+    res.header('Content-Type', 'text/markdown; charset=utf-8')
+    res.header('Content-Disposition', `attachment; filename="${fileName}"`)
+    res.send(markdown)
   }
 
   @Patch('docs/:docId')

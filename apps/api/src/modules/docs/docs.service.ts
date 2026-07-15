@@ -8,6 +8,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { tiptapToMarkdown } from './tiptap-markdown'
 
 type TiptapNode = { type: string; content?: TiptapNode[]; text?: string; attrs?: Record<string, unknown> }
 
@@ -104,6 +105,20 @@ export class DocsService {
     this.realtime.emitToWorkspace(data.workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
     void this.indexDocInSearch(row.id)
     return row
+  }
+
+  /**
+   * Export a doc as Markdown. Access-checked; the title becomes the top H1
+   * unless the body already opens with one.
+   */
+  async exportDocMarkdown(docId: string, userId: string) {
+    await this.assertDocAccess(docId, userId)
+    const [doc] = await this.db.select().from(docs).where(eq(docs.id, docId)).limit(1)
+    if (!doc) throw new NotFoundException('Doc not found')
+    const body = tiptapToMarkdown(doc.content)
+    const markdown = body.startsWith('# ') ? body : `# ${doc.title}\n\n${body}`
+    const base = (doc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
+    return { fileName: `${base}.md`, markdown }
   }
 
   // ─── Doc templates ─────────────────────────────────────────────────────────

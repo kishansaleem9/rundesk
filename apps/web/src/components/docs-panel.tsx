@@ -42,7 +42,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import TextAlign from '@tiptap/extension-text-align'
-import { api, ApiError } from '../lib/api'
+import { api, ApiError, downloadFile } from '../lib/api'
 import { getRealtimeSocket } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
 import { MentionText } from './mention-text'
@@ -564,6 +564,19 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                 }}
               >
                 <Layers className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                title="Export as Markdown"
+                onClick={() => {
+                  const base = (activeDoc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'document'
+                  void downloadFile(`/docs/${activeDoc.id}/export`, `${base}.md`).catch(() =>
+                    toast.error('Could not export the doc'),
+                  )
+                }}
+              >
+                <Download className="h-3.5 w-3.5" />
               </Button>
               <Button
                 size="sm"
