@@ -43,6 +43,7 @@ import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { applyBrandColor } from '../lib/branding'
 import { LanguageSwitcher } from './language-switcher'
+import { useTranslation } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
 import { QuickCreateModal } from './quick-create-modal'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -320,6 +321,7 @@ function TimerIndicator() {
 // ---------------------------------------------------------------------------
 function SearchBar({ onCommandOpen }: { onCommandOpen?: (query?: string) => void }) {
   const [value, setValue] = useState('')
+  const { t } = useTranslation()
 
   function openPalette(query?: string) {
     onCommandOpen?.(query)
@@ -334,8 +336,8 @@ function SearchBar({ onCommandOpen }: { onCommandOpen?: (query?: string) => void
       <input
         type="text"
         value={value}
-        placeholder="Search or jump to…"
-        aria-label="Search"
+        placeholder={t('topbar.search')}
+        aria-label={t('common.search')}
         className="flex-1 min-w-0 bg-transparent outline-none placeholder:text-muted-foreground text-foreground"
         onFocus={() => openPalette()}
         onChange={(e) => openPalette(e.target.value)}
@@ -423,6 +425,7 @@ type NotificationPreferences = {
 function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
   const [open, setOpen] = useState(false)
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { namesById } = useMentionNames(workspaceId)
   const prefsQuery = useQuery({
     queryKey: ['notification-preferences'],
@@ -578,7 +581,7 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
       <PopoverContent align="end" className="w-96 p-0 max-h-[480px] flex flex-col">
         <div className="px-4 py-3 border-b border-border/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <h3 className="font-display font-semibold text-sm">Inbox</h3>
+            <h3 className="font-display font-semibold text-sm">{t('nav.inbox')}</h3>
             {unread > 0 && <Badge variant="gradient" className="text-[10px]">{unread} new</Badge>}
           </div>
           {unread > 0 && (
@@ -586,7 +589,7 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"
               onClick={() => markAllRead.mutate()}
             >
-              Mark all read
+              {t('topbar.markAllRead')}
             </button>
           )}
         </div>
@@ -651,6 +654,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
   const refreshToken = useAuthStore((s) => s.refreshToken)
   const clear = useAuthStore((s) => s.clear)
   const navigate = useNavigate()
+  const { t } = useTranslation()
 
   async function handleSignOut() {
     try {
@@ -686,7 +690,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
             <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
             {user?.role === 'super_admin' && (
               <Badge variant="gradient" className="mt-1 text-[9px] uppercase">
-                Super admin
+                {t('topbar.superAdmin')}
               </Badge>
             )}
           </div>
@@ -694,7 +698,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate({ to: '/app/profile' })}>
           <UserIcon className="h-4 w-4 text-muted-foreground" />
-          Profile
+          {t('topbar.profile')}
         </DropdownMenuItem>
         {workspaceId && (
           <DropdownMenuItem
@@ -703,21 +707,21 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
             }
           >
             <SettingsIcon className="h-4 w-4 text-muted-foreground" />
-            Workspace settings
+            {t('topbar.workspaceSettings')}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onSelect={() => navigate({ to: '/app/help' })}>
           <HelpCircle className="h-4 w-4 text-muted-foreground" />
-          Help & support
+          {t('topbar.helpSupport')}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => window.dispatchEvent(new CustomEvent('rundesk:reset-dock'))}>
           <Sparkles className="h-4 w-4 text-muted-foreground" />
-          Reset dock position
+          {t('topbar.resetDock')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem destructive onSelect={handleSignOut}>
           <LogOut className="h-4 w-4" />
-          Sign out
+          {t('nav.signOut')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

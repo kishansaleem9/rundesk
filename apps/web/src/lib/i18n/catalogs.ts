@@ -46,6 +46,16 @@ export const en = {
   'nav.mindMaps': 'Mind maps',
   'nav.clips': 'Clips',
 
+  // Topbar
+  'topbar.search': 'Search or jump to…',
+  'topbar.profile': 'Profile',
+  'topbar.workspaceSettings': 'Workspace settings',
+  'topbar.helpSupport': 'Help & support',
+  'topbar.resetDock': 'Reset dock position',
+  'topbar.superAdmin': 'Super admin',
+  'topbar.notifications': 'Notifications',
+  'topbar.markAllRead': 'Mark all read',
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -176,6 +186,15 @@ export const es: Record<TranslationKey, string> = {
   'nav.mindMaps': 'Mapas mentales',
   'nav.clips': 'Clips',
 
+  'topbar.search': 'Buscar o ir a…',
+  'topbar.profile': 'Perfil',
+  'topbar.workspaceSettings': 'Ajustes del espacio',
+  'topbar.helpSupport': 'Ayuda y soporte',
+  'topbar.resetDock': 'Restablecer posición del dock',
+  'topbar.superAdmin': 'Superadministrador',
+  'topbar.notifications': 'Notificaciones',
+  'topbar.markAllRead': 'Marcar todo como leído',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -297,6 +316,15 @@ export const ar: Record<TranslationKey, string> = {
   'nav.integrations': 'التكاملات',
   'nav.mindMaps': 'الخرائط الذهنية',
   'nav.clips': 'المقاطع',
+
+  'topbar.search': 'ابحث أو انتقل إلى…',
+  'topbar.profile': 'الملف الشخصي',
+  'topbar.workspaceSettings': 'إعدادات مساحة العمل',
+  'topbar.helpSupport': 'المساعدة والدعم',
+  'topbar.resetDock': 'إعادة ضبط موضع الشريط',
+  'topbar.superAdmin': 'مشرف عام',
+  'topbar.notifications': 'الإشعارات',
+  'topbar.markAllRead': 'تعليم الكل كمقروء',
 
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
