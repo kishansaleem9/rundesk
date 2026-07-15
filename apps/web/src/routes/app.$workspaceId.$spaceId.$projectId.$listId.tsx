@@ -21,14 +21,14 @@ import {
   Archive,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { criticalPath } from '../lib/gantt'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { ListStatusesManager } from '../components/list-statuses-manager'
 import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
 import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
-import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, formatDistanceToNowStrict, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
+import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Status is now a free-text key validated against the list's list_statuses.
@@ -92,6 +92,63 @@ const PRIORITY_COLORS: Record<TaskPriority, string> = {
   low: 'text-gray-400',
 }
 const PRIORITY_OPTIONS: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
+
+// Enum → display-label-key maps. The raw identifier stays the persisted/compared
+// value; only the shown label is localized (mirrors task-detail-sheet.tsx).
+const PRIORITY_LABEL_KEYS: Record<TaskPriority, TranslationKey> = {
+  urgent: 'taskDetail.priority.urgent',
+  high: 'taskDetail.priority.high',
+  normal: 'taskDetail.priority.normal',
+  low: 'taskDetail.priority.low',
+}
+const STATUS_LABEL_KEYS: Record<string, TranslationKey> = {
+  backlog: 'taskDetail.status.backlog',
+  todo: 'taskDetail.status.todo',
+  in_progress: 'taskDetail.status.inProgress',
+  in_review: 'taskDetail.status.inReview',
+  done: 'taskDetail.status.done',
+  cancelled: 'taskDetail.status.cancelled',
+}
+
+// Resolve a status's display label: a known built-in status key renders its
+// localized catalog label; any other (custom/scoped, server-defined) status
+// shows its server-provided name verbatim — user data is never translated.
+function resolveStatusLabel(
+  statusKey: string,
+  serverName: string | undefined,
+  t: (key: TranslationKey) => string,
+): string {
+  const labelKey = STATUS_LABEL_KEYS[statusKey]
+  if (labelKey) return t(labelKey)
+  return serverName ?? statusKey
+}
+
+// User-facing short date (e.g. "Mar 4"), localized via Intl so month names
+// follow the active locale instead of a fixed English date-fns token.
+function shortDate(date: Date, locale: string): string {
+  return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+}
+
+const AGE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ['year', 31536000],
+  ['month', 2592000],
+  ['week', 604800],
+  ['day', 86400],
+  ['hour', 3600],
+  ['minute', 60],
+]
+// Localized "how long ago" for the Created column, replacing date-fns'
+// English-only formatDistanceToNowStrict. numeric:'auto' yields idiomatic
+// forms like "yesterday" / "ayer" / "أمس".
+function formatAge(iso: string, locale: string): string {
+  const diffSec = Math.round((Date.now() - new Date(iso).getTime()) / 1000)
+  const abs = Math.abs(diffSec)
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+  for (const [unit, secs] of AGE_UNITS) {
+    if (abs >= secs) return rtf.format(-Math.round(diffSec / secs), unit)
+  }
+  return rtf.format(-diffSec, 'second')
+}
 
 // Converts a native <input type="date"> value (yyyy-MM-dd, or '') into an ISO
 // date string the backend's @IsDateString() accepts, or undefined when blank so
@@ -161,11 +218,12 @@ function pillStyleFor(color: string): React.CSSProperties {
 }
 
 function useStatusMeta(statusKey: string): StatusMeta {
+  const { t } = useTranslation()
   const statuses = useListStatuses()
   const dynamic = statuses.find((s) => s.key === statusKey)
   if (dynamic) {
     return {
-      label: dynamic.name,
+      label: resolveStatusLabel(statusKey, dynamic.name, t),
       color: dynamic.color,
       // Dynamic colours don't map cleanly to tailwind classes, so we use
       // inline style via pillStyleFor() at the call site instead.
@@ -173,8 +231,12 @@ function useStatusMeta(statusKey: string): StatusMeta {
       pill: '',
     }
   }
-  return DEFAULT_STATUS_META[statusKey] ?? {
-    label: statusKey,
+  const fallback = DEFAULT_STATUS_META[statusKey]
+  if (fallback) {
+    return { ...fallback, label: resolveStatusLabel(statusKey, fallback.label, t) }
+  }
+  return {
+    label: resolveStatusLabel(statusKey, statusKey, t),
     color: '#94a3b8',
     dot: 'bg-zinc-400',
     pill: 'bg-muted/60 text-muted-foreground border-border',
@@ -182,14 +244,15 @@ function useStatusMeta(statusKey: string): StatusMeta {
 }
 
 function TableStatusLegend() {
+  const { t } = useTranslation()
   const ordered = useOrderedStatuses()
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 rounded-lg border border-border bg-card/50 text-[11px] text-muted-foreground">
-      <span className="font-semibold uppercase tracking-wider text-[10px]">Status Legend:</span>
+      <span className="font-semibold uppercase tracking-wider text-[10px]">{t('list.table.statusLegend')}</span>
       {ordered.map((s) => (
         <div key={s.key} className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} />
-          <span>{s.name}</span>
+          <span>{resolveStatusLabel(s.key, s.name, t)}</span>
         </div>
       ))}
     </div>
@@ -221,7 +284,7 @@ function useOrderedStatuses(): ListStatus[] {
 function ListDetail() {
   const { workspaceId, spaceId, projectId, listId } = Route.useParams()
   const navigate = useNavigate()
-  const { t } = useTranslation()
+  const { t, tCount, locale } = useTranslation()
   const qc = useQueryClient()
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
@@ -330,7 +393,7 @@ function ListDetail() {
   const visibleTasks = useMemo(() => {
     let next = [...tasks]
     if (statusFilter !== 'all') {
-      next = next.filter((t) => t.status === statusFilter)
+      next = next.filter((task) => task.status === statusFilter)
     }
     next.sort((a, b) => {
       if (sortBy === 'due') {
@@ -450,7 +513,7 @@ function ListDetail() {
   }
 
   const draggingTask = useMemo(
-    () => tasks.find((t) => t.id === draggingTaskId) ?? null,
+    () => tasks.find((task) => task.id === draggingTaskId) ?? null,
     [tasks, draggingTaskId],
   )
 
@@ -476,7 +539,7 @@ function ListDetail() {
     if (!overId || !activeId.startsWith('task:') || !overId.startsWith('status:')) return
     const taskId = activeId.replace('task:', '')
     const nextStatus = overId.replace('status:', '') as TaskStatus
-    const task = tasks.find((t) => t.id === taskId)
+    const task = tasks.find((task) => task.id === taskId)
     if (!task || task.status === nextStatus) return
     try {
       await moveTaskStatus(taskId, nextStatus)
@@ -520,7 +583,7 @@ function ListDetail() {
     <ListStatusesContext.Provider value={listStatuses}>
     <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-[#0f1114]">
       <TaskListChrome
-        listName={listMeta?.name ?? 'Tasks'}
+        listName={listMeta?.name ?? t('list.defaultListName')}
         taskCount={visibleTasks.length}
         quickAdd={
           <>
@@ -539,7 +602,7 @@ function ListDetail() {
             >
               {PRIORITY_OPTIONS.map((p) => (
                 <option key={p} value={p} className="capitalize">
-                  {p}
+                  {t(PRIORITY_LABEL_KEYS[p])}
                 </option>
               ))}
             </WorkFilterSelect>
@@ -548,11 +611,11 @@ function ListDetail() {
               value={newTaskDueDate}
               onChange={(e) => setNewTaskDueDate(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateTask()}
-              title="Due date"
+              title={t('list.sortDueDate')}
               className="h-8 w-[9.5rem] text-[13px] border-border/80 focus-visible:ring-violet-500/25"
             />
             <Button size="sm" className="h-8 bg-violet-600 hover:bg-violet-700 text-white" onClick={handleCreateTask}>
-              Add task
+              {t('list.addTask')}
             </Button>
           </>
         }
@@ -568,14 +631,14 @@ function ListDetail() {
               <option value="all">{t('list.allStatuses')}</option>
               {statusOptions.map((status) => (
                 <option key={status.key} value={status.key}>
-                  {status.name}
+                  {resolveStatusLabel(status.key, status.name, t)}
                 </option>
               ))}
             </WorkFilterSelect>
             <WorkFilterSelect value={sortBy} onChange={(v) => setSortBy(v as typeof sortBy)}>
               <option value="created">{t('list.sortNewest')}</option>
-              <option value="due">Due date</option>
-              <option value="priority">Priority</option>
+              <option value="due">{t('list.sortDueDate')}</option>
+              <option value="priority">{t('list.sortPriority')}</option>
             </WorkFilterSelect>
             <WorkFilterSelect value={groupBy} onChange={(v) => setGroupBy(v as typeof groupBy)}>
               <option value="status">{t('list.groupByStatus')}</option>
@@ -585,7 +648,7 @@ function ListDetail() {
             {activeView === 'table' && projectFields.length > 0 && (
               <details className="relative">
                 <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
-                  Fields ({projectFields.length - hiddenFields.size}/{projectFields.length})
+                  {t('list.table.fields', { shown: projectFields.length - hiddenFields.size, total: projectFields.length })}
                 </summary>
                 <div className="absolute z-20 mt-1 w-52 rounded-md border border-border bg-card p-1.5 shadow-lg">
                   {projectFields.map((f) => (
@@ -651,7 +714,7 @@ function ListDetail() {
                 await qc.invalidateQueries({ queryKey: ['list-views', listId] })
               }}
             >
-              Save
+              {t('common.save')}
             </Button>
             {selectedSavedViewId ? (
               <>
@@ -667,7 +730,7 @@ function ListDetail() {
                     await qc.invalidateQueries({ queryKey: ['list-views', listId] })
                   }}
                 >
-                  Update
+                  {t('list.viewUpdate')}
                 </Button>
                 <Button
                   size="sm"
@@ -681,7 +744,7 @@ function ListDetail() {
                     await qc.invalidateQueries({ queryKey: ['list-views', listId] })
                   }}
                 >
-                  Default
+                  {t('list.viewDefault')}
                 </Button>
               </>
             ) : null}
@@ -690,18 +753,18 @@ function ListDetail() {
               variant="outline"
               className="h-8 text-[12px]"
               onClick={() => setStatusManagerOpen(true)}
-              title="Manage this list's statuses"
+              title={t('list.manageStatusesTitle')}
             >
-              Statuses
+              {t('list.statusesButton')}
             </Button>
             <Button
               size="sm"
               variant="outline"
               className="h-8 text-[12px]"
               onClick={() => setEmailAliasOpen(true)}
-              title="Email-to-task address for this list"
+              title={t('list.emailAliasTitle')}
             >
-              Email
+              {t('list.emailButton')}
             </Button>
           </>
         }
@@ -710,17 +773,17 @@ function ListDetail() {
       <div className="flex-1 overflow-auto p-4 sm:p-6">
         {isLoading ? (
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
-            Loading tasks…
+            {t('list.loadingTasks')}
           </div>
         ) : visibleTasks.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/80 bg-[#fbfbfc]/60 dark:bg-[#16181d]/40 p-12 text-center">
             <p className="text-[15px] font-medium text-foreground mb-1">{t('list.noTasksYet')}</p>
             <p className="text-[13px] text-muted-foreground mb-4">
-              Add your first task with the field above, or press{' '}
-              <kbd className="px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono">C</kbd> to quick-add.
+              {t('list.empty.addFirstHintBefore')}{' '}
+              <kbd className="px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono">C</kbd> {t('list.empty.addFirstHintAfter')}
             </p>
             <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => quickAddRef.current?.focus()}>
-              Create task
+              {t('list.createTask')}
             </Button>
           </div>
         ) : activeView === 'list' ? (
@@ -821,7 +884,7 @@ function ListDetail() {
               {draggingTask ? (
                 <div className="w-56 rounded border border-border bg-card p-2 shadow-xl">
                   <div className="font-medium text-sm">{draggingTask.title}</div>
-                  <div className="text-xs text-muted-foreground">{draggingTask.priority}</div>
+                  <div className="text-xs text-muted-foreground">{t(PRIORITY_LABEL_KEYS[draggingTask.priority])}</div>
                 </div>
               ) : null}
             </DragOverlay>
@@ -866,13 +929,13 @@ function ListDetail() {
                   setCalendarMonth((d) => (calendarView === 'week' ? addDays(d, -7) : addMonths(d, -1)))
                 }
               >
-                Prev
+                {t('list.calendar.prev')}
               </Button>
               <div className="flex items-center gap-3">
                 <h3 className="font-semibold">
                   {calendarView === 'week'
-                    ? `${format(startOfWeek(calendarMonth, { weekStartsOn: 1 }), 'MMM d')} – ${format(endOfWeek(calendarMonth, { weekStartsOn: 1 }), 'MMM d, yyyy')}`
-                    : format(calendarMonth, 'MMMM yyyy')}
+                    ? `${shortDate(startOfWeek(calendarMonth, { weekStartsOn: 1 }), locale)} – ${endOfWeek(calendarMonth, { weekStartsOn: 1 }).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : calendarMonth.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
                 </h3>
                 <div className="flex items-center gap-1 rounded-md border border-border p-0.5 text-xs">
                   {(['month', 'week'] as const).map((v) => (
@@ -884,7 +947,7 @@ function ListDetail() {
                         calendarView === v ? 'bg-brand-700 text-white' : 'text-muted-foreground hover:text-foreground',
                       )}
                     >
-                      {v}
+                      {v === 'month' ? t('list.calendar.month') : t('list.calendar.week')}
                     </button>
                   ))}
                 </div>
@@ -896,13 +959,18 @@ function ListDetail() {
                   setCalendarMonth((d) => (calendarView === 'week' ? addDays(d, 7) : addMonths(d, 1)))
                 }
               >
-                Next
+                {t('list.calendar.next')}
               </Button>
             </div>
             <div className="grid grid-cols-7 gap-2 text-xs font-medium text-muted-foreground mb-2">
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-                <div key={d} className="px-1">{d}</div>
-              ))}
+              {Array.from({ length: 7 }, (_, i) => {
+                const day = addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), i)
+                return (
+                  <div key={i} className="px-1">
+                    {day.toLocaleDateString(locale, { weekday: 'short' })}
+                  </div>
+                )
+              })}
             </div>
             <div className="grid grid-cols-7 gap-2">
               {calendarDays.map((day) => {
@@ -933,7 +1001,7 @@ function ListDetail() {
                       <span className="text-xs">{format(day, 'd')}</span>
                       <button
                         type="button"
-                        aria-label="Add task on this day"
+                        aria-label={t('list.calendar.addTaskAria')}
                         onClick={() => {
                           setCalendarQuickAddDay(key)
                           setCalendarQuickAddTitle('')
@@ -958,7 +1026,7 @@ function ListDetail() {
                       ))}
                       {dayTasks.length > (calendarView === 'week' ? 12 : 3) ? (
                         <div className="text-[11px] text-muted-foreground">
-                          +{dayTasks.length - (calendarView === 'week' ? 12 : 3)} more
+                          {t('list.calendar.more', { count: dayTasks.length - (calendarView === 'week' ? 12 : 3) })}
                         </div>
                       ) : null}
                       {calendarQuickAddDay === key && (
@@ -975,7 +1043,7 @@ function ListDetail() {
                             }
                             if (e.key === 'Escape') setCalendarQuickAddDay(null)
                           }}
-                          placeholder="Task title…"
+                          placeholder={t('list.taskTitle')}
                           className="w-full rounded border border-border bg-background px-1 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       )}
@@ -1027,13 +1095,14 @@ function GroupedListView({
     opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string },
   ) => Promise<void> | void
 }) {
+  const { t } = useTranslation()
   const ordered = useOrderedStatuses()
   const grouped = useMemo(() => {
     const map: Record<string, TaskItem[]> = {}
     for (const s of ordered) map[s.key] = []
-    for (const t of tasks) {
-      if (!map[t.status]) map[t.status] = []
-      map[t.status].push(t)
+    for (const task of tasks) {
+      if (!map[task.status]) map[task.status] = []
+      map[task.status].push(task)
     }
     return map
   }, [tasks, ordered])
@@ -1053,7 +1122,7 @@ function GroupedListView({
     for (const task of tasks) {
       const first = task.assignees?.[0]
       const gid = first?.userId ?? '__unassigned__'
-      const name = first?.user?.displayName ?? 'Unassigned'
+      const name = first?.user?.displayName ?? t('list.group.unassigned')
       if (!groups.has(gid)) groups.set(gid, { name, tasks: [] })
       groups.get(gid)!.tasks.push(task)
     }
@@ -1113,7 +1182,7 @@ function GroupedListView({
             <Card key={priority} className="p-3">
               <div className="mb-2 flex items-center gap-2 text-sm font-medium capitalize">
                 <Flag className={cn('h-4 w-4', PRIORITY_COLORS[priority])} />
-                {priority} ({groupTasks.length})
+                {t(PRIORITY_LABEL_KEYS[priority])} ({groupTasks.length})
               </div>
               <div className="space-y-2">
                 {groupTasks.length >= VIRTUALIZE_THRESHOLD ? (
@@ -1139,7 +1208,7 @@ function GroupedListView({
                     />
                   ))
                 )}
-                {groupTasks.length === 0 && <div className="text-xs text-muted-foreground">No tasks</div>}
+                {groupTasks.length === 0 && <div className="text-xs text-muted-foreground">{t('list.noTasks')}</div>}
               </div>
             </Card>
           )
@@ -1171,7 +1240,7 @@ function GroupedListView({
                 className="h-2 w-2 rounded-full"
                 style={{ backgroundColor: statusDef.color }}
               />
-              <h3 className="font-semibold text-sm text-foreground">{statusDef.name}</h3>
+              <h3 className="font-semibold text-sm text-foreground">{resolveStatusLabel(statusDef.key, statusDef.name, t)}</h3>
               <span className="text-xs text-muted-foreground tabular-nums">{groupTasks.length}</span>
             </header>
             {!isCollapsed && (
@@ -1281,6 +1350,7 @@ function TaskRow({
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void> | void
 }) {
+  const { t, locale } = useTranslation()
   // statusCategory ('closed') is the post-custom-statuses signal; falling
   // back to the literal 'done' key keeps existing tasks rendering correctly
   // while the API/list-statuses caches warm up.
@@ -1318,7 +1388,7 @@ function TaskRow({
           'opacity-0 group-hover:opacity-100 transition-opacity',
           selected && 'opacity-100',
         )}
-        aria-label={selected ? 'Deselect task' : 'Select task'}
+        aria-label={selected ? t('list.deselectTaskAria') : t('list.selectTaskAria')}
       />
       <button
         className="shrink-0 text-muted-foreground hover:text-accent transition-colors"
@@ -1326,7 +1396,7 @@ function TaskRow({
           e.stopPropagation()
           void onToggleDone(task)
         }}
-        aria-label={isDone ? 'Mark incomplete' : 'Mark done'}
+        aria-label={isDone ? t('list.markIncompleteAria') : t('list.markDoneAria')}
       >
         {isDone ? (
           <CheckCircle2 className="h-4 w-4 text-emerald-500" />
@@ -1348,12 +1418,12 @@ function TaskRow({
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
             {(task.openBlockerCount ?? 0) > 0 ? (
               <span className="rounded-full border border-amber-400/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-700 dark:text-amber-300">
-                blocked by {task.openBlockerCount}
+                {t('list.blockedBy', { count: task.openBlockerCount ?? 0 })}
               </span>
             ) : null}
             {(task.blocksOpenCount ?? 0) > 0 ? (
               <span className="rounded-full border border-blue-400/40 bg-blue-500/10 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">
-                blocks {task.blocksOpenCount}
+                {t('list.blocks', { count: task.blocksOpenCount ?? 0 })}
               </span>
             ) : null}
           </div>
@@ -1368,8 +1438,8 @@ function TaskRow({
             cyclePriority()
           }}
           className="shrink-0 rounded p-0.5 hover:bg-muted"
-          title={`Priority: ${task.priority} — click to change`}
-          aria-label="Change priority"
+          title={t('list.priorityTitle', { priority: t(PRIORITY_LABEL_KEYS[task.priority]) })}
+          aria-label={t('list.changePriorityAria')}
         >
           <Flag className={cn('h-3.5 w-3.5', PRIORITY_COLORS[task.priority])} />
         </button>
@@ -1383,14 +1453,14 @@ function TaskRow({
           value={task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : ''}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => void onPatchTask(task.id, { dueDate: e.target.value || null })}
-          title="Set due date"
+          title={t('list.setDueDateTitle')}
           className="h-6 w-[7.5rem] shrink-0 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
         />
       ) : (
         task.dueDate && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
             <CalendarIcon className="h-3 w-3" />
-            {format(new Date(task.dueDate), 'MMM d')}
+            {shortDate(new Date(task.dueDate), locale)}
           </div>
         )
       )}
@@ -1428,6 +1498,7 @@ function InlineAddTask({
     opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string },
   ) => Promise<void> | void
 }) {
+  const { t } = useTranslation()
   const meta = useStatusMeta(status)
   const [value, setValue] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('normal')
@@ -1471,7 +1542,7 @@ function InlineAddTask({
         onClick={() => setActive(true)}
       >
         <Plus className="h-4 w-4" />
-        Add task
+        {t('list.addTask')}
       </button>
     )
   }
@@ -1496,7 +1567,7 @@ function InlineAddTask({
             setActive(false)
           }
         }}
-        placeholder={`New ${meta.label.toLowerCase()} task…`}
+        placeholder={t('list.newStatusTaskPlaceholder', { status: meta.label.toLowerCase() })}
         className="h-7 flex-1 text-sm border-0 shadow-none focus-visible:ring-0 px-0"
       />
       <WorkFilterSelect
@@ -1506,7 +1577,7 @@ function InlineAddTask({
       >
         {PRIORITY_OPTIONS.map((p) => (
           <option key={p} value={p} className="capitalize">
-            {p}
+            {t(PRIORITY_LABEL_KEYS[p])}
           </option>
         ))}
       </WorkFilterSelect>
@@ -1527,7 +1598,7 @@ function InlineAddTask({
             setActive(false)
           }
         }}
-        title="Due date"
+        title={t('list.sortDueDate')}
         className="h-7 w-[9rem] shrink-0 text-xs border-border/80 focus-visible:ring-0"
       />
     </div>
@@ -1561,6 +1632,7 @@ function TableView({
   onAddTask: (title: string) => Promise<void> | void
   onRefresh: () => Promise<unknown>
 }) {
+  const { t, tCount, locale } = useTranslation()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
   const [titleDraft, setTitleDraft] = useState('')
@@ -1575,7 +1647,7 @@ function TableView({
   const qc = useQueryClient()
 
   const { data: customFieldByTask = {} } = useQuery({
-    queryKey: ['task-custom-fields-batch', workspaceId, projectId, tasks.map((t) => t.id).join(',')],
+    queryKey: ['task-custom-fields-batch', workspaceId, projectId, tasks.map((task) => task.id).join(',')],
     enabled: tasks.length > 0 && projectFields.length > 0,
     queryFn: async () => {
       const entries = await Promise.all(
@@ -1597,11 +1669,11 @@ function TableView({
     [listStatusList],
   )
 
-  const allSelected = tasks.length > 0 && tasks.every((t) => selected.has(t.id))
+  const allSelected = tasks.length > 0 && tasks.every((task) => selected.has(task.id))
   const toggleAll = () => {
     setSelected((prev) => {
       if (allSelected) return new Set()
-      return new Set(tasks.map((t) => t.id))
+      return new Set(tasks.map((task) => task.id))
     })
   }
   const toggleOne = (id: string) => {
@@ -1632,12 +1704,12 @@ function TableView({
 
   const columns = [
     { key: 'checkbox', label: '', width: 'w-9' },
-    { key: 'title', label: 'Title', width: 'flex-1 min-w-[240px]' },
-    { key: 'status', label: 'Status', width: 'w-36' },
-    { key: 'priority', label: 'Priority', width: 'w-28' },
-    { key: 'assignees', label: 'Assignees', width: 'w-28' },
-    { key: 'due', label: 'Due date', width: 'w-28' },
-    { key: 'created', label: 'Created', width: 'w-24' },
+    { key: 'title', label: t('list.table.colTitle'), width: 'flex-1 min-w-[240px]' },
+    { key: 'status', label: t('taskDetail.fieldStatus'), width: 'w-36' },
+    { key: 'priority', label: t('taskDetail.fieldPriority'), width: 'w-28' },
+    { key: 'assignees', label: t('taskDetail.fieldAssignees'), width: 'w-28' },
+    { key: 'due', label: t('taskDetail.fieldDueDate'), width: 'w-28' },
+    { key: 'created', label: t('list.table.colCreated'), width: 'w-24' },
   ] as const
   // Visibility is controlled upstream by the view's Fields picker; render all
   // that were passed in (Plan §4/§5 per-view custom-field visibility).
@@ -1669,12 +1741,12 @@ function TableView({
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         {selectedIds.length > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-accent/10 text-xs">
-          <span className="font-medium text-foreground">{selectedIds.length} selected</span>
+          <span className="font-medium text-foreground">{tCount('list.bulk.selected', selectedIds.length)}</span>
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void applyBulkPatch({ status: 'done' })}>
-            Mark done
+            {t('list.table.markDone')}
           </Button>
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void applyBulkPatch({ priority: 'high' })}>
-            High priority
+            {t('list.table.highPriority')}
           </Button>
           <Button
             size="sm"
@@ -1682,10 +1754,10 @@ function TableView({
             className="h-7 text-xs"
             onClick={() => void applyBulkPatch({ dueDate: new Date().toISOString() })}
           >
-            Due today
+            {t('list.table.dueToday')}
           </Button>
           <Button size="sm" variant="ghost" className="h-7 text-xs ml-auto" onClick={() => setSelected(new Set())}>
-            Clear
+            {t('list.clear')}
           </Button>
         </div>
       )}
@@ -1704,7 +1776,7 @@ function TableView({
                     checked={allSelected}
                     onChange={toggleAll}
                     className="h-3.5 w-3.5 rounded border-border accent-brand-700 cursor-pointer"
-                    aria-label="Select all tasks"
+                    aria-label={t('list.table.selectAllAria')}
                   />
                 ) : (
                   col.label
@@ -1756,7 +1828,7 @@ function TableView({
                       onChange={() => toggleOne(task.id)}
                       onClick={(e) => e.stopPropagation()}
                       className="h-3.5 w-3.5 rounded border-border accent-brand-700 cursor-pointer"
-                      aria-label={`Select ${task.title}`}
+                      aria-label={t('list.table.selectTaskAria', { title: task.title })}
                     />
                   </div>
 
@@ -1816,7 +1888,7 @@ function TableView({
                       style={pillStyleFor(meta.color)}
                     >
                       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-                      {meta.label}
+                      {resolveStatusLabel(task.status, dynamicStatus?.name, t)}
                     </button>
                     {statusOpenFor === task.id && (
                       <div
@@ -1845,7 +1917,7 @@ function TableView({
                             }}
                           >
                             <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: s.color }} />
-                            {s.name}
+                            {resolveStatusLabel(s.key, s.name, t)}
                           </button>
                         ))}
                       </div>
@@ -1865,7 +1937,7 @@ function TableView({
                       className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-foreground"
                     >
                       <Flag className={cn('h-3.5 w-3.5', PRIORITY_COLORS[task.priority])} />
-                      <span className="capitalize">{task.priority}</span>
+                      <span className="capitalize">{t(PRIORITY_LABEL_KEYS[task.priority])}</span>
                     </button>
                     {priorityOpenFor === task.id && (
                       <div
@@ -1885,7 +1957,7 @@ function TableView({
                             }}
                           >
                             <Flag className={cn('h-3.5 w-3.5', PRIORITY_COLORS[p])} />
-                            {p}
+                            {t(PRIORITY_LABEL_KEYS[p])}
                           </button>
                         ))}
                       </div>
@@ -1906,7 +1978,7 @@ function TableView({
                       className="w-full text-left"
                     >
                       {assignees.length === 0 ? (
-                        <span className="text-muted-foreground text-xs">Assign</span>
+                        <span className="text-muted-foreground text-xs">{t('list.table.assign')}</span>
                       ) : (
                         <div className="flex -space-x-1">
                           {assignees.slice(0, 3).map((a) => {
@@ -1955,13 +2027,13 @@ function TableView({
                             >
                               <span className="truncate">{member.displayName || member.email}</span>
                               <span className={cn('text-[10px]', isAssigned ? 'text-emerald-600' : 'text-muted-foreground')}>
-                                {isAssigned ? 'Assigned' : 'Add'}
+                                {isAssigned ? t('list.table.assigned') : t('list.table.add')}
                               </span>
                             </button>
                           )
                         })}
                         {workspaceMembers.length === 0 && (
-                          <div className="px-2 py-1.5 text-xs text-muted-foreground">No members available</div>
+                          <div className="px-2 py-1.5 text-xs text-muted-foreground">{t('list.table.noMembers')}</div>
                         )}
                       </div>
                     )}
@@ -1999,7 +2071,7 @@ function TableView({
                         {task.dueDate ? (
                           <>
                             <CalendarIcon className="h-3 w-3 text-muted-foreground" />
-                            <span>{format(new Date(task.dueDate), 'MMM d')}</span>
+                            <span>{shortDate(new Date(task.dueDate), locale)}</span>
                           </>
                         ) : (
                           <span className="text-muted-foreground">—</span>
@@ -2010,7 +2082,7 @@ function TableView({
 
                   {/* Created */}
                   <div className="w-24 px-3 flex items-center text-xs text-muted-foreground tabular-nums">
-                    {task.createdAt ? formatDistanceToNowStrict(new Date(task.createdAt), { addSuffix: false }) : '—'}
+                    {task.createdAt ? formatAge(task.createdAt, locale) : '—'}
                   </div>
 
                   {customColumns.map((field) => {
@@ -2080,7 +2152,7 @@ function TableView({
                         setAddActive(false)
                       }
                     }}
-                    placeholder="New task…"
+                    placeholder={t('list.newTaskPlaceholder')}
                     className="flex-1 h-7 bg-transparent text-sm outline-none"
                   />
                 </div>
@@ -2091,7 +2163,7 @@ function TableView({
                   className="w-full h-full flex items-center gap-2 px-3 text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors text-left"
                 >
                   <Plus className="h-4 w-4" />
-                  Add task
+                  {t('list.addTask')}
                 </button>
               )}
             </div>
@@ -2115,6 +2187,7 @@ function CustomFieldEditor({
   onSave: (nextValue: string | number | boolean | null) => Promise<void> | void
   onCancel: () => void
 }) {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState<string>(currentValue == null ? '' : String(currentValue))
   const [checked, setChecked] = useState(Boolean(currentValue))
   if (field.type === 'checkbox') {
@@ -2146,7 +2219,7 @@ function CustomFieldEditor({
           void onSave(next || null)
         }}
       >
-        <option value="">None</option>
+        <option value="">{t('list.none')}</option>
         {(field.options ?? []).map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
@@ -2197,6 +2270,7 @@ function BoardColumn({
   onSetWipLimit: (n: number | null) => void
   onAddTask: (title: string) => Promise<void> | void
 }) {
+  const { t } = useTranslation()
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${status}`,
   })
@@ -2219,7 +2293,7 @@ function BoardColumn({
           type="button"
           onClick={onToggleCollapse}
           className="text-muted-foreground hover:text-foreground"
-          aria-label={collapsed ? 'Expand column' : 'Collapse column'}
+          aria-label={collapsed ? t('list.board.expandColumnAria') : t('list.board.collapseColumnAria')}
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
@@ -2244,7 +2318,7 @@ function BoardColumn({
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
               if (e.key === 'Escape') setEditingWip(false)
             }}
-            placeholder="WIP"
+            placeholder={t('list.board.wipPlaceholder')}
             className="ml-auto h-6 w-14 rounded border border-border bg-background px-1 text-[11px]"
           />
         ) : (
@@ -2252,9 +2326,9 @@ function BoardColumn({
             type="button"
             onClick={() => setEditingWip(true)}
             className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
-            title="Set a work-in-progress limit"
+            title={t('list.board.setWipTitle')}
           >
-            {wipLimit != null ? 'WIP ✎' : 'Set WIP'}
+            {wipLimit != null ? t('list.board.wipEdit') : t('list.board.setWip')}
           </button>
         )}
       </div>
@@ -2269,23 +2343,23 @@ function BoardColumn({
               ))
             )}
             {tasks.length === 0 && (
-              <div className="text-xs text-muted-foreground text-center py-4">Drop tasks here</div>
+              <div className="text-xs text-muted-foreground text-center py-4">{t('list.board.dropHere')}</div>
             )}
           </div>
           <form
             className="p-2 pt-0"
             onSubmit={async (e) => {
               e.preventDefault()
-              const t = addTitle.trim()
-              if (!t) return
+              const trimmed = addTitle.trim()
+              if (!trimmed) return
               setAddTitle('')
-              await onAddTask(t)
+              await onAddTask(trimmed)
             }}
           >
             <input
               value={addTitle}
               onChange={(e) => setAddTitle(e.target.value)}
-              placeholder="+ Add task"
+              placeholder={t('list.board.addTaskPlaceholder')}
               className="w-full h-8 rounded border border-transparent bg-transparent px-2 text-sm placeholder:text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
             />
           </form>
@@ -2302,6 +2376,7 @@ function BoardTaskCard({
   task: TaskItem
   onOpenTask: (taskId: string) => void
 }) {
+  const { t, locale } = useTranslation()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `task:${task.id}`,
   })
@@ -2335,16 +2410,16 @@ function BoardTaskCard({
           {due && (
             <span className={cn('inline-flex items-center gap-1', overdue && 'text-red-500 font-medium')}>
               <CalendarIcon className="h-3 w-3" />
-              {format(due, 'MMM d')}
+              {shortDate(due, locale)}
             </span>
           )}
           {subtasks.length > 0 && (
-            <span className="inline-flex items-center gap-1" title="Subtasks done">
+            <span className="inline-flex items-center gap-1" title={t('list.board.subtasksDoneTitle')}>
               ☑ {subtasksDone}/{subtasks.length}
             </span>
           )}
           {(task.openBlockerCount ?? 0) > 0 && (
-            <span className="text-amber-700 dark:text-amber-300">blocked by {task.openBlockerCount}</span>
+            <span className="text-amber-700 dark:text-amber-300">{t('list.blockedBy', { count: task.openBlockerCount ?? 0 })}</span>
           )}
           {assignees.length > 0 && (
             <span className="ml-auto flex -space-x-1.5">
@@ -2425,18 +2500,19 @@ function GanttView({
   groupBy: 'status' | 'priority' | 'assignee'
   onOpenTask: (taskId: string) => void
 }) {
+  const { t, locale } = useTranslation()
   const ordered = useOrderedStatuses()
 
   // Each task's [start,end]; a task needs at least a due or start date to plot.
   const scheduled = useMemo(() => {
     return tasks
-      .map((t) => {
-        const s = t.startDate ? startOfDay(new Date(t.startDate)) : null
-        const d = t.dueDate ? startOfDay(new Date(t.dueDate)) : null
+      .map((task) => {
+        const s = task.startDate ? startOfDay(new Date(task.startDate)) : null
+        const d = task.dueDate ? startOfDay(new Date(task.dueDate)) : null
         if (!s && !d) return null
         const start = s ?? d!
         const end = d ?? s!
-        return { task: t, start: start <= end ? start : end, end: start <= end ? end : start }
+        return { task, start: start <= end ? start : end, end: start <= end ? end : start }
       })
       .filter((x): x is { task: TaskItem; start: Date; end: Date } => x != null)
   }, [tasks])
@@ -2469,14 +2545,14 @@ function GanttView({
   // Build swimlanes + a flat render order; assign each task a row index.
   const { flatRows, layout } = useMemo(() => {
     const groupsMap = new Map<string, { label: string; items: typeof scheduled }>()
-    const groupKey = (t: TaskItem): { id: string; label: string } => {
+    const groupKey = (task: TaskItem): { id: string; label: string } => {
       if (groupBy === 'assignee') {
-        const a = t.assignees?.[0]
-        return { id: a?.userId ?? '__unassigned__', label: a?.user?.displayName ?? 'Unassigned' }
+        const a = task.assignees?.[0]
+        return { id: a?.userId ?? '__unassigned__', label: a?.user?.displayName ?? t('list.group.unassigned') }
       }
-      if (groupBy === 'priority') return { id: t.priority, label: t.priority }
-      const meta = ordered.find((s) => s.key === t.status)
-      return { id: t.status, label: meta?.name ?? t.status }
+      if (groupBy === 'priority') return { id: task.priority, label: t(PRIORITY_LABEL_KEYS[task.priority]) }
+      const meta = ordered.find((s) => s.key === task.status)
+      return { id: task.status, label: resolveStatusLabel(task.status, meta?.name, t) }
     }
     for (const s of scheduled) {
       const g = groupKey(s.task)
@@ -2501,12 +2577,12 @@ function GanttView({
       }
     }
     return { flatRows: rows, layout: lay }
-  }, [scheduled, groupBy, ordered, range])
+  }, [scheduled, groupBy, ordered, range, t])
 
   if (!range) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
-        No tasks with a start or due date yet. Add dates to see them on the timeline.
+        {t('list.gantt.noDatedTasks')}
       </Card>
     )
   }
@@ -2516,7 +2592,7 @@ function GanttView({
   const monthMarkers: Array<{ x: number; label: string }> = []
   for (let i = 0; i < range.days; i++) {
     const day = addDays(range.start, i)
-    if (i === 0 || day.getDate() === 1) monthMarkers.push({ x: i * GANTT_DAY_W, label: format(day, 'MMM yyyy') })
+    if (i === 0 || day.getDate() === 1) monthMarkers.push({ x: i * GANTT_DAY_W, label: day.toLocaleDateString(locale, { month: 'short', year: 'numeric' }) })
   }
 
   // Arrow endpoints from blocker bar right-edge → blocked bar left-edge.
@@ -2548,8 +2624,7 @@ function GanttView({
     <Card className="overflow-hidden p-0">
       {criticalIds.size > 0 && (
         <div className="border-b border-border bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-          <span className="inline-block h-2 w-2 rounded-sm bg-red-500 align-middle mr-1" /> Critical path highlighted —
-          the longest dependency chain.
+          <span className="inline-block h-2 w-2 rounded-sm bg-red-500 align-middle mr-1" /> {t('list.gantt.criticalPath')}
         </div>
       )}
       <div className="flex">
@@ -2663,7 +2738,7 @@ function GanttView({
                     width: lay.w,
                     height: GANTT_BAR_H,
                   }}
-                  title={`${row.s.task.title} · ${format(row.s.start, 'MMM d')} – ${format(row.s.end, 'MMM d')}`}
+                  title={`${row.s.task.title} · ${shortDate(row.s.start, locale)} – ${shortDate(row.s.end, locale)}`}
                 >
                   <span className="truncate">{row.s.task.title}</span>
                 </div>
@@ -2687,6 +2762,7 @@ function BulkActionBar({
   onApplied: () => Promise<void> | void
   workspaceMembers?: WorkspaceMember[]
 }) {
+  const { t, tCount } = useTranslation()
   const [busy, setBusy] = useState(false)
   const count = selectedIds.size
   const bulkStatuses = useOrderedStatuses()
@@ -2719,7 +2795,7 @@ function BulkActionBar({
   return (
     <div className="fixed bottom-5 left-1/2 z-40 -translate-x-1/2">
       <div className="flex items-center gap-2 rounded-full border border-border bg-card/95 px-3 py-2 shadow-xl backdrop-blur-sm">
-        <span className="text-sm font-medium tabular-nums pl-1">{count} selected</span>
+        <span className="text-sm font-medium tabular-nums pl-1">{tCount('list.bulk.selected', count)}</span>
         <span className="h-4 w-px bg-border" />
 
         <select
@@ -2732,12 +2808,12 @@ function BulkActionBar({
             e.target.value = ''
           }}
           className="h-8 rounded-md border border-border bg-background px-2 text-xs"
-          aria-label="Set status"
+          aria-label={t('list.bulk.setStatusAria')}
         >
-          <option value="">Set status…</option>
+          <option value="">{t('list.bulk.setStatus')}</option>
           {bulkStatuses.map((s) => (
             <option key={s.key} value={s.key}>
-              {s.name}
+              {resolveStatusLabel(s.key, s.name, t)}
             </option>
           ))}
         </select>
@@ -2752,12 +2828,12 @@ function BulkActionBar({
             e.target.value = ''
           }}
           className="h-8 rounded-md border border-border bg-background px-2 text-xs capitalize"
-          aria-label="Set priority"
+          aria-label={t('list.bulk.setPriorityAria')}
         >
-          <option value="">Set priority…</option>
+          <option value="">{t('list.bulk.setPriority')}</option>
           {BULK_PRIORITIES.map((p) => (
             <option key={p} value={p}>
-              {p}
+              {t(PRIORITY_LABEL_KEYS[p])}
             </option>
           ))}
         </select>
@@ -2772,9 +2848,9 @@ function BulkActionBar({
               e.target.value = ''
             }}
             className="h-8 rounded-md border border-border bg-background px-2 text-xs max-w-[9rem]"
-            aria-label="Assign to"
+            aria-label={t('list.bulk.assignToAria')}
           >
-            <option value="">Assign…</option>
+            <option value="">{t('list.bulk.assign')}</option>
             {workspaceMembers.map((m) => (
               <option key={m.userId} value={m.userId}>
                 {m.displayName || m.email}
@@ -2788,17 +2864,17 @@ function BulkActionBar({
           variant="ghost"
           disabled={busy}
           onClick={() => {
-            if (confirm(`Archive ${count} task${count === 1 ? '' : 's'}?`)) {
+            if (confirm(tCount('list.bulk.archiveConfirm', count))) {
               void apply({ isArchived: true })
             }
           }}
-          aria-label="Archive selected tasks"
+          aria-label={t('list.bulk.archiveAria')}
         >
           <Archive className="h-3.5 w-3.5 text-red-400" />
         </Button>
 
         <span className="h-4 w-px bg-border" />
-        <Button size="sm" variant="ghost" onClick={onClear} aria-label="Clear selection">
+        <Button size="sm" variant="ghost" onClick={onClear} aria-label={t('list.bulk.clearSelectionAria')}>
           <XIcon className="h-3.5 w-3.5" />
         </Button>
       </div>
