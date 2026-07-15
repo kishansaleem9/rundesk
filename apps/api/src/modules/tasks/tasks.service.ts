@@ -535,6 +535,7 @@ export class TasksService {
     parentTaskId?: string
     assigneeIds?: string[]
     labelIds?: string[]
+    isMilestone?: boolean
     createdById: string
   }) {
     await this.assertNotGuestInList(data.listId, data.createdById)
@@ -568,6 +569,7 @@ export class TasksService {
         startDate: data.startDate,
         dueDate: data.dueDate,
         timeEstimate: data.timeEstimate,
+        isMilestone: data.isMilestone ?? false,
       })
       .returning()
 
@@ -633,6 +635,7 @@ export class TasksService {
         dueDate: tasks.dueDate,
         status: tasks.status,
         priority: tasks.priority,
+        isMilestone: tasks.isMilestone,
         listId: tasks.listId,
         listName: lists.name,
         projectId: lists.projectId,
@@ -710,6 +713,7 @@ export class TasksService {
         status:         tasks.status,
         statusCategory: tasks.statusCategory,
         priority:       tasks.priority,
+        isMilestone:    tasks.isMilestone,
         listId:         lists.id,
         listName:       lists.name,
         projectId:      projects.id,
@@ -1036,6 +1040,7 @@ export class TasksService {
       timeEstimate: number | null
       coverColor: string | null
       isArchived: boolean
+      isMilestone: boolean
     }>,
   ) {
     await this.assertTaskWriteAccess(taskId, actorId)

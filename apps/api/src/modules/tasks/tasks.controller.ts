@@ -124,6 +124,7 @@ export class TasksController {
       timeEstimate: number | null
       coverColor: string | null
       isArchived: boolean
+      isMilestone: boolean
     }>,
   ) {
     const toDate = (label: string, value: string | null | undefined) => {

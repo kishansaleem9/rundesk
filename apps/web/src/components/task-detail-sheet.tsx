@@ -14,7 +14,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2, Paperclip, X as XIcon } from 'lucide-react'
+import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2, Paperclip, Diamond, X as XIcon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
@@ -90,6 +90,7 @@ type TaskDetail = {
   title: string
   description: string | null
   coverColor?: string | null
+  isMilestone?: boolean
   status: TaskStatus
   priority: TaskPriority
   dueDate?: string | null
@@ -294,6 +295,17 @@ export function TaskDetailSheet({
     },
   })
 
+  const updateMilestone = useMutation({
+    mutationFn: (isMilestone: boolean) =>
+      api(`/tasks/${taskId}`, { method: 'PATCH', body: { isMilestone } }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : 'Could not update milestone')
+    },
+  })
+
   const duplicateTask = useMutation({
     mutationFn: () =>
       api(`/workspaces/${fallbackWorkspaceId}/task-templates/duplicate/${taskId}`, { method: 'POST' }),
@@ -405,6 +417,12 @@ export function TaskDetailSheet({
                 <Badge variant="soft" className="font-mono text-[10px] tracking-wider uppercase">
                   RD-{shortId(detailQuery.data.id)}
                 </Badge>
+                {detailQuery.data.isMilestone && (
+                  <Badge variant="soft" className="text-[10px] gap-1 text-amber-600 dark:text-amber-400">
+                    <Diamond className="h-3 w-3 fill-amber-400" />
+                    Milestone
+                  </Badge>
+                )}
                 {detailQuery.data.dueDate && (
                   <Badge variant="info" className="text-[10px]">
                     Due {new Date(detailQuery.data.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
@@ -452,6 +470,19 @@ export function TaskDetailSheet({
                   </SheetTitle>
                 )}
                 <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    title={detailQuery.data.isMilestone ? 'Unmark milestone' : 'Mark as milestone'}
+                    aria-pressed={!!detailQuery.data.isMilestone}
+                    disabled={updateMilestone.isPending}
+                    onClick={() => updateMilestone.mutate(!detailQuery.data.isMilestone)}
+                    className={cn(
+                      'h-8 w-8 inline-flex items-center justify-center rounded hover:text-foreground disabled:opacity-50',
+                      detailQuery.data.isMilestone ? 'text-amber-500' : 'text-muted-foreground',
+                    )}
+                  >
+                    <Diamond className={cn('h-4 w-4', detailQuery.data.isMilestone && 'fill-amber-400')} />
+                  </button>
                   <TaskReminderButton
                     workspaceId={fallbackWorkspaceId}
                     taskId={detailQuery.data.id}

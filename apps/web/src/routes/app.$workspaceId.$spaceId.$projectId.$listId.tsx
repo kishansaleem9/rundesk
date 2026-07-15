@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Plus,
   Flag,
+  Diamond,
   Calendar as CalendarIcon,
   X as XIcon,
   Archive,
@@ -56,6 +57,7 @@ type TaskItem = {
   priority: TaskPriority
   status: TaskStatus
   statusCategory?: StatusCategory
+  isMilestone?: boolean
   startDate?: string | null
   dueDate?: string | null
   createdAt?: string | null
@@ -1788,10 +1790,11 @@ function TableView({
                     ) : (
                       <span
                         className={cn(
-                          'truncate font-medium',
+                          'truncate font-medium inline-flex items-center gap-1',
                           (task.statusCategory === 'closed' || task.status === 'done') && 'line-through text-muted-foreground',
                         )}
                       >
+                        {task.isMilestone && <Diamond className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />}
                         {task.title}
                       </span>
                     )}
@@ -2320,7 +2323,9 @@ function BoardTaskCard({
       {...attributes}
     >
       <div className="flex items-start gap-2">
-        <Flag className={cn('h-3 w-3 mt-0.5 shrink-0', PRIORITY_COLORS[task.priority])} />
+        {task.isMilestone
+          ? <Diamond className="h-3 w-3 mt-0.5 shrink-0 fill-amber-400 text-amber-500" />
+          : <Flag className={cn('h-3 w-3 mt-0.5 shrink-0', PRIORITY_COLORS[task.priority])} />}
         <div className="font-medium text-sm leading-snug">{task.title}</div>
       </div>
       {(due || subtasks.length > 0 || (task.openBlockerCount ?? 0) > 0 || assignees.length > 0) && (

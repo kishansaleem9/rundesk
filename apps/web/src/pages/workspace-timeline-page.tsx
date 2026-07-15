@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
-import { GanttChart } from 'lucide-react'
+import { GanttChart, Diamond } from 'lucide-react'
 import { api } from '../lib/api'
 
 type TimelineTask = {
@@ -12,6 +12,7 @@ type TimelineTask = {
   dueDate: string | null
   status: string
   priority: string
+  isMilestone?: boolean
   listId: string
   listName: string
   projectId: string
@@ -351,7 +352,10 @@ function TaskRow({
         className="sticky left-0 z-10 shrink-0 border-r border-border/40 bg-card/80 backdrop-blur-sm px-4 py-2"
         style={{ width: TASK_COL_WIDTH }}
       >
-        <div className="text-sm truncate text-foreground">{task.title}</div>
+        <div className="text-sm truncate text-foreground flex items-center gap-1.5">
+          {task.isMilestone && <Diamond className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />}
+          <span className="truncate">{task.title}</span>
+        </div>
         <div className="text-[10px] text-muted-foreground truncate flex items-center gap-1.5 mt-0.5">
           <Badge variant={task.priority as 'urgent' | 'high' | 'normal' | 'low'} className="px-1.5 py-0 text-[9px] capitalize">
             {task.priority}
@@ -364,13 +368,13 @@ function TaskRow({
       <div className="relative h-12" style={{ width: totalWidth }}>
         <div
           className={cn(
-            'group/bar absolute top-1/2 -translate-y-1/2 h-7 rounded-md text-[11px] text-white px-2.5 flex items-center font-medium shadow-md ring-1 ring-white/10',
-            PRIORITY_BG[task.priority] ?? 'bg-brand-gradient',
+            'group/bar absolute top-1/2 -translate-y-1/2 h-7 rounded-md text-[11px] text-white px-2.5 flex items-center gap-1 font-medium shadow-md ring-1 ring-white/10',
+            task.isMilestone ? 'bg-amber-500' : (PRIORITY_BG[task.priority] ?? 'bg-brand-gradient'),
             STATUS_OPACITY[task.status] ?? '',
             isDragging && 'ring-2 ring-white/70',
           )}
           style={{ left, width }}
-          title={`${task.title} · ${task.startDate ?? '?'} → ${task.dueDate ?? '?'}`}
+          title={`${task.isMilestone ? 'Milestone · ' : ''}${task.title} · ${task.startDate ?? '?'} → ${task.dueDate ?? '?'}`}
           onMouseDown={(e) => {
             if (e.button !== 0) return
             const target = e.target as HTMLElement
@@ -428,6 +432,7 @@ function TaskRow({
               window.addEventListener('mouseup', up)
             }}
           />
+          {task.isMilestone && <Diamond className="h-3 w-3 shrink-0 fill-white/90" />}
           <span className="truncate flex-1">{task.title}</span>
           {/* Right resize handle — adjusts due date */}
           <div

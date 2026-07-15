@@ -33,6 +33,9 @@ export const tasks = pgTable('tasks', {
   timeEstimate:  integer('time_estimate'), // seconds
   // Optional cover for the task detail header: a CSS color/gradient string.
   coverColor:    text('cover_color'),
+  // Milestone marker (Plan §5 timeline): a key deliverable, rendered as a
+  // diamond on the timeline and badged in lists.
+  isMilestone:   boolean('is_milestone').notNull().default(false),
   // Persisted recurrence config. When set and the task is completed, the next
   // occurrence is auto-created and the config moves forward to it (0038).
   recurrence:    jsonb('recurrence').$type<{
