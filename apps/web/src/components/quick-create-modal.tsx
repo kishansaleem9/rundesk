@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn } from '@rundesk/ui'
 import { CheckSquare, Folder, FileText, Layers, X } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
@@ -12,7 +13,17 @@ type List = { id: string; name: string }
 
 type Mode = 'task' | 'project' | 'space' | 'doc'
 
+// The `value` is the persisted Mode identifier; `labelKey` references an i18n
+// catalog entry resolved at render time.
+const MODE_TABS = [
+  { value: 'task', icon: CheckSquare, labelKey: 'quickCreate.tab.task' },
+  { value: 'project', icon: Folder, labelKey: 'quickCreate.tab.project' },
+  { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space' },
+  { value: 'doc', icon: FileText, labelKey: 'quickCreate.tab.doc' },
+] as const
+
 export function QuickCreateModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation()
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const workspaceId = params.workspaceId
   const [mode, setMode] = useState<Mode>('task')
@@ -21,9 +32,9 @@ export function QuickCreateModal({ onClose }: { onClose: () => void }) {
     return (
       <Backdrop onClose={onClose}>
         <Card>
-          <Header onClose={onClose} title="Pick a workspace first" />
+          <Header onClose={onClose} titleKey="quickCreate.pickWorkspaceTitle" />
           <p className="px-5 py-6 text-sm text-muted-foreground">
-            Choose a workspace from the top-left switcher before creating items.
+            {t('quickCreate.pickWorkspaceBody')}
           </p>
         </Card>
       </Backdrop>
@@ -33,12 +44,11 @@ export function QuickCreateModal({ onClose }: { onClose: () => void }) {
   return (
     <Backdrop onClose={onClose}>
       <Card>
-        <Header onClose={onClose} title="Create" />
+        <Header onClose={onClose} titleKey="quickCreate.title" />
         <div className="px-5 pt-3 pb-2 flex gap-1 border-b border-border">
-          <ModeTab mode={mode} value="task" setMode={setMode} icon={CheckSquare} label="Task" />
-          <ModeTab mode={mode} value="project" setMode={setMode} icon={Folder} label="Project" />
-          <ModeTab mode={mode} value="space" setMode={setMode} icon={Layers} label="Space" />
-          <ModeTab mode={mode} value="doc" setMode={setMode} icon={FileText} label="Doc" />
+          {MODE_TABS.map((tab) => (
+            <ModeTab key={tab.value} mode={mode} value={tab.value} setMode={setMode} icon={tab.icon} labelKey={tab.labelKey} />
+          ))}
         </div>
         {mode === 'task' && <TaskForm workspaceId={workspaceId} onClose={onClose} />}
         {mode === 'project' && <ProjectForm workspaceId={workspaceId} onClose={onClose} />}
@@ -75,10 +85,11 @@ function Card({ children }: { children: React.ReactNode }) {
   return <div className="w-[520px] bg-card rounded-lg shadow-2xl border border-border overflow-hidden">{children}</div>
 }
 
-function Header({ title, onClose }: { title: string; onClose: () => void }) {
+function Header({ titleKey, onClose }: { titleKey: TranslationKey; onClose: () => void }) {
+  const { t } = useTranslation()
   return (
     <div className="px-5 py-3 border-b border-border flex items-center justify-between">
-      <h2 className="font-semibold text-sm">{title}</h2>
+      <h2 className="font-semibold text-sm">{t(titleKey)}</h2>
       <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
         <X className="h-4 w-4" />
       </button>
@@ -91,14 +102,15 @@ function ModeTab({
   value,
   setMode,
   icon: Icon,
-  label,
+  labelKey,
 }: {
   mode: Mode
   value: Mode
   setMode: (m: Mode) => void
   icon: React.ElementType
-  label: string
+  labelKey: TranslationKey
 }) {
+  const { t } = useTranslation()
   const active = mode === value
   return (
     <button
@@ -109,12 +121,13 @@ function ModeTab({
       )}
     >
       <Icon className="h-3.5 w-3.5" />
-      {label}
+      {t(labelKey)}
     </button>
   )
 }
 
 function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
@@ -164,16 +177,16 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         if (title.trim() && listId) create.mutate()
       }}
     >
-      <Input autoFocus placeholder="Task title…" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Input autoFocus placeholder={t('quickCreate.taskTitlePlaceholder')} value={title} onChange={(e) => setTitle(e.target.value)} />
       <div className="grid grid-cols-3 gap-2">
-        <Select label="Space" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId(''); setListId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
-        <Select label="Project" value={projectId} onChange={(v) => { setProjectId(v); setListId('') }} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
-        <Select label="List" value={listId} onChange={setListId} options={lists.map((l) => ({ value: l.id, label: l.name }))} disabled={!projectId} />
+        <Select labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId(''); setListId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
+        <Select labelKey="quickCreate.selectProject" value={projectId} onChange={(v) => { setProjectId(v); setListId('') }} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
+        <Select labelKey="quickCreate.selectList" value={listId} onChange={setListId} options={lists.map((l) => ({ value: l.id, label: l.name }))} disabled={!projectId} />
       </div>
       <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" disabled={!title.trim() || !listId || create.isPending}>
-          {create.isPending ? 'Creating…' : 'Create task'}
+          {create.isPending ? t('quickCreate.creating') : t('quickCreate.createTask')}
         </Button>
       </div>
     </form>
@@ -181,6 +194,7 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
 }
 
 function ProjectForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [name, setName] = useState('')
@@ -210,17 +224,18 @@ function ProjectForm({ workspaceId, onClose }: { workspaceId: string; onClose: (
         if (name.trim() && spaceId) create.mutate()
       }}
     >
-      <Input autoFocus placeholder="Project name…" value={name} onChange={(e) => setName(e.target.value)} />
-      <Select label="Space" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
+      <Input autoFocus placeholder={t('quickCreate.projectNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+      <Select labelKey="quickCreate.selectSpace" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
       <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-        <Button type="submit" size="sm" disabled={!name.trim() || !spaceId || create.isPending}>Create project</Button>
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="submit" size="sm" disabled={!name.trim() || !spaceId || create.isPending}>{t('quickCreate.createProject')}</Button>
       </div>
     </form>
   )
 }
 
 function SpaceForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [name, setName] = useState('')
@@ -242,16 +257,17 @@ function SpaceForm({ workspaceId, onClose }: { workspaceId: string; onClose: () 
         if (name.trim()) create.mutate()
       }}
     >
-      <Input autoFocus placeholder="Space name…" value={name} onChange={(e) => setName(e.target.value)} />
+      <Input autoFocus placeholder={t('quickCreate.spaceNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
       <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-        <Button type="submit" size="sm" disabled={!name.trim() || create.isPending}>Create space</Button>
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="submit" size="sm" disabled={!name.trim() || create.isPending}>{t('quickCreate.createSpace')}</Button>
       </div>
     </form>
   )
 }
 
 function DocForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
@@ -277,38 +293,39 @@ function DocForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =>
         create.mutate()
       }}
     >
-      <Input autoFocus placeholder="Doc title (optional)…" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Input autoFocus placeholder={t('quickCreate.docTitlePlaceholder')} value={title} onChange={(e) => setTitle(e.target.value)} />
       <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-        <Button type="submit" size="sm" disabled={create.isPending}>Create doc</Button>
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="submit" size="sm" disabled={create.isPending}>{t('quickCreate.createDoc')}</Button>
       </div>
     </form>
   )
 }
 
 function Select({
-  label,
+  labelKey,
   value,
   onChange,
   options,
   disabled,
 }: {
-  label: string
+  labelKey: TranslationKey
   value: string
   onChange: (v: string) => void
   options: { value: string; label: string }[]
   disabled?: boolean
 }) {
+  const { t } = useTranslation()
   return (
     <label className="text-xs">
-      <span className="text-muted-foreground mb-1 block">{label}</span>
+      <span className="text-muted-foreground mb-1 block">{t(labelKey)}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className="w-full h-9 px-2 rounded-md border border-border bg-card text-sm disabled:opacity-50"
       >
-        <option value="">Select…</option>
+        <option value="">{t('quickCreate.selectPlaceholder')}</option>
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}

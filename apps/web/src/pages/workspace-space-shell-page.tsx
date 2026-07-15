@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Folder, Users, CircleDot, ArchiveRestore } from 'lucide-react'
 import { Button } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 import { WorkHubPage, WorkEmptyState, WorkEntityCard } from '../components/work/work-ui'
 import { ContainerMembersSheet } from '../components/container-members-sheet'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
@@ -30,6 +31,7 @@ export function SpaceShell() {
 }
 
 function SpaceHome() {
+  const { t, tCount } = useTranslation()
   const { workspaceId, spaceId } = useParams({ from: '/app/$workspaceId/$spaceId' })
   const [membersOpen, setMembersOpen] = useState(false)
   const [statusesOpen, setStatusesOpen] = useState(false)
@@ -60,39 +62,39 @@ function SpaceHome() {
 
   return (
     <WorkHubPage
-      breadcrumb="Space"
-      title={space?.name ?? 'Space'}
+      breadcrumb={t('spaceShell.breadcrumb')}
+      title={space?.name ?? t('spaceShell.titleFallback')}
       description={space?.description}
       headerAction={
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setStatusesOpen(true)}>
             <CircleDot className="h-3.5 w-3.5 mr-1.5" />
-            Statuses
+            {t('spaceShell.statuses')}
           </Button>
           <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
             <Users className="h-3.5 w-3.5 mr-1.5" />
-            Members
+            {t('spaceShell.members')}
           </Button>
         </div>
       }
     >
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[15px] font-semibold text-foreground">Projects</h2>
+          <h2 className="text-[15px] font-semibold text-foreground">{t('spaceShell.projects')}</h2>
           <span className="text-[12px] text-muted-foreground">
-            {projects.length} project{projects.length !== 1 ? 's' : ''}
+            {tCount('spaceShell.projectCount', projects.length)}
           </span>
         </div>
 
         {isLoading ? (
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
-            Loading projects…
+            {t('spaceShell.loadingProjects')}
           </div>
         ) : projects.length === 0 ? (
           <WorkEmptyState
             icon={Folder}
-            title="No projects in this space"
-            description="Projects group related lists and tasks. Create one from the sidebar by hovering this space and clicking +."
+            title={t('spaceShell.noProjectsTitle')}
+            description={t('spaceShell.noProjectsBody')}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -111,7 +113,7 @@ function SpaceHome() {
       {archivedProjects.length > 0 && (
         <section className="mt-8">
           <h2 className="text-[13px] font-semibold text-muted-foreground mb-2">
-            Archived projects ({archivedProjects.length})
+            {t('spaceShell.archivedProjects', { count: archivedProjects.length })}
           </h2>
           <div className="space-y-1">
             {archivedProjects.map((p) => (
@@ -128,7 +130,7 @@ function SpaceHome() {
                   onClick={() => restoreProject.mutate(p.id)}
                 >
                   <ArchiveRestore className="h-3.5 w-3.5 mr-1.5" />
-                  Restore
+                  {t('spaceShell.restore')}
                 </Button>
               </div>
             ))}
@@ -166,6 +168,7 @@ function ProjectCard({
   workspaceId: string
   spaceId: string
 }) {
+  const { tCount } = useTranslation()
   const { data: lists } = useQuery({
     queryKey: ['lists', project.id],
     queryFn: () => api<Array<{ id: string; name: string }>>(`/lists/project/${project.id}`),
@@ -188,7 +191,7 @@ function ProjectCard({
       iconClassName="p-0 overflow-hidden"
       title={project.name}
       subtitle={project.description}
-      meta={`${listCount} list${listCount !== 1 ? 's' : ''}`}
+      meta={tCount('spaceShell.listCount', listCount)}
     />
   )
 }

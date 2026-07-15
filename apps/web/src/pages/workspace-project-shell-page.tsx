@@ -5,6 +5,7 @@ import { Button, Input, Card, cn } from '@rundesk/ui'
 import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 import {
   WorkHubPage,
   WorkEmptyState,
@@ -35,6 +36,7 @@ export function ProjectShell() {
 }
 
 function ProjectHome() {
+  const { t, tCount } = useTranslation()
   const { workspaceId, spaceId, projectId } = useParams({
     from: '/app/$workspaceId/$spaceId/$projectId',
   })
@@ -99,18 +101,18 @@ function ProjectHome() {
 
   return (
     <WorkHubPage
-      breadcrumb="Project"
-      title={project?.name ?? 'Project'}
+      breadcrumb={t('projectShell.breadcrumb')}
+      title={project?.name ?? t('projectShell.titleFallback')}
       description={project?.description}
       headerAction={
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={() => setStatusesOpen(true)}>
             <CircleDot className="h-3.5 w-3.5 mr-1.5" />
-            Statuses
+            {t('projectShell.statuses')}
           </Button>
           <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
             <Users className="h-3.5 w-3.5 mr-1.5" />
-            Members
+            {t('projectShell.members')}
           </Button>
           <Button
             size="sm"
@@ -118,7 +120,7 @@ function ProjectHome() {
             onClick={() => setShowCreateList((v) => !v)}
           >
             <Plus className="h-3.5 w-3.5 mr-1.5" />
-            {showCreateList ? 'Cancel' : 'Add list'}
+            {showCreateList ? t('common.cancel') : t('projectShell.addList')}
           </Button>
         </div>
       }
@@ -127,11 +129,11 @@ function ProjectHome() {
         <WorkSectionTitle
           action={
             <span className="text-[12px] text-muted-foreground">
-              {lists.length} list{lists.length !== 1 ? 's' : ''}
+              {tCount('projectShell.listCount', lists.length)}
             </span>
           }
         >
-          Lists
+          {t('projectShell.lists')}
         </WorkSectionTitle>
 
         {showCreateList && (
@@ -140,13 +142,13 @@ function ProjectHome() {
               autoFocus
               value={newListName}
               onChange={(e) => setNewListName(e.target.value)}
-              placeholder="List name (e.g. Backlog, In Progress, QA)"
+              placeholder={t('projectShell.listNamePlaceholder')}
               className="h-9"
             />
             <Input
               value={newListDescription}
               onChange={(e) => setNewListDescription(e.target.value)}
-              placeholder="Description (optional)"
+              placeholder={t('projectShell.descriptionPlaceholder')}
               className="h-9"
             />
             <Button
@@ -155,26 +157,26 @@ function ProjectHome() {
               onClick={() => createList.mutate()}
               disabled={!newListName.trim() || createList.isPending}
             >
-              {createList.isPending ? 'Creating…' : 'Create list'}
+              {createList.isPending ? t('projectShell.creating') : t('projectShell.createList')}
             </Button>
           </WorkCreateCard>
         )}
 
         {isLoading ? (
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
-            Loading lists…
+            {t('projectShell.loadingLists')}
           </div>
         ) : lists.length === 0 ? (
           <WorkEmptyState
             icon={ListIcon}
-            title="No lists yet"
-            description="Lists organize tasks by workflow stage. Add a list from the button above or from the sidebar."
+            title={t('projectShell.noListsTitle')}
+            description={t('projectShell.noListsBody')}
             action={
               <Button
                 className="bg-violet-600 hover:bg-violet-700 text-white"
                 onClick={() => setShowCreateList(true)}
               >
-                <Plus className="h-4 w-4 mr-1.5" /> Add list
+                <Plus className="h-4 w-4 mr-1.5" /> {t('projectShell.addList')}
               </Button>
             }
           />
@@ -189,7 +191,7 @@ function ProjectHome() {
                 onDrop={() => handleListDrop(list.id)}
                 onDragEnd={() => setDragListId(null)}
                 className={cn('cursor-grab active:cursor-grabbing', dragListId === list.id && 'opacity-50')}
-                title="Drag to reorder lists"
+                title={t('projectShell.dragToReorder')}
               >
                 <ListCard
                   list={list}
@@ -238,6 +240,21 @@ type CustomFieldDef = {
   options: Array<{ label: string; value: string }> | null
 }
 
+// The `value` is the persisted field-type identifier; `labelKey` references an
+// i18n catalog entry resolved at render time.
+const FIELD_TYPE_OPTIONS = [
+  { value: 'text', labelKey: 'projectShell.fieldType.text' },
+  { value: 'number', labelKey: 'projectShell.fieldType.number' },
+  { value: 'dropdown', labelKey: 'projectShell.fieldType.dropdown' },
+  { value: 'date', labelKey: 'projectShell.fieldType.date' },
+  { value: 'checkbox', labelKey: 'projectShell.fieldType.checkbox' },
+  { value: 'url', labelKey: 'projectShell.fieldType.url' },
+  { value: 'email', labelKey: 'projectShell.fieldType.email' },
+  { value: 'phone', labelKey: 'projectShell.fieldType.phone' },
+  { value: 'money', labelKey: 'projectShell.fieldType.money' },
+  { value: 'rating', labelKey: 'projectShell.fieldType.rating' },
+] as const
+
 function CustomFieldsSection({
   workspaceId,
   projectId,
@@ -245,6 +262,7 @@ function CustomFieldsSection({
   workspaceId: string
   projectId: string
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
@@ -296,17 +314,17 @@ function CustomFieldsSection({
         action={
           <Button size="sm" variant="outline" onClick={() => setShowForm((v) => !v)}>
             <Settings className="h-3.5 w-3.5 mr-1.5" />
-            {showForm ? 'Cancel' : 'Add field'}
+            {showForm ? t('common.cancel') : t('projectShell.addField')}
           </Button>
         }
       >
         <span className="flex items-center gap-2">
           <Settings className="h-4 w-4 text-muted-foreground" />
-          Custom fields
+          {t('projectShell.customFields')}
         </span>
       </WorkSectionTitle>
       <p className="text-[13px] text-muted-foreground mb-4 -mt-1">
-        Fields defined here appear on every task in this project.
+        {t('projectShell.customFieldsDesc')}
       </p>
 
       {showForm && (
@@ -314,7 +332,7 @@ function CustomFieldsSection({
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Field name (e.g. Sprint, Risk level)"
+            placeholder={t('projectShell.fieldNamePlaceholder')}
             className="h-9"
           />
           <select
@@ -322,26 +340,19 @@ function CustomFieldsSection({
             onChange={(e) => setType(e.target.value as CustomFieldDef['type'])}
             className="h-9 w-full rounded-md border border-border/80 bg-background px-3 text-sm"
           >
-            <option value="text">Text</option>
-            <option value="number">Number</option>
-            <option value="dropdown">Dropdown</option>
-            <option value="date">Date</option>
-            <option value="checkbox">Checkbox</option>
-            <option value="url">URL</option>
-            <option value="email">Email</option>
-            <option value="phone">Phone</option>
-            <option value="money">Money</option>
-            <option value="rating">Rating</option>
+            {FIELD_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
+            ))}
           </select>
           <label className="flex items-center gap-2 text-[13px]">
             <input type="checkbox" checked={isRequired} onChange={(e) => setIsRequired(e.target.checked)} />
-            Required
+            {t('projectShell.required')}
           </label>
           {type === 'dropdown' && (
             <Input
               value={options}
               onChange={(e) => setOptions(e.target.value)}
-              placeholder="Options, comma-separated"
+              placeholder={t('projectShell.optionsPlaceholder')}
               className="h-9"
             />
           )}
@@ -351,29 +362,30 @@ function CustomFieldsSection({
             disabled={!name.trim() || create.isPending}
             onClick={() => create.mutate()}
           >
-            {create.isPending ? 'Creating…' : 'Create field'}
+            {create.isPending ? t('projectShell.creating') : t('projectShell.createField')}
           </Button>
         </WorkCreateCard>
       )}
 
       {fieldsQuery.isLoading ? (
-        <Card className="p-4 text-sm text-muted-foreground border-border/80">Loading…</Card>
+        <Card className="p-4 text-sm text-muted-foreground border-border/80">{t('common.loading')}</Card>
       ) : fields.length === 0 ? (
         <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
-          No custom fields yet. Add fields like &quot;Estimated cost&quot;, &quot;Risk level&quot;, or
-          &quot;Sprint&quot; to tailor tasks for this project.
+          {t('projectShell.noFieldsBody')}
         </Card>
       ) : (
         <Card className="divide-y border-border/80 overflow-hidden">
-          {fields.map((f) => (
+          {fields.map((f) => {
+            const typeOpt = FIELD_TYPE_OPTIONS.find((o) => o.value === f.type)
+            return (
             <div key={f.id} className="flex items-center gap-3 p-3 bg-background">
               <div className="flex-1 min-w-0">
                 <div className="text-[14px] font-medium flex items-center gap-2">
                   {f.name}
-                  {f.isRequired && <span className="text-destructive text-[11px]">required</span>}
+                  {f.isRequired && <span className="text-destructive text-[11px]">{t('projectShell.requiredTag')}</span>}
                 </div>
                 <div className="text-[12px] text-muted-foreground capitalize">
-                  {f.type}
+                  {typeOpt ? t(typeOpt.labelKey) : f.type}
                   {f.options && f.options.length > 0 && (
                     <> — {f.options.map((o) => o.label).join(', ')}</>
                   )}
@@ -389,7 +401,8 @@ function CustomFieldsSection({
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
-          ))}
+            )
+          })}
         </Card>
       )}
     </section>
@@ -418,6 +431,7 @@ function activityIcon(action: string): string {
 }
 
 function ProjectActivitySection({ projectId }: { projectId: string }) {
+  const { t } = useTranslation()
   const { data: activity = [], isLoading } = useQuery({
     queryKey: ['project-activity', projectId],
     queryFn: () => api<ProjectActivity[]>(`/projects/${projectId}/activity?limit=40`),
@@ -429,17 +443,17 @@ function ProjectActivitySection({ projectId }: { projectId: string }) {
       <WorkSectionTitle>
         <span className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-muted-foreground" />
-          Recent activity
+          {t('projectShell.recentActivity')}
         </span>
       </WorkSectionTitle>
       <p className="text-[13px] text-muted-foreground mb-4 -mt-1">
-        Everything happening across this project&apos;s tasks.
+        {t('projectShell.recentActivityDesc')}
       </p>
       {isLoading ? (
-        <Card className="p-4 text-sm text-muted-foreground border-border/80">Loading…</Card>
+        <Card className="p-4 text-sm text-muted-foreground border-border/80">{t('common.loading')}</Card>
       ) : activity.length === 0 ? (
         <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
-          No activity yet. Task changes across this project will show up here.
+          {t('projectShell.noActivityBody')}
         </Card>
       ) : (
         <Card className="border-border/80 overflow-hidden">
@@ -449,12 +463,12 @@ function ProjectActivitySection({ projectId }: { projectId: string }) {
                 <span className="mt-0.5 shrink-0">{activityIcon(a.action)}</span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate">
-                    <span className="font-medium">{a.actor?.displayName ?? a.actor?.email ?? 'System'}</span>{' '}
+                    <span className="font-medium">{a.actor?.displayName ?? a.actor?.email ?? t('projectShell.system')}</span>{' '}
                     <span className="text-muted-foreground">{label(a.action)}</span>
                     {a.taskTitle ? (
                       <>
                         {' '}
-                        <span className="text-muted-foreground">on</span>{' '}
+                        <span className="text-muted-foreground">{t('projectShell.activityOn')}</span>{' '}
                         <span className="font-medium">{a.taskTitle}</span>
                       </>
                     ) : null}
@@ -473,6 +487,7 @@ function ProjectActivitySection({ projectId }: { projectId: string }) {
 }
 
 function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: string; workspaceId: string }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [newClientName, setNewClientName] = useState('')
   const projectQuery = useQuery({
@@ -505,7 +520,7 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
       await qc.invalidateQueries({ queryKey: ['clients', workspaceId] })
       setClient.mutate(row.id)
     },
-    onError: (err) => window.alert(err instanceof Error ? err.message : 'Could not create client'),
+    onError: (err) => window.alert(err instanceof Error ? err.message : t('projectShell.createClientError')),
   })
 
   return (
@@ -513,18 +528,18 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
       <WorkSectionTitle>
         <span className="flex items-center gap-2">
           <DollarSign className="h-4 w-4 text-muted-foreground" />
-          Time tracking
+          {t('projectShell.timeTracking')}
         </span>
       </WorkSectionTitle>
       <p className="text-[13px] text-muted-foreground mb-4 -mt-1">
-        Defaults applied to time logged against tasks in this project.
+        {t('projectShell.timeTrackingDesc')}
       </p>
       <Card className="p-4 border-border/80">
         <label className="flex items-center justify-between gap-4 cursor-pointer">
           <div>
-            <div className="text-[14px] font-medium">Billable by default</div>
+            <div className="text-[14px] font-medium">{t('projectShell.billableByDefault')}</div>
             <div className="text-[12px] text-muted-foreground">
-              New time entries on this project&apos;s tasks are marked billable unless overridden.
+              {t('projectShell.billableDesc')}
             </div>
           </div>
           <button
@@ -549,9 +564,9 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
         </label>
 
         <div className="mt-4 pt-4 border-t border-border/60">
-          <div className="text-[14px] font-medium">Client</div>
+          <div className="text-[14px] font-medium">{t('projectShell.client')}</div>
           <div className="text-[12px] text-muted-foreground mb-2">
-            Bill this project&apos;s time to a client — shown in the time report.
+            {t('projectShell.clientDesc')}
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -560,7 +575,7 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
               disabled={setClient.isPending}
               className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
             >
-              <option value="">No client</option>
+              <option value="">{t('projectShell.noClient')}</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -578,11 +593,11 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
             <Input
               value={newClientName}
               onChange={(e) => setNewClientName(e.target.value)}
-              placeholder="+ New client name"
+              placeholder={t('projectShell.newClientPlaceholder')}
               className="h-8 flex-1"
             />
             <Button type="submit" size="sm" variant="outline" disabled={!newClientName.trim() || createClient.isPending}>
-              Add
+              {t('projectShell.add')}
             </Button>
           </form>
         </div>
@@ -608,7 +623,7 @@ function ListCard({
   })
 
   const total = tasks?.length ?? 0
-  const done = tasks?.filter((t) => t.status === 'done').length ?? 0
+  const done = tasks?.filter((task) => task.status === 'done').length ?? 0
 
   return (
     <WorkEntityCard

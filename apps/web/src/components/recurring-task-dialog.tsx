@@ -13,6 +13,7 @@ import {
   cn,
 } from '@rundesk/ui'
 import { Repeat, Calendar, Check } from 'lucide-react'
+import { useTranslation } from '../lib/i18n'
 
 type Mode = 'daily' | 'weekly' | 'monthly'
 
@@ -24,18 +25,24 @@ export type RecurrenceRule = {
   skipWeekends?: boolean
 }
 
-// Weekday buttons in Mon→Sun display order, each carrying its JS getDay() value
-// (0=Sun … 6=Sat) so what we store matches the backend's convention exactly.
-const WEEKDAYS: Array<{ label: string; day: number }> = [
-  { label: 'M', day: 1 },
-  { label: 'T', day: 2 },
-  { label: 'W', day: 3 },
-  { label: 'T', day: 4 },
-  { label: 'F', day: 5 },
-  { label: 'S', day: 6 },
-  { label: 'S', day: 0 },
-]
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// Weekday buttons in Mon→Sun display order. Each value is its JS getDay()
+// number (0=Sun … 6=Sat) so what we store matches the backend's convention
+// exactly; the visible label is derived per-locale (see weekdayName).
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
+
+// The `value` is the persisted Mode identifier; `labelKey`/`unitKey` reference
+// i18n catalog entries resolved at render time.
+const MODES = [
+  { value: 'daily', labelKey: 'recurringTask.freq.daily', unitKey: 'recurringTask.unit.day' },
+  { value: 'weekly', labelKey: 'recurringTask.freq.weekly', unitKey: 'recurringTask.unit.week' },
+  { value: 'monthly', labelKey: 'recurringTask.freq.monthly', unitKey: 'recurringTask.unit.month' },
+] as const
+
+// Jan 1 2023 was a Sunday, so a fixed reference week turns a getDay() number
+// into a localized weekday name without hardcoding any language.
+function weekdayName(locale: string, day: number, width: 'narrow' | 'short'): string {
+  return new Date(2023, 0, 1 + day).toLocaleDateString(locale, { weekday: width })
+}
 
 export function RecurringTaskDialog({
   open,
@@ -50,10 +57,12 @@ export function RecurringTaskDialog({
   onSubmit: (rule: RecurrenceRule) => void
   saving?: boolean
 }) {
+  const { t, tCount, locale } = useTranslation()
   const [mode, setMode] = useState<Mode>('weekly')
   const [days, setDays] = useState<Set<number>>(new Set([1, 3, 5]))
   const [interval, setInterval] = useState(1)
   const [skipWeekends, setSkipWeekends] = useState(false)
+  const activeMode = MODES.find((m) => m.value === mode) ?? MODES[0]
 
   // Hydrate from the task's existing rule each time the dialog opens.
   useEffect(() => {
@@ -72,13 +81,16 @@ export function RecurringTaskDialog({
   }, [open, initialRule])
 
   function summary() {
-    const every = interval > 1 ? `${interval} ` : ''
-    if (mode === 'daily') return `Every ${every}day${interval > 1 ? 's' : ''}${skipWeekends ? ', skipping weekends' : ''}`
-    if (mode === 'weekly') {
-      const picked = [...days].sort().map((d) => DAY_NAMES[d]).join(', ')
-      return `Every ${every}week${interval > 1 ? 's' : ''} on ${picked || '—'}`
+    if (mode === 'daily') {
+      return skipWeekends
+        ? tCount('recurringTask.summaryDailySkip', interval)
+        : tCount('recurringTask.summaryDaily', interval)
     }
-    return `Every ${every}month${interval > 1 ? 's' : ''}`
+    if (mode === 'weekly') {
+      const picked = [...days].sort().map((d) => weekdayName(locale, d, 'short')).join(', ')
+      return tCount('recurringTask.summaryWeekly', interval, { days: picked || '—' })
+    }
+    return tCount('recurringTask.summaryMonthly', interval)
   }
 
   const submit = () => {
@@ -98,34 +110,34 @@ export function RecurringTaskDialog({
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-gradient text-white shadow-sm">
               <Repeat className="h-3.5 w-3.5" />
             </span>
-            Custom recurrence
+            {t('recurringTask.title')}
           </DialogTitle>
           <DialogDescription>
-            We&apos;ll auto-create the next instance when this task is completed.
+            {t('recurringTask.description')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2">
-            {(['daily', 'weekly', 'monthly'] as const).map((m) => (
+            {MODES.map((m) => (
               <button
-                key={m}
-                onClick={() => setMode(m)}
+                key={m.value}
+                onClick={() => setMode(m.value)}
                 className={cn(
                   'rounded-lg border px-2 py-2.5 text-xs font-medium capitalize transition-all',
-                  mode === m
+                  mode === m.value
                     ? 'border-accent bg-accent/15 text-foreground'
                     : 'border-border/60 text-muted-foreground hover:bg-card/60',
                 )}
               >
-                {m}
+                {t(m.labelKey)}
               </button>
             ))}
           </div>
 
           <div className="rounded-lg border border-border/40 bg-card/30 p-4 space-y-4">
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Repeat every</Label>
+              <Label className="text-xs text-muted-foreground">{t('recurringTask.repeatEvery')}</Label>
               <div className="flex items-center gap-2">
                 <Input
                   type="number"
@@ -136,16 +148,16 @@ export function RecurringTaskDialog({
                   className="w-20"
                 />
                 <span className="text-sm capitalize text-muted-foreground">
-                  {mode === 'daily' ? 'day(s)' : mode === 'weekly' ? 'week(s)' : 'month(s)'}
+                  {t(activeMode.unitKey)}
                 </span>
               </div>
             </div>
 
             {mode === 'weekly' && (
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">On these days</Label>
+                <Label className="text-xs text-muted-foreground">{t('recurringTask.onTheseDays')}</Label>
                 <div className="grid grid-cols-7 gap-1.5">
-                  {WEEKDAYS.map(({ label, day }, i) => (
+                  {WEEKDAY_ORDER.map((day, i) => (
                     <button
                       key={i}
                       onClick={() =>
@@ -163,7 +175,7 @@ export function RecurringTaskDialog({
                           : 'border-border/60 text-muted-foreground hover:bg-card/60',
                       )}
                     >
-                      {label}
+                      {weekdayName(locale, day, 'narrow')}
                     </button>
                   ))}
                 </div>
@@ -173,22 +185,22 @@ export function RecurringTaskDialog({
             {mode === 'daily' && (
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={skipWeekends} onChange={(e) => setSkipWeekends(e.target.checked)} />
-                Skip weekends
+                {t('recurringTask.skipWeekends')}
               </label>
             )}
           </div>
 
           <div className="flex items-center gap-2 rounded-md border border-accent/30 bg-accent/5 px-3 py-2">
             <Calendar className="h-4 w-4 text-accent shrink-0" />
-            <Badge variant="soft" className="text-[10px] uppercase">Preview</Badge>
+            <Badge variant="soft" className="text-[10px] uppercase">{t('recurringTask.preview')}</Badge>
             <span className="text-sm">{summary()}</span>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button variant="gradient" onClick={submit} disabled={!canSubmit || saving}>
-            <Check className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Set recurrence'}
+            <Check className="h-3.5 w-3.5" /> {saving ? t('common.saving') : t('recurringTask.setRecurrence')}
           </Button>
         </DialogFooter>
       </DialogContent>
