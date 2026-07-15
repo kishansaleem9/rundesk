@@ -34,6 +34,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
+import { ChatAttachmentList } from '../components/chat/chat-attachments'
 
 type Channel = {
   id: string
@@ -82,7 +83,25 @@ type Message = {
     count: number
     reacted: boolean
   }>
+  attachments?: Array<{
+    id: string
+    fileName: string
+    contentType: string
+    sizeBytes: number
+    url: string
+  }>
 }
+
+type PendingChatAttachment = {
+  id: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  url: string
+}
+
+/** Hard cap on a single chat attachment (Plan §6.8) — mirrors the API limit. */
+const MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 
 type CustomEmoji = { id: string; shortcode: string; imageUrl: string; createdById?: string | null }
 
@@ -126,6 +145,9 @@ export function ChatPage() {
   const consumedDeepLinkRef = useRef<string | null>(null)
   const [addPeopleOpen, setAddPeopleOpen] = useState(false)
   const [input, setInput] = useState('')
+  // Files uploaded (to R2) and awaiting attachment to the next sent message (§6.8).
+  const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
+  const [uploadingFiles, setUploadingFiles] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPrivate, setNewPrivate] = useState(false)
@@ -397,10 +419,10 @@ export function ChatPage() {
   }, [highlightedMessageId, messages, selectedId])
 
   const sendMutation = useMutation({
-    mutationFn: ({ body, parentMessageId }: { body: string; parentMessageId?: string }) =>
+    mutationFn: ({ body, parentMessageId, attachmentIds }: { body: string; parentMessageId?: string; attachmentIds?: string[] }) =>
       api<Message>(`/chat/channels/${selectedId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ body, parentMessageId }),
+        body: JSON.stringify({ body, parentMessageId, attachmentIds: attachmentIds?.length ? attachmentIds : undefined }),
       }),
     onSuccess: (msg) => {
       qc.setQueryData<Message[] | undefined>(['chat-messages', msg.channelId], (prev) =>
@@ -408,8 +430,47 @@ export function ChatPage() {
       )
       setInput('')
       setReplyTo(null)
+      setPendingAttachments([])
     },
   })
+
+  // Upload picked files to R2 (presign → PUT → record) and queue them for the
+  // next sent message (Plan §6.8). Runs sequentially; a failure is surfaced but
+  // doesn't drop already-uploaded files.
+  const uploadFiles = async (files: File[]) => {
+    if (!selectedId) return
+    setUploadingFiles(true)
+    try {
+      for (const file of files) {
+        if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
+          toast.error(`"${file.name}" exceeds the ${MAX_CHAT_ATTACHMENT_BYTES / (1024 * 1024)} MB limit`)
+          continue
+        }
+        const contentType = file.type || 'application/octet-stream'
+        try {
+          const presign = await api<{ uploadUrl: string; storageKey: string }>(
+            `/chat/channels/${selectedId}/attachments/presign`,
+            { method: 'POST', body: { fileName: file.name, contentType, sizeBytes: file.size } },
+          )
+          const putRes = await fetch(presign.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': contentType },
+            body: file,
+          })
+          if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`)
+          const rec = await api<PendingChatAttachment>(`/chat/channels/${selectedId}/attachments`, {
+            method: 'POST',
+            body: { fileName: file.name, storageKey: presign.storageKey, contentType, sizeBytes: file.size },
+          })
+          setPendingAttachments((prev) => [...prev, rec])
+        } catch (err) {
+          toast.error(err instanceof ApiError ? err.message : `Could not upload "${file.name}"`)
+        }
+      }
+    } finally {
+      setUploadingFiles(false)
+    }
+  }
 
   const createChannelMutation = useMutation({
     mutationFn: (data: { name: string; isPrivate: boolean }) =>
@@ -587,8 +648,15 @@ export function ChatPage() {
 
   const handleSend = () => {
     const body = input.trim()
-    if (!body || !selectedId) return
-    sendMutation.mutate({ body, parentMessageId: replyTo?.id ?? undefined })
+    if (!selectedId) return
+    // Allow sending with text OR at least one uploaded attachment (§6.8).
+    if (!body && pendingAttachments.length === 0) return
+    if (uploadingFiles) return
+    sendMutation.mutate({
+      body,
+      parentMessageId: replyTo?.id ?? undefined,
+      attachmentIds: pendingAttachments.map((a) => a.id),
+    })
   }
 
   const handleThreadReply = (body: string) => {
@@ -896,8 +964,11 @@ export function ChatPage() {
                         </div>
                       ) : (
                         <div className="text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90">
-                          <ChatMessageBody text={m.body} namesById={namesById} />
+                          {m.body && <ChatMessageBody text={m.body} namesById={namesById} />}
                           {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">(edited)</span>}
+                          {!m.deletedAt && m.attachments && m.attachments.length > 0 && (
+                            <ChatAttachmentList attachments={m.attachments} />
+                          )}
                         </div>
                       )}
                       {!m.deletedAt && editingMessageId !== m.id && (
@@ -1156,6 +1227,10 @@ export function ChatPage() {
           replyTo={replyTo}
           replyNamesById={namesById}
           onCancelReply={() => setReplyTo(null)}
+          attachments={pendingAttachments}
+          onFilesSelected={(files) => void uploadFiles(files)}
+          onRemoveAttachment={(id) => setPendingAttachments((prev) => prev.filter((a) => a.id !== id))}
+          uploading={uploadingFiles}
           mentionMenu={
             showMentions && mentionCandidates.length > 0 ? (
               <div className="mb-2 max-h-36 overflow-auto rounded-lg border border-border/80 bg-background shadow-sm">

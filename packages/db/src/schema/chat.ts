@@ -48,6 +48,26 @@ export const chatMessages = pgTable('chat_messages', {
   createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// Files shared in chat (Plan §6.8). Uploaded to R2; the row holds metadata +
+// the object key. Uploaded first (message_id null), then linked when the
+// message is posted.
+export const chatMessageAttachments = pgTable('chat_message_attachments', {
+  id:          uuid('id').primaryKey().defaultRandom(),
+  channelId:   uuid('channel_id').notNull().references(() => chatChannels.id, { onDelete: 'cascade' }),
+  messageId:   uuid('message_id').references((): AnyPgColumn => chatMessages.id, { onDelete: 'cascade' }),
+  fileName:    text('file_name').notNull(),
+  contentType: text('content_type').notNull(),
+  sizeBytes:   integer('size_bytes').notNull(),
+  storageKey:  text('storage_key').notNull(),
+  uploadedById: uuid('uploaded_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const chatMessageAttachmentsRelations = relations(chatMessageAttachments, ({ one }) => ({
+  channel: one(chatChannels, { fields: [chatMessageAttachments.channelId], references: [chatChannels.id] }),
+  message: one(chatMessages, { fields: [chatMessageAttachments.messageId], references: [chatMessages.id] }),
+}))
+
 export const chatMessageReactions = pgTable('chat_message_reactions', {
   id:        uuid('id').primaryKey().defaultRandom(),
   messageId: uuid('message_id').notNull().references(() => chatMessages.id, { onDelete: 'cascade' }),

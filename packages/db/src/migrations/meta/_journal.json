@@ -358,6 +358,13 @@
       "when": 1900000047000,
       "tag": "0050_slack_routing_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1900000048000,
+      "tag": "0051_chat_message_attachments",
+      "breakpoints": true
     }
   ]
 }

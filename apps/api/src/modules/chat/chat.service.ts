@@ -4,6 +4,7 @@ import {
   chatChannels,
   chatChannelMembers,
   chatMessages,
+  chatMessageAttachments,
   chatMessageReactions,
   chatMessageSaves,
   chatCustomEmoji,
@@ -12,12 +13,16 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
 import { TasksService } from '../tasks/tasks.service'
 import { AiService } from '../ai/ai.service'
 
 const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
+
+/** Hard cap on a single chat attachment (Plan §6.8) — mirrors task attachments. */
+export const MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 
 @Injectable()
 export class ChatService {
@@ -29,7 +34,75 @@ export class ChatService {
     private notifications: NotificationsService,
     private tasks: TasksService,
     private ai: AiService,
+    private r2: R2Service,
   ) {}
+
+  private sanitizeFileName(input: string): string {
+    return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
+  }
+
+  /** Reject attachments over the hard cap (Plan §6.8). Undefined size is allowed. */
+  private assertAttachmentSize(sizeBytes?: number): void {
+    if (sizeBytes != null && Number.isFinite(sizeBytes) && sizeBytes > MAX_CHAT_ATTACHMENT_BYTES) {
+      const mb = Math.round(MAX_CHAT_ATTACHMENT_BYTES / (1024 * 1024))
+      throw new BadRequestException(`Attachment exceeds the ${mb} MB limit`)
+    }
+  }
+
+  /**
+   * Presign a direct-to-R2 upload for a chat attachment (Plan §6.8). The caller
+   * PUTs the bytes to `uploadUrl`, then calls recordAttachment with the returned
+   * storageKey. Membership is enforced up-front via assertChannelAccess.
+   */
+  async createAttachmentUploadUrl(
+    channelId: string,
+    userId: string,
+    body: { fileName: string; contentType: string; sizeBytes?: number },
+  ) {
+    await this.assertChannelAccess(channelId, userId)
+    if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
+    this.assertAttachmentSize(body.sizeBytes)
+    const fileName = this.sanitizeFileName(body.fileName)
+    const key = `chat/${channelId}/attachments/${Date.now()}-${fileName}`
+    const uploadUrl = await this.r2.presignPutObject(key, body.contentType || 'application/octet-stream', {
+      uploadedby: userId,
+      channelid: channelId,
+    })
+    return { uploadUrl, storageKey: key }
+  }
+
+  /**
+   * Record an uploaded attachment (message_id null until the message is posted).
+   * Returns the row plus a short-lived download URL so the composer can preview it.
+   */
+  async recordAttachment(
+    channelId: string,
+    userId: string,
+    data: { fileName: string; contentType: string; sizeBytes: number; storageKey: string },
+  ) {
+    await this.assertChannelAccess(channelId, userId)
+    this.assertAttachmentSize(data.sizeBytes)
+    if (!data.storageKey) throw new BadRequestException('storageKey is required')
+    const [row] = await this.db
+      .insert(chatMessageAttachments)
+      .values({
+        channelId,
+        fileName: this.sanitizeFileName(data.fileName),
+        contentType: data.contentType || 'application/octet-stream',
+        sizeBytes: Math.max(0, Math.floor(data.sizeBytes || 0)),
+        storageKey: data.storageKey,
+        uploadedById: userId,
+      })
+      .returning()
+    return {
+      id: row.id,
+      fileName: row.fileName,
+      contentType: row.contentType,
+      sizeBytes: row.sizeBytes,
+      storageKey: row.storageKey,
+      url: this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey,
+    }
+  }
 
   /** Ensure a system "Rundesk AI" user exists to author @Rundesk replies. */
   private async ensureAiUser(): Promise<string> {
@@ -558,6 +631,27 @@ export class ChatService {
       grouped.set(reaction.messageId, byEmoji)
     }
 
+    // Hydrate per-message attachments (Plan §6.8). Separate query, keyed by
+    // message id, with fresh signed download URLs.
+    const attachmentRows = await this.db
+      .select()
+      .from(chatMessageAttachments)
+      .where(inArray(chatMessageAttachments.messageId, messageIds))
+    const attachmentsByMessage = new Map<string, Array<{ id: string; fileName: string; contentType: string; sizeBytes: number; storageKey: string; url: string }>>()
+    for (const a of attachmentRows) {
+      if (!a.messageId) continue
+      const list = attachmentsByMessage.get(a.messageId) ?? []
+      list.push({
+        id: a.id,
+        fileName: a.fileName,
+        contentType: a.contentType,
+        sizeBytes: a.sizeBytes,
+        storageKey: a.storageKey,
+        url: this.r2.configured ? await this.r2.getObjectUrl(a.storageKey) : a.storageKey,
+      })
+      attachmentsByMessage.set(a.messageId, list)
+    }
+
     return ordered.map((message) => {
       const byEmoji = grouped.get(message.id)
       const reactions =
@@ -568,7 +662,7 @@ export class ChatService {
               reacted: users.has(userId),
             }))
           : []
-      return { ...message, reactions }
+      return { ...message, reactions, attachments: attachmentsByMessage.get(message.id) ?? [] }
     })
   }
 
@@ -680,10 +774,13 @@ export class ChatService {
     body: string
     parentMessageId?: string | null
     mentions?: Array<{ userId: string; offset?: number; length?: number }>
+    attachmentIds?: string[]
   }) {
     await this.assertChannelAccess(data.channelId, data.authorId)
     const body = data.body.trim()
-    if (!body) throw new ForbiddenException('Message body required')
+    const attachmentIds = (data.attachmentIds ?? []).filter(Boolean)
+    // A message must carry either text or at least one attachment (Plan §6.8).
+    if (!body && attachmentIds.length === 0) throw new ForbiddenException('Message body required')
     const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, data.channelId))
     if (!channel) throw new NotFoundException('Channel not found')
 
@@ -705,8 +802,36 @@ export class ChatService {
       })
       .returning()
 
+    // Link any pre-uploaded attachments to this message. Only rows belonging to
+    // this channel and still unlinked (message_id null) are claimed, so an id
+    // can't be smuggled across channels or re-attached to a second message.
+    let attachments: Array<{ id: string; fileName: string; contentType: string; sizeBytes: number; storageKey: string; url: string }> = []
+    if (attachmentIds.length > 0) {
+      const linked = await this.db
+        .update(chatMessageAttachments)
+        .set({ messageId: row.id })
+        .where(
+          and(
+            eq(chatMessageAttachments.channelId, data.channelId),
+            isNull(chatMessageAttachments.messageId),
+            inArray(chatMessageAttachments.id, attachmentIds),
+          ),
+        )
+        .returning()
+      attachments = await Promise.all(
+        linked.map(async (a) => ({
+          id: a.id,
+          fileName: a.fileName,
+          contentType: a.contentType,
+          sizeBytes: a.sizeBytes,
+          storageKey: a.storageKey,
+          url: this.r2.configured ? await this.r2.getObjectUrl(a.storageKey) : a.storageKey,
+        })),
+      )
+    }
+
     const [author] = await this.db.select({ displayName: users.displayName, avatarUrl: users.avatarUrl }).from(users).where(eq(users.id, data.authorId))
-    const enriched = { ...row, authorName: author?.displayName, authorAvatarUrl: author?.avatarUrl, reactions: [] as Array<{ emoji: string; count: number; reacted: boolean }> }
+    const enriched = { ...row, authorName: author?.displayName, authorAvatarUrl: author?.avatarUrl, attachments, reactions: [] as Array<{ emoji: string; count: number; reacted: boolean }> }
 
     let channelLabel = `#${channel.name}`
     if (channel.isDm) {

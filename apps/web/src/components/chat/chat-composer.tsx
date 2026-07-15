@@ -1,9 +1,22 @@
 import { useRef, useState, type ChangeEvent, type ReactNode } from 'react'
-import { AtSign, Bold, Code, Italic, Paperclip, Send, Smile, Sparkles } from 'lucide-react'
+import { AtSign, Bold, Code, FileText, Italic, Loader2, Paperclip, Send, Smile, Sparkles, X } from 'lucide-react'
 import { Button, Popover, PopoverContent, PopoverTrigger, Textarea, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../../lib/api'
 import { formatMentionsPlain } from '../../lib/mentions'
-import type { ChatMessage } from './chat-types'
+import type { ChatAttachment, ChatMessage } from './chat-types'
+
+/** Human-readable file size for attachment chips (e.g. "1.2 MB"). */
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  const units = ['B', 'KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
+}
 
 const COMMON_EMOJIS = ['😀', '👍', '🎉', '❤️', '🙏', '🔥', '✅', '👀', '🚀', '😂', '🙌', '💯']
 
@@ -22,6 +35,10 @@ function ComposerBox({
   rows = 2,
   minHeightClass = 'min-h-[44px] max-h-40',
   sendLabel,
+  attachments,
+  onFilesSelected,
+  onRemoveAttachment,
+  uploading,
 }: {
   value: string
   onChange: (value: string) => void
@@ -32,11 +49,21 @@ function ComposerBox({
   rows?: number
   minHeightClass?: string
   sendLabel?: string
+  // File sharing (Plan §6.8). When onFilesSelected is provided the paperclip
+  // uploads; the parent owns the uploaded-attachment list and renders chips.
+  attachments?: ChatAttachment[]
+  onFilesSelected?: (files: File[]) => void
+  onRemoveAttachment?: (id: string) => void
+  uploading?: boolean
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [improving, setImproving] = useState(false)
+  const canAttach = !!onFilesSelected
+  const hasAttachments = (attachments?.length ?? 0) > 0
+  // Send is allowed with text OR at least one uploaded attachment.
+  const canSend = (!!value.trim() || hasAttachments) && !disabled && !sending && !uploading
 
   // Insert text at the current cursor position (or append) and refocus.
   const insertAtCursor = (insert: string) => {
@@ -85,12 +112,11 @@ function ComposerBox({
   }
 
   const handleFileSelected = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
+    const files = Array.from(event.target.files ?? [])
     // Reset so picking the same file again still fires onChange.
     event.target.value = ''
-    if (!file) return
-    insertAtCursor(`[${file.name}]`)
-    toast('Inline file upload isn’t available yet — the file name was added to your message.')
+    if (files.length === 0) return
+    onFilesSelected?.(files)
   }
 
   const handleAskAi = async () => {
@@ -130,16 +156,45 @@ function ComposerBox({
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
-            onSend()
+            if (canSend) onSend()
           }
         }}
       />
       <input
         ref={fileInputRef}
         type="file"
+        multiple
         className="hidden"
         onChange={handleFileSelected}
       />
+      {(hasAttachments || uploading) && (
+        <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+          {attachments?.map((att) => (
+            <span
+              key={att.id}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/40 pl-2 pr-1 py-1 text-[12px] max-w-[220px]"
+            >
+              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{att.fileName}</span>
+              {att.sizeBytes > 0 && <span className="text-muted-foreground shrink-0">{formatBytes(att.sizeBytes)}</span>}
+              <button
+                type="button"
+                title="Remove"
+                onClick={() => onRemoveAttachment?.(att.id)}
+                className="ml-0.5 h-5 w-5 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+          {uploading && (
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-[12px] text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Uploading…
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-border/60 bg-muted/20">
         <div className="flex items-center gap-0.5">
           <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
@@ -171,7 +226,9 @@ function ComposerBox({
           <ToolBtn icon={Bold} title="Bold" disabled={disabled} onClick={() => wrapSelection('**', 'bold')} />
           <ToolBtn icon={Italic} title="Italic" disabled={disabled} onClick={() => wrapSelection('*', 'italic')} />
           <ToolBtn icon={Code} title="Code" disabled={disabled} onClick={() => wrapSelection('`', 'code')} />
-          <ToolBtn icon={Paperclip} title="Attach" disabled={disabled} onClick={handleAttachClick} />
+          {canAttach && (
+            <ToolBtn icon={Paperclip} title="Attach file" disabled={disabled || uploading} loading={uploading} onClick={handleAttachClick} />
+          )}
           <ToolBtn icon={AtSign} title="Mention" disabled={disabled} onClick={handleMention} />
           <ToolBtn
             icon={Sparkles}
@@ -185,7 +242,7 @@ function ComposerBox({
           size="sm"
           className="h-8 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white shadow-sm"
           onClick={onSend}
-          disabled={!value.trim() || disabled || sending}
+          disabled={!canSend}
         >
           {sendLabel ? <span className="text-[13px]">{sendLabel}</span> : <Send className="h-4 w-4" />}
         </Button>
@@ -205,6 +262,10 @@ export function ChatComposer({
   replyNamesById,
   onCancelReply,
   mentionMenu,
+  attachments,
+  onFilesSelected,
+  onRemoveAttachment,
+  uploading,
 }: {
   channelLabel: string
   value: string
@@ -216,6 +277,10 @@ export function ChatComposer({
   replyNamesById: Record<string, string>
   onCancelReply: () => void
   mentionMenu?: ReactNode
+  attachments?: ChatAttachment[]
+  onFilesSelected?: (files: File[]) => void
+  onRemoveAttachment?: (id: string) => void
+  uploading?: boolean
 }) {
   return (
     <div className="shrink-0 border-t border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] px-4 py-3">
@@ -244,6 +309,10 @@ export function ChatComposer({
         disabled={disabled}
         sending={sending}
         placeholder={channelLabel ? `Message ${channelLabel}` : 'Select a channel'}
+        attachments={attachments}
+        onFilesSelected={onFilesSelected}
+        onRemoveAttachment={onRemoveAttachment}
+        uploading={uploading}
       />
 
       <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">

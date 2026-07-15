@@ -158,7 +158,7 @@ export class ChatController {
   post(
     @Param('channelId') channelId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { body: string; parentMessageId?: string | null; mentions?: Array<{ userId: string; offset?: number; length?: number }> },
+    @Body() body: { body: string; parentMessageId?: string | null; mentions?: Array<{ userId: string; offset?: number; length?: number }>; attachmentIds?: string[] },
   ) {
     return this.chat.postMessage({
       channelId,
@@ -166,7 +166,26 @@ export class ChatController {
       body: body.body,
       parentMessageId: body.parentMessageId,
       mentions: body.mentions,
+      attachmentIds: body.attachmentIds,
     })
+  }
+
+  @Post('chat/channels/:channelId/attachments/presign')
+  presignAttachment(
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { fileName: string; contentType: string; sizeBytes?: number },
+  ) {
+    return this.chat.createAttachmentUploadUrl(channelId, user.id, body)
+  }
+
+  @Post('chat/channels/:channelId/attachments')
+  recordAttachment(
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { fileName: string; contentType: string; sizeBytes: number; storageKey: string },
+  ) {
+    return this.chat.recordAttachment(channelId, user.id, body)
   }
 
   @Patch('chat/messages/:messageId')

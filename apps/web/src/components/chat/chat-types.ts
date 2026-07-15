@@ -29,6 +29,16 @@ export type ChatMessage = {
     count: number
     reacted: boolean
   }>
+  attachments?: ChatAttachment[]
+}
+
+export type ChatAttachment = {
+  id: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  storageKey?: string
+  url: string
 }
 
 export type ChatMember = {

@@ -41,7 +41,8 @@ function buildSvc(db: any) {
   const notifications = {} as any
   const tasks = {} as any
   const ai = { isAvailable: () => false } as any
-  return new ChatService(db, realtime, notifications, tasks, ai)
+  const r2 = { configured: false, getObjectUrl: async (k: string) => k } as any
+  return new ChatService(db, realtime, notifications, tasks, ai, r2)
 }
 
 describe('ChatService.setSaved', () => {
