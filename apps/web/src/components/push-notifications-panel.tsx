@@ -11,19 +11,22 @@ import {
 } from '@rundesk/ui'
 import { Bell, Smartphone, Globe, Mail, Volume2, Moon, Check } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Channel = 'inApp' | 'web' | 'mobile' | 'email'
 type EventKey = 'mention' | 'assigned' | 'comment' | 'due' | 'status' | 'doc' | 'chat' | 'activity'
 
-const EVENTS: Array<{ key: EventKey; label: string; description: string }> = [
-  { key: 'mention', label: '@mentions', description: 'Someone mentions you in a comment, doc, or chat' },
-  { key: 'assigned', label: 'Task assigned', description: 'You are added as an assignee' },
-  { key: 'comment', label: 'New comment', description: 'On tasks you watch' },
-  { key: 'chat', label: 'Chat messages', description: 'New messages in channels you are in' },
-  { key: 'due', label: 'Due-date reminders', description: '24h, 1h, and overdue alerts' },
-  { key: 'status', label: 'Status changes', description: 'Done / blocked / in review on watched tasks' },
-  { key: 'activity', label: 'Other task activity', description: 'Title, priority, and other task updates' },
-  { key: 'doc', label: 'Doc updates', description: 'Edits to docs you\'re subscribed to' },
+// `labelKey` / `descKey` reference i18n catalog entries; the raw `key` is the
+// locale-independent identifier persisted to the API.
+const EVENTS: Array<{ key: EventKey; labelKey: TranslationKey; descKey: TranslationKey }> = [
+  { key: 'mention', labelKey: 'pushNotifications.event.mention', descKey: 'pushNotifications.event.mentionDesc' },
+  { key: 'assigned', labelKey: 'pushNotifications.event.assigned', descKey: 'pushNotifications.event.assignedDesc' },
+  { key: 'comment', labelKey: 'pushNotifications.event.comment', descKey: 'pushNotifications.event.commentDesc' },
+  { key: 'chat', labelKey: 'pushNotifications.event.chat', descKey: 'pushNotifications.event.chatDesc' },
+  { key: 'due', labelKey: 'pushNotifications.event.due', descKey: 'pushNotifications.event.dueDesc' },
+  { key: 'status', labelKey: 'pushNotifications.event.status', descKey: 'pushNotifications.event.statusDesc' },
+  { key: 'activity', labelKey: 'pushNotifications.event.activity', descKey: 'pushNotifications.event.activityDesc' },
+  { key: 'doc', labelKey: 'pushNotifications.event.doc', descKey: 'pushNotifications.event.docDesc' },
 ]
 
 const DEFAULTS: Record<EventKey, Record<Channel, boolean>> = {
@@ -37,14 +40,15 @@ const DEFAULTS: Record<EventKey, Record<Channel, boolean>> = {
   activity: { inApp: true, web: true, mobile: false, email: true },
 }
 
-const CHANNELS: Array<{ key: Channel; label: string; icon: React.ElementType }> = [
-  { key: 'inApp', label: 'In-app', icon: Bell },
-  { key: 'web', label: 'Web push', icon: Globe },
-  { key: 'mobile', label: 'Mobile push', icon: Smartphone },
-  { key: 'email', label: 'Email', icon: Mail },
+const CHANNELS: Array<{ key: Channel; labelKey: TranslationKey; icon: React.ElementType }> = [
+  { key: 'inApp', labelKey: 'pushNotifications.channel.inApp', icon: Bell },
+  { key: 'web', labelKey: 'pushNotifications.channel.web', icon: Globe },
+  { key: 'mobile', labelKey: 'pushNotifications.channel.mobile', icon: Smartphone },
+  { key: 'email', labelKey: 'pushNotifications.channel.email', icon: Mail },
 ]
 
 export function PushNotificationsPanel() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const prefsQuery = useQuery({
     queryKey: ['notification-preferences'],
@@ -127,11 +131,11 @@ export function PushNotificationsPanel() {
         },
       }),
     onSuccess: async () => {
-      toast.success('Notification preferences saved')
+      toast.success(t('pushNotifications.savedToast'))
       await qc.invalidateQueries({ queryKey: ['notification-preferences'] })
     },
     onError: (err: Error) => {
-      toast.error('Failed to save preferences', { description: err.message })
+      toast.error(t('pushNotifications.saveFailedToast'), { description: err.message })
     },
   })
 
@@ -146,7 +150,7 @@ export function PushNotificationsPanel() {
       const key = webPushKeyQuery.data?.publicKey
       if (!key) return
       const permission = await Notification.requestPermission()
-      if (permission !== 'granted') throw new Error('Notification permission not granted')
+      if (permission !== 'granted') throw new Error(t('pushNotifications.permissionDenied'))
       const reg = await navigator.serviceWorker.register('/push-sw.js')
       let subscription = await reg.pushManager.getSubscription()
       if (!subscription) {
@@ -178,7 +182,7 @@ export function PushNotificationsPanel() {
   })
 
   if (prefsQuery.isLoading) {
-    return <Card variant="glass" className="p-5 text-sm text-muted-foreground">Loading notification preferences…</Card>
+    return <Card variant="glass" className="p-5 text-sm text-muted-foreground">{t('pushNotifications.loadingPreferences')}</Card>
   }
 
   return (
@@ -189,37 +193,37 @@ export function PushNotificationsPanel() {
             <Bell className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <h3 className="font-display text-lg font-semibold">Channels</h3>
-            <p className="text-sm text-muted-foreground">Decide where notifications land.</p>
+            <h3 className="font-display text-lg font-semibold">{t('pushNotifications.channelsTitle')}</h3>
+            <p className="text-sm text-muted-foreground">{t('pushNotifications.channelsSubtitle')}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <ChannelRow
             icon={Globe}
-            title="Web push"
-            description="Notifications when this browser is open"
+            title={t('pushNotifications.channel.web')}
+            description={t('pushNotifications.webDescription')}
             checked={webEnabled}
             onChange={(next) => {
               setWebEnabled(next)
               if (next) {
                 void subscribeWebPush.mutateAsync().catch((err: Error) => {
-                  toast.error('Could not enable web push', { description: err.message })
+                  toast.error(t('pushNotifications.enableFailedToast'), { description: err.message })
                 })
               } else {
                 void unsubscribeWebPush.mutateAsync().catch(() => undefined)
               }
             }}
-            badge={webEnabled ? 'Enabled' : 'Off'}
+            badge={webEnabled ? t('pushNotifications.enabled') : t('pushNotifications.off')}
           />
           <ChannelRow
             icon={Smartphone}
-            title="Mobile push"
-            description="Install Rundesk PWA to enable"
+            title={t('pushNotifications.channel.mobile')}
+            description={t('pushNotifications.mobileDescription')}
             checked={mobileEnabled}
             onChange={setMobileEnabled}
-            badge={mobileEnabled ? 'Enabled' : 'Install PWA first'}
-            ctaLabel={!mobileEnabled ? 'Install' : undefined}
+            badge={mobileEnabled ? t('pushNotifications.enabled') : t('pushNotifications.installPwaFirst')}
+            ctaLabel={!mobileEnabled ? t('pushNotifications.install') : undefined}
           />
         </div>
 
@@ -227,9 +231,9 @@ export function PushNotificationsPanel() {
         {!webEnabled && (
           <div className="rounded-md border border-accent/30 bg-accent/5 px-3 py-2 flex items-center gap-2 text-xs">
             <Bell className="h-3.5 w-3.5 text-accent" />
-            <span className="flex-1">Grant permission to receive web push notifications.</span>
+            <span className="flex-1">{t('pushNotifications.permissionPrompt')}</span>
             <Button variant="gradient" size="sm" className="h-7">
-              Allow notifications
+              {t('pushNotifications.allowNotifications')}
             </Button>
           </div>
         )}
@@ -241,9 +245,9 @@ export function PushNotificationsPanel() {
             <Mail className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <h3 className="font-display text-lg font-semibold">Email digest</h3>
+            <h3 className="font-display text-lg font-semibold">{t('pushNotifications.digestTitle')}</h3>
             <p className="text-sm text-muted-foreground">
-              Get a periodic email summarising your unread notifications.
+              {t('pushNotifications.digestSubtitle')}
             </p>
           </div>
           <Switch checked={digestEnabled} onCheckedChange={setDigestEnabled} />
@@ -251,18 +255,18 @@ export function PushNotificationsPanel() {
         {digestEnabled && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-sm">
-              <span className="block text-xs font-medium text-muted-foreground mb-1">Frequency</span>
+              <span className="block text-xs font-medium text-muted-foreground mb-1">{t('pushNotifications.frequency')}</span>
               <select
                 value={digestFrequency}
                 onChange={(e) => setDigestFrequency(e.target.value as 'daily' | 'weekly')}
                 className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
               >
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly (Mondays)</option>
+                <option value="daily">{t('pushNotifications.daily')}</option>
+                <option value="weekly">{t('pushNotifications.weekly')}</option>
               </select>
             </label>
             <label className="text-sm">
-              <span className="block text-xs font-medium text-muted-foreground mb-1">Send at</span>
+              <span className="block text-xs font-medium text-muted-foreground mb-1">{t('pushNotifications.sendAt')}</span>
               <select
                 value={digestHour}
                 onChange={(e) => setDigestHour(Number(e.target.value))}
@@ -281,19 +285,19 @@ export function PushNotificationsPanel() {
 
       <Card variant="glass" className="p-0 overflow-hidden">
         <div className="px-5 py-3 border-b border-border/40">
-          <h3 className="font-display text-lg font-semibold">Per-event preferences</h3>
-          <p className="text-xs text-muted-foreground">Pick which events go to which channel.</p>
+          <h3 className="font-display text-lg font-semibold">{t('pushNotifications.perEventTitle')}</h3>
+          <p className="text-xs text-muted-foreground">{t('pushNotifications.perEventSubtitle')}</p>
         </div>
         <div className="overflow-auto">
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className="text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border/40">
-                <th className="px-5 py-2 text-left font-semibold">Event</th>
+                <th className="px-5 py-2 text-left font-semibold">{t('pushNotifications.eventColumn')}</th>
                 {CHANNELS.map((c) => (
                   <th key={c.key} className="px-3 py-2 text-center font-semibold">
                     <div className="flex flex-col items-center gap-1">
                       <c.icon className="h-3.5 w-3.5" />
-                      {c.label}
+                      {t(c.labelKey)}
                     </div>
                   </th>
                 ))}
@@ -303,8 +307,8 @@ export function PushNotificationsPanel() {
               {EVENTS.map((e) => (
                 <tr key={e.key} className="border-b border-border/30 last:border-0 hover:bg-card/40 transition-colors">
                   <td className="px-5 py-2.5">
-                    <div className="text-sm font-medium">{e.label}</div>
-                    <div className="text-[11px] text-muted-foreground">{e.description}</div>
+                    <div className="text-sm font-medium">{t(e.labelKey)}</div>
+                    <div className="text-[11px] text-muted-foreground">{t(e.descKey)}</div>
                   </td>
                   {CHANNELS.map((c) => (
                     <td key={c.key} className="px-3 py-2.5 text-center">
@@ -327,19 +331,19 @@ export function PushNotificationsPanel() {
             <Moon className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <h3 className="font-display text-lg font-semibold">Quiet hours</h3>
-            <p className="text-sm text-muted-foreground">Mute push and email outside these hours.</p>
+            <h3 className="font-display text-lg font-semibold">{t('pushNotifications.quietHoursTitle')}</h3>
+            <p className="text-sm text-muted-foreground">{t('pushNotifications.quietHoursSubtitle')}</p>
           </div>
           <Switch checked={dndOn} onCheckedChange={setDndOn} />
         </div>
         {dndOn && (
           <div className="grid grid-cols-2 gap-3 animate-fade-in">
             <div>
-              <Label className="text-xs text-muted-foreground">From</Label>
+              <Label className="text-xs text-muted-foreground">{t('pushNotifications.from')}</Label>
               <input type="time" value={dndStart} onChange={(e) => setDndStart(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm mt-1" />
             </div>
             <div>
-              <Label className="text-xs text-muted-foreground">To</Label>
+              <Label className="text-xs text-muted-foreground">{t('pushNotifications.to')}</Label>
               <input type="time" value={dndEnd} onChange={(e) => setDndEnd(e.target.value)} className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm mt-1" />
             </div>
           </div>
@@ -347,7 +351,7 @@ export function PushNotificationsPanel() {
         <div className="flex items-center justify-between pt-2 border-t border-border/30">
           <div className="flex items-center gap-2 text-sm">
             <Volume2 className="h-4 w-4 text-muted-foreground" />
-            Mute notification sounds
+            {t('pushNotifications.muteSounds')}
           </div>
           <Switch checked={muteSounds} onCheckedChange={setMuteSounds} />
         </div>
@@ -366,10 +370,10 @@ export function PushNotificationsPanel() {
             setMuteSounds(false)
           }}
         >
-          Reset to defaults
+          {t('pushNotifications.resetDefaults')}
         </Button>
         <Button variant="gradient" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
-          <Check className="h-3.5 w-3.5" /> Save preferences
+          <Check className="h-3.5 w-3.5" /> {t('pushNotifications.savePreferences')}
         </Button>
       </div>
     </div>

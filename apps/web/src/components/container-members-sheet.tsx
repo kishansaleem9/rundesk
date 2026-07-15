@@ -11,17 +11,20 @@ import {
 } from '@rundesk/ui'
 import { Trash2, UserPlus, Globe, Lock, GitBranch } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type ContainerKind = 'space' | 'project'
 
 const CONTAINER_ROLES = ['admin', 'edit', 'comment', 'view'] as const
 type ContainerRole = (typeof CONTAINER_ROLES)[number]
 
-const ROLE_LABEL: Record<ContainerRole, string> = {
-  admin: 'Admin',
-  edit: 'Can edit',
-  comment: 'Can comment',
-  view: 'Can view',
+// Role display maps to i18n catalog entries; the raw role key
+// ('admin' | 'edit' | 'comment' | 'view') stays the value persisted to the API.
+const ROLE_LABEL_KEYS: Record<ContainerRole, TranslationKey> = {
+  admin: 'containerMembers.role.admin',
+  edit: 'containerMembers.role.edit',
+  comment: 'containerMembers.role.comment',
+  view: 'containerMembers.role.view',
 }
 
 type Member = {
@@ -33,7 +36,7 @@ type Member = {
 }
 type WsMember = { userId: string; displayName: string; email: string }
 
-function errMsg(err: unknown, fallback = 'Something went wrong') {
+function errMsg(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback
 }
 
@@ -62,6 +65,8 @@ export function ContainerMembersSheet({
   /** space: 'public' | 'private'; project: 'public' | 'private' | null (inherit) */
   initialVisibility?: string | null
 }) {
+  const { t, tCount } = useTranslation()
+  const kindWord = t(kind === 'space' ? 'containerMembers.space' : 'containerMembers.project')
   const qc = useQueryClient()
   const base = kind === 'space' ? `/spaces/${containerId}` : `/projects/${containerId}`
   const membersKey = [`${kind}-members`, containerId] as const
@@ -103,7 +108,7 @@ export function ContainerMembersSheet({
       setAddUserId('')
       await refresh()
     } catch (err) {
-      window.alert(errMsg(err, 'Could not add member'))
+      window.alert(errMsg(err, t('containerMembers.addMemberError')))
     } finally {
       setBusy(false)
     }
@@ -115,20 +120,20 @@ export function ContainerMembersSheet({
       await api(`${base}/members/${userId}`, { method: 'PATCH', body: { role } })
       await refresh()
     } catch (err) {
-      window.alert(errMsg(err, 'Could not update role'))
+      window.alert(errMsg(err, t('containerMembers.updateRoleError')))
     } finally {
       setBusy(false)
     }
   }
 
   const removeMember = async (userId: string) => {
-    if (!window.confirm('Remove this member from the ' + kind + '?')) return
+    if (!window.confirm(t('containerMembers.confirmRemove', { kind: kindWord }))) return
     setBusy(true)
     try {
       await api(`${base}/members/${userId}`, { method: 'DELETE' })
       await refresh()
     } catch (err) {
-      window.alert(errMsg(err, 'Could not remove member'))
+      window.alert(errMsg(err, t('containerMembers.removeMemberError')))
     } finally {
       setBusy(false)
     }
@@ -142,38 +147,42 @@ export function ContainerMembersSheet({
       await api(`${base}/visibility`, { method: 'PATCH', body: { visibility: next } })
     } catch (err) {
       setVisibility(prev)
-      window.alert(errMsg(err, 'Could not change visibility'))
+      window.alert(errMsg(err, t('containerMembers.changeVisibilityError')))
     } finally {
       setBusy(false)
     }
   }
 
-  const visOptions: Array<{ value: string | null; label: string; icon: typeof Globe }> =
+  const visOptions: Array<{ value: string | null; labelKey: TranslationKey; icon: typeof Globe }> =
     kind === 'space'
       ? [
-          { value: 'public', label: 'Public', icon: Globe },
-          { value: 'private', label: 'Private', icon: Lock },
+          { value: 'public', labelKey: 'containerMembers.visibility.public', icon: Globe },
+          { value: 'private', labelKey: 'containerMembers.visibility.private', icon: Lock },
         ]
       : [
-          { value: null, label: 'Inherit', icon: GitBranch },
-          { value: 'public', label: 'Public', icon: Globe },
-          { value: 'private', label: 'Private', icon: Lock },
+          { value: null, labelKey: 'containerMembers.visibility.inherit', icon: GitBranch },
+          { value: 'public', labelKey: 'containerMembers.visibility.public', icon: Globe },
+          { value: 'private', labelKey: 'containerMembers.visibility.private', icon: Lock },
         ]
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-[420px] max-w-full overflow-y-auto">
         <SheetHeader>
-          <SheetTitle>Members</SheetTitle>
+          <SheetTitle>{t('containerMembers.title')}</SheetTitle>
           <SheetDescription>
-            Manage who can access {containerName ? `“${containerName}”` : `this ${kind}`} and their role.
+            {t('containerMembers.manageAccess', {
+              target: containerName
+                ? `“${containerName}”`
+                : t(kind === 'space' ? 'containerMembers.thisSpace' : 'containerMembers.thisProject'),
+            })}
           </SheetDescription>
         </SheetHeader>
 
         {/* Visibility */}
         <div className="mb-6">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-            Visibility
+            {t('containerMembers.visibility')}
           </p>
           <div className="flex flex-wrap gap-1.5">
             {visOptions.map((opt) => {
@@ -192,24 +201,24 @@ export function ContainerMembersSheet({
                   )}
                 >
                   <Icon className="h-3.5 w-3.5" />
-                  {opt.label}
+                  {t(opt.labelKey)}
                 </button>
               )
             })}
           </div>
           <p className="mt-1.5 text-[11px] text-muted-foreground">
             {visibility === 'private'
-              ? 'Only the members listed below can open this ' + kind + '.'
+              ? t('containerMembers.visPrivateHint', { kind: kindWord })
               : visibility === null
-                ? 'Inherits access from the parent space.'
-                : 'Everyone in the workspace can open this ' + kind + '.'}
+                ? t('containerMembers.visInheritHint')
+                : t('containerMembers.visPublicHint', { kind: kindWord })}
           </p>
         </div>
 
         {/* Add member */}
         <div className="mb-6">
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-            Add member
+            {t('containerMembers.addMember')}
           </p>
           <div className="flex items-center gap-2">
             <select
@@ -217,7 +226,7 @@ export function ContainerMembersSheet({
               onChange={(e) => setAddUserId(e.target.value)}
               className="h-9 flex-1 min-w-0 rounded-md border border-border/80 bg-background px-2 text-[13px]"
             >
-              <option value="">Select a person…</option>
+              <option value="">{t('containerMembers.selectPerson')}</option>
               {candidates.map((c) => (
                 <option key={c.userId} value={c.userId}>
                   {c.displayName || c.email}
@@ -231,7 +240,7 @@ export function ContainerMembersSheet({
             >
               {CONTAINER_ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {ROLE_LABEL[r]}
+                  {t(ROLE_LABEL_KEYS[r])}
                 </option>
               ))}
             </select>
@@ -241,7 +250,7 @@ export function ContainerMembersSheet({
           </div>
           {wsMembersQuery.data && candidates.length === 0 && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Everyone in the workspace is already a member.
+              {t('containerMembers.allMembers')}
             </p>
           )}
         </div>
@@ -249,12 +258,12 @@ export function ContainerMembersSheet({
         {/* Member list */}
         <div>
           <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-            {members.length} member{members.length !== 1 ? 's' : ''}
+            {tCount('containerMembers.memberCount', members.length)}
           </p>
           {membersQuery.isLoading ? (
-            <p className="text-[13px] text-muted-foreground py-4">Loading members…</p>
+            <p className="text-[13px] text-muted-foreground py-4">{t('containerMembers.loadingMembers')}</p>
           ) : members.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground py-4">No members yet.</p>
+            <p className="text-[13px] text-muted-foreground py-4">{t('containerMembers.noMembers')}</p>
           ) : (
             <ul className="space-y-1">
               {members.map((m) => (
@@ -280,14 +289,14 @@ export function ContainerMembersSheet({
                   >
                     {CONTAINER_ROLES.map((r) => (
                       <option key={r} value={r}>
-                        {ROLE_LABEL[r]}
+                        {t(ROLE_LABEL_KEYS[r])}
                       </option>
                     ))}
                   </select>
                   <button
                     onClick={() => removeMember(m.userId)}
                     disabled={busy}
-                    aria-label="Remove member"
+                    aria-label={t('containerMembers.removeMember')}
                     className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
                   >
                     <Trash2 className="h-3.5 w-3.5" />

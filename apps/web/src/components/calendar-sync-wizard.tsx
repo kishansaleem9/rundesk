@@ -14,6 +14,7 @@ import {
 } from '@rundesk/ui'
 import { Calendar, Check, Copy, RefreshCcw, AlertTriangle } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type ConnectionRow = {
   provider: string
@@ -44,6 +45,7 @@ export function CalendarSyncWizard({
   onOpenChange: (v: boolean) => void
   workspaceId: string
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
 
   const { data: connections = [] } = useQuery({
@@ -84,17 +86,16 @@ export function CalendarSyncWizard({
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-gradient text-white shadow-sm">
               <Calendar className="h-3.5 w-3.5" />
             </span>
-            Calendar sync
+            {t('calendarSync.title')}
           </DialogTitle>
           <DialogDescription>
-            Push task due dates to Google or Outlook, pull events back into Rundesk,
-            and subscribe to a personal iCal feed from anywhere.
+            {t('calendarSync.description')}
           </DialogDescription>
         </DialogHeader>
 
         <section className="space-y-3 mt-2">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Two-way sync
+            {t('calendarSync.twoWaySync')}
           </h4>
           {CALENDAR_PROVIDERS.map((p) => {
             const conn = calendarConnections.find((c) => c.provider === p.id)
@@ -113,11 +114,11 @@ export function CalendarSyncWizard({
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium">{p.label}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {isConnected ? (
-                      <>Connected as {conn!.externalAccountEmail ?? 'unknown account'}</>
-                    ) : (
-                      <>Not connected — visit Integrations to authorise</>
-                    )}
+                    {isConnected
+                      ? t('calendarSync.connectedAs', {
+                          account: conn!.externalAccountEmail ?? t('calendarSync.unknownAccount'),
+                        })
+                      : t('calendarSync.notConnected')}
                   </div>
                 </div>
                 {isConnected ? (
@@ -129,11 +130,11 @@ export function CalendarSyncWizard({
                     disabled={pull.isPending}
                   >
                     <RefreshCcw className={cn('h-3.5 w-3.5 mr-1', pull.isPending && 'animate-spin')} />
-                    Sync now
+                    {t('calendarSync.syncNow')}
                   </Button>
                 ) : (
                   <Badge variant="outline" className="text-[10px] uppercase">
-                    Off
+                    {t('calendarSync.off')}
                   </Badge>
                 )}
               </div>
@@ -142,36 +143,39 @@ export function CalendarSyncWizard({
           {pull.data && (
             <div className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-xs flex items-center gap-2">
               <Check className="h-3.5 w-3.5 text-emerald-600" />
-              {pull.data.created} created · {pull.data.updated} updated · {pull.data.skipped} unchanged
+              {t('calendarSync.syncResult', {
+                created: pull.data.created,
+                updated: pull.data.updated,
+                skipped: pull.data.skipped,
+              })}
             </div>
           )}
           {pull.isError && (
             <div className="rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-xs flex items-center gap-2 text-rose-700 dark:text-rose-300">
               <AlertTriangle className="h-3.5 w-3.5" />
-              Sync failed. Confirm an inbox list is configured on the integration metadata.
+              {t('calendarSync.syncFailed')}
             </div>
           )}
         </section>
 
         <section className="space-y-2 mt-1">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            iCal subscription URL
+            {t('calendarSync.icalTitle')}
           </h4>
           <p className="text-xs text-muted-foreground">
-            One-way read-only feed. Paste this URL into any calendar app
-            (Apple Calendar, Outlook, Google Calendar). Refreshes automatically.
+            {t('calendarSync.icalDescription')}
           </p>
           {ical ? (
             <IcalRow url={ical.url} onRotate={() => rotateIcal.mutate()} rotating={rotateIcal.isPending} />
           ) : (
             <Button variant="outline" size="sm" onClick={() => void refetchIcal()}>
-              Generate iCal URL
+              {t('calendarSync.generateIcal')}
             </Button>
           )}
         </section>
 
         <DialogFooter>
-          <Button onClick={() => onOpenChange(false)}>Done</Button>
+          <Button onClick={() => onOpenChange(false)}>{t('calendarSync.done')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -187,6 +191,7 @@ function IcalRow({
   onRotate: () => void
   rotating: boolean
 }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const copy = async () => {
     try {
@@ -207,7 +212,7 @@ function IcalRow({
       />
       <Button variant="outline" size="sm" className="h-8 text-xs" onClick={copy}>
         {copied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
-        {copied ? 'Copied' : 'Copy'}
+        {copied ? t('calendarSync.copied') : t('calendarSync.copy')}
       </Button>
       <Button
         variant="ghost"
@@ -215,7 +220,7 @@ function IcalRow({
         className="h-8 text-xs"
         onClick={onRotate}
         disabled={rotating}
-        title="Generate a new URL and invalidate the previous one"
+        title={t('calendarSync.rotateIcalTitle')}
       >
         <RefreshCcw className={cn('h-3.5 w-3.5', rotating && 'animate-spin')} />
       </Button>

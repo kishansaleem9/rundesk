@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { GripVertical, Plus, Trash2, X } from 'lucide-react'
 import { Button, Input, Dialog, DialogContent, DialogHeader, DialogTitle, cn } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type StatusCategory = 'open' | 'in_progress' | 'closed'
 
@@ -24,10 +25,12 @@ const PRESET_COLORS = [
   '#a855f7', '#ec4899', '#f59e0b', '#ef4444', '#f43f5e',
 ]
 
-const CATEGORY_LABELS: Record<StatusCategory, string> = {
-  open: 'Not started',
-  in_progress: 'Active',
-  closed: 'Closed',
+// Category display maps to i18n catalog entries; the raw category key
+// ('open' | 'in_progress' | 'closed') stays the value persisted to the API.
+const CATEGORY_LABEL_KEYS: Record<StatusCategory, TranslationKey> = {
+  open: 'listStatuses.category.open',
+  in_progress: 'listStatuses.category.inProgress',
+  closed: 'listStatuses.category.closed',
 }
 
 /** Manage a List's own status pipeline (read-only when it inherits a template). */
@@ -40,6 +43,7 @@ export function ListStatusesManager({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { t } = useTranslation()
   return (
     <StatusPipelineManager
       open={open}
@@ -47,7 +51,7 @@ export function ListStatusesManager({
       basePath={`/lists/${listId}/statuses`}
       queryKey={['list-statuses', listId]}
       extraInvalidateKeys={[['tasks', listId]]}
-      title="Manage list statuses"
+      title={t('listStatuses.manageTitle')}
       supportsScope
       listIdForScope={listId}
     />
@@ -68,14 +72,18 @@ export function ScopedStatusesManager({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { t } = useTranslation()
+  const target = containerName
+    ? `“${containerName}”`
+    : t(scope === 'space' ? 'listStatuses.thisSpace' : 'listStatuses.thisProject')
   return (
     <StatusPipelineManager
       open={open}
       onOpenChange={onOpenChange}
       basePath={`/${scope}s/${containerId}/statuses`}
       queryKey={[`${scope}-statuses`, containerId]}
-      title={`${scope === 'space' ? 'Space' : 'Project'} statuses`}
-      subtitle={`Shared status set for ${containerName ? `“${containerName}”` : `this ${scope}`}. Every list using the ${scope} set updates together.`}
+      title={t(scope === 'space' ? 'listStatuses.spaceStatuses' : 'listStatuses.projectStatuses')}
+      subtitle={t(scope === 'space' ? 'listStatuses.sharedSetSpace' : 'listStatuses.sharedSetProject', { target })}
     />
   )
 }
@@ -101,6 +109,7 @@ function StatusPipelineManager({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const { data: statuses = [] } = useQuery({
     queryKey,
@@ -142,7 +151,7 @@ function StatusPipelineManager({
     mutationFn: (nextScope: StatusScope) =>
       api(`/lists/${listIdForScope}/status-scope`, { method: 'PATCH', body: { scope: nextScope } }),
     onSuccess: invalidate,
-    onError: (err: any) => window.alert(err?.message ?? 'Could not change the status source'),
+    onError: (err: any) => window.alert(err?.message ?? t('listStatuses.changeSourceError')),
   })
   const handleDropOn = (targetId: string) => {
     if (!dragId || dragId === targetId) {
@@ -183,31 +192,30 @@ function StatusPipelineManager({
         <div className="space-y-3">
           {inherited ? (
             <p className="text-sm rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300">
-              This list uses the <strong>{scope}</strong>&rsquo;s shared status set. These statuses are
-              read-only here — edit them under the {scope}&rsquo;s settings and every list using the
-              {' '}{scope} set updates together.
+              {t('listStatuses.inheritedNotice', {
+                scope: t(scope === 'space' ? 'listStatuses.space' : 'listStatuses.project'),
+              })}
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              {subtitle ??
-                'Statuses define how work moves through this list. Renaming a status updates it everywhere; deleting one prompts you to move its tasks first.'}
+              {subtitle ?? t('listStatuses.defaultSubtitle')}
             </p>
           )}
 
           {listIdForScope && (
             <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <span className="font-medium text-foreground">Status source:</span>
+              <span className="font-medium text-foreground">{t('listStatuses.statusSource')}</span>
               <select
                 value={scope}
                 disabled={switchScope.isPending}
                 onChange={(e) => switchScope.mutate(e.target.value as StatusScope)}
                 className="h-8 rounded-md border border-border/80 bg-background px-2 text-[13px]"
               >
-                <option value="list">This list</option>
-                <option value="project">Project template</option>
-                <option value="space">Space template</option>
+                <option value="list">{t('listStatuses.sourceThisList')}</option>
+                <option value="project">{t('listStatuses.sourceProjectTemplate')}</option>
+                <option value="space">{t('listStatuses.sourceSpaceTemplate')}</option>
               </select>
-              {switchScope.isPending && <span className="text-xs">Switching…</span>}
+              {switchScope.isPending && <span className="text-xs">{t('listStatuses.switching')}</span>}
             </label>
           )}
 
@@ -282,6 +290,7 @@ function StatusRow({
   isDragging?: boolean
   readOnly?: boolean
 }) {
+  const { t } = useTranslation()
   const [name, setName] = useState(status.name)
   return (
     <div
@@ -324,10 +333,10 @@ function StatusRow({
         onChange={(e) => onPatch({ category: e.target.value as StatusCategory })}
         disabled={readOnly}
         className="h-7 rounded border border-border/70 bg-background px-2 text-xs disabled:opacity-70"
-        aria-label="Status category"
+        aria-label={t('listStatuses.statusCategoryLabel')}
       >
-        {(Object.entries(CATEGORY_LABELS) as Array<[StatusCategory, string]>).map(([value, label]) => (
-          <option key={value} value={value}>{label}</option>
+        {(Object.entries(CATEGORY_LABEL_KEYS) as Array<[StatusCategory, TranslationKey]>).map(([value, labelKey]) => (
+          <option key={value} value={value}>{t(labelKey)}</option>
         ))}
       </select>
       {!readOnly && (
@@ -336,7 +345,7 @@ function StatusRow({
           size="icon"
           className="h-7 w-7"
           onClick={onDelete}
-          aria-label={`Delete ${status.name}`}
+          aria-label={t('listStatuses.deleteStatus', { name: status.name })}
         >
           <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
         </Button>
@@ -346,6 +355,7 @@ function StatusRow({
 }
 
 function ColorSwatch({ color, onChange }: { color: string; onChange: (color: string) => void }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   return (
     <div className="relative">
@@ -354,7 +364,7 @@ function ColorSwatch({ color, onChange }: { color: string; onChange: (color: str
         className={cn('h-5 w-5 rounded-full border border-border/70')}
         style={{ backgroundColor: color }}
         onClick={() => setOpen((o) => !o)}
-        aria-label="Pick colour"
+        aria-label={t('listStatuses.pickColor')}
       />
       {open && (
         <div
@@ -370,7 +380,7 @@ function ColorSwatch({ color, onChange }: { color: string; onChange: (color: str
                 onChange(c)
                 setOpen(false)
               }}
-              aria-label={`Use colour ${c}`}
+              aria-label={t('listStatuses.useColor', { color: c })}
             />
           ))}
         </div>
@@ -386,6 +396,7 @@ function AddStatusForm({
   onAdd: (input: { name: string; color: string; category: StatusCategory }) => void
   isPending: boolean
 }) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [color, setColor] = useState(PRESET_COLORS[2])
   const [category, setCategory] = useState<StatusCategory>('open')
@@ -405,7 +416,7 @@ function AddStatusForm({
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && submit()}
-        placeholder="Add status…"
+        placeholder={t('listStatuses.addStatusPlaceholder')}
         className="h-8 text-sm flex-1 border-0 shadow-none focus-visible:ring-0 px-1"
       />
       <select
@@ -413,12 +424,12 @@ function AddStatusForm({
         onChange={(e) => setCategory(e.target.value as StatusCategory)}
         className="h-7 rounded border border-border/70 bg-background px-2 text-xs"
       >
-        {(Object.entries(CATEGORY_LABELS) as Array<[StatusCategory, string]>).map(([value, label]) => (
-          <option key={value} value={value}>{label}</option>
+        {(Object.entries(CATEGORY_LABEL_KEYS) as Array<[StatusCategory, TranslationKey]>).map(([value, labelKey]) => (
+          <option key={value} value={value}>{t(labelKey)}</option>
         ))}
       </select>
       <Button size="sm" className="h-7 text-xs" onClick={submit} disabled={isPending || !name.trim()}>
-        Add
+        {t('listStatuses.add')}
       </Button>
     </div>
   )
@@ -437,15 +448,16 @@ function ReassignDialog({
   onCancel: () => void
   onConfirm: (toId: string) => void
 }) {
+  const { t } = useTranslation()
   const [toId, setToId] = useState(options[0]?.id ?? '')
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Move tasks before deleting</DialogTitle>
+          <DialogTitle>{t('listStatuses.reassignTitle')}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          Tasks currently set to <span className="font-medium text-foreground">{sourceName}</span> need a new home before this status can be removed.
+          {t('listStatuses.reassignBody', { name: sourceName })}
         </p>
         <select
           value={toId}
@@ -458,10 +470,10 @@ function ReassignDialog({
         </select>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onCancel} size="sm">
-            <X className="h-3.5 w-3.5 mr-1" /> Cancel
+            <X className="h-3.5 w-3.5 mr-1" /> {t('common.cancel')}
           </Button>
           <Button onClick={() => onConfirm(toId)} size="sm" disabled={!toId}>
-            Move &amp; delete
+            {t('listStatuses.moveAndDelete')}
           </Button>
         </div>
       </DialogContent>
