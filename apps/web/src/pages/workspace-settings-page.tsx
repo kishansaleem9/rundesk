@@ -9,6 +9,8 @@ import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
 import { RolesTab } from '../components/roles-tab'
+import { useTranslation } from '../lib/i18n'
+import { LanguageSwitcher } from '../components/language-switcher'
 
 type Workspace = {
   id: string
@@ -47,14 +49,14 @@ type Invitation = {
 }
 
 const TABS = [
-  { id: 'general', label: 'General', icon: Building2 },
-  { id: 'members', label: 'Members', icon: Users },
-  { id: 'groups', label: 'Groups', icon: Users2 },
-  { id: 'roles', label: 'Roles', icon: ShieldCheck },
-  { id: 'integrations', label: 'Integrations', icon: Plug },
-  { id: 'security', label: 'Security', icon: Shield },
-  { id: 'sso', label: 'SSO & SCIM', icon: KeyRound },
-  { id: 'labels', label: 'Labels', icon: Tag },
+  { id: 'general', labelKey: 'settings.tabGeneral', icon: Building2 },
+  { id: 'members', labelKey: 'settings.tabMembers', icon: Users },
+  { id: 'groups', labelKey: 'settings.tabGroups', icon: Users2 },
+  { id: 'roles', labelKey: 'settings.tabRoles', icon: ShieldCheck },
+  { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
+  { id: 'security', labelKey: 'settings.tabSecurity', icon: Shield },
+  { id: 'sso', labelKey: 'settings.tabSso', icon: KeyRound },
+  { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
 ] as const
 
 function isUuidLike(value?: string): value is string {
@@ -67,6 +69,7 @@ export function SettingsPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/settings' })
   const validWorkspaceId = isUuidLike(workspaceId) ? workspaceId : null
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('general')
+  const { t } = useTranslation()
 
   useEffect(() => {
     if (!validWorkspaceId) {
@@ -93,7 +96,7 @@ export function SettingsPage() {
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
               Workspace
             </div>
-            <h1 className="font-display text-2xl font-semibold leading-tight">Settings</h1>
+            <h1 className="font-display text-2xl font-semibold leading-tight">{t('settings.title')}</h1>
           </div>
         </div>
         <p className="text-sm text-muted-foreground mt-0.5 max-w-2xl">
@@ -104,19 +107,19 @@ export function SettingsPage() {
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8">
           <nav className="space-y-0.5">
-            {TABS.map((t) => (
+            {TABS.map((item) => (
               <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
+                key={item.id}
+                onClick={() => setTab(item.id)}
                 className={cn(
                   'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all',
-                  tab === t.id
+                  tab === item.id
                     ? 'bg-accent/15 text-foreground font-medium [&>svg]:text-accent'
                     : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
                 )}
               >
-                <t.icon className="h-4 w-4 shrink-0" />
-                {t.label}
+                <item.icon className="h-4 w-4 shrink-0" />
+                {t(item.labelKey)}
               </button>
             ))}
           </nav>
@@ -139,6 +142,7 @@ export function SettingsPage() {
 
 function GeneralTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const wsQuery = useQuery({
     queryKey: ['workspace', workspaceId],
     queryFn: () => api<Workspace>(`/workspaces/${workspaceId}`),
@@ -192,7 +196,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     },
   })
 
-  if (!wsQuery.data) return <Card className="p-6 text-sm text-muted-foreground">Loading…</Card>
+  if (!wsQuery.data) return <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>
 
   const dirty =
     name !== wsQuery.data.name ||
@@ -202,20 +206,28 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <Card className="p-6 space-y-5">
+      {/* Personal preference (Plan §13): user's UI language. */}
+      <div className="flex items-center justify-between gap-4 rounded-lg border border-border/60 bg-card/40 p-3">
+        <div>
+          <div className="text-sm font-medium">{t('settings.language')}</div>
+          <div className="text-xs text-muted-foreground">{t('settings.languageDesc')}</div>
+        </div>
+        <LanguageSwitcher />
+      </div>
       <div>
-        <Label>Workspace ID</Label>
+        <Label>{t('settings.workspaceId')}</Label>
         <Input value={wsQuery.data.id} readOnly className="font-mono text-xs" />
       </div>
       <div>
-        <Label>Slug</Label>
+        <Label>{t('settings.slug')}</Label>
         <Input value={wsQuery.data.slug} readOnly className="font-mono text-xs" />
       </div>
       <div>
-        <Label htmlFor="name">Name</Label>
+        <Label htmlFor="name">{t('settings.name')}</Label>
         <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div>
-        <Label htmlFor="primary">Primary brand color</Label>
+        <Label htmlFor="primary">{t('settings.primaryColor')}</Label>
         <div className="flex items-center gap-2">
           <input
             type="color"
@@ -226,10 +238,10 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
           />
           <Input id="primary" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} placeholder="#354fb0" />
         </div>
-        <p className="text-xs text-muted-foreground mt-1">Applied live to accents across the app.</p>
+        <p className="text-xs text-muted-foreground mt-1">{t('settings.primaryColorHint')}</p>
       </div>
       <div>
-        <Label htmlFor="logo">Logo URL</Label>
+        <Label htmlFor="logo">{t('settings.logoUrl')}</Label>
         <div className="flex items-center gap-2">
           {logoUrl ? (
             <img src={logoUrl} alt="Workspace logo" className="h-9 w-9 rounded object-contain border border-border" />
@@ -238,14 +250,14 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         </div>
       </div>
       <div>
-        <Label htmlFor="domain">Custom domain</Label>
+        <Label htmlFor="domain">{t('settings.customDomain')}</Label>
         <div className="flex items-center gap-2">
           <Input id="domain" value={customDomain} onChange={(e) => setCustomDomain(e.target.value)} placeholder="rundesk.example.com" />
           {wsQuery.data.customDomain && (
             wsQuery.data.customDomainVerified ? (
-              <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600">Verified</span>
+              <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600">{t('settings.verified')}</span>
             ) : (
-              <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">Unverified</span>
+              <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">{t('settings.unverified')}</span>
             )
           )}
         </div>
@@ -276,7 +288,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
           {save.error instanceof ApiError && <span className="text-destructive">{save.error.message}</span>}
         </span>
         <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending} size="sm">
-          {save.isPending ? 'Saving…' : 'Save changes'}
+          {save.isPending ? t('common.saving') : t('settings.saveChanges')}
         </Button>
       </div>
 
