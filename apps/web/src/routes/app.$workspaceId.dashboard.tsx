@@ -14,6 +14,7 @@ import { format, formatDistanceToNowStrict, isAfter, isBefore, isToday, startOfW
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
+import { useTranslation } from '../lib/i18n'
 import { DemoDataEmptyState } from '../components/demo-data-empty-state'
 
 type TaskAssignee = {
@@ -58,15 +59,16 @@ export const Route = createFileRoute('/app/$workspaceId/dashboard')({
   component: Dashboard,
 })
 
-function greeting() {
+function greetingKey(): 'dashboard.greetingMorning' | 'dashboard.greetingAfternoon' | 'dashboard.greetingEvening' {
   const h = new Date().getHours()
-  if (h < 12) return 'Good morning'
-  if (h < 18) return 'Good afternoon'
-  return 'Good evening'
+  if (h < 12) return 'dashboard.greetingMorning'
+  if (h < 18) return 'dashboard.greetingAfternoon'
+  return 'dashboard.greetingEvening'
 }
 
 function Dashboard() {
   const { workspaceId } = Route.useParams()
+  const { t, tCount } = useTranslation()
   const [viewMode, setViewMode] = useState<'overview' | 'custom'>('overview')
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
@@ -156,7 +158,7 @@ function Dashboard() {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="font-display text-4xl font-semibold text-foreground mb-1">
-              {greeting()}, {displayName}
+              {t(greetingKey())}, {displayName}
             </h1>
             <p className="text-muted-foreground">
               {format(now, 'EEEE, MMMM d, yyyy')}
@@ -170,12 +172,12 @@ function Dashboard() {
                 value={activePresetId || ''}
                 onChange={(e) => setActivePresetId(e.target.value)}
               >
-                <option value="">Default Layout</option>
+                <option value="">{t('dashboard.defaultLayout')}</option>
                 {presets.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <Button size="sm" onClick={() => setIsSaving(true)}>Save Preset</Button>
+              <Button size="sm" onClick={() => setIsSaving(true)}>{t('dashboard.savePreset')}</Button>
             </div>
           )}
         </div>
@@ -187,7 +189,7 @@ function Dashboard() {
               viewMode === 'overview' ? 'bg-brand-gradient text-white' : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            Overview
+            {t('dashboard.overview')}
           </button>
           <button
             onClick={() => setViewMode('custom')}
@@ -196,7 +198,7 @@ function Dashboard() {
               viewMode === 'custom' ? 'bg-brand-gradient text-white' : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            Custom dashboard
+            {t('dashboard.customDashboard')}
           </button>
         </div>
       </header>
@@ -207,16 +209,16 @@ function Dashboard() {
             <div className="flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
               <div>
                 <h2 className="font-display text-xl font-semibold">
-                  {activePreset ? activePreset.name : 'Custom dashboard builder'}
+                  {activePreset ? activePreset.name : t('dashboard.customBuilderTitle')}
                 </h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Build your personal cockpit with draggable metrics, charts, and workload widgets.
+                  {t('dashboard.customBuilderDesc')}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => setViewMode('overview')}>
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to overview
+                  <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
+                  {t('dashboard.backToOverview')}
                 </Button>
               </div>
             </div>
@@ -226,15 +228,15 @@ function Dashboard() {
           {isSaving && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
               <Card className="w-full max-w-md p-6">
-                <h3 className="font-display text-xl font-semibold mb-4">Save Dashboard Preset</h3>
-                <label className="block text-sm font-medium mb-2 text-foreground">Preset Name</label>
+                <h3 className="font-display text-xl font-semibold mb-4">{t('dashboard.savePresetTitle')}</h3>
+                <label className="block text-sm font-medium mb-2 text-foreground">{t('dashboard.presetName')}</label>
                 <Input
-                  placeholder="My Weekly Focus"
+                  placeholder={t('dashboard.presetPlaceholder')}
                   value={newPresetName}
                   onChange={(e) => setNewPresetName(e.target.value)}
                 />
                 <div className="flex justify-end gap-2 mt-6">
-                  <Button variant="ghost" onClick={() => setIsSaving(false)}>Cancel</Button>
+                  <Button variant="ghost" onClick={() => setIsSaving(false)}>{t('common.cancel')}</Button>
                   <Button onClick={async () => {
                     await api('/dashboards', {
                       method: 'POST',
@@ -247,7 +249,7 @@ function Dashboard() {
                     qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] })
                     setIsSaving(false)
                     setNewPresetName('')
-                  }}>Save</Button>
+                  }}>{t('common.save')}</Button>
                 </div>
               </Card>
             </div>
@@ -255,9 +257,9 @@ function Dashboard() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <WidgetCard title="Due today" icon={Clock} accent="brand" count={dueToday.length} loading={isLoading}>
+          <WidgetCard title={t('dashboard.dueToday')} icon={Clock} accent="brand" count={dueToday.length} loading={isLoading}>
             {dueToday.length === 0 ? (
-              <EmptyLine>Nothing due today. Enjoy the calm.</EmptyLine>
+              <EmptyLine>{t('dashboard.dueTodayEmpty')}</EmptyLine>
             ) : (
               <ul className="space-y-1.5">
                 {dueToday.slice(0, 5).map((t) => (
@@ -267,9 +269,9 @@ function Dashboard() {
             )}
           </WidgetCard>
 
-          <WidgetCard title="Overdue" icon={AlertCircle} accent="red" count={overdue.length} loading={isLoading}>
+          <WidgetCard title={t('dashboard.overdue')} icon={AlertCircle} accent="red" count={overdue.length} loading={isLoading}>
             {overdue.length === 0 ? (
-              <EmptyLine>All clear. No overdue tasks.</EmptyLine>
+              <EmptyLine>{t('dashboard.overdueEmpty')}</EmptyLine>
             ) : (
               <ul className="space-y-1.5">
                 {overdue.slice(0, 5).map((t) => (
@@ -279,28 +281,28 @@ function Dashboard() {
             )}
           </WidgetCard>
 
-          <WidgetCard title="Completed this week" icon={CheckCircle2} accent="green" count={completedThisWeek.length} loading={isLoading}>
-            <p className="text-xs text-muted-foreground">Wins logged since Monday. Keep the streak going.</p>
+          <WidgetCard title={t('dashboard.completedThisWeek')} icon={CheckCircle2} accent="green" count={completedThisWeek.length} loading={isLoading}>
+            <p className="text-xs text-muted-foreground">{t('dashboard.completedDesc')}</p>
           </WidgetCard>
 
-          <WidgetCard title="In progress" icon={TrendingUp} accent="blue" count={inProgress.length} loading={isLoading}>
-            <p className="text-xs text-muted-foreground">Active tasks on your plate right now.</p>
+          <WidgetCard title={t('dashboard.inProgress')} icon={TrendingUp} accent="blue" count={inProgress.length} loading={isLoading}>
+            <p className="text-xs text-muted-foreground">{t('dashboard.inProgressDesc')}</p>
           </WidgetCard>
 
           <Card className="p-5 md:col-span-2 lg:col-span-2">
             <div className="flex items-start justify-between mb-3">
               <div>
-                <h2 className="font-display text-lg font-semibold text-foreground">This week&rsquo;s completion</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Tasks you finished vs. tasks touched this week.</p>
+                <h2 className="font-display text-lg font-semibold text-foreground">{t('dashboard.weekCompletion')}</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">{t('dashboard.weekCompletionDesc')}</p>
               </div>
             </div>
             <div className="flex items-center gap-6">
               <CompletionRing pct={completionPct} />
               <div className="space-y-1.5">
-                <LegendDot color="hsl(var(--brand-700))" label={`${weekDone} completed`} />
-                <LegendDot color="hsl(var(--muted))" label={`${Math.max(weekTotal - weekDone, 0)} remaining`} />
+                <LegendDot color="hsl(var(--brand-700))" label={t('dashboard.completedCount', { count: weekDone })} />
+                <LegendDot color="hsl(var(--muted))" label={t('dashboard.remainingCount', { count: Math.max(weekTotal - weekDone, 0) })} />
                 <div className="text-xs text-muted-foreground pt-1">
-                  {weekTotal === 0 ? 'No activity logged this week yet.' : `Based on ${weekTotal} tracked task${weekTotal === 1 ? '' : 's'}.`}
+                  {weekTotal === 0 ? t('dashboard.noActivityWeek') : tCount('dashboard.basedOn', weekTotal)}
                 </div>
               </div>
             </div>
@@ -309,13 +311,13 @@ function Dashboard() {
           <Card className="p-5 md:col-span-2 lg:col-span-2 row-span-2">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h2 className="font-display text-lg font-semibold text-foreground">My assigned tasks</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Your next 10 open tasks, sorted by due date.</p>
+                <h2 className="font-display text-lg font-semibold text-foreground">{t('dashboard.myAssigned')}</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">{t('dashboard.myAssignedDesc')}</p>
               </div>
               <span className="text-xs font-medium rounded-full bg-brand-100 text-accent px-2 py-0.5">{myAssigned.length}</span>
             </div>
             {myAssigned.length === 0 ? (
-              <EmptyLine>Nothing assigned to you yet.</EmptyLine>
+              <EmptyLine>{t('dashboard.myAssignedEmpty')}</EmptyLine>
             ) : (
               <ul className="divide-y divide-border">
                 {myAssigned.map((t) => (
@@ -331,11 +333,11 @@ function Dashboard() {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <Activity className="h-4 w-4 text-accent" />
-                <h2 className="font-display text-lg font-semibold text-foreground">Recent activity</h2>
+                <h2 className="font-display text-lg font-semibold text-foreground">{t('dashboard.recentActivity')}</h2>
               </div>
             </div>
             {recent.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">No recent activity yet. Updates to tasks will show up here.</div>
+              <div className="py-8 text-center text-sm text-muted-foreground">{t('dashboard.recentEmpty')}</div>
             ) : (
               <ul className="space-y-2">
                 {recent.map((t) => (
