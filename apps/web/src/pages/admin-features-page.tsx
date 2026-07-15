@@ -4,6 +4,8 @@ import { Button, Card, Input } from '@rundesk/ui'
 import { FLAGS, DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 // ---------------------------------------------------------------------------
 // Flag metadata — derived from the registry (we don't modify the registry).
@@ -40,20 +42,20 @@ const CATEGORY_ORDER: CategoryId[] = [
   'other',
 ]
 
-const CATEGORY_LABELS: Record<CategoryId, string> = {
-  core: 'Core tasks',
-  views: 'Views',
-  ai: 'AI',
-  chat: 'Chat',
-  time_tracking: 'Time tracking',
-  reporting: 'Reporting',
-  integrations: 'Integrations',
-  docs: 'Docs',
-  goals: 'Goals',
-  sprints: 'Sprints',
-  forms: 'Forms',
-  advanced_security: 'Advanced security',
-  other: 'Platform & other',
+const CATEGORY_LABEL_KEYS: Record<CategoryId, TranslationKey> = {
+  core: 'adminFeatures.categoryCore',
+  views: 'adminFeatures.categoryViews',
+  ai: 'adminFeatures.categoryAi',
+  chat: 'adminFeatures.categoryChat',
+  time_tracking: 'adminFeatures.categoryTimeTracking',
+  reporting: 'adminFeatures.categoryReporting',
+  integrations: 'nav.integrations',
+  docs: 'adminFeatures.categoryDocs',
+  goals: 'adminFeatures.categoryGoals',
+  sprints: 'adminFeatures.categorySprints',
+  forms: 'adminFeatures.categoryForms',
+  advanced_security: 'adminFeatures.categoryAdvancedSecurity',
+  other: 'adminFeatures.categoryOther',
 }
 
 // Explicit mapping for flags whose category can't be inferred by prefix.
@@ -105,52 +107,41 @@ function categoryFor(key: FlagKey): CategoryId {
   }
 }
 
-function humanize(segment: string): string {
-  return segment
-    .split('_')
-    .map((w) => (w.length === 0 ? w : w[0].toUpperCase() + w.slice(1)))
-    .join(' ')
-}
-
-function displayName(key: FlagKey): string {
-  const parts = key.split('.')
-  if (parts.length === 1) return humanize(parts[0])
-  return parts.slice(1).map(humanize).join(' · ')
-}
-
-const DESCRIPTIONS: Partial<Record<FlagKey, string>> = {
-  [FLAGS.CORE_TASKS]: 'Master toggle for all task functionality.',
-  [FLAGS.CHAT]: 'Enable the in-app chat surface (channels, DMs, threads).',
-  [FLAGS.AI]: 'Top-level AI features gate. Disabling turns off every AI capability.',
-  [FLAGS.DOCS]: 'Rich collaborative documents attached to workspaces and projects.',
-  [FLAGS.GOALS]: 'Objectives and key results tied to projects and sprints.',
-  [FLAGS.SPRINTS]: 'Sprint planning, velocity, and burndown.',
-  [FLAGS.FORMS]: 'Public and internal intake forms that create tasks.',
-  [FLAGS.REPORTING]: 'Dashboards and cross-workspace reporting surface.',
-  [FLAGS.TIME_TRACKING]: 'Record time against tasks, sprints, and goals.',
-  [FLAGS.INTEGRATIONS]: 'Gate for all third-party integrations.',
-}
-
-function descriptionFor(key: FlagKey): string {
-  if (DESCRIPTIONS[key]) return DESCRIPTIONS[key]!
-  return `Controls availability of the ${displayName(key).toLowerCase()} capability.`
-}
+// Flags with a bespoke description in the catalog (`adminFeatures.flagDesc.<key>`).
+// Every other flag renders the shared `adminFeatures.descFallback` template,
+// interpolated with the localized flag name.
+const EXPLICIT_DESC_FLAGS = new Set<FlagKey>([
+  FLAGS.CORE_TASKS,
+  FLAGS.CHAT,
+  FLAGS.AI,
+  FLAGS.DOCS,
+  FLAGS.GOALS,
+  FLAGS.SPRINTS,
+  FLAGS.FORMS,
+  FLAGS.REPORTING,
+  FLAGS.TIME_TRACKING,
+  FLAGS.INTEGRATIONS,
+])
 
 type FlagMeta = {
   key: FlagKey
   category: CategoryId
-  name: string
-  description: string
+  nameKey: TranslationKey
+  descKey?: TranslationKey
   defaultEnabled: boolean
 }
 
 const DEFAULT_SET = new Set<FlagKey>(DEFAULT_ENABLED_FLAGS)
 
+// `nameKey` / `descKey` reference i18n catalog entries; the raw `key` remains the
+// locale-independent identifier persisted to and compared against the API.
 const ALL_FLAGS: FlagMeta[] = (Object.values(FLAGS) as FlagKey[]).map((key) => ({
   key,
   category: categoryFor(key),
-  name: displayName(key),
-  description: descriptionFor(key),
+  nameKey: `adminFeatures.flag.${key}` as TranslationKey,
+  descKey: EXPLICIT_DESC_FLAGS.has(key)
+    ? (`adminFeatures.flagDesc.${key}` as TranslationKey)
+    : undefined,
   defaultEnabled: DEFAULT_SET.has(key),
 }))
 
@@ -219,6 +210,7 @@ function Switch({
 // ---------------------------------------------------------------------------
 
 export function FeatureFlagsPanel() {
+  const { t, tCount } = useTranslation()
   const queryClient = useQueryClient()
   const searchRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
@@ -319,10 +311,10 @@ export function FeatureFlagsPanel() {
       if (!needle) return true
       return (
         f.key.toLowerCase().includes(needle) ||
-        f.name.toLowerCase().includes(needle)
+        t(f.nameKey).toLowerCase().includes(needle)
       )
     })
-  }, [search, activeCategory])
+  }, [search, activeCategory, t])
 
   const grouped = useMemo(() => {
     const map = new Map<CategoryId, FlagMeta[]>()
@@ -333,7 +325,7 @@ export function FeatureFlagsPanel() {
     }
     return CATEGORY_ORDER.filter((c) => map.has(c)).map((c) => ({
       id: c,
-      label: CATEGORY_LABELS[c],
+      labelKey: CATEGORY_LABEL_KEYS[c],
       flags: map.get(c)!,
     }))
   }, [filtered])
@@ -347,9 +339,9 @@ export function FeatureFlagsPanel() {
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-8 py-10">
       <header className="space-y-2">
-        <h1 className="font-display text-3xl text-foreground">Feature flags</h1>
+        <h1 className="font-display text-3xl text-foreground">{t('adminFeatures.title')}</h1>
         <p className="text-muted-foreground">
-          Control every feature across the platform.
+          {t('adminFeatures.subtitle')}
         </p>
       </header>
 
@@ -359,8 +351,8 @@ export function FeatureFlagsPanel() {
             ref={searchRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search flags by key or name…"
-            aria-label="Search feature flags"
+            placeholder={t('adminFeatures.searchPlaceholder')}
+            aria-label={t('adminFeatures.searchAria')}
             className="pr-16"
           />
           <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-border bg-surface-50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
@@ -370,14 +362,14 @@ export function FeatureFlagsPanel() {
 
         <div className="flex flex-wrap gap-2">
           <CategoryChip
-            label="All"
+            label={t('adminFeatures.categoryAll')}
             active={activeCategory === 'all'}
             onClick={() => setActiveCategory('all')}
           />
           {availableCategories.map((c) => (
             <CategoryChip
               key={c}
-              label={CATEGORY_LABELS[c]}
+              label={t(CATEGORY_LABEL_KEYS[c])}
               active={activeCategory === c}
               onClick={() => setActiveCategory(c)}
             />
@@ -386,10 +378,10 @@ export function FeatureFlagsPanel() {
       </div>
 
       {resolvedQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">Loading flags…</p>
+        <p className="text-sm text-muted-foreground">{t('adminFeatures.loading')}</p>
       )}
       {resolvedQuery.isError && (
-        <p className="text-sm text-destructive">Failed to load flag state.</p>
+        <p className="text-sm text-destructive">{t('adminFeatures.loadError')}</p>
       )}
 
       <div className="space-y-10">
@@ -401,10 +393,10 @@ export function FeatureFlagsPanel() {
               <div className="flex items-end justify-between gap-4 pt-2">
                 <div className="space-y-1">
                   <h2 className="font-display text-xl font-semibold text-foreground">
-                    {group.label}
+                    {t(group.labelKey)}
                   </h2>
                   <p className="text-xs text-muted-foreground">
-                    {group.flags.length} flag{group.flags.length === 1 ? '' : 's'}
+                    {tCount('adminFeatures.flagCount', group.flags.length)}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -419,7 +411,7 @@ export function FeatureFlagsPanel() {
                       })
                     }
                   >
-                    Enable all
+                    {t('adminFeatures.enableAll')}
                   </Button>
                   <Button
                     variant="outline"
@@ -432,7 +424,7 @@ export function FeatureFlagsPanel() {
                       })
                     }
                   >
-                    Disable all
+                    {t('adminFeatures.disableAll')}
                   </Button>
                 </div>
               </div>
@@ -440,6 +432,10 @@ export function FeatureFlagsPanel() {
               <Card className="divide-y divide-border overflow-hidden">
                 {group.flags.map((flag) => {
                   const enabled = flagState[flag.key] ?? false
+                  const name = t(flag.nameKey)
+                  const description = flag.descKey
+                    ? t(flag.descKey)
+                    : t('adminFeatures.descFallback', { name: name.toLowerCase() })
                   return (
                     <div
                       key={flag.key}
@@ -453,15 +449,15 @@ export function FeatureFlagsPanel() {
                           <DefaultBadge defaultEnabled={flag.defaultEnabled} />
                         </div>
                         <p className="font-semibold text-foreground">
-                          {flag.name}
+                          {name}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          {flag.description}
+                          {description}
                         </p>
                       </div>
                       <Switch
                         checked={enabled}
-                        ariaLabel={`Toggle ${flag.name}`}
+                        ariaLabel={t('adminFeatures.toggleFlag', { name })}
                         disabled={toggleMutation.isPending}
                         onChange={(next) =>
                           toggleMutation.mutate({ key: flag.key, enabled: next })
@@ -477,7 +473,7 @@ export function FeatureFlagsPanel() {
 
         {grouped.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            No flags match your filters.
+            {t('adminFeatures.noMatch')}
           </p>
         )}
       </div>
@@ -511,6 +507,7 @@ function CategoryChip({
 }
 
 function DefaultBadge({ defaultEnabled }: { defaultEnabled: boolean }) {
+  const { t } = useTranslation()
   return (
     <span
       className={[
@@ -520,7 +517,7 @@ function DefaultBadge({ defaultEnabled }: { defaultEnabled: boolean }) {
           : 'bg-secondary text-muted-foreground',
       ].join(' ')}
     >
-      default {defaultEnabled ? 'on' : 'off'}
+      {t(defaultEnabled ? 'adminFeatures.defaultOn' : 'adminFeatures.defaultOff')}
     </span>
   )
 }

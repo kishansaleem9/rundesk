@@ -4,6 +4,8 @@ import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Shield, Search, Download } from 'lucide-react'
 import { api, downloadFile } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 type AuditLog = {
   id: string
@@ -43,6 +45,34 @@ const ACTION_COLORS: Record<string, string> = {
   'announcement.removed': 'bg-red-100 text-red-700',
 }
 
+// Human-readable labels for audit actions. The raw `log.action` identifier is
+// the persisted/compared value; unmapped actions fall back to the raw string.
+const ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
+  'auth.login': 'adminAudit.action.authLogin',
+  'member.invited': 'adminAudit.action.memberInvited',
+  'member.removed': 'adminAudit.action.memberRemoved',
+  'role.changed': 'adminAudit.action.roleChanged',
+  'workspace.updated': 'adminAudit.action.workspaceUpdated',
+  'feature_flag.changed': 'adminAudit.action.featureFlagChanged',
+  'data.exported': 'adminAudit.action.dataExported',
+  'api_key.created': 'adminAudit.action.apiKeyCreated',
+  'api_key.revoked': 'adminAudit.action.apiKeyRevoked',
+  'api_key.deleted': 'adminAudit.action.apiKeyDeleted',
+  '2fa.enabled': 'adminAudit.action.twoFaEnabled',
+  '2fa.disabled': 'adminAudit.action.twoFaDisabled',
+  'timesheet.approved': 'adminAudit.action.timesheetApproved',
+  'timesheet.rejected': 'adminAudit.action.timesheetRejected',
+  'integration.connected': 'adminAudit.action.integrationConnected',
+  'integration.disconnected': 'adminAudit.action.integrationDisconnected',
+  'integration.access_requested': 'adminAudit.action.integrationAccessRequested',
+  'integration.access_approved': 'adminAudit.action.integrationAccessApproved',
+  'integration.access_rejected': 'adminAudit.action.integrationAccessRejected',
+  'integration.access_pending': 'adminAudit.action.integrationAccessPending',
+  'announcement.created': 'adminAudit.action.announcementCreated',
+  'announcement.updated': 'adminAudit.action.announcementUpdated',
+  'announcement.removed': 'adminAudit.action.announcementRemoved',
+}
+
 type ActionGroup = 'all' | 'members' | 'security' | 'integrations' | 'timesheets' | 'announcements' | 'workspace'
 
 const ACTION_GROUPS: Record<Exclude<ActionGroup, 'all'>, (action: string) => boolean> = {
@@ -54,17 +84,18 @@ const ACTION_GROUPS: Record<Exclude<ActionGroup, 'all'>, (action: string) => boo
   workspace: (a) => a.startsWith('workspace.') || a.startsWith('feature_flag.') || a.startsWith('data.'),
 }
 
-const GROUP_LABELS: Record<ActionGroup, string> = {
-  all: 'All',
-  members: 'Members',
-  security: 'Security',
-  integrations: 'Integrations',
-  timesheets: 'Timesheets',
-  announcements: 'Announcements',
-  workspace: 'Workspace',
+const GROUP_LABEL_KEYS: Record<ActionGroup, TranslationKey> = {
+  all: 'adminAudit.groupAll',
+  members: 'adminAudit.groupMembers',
+  security: 'adminAudit.groupSecurity',
+  integrations: 'nav.integrations',
+  timesheets: 'adminAudit.groupTimesheets',
+  announcements: 'adminAudit.groupAnnouncements',
+  workspace: 'common.workspace',
 }
 
 export function AuditLogPage() {
+  const { t } = useTranslation()
   const user = useAuthStore((s) => s.user)
   // Get the user's current workspace — we use the first workspace for the audit log
   const [search, setSearch] = useState('')
@@ -132,10 +163,10 @@ export function AuditLogPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-accent" />
-          <h1 className="text-lg font-semibold">Audit log</h1>
+          <h1 className="text-lg font-semibold">{t('adminAudit.title')}</h1>
         </div>
         <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv}>
-          <Download className="h-3.5 w-3.5" /> Export CSV
+          <Download className="h-3.5 w-3.5" /> {t('adminAudit.exportCsv')}
         </Button>
       </div>
 
@@ -144,13 +175,13 @@ export function AuditLogPage() {
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by action, actor, or description…"
+          placeholder={t('adminAudit.searchPlaceholder')}
           className="pl-9"
         />
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(Object.keys(GROUP_LABELS) as ActionGroup[]).map((g) => (
+        {(Object.keys(GROUP_LABEL_KEYS) as ActionGroup[]).map((g) => (
           <button
             key={g}
             type="button"
@@ -162,25 +193,27 @@ export function AuditLogPage() {
                 : 'bg-card text-muted-foreground border-border hover:bg-muted/30',
             )}
           >
-            {GROUP_LABELS[g]} <span className="opacity-70 tabular-nums">· {groupCounts[g]}</span>
+            {t(GROUP_LABEL_KEYS[g])} <span className="opacity-70 tabular-nums">· {groupCounts[g]}</span>
           </button>
         ))}
       </div>
 
       <div className="space-y-2">
-        {logsQuery.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {logsQuery.isLoading && <p className="text-sm text-muted-foreground">{t('common.loading')}</p>}
         {!logsQuery.isLoading && logs.length === 0 && (
           <Card className="p-8 text-center text-muted-foreground">
             <Shield className="h-8 w-8 mx-auto mb-2 opacity-30" />
             <p>
               {allLogs.length === 0
-                ? 'No audit events yet.'
-                : `No events match this filter${search ? ' or search' : ''}.`}
+                ? t('adminAudit.emptyNoEvents')
+                : search
+                  ? t('adminAudit.emptyNoMatchFilterSearch')
+                  : t('adminAudit.emptyNoMatchFilter')}
             </p>
             <p className="text-xs mt-1">
               {allLogs.length === 0
-                ? 'Events appear here as admins make changes.'
-                : 'Try selecting another category or clearing the search.'}
+                ? t('adminAudit.emptyHintNoEvents')
+                : t('adminAudit.emptyHintFiltered')}
             </p>
           </Card>
         )}
@@ -192,10 +225,10 @@ export function AuditLogPage() {
       {logs.length === 50 && (
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-            Previous
+            {t('adminAudit.previous')}
           </Button>
           <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)}>
-            Next
+            {t('common.next')}
           </Button>
         </div>
       )}
@@ -204,10 +237,12 @@ export function AuditLogPage() {
 }
 
 function AuditRow({ log }: { log: AuditLog }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const hasMetadata = Boolean(log.metadata && Object.keys(log.metadata).length > 0)
   const hasResource = Boolean(log.resourceType || log.resourceId)
   const canExpand = hasMetadata || hasResource
+  const actionLabelKey = ACTION_LABEL_KEYS[log.action] as TranslationKey | undefined
 
   return (
     <div className="border-b border-border/50">
@@ -223,15 +258,15 @@ function AuditRow({ log }: { log: AuditLog }) {
           <span
             className={`text-xs px-2 py-0.5 rounded-full font-medium ${ACTION_COLORS[log.action] ?? 'bg-gray-100 text-gray-700'}`}
           >
-            {log.action}
+            {actionLabelKey ? t(actionLabelKey) : log.action}
           </span>
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm">{log.description}</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {log.actorEmail ?? 'System'}
+            {log.actorEmail ?? t('adminAudit.system')}
             {log.ipAddress ? ` · ${log.ipAddress}` : ''}
-            {hasResource ? ` · ${log.resourceType ?? 'resource'}${log.resourceId ? ` #${String(log.resourceId).slice(0, 8)}` : ''}` : ''}
+            {hasResource ? ` · ${log.resourceType ?? t('adminAudit.resource')}${log.resourceId ? ` #${String(log.resourceId).slice(0, 8)}` : ''}` : ''}
           </p>
         </div>
         <div className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
@@ -243,7 +278,7 @@ function AuditRow({ log }: { log: AuditLog }) {
           <div className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-1.5">
             {hasResource && (
               <div className="flex gap-2">
-                <span className="text-muted-foreground w-20 shrink-0">Resource</span>
+                <span className="text-muted-foreground w-20 shrink-0">{t('adminAudit.resourceLabel')}</span>
                 <span className="font-mono break-all">
                   {log.resourceType ?? '—'}
                   {log.resourceId ? ` · ${log.resourceId}` : ''}
@@ -252,7 +287,7 @@ function AuditRow({ log }: { log: AuditLog }) {
             )}
             {hasMetadata && (
               <div className="flex gap-2">
-                <span className="text-muted-foreground w-20 shrink-0">Metadata</span>
+                <span className="text-muted-foreground w-20 shrink-0">{t('adminAudit.metadataLabel')}</span>
                 <pre className="font-mono whitespace-pre-wrap break-all flex-1">
                   {JSON.stringify(log.metadata, null, 2)}
                 </pre>

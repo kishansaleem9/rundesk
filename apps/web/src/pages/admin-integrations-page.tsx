@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input } from '@rundesk/ui'
 import { Plug } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n'
 
 type WorkspaceEntry = {
   workspace: { id: string; name: string; slug: string }
@@ -20,7 +22,23 @@ type AccessRequest = {
   updatedAt: string
 }
 
+// `labelKey` references an i18n catalog entry; the raw `value` is the
+// locale-independent identifier used for filtering/persisted status.
+const STATUS_FILTERS = [
+  { value: 'all', labelKey: 'adminIntegrations.filterAll' },
+  { value: 'pending', labelKey: 'adminIntegrations.statusPending' },
+  { value: 'approved', labelKey: 'adminIntegrations.statusApproved' },
+  { value: 'rejected', labelKey: 'adminIntegrations.statusRejected' },
+] as const
+
+const STATUS_LABEL_KEYS: Record<AccessRequest['status'], TranslationKey> = {
+  pending: 'adminIntegrations.statusPending',
+  approved: 'adminIntegrations.statusApproved',
+  rejected: 'adminIntegrations.statusRejected',
+}
+
 export function AdminIntegrationsPage() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [workspaceId, setWorkspaceId] = useState('')
   const [adminNote, setAdminNote] = useState('')
@@ -57,10 +75,10 @@ export function AdminIntegrationsPage() {
       <header className="space-y-1">
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Plug className="h-5 w-5 text-accent" />
-          Admin integrations
+          {t('adminIntegrations.title')}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Review provider access requests from workspace members and set approval status.
+          {t('adminIntegrations.subtitle')}
         </p>
       </header>
 
@@ -79,17 +97,17 @@ export function AdminIntegrationsPage() {
         <Input
           value={adminNote}
           onChange={(e) => setAdminNote(e.target.value)}
-          placeholder="Optional admin note (applies on next status change)"
+          placeholder={t('adminIntegrations.notePlaceholder')}
         />
         <div className="flex flex-wrap gap-2">
-          {(['all', 'pending', 'approved', 'rejected'] as const).map((value) => (
+          {STATUS_FILTERS.map((option) => (
             <Button
-              key={value}
+              key={option.value}
               size="sm"
-              variant={statusFilter === value ? 'secondary' : 'outline'}
-              onClick={() => setStatusFilter(value)}
+              variant={statusFilter === option.value ? 'secondary' : 'outline'}
+              onClick={() => setStatusFilter(option.value)}
             >
-              {value === 'all' ? 'All' : value[0]?.toUpperCase() + value.slice(1)}
+              {t(option.labelKey)}
             </Button>
           ))}
         </div>
@@ -97,12 +115,12 @@ export function AdminIntegrationsPage() {
 
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border text-sm font-medium">
-          Access requests · {filteredRequests.length}
+          {t('adminIntegrations.accessRequests')} · {filteredRequests.length}
         </div>
         {requestsQuery.isLoading ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">Loading requests...</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminIntegrations.loadingRequests')}</div>
         ) : filteredRequests.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">No access requests yet.</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminIntegrations.emptyRequests')}</div>
         ) : (
           <ul className="divide-y divide-border">
             {filteredRequests.map((req) => (
@@ -110,21 +128,21 @@ export function AdminIntegrationsPage() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-sm truncate">{req.provider}</div>
                   <div className="text-xs text-muted-foreground">
-                    status: {req.status} · requested by: {req.requesterName || req.requesterEmail || req.requestedById}
+                    {t('adminIntegrations.statusPrefix')} {t(STATUS_LABEL_KEYS[req.status])} · {t('adminIntegrations.requestedByPrefix')} {req.requesterName || req.requesterEmail || req.requestedById}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    updated: {new Date(req.updatedAt).toLocaleString()}
+                    {t('adminIntegrations.updatedPrefix')} {new Date(req.updatedAt).toLocaleString()}
                   </div>
-                  {req.note ? <div className="text-xs text-muted-foreground truncate">note: {req.note}</div> : null}
+                  {req.note ? <div className="text-xs text-muted-foreground truncate">{t('adminIntegrations.notePrefix')} {req.note}</div> : null}
                 </div>
                 <Button size="sm" variant="outline" onClick={() => setStatus.mutate({ provider: req.provider, status: 'pending' })}>
-                  Pending
+                  {t('adminIntegrations.statusPending')}
                 </Button>
                 <Button size="sm" onClick={() => setStatus.mutate({ provider: req.provider, status: 'approved' })}>
-                  Approve
+                  {t('adminIntegrations.approve')}
                 </Button>
                 <Button size="sm" variant="destructive" onClick={() => setStatus.mutate({ provider: req.provider, status: 'rejected' })}>
-                  Reject
+                  {t('adminIntegrations.reject')}
                 </Button>
               </li>
             ))}
