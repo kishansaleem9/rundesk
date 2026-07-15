@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Star } from 'lucide-react'
 import { cn, toast } from '@rundesk/ui'
 import { api, ApiError } from './api'
+import { useTranslation } from './i18n'
 
 export type FavoriteEntityType = 'space' | 'list' | 'task' | 'doc' | 'channel'
 
@@ -27,6 +28,7 @@ export function useFavorites(workspaceId: string | undefined) {
 /** Toggle an entity's pinned state; refreshes the favorites list on success. */
 export function useToggleFavorite(workspaceId: string | undefined) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   return useMutation({
     mutationFn: (input: { entityType: FavoriteEntityType; entityId: string }) =>
       api<{ favorited: boolean; entityType: FavoriteEntityType; entityId: string }>(
@@ -35,10 +37,10 @@ export function useToggleFavorite(workspaceId: string | undefined) {
       ),
     onSuccess: (res) => {
       void qc.invalidateQueries({ queryKey: ['favorites', workspaceId] })
-      toast(res.favorited ? 'Pinned to your favorites' : 'Removed from favorites')
+      toast(res.favorited ? t('favorites.pinned') : t('favorites.removed'))
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Could not update favorites')
+      toast.error(err instanceof ApiError ? err.message : t('favorites.updateError'))
     },
   })
 }
@@ -62,6 +64,7 @@ export function FavoriteStar({
   className?: string
 }) {
   const { data: favorites } = useFavorites(workspaceId)
+  const { t } = useTranslation()
   const toggle = useToggleFavorite(workspaceId)
   const favorited = !!favorites?.some((f) => f.entityType === entityType && f.entityId === entityId)
   const dim = size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4'
@@ -69,7 +72,7 @@ export function FavoriteStar({
   return (
     <button
       type="button"
-      title={favorited ? 'Remove from favorites' : 'Add to favorites'}
+      title={favorited ? t('favorites.remove') : t('favorites.add')}
       aria-pressed={favorited}
       disabled={!workspaceId || toggle.isPending}
       onClick={(e) => {

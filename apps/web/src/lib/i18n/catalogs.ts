@@ -3231,6 +3231,17 @@ export const en = {
   'auth.seededLogins': 'Seeded test logins',
   'auth.seededOrgAdmin': 'Organization admin',
 
+  // Gap-fill: subdirectory components (add-people dialog, favorites)
+  'chat.addPeopleTo': 'Add people to #{{channel}}',
+  'chat.loadingTeammates': 'Loading teammates…',
+  'chat.everyoneHere': 'Everyone in the workspace is already here.',
+  'chat.couldNotAddPeople': 'Could not add people',
+  'favorites.pinned': 'Pinned to your favorites',
+  'favorites.removed': 'Removed from favorites',
+  'favorites.add': 'Add to favorites',
+  'favorites.remove': 'Remove from favorites',
+  'favorites.updateError': 'Could not update favorites',
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -6534,6 +6545,17 @@ export const es: Record<TranslationKey, string> = {
   'auth.seededLogins': 'Inicios de sesión de prueba',
   'auth.seededOrgAdmin': 'Administrador de la organización',
 
+  // Gap-fill: subdirectory components (add-people dialog, favorites)
+  'chat.addPeopleTo': 'Añadir personas a #{{channel}}',
+  'chat.loadingTeammates': 'Cargando compañeros…',
+  'chat.everyoneHere': 'Todos en el espacio de trabajo ya están aquí.',
+  'chat.couldNotAddPeople': 'No se pudieron añadir personas',
+  'favorites.pinned': 'Fijado en tus favoritos',
+  'favorites.removed': 'Eliminado de favoritos',
+  'favorites.add': 'Añadir a favoritos',
+  'favorites.remove': 'Eliminar de favoritos',
+  'favorites.updateError': 'No se pudieron actualizar los favoritos',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -9828,6 +9850,17 @@ export const ar: Record<TranslationKey, string> = {
   'auth.registrationFailed': 'فشل التسجيل',
   'auth.seededLogins': 'حسابات دخول تجريبية',
   'auth.seededOrgAdmin': 'مسؤول المؤسسة',
+
+  // Gap-fill: subdirectory components (add-people dialog, favorites)
+  'chat.addPeopleTo': 'إضافة أشخاص إلى #{{channel}}',
+  'chat.loadingTeammates': 'جارٍ تحميل الزملاء…',
+  'chat.everyoneHere': 'الجميع في مساحة العمل موجودون هنا بالفعل.',
+  'chat.couldNotAddPeople': 'تعذّرت إضافة الأشخاص',
+  'favorites.pinned': 'تم التثبيت في مفضّلتك',
+  'favorites.removed': 'تمت الإزالة من المفضّلة',
+  'favorites.add': 'إضافة إلى المفضّلة',
+  'favorites.remove': 'إزالة من المفضّلة',
+  'favorites.updateError': 'تعذّر تحديث المفضّلة',
 
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',

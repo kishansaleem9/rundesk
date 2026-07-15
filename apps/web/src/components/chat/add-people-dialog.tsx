@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, Button, cn } from '@r
 import { Check, UserPlus } from 'lucide-react'
 import { api } from '../../lib/api'
 import { initials } from './chat-utils'
+import { useTranslation } from '../../lib/i18n'
 
 type WsMember = { userId: string; displayName: string; email: string }
 type ChannelMember = { userId: string }
@@ -22,6 +23,7 @@ export function AddPeopleDialog({
   onOpenChange: (next: boolean) => void
 }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const membersQ = useQuery({
     queryKey: ['channel-members', channelId],
     queryFn: () => api<ChannelMember[]>(`/chat/channels/${channelId}/members`),
@@ -56,7 +58,7 @@ export function AddPeopleDialog({
       await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
       onOpenChange(false)
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : 'Could not add people')
+      window.alert(e instanceof Error ? e.message : t('chat.couldNotAddPeople'))
     } finally {
       setBusy(false)
     }
@@ -66,14 +68,14 @@ export function AddPeopleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add people{channelName ? ` to #${channelName}` : ''}</DialogTitle>
+          <DialogTitle>{channelName ? t('chat.addPeopleTo', { channel: channelName }) : t('chat.addPeople')}</DialogTitle>
         </DialogHeader>
 
         <div className="max-h-72 overflow-y-auto space-y-0.5">
           {wsQ.isLoading ? (
-            <p className="text-sm text-muted-foreground py-4">Loading teammates…</p>
+            <p className="text-sm text-muted-foreground py-4">{t('chat.loadingTeammates')}</p>
           ) : candidates.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4">Everyone in the workspace is already here.</p>
+            <p className="text-sm text-muted-foreground py-4">{t('chat.everyoneHere')}</p>
           ) : (
             candidates.map((c) => {
               const on = selected.has(c.userId)
@@ -109,11 +111,11 @@ export function AddPeopleDialog({
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button size="sm" onClick={add} disabled={busy || selected.size === 0}>
             <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-            Add {selected.size > 0 ? selected.size : ''}
+            {t('chat.add')}{selected.size > 0 ? ` ${selected.size}` : ''}
           </Button>
         </div>
       </DialogContent>
