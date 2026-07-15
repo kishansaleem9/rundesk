@@ -34,11 +34,11 @@ type Member = {
 }
 
 const ROLES = [
-  { value: 'workspace_admin', label: 'Admin' },
-  { value: 'manager', label: 'Manager' },
-  { value: 'member', label: 'Member' },
-  { value: 'guest', label: 'Guest' },
-]
+  { value: 'workspace_admin', labelKey: 'settings.roleAdmin' },
+  { value: 'manager', labelKey: 'settings.roleManager' },
+  { value: 'member', labelKey: 'settings.roleMember' },
+  { value: 'guest', labelKey: 'settings.roleGuest' },
+] as const
 
 type Invitation = {
   id: string
@@ -80,7 +80,7 @@ export function SettingsPage() {
   if (!validWorkspaceId) {
     return (
       <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-        Redirecting to profile...
+        {t('settings.redirecting')}
       </div>
     )
   }
@@ -94,13 +94,13 @@ export function SettingsPage() {
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Workspace
+              {t('common.workspace')}
             </div>
             <h1 className="font-display text-2xl font-semibold leading-tight">{t('settings.title')}</h1>
           </div>
         </div>
         <p className="text-sm text-muted-foreground mt-0.5 max-w-2xl">
-          Manage your workspace name, members, integrations, and security policies.
+          {t('settings.subtitle')}
         </p>
       </header>
 
@@ -231,7 +231,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         <div className="flex items-center gap-2">
           <input
             type="color"
-            aria-label="Brand color"
+            aria-label={t('settings.brandColor')}
             value={/^#[0-9a-f]{6}$/i.test(primaryColor) ? primaryColor : '#354fb0'}
             onChange={(e) => setPrimaryColor(e.target.value)}
             className="h-9 w-10 rounded border border-border bg-transparent p-0.5 cursor-pointer"
@@ -244,7 +244,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         <Label htmlFor="logo">{t('settings.logoUrl')}</Label>
         <div className="flex items-center gap-2">
           {logoUrl ? (
-            <img src={logoUrl} alt="Workspace logo" className="h-9 w-9 rounded object-contain border border-border" />
+            <img src={logoUrl} alt={t('settings.logoAlt')} className="h-9 w-9 rounded object-contain border border-border" />
           ) : null}
           <Input id="logo" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
         </div>
@@ -264,18 +264,18 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         {wsQuery.data.customDomain && !wsQuery.data.customDomainVerified && wsQuery.data.customDomainToken && (
           <div className="mt-2 rounded-md border border-border/60 bg-card/40 p-3 text-xs space-y-1.5">
             <div className="text-muted-foreground">
-              Add this DNS TXT record, then click Verify:
+              {t('settings.dnsInstructions')}
             </div>
             <div className="font-mono">
-              <div>Host: <span className="text-foreground">_rundesk-verify.{wsQuery.data.customDomain}</span></div>
-              <div>Value: <span className="text-foreground">{wsQuery.data.customDomainToken}</span></div>
+              <div>{t('settings.dnsHost')}: <span className="text-foreground">_rundesk-verify.{wsQuery.data.customDomain}</span></div>
+              <div>{t('settings.dnsValue')}: <span className="text-foreground">{wsQuery.data.customDomainToken}</span></div>
             </div>
             <div className="flex items-center gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={() => verifyDomain.mutate()} disabled={verifyDomain.isPending}>
-                {verifyDomain.isPending ? 'Checking…' : 'Verify'}
+                {verifyDomain.isPending ? t('settings.checking') : t('settings.verify')}
               </Button>
               {verifyDomain.data && !verifyDomain.data.verified && (
-                <span className="text-amber-600">TXT record not found yet — DNS can take a few minutes.</span>
+                <span className="text-amber-600">{t('settings.dnsNotFound')}</span>
               )}
             </div>
           </div>
@@ -284,7 +284,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
 
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <span className="text-xs">
-          {save.isSuccess && <span className="text-emerald-600">Saved.</span>}
+          {save.isSuccess && <span className="text-emerald-600">{t('settings.saved')}</span>}
           {save.error instanceof ApiError && <span className="text-destructive">{save.error.message}</span>}
         </span>
         <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending} size="sm">
@@ -293,10 +293,10 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
       </div>
 
       <div className="pt-4 mt-2 border-t border-destructive/30">
-        <p className="text-sm font-semibold text-destructive">Danger zone</p>
+        <p className="text-sm font-semibold text-destructive">{t('settings.dangerZone')}</p>
         <div className="mt-2 flex items-center justify-between gap-4">
           <span className="text-xs text-muted-foreground">
-            Archiving hides this workspace for everyone. It can be restored by an admin.
+            {t('settings.archiveDesc')}
           </span>
           <Button
             variant="outline"
@@ -304,11 +304,11 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
             className="border-destructive/50 text-destructive hover:bg-destructive/10 shrink-0"
             disabled={archive.isPending}
             onClick={() => {
-              if (window.confirm(`Archive workspace "${wsQuery.data!.name}"? Members will lose access until it is restored.`))
+              if (window.confirm(t('settings.archiveConfirm', { name: wsQuery.data!.name })))
                 archive.mutate()
             }}
           >
-            {archive.isPending ? 'Archiving…' : 'Archive workspace'}
+            {archive.isPending ? t('settings.archiving') : t('settings.archiveWorkspace')}
           </Button>
         </div>
       </div>
@@ -318,7 +318,8 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
 
 function MembersTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
-  
+  const { t, tCount } = useTranslation()
+
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<Member[]>(`/workspaces/${workspaceId}/members`),
@@ -340,7 +341,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
       }),
     onSuccess: () => {
       setInviteEmail('')
-      toast.success('Invitation sent!')
+      toast.success(t('settings.inviteSent'))
       qc.invalidateQueries({ queryKey: ['workspace-invitations', workspaceId] })
     },
   })
@@ -348,14 +349,14 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
   const cancelInvite = useMutation({
     mutationFn: (id: string) => api(`/invitations/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      toast.success('Invitation cancelled')
+      toast.success(t('settings.inviteCancelled'))
       qc.invalidateQueries({ queryKey: ['workspace-invitations', workspaceId] })
     },
   })
 
   const resendInvite = useMutation({
     mutationFn: (id: string) => api(`/invitations/${id}/resend`, { method: 'POST' }),
-    onSuccess: () => toast.success('Invitation resent'),
+    onSuccess: () => toast.success(t('settings.inviteResent')),
   })
 
   const copyLink = useMutation({
@@ -364,7 +365,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
       await navigator.clipboard.writeText(data.claimUrl)
       return data.claimUrl
     },
-    onSuccess: () => toast.success('Invite link copied'),
+    onSuccess: () => toast.success(t('settings.inviteLinkCopied')),
   })
 
   const updateRole = useMutation({
@@ -383,7 +384,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
         body: { weeklyCapacityHours },
       }),
     onSuccess: () => {
-      toast.success('Capacity updated')
+      toast.success(t('settings.capacityUpdated'))
       qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] })
       qc.invalidateQueries({ queryKey: ['workload-report', workspaceId] })
     },
@@ -403,8 +404,8 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
             <UserPlus className="h-4 w-4" />
           </div>
           <div>
-            <h2 className="font-semibold text-sm">Invite a teammate</h2>
-            <p className="text-xs text-muted-foreground">They&apos;ll get an email to join this workspace.</p>
+            <h2 className="font-semibold text-sm">{t('settings.inviteTeammate')}</h2>
+            <p className="text-xs text-muted-foreground">{t('settings.inviteTeammateDesc')}</p>
           </div>
         </div>
 
@@ -416,7 +417,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
           }}
         >
           <Input
-            placeholder="teammate@company.com"
+            placeholder={t('settings.inviteEmailPlaceholder')}
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             className="flex-1"
@@ -428,11 +429,11 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
             className="px-3 rounded-md border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
             {ROLES.map((r) => (
-              <option key={r.value} value={r.value}>{r.label}</option>
+              <option key={r.value} value={r.value}>{t(r.labelKey)}</option>
             ))}
           </select>
           <Button type="submit" disabled={!inviteEmail.includes('@') || invite.isPending}>
-            {invite.isPending ? 'Sending...' : 'Invite'}
+            {invite.isPending ? t('settings.sending') : t('settings.invite')}
           </Button>
         </form>
         
@@ -446,7 +447,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
         <Card className="overflow-hidden border-amber-500/20">
           <div className="px-4 py-3 bg-amber-500/5 border-b border-amber-500/10 flex items-center justify-between">
             <h2 className="font-semibold text-sm text-amber-700 dark:text-amber-400">
-              Pending Invitations · {invitesQuery.data?.length}
+              {tCount('settings.pendingInvitations', invitesQuery.data?.length ?? 0)}
             </h2>
           </div>
           <ul className="divide-y divide-border">
@@ -458,7 +459,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{inv.email}</div>
                   <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                    {inv.role} · Expires {new Date(inv.expiresAt).toLocaleDateString()}
+                    {inv.role} · {t('settings.expires', { date: new Date(inv.expiresAt).toLocaleDateString() })}
                   </div>
                 </div>
                 <Button
@@ -467,10 +468,10 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   className="text-xs"
                   onClick={() => copyLink.mutate(inv.id)}
                   disabled={copyLink.isPending}
-                  title="Copy invitation link"
+                  title={t('settings.copyInviteLink')}
                 >
                   <Link2 className="h-3.5 w-3.5 mr-1" />
-                  Copy link
+                  {t('settings.copyLink')}
                 </Button>
                 <Button
                   variant="ghost"
@@ -478,10 +479,10 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   className="text-xs"
                   onClick={() => resendInvite.mutate(inv.id)}
                   disabled={resendInvite.isPending}
-                  title="Resend invitation email"
+                  title={t('settings.resendInviteEmail')}
                 >
                   <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                  Resend
+                  {t('settings.resend')}
                 </Button>
                 <Button
                   variant="ghost"
@@ -490,7 +491,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   onClick={() => cancelInvite.mutate(inv.id)}
                   disabled={cancelInvite.isPending}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
               </li>
             ))}
@@ -500,7 +501,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
 
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h2 className="font-semibold text-sm">Active Members · {membersQuery.data?.length ?? 0}</h2>
+          <h2 className="font-semibold text-sm">{tCount('settings.activeMembers', membersQuery.data?.length ?? 0)}</h2>
         </div>
         <ul className="divide-y divide-border">
           {(membersQuery.data ?? []).map((m) => (
@@ -525,22 +526,22 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                 className="text-xs px-2 py-1 rounded border border-border bg-card"
               >
                 {ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
+                  <option key={r.value} value={r.value}>{t(r.labelKey)}</option>
                 ))}
               </select>
               <button
                 onClick={() => {
-                  if (confirm(`Remove ${m.displayName} from the workspace?`)) remove.mutate(m.userId)
+                  if (confirm(t('settings.removeMemberConfirm', { name: m.displayName }))) remove.mutate(m.userId)
                 }}
                 className="p-1.5 rounded hover:bg-surface-50 text-muted-foreground hover:text-destructive"
-                title="Remove member"
+                title={t('settings.removeMember')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </li>
           ))}
           {membersQuery.data?.length === 0 && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">No members yet.</li>
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.noMembers')}</li>
           )}
         </ul>
       </Card>
@@ -550,6 +551,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
 
 function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [showWebhookForm, setShowWebhookForm] = useState(false)
   const [whName, setWhName] = useState('')
   const [whUrl, setWhUrl] = useState('')
@@ -629,17 +631,17 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
       <Card className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="font-semibold text-sm">Webhooks</h3>
-            <p className="text-xs text-muted-foreground">Send outbound HTTP events to your URLs when things happen in Rundesk.</p>
+            <h3 className="font-semibold text-sm">{t('settings.webhooks')}</h3>
+            <p className="text-xs text-muted-foreground">{t('settings.webhooksDesc')}</p>
           </div>
           <Button size="sm" onClick={() => setShowWebhookForm(true)} disabled={showWebhookForm}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Add webhook
+            <Plus className="h-3.5 w-3.5 mr-1" /> {t('settings.addWebhook')}
           </Button>
         </div>
 
         {showWebhookForm && (
           <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
-            <Input value={whName} onChange={(e) => setWhName(e.target.value)} placeholder="Name (e.g. Slack notifications)" />
+            <Input value={whName} onChange={(e) => setWhName(e.target.value)} placeholder={t('settings.webhookNamePlaceholder')} />
             <Input value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-endpoint.com/hook" />
             <div className="flex flex-wrap gap-1">
               {ALL_EVENTS.map((ev) => (
@@ -653,14 +655,14 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
               ))}
             </div>
             <div className="flex gap-2">
-              <Button size="sm" disabled={!whName || !whUrl || createWh.isPending} onClick={() => createWh.mutate()}>Save</Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowWebhookForm(false)}>Cancel</Button>
+              <Button size="sm" disabled={!whName || !whUrl || createWh.isPending} onClick={() => createWh.mutate()}>{t('common.save')}</Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowWebhookForm(false)}>{t('common.cancel')}</Button>
             </div>
           </div>
         )}
 
         {hooks.length === 0 && !showWebhookForm && (
-          <p className="text-xs text-muted-foreground">No webhooks configured yet.</p>
+          <p className="text-xs text-muted-foreground">{t('settings.noWebhooks')}</p>
         )}
         {hooks.map((hook) => (
           <div key={hook.id} className="flex items-center gap-3 py-2 border-t border-border/50">
@@ -673,7 +675,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
               <span className="text-emerald-600">{hook.successCount}✓</span>
               {' '}<span className="text-red-500">{hook.failureCount}✗</span>
             </div>
-            <Button variant="ghost" size="sm" className="text-xs" onClick={() => testWh.mutate(hook.id)} disabled={testWh.isPending}>Test</Button>
+            <Button variant="ghost" size="sm" className="text-xs" onClick={() => testWh.mutate(hook.id)} disabled={testWh.isPending}>{t('settings.test')}</Button>
             <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => deleteWh.mutate(hook.id)}>
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -689,17 +691,17 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
               Slack
               {slackQuery.data?.isEnabled && (
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
-                  Connected
+                  {t('settings.connected')}
                 </span>
               )}
             </h3>
             <p className="text-xs text-muted-foreground">
-              Send task notifications to a Slack channel via incoming webhook.
+              {t('settings.slackDesc')}
             </p>
           </div>
           {!slackQuery.data && !showSlackForm && (
             <Button size="sm" onClick={() => setShowSlackForm(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Connect
+              <Plus className="h-3.5 w-3.5 mr-1" /> {t('settings.connect')}
             </Button>
           )}
         </div>
@@ -714,7 +716,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
             <Input
               value={slackChannel}
               onChange={(e) => setSlackChannel(e.target.value)}
-              placeholder="Channel name (optional, e.g. #project-updates)"
+              placeholder={t('settings.slackChannelPlaceholder')}
             />
             <div className="flex gap-2">
               <Button
@@ -722,21 +724,21 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
                 disabled={!slackUrl || connectSlack.isPending}
                 onClick={() => connectSlack.mutate()}
               >
-                Connect
+                {t('settings.connect')}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setShowSlackForm(false)}>
-                Cancel
+                {t('common.cancel')}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Get your incoming-webhook URL from{' '}
+              {t('settings.slackWebhookHelp')}{' '}
               <a
                 href="https://api.slack.com/messaging/webhooks"
                 target="_blank"
                 rel="noreferrer"
                 className="underline"
               >
-                Slack apps
+                {t('settings.slackApps')}
               </a>.
             </p>
           </div>
@@ -757,7 +759,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
             </div>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => testSlack.mutate()} disabled={testSlack.isPending}>
-                {testSlack.isPending ? 'Sending...' : 'Send test'}
+                {testSlack.isPending ? t('settings.sending') : t('settings.sendTest')}
               </Button>
               <Button
                 size="sm"
@@ -765,11 +767,11 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
                 className="text-destructive"
                 onClick={() => disconnectSlack.mutate()}
               >
-                Disconnect
+                {t('settings.disconnect')}
               </Button>
             </div>
             {testSlack.isSuccess && (
-              <p className="text-xs text-emerald-600">Test message sent.</p>
+              <p className="text-xs text-emerald-600">{t('settings.testMessageSent')}</p>
             )}
             {testSlack.isError && (
               <p className="text-xs text-destructive">{(testSlack.error as Error).message}</p>
@@ -782,43 +784,43 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
       <Card className="p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-sm">ClickUp import</h3>
+            <h3 className="font-semibold text-sm">{t('settings.clickupImport')}</h3>
             <p className="text-xs text-muted-foreground">
-              Migrate spaces, lists, and tasks from a ClickUp CSV export.
+              {t('settings.clickupImportDesc')}
             </p>
           </div>
           <a href={`/app/${workspaceId}/import`}>
-            <Button size="sm" variant="outline">Open importer</Button>
+            <Button size="sm" variant="outline">{t('settings.openImporter')}</Button>
           </a>
         </div>
       </Card>
 
       {/* Data export */}
       <Card className="p-4">
-        <h3 className="font-semibold text-sm mb-1">Data export</h3>
-        <p className="text-xs text-muted-foreground mb-3">Download a full copy of your workspace data.</p>
+        <h3 className="font-semibold text-sm mb-1">{t('settings.dataExport')}</h3>
+        <p className="text-xs text-muted-foreground mb-3">{t('settings.dataExportDesc')}</p>
         <div className="flex gap-2">
           <Button
             size="sm"
             variant="outline"
             onClick={() =>
               downloadFile(`/workspaces/${workspaceId}/export/json`, `rundesk-${workspaceId}.json`).catch((e) =>
-                toast.error(e instanceof Error ? e.message : 'Export failed'),
+                toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
               )
             }
           >
-            Export JSON
+            {t('settings.exportJson')}
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={() =>
               downloadFile(`/workspaces/${workspaceId}/export/csv/tasks`, `rundesk-${workspaceId}-tasks.csv`).catch((e) =>
-                toast.error(e instanceof Error ? e.message : 'Export failed'),
+                toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
               )
             }
           >
-            Export tasks CSV
+            {t('settings.exportTasksCsv')}
           </Button>
         </div>
       </Card>
@@ -828,6 +830,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
 
 function SecurityTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [newKeyName, setNewKeyName] = useState('')
   const [newKeyScope, setNewKeyScope] = useState('read_write')
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
@@ -877,33 +880,33 @@ function SecurityTab({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-4">
       {/* API Keys */}
       <Card className="p-4">
-        <h3 className="font-semibold text-sm mb-1">API keys</h3>
+        <h3 className="font-semibold text-sm mb-1">{t('settings.apiKeys')}</h3>
         <p className="text-xs text-muted-foreground mb-3">
-          Generate API keys to integrate with external tools.
+          {t('settings.apiKeysDesc')}
         </p>
 
         {revealedKey && (
           <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-md">
-            <p className="text-xs font-medium text-emerald-700 mb-1">Key created — copy it now, it won&apos;t be shown again:</p>
+            <p className="text-xs font-medium text-emerald-700 mb-1">{t('settings.keyCreated')}</p>
             <code className="text-xs font-mono break-all">{revealedKey}</code>
-            <button className="text-xs text-emerald-700 hover:underline ml-2" onClick={() => navigator.clipboard.writeText(revealedKey)}>Copy</button>
-            <button className="text-xs text-muted-foreground hover:underline ml-2" onClick={() => setRevealedKey(null)}>Dismiss</button>
+            <button className="text-xs text-emerald-700 hover:underline ml-2" onClick={() => navigator.clipboard.writeText(revealedKey)}>{t('settings.copy')}</button>
+            <button className="text-xs text-muted-foreground hover:underline ml-2" onClick={() => setRevealedKey(null)}>{t('settings.dismiss')}</button>
           </div>
         )}
 
         <div className="flex gap-2 mb-3">
-          <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder="Key name" className="flex-1" />
+          <Input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)} placeholder={t('settings.keyNamePlaceholder')} className="flex-1" />
           <select
             value={newKeyScope}
             onChange={(e) => setNewKeyScope(e.target.value)}
             className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
           >
-            <option value="read_only">Read only</option>
-            <option value="read_write">Read/Write</option>
-            <option value="admin">Admin</option>
+            <option value="read_only">{t('settings.scopeReadOnly')}</option>
+            <option value="read_write">{t('settings.scopeReadWrite')}</option>
+            <option value="admin">{t('settings.scopeAdmin')}</option>
           </select>
           <Button size="sm" disabled={!newKeyName.trim() || createKey.isPending} onClick={() => createKey.mutate()}>
-            Generate
+            {t('settings.generate')}
           </Button>
         </div>
 
@@ -914,12 +917,12 @@ function SecurityTab({ workspaceId }: { workspaceId: string }) {
                 <div className="flex-1 min-w-0">
                   <span className="font-medium">{key.name}</span>
                   <span className="ml-2 text-xs text-muted-foreground font-mono">{key.keyPrefix}…</span>
-                  {key.isRevoked && <span className="ml-2 text-xs text-destructive">Revoked</span>}
+                  {key.isRevoked && <span className="ml-2 text-xs text-destructive">{t('settings.revoked')}</span>}
                 </div>
                 <span className="text-xs text-muted-foreground">{key.scope}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">{key.requestCount} req</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{key.requestCount} {t('settings.requestsUnit')}</span>
                 {!key.isRevoked && (
-                  <Button variant="ghost" size="sm" className="text-xs" onClick={() => revokeKey.mutate(key.id)}>Revoke</Button>
+                  <Button variant="ghost" size="sm" className="text-xs" onClick={() => revokeKey.mutate(key.id)}>{t('settings.revoke')}</Button>
                 )}
                 <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => deleteKey.mutate(key.id)}>
                   <Trash2 className="h-3.5 w-3.5" />
@@ -939,6 +942,7 @@ type LabelRow = { id: string; name: string; color: string }
 
 function LabelsTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
+  const { t, tCount } = useTranslation()
   const labels = useQuery({
     queryKey: ['workspace-labels', workspaceId],
     queryFn: async () => {
@@ -983,7 +987,7 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-3">
       <Card className="p-4">
-        <h3 className="font-semibold text-sm mb-2">Add label</h3>
+        <h3 className="font-semibold text-sm mb-2">{t('settings.addLabel')}</h3>
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -991,19 +995,19 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
             if (name.trim()) create.mutate()
           }}
         >
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Label name" className="flex-1" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('settings.labelNamePlaceholder')} className="flex-1" />
           <input
             type="color"
             value={color}
             onChange={(e) => setColor(e.target.value)}
             className="h-9 w-12 rounded border border-border cursor-pointer"
           />
-          <Button size="sm" type="submit" disabled={!name.trim() || create.isPending}>Add</Button>
+          <Button size="sm" type="submit" disabled={!name.trim() || create.isPending}>{t('settings.add')}</Button>
         </form>
       </Card>
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
-          <h3 className="font-semibold text-sm">Workspace labels · {labels.data?.length ?? 0}</h3>
+          <h3 className="font-semibold text-sm">{tCount('settings.workspaceLabels', labels.data?.length ?? 0)}</h3>
         </div>
         <ul className="divide-y divide-border">
           {(labels.data ?? []).map((l) => (
@@ -1025,7 +1029,7 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
                 <button
                   type="button"
                   className="flex-1 text-left text-sm hover:underline"
-                  title="Click to rename"
+                  title={t('settings.clickToRename')}
                   onClick={() => {
                     setEditingId(l.id)
                     setEditName(l.name)
@@ -1040,7 +1044,7 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
             </li>
           ))}
           {labels.data?.length === 0 && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">No labels yet.</li>
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.noLabels')}</li>
           )}
         </ul>
       </Card>
@@ -1057,6 +1061,7 @@ function CapacityInput({
   pending: boolean
   onCommit: (next: number) => void
 }) {
+  const { t } = useTranslation()
   const [local, setLocal] = useState(String(value))
   useEffect(() => {
     setLocal(String(value))
@@ -1081,9 +1086,9 @@ function CapacityInput({
           if (e.key === 'Escape') setLocal(String(value))
         }}
         className="w-14 px-1.5 py-1 rounded border border-border bg-card text-right tabular-nums disabled:opacity-60"
-        title="Weekly capacity in hours"
+        title={t('settings.weeklyCapacity')}
       />
-      <span className="text-muted-foreground">h/wk</span>
+      <span className="text-muted-foreground">{t('settings.hoursPerWeekUnit')}</span>
     </div>
   )
 }
