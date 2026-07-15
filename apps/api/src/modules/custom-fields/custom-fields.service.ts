@@ -11,7 +11,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
-type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
+type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
 type FieldValue = string | number | boolean | null
 
 @Injectable()
@@ -170,6 +170,8 @@ export class CustomFieldsService {
         case 'text':
         case 'url':
         case 'date':
+        case 'email':
+        case 'phone':
           if (typeof value !== 'string') {
             throw new BadRequestException(`Field expects a string value`)
           }
@@ -179,10 +181,22 @@ export class CustomFieldsService {
           if (def.type === 'date' && Number.isNaN(Date.parse(value as string))) {
             throw new BadRequestException('Invalid date value')
           }
+          if (def.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value as string)) {
+            throw new BadRequestException('Invalid email address')
+          }
+          if (def.type === 'phone' && !/^[+]?[0-9().\-\s]{5,}$/.test(value as string)) {
+            throw new BadRequestException('Invalid phone number')
+          }
           break
         case 'number':
-          if (typeof value !== 'number') {
+        case 'money':
+          if (typeof value !== 'number' || !Number.isFinite(value)) {
             throw new BadRequestException('Field expects a number value')
+          }
+          break
+        case 'rating':
+          if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 5) {
+            throw new BadRequestException('Rating must be an integer from 0 to 5')
           }
           break
         case 'checkbox':

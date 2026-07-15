@@ -3376,7 +3376,7 @@ type CustomFieldDef = {
   id: string
   projectId: string
   name: string
-  type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
+  type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
   isRequired: boolean
   options: Array<{ label: string; value: string; color?: string }> | null
 }
@@ -3479,13 +3479,21 @@ function CustomFieldEditor({
   switch (definition.type) {
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return (
         <Input
+          type={definition.type === 'email' ? 'email' : definition.type === 'phone' ? 'tel' : 'text'}
           value={draft}
           disabled={disabled}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => onCommit(draft.trim() === '' ? null : draft)}
-          placeholder={definition.type === 'url' ? 'https://...' : ''}
+          placeholder={
+            definition.type === 'url' ? 'https://...'
+              : definition.type === 'email' ? 'name@example.com'
+              : definition.type === 'phone' ? '+1 555 123 4567'
+              : ''
+          }
         />
       )
     case 'number':
@@ -3498,6 +3506,42 @@ function CustomFieldEditor({
           onBlur={() => onCommit(draft === '' ? null : Number(draft))}
         />
       )
+    case 'money':
+      return (
+        <div className="relative">
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
+          <Input
+            type="number"
+            step="0.01"
+            className="pl-5"
+            value={draft}
+            disabled={disabled}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => onCommit(draft === '' ? null : Number(draft))}
+            placeholder="0.00"
+          />
+        </div>
+      )
+    case 'rating': {
+      const current = typeof value === 'number' ? value : 0
+      return (
+        <div className="flex items-center gap-0.5">
+          {[1, 2, 3, 4, 5].map((star) => (
+            <button
+              key={star}
+              type="button"
+              disabled={disabled}
+              title={`${star} / 5`}
+              onClick={() => onCommit(current === star ? 0 : star)}
+              className={cn('text-lg leading-none', star <= current ? 'text-amber-400' : 'text-muted-foreground/30 hover:text-amber-300')}
+            >
+              ★
+            </button>
+          ))}
+          {current > 0 && <span className="ml-1 text-xs text-muted-foreground">{current}/5</span>}
+        </div>
+      )
+    }
     case 'date':
       return (
         <Input

@@ -407,6 +407,13 @@
       "when": 1900000054000,
       "tag": "0057_task_doc_links",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1900000055000,
+      "tag": "0058_custom_field_types",
+      "breakpoints": true
     }
   ]
 }

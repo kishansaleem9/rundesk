@@ -11,6 +11,10 @@ export const customFieldTypeEnum = pgEnum('custom_field_type', [
   'date',
   'checkbox',
   'url',
+  'email',
+  'phone',
+  'money',
+  'rating',
 ])
 
 /**

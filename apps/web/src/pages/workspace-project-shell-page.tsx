@@ -233,7 +233,7 @@ function ProjectHome() {
 type CustomFieldDef = {
   id: string
   name: string
-  type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
+  type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
   isRequired: boolean
   options: Array<{ label: string; value: string }> | null
 }
@@ -328,6 +328,10 @@ function CustomFieldsSection({
             <option value="date">Date</option>
             <option value="checkbox">Checkbox</option>
             <option value="url">URL</option>
+            <option value="email">Email</option>
+            <option value="phone">Phone</option>
+            <option value="money">Money</option>
+            <option value="rating">Rating</option>
           </select>
           <label className="flex items-center gap-2 text-[13px]">
             <input type="checkbox" checked={isRequired} onChange={(e) => setIsRequired(e.target.checked)} />
