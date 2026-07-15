@@ -14,6 +14,7 @@ import {
   Settings as SettingsIcon,
   Moon,
   Sun,
+  Monitor,
   Check,
   Inbox as InboxIcon,
   Square,
@@ -40,6 +41,7 @@ import {
 } from '@rundesk/ui'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
+import { applyBrandColor } from '../lib/branding'
 import { api, ApiError } from '../lib/api'
 import { QuickCreateModal } from './quick-create-modal'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -83,6 +85,7 @@ export function AppTopbar({
           <Menu className="h-4 w-4" />
         </button>
       )}
+      <BrandingApplier workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
       <Breadcrumbs {...params} />
       <div className="flex-1" />
       <TimerIndicator />
@@ -93,6 +96,23 @@ export function AppTopbar({
       <UserMenu workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
     </header>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Branding — apply the workspace's accent color to the CSS brand variable
+// (Plan §13). Renders nothing.
+// ---------------------------------------------------------------------------
+function BrandingApplier({ workspaceId }: { workspaceId?: string }) {
+  const { data } = useQuery({
+    queryKey: ['workspace-branding', workspaceId],
+    queryFn: () => api<{ primaryColor?: string | null }>(`/workspaces/${workspaceId}`),
+    enabled: !!workspaceId,
+    staleTime: 60_000,
+  })
+  useEffect(() => {
+    applyBrandColor(data?.primaryColor ?? null)
+  }, [data?.primaryColor])
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -347,6 +367,7 @@ function QuickCreateButton() {
 function ThemeToggle() {
   const theme = useThemeStore((s) => s.theme)
   const toggle = useThemeStore((s) => s.toggle)
+  const next = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light'
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -355,11 +376,17 @@ function ThemeToggle() {
           className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
           aria-label="Toggle theme"
         >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {theme === 'light' ? (
+            <Moon className="h-4 w-4" />
+          ) : theme === 'dark' ? (
+            <Sun className="h-4 w-4" />
+          ) : (
+            <Monitor className="h-4 w-4" />
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent>
-        Switch to {theme === 'dark' ? 'light' : 'dark'} mode
+        Theme: {theme} · switch to {next}
       </TooltipContent>
     </Tooltip>
   )

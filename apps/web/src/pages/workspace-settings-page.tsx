@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
 import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
+import { applyBrandColor } from '../lib/branding'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
@@ -142,21 +143,33 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
   })
   const [name, setName] = useState('')
   const [primaryColor, setPrimaryColor] = useState('')
+  const [logoUrl, setLogoUrl] = useState('')
   const [customDomain, setCustomDomain] = useState('')
 
   useEffect(() => {
     if (wsQuery.data) {
       setName(wsQuery.data.name)
       setPrimaryColor(wsQuery.data.primaryColor ?? '')
+      setLogoUrl(wsQuery.data.logoUrl ?? '')
       setCustomDomain(wsQuery.data.customDomain ?? '')
     }
   }, [wsQuery.data])
+
+  // Live-preview the accent color while editing.
+  useEffect(() => {
+    applyBrandColor(primaryColor || null)
+  }, [primaryColor])
 
   const save = useMutation({
     mutationFn: () =>
       api<Workspace>(`/workspaces/${workspaceId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name, primaryColor: primaryColor || null, customDomain: customDomain || null }),
+        body: JSON.stringify({
+          name,
+          primaryColor: primaryColor || null,
+          logoUrl: logoUrl || null,
+          customDomain: customDomain || null,
+        }),
       }),
     onSuccess: (updated) => {
       qc.setQueryData(['workspace', workspaceId], updated)
@@ -177,6 +190,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
   const dirty =
     name !== wsQuery.data.name ||
     primaryColor !== (wsQuery.data.primaryColor ?? '') ||
+    logoUrl !== (wsQuery.data.logoUrl ?? '') ||
     customDomain !== (wsQuery.data.customDomain ?? '')
 
   return (
@@ -194,8 +208,27 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div>
-        <Label htmlFor="primary">Primary brand color (hex)</Label>
-        <Input id="primary" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} placeholder="#354fb0" />
+        <Label htmlFor="primary">Primary brand color</Label>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            aria-label="Brand color"
+            value={/^#[0-9a-f]{6}$/i.test(primaryColor) ? primaryColor : '#354fb0'}
+            onChange={(e) => setPrimaryColor(e.target.value)}
+            className="h-9 w-10 rounded border border-border bg-transparent p-0.5 cursor-pointer"
+          />
+          <Input id="primary" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} placeholder="#354fb0" />
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">Applied live to accents across the app.</p>
+      </div>
+      <div>
+        <Label htmlFor="logo">Logo URL</Label>
+        <div className="flex items-center gap-2">
+          {logoUrl ? (
+            <img src={logoUrl} alt="Workspace logo" className="h-9 w-9 rounded object-contain border border-border" />
+          ) : null}
+          <Input id="logo" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
+        </div>
       </div>
       <div>
         <Label htmlFor="domain">Custom domain</Label>
