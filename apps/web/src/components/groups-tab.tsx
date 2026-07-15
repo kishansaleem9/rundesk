@@ -12,6 +12,7 @@ import {
   Edit3,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type Member = {
   userId: string
@@ -40,6 +41,7 @@ type WorkspaceGroup = {
 }
 
 export function GroupsTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
@@ -74,12 +76,12 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
         body: { name },
       }),
     onSuccess: async (created) => {
-      toast.success(`Group "${created.name}" created`)
+      toast.success(t('groupsTab.groupCreated', { name: created.name }))
       setNewName('')
       await qc.invalidateQueries({ queryKey: ['workspace-groups', workspaceId] })
       setActiveGroupId(created.id)
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Failed to create group'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('groupsTab.createFailed')),
   })
 
   const updateGroup = useMutation({
@@ -95,18 +97,18 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
         body: patch,
       }),
     onSuccess: async () => {
-      toast.success('Group updated')
+      toast.success(t('groupsTab.groupUpdated'))
       setEditingMeta(false)
       await qc.invalidateQueries({ queryKey: ['workspace-groups', workspaceId] })
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Failed to update group'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('groupsTab.updateFailed')),
   })
 
   const removeGroup = useMutation({
     mutationFn: (groupId: string) =>
       api(`/workspaces/${workspaceId}/groups/${groupId}`, { method: 'DELETE' }),
     onSuccess: async () => {
-      toast.success('Group deleted')
+      toast.success(t('groupsTab.groupDeleted'))
       setActiveGroupId(null)
       await qc.invalidateQueries({ queryKey: ['workspace-groups', workspaceId] })
     },
@@ -121,7 +123,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['workspace-groups', workspaceId] })
     },
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : 'Failed to add member'),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('groupsTab.addMemberFailed')),
   })
 
   const removeMember = useMutation({
@@ -150,10 +152,9 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
             <Users className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <h3 className="font-display text-lg font-semibold">Groups (teams)</h3>
+            <h3 className="font-display text-lg font-semibold">{t('groupsTab.title')}</h3>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Bundle members into reusable groups for assignments, notifications, and SCIM sync from
-              your IdP. Groups are workspace-scoped and audit-logged on every change.
+              {t('groupsTab.subtitle')}
             </p>
           </div>
         </div>
@@ -167,7 +168,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search groups…"
+              placeholder={t('groupsTab.searchPlaceholder')}
               className="h-8"
             />
           </div>
@@ -175,7 +176,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
             <Input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="New group name"
+              placeholder={t('groupsTab.newGroupPlaceholder')}
               className="h-8"
             />
             <Button
@@ -190,11 +191,11 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
 
           <div className="space-y-1 max-h-[420px] overflow-auto">
             {groupsQuery.isLoading && (
-              <p className="text-xs text-muted-foreground italic">Loading…</p>
+              <p className="text-xs text-muted-foreground italic">{t('common.loading')}</p>
             )}
             {groupsQuery.isSuccess && groups.length === 0 && (
               <p className="text-xs text-muted-foreground italic">
-                No groups yet. Create your first team above.
+                {t('groupsTab.emptyList')}
               </p>
             )}
             {groups.map((g) => (
@@ -231,7 +232,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
         <Card variant="glass" className="p-5 min-h-[420px]">
           {!activeGroup ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Select a group to manage its members, or create a new one.
+              {t('groupsTab.emptyEditor')}
             </div>
           ) : (
             <div className="space-y-5">
@@ -240,11 +241,11 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
                 {editingMeta ? (
                   <div className="flex-1 space-y-2">
                     <div>
-                      <Label className="text-xs">Group name</Label>
+                      <Label className="text-xs">{t('groupsTab.groupName')}</Label>
                       <Input value={draftName} onChange={(e) => setDraftName(e.target.value)} />
                     </div>
                     <div>
-                      <Label className="text-xs">Description (optional)</Label>
+                      <Label className="text-xs">{t('groupsTab.descriptionOptional')}</Label>
                       <Input
                         value={draftDescription}
                         onChange={(e) => setDraftDescription(e.target.value)}
@@ -259,7 +260,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
                     )}
                     {activeGroup.externalId && (
                       <p className="text-[10px] text-muted-foreground font-mono mt-1">
-                        Synced from IdP · externalId {activeGroup.externalId}
+                        {t('groupsTab.syncedFromIdp', { id: activeGroup.externalId })}
                       </p>
                     )}
                   </div>
@@ -290,7 +291,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
                     size="sm"
                     variant="ghost"
                     onClick={() => {
-                      if (confirm(`Delete group "${activeGroup.name}"?`)) {
+                      if (confirm(t('groupsTab.confirmDelete', { name: activeGroup.name }))) {
                         removeGroup.mutate(activeGroup.id)
                       }
                     }}
@@ -329,6 +330,7 @@ function GroupMemberManager({
   onAdd: (userIds: string[]) => void
   onRemove: (userId: string) => void
 }) {
+  const { t } = useTranslation()
   const [query, setQuery] = useState('')
   const memberIdSet = useMemo(() => new Set(currentMembers.map((m) => m.userId)), [currentMembers])
 
@@ -350,12 +352,12 @@ function GroupMemberManager({
       <div>
         <div className="flex items-center justify-between mb-2">
           <Label className="text-xs uppercase tracking-wider">
-            Members ({currentMembers.length})
+            {t('groupsTab.membersCount', { count: currentMembers.length })}
           </Label>
         </div>
         <div className="rounded-md border border-border/40 bg-card/40 divide-y divide-border/40 max-h-[280px] overflow-auto">
           {currentMembers.length === 0 ? (
-            <p className="px-3 py-3 text-xs text-muted-foreground italic">No members yet.</p>
+            <p className="px-3 py-3 text-xs text-muted-foreground italic">{t('groupsTab.noMembers')}</p>
           ) : (
             currentMembers.map((m) => (
               <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2">
@@ -374,7 +376,7 @@ function GroupMemberManager({
                   size="sm"
                   variant="ghost"
                   onClick={() => onRemove(m.userId)}
-                  aria-label="Remove from group"
+                  aria-label={t('groupsTab.removeFromGroup')}
                 >
                   <UserMinus className="h-3.5 w-3.5 text-red-400" />
                 </Button>
@@ -387,18 +389,18 @@ function GroupMemberManager({
       {/* Add members */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <Label className="text-xs uppercase tracking-wider">Add members</Label>
+          <Label className="text-xs uppercase tracking-wider">{t('groupsTab.addMembers')}</Label>
         </div>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search workspace members…"
+          placeholder={t('groupsTab.searchMembersPlaceholder')}
           className="h-8 mb-2"
         />
         <div className="rounded-md border border-border/40 bg-card/40 divide-y divide-border/40 max-h-[280px] overflow-auto">
           {candidates.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground italic">
-              No more workspace members to add.
+              {t('groupsTab.noMoreMembers')}
             </p>
           ) : (
             candidates.map((m) => (
@@ -414,7 +416,7 @@ function GroupMemberManager({
                   size="sm"
                   variant="ghost"
                   onClick={() => onAdd([m.userId])}
-                  aria-label="Add to group"
+                  aria-label={t('groupsTab.addToGroup')}
                 >
                   <UserPlus className="h-3.5 w-3.5 text-emerald-400" />
                 </Button>

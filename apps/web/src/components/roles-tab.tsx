@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge, Button, Card, Checkbox, Input, Label, Textarea, toast, cn } from '@rundesk/ui'
 import { Plus, Trash2, Shield, Save, X, Lock, UserPlus, UserMinus } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type PermissionDef = {
   key: string
@@ -37,7 +38,113 @@ type MemberWithMeta = Member & { workspaceMemberId?: string }
 
 const DEFAULT_COLOR = '#64748b'
 
+type TFunc = (key: TranslationKey, vars?: Record<string, string | number>) => string
+
+// The role editor's permission catalog arrives from the API with English
+// label/description/category text. We map each stable permission `key`,
+// category name, and legacy role identifier to an i18n catalog entry for
+// display, falling back to the server text (or a humanized raw id) for any id
+// not covered here. The raw `key` remains the value persisted to the API.
+const PERMISSION_LABEL_KEYS: Record<string, TranslationKey> = {
+  'workspace.manage': 'rolesTab.perm.workspaceManage',
+  'workspace.billing': 'rolesTab.perm.workspaceBilling',
+  'workspace.delete': 'rolesTab.perm.workspaceDelete',
+  'workspace.audit.view': 'rolesTab.perm.workspaceAuditView',
+  'members.invite': 'rolesTab.perm.membersInvite',
+  'members.remove': 'rolesTab.perm.membersRemove',
+  'members.role.change': 'rolesTab.perm.membersRoleChange',
+  'roles.manage': 'rolesTab.perm.rolesManage',
+  'integrations.manage': 'rolesTab.perm.integrationsManage',
+  'integrations.access_requests.manage': 'rolesTab.perm.integrationsAccessRequestsManage',
+  'sso.manage': 'rolesTab.perm.ssoManage',
+  'security.policy.manage': 'rolesTab.perm.securityPolicyManage',
+  'space.create': 'rolesTab.perm.spaceCreate',
+  'project.create': 'rolesTab.perm.projectCreate',
+  'space.delete': 'rolesTab.perm.spaceDelete',
+  'project.delete': 'rolesTab.perm.projectDelete',
+  'list.delete': 'rolesTab.perm.listDelete',
+  'task.delete.any': 'rolesTab.perm.taskDeleteAny',
+  'doc.publish': 'rolesTab.perm.docPublish',
+  'doc.delete.any': 'rolesTab.perm.docDeleteAny',
+  'automation.manage': 'rolesTab.perm.automationManage',
+  'webhook.manage': 'rolesTab.perm.webhookManage',
+  'template.manage': 'rolesTab.perm.templateManage',
+  'report.view.basic': 'rolesTab.perm.reportViewBasic',
+  'report.export': 'rolesTab.perm.reportExport',
+  'time.approval.manage': 'rolesTab.perm.timeApprovalManage',
+}
+
+const PERMISSION_DESC_KEYS: Record<string, TranslationKey> = {
+  'workspace.manage': 'rolesTab.permDesc.workspaceManage',
+  'workspace.billing': 'rolesTab.permDesc.workspaceBilling',
+  'workspace.delete': 'rolesTab.permDesc.workspaceDelete',
+  'workspace.audit.view': 'rolesTab.permDesc.workspaceAuditView',
+  'members.invite': 'rolesTab.permDesc.membersInvite',
+  'members.remove': 'rolesTab.permDesc.membersRemove',
+  'members.role.change': 'rolesTab.permDesc.membersRoleChange',
+  'roles.manage': 'rolesTab.permDesc.rolesManage',
+  'integrations.manage': 'rolesTab.permDesc.integrationsManage',
+  'integrations.access_requests.manage': 'rolesTab.permDesc.integrationsAccessRequestsManage',
+  'sso.manage': 'rolesTab.permDesc.ssoManage',
+  'security.policy.manage': 'rolesTab.permDesc.securityPolicyManage',
+  'space.create': 'rolesTab.permDesc.spaceCreate',
+  'project.create': 'rolesTab.permDesc.projectCreate',
+  'space.delete': 'rolesTab.permDesc.spaceDelete',
+  'project.delete': 'rolesTab.permDesc.projectDelete',
+  'list.delete': 'rolesTab.permDesc.listDelete',
+  'task.delete.any': 'rolesTab.permDesc.taskDeleteAny',
+  'doc.publish': 'rolesTab.permDesc.docPublish',
+  'doc.delete.any': 'rolesTab.permDesc.docDeleteAny',
+  'automation.manage': 'rolesTab.permDesc.automationManage',
+  'webhook.manage': 'rolesTab.permDesc.webhookManage',
+  'template.manage': 'rolesTab.permDesc.templateManage',
+  'report.view.basic': 'rolesTab.permDesc.reportViewBasic',
+  'report.export': 'rolesTab.permDesc.reportExport',
+  'time.approval.manage': 'rolesTab.permDesc.timeApprovalManage',
+}
+
+const CATEGORY_LABEL_KEYS: Record<string, TranslationKey> = {
+  Workspace: 'rolesTab.category.workspace',
+  Members: 'rolesTab.category.members',
+  Integrations: 'rolesTab.category.integrations',
+  Security: 'rolesTab.category.security',
+  Content: 'rolesTab.category.content',
+  Automation: 'rolesTab.category.automation',
+  Reporting: 'rolesTab.category.reporting',
+}
+
+const ROLE_NAME_KEYS: Record<string, TranslationKey> = {
+  super_admin: 'rolesTab.roleName.superAdmin',
+  workspace_admin: 'rolesTab.roleName.workspaceAdmin',
+  admin: 'rolesTab.roleName.admin',
+  manager: 'rolesTab.roleName.manager',
+  member: 'rolesTab.roleName.member',
+  guest: 'rolesTab.roleName.guest',
+}
+
+function humanizeId(raw: string): string {
+  const s = raw.replace(/[._]/g, ' ').trim()
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+function permLabel(t: TFunc, p: PermissionDef): string {
+  const key = PERMISSION_LABEL_KEYS[p.key]
+  return key ? t(key) : p.label || humanizeId(p.key)
+}
+function permDescription(t: TFunc, p: PermissionDef): string {
+  const key = PERMISSION_DESC_KEYS[p.key]
+  return key ? t(key) : p.description || ''
+}
+function categoryLabel(t: TFunc, category: string): string {
+  const key = CATEGORY_LABEL_KEYS[category]
+  return key ? t(key) : humanizeId(category)
+}
+function roleLabel(t: TFunc, role: string): string {
+  const key = ROLE_NAME_KEYS[role]
+  return key ? t(key) : humanizeId(role)
+}
+
 export function RolesTab({ workspaceId }: { workspaceId: string }) {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
 
   const catalogQuery = useQuery({
@@ -76,7 +183,7 @@ export function RolesTab({ workspaceId }: { workspaceId: string }) {
           <div className="p-4 border-b border-border/40 flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Shield className="h-4 w-4 text-muted-foreground" />
-              Custom roles
+              {t('rolesTab.customRoles')}
             </div>
             <Button
               size="sm"
@@ -85,18 +192,18 @@ export function RolesTab({ workspaceId }: { workspaceId: string }) {
                 setCreating(true)
                 setActiveRoleId(null)
               }}
-              title="New role"
+              title={t('rolesTab.newRole')}
             >
               <Plus className="h-4 w-4" />
             </Button>
           </div>
           <div className="max-h-[640px] overflow-auto">
             {rolesQuery.isLoading && (
-              <div className="p-4 text-xs text-muted-foreground">Loading…</div>
+              <div className="p-4 text-xs text-muted-foreground">{t('common.loading')}</div>
             )}
             {rolesQuery.data?.length === 0 && !creating && (
               <div className="p-4 text-xs text-muted-foreground">
-                No custom roles yet. Click + to create one.
+                {t('rolesTab.emptyList')}
               </div>
             )}
             <ul className="divide-y divide-border/40">
@@ -124,9 +231,9 @@ export function RolesTab({ workspaceId }: { workspaceId: string }) {
                         {role.isLocked && <Lock className="h-3 w-3 text-muted-foreground" />}
                       </span>
                       <span className="block text-[11px] text-muted-foreground mt-0.5">
-                        {role.permissions.length} permission{role.permissions.length === 1 ? '' : 's'}
+                        {tCount('rolesTab.permissionCount', role.permissions.length)}
                         {' · '}
-                        {role.memberCount} member{role.memberCount === 1 ? '' : 's'}
+                        {tCount('rolesTab.memberCount', role.memberCount)}
                       </span>
                     </span>
                   </button>
@@ -172,14 +279,13 @@ export function RolesTab({ workspaceId }: { workspaceId: string }) {
 }
 
 function EmptyHint() {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center justify-center text-center py-12">
       <Shield className="h-10 w-10 text-muted-foreground/40 mb-3" />
-      <h3 className="text-sm font-medium mb-1">Pick a role to edit</h3>
+      <h3 className="text-sm font-medium mb-1">{t('rolesTab.emptyHintTitle')}</h3>
       <p className="text-xs text-muted-foreground max-w-sm">
-        Custom roles let you grant fine-grained capabilities on top of a
-        member’s legacy workspace role. Built-in roles (Admin, Manager,
-        Member, Guest) still apply — custom roles are additive.
+        {t('rolesTab.emptyHintBody')}
       </p>
     </div>
   )
@@ -200,6 +306,7 @@ function RoleEditor({
   onCancel?: () => void
   onDeleted?: () => void
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [name, setName] = useState(role?.name ?? '')
   const [description, setDescription] = useState(role?.description ?? '')
@@ -228,11 +335,11 @@ function RoleEditor({
       })
     },
     onSuccess: (saved) => {
-      toast.success(role ? 'Role saved' : 'Role created')
+      toast.success(role ? t('rolesTab.roleSaved') : t('rolesTab.roleCreated'))
       onSaved(saved)
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to save role')
+      toast.error(err instanceof ApiError ? err.message : t('rolesTab.saveFailed'))
     },
   })
 
@@ -240,11 +347,11 @@ function RoleEditor({
     mutationFn: () =>
       api(`/workspaces/${workspaceId}/roles/${role!.id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      toast.success('Role deleted')
+      toast.success(t('rolesTab.roleDeleted'))
       onDeleted?.()
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : 'Failed to delete role')
+      toast.error(err instanceof ApiError ? err.message : t('rolesTab.deleteFailed'))
     },
   })
 
@@ -276,26 +383,26 @@ function RoleEditor({
       <div className="flex items-start gap-4">
         <div className="flex-1 space-y-3">
           <div>
-            <Label>Name</Label>
+            <Label>{t('rolesTab.name')}</Label>
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Project Lead"
+              placeholder={t('rolesTab.namePlaceholder')}
               disabled={locked}
             />
           </div>
           <div>
-            <Label>Description (optional)</Label>
+            <Label>{t('rolesTab.descriptionOptional')}</Label>
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What does this role do?"
+              placeholder={t('rolesTab.descriptionPlaceholder')}
               rows={2}
             />
           </div>
         </div>
         <div className="space-y-2">
-          <Label>Color</Label>
+          <Label>{t('rolesTab.color')}</Label>
           <input
             type="color"
             value={color}
@@ -307,26 +414,25 @@ function RoleEditor({
 
       <div className="space-y-3">
         <div className="flex items-baseline justify-between">
-          <Label>Permissions</Label>
+          <Label>{t('rolesTab.permissions')}</Label>
           <span className="text-xs text-muted-foreground">
-            {permissions.size} selected
+            {t('rolesTab.selectedCount', { count: permissions.size })}
           </span>
         </div>
         <div className="space-y-3 max-h-[400px] overflow-auto pr-1">
           {catalog.map(([category, perms]) => {
             const allSelected = perms.every((p) => permissions.has(p.key))
-            const someSelected = perms.some((p) => permissions.has(p.key))
             return (
               <div key={category} className="rounded-md border border-border/50 bg-card/40">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
                   <span className="text-xs font-medium tracking-wide uppercase text-muted-foreground">
-                    {category}
+                    {categoryLabel(t, category)}
                   </span>
                   <button
                     onClick={() => toggleCategory(perms)}
                     className="text-xs text-accent hover:underline"
                   >
-                    {allSelected ? 'Clear all' : someSelected ? 'Select all' : 'Select all'}
+                    {allSelected ? t('rolesTab.clearAll') : t('rolesTab.selectAll')}
                   </button>
                 </div>
                 <ul className="divide-y divide-border/40">
@@ -338,8 +444,8 @@ function RoleEditor({
                         className="mt-0.5"
                       />
                       <div className="min-w-0">
-                        <div className="text-sm font-medium">{p.label}</div>
-                        <div className="text-xs text-muted-foreground">{p.description}</div>
+                        <div className="text-sm font-medium">{permLabel(t, p)}</div>
+                        <div className="text-xs text-muted-foreground">{permDescription(t, p)}</div>
                       </div>
                     </li>
                   ))}
@@ -357,19 +463,19 @@ function RoleEditor({
               variant="ghost"
               size="sm"
               onClick={() => {
-                if (window.confirm(`Delete role "${role.name}"?`)) remove.mutate()
+                if (window.confirm(t('rolesTab.confirmDelete', { name: role.name }))) remove.mutate()
               }}
               disabled={remove.isPending}
               className="text-destructive hover:bg-destructive/10"
             >
               <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-              Delete
+              {t('common.delete')}
             </Button>
           )}
           {locked && (
             <Badge variant="secondary" className="text-[10px]">
               <Lock className="h-3 w-3 mr-1" />
-              Built-in
+              {t('rolesTab.builtIn')}
             </Badge>
           )}
         </div>
@@ -377,7 +483,7 @@ function RoleEditor({
           {onCancel && (
             <Button variant="ghost" size="sm" onClick={onCancel}>
               <X className="h-3.5 w-3.5 mr-1.5" />
-              Cancel
+              {t('common.cancel')}
             </Button>
           )}
           <Button
@@ -386,7 +492,7 @@ function RoleEditor({
             disabled={!name.trim() || save.isPending}
           >
             <Save className="h-3.5 w-3.5 mr-1.5" />
-            {save.isPending ? 'Saving…' : role ? 'Save changes' : 'Create role'}
+            {save.isPending ? t('common.saving') : role ? t('rolesTab.saveChanges') : t('rolesTab.createRole')}
           </Button>
         </div>
       </div>
@@ -403,6 +509,7 @@ function MemberAssignmentPanel({
   workspaceId: string
   role: RoleView
 }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState(false)
 
@@ -427,7 +534,7 @@ function MemberAssignmentPanel({
         { method: 'POST' },
       ),
     onSuccess: () => {
-      toast.success('Role assigned')
+      toast.success(t('rolesTab.roleAssigned'))
       qc.invalidateQueries({ queryKey: ['workspace-role-assignees', workspaceId, role.id] })
       qc.invalidateQueries({ queryKey: ['workspace-roles', workspaceId] })
     },
@@ -439,7 +546,7 @@ function MemberAssignmentPanel({
         { method: 'DELETE' },
       ),
     onSuccess: () => {
-      toast.success('Role removed')
+      toast.success(t('rolesTab.roleRemoved'))
       qc.invalidateQueries({ queryKey: ['workspace-role-assignees', workspaceId, role.id] })
       qc.invalidateQueries({ queryKey: ['workspace-roles', workspaceId] })
     },
@@ -460,19 +567,19 @@ function MemberAssignmentPanel({
       >
         <span className="flex items-center gap-2 font-medium">
           <UserPlus className="h-4 w-4 text-muted-foreground" />
-          Assign to members
+          {t('rolesTab.assignToMembers')}
           <Badge variant="secondary" className="text-[10px]">
             {role.memberCount}
           </Badge>
         </span>
         <span className="text-xs text-muted-foreground">
-          {expanded ? 'Hide' : 'Show'}
+          {expanded ? t('rolesTab.hide') : t('rolesTab.show')}
         </span>
       </button>
       {expanded && (
         <div className="border-t border-border/40 divide-y divide-border/40 max-h-72 overflow-auto">
           {membersQuery.isLoading || assigneesQuery.isLoading ? (
-            <div className="p-4 text-xs text-muted-foreground">Loading members…</div>
+            <div className="p-4 text-xs text-muted-foreground">{t('rolesTab.loadingMembers')}</div>
           ) : (
             (membersQuery.data ?? []).map((m) => {
               const assigned = hasRole(m.workspaceMemberId ?? null)
@@ -483,7 +590,7 @@ function MemberAssignmentPanel({
                       {m.displayName || m.email}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {m.email} · {m.role}
+                      {m.email} · {roleLabel(t, m.role)}
                     </div>
                   </div>
                   {m.workspaceMemberId && (
@@ -500,12 +607,12 @@ function MemberAssignmentPanel({
                       {assigned ? (
                         <>
                           <UserMinus className="h-3.5 w-3.5 mr-1.5" />
-                          Remove
+                          {t('rolesTab.remove')}
                         </>
                       ) : (
                         <>
                           <UserPlus className="h-3.5 w-3.5 mr-1.5" />
-                          Assign
+                          {t('rolesTab.assign')}
                         </>
                       )}
                     </Button>

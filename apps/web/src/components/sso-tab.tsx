@@ -3,8 +3,17 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, Switch, Badge, toast, cn } from '@rundesk/ui'
 import { KeyRound, Copy, Plus, Trash2, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type SsoProvider = 'oidc' | 'saml'
+
+// Role dropdown options. `value` is the canonical role identifier persisted to
+// the API; `labelKey` references an i18n catalog entry used only for display.
+const ROLE_OPTIONS = [
+  { value: 'member', labelKey: 'ssoTab.role.member' },
+  { value: 'manager', labelKey: 'ssoTab.role.manager' },
+  { value: 'guest', labelKey: 'ssoTab.role.guest' },
+] as const
 
 type SsoConnection = {
   id: string
@@ -39,6 +48,7 @@ type ScimToken = {
 }
 
 export function SsoTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
   const qc = useQueryClient()
 
   const connectionsQ = useQuery({
@@ -68,10 +78,9 @@ export function SsoTab({ workspaceId }: { workspaceId: string }) {
             <ShieldCheck className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <h3 className="font-display text-lg font-semibold">Enterprise SSO</h3>
+            <h3 className="font-display text-lg font-semibold">{t('ssoTab.title')}</h3>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Connect Okta, Azure AD, Google Workspace, or any SAML / OIDC IdP. JIT-provisioned
-              members are added with the default role and audit-logged on every sign-in.
+              {t('ssoTab.subtitle')}
             </p>
           </div>
         </div>
@@ -109,7 +118,8 @@ function OidcCard({
   connection: SsoConnection | null
   onSaved: () => void
 }) {
-  const [displayName, setDisplayName] = useState(connection?.displayName ?? 'Workspace OIDC')
+  const { t } = useTranslation()
+  const [displayName, setDisplayName] = useState(connection?.displayName ?? t('ssoTab.oidcDefaultName'))
   const [issuer, setIssuer] = useState(connection?.oidcIssuer ?? '')
   const [clientId, setClientId] = useState(connection?.oidcClientId ?? '')
   const [clientSecret, setClientSecret] = useState('')
@@ -135,12 +145,12 @@ function OidcCard({
       return api<SsoConnection>(`/workspaces/${workspaceId}/sso/oidc`, { method: 'PUT', body: payload })
     },
     onSuccess: () => {
-      toast.success('OIDC connection saved')
+      toast.success(t('ssoTab.oidcSaved'))
       setClientSecret('')
       onSaved()
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Failed to save OIDC connection'
+      const msg = err instanceof ApiError ? err.message : t('ssoTab.oidcSaveFailed')
       toast.error(msg)
     },
   })
@@ -152,61 +162,61 @@ function OidcCard({
       <div className="flex items-center justify-between">
         <div>
           <h4 className="font-display text-base font-semibold flex items-center gap-2">
-            OpenID Connect (OIDC)
+            {t('ssoTab.oidcTitle')}
             {connection?.isEnabled && (
-              <Badge variant="success" className="text-[9px] uppercase">Active</Badge>
+              <Badge variant="success" className="text-[9px] uppercase">{t('ssoTab.badgeActive')}</Badge>
             )}
           </h4>
           <p className="text-xs text-muted-foreground mt-0.5">
-            For Okta, Azure AD, Google Workspace, Auth0, Authentik, and most modern IdPs.
+            {t('ssoTab.oidcSubtitle')}
           </p>
         </div>
-        <Switch checked={isEnabled} onCheckedChange={setIsEnabled} aria-label="Enable OIDC" />
+        <Switch checked={isEnabled} onCheckedChange={setIsEnabled} aria-label={t('ssoTab.enableOidc')} />
       </div>
 
-      <CalloutRow label="Redirect URI">
+      <CalloutRow label={t('ssoTab.redirectUri')}>
         <CopyableMono value={callbackUrl} />
       </CalloutRow>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Display name">
+        <Field label={t('ssoTab.displayName')}>
           <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Okta" />
         </Field>
-        <Field label="Issuer URL">
+        <Field label={t('ssoTab.issuerUrl')}>
           <Input value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://example.okta.com" />
         </Field>
-        <Field label="Client ID">
+        <Field label={t('ssoTab.clientId')}>
           <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="0oab..." />
         </Field>
-        <Field label="Client secret">
+        <Field label={t('ssoTab.clientSecret')}>
           <Input
             type="password"
             value={clientSecret}
             onChange={(e) => setClientSecret(e.target.value)}
-            placeholder={connection?.oidcClientSecret ? '•••••••• (set; replace to change)' : 'paste secret'}
+            placeholder={connection?.oidcClientSecret ? t('ssoTab.secretSetPlaceholder') : t('ssoTab.secretPastePlaceholder')}
           />
         </Field>
-        <Field label="Scopes">
+        <Field label={t('ssoTab.scopes')}>
           <Input value={scopes} onChange={(e) => setScopes(e.target.value)} />
         </Field>
-        <Field label="Enforce for email domain" hint="Optional. If set, users at this domain must sign in via SSO.">
+        <Field label={t('ssoTab.enforceForDomain')} hint={t('ssoTab.enforceForDomainHint')}>
           <Input value={enforceDomain} onChange={(e) => setEnforceDomain(e.target.value)} placeholder="example.com" />
         </Field>
-        <Field label="Default role for JIT users">
+        <Field label={t('ssoTab.defaultRoleJit')}>
           <select
             value={defaultRole}
             onChange={(e) => setDefaultRole(e.target.value)}
             className="w-full h-9 px-3 rounded-md border border-border bg-card text-sm"
           >
-            <option value="member">Member</option>
-            <option value="manager">Manager</option>
-            <option value="guest">Guest</option>
+            {ROLE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+            ))}
           </select>
         </Field>
-        <Field label="JIT provisioning" hint="Auto-create users on first SSO sign-in.">
+        <Field label={t('ssoTab.jitProvisioning')} hint={t('ssoTab.jitHint')}>
           <label className="flex items-center gap-2 h-9 cursor-pointer">
             <Switch checked={jit} onCheckedChange={setJit} />
-            <span className="text-sm">{jit ? 'Enabled' : 'Disabled'}</span>
+            <span className="text-sm">{jit ? t('ssoTab.enabled') : t('ssoTab.disabled')}</span>
           </label>
         </Field>
       </div>
@@ -214,11 +224,11 @@ function OidcCard({
       <div className="flex items-center justify-between pt-2 border-t border-border/40">
         <p className="text-xs text-muted-foreground">
           {connection?.lastUsedAt
-            ? `Last used ${new Date(connection.lastUsedAt).toLocaleString()}`
-            : 'Not yet used'}
+            ? t('ssoTab.lastUsed', { date: new Date(connection.lastUsedAt).toLocaleString() })
+            : t('ssoTab.notYetUsed')}
         </p>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>
-          {save.isPending ? 'Saving…' : connection ? 'Update' : 'Create'}
+          {save.isPending ? t('common.saving') : connection ? t('ssoTab.update') : t('common.create')}
         </Button>
       </div>
     </Card>
@@ -236,7 +246,8 @@ function SamlCard({
   connection: SsoConnection | null
   onSaved: () => void
 }) {
-  const [displayName, setDisplayName] = useState(connection?.displayName ?? 'Workspace SAML')
+  const { t } = useTranslation()
+  const [displayName, setDisplayName] = useState(connection?.displayName ?? t('ssoTab.samlDefaultName'))
   const [idpEntityId, setIdpEntityId] = useState(connection?.samlIdpEntityId ?? '')
   const [idpSsoUrl, setIdpSsoUrl] = useState(connection?.samlIdpSsoUrl ?? '')
   const [idpCert, setIdpCert] = useState('')
@@ -264,12 +275,12 @@ function SamlCard({
       return api<SsoConnection>(`/workspaces/${workspaceId}/sso/saml`, { method: 'PUT', body: payload })
     },
     onSuccess: () => {
-      toast.success('SAML connection saved')
+      toast.success(t('ssoTab.samlSaved'))
       setIdpCert('')
       onSaved()
     },
     onError: (err) => {
-      const msg = err instanceof ApiError ? err.message : 'Failed to save SAML connection'
+      const msg = err instanceof ApiError ? err.message : t('ssoTab.samlSaveFailed')
       toast.error(msg)
     },
   })
@@ -279,40 +290,40 @@ function SamlCard({
       <div className="flex items-center justify-between">
         <div>
           <h4 className="font-display text-base font-semibold flex items-center gap-2">
-            SAML 2.0
+            {t('ssoTab.samlTitle')}
             {connection?.isEnabled && (
-              <Badge variant="success" className="text-[9px] uppercase">Active</Badge>
+              <Badge variant="success" className="text-[9px] uppercase">{t('ssoTab.badgeActive')}</Badge>
             )}
           </h4>
           <p className="text-xs text-muted-foreground mt-0.5">
-            For traditional enterprise IdPs (ADFS, Ping, OneLogin, on-prem deployments).
+            {t('ssoTab.samlSubtitle')}
           </p>
         </div>
-        <Switch checked={isEnabled} onCheckedChange={setIsEnabled} aria-label="Enable SAML" />
+        <Switch checked={isEnabled} onCheckedChange={setIsEnabled} aria-label={t('ssoTab.enableSaml')} />
       </div>
 
-      <CalloutRow label="ACS / Reply URL">
+      <CalloutRow label={t('ssoTab.acsUrl')}>
         <CopyableMono value={acsUrl} />
       </CalloutRow>
-      <CalloutRow label="SP Entity ID">
+      <CalloutRow label={t('ssoTab.spEntityId')}>
         <CopyableMono value={spEntityId || `rundesk:${workspaceId}`} />
       </CalloutRow>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="Display name">
+        <Field label={t('ssoTab.displayName')}>
           <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </Field>
-        <Field label="SP Entity ID">
+        <Field label={t('ssoTab.spEntityId')}>
           <Input value={spEntityId} onChange={(e) => setSpEntityId(e.target.value)} />
         </Field>
-        <Field label="IdP Entity ID">
+        <Field label={t('ssoTab.idpEntityId')}>
           <Input value={idpEntityId} onChange={(e) => setIdpEntityId(e.target.value)} placeholder="https://idp.example.com/exk..." />
         </Field>
-        <Field label="IdP SSO URL">
+        <Field label={t('ssoTab.idpSsoUrl')}>
           <Input value={idpSsoUrl} onChange={(e) => setIdpSsoUrl(e.target.value)} placeholder="https://idp.example.com/app/.../sso/saml" />
         </Field>
         <div className="md:col-span-2">
-          <Field label="IdP signing certificate (PEM)" hint={connection?.samlIdpCertificate ? `Currently: ${connection.samlIdpCertificate}` : 'Paste the X.509 certificate from your IdP'}>
+          <Field label={t('ssoTab.idpCertificate')} hint={connection?.samlIdpCertificate ? t('ssoTab.certCurrent', { cert: connection.samlIdpCertificate }) : t('ssoTab.certPaste')}>
             <textarea
               value={idpCert}
               onChange={(e) => setIdpCert(e.target.value)}
@@ -322,24 +333,24 @@ function SamlCard({
             />
           </Field>
         </div>
-        <Field label="Enforce for email domain">
+        <Field label={t('ssoTab.enforceForDomain')}>
           <Input value={enforceDomain} onChange={(e) => setEnforceDomain(e.target.value)} placeholder="example.com" />
         </Field>
-        <Field label="Default role for JIT users">
+        <Field label={t('ssoTab.defaultRoleJit')}>
           <select
             value={defaultRole}
             onChange={(e) => setDefaultRole(e.target.value)}
             className="w-full h-9 px-3 rounded-md border border-border bg-card text-sm"
           >
-            <option value="member">Member</option>
-            <option value="manager">Manager</option>
-            <option value="guest">Guest</option>
+            {ROLE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
+            ))}
           </select>
         </Field>
-        <Field label="JIT provisioning">
+        <Field label={t('ssoTab.jitProvisioning')}>
           <label className="flex items-center gap-2 h-9 cursor-pointer">
             <Switch checked={jit} onCheckedChange={setJit} />
-            <span className="text-sm">{jit ? 'Enabled' : 'Disabled'}</span>
+            <span className="text-sm">{jit ? t('ssoTab.enabled') : t('ssoTab.disabled')}</span>
           </label>
         </Field>
       </div>
@@ -347,11 +358,11 @@ function SamlCard({
       <div className="flex items-center justify-between pt-2 border-t border-border/40">
         <p className="text-xs text-muted-foreground">
           {connection?.lastUsedAt
-            ? `Last used ${new Date(connection.lastUsedAt).toLocaleString()}`
-            : 'Not yet used'}
+            ? t('ssoTab.lastUsed', { date: new Date(connection.lastUsedAt).toLocaleString() })
+            : t('ssoTab.notYetUsed')}
         </p>
         <Button onClick={() => save.mutate()} disabled={save.isPending}>
-          {save.isPending ? 'Saving…' : connection ? 'Update' : 'Create'}
+          {save.isPending ? t('common.saving') : connection ? t('ssoTab.update') : t('common.create')}
         </Button>
       </div>
     </Card>
@@ -369,33 +380,34 @@ function ScimSection({
   tokens: ScimToken[]
   onChanged: () => void
 }) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [newToken, setNewToken] = useState<string | null>(null)
   const scimBase = `${window.location.origin}/api/v1/scim/v2`
 
   const create = useMutation({
     mutationFn: async () => {
-      if (!name.trim()) throw new Error('Token name required')
+      if (!name.trim()) throw new Error(t('ssoTab.tokenNameRequired'))
       return api<{ id: string; token: string; name: string; keyPrefix: string }>(
         `/workspaces/${workspaceId}/scim/tokens`,
         { method: 'POST', body: { name: name.trim() } },
       )
     },
     onSuccess: (resp) => {
-      toast.success('SCIM token created')
+      toast.success(t('ssoTab.tokenCreated'))
       setNewToken(resp.token)
       setName('')
       onChanged()
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to create token')
+      toast.error(err instanceof Error ? err.message : t('ssoTab.tokenCreateFailed'))
     },
   })
 
   const revoke = useMutation({
     mutationFn: (id: string) => api(`/workspaces/${workspaceId}/scim/tokens/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
-      toast.success('Token revoked')
+      toast.success(t('ssoTab.tokenRevoked'))
       onChanged()
     },
   })
@@ -404,29 +416,28 @@ function ScimSection({
     <Card variant="glass" className="p-5 space-y-4">
       <div>
         <h4 className="font-display text-base font-semibold flex items-center gap-2">
-          <KeyRound className="h-4 w-4" /> SCIM 2.0 provisioning
+          <KeyRound className="h-4 w-4" /> {t('ssoTab.scimTitle')}
         </h4>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Generate a long-lived bearer token to let your IdP provision and de-provision users
-          automatically.
+          {t('ssoTab.scimSubtitle')}
         </p>
       </div>
 
-      <CalloutRow label="SCIM base URL">
+      <CalloutRow label={t('ssoTab.scimBaseUrl')}>
         <CopyableMono value={scimBase} />
       </CalloutRow>
 
       <div className="flex items-end gap-2">
-        <Field label="Token name" hint="Used for audit logs and revocation">
+        <Field label={t('ssoTab.tokenName')} hint={t('ssoTab.tokenNameHint')}>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Okta provisioning"
+            placeholder={t('ssoTab.tokenNamePlaceholder')}
             className="w-64"
           />
         </Field>
         <Button onClick={() => create.mutate()} disabled={create.isPending}>
-          <Plus className="h-4 w-4 mr-1" /> {create.isPending ? 'Creating…' : 'Create token'}
+          <Plus className="h-4 w-4 mr-1" /> {create.isPending ? t('ssoTab.creating') : t('ssoTab.createToken')}
         </Button>
       </div>
 
@@ -434,7 +445,7 @@ function ScimSection({
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
           <div className="flex items-center gap-2 text-xs text-amber-300">
             <AlertTriangle className="h-3.5 w-3.5" />
-            Copy this token now. We will not show it again.
+            {t('ssoTab.copyTokenWarning')}
           </div>
           <CopyableMono value={newToken} className="mt-2" />
         </div>
@@ -442,33 +453,33 @@ function ScimSection({
 
       <div className="space-y-1">
         {tokens.length === 0 ? (
-          <p className="text-xs text-muted-foreground italic">No tokens issued yet.</p>
+          <p className="text-xs text-muted-foreground italic">{t('ssoTab.noTokens')}</p>
         ) : (
-          tokens.map((t) => (
+          tokens.map((token) => (
             <div
-              key={t.id}
+              key={token.id}
               className={cn(
                 'flex items-center justify-between rounded-md border border-border/40 bg-card/60 px-3 py-2',
-                t.revokedAt && 'opacity-60',
+                token.revokedAt && 'opacity-60',
               )}
             >
               <div>
                 <div className="flex items-center gap-2 text-sm font-medium">
-                  {t.name}
-                  {t.revokedAt && <Badge variant="destructive" className="text-[9px]">Revoked</Badge>}
+                  {token.name}
+                  {token.revokedAt && <Badge variant="destructive" className="text-[9px]">{t('ssoTab.revoked')}</Badge>}
                 </div>
                 <div className="text-[10px] text-muted-foreground font-mono">
-                  {t.keyPrefix}…  ·  {t.lastUsedAt
-                    ? `last used ${new Date(t.lastUsedAt).toLocaleString()}`
-                    : 'never used'}
+                  {token.keyPrefix}…  ·  {token.lastUsedAt
+                    ? t('ssoTab.lastUsedLower', { date: new Date(token.lastUsedAt).toLocaleString() })
+                    : t('ssoTab.neverUsed')}
                 </div>
               </div>
-              {!t.revokedAt && (
+              {!token.revokedAt && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => {
-                    if (confirm(`Revoke token "${t.name}"?`)) revoke.mutate(t.id)
+                    if (confirm(t('ssoTab.confirmRevoke', { name: token.name }))) revoke.mutate(token.id)
                   }}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -514,6 +525,7 @@ function CalloutRow({ label, children }: { label: string; children: React.ReactN
 }
 
 function CopyableMono({ value, className }: { value: string; className?: string }) {
+  const { t } = useTranslation()
   return (
     <div className={cn('flex items-center gap-2 min-w-0', className)}>
       <code className="flex-1 font-mono text-xs truncate">{value}</code>
@@ -521,7 +533,7 @@ function CopyableMono({ value, className }: { value: string; className?: string 
         variant="ghost"
         size="sm"
         onClick={() => {
-          navigator.clipboard.writeText(value).then(() => toast.success('Copied'))
+          navigator.clipboard.writeText(value).then(() => toast.success(t('ssoTab.copied')))
         }}
       >
         <Copy className="h-3 w-3" />

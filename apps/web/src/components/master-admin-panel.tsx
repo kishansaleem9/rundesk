@@ -12,6 +12,7 @@ import {
   Users,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Org = {
   id: string
@@ -23,14 +24,19 @@ type Org = {
   createdAt: string
 }
 
+type TFunc = (key: TranslationKey, vars?: Record<string, string | number>) => string
+
+// `key` is the canonical, locale-independent feature identifier persisted to
+// localStorage; `labelKey` / `descKey` reference i18n catalog entries used only
+// for display in the panel.
 const ALL_FEATURES = [
-  { key: 'ai', label: 'AI Hub', desc: 'Show AI section in sidebar' },
-  { key: 'teams', label: 'Teams', desc: 'Enable Teams hub and collaboration rails' },
-  { key: 'docs', label: 'Docs', desc: 'Enable Docs hub and document editing' },
-  { key: 'dashboard', label: 'Dashboards', desc: 'Enable Dashboard hub and widgets' },
-  { key: 'whiteboards', label: 'Whiteboards', desc: 'Enable Whiteboards hub' },
-  { key: 'forms', label: 'Forms', desc: 'Enable Forms hub' },
-  { key: 'more', label: 'More / Integrations', desc: 'Expose additional hubs and integrations' },
+  { key: 'ai', labelKey: 'masterAdmin.feature.ai.label', descKey: 'masterAdmin.feature.ai.desc' },
+  { key: 'teams', labelKey: 'masterAdmin.feature.teams.label', descKey: 'masterAdmin.feature.teams.desc' },
+  { key: 'docs', labelKey: 'masterAdmin.feature.docs.label', descKey: 'masterAdmin.feature.docs.desc' },
+  { key: 'dashboard', labelKey: 'masterAdmin.feature.dashboard.label', descKey: 'masterAdmin.feature.dashboard.desc' },
+  { key: 'whiteboards', labelKey: 'masterAdmin.feature.whiteboards.label', descKey: 'masterAdmin.feature.whiteboards.desc' },
+  { key: 'forms', labelKey: 'masterAdmin.feature.forms.label', descKey: 'masterAdmin.feature.forms.desc' },
+  { key: 'more', labelKey: 'masterAdmin.feature.more.label', descKey: 'masterAdmin.feature.more.desc' },
 ] as const
 
 type FeatureKey = (typeof ALL_FEATURES)[number]['key']
@@ -48,7 +54,14 @@ function defaultFeatures(): FeatureState {
   }
 }
 
+function statusLabel(t: TFunc, status: string): string {
+  if (status === 'active') return t('masterAdmin.status.active')
+  if (status === 'past_due') return t('masterAdmin.status.pastDue')
+  return status.replace(/_/g, ' ')
+}
+
 export function MasterAdminPanel() {
+  const { t, tCount } = useTranslation()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null)
@@ -127,14 +140,14 @@ export function MasterAdminPanel() {
   return (
     <div className="p-8 space-y-6 max-w-7xl">
       <header className="space-y-2">
-        <div className="text-[11px] uppercase tracking-widest text-muted-foreground">Super panel</div>
-        <h1 className="font-display text-3xl font-semibold">Master Tenant Control Center</h1>
+        <div className="text-[11px] uppercase tracking-widest text-muted-foreground">{t('masterAdmin.eyebrow')}</div>
+        <h1 className="font-display text-3xl font-semibold">{t('masterAdmin.title')}</h1>
         <p className="text-sm text-muted-foreground max-w-3xl">
-          Manage purchased organizations, subscriptions, invoices, data controls, and tenant-level feature visibility.
+          {t('masterAdmin.subtitle')}
         </p>
         {impersonatedOrgId && (
           <div className="text-xs text-success">
-            Impersonation mode active for {orgs.find((o) => o.id === impersonatedOrgId)?.name}
+            {t('masterAdmin.impersonationActive', { name: orgs.find((o) => o.id === impersonatedOrgId)?.name ?? '' })}
           </div>
         )}
       </header>
@@ -143,20 +156,20 @@ export function MasterAdminPanel() {
         <Card className="p-4 space-y-3 h-fit">
           <div className="flex items-center gap-2">
             <Building2 className="h-4 w-4 text-accent" />
-            <h2 className="font-semibold">Organizations</h2>
+            <h2 className="font-semibold">{t('masterAdmin.organizations')}</h2>
           </div>
           <Input
             leadingIcon={<Search className="h-4 w-4" />}
-            placeholder="Search orgs..."
+            placeholder={t('masterAdmin.searchPlaceholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
             {orgsQuery.isLoading && (
-              <div className="text-xs text-muted-foreground px-1 py-2">Loading organizations...</div>
+              <div className="text-xs text-muted-foreground px-1 py-2">{t('masterAdmin.loadingOrgs')}</div>
             )}
             {orgsQuery.isError && (
-              <div className="text-xs text-destructive px-1 py-2">Failed to load organizations.</div>
+              <div className="text-xs text-destructive px-1 py-2">{t('masterAdmin.loadError')}</div>
             )}
             {filtered.map((org) => (
               <button
@@ -171,16 +184,16 @@ export function MasterAdminPanel() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-medium truncate">{org.name}</span>
                   <Badge variant={org.status === 'active' ? 'success' : org.status === 'past_due' ? 'warning' : 'soft'}>
-                    {org.status}
+                    {statusLabel(t, org.status)}
                   </Badge>
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
-                  {org.users} users · {org.workspaces} workspaces
+                  {tCount('masterAdmin.usersCount', org.users)} · {tCount('masterAdmin.workspacesCount', org.workspaces)}
                 </div>
               </button>
             ))}
             {!orgsQuery.isLoading && filtered.length === 0 && (
-              <div className="text-xs text-muted-foreground px-1 py-2">No organizations found.</div>
+              <div className="text-xs text-muted-foreground px-1 py-2">{t('masterAdmin.noOrgsFound')}</div>
             )}
           </div>
         </Card>
@@ -188,19 +201,19 @@ export function MasterAdminPanel() {
         <div className="space-y-5">
           {!selectedOrg ? (
             <Card className="p-6 text-sm text-muted-foreground">
-              No organizations available.
+              {t('masterAdmin.noOrgsAvailable')}
             </Card>
           ) : (
             <>
           <Card className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Metric icon={Users} label="Seats" value={selectedOrg.users.toString()} />
-            <Metric icon={CreditCard} label="Status" value={selectedOrg.status} />
-            <Metric icon={Receipt} label="Slug" value={selectedOrg.slug} />
-            <Metric icon={Shield} label="Created" value={new Date(selectedOrg.createdAt).toLocaleDateString()} />
+            <Metric icon={Users} label={t('masterAdmin.metric.seats')} value={selectedOrg.users.toString()} />
+            <Metric icon={CreditCard} label={t('masterAdmin.metric.status')} value={statusLabel(t, selectedOrg.status)} />
+            <Metric icon={Receipt} label={t('masterAdmin.metric.slug')} value={selectedOrg.slug} />
+            <Metric icon={Shield} label={t('masterAdmin.metric.created')} value={new Date(selectedOrg.createdAt).toLocaleDateString()} />
           </Card>
           <div className="flex items-center gap-2">
             <Button variant="gradient" onClick={impersonateOrg}>
-              Impersonate {selectedOrg.name}
+              {t('masterAdmin.impersonate', { name: selectedOrg.name })}
             </Button>
             <Button
               variant="outline"
@@ -209,7 +222,7 @@ export function MasterAdminPanel() {
                 setImpersonatedOrgId(null)
               }}
             >
-              Clear impersonation
+              {t('masterAdmin.clearImpersonation')}
             </Button>
           </div>
 
@@ -217,24 +230,24 @@ export function MasterAdminPanel() {
             <Card className="p-4 space-y-3">
               <h3 className="font-semibold flex items-center gap-2">
                 <Lock className="h-4 w-4 text-accent" />
-                Tenant Feature Visibility (Sidebar)
+                {t('masterAdmin.featureVisibilityTitle')}
               </h3>
               <div className="space-y-2">
                 {ALL_FEATURES.map((f) => (
                   <div key={f.key} className="flex items-center gap-3 justify-between rounded border border-border px-3 py-2">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium">{f.label}</div>
-                      <div className="text-xs text-muted-foreground">{f.desc}</div>
+                      <div className="text-sm font-medium">{t(f.labelKey)}</div>
+                      <div className="text-xs text-muted-foreground">{t(f.descKey)}</div>
                     </div>
                     <Switch checked={featureState[f.key]} onCheckedChange={(v) => setFeature(f.key, v)} />
                   </div>
                 ))}
               </div>
               <Button onClick={pushToSidebarPreview}>
-                Apply to Tenant Sidebar
+                {t('masterAdmin.applyToSidebar')}
               </Button>
               <p className="text-[11px] text-muted-foreground">
-                Applies to current UI preview by writing `rundesk.sidebarVisibility` in localStorage.
+                {t('masterAdmin.applyHelp')}
               </p>
             </Card>
           </div>

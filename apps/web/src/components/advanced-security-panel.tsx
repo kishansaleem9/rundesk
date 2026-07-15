@@ -26,6 +26,7 @@ import {
   Lock,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useTranslation } from '../lib/i18n'
 
 type SecuritySettings = {
   workspaceId: string
@@ -71,6 +72,7 @@ function looksLikeIpRule(value: string): boolean {
 }
 
 export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) {
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const queryKey = ['security-settings', workspaceId]
 
@@ -85,10 +87,10 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
       api<SecuritySettings>(`/workspaces/${workspaceId}/security-settings`, { method: 'PATCH', body: patch }),
     onSuccess: (updated) => {
       qc.setQueryData(queryKey, updated)
-      toast.success('Security settings saved')
+      toast.success(t('advancedSecurity.saved'))
     },
     onError: (e: unknown) =>
-      toast.error(e instanceof ApiError ? e.message : 'Failed to save security settings'),
+      toast.error(e instanceof ApiError ? e.message : t('advancedSecurity.saveFailed')),
   })
 
   const [allowlistOpen, setAllowlistOpen] = useState(false)
@@ -97,7 +99,7 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
   if (isLoading || !data) {
     return (
       <Card variant="glass" className="p-5 text-sm text-muted-foreground">
-        Loading security settings…
+        {t('advancedSecurity.loading')}
       </Card>
     )
   }
@@ -113,20 +115,20 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <h3 className="font-display text-lg font-semibold">IP allowlist</h3>
+              <h3 className="font-display text-lg font-semibold">{t('advancedSecurity.ipAllowlistTitle')}</h3>
               <Badge variant="soft" className="text-[9px] uppercase">
-                {s.ipAllowlist.length} {s.ipAllowlist.length === 1 ? 'range' : 'ranges'}
+                {tCount('advancedSecurity.rangeCount', s.ipAllowlist.length)}
               </Badge>
               <Badge variant={s.ipAllowlistEnabled ? 'success' : 'outline'} className="text-[9px] uppercase">
-                {s.ipAllowlistEnabled ? 'Enforced' : 'Off'}
+                {s.ipAllowlistEnabled ? t('advancedSecurity.enforced') : t('advancedSecurity.off')}
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Only allow workspace access from approved IPs. Logins from other addresses are blocked.
+              {t('advancedSecurity.ipAllowlistDesc')}
             </p>
             <div className="flex flex-wrap gap-1.5 mt-3">
               {s.ipAllowlist.length === 0 ? (
-                <span className="text-xs text-muted-foreground">No ranges configured.</span>
+                <span className="text-xs text-muted-foreground">{t('advancedSecurity.noRangesConfigured')}</span>
               ) : (
                 s.ipAllowlist.slice(0, 8).map((ip) => (
                   <Badge key={ip} variant="info" className="font-mono text-[10px]">
@@ -137,7 +139,7 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={() => setAllowlistOpen(true)}>
-            Configure
+            {t('advancedSecurity.configure')}
           </Button>
         </div>
       </Card>
@@ -150,22 +152,22 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <h3 className="font-display text-lg font-semibold">Session timeout</h3>
+              <h3 className="font-display text-lg font-semibold">{t('advancedSecurity.sessionTimeoutTitle')}</h3>
               <Badge variant="success" className="text-[9px] uppercase">
-                {formatMinutes(s.sessionTimeoutMinutes)} after inactivity
+                {t('advancedSecurity.afterInactivity', { duration: formatMinutes(s.sessionTimeoutMinutes) })}
               </Badge>
               {s.maxConcurrentSessions > 0 && (
                 <Badge variant="soft" className="text-[9px] uppercase">
-                  max {s.maxConcurrentSessions} sessions
+                  {tCount('advancedSecurity.maxSessions', s.maxConcurrentSessions)}
                 </Badge>
               )}
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Force re-login after a period of inactivity, and cap concurrent sessions per user.
+              {t('advancedSecurity.sessionTimeoutDesc')}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => setSessionOpen(true)}>
-            Configure
+            {t('advancedSecurity.configure')}
           </Button>
         </div>
       </Card>
@@ -177,16 +179,16 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
             <Lock className="h-4 w-4" />
           </div>
           <div className="flex-1">
-            <h3 className="font-display text-lg font-semibold">Login policy</h3>
+            <h3 className="font-display text-lg font-semibold">{t('advancedSecurity.loginPolicyTitle')}</h3>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Lockout and password-strength requirements applied at sign-in and sign-up.
+              {t('advancedSecurity.loginPolicyDesc')}
             </p>
           </div>
         </div>
         <div className="space-y-2 pl-13">
           <PolicyToggle
-            label={`Lock account after ${s.lockoutThreshold} failed attempts`}
-            description={`Released automatically after ${s.lockoutDurationMinutes} minutes.`}
+            label={tCount('advancedSecurity.lockoutLabel', s.lockoutThreshold)}
+            description={tCount('advancedSecurity.lockoutDesc', s.lockoutDurationMinutes)}
             checked={s.lockoutEnabled}
             disabled={save.isPending}
             onChange={(v) => save.mutate({ lockoutEnabled: v })}
@@ -194,14 +196,14 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
           {s.lockoutEnabled && (
             <div className="grid grid-cols-2 gap-2 pl-3">
               <NumberField
-                label="Attempts before lock"
+                label={t('advancedSecurity.attemptsBeforeLock')}
                 value={s.lockoutThreshold}
                 min={1}
                 max={100}
                 onCommit={(v) => v !== s.lockoutThreshold && save.mutate({ lockoutThreshold: v })}
               />
               <NumberField
-                label="Lock duration (min)"
+                label={t('advancedSecurity.lockDuration')}
                 value={s.lockoutDurationMinutes}
                 min={1}
                 max={1440}
@@ -210,15 +212,15 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
             </div>
           )}
           <PolicyToggle
-            label="Require strong passwords"
-            description="At least 10 chars, mixed case, number + symbol — enforced at sign-up and reset."
+            label={t('advancedSecurity.strongPasswordsLabel')}
+            description={t('advancedSecurity.strongPasswordsDesc')}
             checked={s.requireStrongPasswords}
             disabled={save.isPending}
             onChange={(v) => save.mutate({ requireStrongPasswords: v })}
           />
           <PolicyToggle
-            label="Block known-breached passwords"
-            description="Cross-check against HaveIBeenPwned at sign-up. Fails open if the service is unreachable."
+            label={t('advancedSecurity.breachedLabel')}
+            description={t('advancedSecurity.breachedDesc')}
             checked={s.blockBreachedPasswords}
             disabled={save.isPending}
             onChange={(v) => save.mutate({ blockBreachedPasswords: v })}
@@ -324,6 +326,7 @@ function IpAllowlistDialog({
   saving: boolean
   onSave: (patch: Partial<SecuritySettings>) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const [enabled, setEnabled] = useState(settings.ipAllowlistEnabled)
   const [includeAdmins, setIncludeAdmins] = useState(settings.ipAllowlistIncludeAdmins)
   const [ips, setIps] = useState<string[]>(settings.ipAllowlist)
@@ -343,7 +346,7 @@ function IpAllowlistDialog({
     const v = draft.trim()
     if (!v) return
     if (!looksLikeIpRule(v)) {
-      toast.error('Enter a valid IP or CIDR (e.g. 203.0.113.0/24)')
+      toast.error(t('advancedSecurity.invalidIp'))
       return
     }
     if (!ips.includes(v)) setIps((arr) => [...arr, v])
@@ -360,19 +363,19 @@ function IpAllowlistDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Globe className="h-4 w-4 text-accent" /> IP allowlist
+            <Globe className="h-4 w-4 text-accent" /> {t('advancedSecurity.ipAllowlistTitle')}
           </DialogTitle>
           <DialogDescription>
-            Restrict workspace access to a list of IPs or ranges (CIDR).
+            {t('advancedSecurity.ipDialogDesc')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between rounded-lg border border-border/40 bg-card/30 px-3 py-2.5">
             <div>
-              <div className="text-sm font-medium">Enforce allowlist</div>
+              <div className="text-sm font-medium">{t('advancedSecurity.enforceAllowlist')}</div>
               <div className="text-xs text-muted-foreground">
-                Logins from addresses outside the list are blocked.
+                {t('advancedSecurity.enforceAllowlistDesc')}
               </div>
             </div>
             <Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -390,15 +393,16 @@ function IpAllowlistDialog({
               >
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                 <span>
-                  Your current IP <span className="font-mono font-medium">{settings.currentIp}</span>{' '}
+                  {t('advancedSecurity.currentIpLabel')}{' '}
+                  <span className="font-mono font-medium">{settings.currentIp}</span>{' '}
                   {currentCovered
-                    ? 'is in the list.'
-                    : 'is not in the list yet — it will be added automatically on save so you don’t lock yourself out.'}
+                    ? t('advancedSecurity.currentIpCovered')
+                    : t('advancedSecurity.currentIpNotCovered')}
                 </span>
               </div>
 
               <div>
-                <Label className="mb-2">Allowed IPs / ranges</Label>
+                <Label className="mb-2">{t('advancedSecurity.allowedIps')}</Label>
                 <ul className="space-y-1.5 mb-2">
                   {ips.map((ip) => (
                     <li
@@ -417,7 +421,7 @@ function IpAllowlistDialog({
                   ))}
                   {ips.length === 0 && (
                     <li className="text-xs text-muted-foreground px-1">
-                      No ranges yet. With the list empty, enforcement is skipped (fail-open).
+                      {t('advancedSecurity.noRangesYet')}
                     </li>
                   )}
                 </ul>
@@ -426,7 +430,7 @@ function IpAllowlistDialog({
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-                    placeholder="203.0.113.0/24 or 198.51.100.42"
+                    placeholder={t('advancedSecurity.ipInputPlaceholder')}
                   />
                   <Button variant="outline" size="sm" onClick={add}>
                     <Plus className="h-3.5 w-3.5" />
@@ -436,9 +440,9 @@ function IpAllowlistDialog({
 
               <div className="flex items-center justify-between rounded-lg border border-border/40 bg-card/30 px-3 py-2.5">
                 <div>
-                  <div className="text-sm">Apply to workspace admins</div>
+                  <div className="text-sm">{t('advancedSecurity.applyToAdmins')}</div>
                   <div className="text-xs text-muted-foreground">
-                    By default, admins can sign in from any IP for emergency access.
+                    {t('advancedSecurity.applyToAdminsDesc')}
                   </div>
                 </div>
                 <Switch checked={includeAdmins} onCheckedChange={setIncludeAdmins} />
@@ -449,7 +453,7 @@ function IpAllowlistDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             variant="gradient"
@@ -462,7 +466,7 @@ function IpAllowlistDialog({
               })
             }
           >
-            <Check className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save'}
+            <Check className="h-3.5 w-3.5" /> {saving ? t('common.saving') : t('common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -483,6 +487,7 @@ function SessionTimeoutDialog({
   saving: boolean
   onSave: (patch: Partial<SecuritySettings>) => Promise<void>
 }) {
+  const { t } = useTranslation()
   const initial = splitMinutes(settings.sessionTimeoutMinutes)
   const [duration, setDuration] = useState(initial.duration)
   const [unit, setUnit] = useState<TimeUnit>(initial.unit)
@@ -502,14 +507,14 @@ function SessionTimeoutDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-accent" /> Session timeout
+            <Clock className="h-4 w-4 text-accent" /> {t('advancedSecurity.sessionTimeoutTitle')}
           </DialogTitle>
-          <DialogDescription>Force re-login after inactivity.</DialogDescription>
+          <DialogDescription>{t('advancedSecurity.sessionDialogDesc')}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Inactivity timeout</Label>
+            <Label>{t('advancedSecurity.inactivityTimeout')}</Label>
             <div className="flex items-center gap-2">
               <Input
                 type="number"
@@ -530,7 +535,7 @@ function SessionTimeoutDialog({
                         : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
-                    {u}
+                    {t(`advancedSecurity.unit.${u}`)}
                   </button>
                 ))}
               </div>
@@ -538,7 +543,7 @@ function SessionTimeoutDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Max concurrent sessions per user</Label>
+            <Label>{t('advancedSecurity.maxSessionsLabel')}</Label>
             <Input
               type="number"
               min={0}
@@ -548,14 +553,14 @@ function SessionTimeoutDialog({
               className="w-24"
             />
             <p className="text-[11px] text-muted-foreground">
-              Older sessions get logged out when this number is exceeded. 0 = unlimited.
+              {t('advancedSecurity.maxSessionsHelp')}
             </p>
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             variant="gradient"
@@ -567,7 +572,7 @@ function SessionTimeoutDialog({
               })
             }
           >
-            <Check className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save'}
+            <Check className="h-3.5 w-3.5" /> {saving ? t('common.saving') : t('common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
