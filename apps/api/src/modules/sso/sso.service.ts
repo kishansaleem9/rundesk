@@ -436,8 +436,13 @@ export class SsoService {
   // ─── Utilities ────────────────────────────────────────────────────────────
 
   private callbackUrl(provider: SsoProvider): string {
-    const base = this.config.get<string>('API_URL') ?? this.appUrl.replace(':5173', ':3000')
-    return `${base.replace(/\/$/, '')}/auth/sso/${provider}/callback`
+    const base = (this.config.get<string>('API_URL') ?? this.appUrl.replace(':5173', ':3000')).replace(/\/$/, '')
+    // Routes are served under the global prefix `/api/v1` (main.ts) with no
+    // exclusions, so the redirect_uri handed to the IdP must include it or the
+    // callback 404s. Idempotent: only append when API_URL doesn't already
+    // carry the prefix.
+    const withPrefix = /\/api\/v1$/.test(base) ? base : `${base}/api/v1`
+    return `${withPrefix}/auth/sso/${provider}/callback`
   }
 
   /**
