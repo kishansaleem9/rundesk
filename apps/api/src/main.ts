@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core'
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify'
 import { ValidationPipe, Logger } from '@nestjs/common'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger'
+import fastifyCookie from '@fastify/cookie'
 import { AppModule } from './app.module'
 import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
@@ -17,6 +18,11 @@ async function bootstrap() {
     // default so a direct deployment isn't tricked by spoofed XFF headers.
     new FastifyAdapter({ logger: false, trustProxy: process.env.TRUST_PROXY === 'true' }),
   )
+
+  // Cookie parsing/serialisation for httpOnly access/refresh + CSRF cookies
+  // (Plan §1.1). No secret: we don't use signed cookies — the access/refresh
+  // cookies are already-signed JWTs and the CSRF cookie is a double-submit value.
+  await app.register(fastifyCookie as any)
 
   app.setGlobalPrefix('api/v1')
 

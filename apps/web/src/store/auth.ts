@@ -59,17 +59,23 @@ export const useAuthStore = create<AuthState>()(
       setOrganizations: (organizations) => set({ organizations }),
       setWorkspaces: (workspaces) => set({ workspaces }),
       clear: () => set({ user: null, accessToken: null, refreshToken: null, organizations: [], workspaces: [] }),
-      isAuthenticated: () => !!get().accessToken,
+      // Auth is now anchored on the httpOnly session cookie, not a persisted
+      // token. We treat the presence of a hydrated user profile as "logged in"
+      // (the route guard reads this synchronously); the cookie is what actually
+      // authenticates each request, and GET /users/me on load confirms it.
+      isAuthenticated: () => !!get().user,
     }),
     {
       name: 'rundesk.auth',
       storage: createJSONStorage(() => localStorage),
+      // Persist only the user profile + memberships — NOT the raw tokens. The
+      // access/refresh tokens live in httpOnly cookies now. (Existing users who
+      // still have tokens in localStorage keep them in memory after rehydration
+      // for a graceful Bearer transition; they're dropped on the next write.)
       partialize: (s) => ({
         user: s.user,
         organizations: s.organizations,
         workspaces: s.workspaces,
-        accessToken: s.accessToken,
-        refreshToken: s.refreshToken,
       }),
     },
   ),

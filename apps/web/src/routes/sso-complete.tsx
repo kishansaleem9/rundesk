@@ -25,29 +25,21 @@ function SsoCompletePage() {
 
   useEffect(() => {
     const finalize = async () => {
-      const hash = window.location.hash.replace(/^#/, '')
-      if (!hash) {
-        setError('Missing SSO response')
-        return
-      }
-      const params = new URLSearchParams(hash)
-      const refreshToken = params.get('refreshToken')
-      const workspaceId = params.get('workspaceId')
-      if (!refreshToken) {
-        setError('SSO response is missing tokens')
-        return
-      }
-      window.history.replaceState({}, '', '/sso-complete')
+      // The API set httpOnly session cookies (access + refresh) and the CSRF
+      // cookie before redirecting here — tokens are NO LONGER in the URL hash.
+      // Only the target workspace comes through as a query param.
+      const workspaceId = new URLSearchParams(window.location.search).get('workspaceId')
 
       try {
-        // Exchange the SSO-issued refresh token for a full login bundle. This
-        // rotates the refresh token (the original is invalidated) and returns
-        // the same payload shape as POST /auth/login, including orgs and
-        // workspaces, so the auth store hydrates the same way as a password
-        // sign-in.
+        // Exchange the cookie session for a full login bundle. Refresh rotates
+        // the SSO-issued refresh token and returns the same payload shape as
+        // POST /auth/login (user + orgs + workspaces) so the store hydrates the
+        // same way as a password sign-in. The refresh_token cookie is read
+        // server-side (no body token needed); credentials + the CSRF header are
+        // attached by the api() layer.
         const bundle = await api<LoginBundle>('/auth/refresh', {
           method: 'POST',
-          body: { refreshToken },
+          body: {},
           skipAuth: true,
         })
         setSession(

@@ -18,6 +18,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { SsoService, type SsoConnectionUpdate } from './sso.service'
 import { AuthService } from '../auth/auth.service'
+import { setAuthCookies } from '../auth/auth-cookies'
 import type { SsoProvider } from '@rundesk/db'
 
 type CurrentUserPayload = { id: string; email: string }
@@ -145,18 +146,18 @@ export class SsoAuthController {
   }
 
   /**
-   * Send the user back to the SPA with a one-shot bridge URL. The frontend
-   * sign-in page reads the accessToken + refreshToken from the URL hash,
-   * persists them to the auth store, then strips the hash from history.
+   * Finish SSO by setting the session as httpOnly cookies (access + refresh)
+   * plus the readable CSRF cookie, then redirecting to the SPA. Tokens are NO
+   * LONGER placed in the URL hash (Plan §1.1) — the /sso-complete route hydrates
+   * from the cookie session via POST /auth/refresh, so the token never becomes a
+   * durable client-side store and never appears in browser history / referrers.
    */
   private redirectToApp(res: any, bundle: { accessToken: string; refreshToken: string }, workspaceId: string) {
+    const secure = (process.env.NODE_ENV ?? 'development') === 'production'
+    setAuthCookies(res, bundle, { secure })
     const appUrl = process.env.APP_URL ?? 'http://localhost:5173'
     const target = new URL(`${appUrl}/sso-complete`)
-    target.hash = new URLSearchParams({
-      accessToken: bundle.accessToken,
-      refreshToken: bundle.refreshToken,
-      workspaceId,
-    }).toString()
+    if (workspaceId) target.searchParams.set('workspaceId', workspaceId)
     res.redirect(target.toString())
   }
 

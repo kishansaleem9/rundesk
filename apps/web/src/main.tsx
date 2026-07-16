@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -7,7 +7,8 @@ import '@rundesk/ui/styles.css'
 
 import { routeTree } from './routeTree.gen'
 import { queryClient } from './lib/query'
-import { useAuthStore } from './store/auth'
+import { useAuthStore, type AuthUser } from './store/auth'
+import { api } from './lib/api'
 import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
 
@@ -28,8 +29,38 @@ declare module '@tanstack/react-router' {
   }
 }
 
+/**
+ * On load, if we have a persisted profile (so the route guard lets us in),
+ * confirm the httpOnly cookie session is still valid and refresh the profile
+ * via GET /users/me. If the cookie is gone/expired, api() runs a cookie-based
+ * refresh and, on failure, clears the store — dropping the user back to /login.
+ */
+function useSessionHydration() {
+  useEffect(() => {
+    if (!useAuthStore.getState().isAuthenticated()) return
+    let cancelled = false
+    void api<AuthUser | null>('/users/me')
+      .then((me) => {
+        if (cancelled || !me) return
+        useAuthStore.getState().setUser({
+          id: me.id,
+          email: me.email,
+          displayName: me.displayName,
+          role: me.role,
+        })
+      })
+      .catch(() => {
+        /* api() already attempted a refresh and cleared the store on failure */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+}
+
 function App() {
   const auth = useAuthStore()
+  useSessionHydration()
   return (
     <>
       <RouterProvider router={router} context={{ auth, queryClient }} />

@@ -1,6 +1,7 @@
-import { Controller, Post, Body, UseGuards, Req, HttpCode, HttpStatus, Get, Query, Delete, Param } from '@nestjs/common'
+import { Controller, Post, Body, UseGuards, Req, Res, HttpCode, HttpStatus, Get, Query, Delete, Param } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger'
-import type { FastifyRequest } from 'fastify'
+import { ConfigService } from '@nestjs/config'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 import { AuthService } from './auth.service'
 import { LocalAuthGuard } from './guards/local-auth.guard'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
@@ -8,6 +9,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { RegisterDto } from './dto/register.dto'
 import { SignupDto } from './dto/signup.dto'
 import { LoginDto } from './dto/login.dto'
+import { REFRESH_TOKEN_COOKIE, clearAuthCookies, setAuthCookies } from './auth-cookies'
 
 function sessionMeta(req: FastifyRequest) {
   return {
@@ -16,21 +18,41 @@ function sessionMeta(req: FastifyRequest) {
   }
 }
 
+// Fastify request with cookies populated by @fastify/cookie.
+type RequestWithCookies = FastifyRequest & { cookies?: Record<string, string | undefined> }
+
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly config: ConfigService,
+  ) {}
+
+  // Secure only in production so cookies still work over http://localhost in dev.
+  private get cookiesSecure(): boolean {
+    return (this.config.get<string>('NODE_ENV') ?? 'development') === 'production'
+  }
+
+  /** Attach the httpOnly access/refresh + readable CSRF cookies to a response. */
+  private issueCookies(reply: FastifyReply, bundle: { accessToken: string; refreshToken: string }) {
+    setAuthCookies(reply, bundle, { secure: this.cookiesSecure })
+  }
 
   @Post('signup')
   @ApiOperation({ summary: 'Atomic organization signup with initial workspace and optional invites' })
-  async signup(@Body() dto: SignupDto, @Req() req: FastifyRequest) {
-    return this.authService.signUp(dto, sessionMeta(req))
+  async signup(@Body() dto: SignupDto, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
+    const bundle = await this.authService.signUp(dto, sessionMeta(req))
+    this.issueCookies(res, bundle)
+    return bundle
   }
 
   @Post('register')
   @ApiOperation({ summary: 'Register a new user (creates a personal workspace) - DEPRECATED: use /signup' })
-  async register(@Body() dto: RegisterDto, @Req() req: FastifyRequest) {
-    return this.authService.register(dto, sessionMeta(req))
+  async register(@Body() dto: RegisterDto, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
+    const bundle = await this.authService.register(dto, sessionMeta(req))
+    this.issueCookies(res, bundle)
+    return bundle
   }
 
   @Post('login')
@@ -38,15 +60,26 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiBody({ type: LoginDto })
-  async login(@CurrentUser() user: any, @Req() req: FastifyRequest) {
-    return this.authService.login(user, sessionMeta(req))
+  async login(@CurrentUser() user: any, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
+    const bundle = await this.authService.login(user, sessionMeta(req))
+    this.issueCookies(res, bundle)
+    return bundle
   }
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token (rotates the refresh token)' })
-  async refresh(@Body() body: { refreshToken: string }, @Req() req: FastifyRequest) {
-    return this.authService.refresh(body.refreshToken, sessionMeta(req))
+  async refresh(
+    @Body() body: { refreshToken?: string },
+    @Req() req: RequestWithCookies,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    // Accept the refresh token from the JSON body (Bearer/API clients) or, for
+    // browser sessions, from the httpOnly refresh_token cookie.
+    const token = body?.refreshToken ?? req.cookies?.[REFRESH_TOKEN_COOKIE]
+    const bundle = await this.authService.refresh(token as string, sessionMeta(req))
+    this.issueCookies(res, bundle)
+    return bundle
   }
 
   @Post('forgot-password')
@@ -78,12 +111,19 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Logout and revoke refresh token' })
-  async logout(@Body() body: { refreshToken: string }) {
-    await this.authService.logout(body.refreshToken)
+  @ApiOperation({ summary: 'Logout: clear auth cookies and revoke the refresh session' })
+  async logout(
+    @Body() body: { refreshToken?: string },
+    @Req() req: RequestWithCookies,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    // Revoke the session identified by the presented refresh token (body for
+    // Bearer clients, cookie for browsers). Always clear the cookies so the
+    // browser session ends even if no refresh token is present.
+    const token = body?.refreshToken ?? req.cookies?.[REFRESH_TOKEN_COOKIE]
+    if (token) await this.authService.logout(token)
+    clearAuthCookies(res, { secure: this.cookiesSecure })
   }
 
   @Get('me')

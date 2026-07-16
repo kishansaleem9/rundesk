@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common'
+import { APP_GUARD } from '@nestjs/core'
 import { ConfigModule } from '@nestjs/config'
 import { ScheduleModule } from '@nestjs/schedule'
+import { CsrfGuard } from './common/guards/csrf.guard'
 import { AuthModule } from './modules/auth/auth.module'
 import { UsersModule } from './modules/users/users.module'
 import { WorkspacesModule } from './modules/workspaces/workspaces.module'
@@ -121,6 +123,12 @@ import { SampleDataModule } from './modules/sample-data/sample-data.module'
     CustomRolesModule,
     TaskTemplatesModule,
     SampleDataModule,
+  ],
+  providers: [
+    // Global double-submit CSRF guard. It only enforces on cookie-authenticated,
+    // state-changing requests; Bearer and safe (GET/HEAD/OPTIONS) requests pass
+    // through untouched, so existing API clients are unaffected.
+    { provide: APP_GUARD, useClass: CsrfGuard },
   ],
 })
 export class AppModule {}

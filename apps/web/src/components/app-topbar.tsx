@@ -664,12 +664,13 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
 
   async function handleSignOut() {
     try {
-      if (refreshToken) {
-        await api('/auth/logout', {
-          method: 'POST',
-          body: JSON.stringify({ refreshToken }),
-        })
-      }
+      // Always hit the endpoint: it clears the httpOnly cookies and revokes the
+      // refresh session. Cookie sessions have no stored refreshToken — the
+      // server reads the refresh_token cookie instead.
+      await api('/auth/logout', {
+        method: 'POST',
+        body: refreshToken ? { refreshToken } : {},
+      })
     } catch (err) {
       if (!(err instanceof ApiError)) console.error(err)
     } finally {

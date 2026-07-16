@@ -20,18 +20,37 @@ type Envelope<T> = {
   error: { status: number; message: string; details?: unknown } | null
 }
 
+// Methods that mutate state must carry the double-submit CSRF header when the
+// session is cookie-authenticated (the server ignores it for Bearer requests).
+const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const CSRF_COOKIE = 'csrf_token'
+
+/** Read a non-httpOnly cookie value from document.cookie (browser only). */
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  const escaped = name.replace(/([.*+?^${}()|[\]\\])/g, '\\$1')
+  const match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'))
+  return match ? decodeURIComponent(match[1]) : null
+}
+
 // Single in-flight refresh promise so a burst of 401s doesn't trigger N refreshes.
 let refreshInFlight: Promise<string | null> | null = null
 
 async function performRefresh(): Promise<string | null> {
+  // During the localStorage→cookie transition a stored refresh token may still
+  // exist; send it if present. Otherwise the server reads the refresh_token
+  // httpOnly cookie (credentials: 'include'), so cookie-only sessions refresh too.
   const refreshToken = useAuthStore.getState().refreshToken
-  if (!refreshToken) return null
 
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    const csrf = readCookie(CSRF_COOKIE)
+    if (csrf) headers['X-CSRF-Token'] = csrf
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      headers,
+      credentials: 'include',
+      body: JSON.stringify(refreshToken ? { refreshToken } : {}),
     })
     if (!res.ok) return null
     const body = (await res.json()) as Envelope<{
@@ -67,7 +86,17 @@ async function fetchWithAuth(path: string, init: RequestInit, token: string | nu
   if (!headers.has('Content-Type') && init.body) {
     headers.set('Content-Type', 'application/json')
   }
+  // Bearer is still sent when a token is available (transition + API clients).
   if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  // Attach the CSRF header for unsafe methods so cookie-authenticated mutations
+  // pass the server's double-submit check. Harmless for Bearer requests (the
+  // server exempts them). Skipped when no csrf_token cookie is present.
+  const method = (init.method ?? 'GET').toUpperCase()
+  if (UNSAFE_METHODS.has(method) && !headers.has('X-CSRF-Token')) {
+    const csrf = readCookie(CSRF_COOKIE)
+    if (csrf) headers.set('X-CSRF-Token', csrf)
+  }
 
   return fetch(`${API_BASE}${path}`, {
     ...init,
@@ -89,7 +118,7 @@ type ApiOptions = Omit<RequestInit, 'body'> & {
 export async function downloadFile(path: string, filename: string): Promise<void> {
   const token = useAuthStore.getState().accessToken
   let res = await fetchWithAuth(path, { method: 'GET' }, token)
-  if (res.status === 401 && useAuthStore.getState().refreshToken) {
+  if (res.status === 401 && useAuthStore.getState().isAuthenticated()) {
     const newToken = await ensureFreshToken()
     if (newToken) res = await fetchWithAuth(path, { method: 'GET' }, newToken)
     else useAuthStore.getState().clear()
@@ -111,7 +140,7 @@ export async function downloadFilePost(path: string, body: unknown, filename: st
   const token = useAuthStore.getState().accessToken
   const init: RequestInit = { method: 'POST', body: JSON.stringify(body) }
   let res = await fetchWithAuth(path, init, token)
-  if (res.status === 401 && useAuthStore.getState().refreshToken) {
+  if (res.status === 401 && useAuthStore.getState().isAuthenticated()) {
     const newToken = await ensureFreshToken()
     if (newToken) res = await fetchWithAuth(path, init, newToken)
     else useAuthStore.getState().clear()
@@ -143,7 +172,7 @@ export async function api<T = unknown>(
   const token = skipAuth ? null : useAuthStore.getState().accessToken
   let res = await fetchWithAuth(path, rawInit, token)
 
-  if (!skipAuth && res.status === 401 && useAuthStore.getState().refreshToken && !path.startsWith('/auth/')) {
+  if (!skipAuth && res.status === 401 && useAuthStore.getState().isAuthenticated() && !path.startsWith('/auth/')) {
     const newToken = await ensureFreshToken()
     if (newToken) {
       res = await fetchWithAuth(path, rawInit, newToken)

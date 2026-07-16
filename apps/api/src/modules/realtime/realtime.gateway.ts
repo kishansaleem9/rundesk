@@ -16,6 +16,24 @@ import { workspaceMembers, lists, projects, spaces, tasks, docs, workspaceCanvas
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PresenceService } from '../presence/presence.service'
+import { ACCESS_TOKEN_COOKIE } from '../auth/auth-cookies'
+
+/**
+ * Extract the access_token from a raw Cookie header. Browser sessions no longer
+ * keep the JWT in JS (it lives in an httpOnly cookie), so the socket handshake
+ * can't pass it via `auth.token`; the cookie rides along automatically instead.
+ */
+function accessTokenFromCookieHeader(cookieHeader?: string): string | undefined {
+  if (!cookieHeader) return undefined
+  for (const part of cookieHeader.split(';')) {
+    const eq = part.indexOf('=')
+    if (eq < 0) continue
+    if (part.slice(0, eq).trim() === ACCESS_TOKEN_COOKIE) {
+      return decodeURIComponent(part.slice(eq + 1).trim())
+    }
+  }
+  return undefined
+}
 
 /**
  * Room taxonomy:
@@ -160,6 +178,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   async handleConnection(client: Socket) {
     const token = (client.handshake.auth?.token as string | undefined)
       ?? (client.handshake.query?.token as string | undefined)
+      ?? accessTokenFromCookieHeader(client.handshake.headers?.cookie)
     if (!token) {
       client.emit('error', { message: 'Missing auth token' })
       client.disconnect(true)
