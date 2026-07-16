@@ -41,38 +41,38 @@ type ConnectionHealth = 'healthy' | 'expiring' | 'expired' | 'disconnected'
 
 const INTEGRATIONS: Integration[] = [
   { id: 'slack', name: 'Slack', descKey: 'integrations.desc.slack', category: 'comms', popular: true, brandColor: '#4A154B', logo: 'S' },
-  { id: 'discord', name: 'Discord', descKey: 'integrations.desc.discord', category: 'comms', brandColor: '#5865F2', logo: 'D' },
-  { id: 'teams', name: 'Microsoft Teams', descKey: 'integrations.desc.teams', category: 'comms', brandColor: '#5059C9', logo: 'T' },
+  { id: 'discord', name: 'Discord', descKey: 'integrations.desc.discord', category: 'comms', comingSoon: true, brandColor: '#5865F2', logo: 'D' },
+  { id: 'teams', name: 'Microsoft Teams', descKey: 'integrations.desc.teams', category: 'comms', comingSoon: true, brandColor: '#5059C9', logo: 'T' },
   { id: 'zoom', name: 'Zoom', descKey: 'integrations.desc.zoom', category: 'comms', popular: true, brandColor: '#2D8CFF', logo: 'Z' },
 
   { id: 'google-drive', name: 'Google Drive', descKey: 'integrations.desc.googleDrive', category: 'storage', popular: true, brandColor: '#1FA463', logo: 'G' },
   { id: 'dropbox', name: 'Dropbox', descKey: 'integrations.desc.dropbox', category: 'storage', brandColor: '#0061FF', logo: 'D' },
-  { id: 'onedrive', name: 'OneDrive', descKey: 'integrations.desc.onedrive', category: 'storage', brandColor: '#0078D4', logo: 'O' },
-  { id: 'figma', name: 'Figma', descKey: 'integrations.desc.figma', category: 'storage', popular: true, brandColor: '#F24E1E', logo: 'F' },
+  { id: 'onedrive', name: 'OneDrive', descKey: 'integrations.desc.onedrive', category: 'storage', comingSoon: true, brandColor: '#0078D4', logo: 'O' },
+  { id: 'figma', name: 'Figma', descKey: 'integrations.desc.figma', category: 'storage', comingSoon: true, brandColor: '#F24E1E', logo: 'F' },
 
   { id: 'github', name: 'GitHub', descKey: 'integrations.desc.github', category: 'dev', popular: true, brandColor: '#181717', logo: 'G' },
   { id: 'gitlab', name: 'GitLab', descKey: 'integrations.desc.gitlab', category: 'dev', brandColor: '#FC6D26', logo: 'G' },
-  { id: 'sentry', name: 'Sentry', descKey: 'integrations.desc.sentry', category: 'dev', brandColor: '#362D59', logo: 'S' },
-  { id: 'linear', name: 'Linear', descKey: 'integrations.desc.linear', category: 'dev', brandColor: '#5E6AD2', logo: 'L' },
+  { id: 'sentry', name: 'Sentry', descKey: 'integrations.desc.sentry', category: 'dev', comingSoon: true, brandColor: '#362D59', logo: 'S' },
+  { id: 'linear', name: 'Linear', descKey: 'integrations.desc.linear', category: 'dev', comingSoon: true, brandColor: '#5E6AD2', logo: 'L' },
 
   { id: 'gcal', name: 'Google Calendar', descKey: 'integrations.desc.gcal', category: 'calendar', popular: true, brandColor: '#4285F4', logo: 'C' },
   { id: 'outlook', name: 'Outlook Calendar', descKey: 'integrations.desc.outlook', category: 'calendar', brandColor: '#0078D4', logo: 'O' },
-  { id: 'cal', name: 'Cal.com', descKey: 'integrations.desc.cal', category: 'calendar', brandColor: '#000', logo: 'C' },
+  { id: 'cal', name: 'Cal.com', descKey: 'integrations.desc.cal', category: 'calendar', comingSoon: true, brandColor: '#000', logo: 'C' },
 
-  { id: 'amplitude', name: 'Amplitude', descKey: 'integrations.desc.amplitude', category: 'analytics', brandColor: '#1F71F4', logo: 'A' },
-  { id: 'mixpanel', name: 'Mixpanel', descKey: 'integrations.desc.mixpanel', category: 'analytics', brandColor: '#7856FF', logo: 'M' },
-  { id: 'posthog', name: 'PostHog', descKey: 'integrations.desc.posthog', category: 'analytics', brandColor: '#1D4AFF', logo: 'P' },
+  { id: 'amplitude', name: 'Amplitude', descKey: 'integrations.desc.amplitude', category: 'analytics', comingSoon: true, brandColor: '#1F71F4', logo: 'A' },
+  { id: 'mixpanel', name: 'Mixpanel', descKey: 'integrations.desc.mixpanel', category: 'analytics', comingSoon: true, brandColor: '#7856FF', logo: 'M' },
+  { id: 'posthog', name: 'PostHog', descKey: 'integrations.desc.posthog', category: 'analytics', comingSoon: true, brandColor: '#1D4AFF', logo: 'P' },
 
   { id: 'stripe', name: 'Stripe', descKey: 'integrations.desc.stripe', category: 'crm', brandColor: '#635BFF', logo: 'S' },
-  { id: 'hubspot', name: 'HubSpot', descKey: 'integrations.desc.hubspot', category: 'crm', brandColor: '#FF7A59', logo: 'H' },
-  { id: 'salesforce', name: 'Salesforce', descKey: 'integrations.desc.salesforce', category: 'crm', brandColor: '#00A1E0', logo: 'S' },
+  { id: 'hubspot', name: 'HubSpot', descKey: 'integrations.desc.hubspot', category: 'crm', comingSoon: true, brandColor: '#FF7A59', logo: 'H' },
+  { id: 'salesforce', name: 'Salesforce', descKey: 'integrations.desc.salesforce', category: 'crm', comingSoon: true, brandColor: '#00A1E0', logo: 'S' },
 
   { id: 'zapier', name: 'Zapier', descKey: 'integrations.desc.zapier', category: 'dev', popular: true, brandColor: '#FF4F00', logo: 'Z' },
-  { id: 'make', name: 'Make (Integromat)', descKey: 'integrations.desc.make', category: 'dev', brandColor: '#6D00CC', logo: 'M' },
+  { id: 'make', name: 'Make (Integromat)', descKey: 'integrations.desc.make', category: 'dev', comingSoon: true, brandColor: '#6D00CC', logo: 'M' },
   { id: 'webhook', name: 'Custom webhooks', descKey: 'integrations.desc.webhook', category: 'dev', brandColor: '#0c215d', logo: 'W' },
 
   { id: 'openai', name: 'OpenAI', descKey: 'integrations.desc.openai', category: 'ai', brandColor: '#10A37F', logo: 'A' },
-  { id: 'gemini', name: 'Google Gemini', descKey: 'integrations.desc.gemini', category: 'ai', brandColor: '#1F71F4', logo: 'G' },
+  { id: 'gemini', name: 'Google Gemini', descKey: 'integrations.desc.gemini', category: 'ai', comingSoon: true, brandColor: '#1F71F4', logo: 'G' },
 ]
 
 const CATEGORIES: Array<{ id: Integration['category'] | 'all' | 'installed'; labelKey: TranslationKey }> = [
@@ -727,7 +727,9 @@ function IntegrationCard({
                 onOpenConnect()
               }}
             >
-              {!supported && !integration.comingSoon
+              {integration.comingSoon
+                ? t('integrations.notAvailableYet')
+                : !supported
                 ? accessRequest?.status === 'rejected'
                   ? t('integrations.requestAgain')
                   : accessRequest?.status === 'approved'

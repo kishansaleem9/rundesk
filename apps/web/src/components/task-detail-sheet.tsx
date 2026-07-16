@@ -3791,7 +3791,7 @@ function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: stri
     }, 0)
   }, [entries])
   if (entriesQuery.data === null) {
-    return <NotWiredNote>Time tracking is not available.</NotWiredNote>
+    return <NotWiredNote>{t('taskDetail.timeTrackingUnavailable')}</NotWiredNote>
   }
   const manualRangeValid =
     !!manualStart &&
