@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Ip, Param, Patch, Post, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
+import { Body, Controller, Get, Headers, Ip, NotFoundException, Param, Patch, Post, Query, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService } from './workspaces.service'
 import { PlansService } from '../plans/plans.service'
@@ -210,5 +210,33 @@ export class WorkspacesController {
       email: user.email,
       ip,
     })
+  }
+}
+
+/**
+ * Public, unauthenticated custom-domain resolution (Plan §13.5 / §2.2). No
+ * JwtAuthGuard — mirrors ClientPortalPublicController / DocsPublicController — so
+ * the SPA can, at bootstrap on a custom domain, discover which workspace the
+ * domain belongs to and apply its branding before anyone signs in. GET is a
+ * safe method, so the global CsrfGuard admits it too. Returns only the safe
+ * public branding projection, or 404 when no verified workspace claims the host.
+ */
+@ApiTags('workspaces-public')
+@Controller()
+export class WorkspacesPublicController {
+  constructor(private readonly workspacesService: WorkspacesService) {}
+
+  @Get('public/workspace-by-domain')
+  @ApiOperation({ summary: 'Resolve a verified custom domain to its workspace branding (no auth)' })
+  async workspaceByDomain(
+    @Query('host') hostParam?: string,
+    @Headers('host') hostHeader?: string,
+  ) {
+    // Prefer an explicit ?host= (the SPA passes window.location.host); fall back
+    // to the request's own Host header when the query param is absent.
+    const host = (hostParam && hostParam.trim()) || hostHeader || ''
+    const workspace = await this.workspacesService.resolveByCustomDomain(host)
+    if (!workspace) throw new NotFoundException('No workspace is served on that domain')
+    return workspace
   }
 }

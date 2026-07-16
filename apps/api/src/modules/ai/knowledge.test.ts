@@ -190,6 +190,47 @@ describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 
     const farIdx = ids.indexOf('far')
     assert.ok(farIdx === -1 || farIdx > ids.indexOf('near'), 'the unrelated item never outranks the on-topic item')
   })
+
+  it('surfaces an attachment hit whose parent task the caller can access (non-manager)', async () => {
+    // The attachment inherits its task's container access: the access-filter
+    // query (attachment -> task -> space/project) resolves a1, so it is cited.
+    const db = makeDb({
+      workspace_members: [{ role: 'member' }],
+      knowledge_embeddings: [
+        embRow('attachment', 'a1', 'launch-notes.txt', '/app/w1/pub?task=t1', 'roadmap launch plan ships q3'),
+      ],
+      task_attachments: [{ id: 'a1' }], // access query returns a1 => accessible
+    })
+    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const res = await svc.answerKnowledge('w1', 'u-member', 'roadmap launch plan', {
+      userId: 'u-member',
+      workspaceId: 'w1',
+    })
+    assert.equal(res.source, 'vector')
+    assert.deepEqual(res.sources.map((s) => s.id), ['a1'])
+    assert.equal(res.sources[0].type, 'attachment')
+    assert.equal(res.sources[0].title, 'launch-notes.txt')
+  })
+
+  it('drops an attachment whose parent task is in a private space the caller cannot reach', async () => {
+    // The access-filter query returns nothing for a1 (its task is in a private
+    // space the member is not part of), so the attachment must never be cited —
+    // it must NOT leak through the generic pass-through.
+    const db = makeDb({
+      workspace_members: [{ role: 'member' }],
+      knowledge_embeddings: [
+        embRow('attachment', 'a1', 'secret.txt', '/app/w1/priv?task=t1', 'roadmap launch secret plan'),
+      ],
+      task_attachments: [], // access query returns nothing => inaccessible
+    })
+    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const res = await svc.answerKnowledge('w1', 'u-member', 'roadmap launch plan', {
+      userId: 'u-member',
+      workspaceId: 'w1',
+    })
+    assert.deepEqual(res.sources, [], 'inaccessible attachment is not surfaced')
+    assert.match(res.answer, /No matching items/)
+  })
 })
 
 describe('matchHelpTopics (§14.4 keyword fallback — closest FAQ)', () => {

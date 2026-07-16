@@ -89,6 +89,23 @@ export class R2Service {
     )
   }
 
+  /**
+   * Fetch an object's raw bytes server-side. Used when the API needs the
+   * content itself (not a browser download URL) — e.g. the §15.1 knowledge
+   * indexer extracting text from a text attachment. Returns a Buffer; callers
+   * decide how to decode. Throws if storage is unconfigured or the key is
+   * missing (callers that must not fail wrap this in try/catch).
+   */
+  async getObject(key: string): Promise<Buffer> {
+    this.requireConfigured()
+    const res = await this.client!.send(new GetObjectCommand({ Bucket: this.bucketName!, Key: key }))
+    const body = res.Body
+    if (!body) return Buffer.alloc(0)
+    // AWS SDK v3 streams expose transformToByteArray() in Node and browsers.
+    const bytes = await (body as { transformToByteArray(): Promise<Uint8Array> }).transformToByteArray()
+    return Buffer.from(bytes)
+  }
+
   async getObjectUrl(key: string, expiresInSeconds = 900): Promise<string> {
     this.requireConfigured()
     if (this.publicUrl) {

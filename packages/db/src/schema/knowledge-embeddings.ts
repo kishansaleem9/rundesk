@@ -4,8 +4,9 @@ import { workspaces } from './workspaces'
 
 /**
  * Semantic knowledge store (Plan §15.1). One row = one embedded piece of
- * workspace content (a task, a doc, or a task comment), used to answer
- * "Ask about your workspace" via vector similarity instead of keyword match.
+ * workspace content (a task, a doc, a task comment, or the extracted text of a
+ * task attachment), used to answer "Ask about your workspace" via vector
+ * similarity instead of keyword match.
  *
  * PORTABILITY — the `embedding` column is a plain `double precision[]` (float8[]),
  * NOT the pgvector `vector` type. This means the table works on stock Postgres
@@ -15,16 +16,17 @@ import { workspaces } from './workspaces'
  * L2-normalized, so cosine == dot product). If pgvector is ever present it can
  * be layered on top; it is intentionally NOT required.
  */
-export type KnowledgeSourceType = 'task' | 'doc' | 'comment'
+export type KnowledgeSourceType = 'task' | 'doc' | 'comment' | 'attachment'
 
 export const knowledgeEmbeddings = pgTable(
   'knowledge_embeddings',
   {
     id:          uuid('id').primaryKey().defaultRandom(),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-    // Polymorphic source — no FK (points at tasks / docs / task_comments). Stale
-    // rows for deleted sources are harmless: retrieval re-checks access against
-    // the live source table, so a deleted source can never be cited.
+    // Polymorphic source — no FK (points at tasks / docs / task_comments /
+    // task_attachments). Stale rows for deleted sources are harmless: retrieval
+    // re-checks access against the live source table, so a deleted source can
+    // never be cited.
     sourceType:  text('source_type').$type<KnowledgeSourceType>().notNull(),
     sourceId:    uuid('source_id').notNull(),
     title:       text('title').notNull().default(''),

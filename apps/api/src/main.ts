@@ -7,6 +7,9 @@ import fastifyCookie from '@fastify/cookie'
 import { AppModule } from './app.module'
 import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
+import { TenantDbInterceptor } from './common/database/tenant-db.interceptor'
+import { SHARED_DB_TOKEN } from './common/database/database.module'
+import { TenantDatabasesService } from './modules/tenant-databases/tenant-databases.service'
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap')
@@ -42,7 +45,16 @@ async function bootstrap() {
     transform: true,
   }))
 
-  app.useGlobalInterceptors(new ResponseInterceptor())
+  // §14.2 dedicated-database routing. Registered after ResponseInterceptor so
+  // ResponseInterceptor stays outermost (response shaping is unchanged) and the
+  // tenant interceptor is innermost — closest to the controller — establishing
+  // the request's DB context around the handler. It is a near-no-op unless an
+  // org has an ACTIVE dedicated database; it uses the SHARED handle for its own
+  // registry/workspace lookups and never re-routes them.
+  app.useGlobalInterceptors(
+    new ResponseInterceptor(),
+    new TenantDbInterceptor(app.get(SHARED_DB_TOKEN), app.get(TenantDatabasesService)),
+  )
   app.useGlobalFilters(new AllExceptionsFilter())
 
   app.enableCors({

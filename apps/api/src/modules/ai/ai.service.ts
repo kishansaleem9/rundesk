@@ -12,14 +12,16 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings } from '@rundesk/db'
+import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { R2Service } from '../../common/storage/r2.service'
 import { estimateAiCostUsd } from './ai-cost'
 import { TasksService } from '../tasks/tasks.service'
 import { SearchService } from '../search/search.service'
 import { EmbeddingService } from './embedding.service'
 import { embedText, cosineSimilarity } from './embedding'
+import { ATTACHMENT_TEXT_CAP, extractAttachmentText, isExtractableAttachment } from './attachment-text'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import {
   assembleKnowledgeContext,
@@ -735,6 +737,12 @@ export class AiService {
     // production (SearchModule is @Global; EmbeddingService lives in AiModule).
     @Optional() private search?: SearchService,
     @Optional() private embeddings?: EmbeddingService,
+    // §15.1 — used to hydrate attachment hits with their extracted text at
+    // answer-time (the embeddings table stores only title/url). @Optional so the
+    // many `new AiService(config, db, tasks)` unit constructions keep compiling;
+    // injected in production (StorageModule is @Global). When absent, attachment
+    // citations simply carry no body — the answer path degrades gracefully.
+    @Optional() private r2?: R2Service,
   ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
@@ -1467,11 +1475,13 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     const taskIds: string[] = []
     const docIds: string[] = []
     const commentIds: string[] = []
+    const attachmentIds: string[] = []
     for (const h of hits) {
       const { type, rawId } = splitSearchId(h.id)
       if (type === 'task') taskIds.push(rawId)
       else if (type === 'doc') docIds.push(rawId)
       else if (type === 'comment') commentIds.push(rawId)
+      else if (type === 'attachment') attachmentIds.push(rawId)
     }
     const [taskRows, docRows, commentRows] = await Promise.all([
       taskIds.length
@@ -1486,6 +1496,36 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     ])
     const byId = new Map<string, string>()
     for (const r of [...taskRows, ...docRows, ...commentRows]) byId.set(r.id, r.text ?? '')
+
+    // Attachment bodies live in R2, not the DB — re-read + extract their text for
+    // the top hits so the model can answer FROM attachment contents. Best-effort
+    // and R2-gated: unconfigured storage or a missing/unreadable object just
+    // leaves the filename as the citation (never throws on the answer path).
+    if (attachmentIds.length > 0 && this.r2?.configured) {
+      const r2 = this.r2
+      const attachmentRows = await this.db
+        .select({
+          id: taskAttachments.id,
+          storageKey: taskAttachments.storageKey,
+          contentType: taskAttachments.contentType,
+        })
+        .from(taskAttachments)
+        .where(inArray(taskAttachments.id, attachmentIds))
+      await Promise.all(
+        attachmentRows
+          .filter((a) => isExtractableAttachment(a.contentType))
+          .map(async (a) => {
+            try {
+              const bytes = await r2.getObject(a.storageKey)
+              const text = extractAttachmentText(bytes, a.contentType, ATTACHMENT_TEXT_CAP)
+              if (text) byId.set(a.id, text)
+            } catch {
+              // best-effort — leave the citation as the filename
+            }
+          }),
+      )
+    }
+
     return hits.map((h) => {
       const { rawId } = splitSearchId(h.id)
       const text = byId.get(rawId)
@@ -1511,11 +1551,13 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     const taskIds: string[] = []
     const commentIds: string[] = []
     const docIds: string[] = []
+    const attachmentIds: string[] = []
     for (const h of hits) {
       const { type, rawId } = splitSearchId(h.id)
       if (type === 'task') taskIds.push(rawId)
       else if (type === 'comment') commentIds.push(rawId)
       else if (type === 'doc') docIds.push(rawId)
+      else if (type === 'attachment') attachmentIds.push(rawId)
     }
 
     // Predicates matching common/permissions/container-access: a private space
@@ -1532,7 +1574,7 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     const spaceOk = or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces))
     const projectOk = or(isNull(projects.visibility), ne(projects.visibility, 'private'), inArray(projects.id, memberProjects))
 
-    const [okTasks, okComments, okDocs] = await Promise.all([
+    const [okTasks, okComments, okDocs, okAttachments] = await Promise.all([
       taskIds.length
         ? this.db
             .select({ id: tasks.id })
@@ -1565,16 +1607,33 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
               ),
             )
         : Promise.resolve([] as Array<{ id: string }>),
+      // An attachment inherits its parent task's container access: gate it by
+      // the SAME space/project visibility as the task it hangs off (join
+      // attachment → task → list → project → space). Without this branch an
+      // attachment hit would fall through to the `return true` default below and
+      // leak content from a private space/project the caller can't reach.
+      attachmentIds.length
+        ? this.db
+            .select({ id: taskAttachments.id })
+            .from(taskAttachments)
+            .innerJoin(tasks, eq(tasks.id, taskAttachments.taskId))
+            .innerJoin(lists, eq(lists.id, tasks.listId))
+            .innerJoin(projects, eq(projects.id, lists.projectId))
+            .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+            .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskAttachments.id, attachmentIds), spaceOk, projectOk))
+        : Promise.resolve([] as Array<{ id: string }>),
     ])
 
     const okTaskSet = new Set(okTasks.map((r) => r.id))
     const okCommentSet = new Set(okComments.map((r) => r.id))
     const okDocSet = new Set(okDocs.map((r) => r.id))
+    const okAttachmentSet = new Set(okAttachments.map((r) => r.id))
     return hits.filter((h) => {
       const { type, rawId } = splitSearchId(h.id)
       if (type === 'task') return okTaskSet.has(rawId)
       if (type === 'comment') return okCommentSet.has(rawId)
       if (type === 'doc') return okDocSet.has(rawId)
+      if (type === 'attachment') return okAttachmentSet.has(rawId)
       // user / channel / message — already scoped by SearchService.
       return true
     })

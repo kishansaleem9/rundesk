@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
 import * as dns from 'dns'
@@ -81,6 +81,43 @@ export function computeOnboardingSteps(counts: OnboardingCounts): OnboardingStep
     invite: counts.members > 1,
     ai: counts.aiEvents > 0,
   }
+}
+
+/**
+ * A workspace's SAFE, PUBLIC branding projection (Plan §13.5). Exactly the
+ * fields a custom-domain visitor needs to render the branded entry point —
+ * never members, the DNS verification token, plan limits, or any other
+ * internal/secret column.
+ */
+export type PublicWorkspaceBranding = {
+  id: string
+  name: string
+  slug: string
+  logoUrl: string | null
+  primaryColor: string | null
+  accentColor: string | null
+  customDomain: string | null
+}
+
+/**
+ * Normalize an HTTP `Host` (or a stored custom domain) to a canonical
+ * comparison key: trimmed, lowercased, scheme/path stripped, port stripped,
+ * trailing FQDN dot removed, and a single leading `www.` removed. Applied to
+ * BOTH sides of a custom-domain match so "Example.com:443", "www.example.com"
+ * and "example.com" all resolve to the same workspace — and so it does not
+ * matter whether the owner saved the bare or the `www.` form. Returns '' when
+ * there is nothing usable to match on.
+ */
+export function normalizeHost(host: string | null | undefined): string {
+  if (!host) return ''
+  let h = host.trim().toLowerCase()
+  if (!h) return ''
+  h = h.replace(/^https?:\/\//, '') // drop scheme if a full URL was passed (defensive)
+  h = h.split('/')[0] ?? '' // drop any path/query segment
+  h = h.replace(/:\d+$/, '') // strip port: example.com:443 -> example.com
+  h = h.replace(/\.$/, '') // strip trailing FQDN root dot
+  h = h.replace(/^www\./, '') // strip a single leading www.
+  return h
 }
 
 @Injectable()
@@ -300,6 +337,71 @@ export class WorkspacesService {
       .set({ customDomainVerified: verified, updatedAt: new Date() })
       .where(eq(workspaces.id, workspaceId))
     return { verified, host, expectedTxt: ws.customDomainToken }
+  }
+
+  /**
+   * Resolve an incoming request `Host` to the workspace that serves it via a
+   * VERIFIED custom domain (Plan §13.5 / §2.2). This is the app-layer half of
+   * custom domains: `verifyCustomDomain` proves ownership over a DNS TXT record,
+   * and this turns a Host header into the branded entry point the SPA boots
+   * into. Nothing else in the app previously mapped a Host to a workspace.
+   *
+   * The match is symmetric — `normalizeHost` is applied to both the incoming
+   * Host and each stored `custom_domain` — so case, port, a leading `www.`, and
+   * whether the owner saved "example.com" or "www.example.com" never matter. A
+   * domain only resolves while it is verified AND its workspace is not archived.
+   *
+   * Returns a SAFE PUBLIC projection only (id, name, slug, logoUrl,
+   * primaryColor, accentColor, customDomain); members, the verification token,
+   * plan limits and every other internal column are never returned. Returns
+   * null when no verified, non-archived workspace claims the host.
+   *
+   * SCOPE: TLS certificate provisioning for a custom domain is an
+   * infrastructure / reverse-proxy concern (e.g. an ACME-enabled edge that
+   * terminates HTTPS for the verified host) and is intentionally OUT of
+   * application scope. With this method the application side is complete: the
+   * app now fully resolves Host -> workspace and serves that workspace's
+   * branding — the only remaining step to go live is the cert at the edge.
+   */
+  async resolveByCustomDomain(host: string): Promise<PublicWorkspaceBranding | null> {
+    const normalized = normalizeHost(host)
+    if (!normalized) return null
+    // Only workspaces that actually set a custom domain are candidates — a tiny
+    // set. We fetch the two guard flags alongside the safe columns and evaluate
+    // the match in JS so the SAME normalization applies to the stored domain and
+    // the incoming Host (a plain SQL equality could not compare them
+    // symmetrically). The SELECT lists only safe columns, so the verification
+    // token, plan limits and members are never even read.
+    const rows = await this.db
+      .select({
+        id: workspaces.id,
+        name: workspaces.name,
+        slug: workspaces.slug,
+        logoUrl: workspaces.logoUrl,
+        primaryColor: workspaces.primaryColor,
+        accentColor: workspaces.accentColor,
+        customDomain: workspaces.customDomain,
+        customDomainVerified: workspaces.customDomainVerified,
+        isArchived: workspaces.isArchived,
+      })
+      .from(workspaces)
+      .where(isNotNull(workspaces.customDomain))
+    const match = rows.find(
+      (w) =>
+        w.customDomainVerified &&
+        !w.isArchived &&
+        normalizeHost(w.customDomain) === normalized,
+    )
+    if (!match) return null
+    return {
+      id: match.id,
+      name: match.name,
+      slug: match.slug,
+      logoUrl: match.logoUrl,
+      primaryColor: match.primaryColor,
+      accentColor: match.accentColor,
+      customDomain: match.customDomain,
+    }
   }
 
   async listMembers(workspaceId: string) {

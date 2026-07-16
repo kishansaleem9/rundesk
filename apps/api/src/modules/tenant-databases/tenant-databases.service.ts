@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common'
 import { and, eq, sql } from 'drizzle-orm'
 import { getDb, tenantDatabases } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { DB_TOKEN } from '../../common/database/database.module'
+import { SHARED_DB_TOKEN } from '../../common/database/database.module'
 
 export type TenantDatabaseStatus = 'pending' | 'active' | 'disabled'
 
@@ -42,7 +42,11 @@ export class TenantDatabasesService {
    */
   private readonly handles = new Map<string, Db>()
 
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  // The registry (`tenant_databases`) itself always lives on the SHARED cluster,
+  // so this service injects the raw shared handle rather than the tenant-aware
+  // proxy — its lookups must never be re-routed to a dedicated database by the
+  // request-scoped routing it powers (that would also recurse through the proxy).
+  constructor(@Inject(SHARED_DB_TOKEN) private db: Db) {}
 
   // ---- Registry CRUD (super-admin only; the gate is enforced in the controller)
 

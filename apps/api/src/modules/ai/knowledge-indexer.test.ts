@@ -61,6 +61,38 @@ function baseTables() {
   }
 }
 
+// A minimal R2Service stand-in: `configured` gates attachment indexing and
+// `getObject` returns the stored bytes for a key (UTF-8). Records reads so a
+// test can prove binaries are skipped WITHOUT hitting storage.
+function makeR2(objects: Record<string, string>, configured = true) {
+  const reads: string[] = []
+  const r2: any = {
+    configured,
+    getObject: async (key: string) => {
+      reads.push(key)
+      if (!(key in objects)) throw new Error(`no such object: ${key}`)
+      return Buffer.from(objects[key], 'utf8')
+    },
+  }
+  return { r2, reads }
+}
+
+// One extractable attachment row shaped like the indexer's join projection.
+function attachmentRow(over: Record<string, unknown> = {}) {
+  return {
+    id: 'a1',
+    fileName: 'launch-notes.txt',
+    contentType: 'text/plain',
+    storageKey: 'ws/w1/att/a1.txt',
+    sizeBytes: 40,
+    taskId: 't1',
+    listId: 'l1',
+    spaceId: 's1',
+    projectId: 'p1',
+    ...over,
+  }
+}
+
 describe('KnowledgeIndexerService.collectSources (§15.1)', () => {
   it('collects tasks, docs and non-empty comments with citation urls', async () => {
     const { db } = makeIndexerDb(baseTables())
@@ -134,5 +166,146 @@ describe('KnowledgeIndexerService.indexWorkspaceContent (§15.1)', () => {
     assert.equal(res.indexed, 1, 'the dim-mismatched task is re-embedded')
     assert.equal(inserts[0].sourceId, 't1')
     assert.equal(inserts[0].dim, D)
+  })
+})
+
+describe('KnowledgeIndexerService — attachment contents (§15.1)', () => {
+  it('collectAttachmentSources: reads R2 bytes and extracts UTF-8 text for a text attachment', async () => {
+    const body = 'The Q3 launch ships on August 15. Owner is Priya.'
+    const { db } = makeIndexerDb({ task_attachments: [attachmentRow({ sizeBytes: body.length })] })
+    const { r2, reads } = makeR2({ 'ws/w1/att/a1.txt': body })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+
+    const items = await svc.collectAttachmentSources('w1')
+    assert.equal(items.length, 1)
+    assert.equal(items[0].sourceType, 'attachment')
+    assert.equal(items[0].sourceId, 'a1')
+    assert.equal(items[0].title, 'launch-notes.txt')
+    // Cited at the parent task so filterAccessibleHits scopes it by task access.
+    assert.equal(items[0].url, '/app/w1/s1/p1/l1?task=t1')
+    assert.equal(items[0].text, body)
+    assert.deepEqual(reads, ['ws/w1/att/a1.txt'], 'bytes were fetched from R2 once')
+  })
+
+  it('indexWorkspaceContent embeds a text attachment as sourceType "attachment" alongside tasks/docs/comments', async () => {
+    const body = 'quarterly roadmap and launch plan details'
+    const { db, inserts } = makeIndexerDb({
+      ...baseTables(),
+      knowledge_embeddings: [],
+      task_attachments: [attachmentRow({ sizeBytes: body.length })],
+    })
+    const { r2 } = makeR2({ 'ws/w1/att/a1.txt': body })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+
+    const res = await svc.indexWorkspaceContent('w1')
+    assert.equal(res.total, 4, '3 base sources + 1 attachment')
+    assert.equal(res.indexed, 4)
+    const att = inserts.find((r) => r.sourceType === 'attachment')
+    assert.ok(att, 'attachment embedding was upserted')
+    assert.equal(att.sourceId, 'a1')
+    assert.equal(att.title, 'launch-notes.txt')
+    assert.equal(att.dim, D)
+    assert.equal(att.embedding.length, D)
+    assert.equal(att.workspaceId, 'w1')
+  })
+
+  it('skips a binary (image/png) attachment — no extraction, R2 is never read', async () => {
+    const { db, inserts } = makeIndexerDb({
+      knowledge_embeddings: [],
+      task_attachments: [attachmentRow({ id: 'a2', fileName: 'photo.png', contentType: 'image/png', storageKey: 'ws/w1/att/a2.png' })],
+    })
+    const { r2, reads } = makeR2({}) // nothing stored; must not be read
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+
+    const items = await svc.collectAttachmentSources('w1')
+    assert.deepEqual(items, [], 'binary attachment produces no indexable item')
+    assert.deepEqual(reads, [], 'a non-text type is skipped before any R2 fetch')
+
+    const res = await svc.indexWorkspaceContent('w1')
+    assert.ok(!inserts.some((r) => r.sourceType === 'attachment'), 'binary attachment is not embedded')
+    assert.equal(res.total, 0)
+  })
+
+  it('skips a text attachment larger than the byte cap without reading it', async () => {
+    const { db } = makeIndexerDb({
+      task_attachments: [attachmentRow({ sizeBytes: 5_000_000 })], // > MAX_ATTACHMENT_BYTES
+    })
+    const { r2, reads } = makeR2({ 'ws/w1/att/a1.txt': 'x'.repeat(10) })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+    assert.deepEqual(await svc.collectAttachmentSources('w1'), [])
+    assert.deepEqual(reads, [], 'oversized object is never pulled into memory')
+  })
+
+  it('skips attachment indexing gracefully when R2 is not configured (never throws)', async () => {
+    const { db, inserts } = makeIndexerDb({
+      ...baseTables(),
+      knowledge_embeddings: [],
+      task_attachments: [attachmentRow()],
+    })
+    const { r2, reads } = makeR2({ 'ws/w1/att/a1.txt': 'body' }, /* configured */ false)
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+
+    assert.deepEqual(await svc.collectAttachmentSources('w1'), [], 'unconfigured R2 -> no attachments')
+    assert.deepEqual(reads, [], 'unconfigured R2 is never read')
+    // The rest of the reindex (tasks/docs/comments) still runs normally.
+    const res = await svc.indexWorkspaceContent('w1')
+    assert.equal(res.total, 3)
+    assert.ok(!inserts.some((r) => r.sourceType === 'attachment'))
+  })
+
+  it('skips attachments when no R2 service is injected at all', async () => {
+    const { db } = makeIndexerDb({ task_attachments: [attachmentRow()] })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings) // no r2 arg
+    assert.deepEqual(await svc.collectAttachmentSources('w1'), [])
+  })
+
+  it('re-indexing an unchanged text attachment is a no-op (content-hash dedupe)', async () => {
+    const body = 'stable attachment body that does not change between runs'
+    const { db, inserts } = makeIndexerDb({
+      knowledge_embeddings: [
+        { sourceType: 'attachment', sourceId: 'a1', contentHash: contentHash(body), dim: D },
+      ],
+      task_attachments: [attachmentRow({ sizeBytes: body.length })],
+    })
+    const { r2 } = makeR2({ 'ws/w1/att/a1.txt': body })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+
+    const res = await svc.indexWorkspaceContent('w1')
+    assert.deepEqual(res, { total: 1, indexed: 0, skipped: 1 }, 'unchanged attachment is skipped')
+    assert.equal(inserts.length, 0, 'no re-embed for an unchanged attachment')
+  })
+
+  it('re-embeds an attachment whose extracted text changed (stale hash)', async () => {
+    const body = 'brand new revised attachment contents'
+    const { db, inserts } = makeIndexerDb({
+      knowledge_embeddings: [
+        { sourceType: 'attachment', sourceId: 'a1', contentHash: 'stale-hash', dim: D },
+      ],
+      task_attachments: [attachmentRow({ sizeBytes: body.length })],
+    })
+    const { r2 } = makeR2({ 'ws/w1/att/a1.txt': body })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+
+    const res = await svc.indexWorkspaceContent('w1')
+    assert.equal(res.indexed, 1)
+    assert.equal(inserts.length, 1)
+    assert.equal(inserts[0].sourceType, 'attachment')
+    assert.equal(inserts[0].sourceId, 'a1')
+    assert.equal(inserts[0].contentHash, contentHash(body))
+  })
+
+  it('collects a failed R2 read without aborting the run (best-effort per attachment)', async () => {
+    const { db } = makeIndexerDb({
+      task_attachments: [
+        attachmentRow({ id: 'a1', storageKey: 'present' }),
+        attachmentRow({ id: 'a2', storageKey: 'missing' }), // getObject throws
+      ],
+    })
+    const { r2 } = makeR2({ present: 'readable attachment text' }) // 'missing' is absent -> throws
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+
+    const items = await svc.collectAttachmentSources('w1')
+    assert.equal(items.length, 1, 'the readable attachment is still indexed')
+    assert.equal(items[0].sourceId, 'a1')
   })
 })

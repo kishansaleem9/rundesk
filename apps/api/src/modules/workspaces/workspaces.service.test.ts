@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
-import { WorkspacesService, computeOnboardingSteps } from './workspaces.service'
+import { WorkspacesService, computeOnboardingSteps, normalizeHost } from './workspaces.service'
 
 // §14.3 — onboarding checklist done-state is derived purely from real workspace
 // counts, so each step auto-checks the moment the data proving it exists.
@@ -145,5 +145,116 @@ describe('WorkspacesService.addMember plan member-limit gate (§14.1)', () => {
     // Enforced against the right workspace, before any insert.
     assert.equal(plans.assertCanAddMembers.mock.callCount(), 1)
     assert.equal(plans.assertCanAddMembers.mock.calls[0].arguments[0], 'ws-1')
+  })
+})
+
+// §13.5 — normalizeHost canonicalizes a Host so a custom-domain match is case-,
+// port-, scheme-, and www-insensitive on BOTH the incoming host and the stored
+// domain.
+describe('normalizeHost (§13.5 custom-domain canonicalization)', () => {
+  it('lowercases and strips a port', () => {
+    assert.equal(normalizeHost('Example.COM:443'), 'example.com')
+  })
+  it('strips a single leading www.', () => {
+    assert.equal(normalizeHost('www.example.com'), 'example.com')
+  })
+  it('strips scheme, path, and a trailing FQDN dot', () => {
+    assert.equal(normalizeHost('https://www.Example.com.:8080/app'), 'example.com')
+  })
+  it('returns empty string for missing or blank input', () => {
+    assert.equal(normalizeHost(''), '')
+    assert.equal(normalizeHost(undefined), '')
+    assert.equal(normalizeHost('   '), '')
+  })
+})
+
+// §13.5 / §2.2 — resolveByCustomDomain turns a Host into the workspace that
+// serves it, but ONLY when the domain is verified and the workspace is live, and
+// returns a safe public projection (never members/tokens/plan limits/flags).
+describe('WorkspacesService.resolveByCustomDomain (§13.5 Host -> workspace)', () => {
+  // A condition-ignoring mock: it returns the seeded rows for any query, so the
+  // service's own JS filtering (verified + not archived + normalized match) is
+  // exactly what is under test.
+  function svcWithRows(rows: any[]) {
+    const db = { select: () => ({ from: () => ({ where: async () => rows }) }) } as any
+    return new WorkspacesService(db, {} as any, {} as any, {} as any, {} as any)
+  }
+
+  const verified = {
+    id: 'ws-1',
+    name: 'Acme',
+    slug: 'acme',
+    logoUrl: 'https://cdn.example/logo.png',
+    primaryColor: '#112233',
+    accentColor: '#abcdef',
+    customDomain: 'example.com',
+    customDomainVerified: true,
+    isArchived: false,
+    // Sensitive / internal columns that must NEVER surface in the projection:
+    customDomainToken: 'rundesk-verify=super-secret',
+    planLimits: { maxMembers: 3 },
+    organizationId: 'org-1',
+  }
+
+  it('matches a verified domain case/port/scheme/www-insensitively', async () => {
+    for (const host of [
+      'example.com',
+      'EXAMPLE.com',
+      'www.example.com',
+      'Example.com:443',
+      'https://www.example.com/',
+    ]) {
+      const res = await svcWithRows([verified]).resolveByCustomDomain(host)
+      assert.equal(res?.id, 'ws-1', `host ${host} should resolve`)
+    }
+  })
+
+  it('matches when the STORED domain carries www./caps but the host does not', async () => {
+    const res = await svcWithRows([{ ...verified, customDomain: 'WWW.Example.com' }]).resolveByCustomDomain('example.com')
+    assert.equal(res?.id, 'ws-1')
+  })
+
+  it('returns ONLY the safe public projection — no token/plan/org/flags', async () => {
+    const res = await svcWithRows([verified]).resolveByCustomDomain('example.com')
+    assert.deepEqual(Object.keys(res ?? {}).sort(), [
+      'accentColor',
+      'customDomain',
+      'id',
+      'logoUrl',
+      'name',
+      'primaryColor',
+      'slug',
+    ])
+    // Explicitly assert the sensitive fields did not leak through.
+    assert.equal((res as any).customDomainToken, undefined)
+    assert.equal((res as any).customDomainVerified, undefined)
+    assert.equal((res as any).isArchived, undefined)
+    assert.equal((res as any).planLimits, undefined)
+    assert.equal((res as any).organizationId, undefined)
+  })
+
+  it('returns null for an unverified domain', async () => {
+    assert.equal(await svcWithRows([{ ...verified, customDomainVerified: false }]).resolveByCustomDomain('example.com'), null)
+  })
+
+  it('returns null for an archived workspace', async () => {
+    assert.equal(await svcWithRows([{ ...verified, isArchived: true }]).resolveByCustomDomain('example.com'), null)
+  })
+
+  it('returns null for an unknown host', async () => {
+    assert.equal(await svcWithRows([verified]).resolveByCustomDomain('other.example'), null)
+  })
+
+  it('returns null for a blank host without querying the DB', async () => {
+    let selected = false
+    const db = {
+      select: () => {
+        selected = true
+        return { from: () => ({ where: async () => [] }) }
+      },
+    } as any
+    const svc = new WorkspacesService(db, {} as any, {} as any, {} as any, {} as any)
+    assert.equal(await svc.resolveByCustomDomain(''), null)
+    assert.equal(selected, false)
   })
 })

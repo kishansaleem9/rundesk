@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common'
+import { Injectable, Inject, Optional, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { and, eq } from 'drizzle-orm'
 import {
@@ -6,6 +6,7 @@ import {
   tasks,
   docs,
   taskComments,
+  taskAttachments,
   lists,
   projects,
   spaces,
@@ -14,8 +15,15 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { R2Service } from '../../common/storage/r2.service'
 import { EmbeddingService } from './embedding.service'
 import { contentHash } from './embedding'
+import {
+  ATTACHMENT_TEXT_CAP,
+  MAX_ATTACHMENT_BYTES,
+  extractAttachmentText,
+  isExtractableAttachment,
+} from './attachment-text'
 
 /** A piece of workspace content to embed, resolved to its citation shape. */
 export type KnowledgeSourceItem = {
@@ -31,7 +39,8 @@ export type IndexResult = { total: number; indexed: number; skipped: number }
 
 /**
  * §15.1 indexer — embeds a workspace's tasks (title+description), docs
- * (title+plaintext), and task comments (body) into `knowledge_embeddings`.
+ * (title+plaintext), task comments (body), and the extracted text of
+ * text-format task attachments into `knowledge_embeddings`.
  *
  * Upsert-by-source with content-hash skip: a source whose text is unchanged
  * since last run (same `content_hash`) and whose stored vector already has the
@@ -50,6 +59,12 @@ export class KnowledgeIndexerService {
   constructor(
     @Inject(DB_TOKEN) private readonly db: Db,
     private readonly embeddings: EmbeddingService,
+    // Attachment CONTENTS live in R2; the indexer reads their bytes to extract
+    // text. @Optional so the many unit tests that construct
+    // `new KnowledgeIndexerService(db, embeddings)` keep compiling; injected in
+    // production (StorageModule is @Global). When absent/unconfigured, attachment
+    // indexing is skipped gracefully and the rest of the reindex is unaffected.
+    @Optional() private readonly r2?: R2Service,
   ) {}
 
   /** Build the task/doc/comment URL used for citations (mirrors SearchService). */
@@ -137,12 +152,90 @@ export class KnowledgeIndexerService {
   }
 
   /**
+   * Gather every text/extractable attachment in a workspace as normalized items,
+   * reading each object's bytes from R2 and extracting UTF-8 text.
+   *
+   * Access: an attachment inherits its parent task's container access, so it is
+   * cited at the task URL and carries the same space/project scope — the same
+   * `filterAccessibleHits` gate that scopes tasks/comments then scopes it too.
+   *
+   * Binaries (pdf/docx/images/zip/…) are skipped without any parser dependency
+   * (see attachment-text.ts). R2-gated: with no storage configured this returns
+   * `[]` so the rest of the reindex still runs. Best-effort per attachment — a
+   * single unreadable object is logged and skipped, never fatal to the run.
+   *
+   * NOTE: extracting text from PDF/Office documents would require a heavy parser
+   * lib (pdf-parse / mammoth / OCR) and is intentionally out of scope; only text
+   * formats are indexed here.
+   */
+  async collectAttachmentSources(workspaceId: string): Promise<KnowledgeSourceItem[]> {
+    if (!this.r2?.configured) {
+      this.logger.debug(`Attachment indexing skipped for workspace ${workspaceId}: R2 not configured`)
+      return []
+    }
+    const r2 = this.r2
+
+    const attachmentRows = await this.db
+      .select({
+        id: taskAttachments.id,
+        fileName: taskAttachments.fileName,
+        contentType: taskAttachments.contentType,
+        storageKey: taskAttachments.storageKey,
+        sizeBytes: taskAttachments.sizeBytes,
+        taskId: tasks.id,
+        listId: tasks.listId,
+        spaceId: spaces.id,
+        projectId: projects.id,
+      })
+      .from(taskAttachments)
+      .innerJoin(tasks, eq(tasks.id, taskAttachments.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+
+    const items: KnowledgeSourceItem[] = []
+    let failed = 0
+    for (const a of attachmentRows) {
+      // Skip non-text binaries cleanly (no parser dependency).
+      if (!isExtractableAttachment(a.contentType)) continue
+      // Don't pull a very large object fully into memory just to truncate it.
+      if (typeof a.sizeBytes === 'number' && a.sizeBytes > MAX_ATTACHMENT_BYTES) continue
+      try {
+        const bytes = await r2.getObject(a.storageKey)
+        const text = extractAttachmentText(bytes, a.contentType, ATTACHMENT_TEXT_CAP)
+        if (!text) continue
+        items.push({
+          sourceType: 'attachment',
+          sourceId: a.id,
+          title: a.fileName,
+          url: this.taskUrl(workspaceId, a.spaceId, a.projectId, a.listId, a.taskId),
+          text,
+        })
+      } catch (err) {
+        failed++
+        this.logger.warn(`Failed to read attachment ${a.id} (${a.fileName}) from R2 — ${(err as Error).message}`)
+      }
+    }
+    if (failed > 0) {
+      this.logger.warn(`Attachment indexing for workspace ${workspaceId}: ${failed} attachment(s) unreadable`)
+    }
+    return items
+  }
+
+  /**
    * Embed and upsert a workspace's content, skipping sources whose text is
    * unchanged (same content hash) and already stored at the current dimension.
    * Best-effort per source; never throws for one bad row.
    */
   async indexWorkspaceContent(workspaceId: string): Promise<IndexResult> {
-    const items = await this.collectSources(workspaceId)
+    // Tasks/docs/comments (from the live tables) plus text attachments (bytes
+    // read from R2). Both trigger (a) /reindex and trigger (b) the nightly cron
+    // flow through here, so attachments are indexed by both.
+    const items = [
+      ...(await this.collectSources(workspaceId)),
+      ...(await this.collectAttachmentSources(workspaceId)),
+    ]
 
     // Existing rows keyed by "type:id" → { contentHash, dim } for skip decisions.
     const existingRows = await this.db
