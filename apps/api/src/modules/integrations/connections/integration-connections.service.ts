@@ -20,6 +20,8 @@ type Provider =
   | 'onedrive'
   | 'linear'
   | 'salesforce'
+  | 'dropbox'
+  | 'zoom'
 type ProviderConfig = {
   provider: Provider
   authUrl: string
@@ -28,6 +30,12 @@ type ProviderConfig = {
   clientSecret: string
   scopes: string[]
   extraAuthParams?: Record<string, string>
+  /**
+   * How the client authenticates at the token endpoint. Most providers accept
+   * `client_id`/`client_secret` in the POST body ('body', the default); Zoom
+   * requires HTTP Basic auth ('basic').
+   */
+  tokenAuthStyle?: 'body' | 'basic'
 }
 type ProviderAvailability = {
   provider: Provider
@@ -76,6 +84,8 @@ export class IntegrationConnectionsService {
       'onedrive',
       'linear',
       'salesforce',
+      'dropbox',
+      'zoom',
     ] as const
   }
 
@@ -331,7 +341,9 @@ export class IntegrationConnectionsService {
       providerRaw === 'outlook' ||
       providerRaw === 'onedrive' ||
       providerRaw === 'linear' ||
-      providerRaw === 'salesforce'
+      providerRaw === 'salesforce' ||
+      providerRaw === 'dropbox' ||
+      providerRaw === 'zoom'
     ) {
       return providerRaw
     }
@@ -419,6 +431,32 @@ export class IntegrationConnectionsService {
         scopes: ['api', 'refresh_token'],
       }
     }
+    if (provider === 'dropbox') {
+      return {
+        provider,
+        authUrl: process.env.DROPBOX_AUTH_URL ?? 'https://www.dropbox.com/oauth2/authorize',
+        tokenUrl: process.env.DROPBOX_TOKEN_URL ?? 'https://api.dropboxapi.com/oauth2/token',
+        clientId: process.env.DROPBOX_CLIENT_ID ?? '',
+        clientSecret: process.env.DROPBOX_CLIENT_SECRET ?? '',
+        scopes: ['files.metadata.read', 'sharing.read'],
+        // Dropbox only issues a refresh_token when the authorize call asks for
+        // offline access; without it access tokens expire in ~4h with no renewal.
+        extraAuthParams: { token_access_type: 'offline' },
+      }
+    }
+    if (provider === 'zoom') {
+      return {
+        provider,
+        authUrl: process.env.ZOOM_AUTH_URL ?? 'https://zoom.us/oauth/authorize',
+        tokenUrl: process.env.ZOOM_TOKEN_URL ?? 'https://zoom.us/oauth/token',
+        clientId: process.env.ZOOM_CLIENT_ID ?? '',
+        clientSecret: process.env.ZOOM_CLIENT_SECRET ?? '',
+        scopes: ['meeting:write'],
+        // Zoom authenticates the client at the token endpoint via HTTP Basic,
+        // not client_id/client_secret in the body.
+        tokenAuthStyle: 'basic',
+      }
+    }
 
     const scopes =
       provider === 'gcal'
@@ -455,6 +493,12 @@ export class IntegrationConnectionsService {
     if (provider === 'salesforce') {
       return ['SALESFORCE_CLIENT_ID', 'SALESFORCE_CLIENT_SECRET'].filter((k) => !process.env[k])
     }
+    if (provider === 'dropbox') {
+      return ['DROPBOX_CLIENT_ID', 'DROPBOX_CLIENT_SECRET'].filter((k) => !process.env[k])
+    }
+    if (provider === 'zoom') {
+      return ['ZOOM_CLIENT_ID', 'ZOOM_CLIENT_SECRET'].filter((k) => !process.env[k])
+    }
     return ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'].filter((k) => !process.env[k])
   }
 
@@ -483,18 +527,23 @@ export class IntegrationConnectionsService {
 
   private async exchangeCode(cfg: ProviderConfig, code: string, redirectUri: string) {
     const body = new URLSearchParams({
-      client_id: cfg.clientId,
-      client_secret: cfg.clientSecret,
       code,
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     })
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    }
+    if (cfg.tokenAuthStyle === 'basic') {
+      headers.Authorization = `Basic ${Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64')}`
+    } else {
+      body.set('client_id', cfg.clientId)
+      body.set('client_secret', cfg.clientSecret)
+    }
     const res = await fetch(cfg.tokenUrl, {
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers,
       body: body.toString(),
       signal: AbortSignal.timeout(20_000),
     })
@@ -632,6 +681,51 @@ export class IntegrationConnectionsService {
         id: userId,
         email: userInfo.email ?? userInfo.preferred_username ?? null,
         metadata: { name: userInfo.name ?? null },
+      }
+    }
+
+    if (provider === 'dropbox') {
+      // `users/get_current_account` takes no args — Dropbox RPC endpoints want
+      // an explicit JSON `null` body (or no Content-Type). Sending `{}` 400s.
+      const meRes = await fetch(
+        `${process.env.DROPBOX_API_URL ?? 'https://api.dropboxapi.com/2'}/users/get_current_account`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: 'null',
+          signal: AbortSignal.timeout(20_000),
+        },
+      )
+      if (!meRes.ok) throw new BadRequestException('Failed to fetch Dropbox profile')
+      const me = (await meRes.json()) as {
+        account_id?: string
+        email?: string | null
+        name?: { display_name?: string | null }
+      }
+      if (!me.account_id) throw new BadRequestException('Dropbox profile payload missing account_id')
+      return {
+        id: me.account_id,
+        email: me.email ?? null,
+        metadata: { name: me.name?.display_name ?? null },
+      }
+    }
+    if (provider === 'zoom') {
+      const meRes = await fetch(`${process.env.ZOOM_API_URL ?? 'https://api.zoom.us/v2'}/users/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(20_000),
+      })
+      if (!meRes.ok) throw new BadRequestException('Failed to fetch Zoom profile')
+      const me = (await meRes.json()) as {
+        id?: string
+        email?: string | null
+        first_name?: string | null
+        last_name?: string | null
+      }
+      if (!me.id) throw new BadRequestException('Zoom profile payload missing id')
+      return {
+        id: me.id,
+        email: me.email ?? null,
+        metadata: { name: [me.first_name, me.last_name].filter(Boolean).join(' ') || null },
       }
     }
 

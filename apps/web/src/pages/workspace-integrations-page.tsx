@@ -43,6 +43,7 @@ const INTEGRATIONS: Integration[] = [
   { id: 'slack', name: 'Slack', descKey: 'integrations.desc.slack', category: 'comms', popular: true, brandColor: '#4A154B', logo: 'S' },
   { id: 'discord', name: 'Discord', descKey: 'integrations.desc.discord', category: 'comms', brandColor: '#5865F2', logo: 'D' },
   { id: 'teams', name: 'Microsoft Teams', descKey: 'integrations.desc.teams', category: 'comms', brandColor: '#5059C9', logo: 'T' },
+  { id: 'zoom', name: 'Zoom', descKey: 'integrations.desc.zoom', category: 'comms', popular: true, brandColor: '#2D8CFF', logo: 'Z' },
 
   { id: 'google-drive', name: 'Google Drive', descKey: 'integrations.desc.googleDrive', category: 'storage', popular: true, brandColor: '#1FA463', logo: 'G' },
   { id: 'dropbox', name: 'Dropbox', descKey: 'integrations.desc.dropbox', category: 'storage', brandColor: '#0061FF', logo: 'D' },
@@ -117,7 +118,7 @@ export function IntegrationsMarketplacePage() {
       ),
   })
   const oauthProviders = useMemo(
-    () => new Set(providersQuery.data ?? ['github', 'gitlab', 'gcal', 'google-drive', 'outlook', 'onedrive', 'linear', 'salesforce']),
+    () => new Set(providersQuery.data ?? ['github', 'gitlab', 'gcal', 'google-drive', 'outlook', 'onedrive', 'linear', 'salesforce', 'dropbox', 'zoom']),
     [providersQuery.data],
   )
   const providerAvailability = useMemo(() => {

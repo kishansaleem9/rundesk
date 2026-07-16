@@ -112,6 +112,38 @@ describe('parseExternalLinkUrl — Google Drive', () => {
   })
 })
 
+describe('parseExternalLinkUrl — Dropbox', () => {
+  it('detects a legacy /s/ file share and reads the filename', () => {
+    const r = parseExternalLinkUrl('https://www.dropbox.com/s/abc123/Q3-report.pdf?dl=0')
+    assert.equal(r.provider, 'dropbox')
+    assert.equal(r.kind, 'file')
+    assert.equal(r.title, 'Q3-report.pdf')
+    assert.equal(r.ref.fileId, 'abc123')
+    assert.equal(r.ref.sharedUrl, 'https://www.dropbox.com/s/abc123/Q3-report.pdf?dl=0')
+  })
+
+  it('detects a current /scl/fi/ file share and decodes the filename', () => {
+    const r = parseExternalLinkUrl('https://www.dropbox.com/scl/fi/xyz789/Design%20Spec.fig?rlkey=k&dl=0')
+    assert.equal(r.provider, 'dropbox')
+    assert.equal(r.kind, 'file')
+    assert.equal(r.title, 'Design Spec.fig')
+    assert.equal(r.ref.fileId, 'xyz789')
+  })
+
+  it('treats a folder share as a plain dropbox link', () => {
+    const r = parseExternalLinkUrl('https://www.dropbox.com/scl/fo/folderid/rlkey?dl=0')
+    assert.equal(r.provider, 'dropbox')
+    assert.equal(r.kind, 'link')
+    assert.equal(r.externalId, null)
+  })
+
+  it('honours a dropbox hint on an unrecognised URL', () => {
+    const r = parseExternalLinkUrl('https://example.com/x', 'dropbox')
+    assert.equal(r.provider, 'dropbox')
+    assert.equal(r.kind, 'link')
+  })
+})
+
 describe('parseExternalLinkUrl — generic + hints', () => {
   it('treats an unknown URL as a plain link', () => {
     const r = parseExternalLinkUrl('https://example.com/some/page')
@@ -160,7 +192,9 @@ function makeCaptureDb(selects: unknown[][]) {
         return node([{ id: 'link-1', ...v }])
       },
     })),
-    update: mock.fn(() => node([])),
+    // `.set(v)` echoes the patched row back through `.returning()` so
+    // update-then-return flows (recording attach) can assert the result.
+    update: mock.fn(() => ({ set: (v: Record<string, unknown>) => node([{ id: 'link-1', ...v }]) })),
     delete: mock.fn(() => {
       deletes.push(true)
       return node([])
@@ -210,6 +244,25 @@ describe('TasksService external links — CRUD + access', () => {
     assert.equal(inserted[0].kind, 'file')
     assert.equal(inserted[0].externalId, 'FILE_1')
     assert.equal(inserted[0].status, null)
+  })
+
+  it('persists a Dropbox file link (unconfigured) with kind=file, status null', async () => {
+    const { db, inserted } = makeCaptureDb([CTX, ADMIN, []])
+    const svc = makeService(db)
+
+    await svc.addExternalLink('t1', 'u1', {
+      url: 'https://www.dropbox.com/s/abc123/spec.pdf?dl=0',
+      provider: 'dropbox',
+    })
+
+    assert.equal(inserted[0].provider, 'dropbox')
+    assert.equal(inserted[0].kind, 'file')
+    assert.equal(inserted[0].externalId, 'abc123')
+    assert.equal(inserted[0].status, null, 'status stays null when Dropbox is not connected (env-gated)')
+    assert.equal(
+      (inserted[0].metadata as any).ref.sharedUrl,
+      'https://www.dropbox.com/s/abc123/spec.pdf?dl=0',
+    )
   })
 
   it('persists a generic link without any provider-connection lookup', async () => {
@@ -265,5 +318,116 @@ describe('TasksService external links — CRUD + access', () => {
     const out = await svc.removeExternalLink('t1', 'link-1', 'u1')
     assert.deepEqual(out, { ok: true })
     assert.equal(deletes.length, 1)
+  })
+})
+
+// --- Meetings: create + persistence + not-connected 400 (§12.9) -----------
+//
+// The provider API is fully mocked (no live Zoom / Google calls). We assert
+// the persisted task_external_links meeting row, that the task's due date
+// seeds the meeting start_time, and the clean "connect {provider} first" 400
+// when the provider isn't connected.
+
+describe('TasksService meetings — Zoom / Google Meet', () => {
+  it('creates a Zoom meeting and persists a meeting link with the due date as start_time', async () => {
+    const future = new Date(Date.now() + 3_600_000)
+    const conn = [{ id: 'conn-1', status: 'connected', accessToken: 'tok', refreshToken: null, tokenExpiresAt: future }]
+    const task = [{ title: 'Design review', dueDate: new Date('2026-08-01T10:00:00Z') }]
+    const { db, inserted } = makeCaptureDb([CTX, ADMIN, task, conn])
+    const svc = makeService(db)
+
+    const fetchMock = mock.method(
+      globalThis,
+      'fetch',
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 88,
+            join_url: 'https://zoom.us/j/88',
+            topic: 'Design review',
+            start_time: '2026-08-01T10:00:00Z',
+          }),
+        }) as any,
+    )
+    try {
+      const row = await svc.createTaskMeeting('t1', 'u1', 'zoom')
+      assert.equal(inserted.length, 1)
+      assert.equal(inserted[0].provider, 'zoom')
+      assert.equal(inserted[0].kind, 'meeting')
+      assert.equal(inserted[0].url, 'https://zoom.us/j/88')
+      assert.equal(inserted[0].externalId, '88')
+      assert.equal(inserted[0].status, null)
+      assert.equal((row as any).url, 'https://zoom.us/j/88')
+      // Exactly one live call (no token refresh — the token is still fresh).
+      assert.equal(fetchMock.mock.callCount(), 1)
+      const [reqUrl, reqInit] = fetchMock.mock.calls[0].arguments as [string, RequestInit]
+      assert.match(String(reqUrl), /users\/me\/meetings/)
+      const sentBody = JSON.parse(String(reqInit.body))
+      assert.equal(sentBody.start_time, '2026-08-01T10:00:00.000Z')
+      assert.equal(sentBody.type, 2)
+    } finally {
+      fetchMock.mock.restore()
+    }
+  })
+
+  it('creates a Google Meet meeting reusing the gcal connection', async () => {
+    const future = new Date(Date.now() + 3_600_000)
+    const conn = [{ id: 'conn-2', status: 'connected', accessToken: 'gtok', refreshToken: null, tokenExpiresAt: future }]
+    const task = [{ title: 'Standup', dueDate: null }]
+    const { db, inserted } = makeCaptureDb([CTX, ADMIN, task, conn])
+    const svc = makeService(db)
+
+    const fetchMock = mock.method(
+      globalThis,
+      'fetch',
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'evt1',
+            hangoutLink: 'https://meet.google.com/abc-defg-hij',
+            htmlLink: 'https://calendar.google.com/event',
+          }),
+        }) as any,
+    )
+    try {
+      await svc.createTaskMeeting('t1', 'u1', 'google_meet')
+      assert.equal(inserted[0].provider, 'google_meet')
+      assert.equal(inserted[0].kind, 'meeting')
+      assert.equal(inserted[0].url, 'https://meet.google.com/abc-defg-hij')
+      const [reqUrl] = fetchMock.mock.calls[0].arguments as [string]
+      assert.match(String(reqUrl), /conferenceDataVersion=1/)
+    } finally {
+      fetchMock.mock.restore()
+    }
+  })
+
+  it('rejects with a clean "connect zoom first" 400 when the provider is not connected', async () => {
+    const task = [{ title: 'X', dueDate: null }]
+    const { db } = makeCaptureDb([CTX, ADMIN, task, []]) // empty connection lookup
+    const svc = makeService(db)
+    await assert.rejects(() => svc.createTaskMeeting('t1', 'u1', 'zoom'), /connect zoom first/i)
+  })
+
+  it('attaches a recording link to a meeting row', async () => {
+    const meetingLink = [{ id: 'link-1', taskId: 't1', kind: 'meeting', metadata: { meeting: { id: '88' } } }]
+    const { db, inserted: _i } = makeCaptureDb([CTX, ADMIN, meetingLink])
+    void _i
+    const svc = makeService(db)
+    const updated = await svc.attachMeetingRecording('t1', 'link-1', 'u1', 'https://zoom.us/rec/xyz')
+    assert.equal((updated as any).metadata.recordingUrl, 'https://zoom.us/rec/xyz')
+  })
+
+  it('rejects attaching a recording to a non-meeting link', async () => {
+    const fileLink = [{ id: 'link-2', taskId: 't1', kind: 'file', metadata: {} }]
+    const { db } = makeCaptureDb([CTX, ADMIN, fileLink])
+    const svc = makeService(db)
+    await assert.rejects(
+      () => svc.attachMeetingRecording('t1', 'link-2', 'u1', 'https://x.com/rec'),
+      /not a meeting/i,
+    )
   })
 })

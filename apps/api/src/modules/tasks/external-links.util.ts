@@ -8,13 +8,23 @@
  * right endpoint.
  */
 
-export type ExternalLinkProvider = 'github' | 'gitlab' | 'google_drive' | 'link'
-export type ExternalLinkKind = 'commit' | 'pull_request' | 'issue' | 'file' | 'link'
+export type ExternalLinkProvider =
+  | 'github'
+  | 'gitlab'
+  | 'google_drive'
+  | 'dropbox'
+  | 'zoom'
+  | 'google_meet'
+  | 'link'
+export type ExternalLinkKind = 'commit' | 'pull_request' | 'issue' | 'file' | 'meeting' | 'link'
 
 export const EXTERNAL_LINK_PROVIDERS: readonly ExternalLinkProvider[] = [
   'github',
   'gitlab',
   'google_drive',
+  'dropbox',
+  'zoom',
+  'google_meet',
   'link',
 ]
 
@@ -27,6 +37,8 @@ export interface ExternalLinkRef {
   projectPath?: string
   host?: string
   fileId?: string
+  /** Full share URL for a Dropbox link — needed for the metadata lookup. */
+  sharedUrl?: string
 }
 
 export interface ParsedExternalLink {
@@ -52,7 +64,11 @@ function shortSha(sha: string): string {
 }
 
 function knownProvider(hint?: string): ExternalLinkProvider | undefined {
-  return hint === 'github' || hint === 'gitlab' || hint === 'google_drive' || hint === 'link'
+  return hint === 'github' ||
+    hint === 'gitlab' ||
+    hint === 'google_drive' ||
+    hint === 'dropbox' ||
+    hint === 'link'
     ? hint
     : undefined
 }
@@ -64,6 +80,7 @@ const DRIVE_HOSTS = new Set([
   'sheets.google.com',
   'slides.google.com',
 ])
+const DROPBOX_HOSTS = new Set(['dropbox.com', 'www.dropbox.com'])
 
 /**
  * Detect provider/kind/externalId from a pasted URL. `providerHint` (the
@@ -149,6 +166,30 @@ export function parseExternalLinkUrl(rawUrl: string, providerHint?: string): Par
       }
     }
     return { provider: 'google_drive', kind: 'link', externalId: null, title: null, ref: {} }
+  }
+
+  // --- Dropbox share links ------------------------------------------------
+  // File shares embed the filename as the final path segment:
+  //   /s/<key>/<file>        (legacy)
+  //   /scl/fi/<id>/<file>    (current)
+  // Folder shares (/scl/fo/…) have no filename → treated as a plain dropbox link.
+  if (DROPBOX_HOSTS.has(host)) {
+    const sharedUrl = url.toString()
+    const sIdx = segs.indexOf('s')
+    const fiIdx = segs.indexOf('fi')
+    const idIdx = fiIdx >= 0 ? fiIdx + 1 : sIdx >= 0 ? sIdx + 1 : -1
+    if (idIdx >= 0 && segs[idIdx]) {
+      const fileId = segs[idIdx]
+      const name = segs[idIdx + 1] ? decodeURIComponent(segs[idIdx + 1]) : null
+      return {
+        provider: 'dropbox',
+        kind: 'file',
+        externalId: fileId,
+        title: name,
+        ref: { fileId, sharedUrl },
+      }
+    }
+    return { provider: 'dropbox', kind: 'link', externalId: null, title: null, ref: { sharedUrl } }
   }
 
   // --- GitLab (gitlab.com + self-hosted) ---------------------------------

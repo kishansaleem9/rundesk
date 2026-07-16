@@ -1,6 +1,6 @@
 import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator'
 
-const PROVIDERS = ['github', 'gitlab', 'google_drive', 'link'] as const
+const PROVIDERS = ['github', 'gitlab', 'google_drive', 'dropbox', 'link'] as const
 
 /**
  * Create a task ↔ external-service link (Plan §12.8 / §12.2). Only `url` is

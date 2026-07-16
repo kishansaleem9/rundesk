@@ -1,4 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
+import { randomUUID } from 'node:crypto'
 import { eq, and, asc, desc, inArray, isNull, sql } from 'drizzle-orm'
 import {
   tasks,
@@ -697,7 +698,7 @@ export class TasksService {
    */
   private async getProviderToken(
     workspaceId: string,
-    connectionProvider: 'github' | 'gitlab' | 'google-drive',
+    connectionProvider: 'github' | 'gitlab' | 'google-drive' | 'dropbox',
   ): Promise<string | null> {
     const [conn] = await this.db
       .select({ status: workspaceIntegrationConnections.status, accessToken: workspaceIntegrationConnections.accessToken })
@@ -740,6 +741,11 @@ export class TasksService {
         const token = await this.getProviderToken(workspaceId, 'google-drive')
         if (!token) return null
         return await this.fetchDriveFile(ref, token)
+      }
+      if (provider === 'dropbox' && kind === 'file') {
+        const token = await this.getProviderToken(workspaceId, 'dropbox')
+        if (!token) return null
+        return await this.fetchDropboxFile(ref, token)
       }
     } catch {
       // Network / auth / rate-limit failure — degrade gracefully.
@@ -832,6 +838,282 @@ export class TasksService {
         iconLink: body.iconLink ?? null,
       },
     }
+  }
+
+  private async fetchDropboxFile(
+    ref: ExternalLinkRef,
+    token: string,
+  ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
+    if (!ref.sharedUrl) return null
+    const base = process.env.DROPBOX_API_URL ?? 'https://api.dropboxapi.com/2'
+    const res = await fetch(`${base}/sharing/get_shared_link_metadata`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: ref.sharedUrl }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { name?: string; '.tag'?: string; size?: number }
+    return {
+      status: null, // Files have no open/merged/closed state.
+      title: body.name ?? null,
+      metadata: {
+        dropboxType: body['.tag'] ?? null,
+        size: body.size ?? null,
+      },
+    }
+  }
+
+  // --- Meetings (Plan §12.9 Zoom / Google Meet) ----------------------------
+  //
+  // One-click meeting creation from a task. When the provider is connected we
+  // create a real meeting (Zoom `POST /users/me/meetings`; Google Meet via a
+  // Google Calendar event with `conferenceData.createRequest` reusing the gcal
+  // connection), seed its start time from the task's due date, and persist the
+  // join URL as a `task_external_links` row (kind 'meeting'). Not connected →
+  // a clean "connect {provider} first" 400.
+
+  /** Create a Zoom or Google Meet meeting for a task and store the join link. */
+  async createTaskMeeting(taskId: string, userId: string, provider: 'zoom' | 'google_meet') {
+    const ctx = await this.assertTaskWriteAccess(taskId, userId)
+    const [task] = await this.db
+      .select({ title: tasks.title, dueDate: tasks.dueDate })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!task) throw new NotFoundException('Task not found')
+
+    // Google Meet reuses the workspace's Google Calendar connection; Zoom has
+    // its own OAuth connection.
+    const connectionProvider = provider === 'zoom' ? 'zoom' : 'gcal'
+    const conn = await this.loadIntegrationConnection(ctx.workspaceId, connectionProvider)
+    if (!conn) {
+      const label = provider === 'zoom' ? 'Zoom' : 'Google Meet'
+      throw new BadRequestException(`Connect ${label} first`)
+    }
+
+    const created =
+      provider === 'zoom'
+        ? await this.createZoomMeeting(conn, task.title, task.dueDate)
+        : await this.createGoogleMeet(conn, task.title, task.dueDate)
+
+    const [row] = await this.db
+      .insert(taskExternalLinks)
+      .values({
+        taskId,
+        workspaceId: ctx.workspaceId,
+        provider,
+        kind: 'meeting',
+        url: created.joinUrl,
+        externalId: created.meetingId,
+        title: created.title ?? task.title,
+        status: null,
+        metadata: {
+          meeting: { id: created.meetingId, startTime: created.startTime },
+          ...(created.metadata ?? {}),
+        },
+        createdById: userId,
+      })
+      .returning()
+    return row
+  }
+
+  /** Attach a post-meeting recording link to an existing meeting link. */
+  async attachMeetingRecording(taskId: string, linkId: string, userId: string, url: string) {
+    await this.assertTaskWriteAccess(taskId, userId)
+    const recordingUrl = (url ?? '').trim()
+    if (!isHttpUrl(recordingUrl)) throw new BadRequestException('A valid http(s) URL is required')
+
+    const [link] = await this.db
+      .select()
+      .from(taskExternalLinks)
+      .where(and(eq(taskExternalLinks.id, linkId), eq(taskExternalLinks.taskId, taskId)))
+      .limit(1)
+    if (!link) throw new NotFoundException('Meeting link not found')
+    if (link.kind !== 'meeting') throw new BadRequestException('This link is not a meeting')
+
+    const metadata: Record<string, unknown> = { ...(link.metadata ?? {}), recordingUrl }
+    const [updated] = await this.db
+      .update(taskExternalLinks)
+      .set({ metadata })
+      .where(eq(taskExternalLinks.id, linkId))
+      .returning()
+    return updated
+  }
+
+  /**
+   * Load a connected integration connection (with tokens) for a provider, or
+   * null when the provider isn't connected / has no stored access token.
+   */
+  private async loadIntegrationConnection(
+    workspaceId: string,
+    provider: 'zoom' | 'gcal',
+  ): Promise<{
+    id: string
+    accessToken: string
+    refreshToken: string | null
+    tokenExpiresAt: Date | null
+  } | null> {
+    const [conn] = await this.db
+      .select({
+        id: workspaceIntegrationConnections.id,
+        status: workspaceIntegrationConnections.status,
+        accessToken: workspaceIntegrationConnections.accessToken,
+        refreshToken: workspaceIntegrationConnections.refreshToken,
+        tokenExpiresAt: workspaceIntegrationConnections.tokenExpiresAt,
+      })
+      .from(workspaceIntegrationConnections)
+      .where(
+        and(
+          eq(workspaceIntegrationConnections.workspaceId, workspaceId),
+          eq(workspaceIntegrationConnections.provider, provider),
+        ),
+      )
+      .limit(1)
+    if (!conn || conn.status !== 'connected' || !conn.accessToken) return null
+    return {
+      id: conn.id,
+      accessToken: conn.accessToken,
+      refreshToken: conn.refreshToken,
+      tokenExpiresAt: conn.tokenExpiresAt,
+    }
+  }
+
+  private async createZoomMeeting(
+    conn: { id: string; accessToken: string; refreshToken: string | null; tokenExpiresAt: Date | null },
+    title: string,
+    dueDate: Date | null,
+  ): Promise<{ joinUrl: string; meetingId: string | null; title: string | null; startTime: string | null; metadata?: Record<string, unknown> }> {
+    const token = await this.ensureMeetingToken(conn, 'zoom')
+    const base = process.env.ZOOM_API_URL ?? 'https://api.zoom.us/v2'
+    const res = await fetch(`${base}/users/me/meetings`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: title,
+        // 2 = scheduled (with a start_time), 1 = instant.
+        type: dueDate ? 2 : 1,
+        ...(dueDate ? { start_time: dueDate.toISOString() } : {}),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) throw new BadRequestException(`Zoom meeting creation failed (${res.status})`)
+    const body = (await res.json()) as {
+      id?: number | string
+      join_url?: string
+      start_time?: string
+      topic?: string
+    }
+    if (!body.join_url) throw new BadRequestException('Zoom did not return a join URL')
+    return {
+      joinUrl: body.join_url,
+      meetingId: body.id != null ? String(body.id) : null,
+      title: body.topic ?? title,
+      startTime: body.start_time ?? dueDate?.toISOString() ?? null,
+    }
+  }
+
+  private async createGoogleMeet(
+    conn: { id: string; accessToken: string; refreshToken: string | null; tokenExpiresAt: Date | null },
+    title: string,
+    dueDate: Date | null,
+  ): Promise<{ joinUrl: string; meetingId: string | null; title: string | null; startTime: string | null; metadata?: Record<string, unknown> }> {
+    const token = await this.ensureMeetingToken(conn, 'gcal')
+    const start = dueDate ?? new Date(Date.now() + 60 * 60 * 1000)
+    const end = new Date(start.getTime() + 30 * 60 * 1000)
+    const base = process.env.GOOGLE_CALENDAR_API_URL ?? 'https://www.googleapis.com/calendar/v3'
+    const res = await fetch(`${base}/calendars/primary/events?conferenceDataVersion=1`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        summary: title,
+        start: { dateTime: start.toISOString() },
+        end: { dateTime: end.toISOString() },
+        conferenceData: {
+          createRequest: {
+            requestId: `rundesk-${randomUUID()}`,
+            conferenceSolutionKey: { type: 'hangoutsMeet' },
+          },
+        },
+      }),
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) throw new BadRequestException(`Google Meet creation failed (${res.status})`)
+    const body = (await res.json()) as {
+      id?: string
+      hangoutLink?: string
+      htmlLink?: string
+      conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> }
+    }
+    const meetUrl =
+      body.hangoutLink ??
+      body.conferenceData?.entryPoints?.find((e) => e.entryPointType === 'video')?.uri ??
+      null
+    if (!meetUrl) throw new BadRequestException('Google did not return a Meet link')
+    return {
+      joinUrl: meetUrl,
+      meetingId: body.id ?? null,
+      title,
+      startTime: start.toISOString(),
+      metadata: { eventUrl: body.htmlLink ?? null },
+    }
+  }
+
+  /**
+   * Return a usable access token for a meeting-provider connection, refreshing
+   * via the refresh_token grant when expired/near-expiry (60s buffer). Zoom
+   * authenticates the refresh via HTTP Basic; Google via body params. Failures
+   * fall back to the stored token so a flaky refresh doesn't block creation.
+   */
+  private async ensureMeetingToken(
+    conn: { id: string; accessToken: string; refreshToken: string | null; tokenExpiresAt: Date | null },
+    provider: 'zoom' | 'gcal',
+  ): Promise<string> {
+    const remaining = conn.tokenExpiresAt ? conn.tokenExpiresAt.getTime() - Date.now() : Infinity
+    if (remaining > 60_000 || !conn.refreshToken) return conn.accessToken
+
+    const cfg =
+      provider === 'zoom'
+        ? {
+            tokenUrl: process.env.ZOOM_TOKEN_URL ?? 'https://zoom.us/oauth/token',
+            clientId: process.env.ZOOM_CLIENT_ID ?? '',
+            clientSecret: process.env.ZOOM_CLIENT_SECRET ?? '',
+            basic: true,
+          }
+        : {
+            tokenUrl: 'https://oauth2.googleapis.com/token',
+            clientId: process.env.GOOGLE_CLIENT_ID ?? '',
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+            basic: false,
+          }
+    const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: conn.refreshToken })
+    const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' }
+    if (cfg.basic) {
+      headers.Authorization = `Basic ${Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64')}`
+    } else {
+      body.set('client_id', cfg.clientId)
+      body.set('client_secret', cfg.clientSecret)
+    }
+    const res = await fetch(cfg.tokenUrl, {
+      method: 'POST',
+      headers,
+      body: body.toString(),
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return conn.accessToken
+    const tok = (await res.json()) as { access_token?: string; expires_in?: number; refresh_token?: string }
+    if (!tok.access_token) return conn.accessToken
+    const newExpiry = tok.expires_in ? new Date(Date.now() + tok.expires_in * 1000) : null
+    await this.db
+      .update(workspaceIntegrationConnections)
+      .set({
+        accessToken: tok.access_token,
+        refreshToken: tok.refresh_token ?? conn.refreshToken,
+        tokenExpiresAt: newExpiry,
+        updatedAt: new Date(),
+      })
+      .where(eq(workspaceIntegrationConnections.id, conn.id))
+    return tok.access_token
   }
 
   // --- Task CRUD -----------------------------------------------------------

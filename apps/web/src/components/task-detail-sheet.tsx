@@ -33,6 +33,8 @@ import {
   RefreshCw,
   Link2,
   FileText,
+  Box,
+  Video,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
@@ -1413,7 +1415,7 @@ function OverviewPanel({
 
       <LinkedDocsSection taskId={taskId} workspaceId={workspaceId} />
 
-      <LinkedWorkSection taskId={taskId} />
+      <LinkedWorkSection taskId={taskId} workspaceId={workspaceId} />
     </div>
   )
 }
@@ -1433,24 +1435,33 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
 
 type ExternalLink = {
   id: string
-  provider: 'github' | 'gitlab' | 'google_drive' | 'link'
-  kind: 'commit' | 'pull_request' | 'issue' | 'file' | 'link'
+  provider: 'github' | 'gitlab' | 'google_drive' | 'dropbox' | 'zoom' | 'google_meet' | 'link'
+  kind: 'commit' | 'pull_request' | 'issue' | 'file' | 'meeting' | 'link'
   url: string
   externalId: string | null
   title: string | null
   status: string | null
-  metadata: { mimeType?: string | null; thumbnailLink?: string | null; iconLink?: string | null } | null
+  metadata:
+    | {
+        mimeType?: string | null
+        thumbnailLink?: string | null
+        iconLink?: string | null
+        recordingUrl?: string | null
+      }
+    | null
   createdAt: string
 }
 
 /** Icon for a link, keyed by provider + kind (PR/issue/commit get git glyphs). */
 function linkIcon(link: ExternalLink) {
+  if (link.kind === 'meeting') return Video
   if (link.kind === 'pull_request') return GitPullRequest
   if (link.kind === 'issue') return CircleDot
   if (link.kind === 'commit') return GitCommit
   if (link.provider === 'github') return Github
   if (link.provider === 'gitlab') return Gitlab
   if (link.provider === 'google_drive') return FileText
+  if (link.provider === 'dropbox') return Box
   return Link2
 }
 
@@ -1462,7 +1473,7 @@ function linkIcon(link: ExternalLink) {
  * API when the workspace has the provider connected; otherwise links show a
  * neutral "Linked" badge.
  */
-function LinkedWorkSection({ taskId }: { taskId: string }) {
+function LinkedWorkSection({ taskId, workspaceId }: { taskId: string; workspaceId?: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [url, setUrl] = useState('')
@@ -1470,6 +1481,16 @@ function LinkedWorkSection({ taskId }: { taskId: string }) {
   const linksQuery = useQuery({
     queryKey: ['task-external-links', taskId],
     queryFn: () => api<ExternalLink[]>(`/tasks/${taskId}/links`),
+  })
+  // Which providers are connected drives whether the meeting buttons are
+  // enabled (Zoom = its own connection, Google Meet = the gcal connection).
+  const connectionsQuery = useQuery({
+    queryKey: ['integration-connections', workspaceId],
+    queryFn: () =>
+      api<Array<{ provider: string; status: string }>>(
+        `/workspaces/${workspaceId}/integrations/connections`,
+      ),
+    enabled: !!workspaceId,
   })
   const invalidate = () => qc.invalidateQueries({ queryKey: ['task-external-links', taskId] })
 
@@ -1489,6 +1510,18 @@ function LinkedWorkSection({ taskId }: { taskId: string }) {
     mutationFn: (linkId: string) => api(`/tasks/${taskId}/links/${linkId}`, { method: 'DELETE' }),
     onSuccess: invalidate,
   })
+  const createMeeting = useMutation({
+    mutationFn: (provider: 'zoom' | 'google_meet') =>
+      api(`/tasks/${taskId}/meeting`, { method: 'POST', body: { provider } }),
+    onSuccess: invalidate,
+    onError: () => toast.error(t('taskDetail.meetings.createError')),
+  })
+  const attachRecording = useMutation({
+    mutationFn: ({ linkId, recordingUrl }: { linkId: string; recordingUrl: string }) =>
+      api(`/tasks/${taskId}/meeting/${linkId}/recording`, { method: 'POST', body: { url: recordingUrl } }),
+    onSuccess: invalidate,
+    onError: () => toast.error(t('taskDetail.meetings.recordingError')),
+  })
 
   const submit = () => {
     const u = url.trim()
@@ -1498,6 +1531,14 @@ function LinkedWorkSection({ taskId }: { taskId: string }) {
     }
     add.mutate(u)
   }
+
+  const connected = useMemo(() => {
+    const set = new Set<string>()
+    for (const c of connectionsQuery.data ?? []) if (c.status === 'connected') set.add(c.provider)
+    return set
+  }, [connectionsQuery.data])
+  const zoomConnected = connected.has('zoom')
+  const meetConnected = connected.has('gcal')
 
   const links = linksQuery.data ?? []
 
@@ -1530,6 +1571,33 @@ function LinkedWorkSection({ taskId }: { taskId: string }) {
         </Button>
       </div>
 
+      {/* One-click meeting creation (Plan §12.9). Disabled with a hint until
+          the matching provider is connected in Integrations. */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 shrink-0"
+          disabled={!zoomConnected || createMeeting.isPending}
+          title={zoomConnected ? undefined : t('taskDetail.meetings.connectHint')}
+          onClick={() => createMeeting.mutate('zoom')}
+        >
+          <Video className="h-3.5 w-3.5 mr-1" />
+          {t('taskDetail.meetings.createZoom')}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 shrink-0"
+          disabled={!meetConnected || createMeeting.isPending}
+          title={meetConnected ? undefined : t('taskDetail.meetings.connectHint')}
+          onClick={() => createMeeting.mutate('google_meet')}
+        >
+          <Video className="h-3.5 w-3.5 mr-1" />
+          {t('taskDetail.meetings.createMeet')}
+        </Button>
+      </div>
+
       {links.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t('taskDetail.linkedWork.empty')}</p>
       ) : (
@@ -1540,7 +1608,8 @@ function LinkedWorkSection({ taskId }: { taskId: string }) {
               link={l}
               onRefresh={() => refresh.mutate(l.id)}
               onUnlink={() => unlink.mutate(l.id)}
-              busy={refresh.isPending || unlink.isPending}
+              onAttachRecording={(recordingUrl) => attachRecording.mutate({ linkId: l.id, recordingUrl })}
+              busy={refresh.isPending || unlink.isPending || attachRecording.isPending}
             />
           ))}
         </div>
@@ -1581,14 +1650,17 @@ function LinkedWorkRow({
   link,
   onRefresh,
   onUnlink,
+  onAttachRecording,
   busy,
 }: {
   link: ExternalLink
   onRefresh: () => void
   onUnlink: () => void
+  onAttachRecording: (url: string) => void
   busy: boolean
 }) {
   const { t } = useTranslation()
+  const [recordingUrl, setRecordingUrl] = useState('')
   const Icon = linkIcon(link)
   const kindKey: TranslationKey =
     link.kind === 'commit'
@@ -1599,61 +1671,121 @@ function LinkedWorkRow({
           ? 'taskDetail.linkedWork.kindIssue'
           : link.kind === 'file'
             ? 'taskDetail.linkedWork.kindFile'
-            : 'taskDetail.linkedWork.kindLink'
-  const label =
-    link.title ||
-    link.externalId ||
-    (link.provider === 'google_drive' ? t('taskDetail.linkedWork.driveFile') : link.url)
+            : link.kind === 'meeting'
+              ? 'taskDetail.linkedWork.kindMeeting'
+              : 'taskDetail.linkedWork.kindLink'
+  const fallbackLabel =
+    link.provider === 'google_drive'
+      ? t('taskDetail.linkedWork.driveFile')
+      : link.provider === 'dropbox'
+        ? t('taskDetail.linkedWork.dropboxFile')
+        : link.url
+  const label = link.title || link.externalId || fallbackLabel
   // Drive files surface their mime type; everything else shows the kind.
   const typeText =
     link.provider === 'google_drive' && link.metadata?.mimeType ? String(link.metadata.mimeType) : t(kindKey)
   const canRefresh =
     ((link.provider === 'github' || link.provider === 'gitlab') &&
       (link.kind === 'pull_request' || link.kind === 'issue')) ||
-    (link.provider === 'google_drive' && link.kind === 'file')
+    ((link.provider === 'google_drive' || link.provider === 'dropbox') && link.kind === 'file')
+  const isMeeting = link.kind === 'meeting'
+  const recording = link.metadata?.recordingUrl ?? null
+
+  const submitRecording = () => {
+    const u = recordingUrl.trim()
+    if (!/^https?:\/\//i.test(u)) {
+      toast.error(t('taskDetail.linkedWork.invalidUrl'))
+      return
+    }
+    onAttachRecording(u)
+    setRecordingUrl('')
+  }
 
   return (
-    <div className="group flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5 text-sm hover:bg-accent/5">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-      <a
-        href={link.url}
-        target="_blank"
-        rel="noreferrer"
-        className="flex min-w-0 flex-1 flex-col hover:underline"
-      >
-        <span className="truncate">{label}</span>
-        <span className="truncate text-[11px] text-muted-foreground no-underline">{typeText}</span>
-      </a>
-      <LinkedWorkStatusBadge status={link.status} />
-      {canRefresh && (
-        <button
-          type="button"
-          title={t('taskDetail.linkedWork.refresh')}
-          disabled={busy}
-          onClick={onRefresh}
+    <div className="rounded-md border border-border/60 hover:bg-accent/5">
+      <div className="group flex items-center gap-2 px-2 py-1.5 text-sm">
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <a
+          href={link.url}
+          target="_blank"
+          rel="noreferrer"
+          className="flex min-w-0 flex-1 flex-col hover:underline"
+        >
+          <span className="truncate">{label}</span>
+          <span className="truncate text-[11px] text-muted-foreground no-underline">{typeText}</span>
+        </a>
+        <LinkedWorkStatusBadge status={link.status} />
+        {canRefresh && (
+          <button
+            type="button"
+            title={t('taskDetail.linkedWork.refresh')}
+            disabled={busy}
+            onClick={onRefresh}
+            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <a
+          href={link.url}
+          target="_blank"
+          rel="noreferrer"
+          title={isMeeting ? t('taskDetail.meetings.join') : t('taskDetail.linkedWork.open')}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
         >
-          <RefreshCw className="h-3.5 w-3.5" />
+          <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+        <button
+          type="button"
+          title={t('taskDetail.linkedWork.unlink')}
+          disabled={busy}
+          onClick={onUnlink}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-rose-500 group-hover:opacity-100"
+        >
+          <XIcon className="h-3.5 w-3.5" />
         </button>
+      </div>
+
+      {/* Recording link — attach after the meeting, or open an attached one. */}
+      {isMeeting && (
+        <div className="flex items-center gap-1.5 px-2 pb-1.5">
+          {recording ? (
+            <a
+              href={recording}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+            >
+              <Video className="h-3 w-3" />
+              {t('taskDetail.meetings.recording')}
+            </a>
+          ) : (
+            <>
+              <Input
+                value={recordingUrl}
+                onChange={(e) => setRecordingUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    submitRecording()
+                  }
+                }}
+                placeholder={t('taskDetail.meetings.recordingPlaceholder')}
+                className="h-7 text-[12px]"
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 shrink-0 text-[12px]"
+                disabled={busy || !recordingUrl.trim()}
+                onClick={submitRecording}
+              >
+                {t('taskDetail.meetings.attachRecording')}
+              </Button>
+            </>
+          )}
+        </div>
       )}
-      <a
-        href={link.url}
-        target="_blank"
-        rel="noreferrer"
-        title={t('taskDetail.linkedWork.open')}
-        className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
-      >
-        <ExternalLink className="h-3.5 w-3.5" />
-      </a>
-      <button
-        type="button"
-        title={t('taskDetail.linkedWork.unlink')}
-        disabled={busy}
-        onClick={onUnlink}
-        className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-rose-500 group-hover:opacity-100"
-      >
-        <XIcon className="h-3.5 w-3.5" />
-      </button>
     </div>
   )
 }
