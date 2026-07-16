@@ -42,7 +42,6 @@ import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
-import { MentionText } from '../components/mention-text'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
 import { ChatAttachmentList } from '../components/chat/chat-attachments'
 
@@ -1752,6 +1751,7 @@ export function ChatPage() {
             pending={sendMutation.isPending}
             namesById={namesById}
             customEmoji={customEmoji}
+            emojiByCode={emojiByCode}
           />
         )}
         {selectedProfile && (
@@ -1784,6 +1784,7 @@ export function ChatPage() {
             messages={pinnedMessages}
             loading={pinnedQuery.isLoading}
             namesById={namesById}
+            emojiByCode={emojiByCode}
             onClose={() => setShowPinnedPanel(false)}
             onOpenThread={(id) => setThreadParentId(id)}
           />
@@ -1793,6 +1794,7 @@ export function ChatPage() {
             messages={savedMessages}
             loading={savedQuery.isLoading}
             namesById={namesById}
+            emojiByCode={emojiByCode}
             onClose={() => setShowSavedPanel(false)}
             onOpenThread={(id, channelId) => {
               // A saved message may live in another channel — switch to it first.
@@ -1835,12 +1837,14 @@ function PinnedPanel({
   messages,
   loading,
   namesById,
+  emojiByCode,
   onClose,
   onOpenThread,
 }: {
   messages: Message[]
   loading?: boolean
   namesById: Record<string, string>
+  emojiByCode: Map<string, string>
   onClose: () => void
   onOpenThread: (id: string) => void
 }) {
@@ -1862,7 +1866,7 @@ function PinnedPanel({
           messages.map((m) => (
             <Card key={m.id} className="p-3">
               <div className="text-xs text-muted-foreground">{m.authorName ?? t('chat.unknownUser')}</div>
-              <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
+              <ChatMessageBody text={m.body} namesById={namesById} customEmoji={emojiByCode} className="text-sm mt-1" />
               {(m.pinnedByName || m.pinnedAt) && (
                 <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
                   <Pin className="h-2.5 w-2.5" />
@@ -1887,6 +1891,7 @@ function SavedPanel({
   messages,
   loading,
   namesById,
+  emojiByCode,
   onClose,
   onOpenThread,
   onUnsave,
@@ -1895,6 +1900,7 @@ function SavedPanel({
   messages: SavedMessage[]
   loading?: boolean
   namesById: Record<string, string>
+  emojiByCode: Map<string, string>
   onClose: () => void
   onOpenThread: (id: string, channelId: string) => void
   onUnsave: (id: string) => void
@@ -1973,6 +1979,7 @@ function SavedPanel({
               key={m.id}
               m={m}
               namesById={namesById}
+              emojiByCode={emojiByCode}
               onOpenThread={onOpenThread}
               onUnsave={onUnsave}
               onUpdateTags={onUpdateTags}
@@ -1987,12 +1994,14 @@ function SavedPanel({
 function SavedMessageCard({
   m,
   namesById,
+  emojiByCode,
   onOpenThread,
   onUnsave,
   onUpdateTags,
 }: {
   m: SavedMessage
   namesById: Record<string, string>
+  emojiByCode: Map<string, string>
   onOpenThread: (id: string, channelId: string) => void
   onUnsave: (id: string) => void
   onUpdateTags: (messageId: string, tags: string[]) => void
@@ -2023,7 +2032,7 @@ function SavedMessageCard({
           {t('chat.remove')}
         </button>
       </div>
-      <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
+      <ChatMessageBody text={m.body} namesById={namesById} customEmoji={emojiByCode} className="text-sm mt-1" />
       <div className="mt-2 flex flex-wrap items-center gap-1">
         {tags.map((tag) => (
           <span
@@ -2339,6 +2348,7 @@ function ThreadPanel({
   pending,
   namesById,
   customEmoji,
+  emojiByCode,
 }: {
   parent: Message
   replies: Message[]
@@ -2347,6 +2357,7 @@ function ThreadPanel({
   pending: boolean
   namesById: Record<string, string>
   customEmoji?: CustomEmoji[]
+  emojiByCode: Map<string, string>
 }) {
   const [draft, setDraft] = useState('')
   const { t } = useTranslation()
@@ -2365,12 +2376,12 @@ function ThreadPanel({
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white dark:bg-[#0f1114]">
         <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
           <div className="text-[12px] font-semibold text-foreground mb-1">{parent.authorName ?? t('chat.unknownUser')}</div>
-          <MentionText text={parent.body} namesById={namesById} className="text-[14px] leading-relaxed" />
+          <ChatMessageBody text={parent.body} namesById={namesById} customEmoji={emojiByCode} className="text-[14px] leading-relaxed" />
         </div>
         {replies.map((reply) => (
           <div key={reply.id} className="rounded-lg border border-border/70 bg-background p-3">
             <div className="text-[12px] font-semibold text-foreground mb-1">{reply.authorName ?? t('chat.unknownUser')}</div>
-            <MentionText text={reply.body} namesById={namesById} className="text-[14px] leading-relaxed" />
+            <ChatMessageBody text={reply.body} namesById={namesById} customEmoji={emojiByCode} className="text-[14px] leading-relaxed" />
           </div>
         ))}
         {replies.length === 0 && (

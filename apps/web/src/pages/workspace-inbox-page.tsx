@@ -4,6 +4,7 @@ import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
 import { Bell, AtSign, MessageSquare, UserPlus, RefreshCw, Ban } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
+import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -99,47 +100,19 @@ export function InboxPage() {
 
   // Navigate to a resolved path, splitting any query string into `search` so
   // deep-links like /app/:ws/chat?channel=..&message=.. actually carry params.
-  const go = (dest: string) => {
-    const qIdx = dest.indexOf('?')
-    if (qIdx === -1) {
-      navigate({ to: dest as any })
-      return
-    }
-    const pathname = dest.slice(0, qIdx)
-    const params = new URLSearchParams(dest.slice(qIdx + 1))
-    const search: Record<string, string> = {}
-    params.forEach((v, k) => {
-      search[k] = v
-    })
-    navigate({ to: pathname as any, search: search as any })
-  }
+  const go = (dest: string) => goToDestination(navigate, dest)
 
-  const resolveDestination = async (notif: Notification) => {
-    const raw = notif.target?.url?.trim()
-    if (!raw) return null
-    let path = raw
-    if (raw.startsWith('http://') || raw.startsWith('https://')) {
-      try {
-        const parsed = new URL(raw)
-        path = `${parsed.pathname}${parsed.search}${parsed.hash}`
-      } catch {
-        path = raw
-      }
-    }
-    if (path.startsWith('/app/') && !/\/tasks\/[0-9a-f-]{36}$/i.test(path)) return path
+  const resolveDestination = (notif: Notification) => resolveNotificationDestination(notif.target, workspaceId)
 
-    const taskIdFromTarget = notif.target?.entityType === 'task' ? notif.target.entityId : null
-    const taskIdFromLegacyPath = path.match(/\/tasks\/([0-9a-f-]{36})$/i)?.[1] ?? null
-    const taskId = taskIdFromTarget ?? taskIdFromLegacyPath
-    if (!taskId) return path.startsWith('/') ? path : null
-
-    try {
-      const nav = await api<{ url: string }>(`/tasks/${taskId}/navigation`)
-      return nav.url
-    } catch {
-      return workspaceId ? `/app/${workspaceId}` : null
-    }
-  }
+  const markAllRead = useMutation({
+    mutationFn: () => api('/notifications/mark-all-read', { method: 'POST' }),
+    onSuccess: async () => {
+      // Matches both the inbox list (['notifications', workspaceId]) and the
+      // topbar bell's recent list (['notifications', 'recent']) by prefix.
+      await qc.invalidateQueries({ queryKey: ['notifications'] })
+      await qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
+    },
+  })
 
   return (
     <div className="h-full flex flex-col">
@@ -153,9 +126,19 @@ export function InboxPage() {
             <h1 className="font-display text-2xl font-semibold leading-tight">{t('inbox.title')}</h1>
           </div>
           {unread.length > 0 && (
-            <Badge variant="gradient" className="ml-auto text-[10px]">
-              {t('inbox.new', { count: unread.length })}
-            </Badge>
+            <div className="ml-auto flex items-center gap-2">
+              <Badge variant="gradient" className="text-[10px]">
+                {t('inbox.new', { count: unread.length })}
+              </Badge>
+              <button
+                type="button"
+                onClick={() => markAllRead.mutate()}
+                disabled={markAllRead.isPending}
+                className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
+              >
+                {t('topbar.markAllRead')}
+              </button>
+            </div>
           )}
         </div>
         <p className="text-sm text-muted-foreground mt-0.5 max-w-xl">

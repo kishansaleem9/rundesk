@@ -4255,6 +4255,8 @@ export const en = {
   'import.attachmentsImported': 'Attachments',
   'import.attachmentsSkipped': 'Attachments skipped',
 
+  'topbar.viewAllNotifications': 'View all',
+
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
   'auth.email': 'Email',
@@ -8567,6 +8569,8 @@ export const es: Record<TranslationKey, string> = {
   'import.attachmentsImported': 'Adjuntos',
   'import.attachmentsSkipped': 'Adjuntos omitidos',
 
+  'topbar.viewAllNotifications': 'Ver todo',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -12872,6 +12876,8 @@ export const ar: Record<TranslationKey, string> = {
   'import.attachmentsImported': 'المرفقات',
   'import.attachmentsSkipped': 'المرفقات المتخطّاة',
 
+  'topbar.viewAllNotifications': 'عرض الكل',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -17026,6 +17032,8 @@ export const ur: Record<TranslationKey, string> = {
   'import.commentsImported': 'تبصرے',
   'import.attachmentsImported': 'منسلکات',
   'import.attachmentsSkipped': 'چھوڑے گئے منسلکات',
+
+  'topbar.viewAllNotifications': 'سب دیکھیں',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',

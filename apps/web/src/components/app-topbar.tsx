@@ -45,6 +45,7 @@ import { applyBrandColor } from '../lib/branding'
 import { LanguageSwitcher } from './language-switcher'
 import { useTranslation } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
+import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { QuickCreateModal } from './quick-create-modal'
 import { getRealtimeSocket } from '../lib/realtime'
 import { MentionText } from './mention-text'
@@ -449,6 +450,11 @@ type Notification = {
   readAt?: string | null
   createdAt: string
   actor?: { displayName?: string | null } | null
+  // §10.1 — click-through target. `url` is the API's pre-resolved link; `target`
+  // carries the raw entity so the shared resolver can look up a task's live
+  // location. Both come straight off `GET /notifications`.
+  url?: string | null
+  target?: { url?: string; entityType?: string; entityId?: string } | null
 }
 
 type NotificationEventKey = 'mention' | 'assigned' | 'comment' | 'due' | 'status' | 'doc' | 'chat' | 'activity'
@@ -467,6 +473,7 @@ type NotificationPreferences = {
 function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
   const [open, setOpen] = useState(false)
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const { t, tCount } = useTranslation()
   const { namesById } = useMentionNames(workspaceId)
   const prefsQuery = useQuery({
@@ -653,7 +660,14 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
               {notifs.slice(0, 20).map((n) => (
                 <li
                   key={n.id}
-                  onClick={() => !n.readAt && markRead.mutate(n.id)}
+                  onClick={async () => {
+                    if (!n.readAt) markRead.mutate(n.id)
+                    const destination = await resolveNotificationDestination(n.target, workspaceId)
+                    if (destination) {
+                      setOpen(false)
+                      goToDestination(navigate, destination)
+                    }
+                  }}
                   className={cn(
                     'px-4 py-3 border-b border-border/40 last:border-0 cursor-pointer hover:bg-card/60 transition-colors',
                     !n.readAt && 'bg-accent/5',
@@ -683,6 +697,18 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
             </ul>
           )}
         </div>
+        {workspaceId && (
+          <div className="px-4 py-2.5 border-t border-border/60 shrink-0">
+            <Link
+              to="/app/$workspaceId/inbox"
+              params={{ workspaceId }}
+              onClick={() => setOpen(false)}
+              className="block text-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {t('topbar.viewAllNotifications')}
+            </Link>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   )
