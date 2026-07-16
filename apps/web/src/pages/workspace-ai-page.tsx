@@ -20,11 +20,13 @@ import {
   Search,
   ExternalLink,
   ShieldCheck,
+  RefreshCw,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 type GeneratedTask = {
   title: string
@@ -177,7 +179,11 @@ export function AiPage() {
 // ─── Knowledge base — "Ask about your workspace" (Plan §15.1) ─────────────────
 
 type KnowledgeSource = { type: string; id: string; title: string; url: string }
-type KnowledgeAnswer = { answer: string; sources: KnowledgeSource[]; source: 'ai' | 'search' }
+// `source` reflects how the answer was produced over the semantic vector store:
+// 'ai' (model, grounded on vector hits), 'vector' (deterministic over vector
+// hits), or 'fallback' (no accessible vector matches).
+type KnowledgeAnswer = { answer: string; sources: KnowledgeSource[]; source: 'ai' | 'vector' | 'fallback' }
+type ReindexResult = { total: number; indexed: number; skipped: number }
 
 const KNOWLEDGE_SUGGESTION_KEYS = [
   'ai.knowledgeExampleStatus',
@@ -187,9 +193,11 @@ const KNOWLEDGE_SUGGESTION_KEYS = [
 
 function KnowledgeTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
+  const { isManagerOrAbove } = useWorkspaceRole(workspaceId)
   const [question, setQuestion] = useState('')
   const [result, setResult] = useState<KnowledgeAnswer | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reindexMsg, setReindexMsg] = useState<string | null>(null)
 
   const ask = useMutation({
     mutationFn: (q: string) =>
@@ -201,6 +209,15 @@ function KnowledgeTab({ workspaceId }: { workspaceId: string }) {
     onError: (err) => setError(err instanceof Error ? err.message : t('ai.knowledgeError')),
   })
 
+  // Admin backfill: re-embed the workspace into the semantic store (§15.1).
+  const reindex = useMutation({
+    mutationFn: () =>
+      api<ReindexResult>(`/workspaces/${workspaceId}/knowledge/reindex`, { method: 'POST' }),
+    onSuccess: (data) =>
+      setReindexMsg(t('ai.knowledgeReindexed', { indexed: data.indexed, total: data.total })),
+    onError: (err) => setReindexMsg(err instanceof Error ? err.message : t('ai.knowledgeReindexError')),
+  })
+
   function submit() {
     const q = question.trim()
     if (!q || ask.isPending) return
@@ -209,9 +226,31 @@ function KnowledgeTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="p-6 max-w-2xl overflow-auto h-full space-y-4">
-      <div>
-        <h2 className="font-semibold mb-1">{t('ai.knowledgeTitle')}</h2>
-        <p className="text-sm text-muted-foreground">{t('ai.knowledgeDesc')}</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="font-semibold mb-1">{t('ai.knowledgeTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('ai.knowledgeDesc')}</p>
+        </div>
+        {isManagerOrAbove && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setReindexMsg(null)
+              reindex.mutate()
+            }}
+            disabled={reindex.isPending}
+            className="shrink-0"
+            title={t('ai.knowledgeReindexHint')}
+          >
+            {reindex.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            <span className="ml-1.5">{t('ai.knowledgeReindex')}</span>
+          </Button>
+        )}
       </div>
 
       <div className="flex gap-2">
@@ -229,10 +268,20 @@ function KnowledgeTab({ workspaceId }: { workspaceId: string }) {
         </Button>
       </div>
 
-      <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
-        <ShieldCheck className="h-3.5 w-3.5 mt-px shrink-0 text-emerald-600 dark:text-emerald-400" />
-        {t('ai.knowledgeScopeNote')}
-      </p>
+      <div className="space-y-1">
+        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <Sparkles className="h-3.5 w-3.5 mt-px shrink-0 text-brand-500" />
+          {t('ai.knowledgeSemanticNote')}
+        </p>
+        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <ShieldCheck className="h-3.5 w-3.5 mt-px shrink-0 text-emerald-600 dark:text-emerald-400" />
+          {t('ai.knowledgeScopeNote')}
+        </p>
+      </div>
+
+      {reindexMsg && (
+        <p className="text-[11px] text-muted-foreground">{reindexMsg}</p>
+      )}
 
       {!result && !ask.isPending && (
         <div className="flex flex-wrap gap-1.5">

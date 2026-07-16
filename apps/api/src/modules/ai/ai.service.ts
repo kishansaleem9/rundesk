@@ -12,11 +12,13 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAssignees, taskActivity, docs, users, notifications } from '@rundesk/db'
+import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { TasksService } from '../tasks/tasks.service'
 import { SearchService } from '../search/search.service'
+import { EmbeddingService } from './embedding.service'
+import { embedText, cosineSimilarity } from './embedding'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import {
   assembleKnowledgeContext,
@@ -735,10 +737,13 @@ export class AiService {
     private config: ConfigService,
     @Inject(DB_TOKEN) private db: Db,
     private tasks: TasksService,
-    // §15.1 Knowledge base reuses the existing SearchService for retrieval.
-    // Optional so the many unit tests that construct `new AiService(config, db,
-    // tasks)` keep compiling; injected in production (SearchModule is @Global).
+    // §15.1 Knowledge base retrieval. SearchService is retained for other
+    // surfaces; knowledge now retrieves via vector similarity (EmbeddingService
+    // + knowledge_embeddings). Both are @Optional so the many unit tests that
+    // construct `new AiService(config, db, tasks)` keep compiling; injected in
+    // production (SearchModule is @Global; EmbeddingService lives in AiModule).
     @Optional() private search?: SearchService,
+    @Optional() private embeddings?: EmbeddingService,
   ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
@@ -1386,17 +1391,36 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
 
   // ─── §15.1 Knowledge base — "Ask about your workspace" ────────────────────
   //
-  // Retrieval-augmented over the existing keyword SearchService (NOT a
-  // vector/embeddings store): we keyword-rank tasks/comments/docs/chat the
-  // caller can see, assemble a compact cited context, and answer with the model
-  // — falling back to the ranked matches themselves (no fabrication) when AI is
-  // unavailable or errors. Access control is honored end-to-end: SearchService
-  // already scopes chat by channel membership, and `filterAccessibleHits` drops
-  // any task/comment/doc in a private space/project the caller can't reach.
+  // Retrieval-augmented over a REAL vector/embeddings store (NOT keyword
+  // search): the question is embedded and ranked by cosine similarity against
+  // the workspace's `knowledge_embeddings` (portable float8[] vectors, stored
+  // L2-normalized so cosine == dot product). We take the top matches, assemble
+  // a compact cited context, and answer with the model — falling back to the
+  // ranked matches themselves (no fabrication) when AI is unavailable or errors.
+  // Access control is honored end-to-end: `filterAccessibleHits` drops any
+  // task/comment/doc in a private space/project the caller can't reach BEFORE
+  // anything is cited or fed to the model.
+
+  /** Bounded cap on candidate embedding rows fetched per workspace for ranking. */
+  private get knowledgeCandidateCap(): number {
+    const v = Number(this.config.get<string>('KNOWLEDGE_CANDIDATE_CAP'))
+    return Number.isFinite(v) && v > 0 ? Math.trunc(v) : 5000
+  }
 
   /**
-   * Retrieve the access-scoped, keyword-ranked hits that ground a knowledge
-   * answer. Over-fetches from search, then filters by container visibility.
+   * Embed the question with the SAME embedder used at index-time (env-gated real
+   * API or the deterministic local embedder). Falls back to the pure local
+   * embedder if no EmbeddingService is injected (some unit-test constructions).
+   */
+  private async embedQuestion(text: string): Promise<number[]> {
+    if (this.embeddings) return (await this.embeddings.embed(text)).vector
+    return embedText(text)
+  }
+
+  /**
+   * Retrieve the access-scoped, semantically-ranked hits that ground a knowledge
+   * answer. Embeds the question, ranks the workspace's embeddings by cosine,
+   * over-fetches the top candidates, then filters by container visibility.
    */
   async retrieveKnowledgeHits(
     workspaceId: string,
@@ -1404,10 +1428,78 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     question: string,
     limit = 6,
   ): Promise<RawSearchHit[]> {
-    if (!this.search || !question.trim()) return []
-    const raw = (await this.search.search(workspaceId, userId, question, limit * 3)) as RawSearchHit[]
-    const accessible = await this.filterAccessibleHits(workspaceId, userId, raw)
+    const q = question.trim()
+    if (!q) return []
+    const queryVec = await this.embedQuestion(q)
+    if (queryVec.length === 0) return []
+
+    const rows = await this.db
+      .select({
+        sourceType: knowledgeEmbeddings.sourceType,
+        sourceId: knowledgeEmbeddings.sourceId,
+        title: knowledgeEmbeddings.title,
+        url: knowledgeEmbeddings.url,
+        embedding: knowledgeEmbeddings.embedding,
+        dim: knowledgeEmbeddings.dim,
+      })
+      .from(knowledgeEmbeddings)
+      .where(eq(knowledgeEmbeddings.workspaceId, workspaceId))
+      .limit(this.knowledgeCandidateCap)
+
+    const ranked = rows
+      // Only compare vectors of the same dimensionality as the query (guards a
+      // mid-flight embedder switch from mis-ranking stale rows).
+      .filter((r) => Array.isArray(r.embedding) && r.embedding.length === queryVec.length && r.dim === queryVec.length)
+      .map((r) => ({ r, score: cosineSimilarity(queryVec, r.embedding as number[]) }))
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit * 3)
+
+    const hits: RawSearchHit[] = ranked.map(({ r }) => ({
+      id: `${r.sourceType}-${r.sourceId}`,
+      entityType: r.sourceType,
+      title: r.title,
+      content: '',
+      url: r.url,
+    }))
+    const accessible = await this.filterAccessibleHits(workspaceId, userId, hits)
     return accessible.slice(0, limit)
+  }
+
+  /**
+   * Hydrate the (already access-filtered) top hits with their live source text,
+   * so the model gets grounded context — the embeddings table stores only
+   * title/url, not the body. Only used on the AI-answer path. Best-effort:
+   * missing text just leaves the title as the citation.
+   */
+  private async enrichKnowledgeContent(hits: RawSearchHit[]): Promise<RawSearchHit[]> {
+    const taskIds: string[] = []
+    const docIds: string[] = []
+    const commentIds: string[] = []
+    for (const h of hits) {
+      const { type, rawId } = splitSearchId(h.id)
+      if (type === 'task') taskIds.push(rawId)
+      else if (type === 'doc') docIds.push(rawId)
+      else if (type === 'comment') commentIds.push(rawId)
+    }
+    const [taskRows, docRows, commentRows] = await Promise.all([
+      taskIds.length
+        ? this.db.select({ id: tasks.id, text: tasks.description }).from(tasks).where(inArray(tasks.id, taskIds))
+        : Promise.resolve([] as Array<{ id: string; text: string | null }>),
+      docIds.length
+        ? this.db.select({ id: docs.id, text: docs.plaintext }).from(docs).where(inArray(docs.id, docIds))
+        : Promise.resolve([] as Array<{ id: string; text: string | null }>),
+      commentIds.length
+        ? this.db.select({ id: taskComments.id, text: taskComments.body }).from(taskComments).where(inArray(taskComments.id, commentIds))
+        : Promise.resolve([] as Array<{ id: string; text: string | null }>),
+    ])
+    const byId = new Map<string, string>()
+    for (const r of [...taskRows, ...docRows, ...commentRows]) byId.set(r.id, r.text ?? '')
+    return hits.map((h) => {
+      const { rawId } = splitSearchId(h.id)
+      const text = byId.get(rawId)
+      return text ? { ...h, content: text } : h
+    })
   }
 
   /**
@@ -1508,21 +1600,23 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     userId: string,
     question: string,
     ctx: AiCtx = {},
-  ): Promise<{ answer: string; sources: KnowledgeSource[]; source: 'ai' | 'search' }> {
+  ): Promise<{ answer: string; sources: KnowledgeSource[]; source: 'ai' | 'vector' | 'fallback' }> {
     const hits = await this.retrieveKnowledgeHits(workspaceId, userId, question)
     const sources = hits.map(hitToSource)
 
-    // Nothing accessible to ground on → deterministic, no model call, no
-    // fabrication.
+    // No vector matches the caller can see → deterministic no-match, no model
+    // call, no fabrication.
     if (sources.length === 0) {
-      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'fallback' }
     }
+    // Vector matches found but the model is unavailable → report them
+    // deterministically (source: 'vector').
     if (!this.isAvailable()) {
-      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'vector' }
     }
 
     try {
-      const context = assembleKnowledgeContext(hits)
+      const context = assembleKnowledgeContext(await this.enrichKnowledgeContent(hits))
       const response = await this.complete('knowledge.answer', ctx, {
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
@@ -1537,11 +1631,11 @@ ${context}`,
         messages: [{ role: 'user', content: question.trim() }],
       })
       const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
-      if (!text) return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+      if (!text) return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'vector' }
       return { answer: text, sources, source: 'ai' }
     } catch {
-      // AI unavailable / rate-limited / malformed — degrade to the matches.
-      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+      // AI unavailable / rate-limited / malformed — degrade to the vector matches.
+      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'vector' }
     }
   }
 

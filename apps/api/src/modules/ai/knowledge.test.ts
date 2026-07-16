@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { getTableName } from 'drizzle-orm'
 import { AiService } from './ai.service'
+import { EmbeddingService } from './embedding.service'
+import { embedText, DEFAULT_EMBED_DIM } from './embedding'
 import {
   splitSearchId,
   hitToSource,
@@ -13,6 +15,21 @@ import {
   HELP_TOPICS,
   type RawSearchHit,
 } from './knowledge'
+
+// A local (no-API-key) embedder — the deterministic default path. Shared by the
+// vector-retrieval tests below so index-time and query-time vectors match dim.
+const localEmbeddings = new EmbeddingService({ get: () => undefined } as any)
+const D = DEFAULT_EMBED_DIM
+/** Build a knowledge_embeddings row with a real, dim-D normalized vector. */
+function embRow(
+  sourceType: string,
+  sourceId: string,
+  title: string,
+  url: string,
+  text: string,
+) {
+  return { sourceType, sourceId, title, url, embedding: embedText(text, D), dim: D }
+}
 
 /**
  * §15.1 Knowledge base + §14.4 Help center.
@@ -98,57 +115,80 @@ describe('deterministicKnowledgeAnswer (§15.1 fallback — no fabrication)', ()
   })
 })
 
-describe('AiService.answerKnowledge — assembles sources + honors access scope (§15.1 deterministic path)', () => {
-  it('drops an inaccessible private-space task and cites only accessible sources', async () => {
-    // Search returns two tasks + a doc. The access-filter task query resolves
-    // ONLY t1 (t2 lives in a private space the caller cannot reach), so t2 must
-    // not appear in the cited sources.
-    const hits: RawSearchHit[] = [
-      { id: 'task-t1', entityType: 'task', title: 'Public roadmap', content: 'ships in Q3', url: '/app/w1/pub?task=t1' },
-      { id: 'task-t2', entityType: 'task', title: 'Secret roadmap', content: 'private plan', url: '/app/w1/priv?task=t2' },
-      { id: 'doc-d1', entityType: 'doc', title: 'Onboarding', content: 'welcome', url: '/app/w1/docs?doc=d1' },
-    ]
-    const search: any = { search: async () => hits }
+describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 deterministic path)', () => {
+  it('ranks vector matches, drops an inaccessible private-space task, cites only accessible sources', async () => {
+    // Three embedded sources. All are semantically close to the question, but
+    // the access-filter task query resolves ONLY t1 (t2 lives in a private space
+    // the caller cannot reach), so t2 must never be cited. t1 shares more of the
+    // question's vocabulary than d1, so it ranks first.
     const db = makeDb({
       workspace_members: [{ role: 'member' }], // non-manager → visibility filter applies
+      knowledge_embeddings: [
+        embRow('task', 't1', 'Public roadmap', '/app/w1/pub?task=t1', 'roadmap launch plan ships q3'),
+        embRow('task', 't2', 'Secret roadmap', '/app/w1/priv?task=t2', 'roadmap launch secret plan'),
+        embRow('doc', 'd1', 'Launch plan', '/app/w1/docs?doc=d1', 'launch plan onboarding'),
+      ],
       tasks: [{ id: 't1' }], // access query returns only the accessible task
       docs: [{ id: 'd1' }],
     })
-    const svc = new AiService(noKeyConfig, db, {} as any, search)
+    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
 
-    const res = await svc.answerKnowledge('w1', 'u-member', 'what is on the roadmap', {
+    const res = await svc.answerKnowledge('w1', 'u-member', 'roadmap launch plan', {
       userId: 'u-member',
       workspaceId: 'w1',
     })
 
-    assert.equal(res.source, 'search') // no API key → deterministic
+    assert.equal(res.source, 'vector') // no API key → deterministic over vector hits
     const ids = res.sources.map((s) => s.id)
-    assert.deepEqual(ids, ['t1', 'd1'], 'only accessible sources, private task t2 excluded')
+    assert.deepEqual(ids, ['t1', 'd1'], 'only accessible sources, private task t2 excluded, closer item first')
     assert.ok(!res.sources.some((s) => s.id === 't2'), 'inaccessible private-space task is NOT surfaced')
     assert.deepEqual(res.sources[0], { type: 'task', id: 't1', title: 'Public roadmap', url: '/app/w1/pub?task=t1' })
     assert.match(res.answer, /Found 2 relevant items/)
   })
 
-  it('returns a no-match answer (no sources) when retrieval finds nothing', async () => {
-    const search: any = { search: async () => [] }
-    const svc = new AiService(noKeyConfig, makeDb({ workspace_members: [{ role: 'member' }] }), {} as any, search)
+  it('returns a no-match answer (no sources) when the vector store is empty', async () => {
+    const svc = new AiService(
+      noKeyConfig,
+      makeDb({ workspace_members: [{ role: 'member' }], knowledge_embeddings: [] }),
+      {} as any,
+      undefined,
+      localEmbeddings,
+    )
     const res = await svc.answerKnowledge('w1', 'u1', 'nothing here', { workspaceId: 'w1' })
-    assert.equal(res.source, 'search')
+    assert.equal(res.source, 'fallback')
     assert.deepEqual(res.sources, [])
     assert.match(res.answer, /No matching items/)
   })
 
-  it('a workspace manager bypasses the visibility filter (all hits pass through)', async () => {
-    const hits: RawSearchHit[] = [
-      { id: 'task-t1', entityType: 'task', title: 'A', content: '', url: '/a' },
-      { id: 'task-t2', entityType: 'task', title: 'B', content: '', url: '/b' },
-    ]
-    const search: any = { search: async () => hits }
+  it('a workspace manager bypasses the visibility filter (all vector hits pass through)', async () => {
     // isWorkspaceManager → true, so filterAccessibleHits short-circuits and never
-    // queries tasks; both survive.
-    const svc = new AiService(noKeyConfig, makeDb({ workspace_members: [{ role: 'workspace_admin' }] }), {} as any, search)
-    const res = await svc.answerKnowledge('w1', 'admin', 'q', { workspaceId: 'w1' })
+    // queries tasks; both survive. Question shares more with t1 so it ranks first.
+    const db = makeDb({
+      workspace_members: [{ role: 'workspace_admin' }],
+      knowledge_embeddings: [
+        embRow('task', 't1', 'A', '/a', 'alpha roadmap'),
+        embRow('task', 't2', 'B', '/b', 'roadmap beta gamma'),
+      ],
+    })
+    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const res = await svc.answerKnowledge('w1', 'admin', 'roadmap alpha', { workspaceId: 'w1' })
     assert.deepEqual(res.sources.map((s) => s.id), ['t1', 't2'])
+  })
+
+  it('ranks a semantically-closer item above a farther one (cosine ordering)', async () => {
+    const db = makeDb({
+      workspace_members: [{ role: 'workspace_admin' }], // manager → skip access DB round-trip
+      knowledge_embeddings: [
+        embRow('task', 'far', 'Unrelated', '/far', 'accounting invoices payroll taxes'),
+        embRow('task', 'near', 'On topic', '/near', 'mobile app launch marketing plan'),
+      ],
+    })
+    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const res = await svc.answerKnowledge('w1', 'admin', 'when is the mobile app launch', { workspaceId: 'w1' })
+    const ids = res.sources.map((s) => s.id)
+    assert.equal(ids[0], 'near', 'semantically-closer item ranks first')
+    const farIdx = ids.indexOf('far')
+    assert.ok(farIdx === -1 || farIdx > ids.indexOf('near'), 'the unrelated item never outranks the on-topic item')
   })
 })
 

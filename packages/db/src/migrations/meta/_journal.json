@@ -526,6 +526,13 @@
       "when": 1900000071000,
       "tag": "0074_client_portals",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1900000072000,
+      "tag": "0075_knowledge_embeddings",
+      "breakpoints": true
     }
   ]
 }

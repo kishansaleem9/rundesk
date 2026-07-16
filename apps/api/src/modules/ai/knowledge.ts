@@ -4,10 +4,12 @@
  * Kept free of NestJS/DB imports so every piece is unit-testable without a
  * database or a live model:
  *   - §15.1 Knowledge base: id parsing, context assembly, and the deterministic
- *     "matches found" answer used when the model is unavailable. Retrieval is
- *     RETRIEVAL-AUGMENTED over the existing keyword SearchService (not a
- *     vector/embeddings store) — we rank by keyword relevance and cite the
- *     source items verbatim, never fabricating.
+ *     "matches found" answer used when the model is unavailable. Retrieval is a
+ *     REAL vector/embeddings store — the question is embedded and ranked by
+ *     cosine similarity against `knowledge_embeddings` (see embedding.ts +
+ *     knowledge-indexer.service.ts + AiService.retrieveKnowledgeHits); these
+ *     helpers turn the ranked, access-filtered hits into cited sources and
+ *     never fabricate.
  *   - §14.4 Help center: a compact, curated help/FAQ knowledge base embedded as
  *     a constant, plus the keyword matcher that backs the deterministic fallback.
  */
