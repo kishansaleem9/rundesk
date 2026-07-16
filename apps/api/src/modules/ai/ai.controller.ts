@@ -280,6 +280,33 @@ export class AiController {
     return this.ai.executeWorkloadBalance(body.workspaceId, Array.isArray(body?.moves) ? body.moves : [], user.id)
   }
 
+  @Post('knowledge')
+  @ApiOperation({ summary: 'Ask the workspace knowledge base (retrieval over accessible content; deterministic fallback)' })
+  async knowledge(@CurrentUser() user: any, @Body() body: { workspaceId?: string; question?: string }) {
+    if (!body?.workspaceId || !body?.question?.trim()) {
+      throw new HttpException('workspaceId and question are required', HttpStatus.BAD_REQUEST)
+    }
+    // Gate on workspace membership (the controller isn't workspace-scoped);
+    // retrieval further scopes to content the caller can access. Best-effort —
+    // the service never throws on AI failure (deterministic search fallback).
+    await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
+    return this.ai.answerKnowledge(body.workspaceId, user.id, body.question, {
+      userId: user.id,
+      workspaceId: body.workspaceId,
+    })
+  }
+
+  @Post('help')
+  @ApiOperation({ summary: 'Ask the AI help assistant (grounded in the curated FAQ; deterministic keyword fallback)' })
+  async help(@CurrentUser() user: any, @Body() body: { question?: string }) {
+    if (!body?.question?.trim()) {
+      throw new HttpException('question is required', HttpStatus.BAD_REQUEST)
+    }
+    // Help is product-wide (no workspace) — the PlanFeatureGuard is a no-op
+    // without a workspaceId. Best-effort: always answers via the FAQ fallback.
+    return this.ai.answerHelp(body.question, { userId: user.id })
+  }
+
   @Post('command')
   @ApiOperation({ summary: 'Plan a natural-language command via tool use (preview, nothing mutates)' })
   async command(@CurrentUser() user: any, @Body() body: { workspaceId?: string; message?: string }) {

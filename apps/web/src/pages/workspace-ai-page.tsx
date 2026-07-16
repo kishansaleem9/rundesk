@@ -16,6 +16,10 @@ import {
   X,
   Terminal,
   AlertTriangle,
+  Library,
+  Search,
+  ExternalLink,
+  ShieldCheck,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
@@ -109,7 +113,7 @@ function writingModeLabelKey(mode: string): TranslationKey {
 export function AiPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
-  const [activeTab, setActiveTab] = useState<'chat' | 'commands' | 'generate' | 'notes' | 'writing'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing'>('chat')
 
   return (
     <div className="h-full flex flex-col">
@@ -132,6 +136,7 @@ export function AiPage() {
         {(
           [
             { id: 'chat', labelKey: 'ai.tabChat', icon: MessageSquare },
+            { id: 'knowledge', labelKey: 'ai.tabKnowledge', icon: Library },
             { id: 'commands', labelKey: 'ai.tabCommands', icon: Terminal },
             { id: 'generate', labelKey: 'ai.tabGenerate', icon: Wand2 },
             { id: 'notes', labelKey: 'ai.tabNotes', icon: FileText },
@@ -158,11 +163,139 @@ export function AiPage() {
         {activeTab === 'chat' && (
           <AiPanel workspaceId={workspaceId} className="h-full" />
         )}
+        {activeTab === 'knowledge' && <KnowledgeTab workspaceId={workspaceId} />}
         {activeTab === 'commands' && <CommandsTab workspaceId={workspaceId} />}
         {activeTab === 'generate' && <TaskGeneratorTab workspaceId={workspaceId} />}
         {activeTab === 'notes' && <MeetingNotesTab workspaceId={workspaceId} />}
         {activeTab === 'writing' && <WritingTab />}
       </div>
+    </div>
+  )
+}
+
+// ─── Knowledge base — "Ask about your workspace" (Plan §15.1) ─────────────────
+
+type KnowledgeSource = { type: string; id: string; title: string; url: string }
+type KnowledgeAnswer = { answer: string; sources: KnowledgeSource[]; source: 'ai' | 'search' }
+
+const KNOWLEDGE_SUGGESTION_KEYS = [
+  'ai.knowledgeExampleStatus',
+  'ai.knowledgeExampleBlockers',
+  'ai.knowledgeExampleDecisions',
+] as const
+
+function KnowledgeTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const [question, setQuestion] = useState('')
+  const [result, setResult] = useState<KnowledgeAnswer | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const ask = useMutation({
+    mutationFn: (q: string) =>
+      api<KnowledgeAnswer>('/ai/knowledge', { method: 'POST', body: { workspaceId, question: q } }),
+    onSuccess: (data) => {
+      setResult(data)
+      setError(null)
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : t('ai.knowledgeError')),
+  })
+
+  function submit() {
+    const q = question.trim()
+    if (!q || ask.isPending) return
+    ask.mutate(q)
+  }
+
+  return (
+    <div className="p-6 max-w-2xl overflow-auto h-full space-y-4">
+      <div>
+        <h2 className="font-semibold mb-1">{t('ai.knowledgeTitle')}</h2>
+        <p className="text-sm text-muted-foreground">{t('ai.knowledgeDesc')}</p>
+      </div>
+
+      <div className="flex gap-2">
+        <Input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder={t('ai.knowledgePlaceholder')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+          className="flex-1"
+        />
+        <Button onClick={submit} disabled={!question.trim() || ask.isPending}>
+          {ask.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+        <ShieldCheck className="h-3.5 w-3.5 mt-px shrink-0 text-emerald-600 dark:text-emerald-400" />
+        {t('ai.knowledgeScopeNote')}
+      </p>
+
+      {!result && !ask.isPending && (
+        <div className="flex flex-wrap gap-1.5">
+          {KNOWLEDGE_SUGGESTION_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                setQuestion(t(key))
+                ask.mutate(t(key))
+              }}
+              className="text-xs px-2.5 py-1 rounded-full border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              {t(key)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <Card className="p-3 border-destructive/40 bg-destructive/5 text-sm text-destructive">{error}</Card>
+      )}
+
+      {result && (
+        <Card className="p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span
+              className={cn(
+                'text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full',
+                result.source === 'ai'
+                  ? 'bg-brand-200/20 text-brand-700 dark:text-brand-300'
+                  : 'bg-muted text-muted-foreground',
+              )}
+            >
+              {result.source === 'ai' ? t('ai.knowledgeAiBadge') : t('ai.knowledgeSearchBadge')}
+            </span>
+          </div>
+          <p className="text-sm whitespace-pre-wrap leading-relaxed">{result.answer}</p>
+
+          {result.sources.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {t('ai.knowledgeSources')}
+              </p>
+              <ul className="space-y-1">
+                {result.sources.map((src) => (
+                  <li key={`${src.type}-${src.id}`}>
+                    <a
+                      href={src.url}
+                      className="group flex items-center gap-2 text-sm rounded-md border border-border px-3 py-2 hover:bg-muted/50 transition-colors"
+                    >
+                      <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
+                        {src.type}
+                      </span>
+                      <span className="flex-1 truncate group-hover:underline">{src.title}</span>
+                      <ExternalLink className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   )
 }

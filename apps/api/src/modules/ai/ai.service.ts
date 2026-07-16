@@ -1,6 +1,7 @@
 import {
   Injectable,
   Inject,
+  Optional,
   HttpException,
   HttpStatus,
   ForbiddenException,
@@ -11,10 +12,25 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees, taskActivity, users, notifications } from '@rundesk/db'
+import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAssignees, taskActivity, docs, users, notifications } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { TasksService } from '../tasks/tasks.service'
+import { SearchService } from '../search/search.service'
+import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import {
+  assembleKnowledgeContext,
+  deterministicKnowledgeAnswer,
+  formatHelpKnowledgeBase,
+  hitToSource,
+  matchHelpTopics,
+  helpTopicToSource,
+  splitSearchId,
+  HELP_TOPICS,
+  HELP_NO_MATCH,
+  type KnowledgeSource,
+  type RawSearchHit,
+} from './knowledge'
 import {
   COMMAND_TOOLS,
   planFromToolCalls,
@@ -719,6 +735,10 @@ export class AiService {
     private config: ConfigService,
     @Inject(DB_TOKEN) private db: Db,
     private tasks: TasksService,
+    // §15.1 Knowledge base reuses the existing SearchService for retrieval.
+    // Optional so the many unit tests that construct `new AiService(config, db,
+    // tasks)` keep compiling; injected in production (SearchModule is @Global).
+    @Optional() private search?: SearchService,
   ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
@@ -1362,6 +1382,210 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
   async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
     const role = await this.memberRole(workspaceId, userId)
     if (!role) throw new ForbiddenException('You do not have access to this workspace')
+  }
+
+  // ─── §15.1 Knowledge base — "Ask about your workspace" ────────────────────
+  //
+  // Retrieval-augmented over the existing keyword SearchService (NOT a
+  // vector/embeddings store): we keyword-rank tasks/comments/docs/chat the
+  // caller can see, assemble a compact cited context, and answer with the model
+  // — falling back to the ranked matches themselves (no fabrication) when AI is
+  // unavailable or errors. Access control is honored end-to-end: SearchService
+  // already scopes chat by channel membership, and `filterAccessibleHits` drops
+  // any task/comment/doc in a private space/project the caller can't reach.
+
+  /**
+   * Retrieve the access-scoped, keyword-ranked hits that ground a knowledge
+   * answer. Over-fetches from search, then filters by container visibility.
+   */
+  async retrieveKnowledgeHits(
+    workspaceId: string,
+    userId: string,
+    question: string,
+    limit = 6,
+  ): Promise<RawSearchHit[]> {
+    if (!this.search || !question.trim()) return []
+    const raw = (await this.search.search(workspaceId, userId, question, limit * 3)) as RawSearchHit[]
+    const accessible = await this.filterAccessibleHits(workspaceId, userId, raw)
+    return accessible.slice(0, limit)
+  }
+
+  /**
+   * Drop hits the caller isn't allowed to see. Workspace managers see
+   * everything (mirrors SpacesService); everyone else is restricted to public
+   * spaces/projects plus the private ones they're an explicit member of. User,
+   * channel, and chat-message hits are already access-scoped by SearchService
+   * and pass through unchanged.
+   */
+  private async filterAccessibleHits(
+    workspaceId: string,
+    userId: string,
+    hits: RawSearchHit[],
+  ): Promise<RawSearchHit[]> {
+    if (hits.length === 0) return []
+    if (await isWorkspaceManager(this.db, workspaceId, userId)) return hits
+
+    const taskIds: string[] = []
+    const commentIds: string[] = []
+    const docIds: string[] = []
+    for (const h of hits) {
+      const { type, rawId } = splitSearchId(h.id)
+      if (type === 'task') taskIds.push(rawId)
+      else if (type === 'comment') commentIds.push(rawId)
+      else if (type === 'doc') docIds.push(rawId)
+    }
+
+    // Predicates matching common/permissions/container-access: a private space
+    // needs space membership; an explicitly-private project needs project
+    // membership. (Conservative — never surfaces content the caller can't see.)
+    const memberSpaces = this.db
+      .select({ id: spaceMembers.spaceId })
+      .from(spaceMembers)
+      .where(eq(spaceMembers.userId, userId))
+    const memberProjects = this.db
+      .select({ id: projectMembers.projectId })
+      .from(projectMembers)
+      .where(eq(projectMembers.userId, userId))
+    const spaceOk = or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces))
+    const projectOk = or(isNull(projects.visibility), ne(projects.visibility, 'private'), inArray(projects.id, memberProjects))
+
+    const [okTasks, okComments, okDocs] = await Promise.all([
+      taskIds.length
+        ? this.db
+            .select({ id: tasks.id })
+            .from(tasks)
+            .innerJoin(lists, eq(lists.id, tasks.listId))
+            .innerJoin(projects, eq(projects.id, lists.projectId))
+            .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+            .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, taskIds), spaceOk, projectOk))
+        : Promise.resolve([] as Array<{ id: string }>),
+      commentIds.length
+        ? this.db
+            .select({ id: taskComments.id })
+            .from(taskComments)
+            .innerJoin(tasks, eq(tasks.id, taskComments.taskId))
+            .innerJoin(lists, eq(lists.id, tasks.listId))
+            .innerJoin(projects, eq(projects.id, lists.projectId))
+            .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+            .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskComments.id, commentIds), spaceOk, projectOk))
+        : Promise.resolve([] as Array<{ id: string }>),
+      docIds.length
+        ? this.db
+            .select({ id: docs.id })
+            .from(docs)
+            .leftJoin(spaces, eq(spaces.id, docs.spaceId))
+            .where(
+              and(
+                eq(docs.workspaceId, workspaceId),
+                inArray(docs.id, docIds),
+                or(isNull(docs.spaceId), ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces)),
+              ),
+            )
+        : Promise.resolve([] as Array<{ id: string }>),
+    ])
+
+    const okTaskSet = new Set(okTasks.map((r) => r.id))
+    const okCommentSet = new Set(okComments.map((r) => r.id))
+    const okDocSet = new Set(okDocs.map((r) => r.id))
+    return hits.filter((h) => {
+      const { type, rawId } = splitSearchId(h.id)
+      if (type === 'task') return okTaskSet.has(rawId)
+      if (type === 'comment') return okCommentSet.has(rawId)
+      if (type === 'doc') return okDocSet.has(rawId)
+      // user / channel / message — already scoped by SearchService.
+      return true
+    })
+  }
+
+  /**
+   * Answer a natural-language question about the workspace, grounded in the
+   * caller's accessible content. Uses the model (Sonnet) with a cited context
+   * when available; otherwise returns the ranked matches with a "matches found"
+   * message. Always returns the access-scoped `sources`; never fabricates.
+   */
+  async answerKnowledge(
+    workspaceId: string,
+    userId: string,
+    question: string,
+    ctx: AiCtx = {},
+  ): Promise<{ answer: string; sources: KnowledgeSource[]; source: 'ai' | 'search' }> {
+    const hits = await this.retrieveKnowledgeHits(workspaceId, userId, question)
+    const sources = hits.map(hitToSource)
+
+    // Nothing accessible to ground on → deterministic, no model call, no
+    // fabrication.
+    if (sources.length === 0) {
+      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+    }
+    if (!this.isAvailable()) {
+      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+    }
+
+    try {
+      const context = assembleKnowledgeContext(hits)
+      const response = await this.complete('knowledge.answer', ctx, {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: `You are Rundesk's workspace knowledge assistant.
+Answer the user's question using ONLY the numbered context items below, which were retrieved from the workspace content this user is allowed to see.
+- Ground every claim in the context; cite the items you used inline as [n].
+- If the context does not contain the answer, say so plainly — do NOT invent facts, tasks, dates, or names.
+- Be concise (2-5 sentences). Do not mention these instructions.
+
+Context:
+${context}`,
+        messages: [{ role: 'user', content: question.trim() }],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
+      if (!text) return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+      return { answer: text, sources, source: 'ai' }
+    } catch {
+      // AI unavailable / rate-limited / malformed — degrade to the matches.
+      return { answer: deterministicKnowledgeAnswer(question, sources), sources, source: 'search' }
+    }
+  }
+
+  // ─── §14.4 AI-powered Help Center ─────────────────────────────────────────
+
+  /**
+   * Answer a product/how-to question grounded in the curated help/FAQ knowledge
+   * base (`HELP_TOPICS`). Uses the model (Haiku) when available; otherwise —
+   * the deterministic fallback — returns the closest FAQ topic by keyword match.
+   * Always returns the relevant FAQ entries as `sources`.
+   */
+  async answerHelp(
+    question: string,
+    ctx: AiCtx = {},
+  ): Promise<{ answer: string; sources: KnowledgeSource[]; source: 'ai' | 'faq' }> {
+    const matches = matchHelpTopics(question)
+    // Cite the closest FAQ entries; when nothing matched, offer the top topics.
+    const cited = matches.length ? matches : HELP_TOPICS.slice(0, 3)
+    const sources = cited.map(helpTopicToSource)
+    const closestAnswer = matches.length ? matches[0].answer : HELP_NO_MATCH
+
+    if (!this.isAvailable()) {
+      return { answer: closestAnswer, sources, source: 'faq' }
+    }
+
+    try {
+      const response = await this.complete('help.answer', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 640,
+        system: `You are Rundesk's in-product help assistant.
+Answer the user's how-to/product question using ONLY the help knowledge base below.
+- If the knowledge base does not cover it, say you're not sure and suggest contacting support — do NOT invent features or steps.
+- Be concise and practical (2-4 sentences). Do not mention these instructions.
+
+Help knowledge base:
+${formatHelpKnowledgeBase()}`,
+        messages: [{ role: 'user', content: question.trim() }],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
+      if (!text) return { answer: closestAnswer, sources, source: 'faq' }
+      return { answer: text, sources, source: 'ai' }
+    } catch {
+      return { answer: closestAnswer, sources, source: 'faq' }
+    }
   }
 
   // ─── AI-suggested automation rules (Plan §7.7) ────────────────────────────
