@@ -1036,7 +1036,10 @@ function OverviewPanel({
     mutationFn: () =>
       api<{ suggestedDate: string; reasoning: string }>(`/ai/task/deadline`, {
         method: 'POST',
-        body: { title: detail.title, description: detail.description ?? undefined, workspaceId },
+        // Pass taskId so the backend factors in current team workload (Plan §7.4)
+        // — it derives a per-assignee open-task signal server-side and the
+        // returned reasoning reflects it.
+        body: { title: detail.title, description: detail.description ?? undefined, taskId, workspaceId },
       }),
     onSuccess: (r) => {
       patchTask.mutate({ dueDate: r.suggestedDate })

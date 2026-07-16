@@ -43,6 +43,12 @@ type AutomationRun = {
   context?: Record<string, string>
 }
 
+type ChatChannel = { id: string; name: string; isDm: boolean }
+
+// §7.7 AI-suggested rules (shape returned by POST /ai/automation-suggestions).
+type Suggestion = { name: string; trigger: TriggerDef; actions: ActionDef[]; rationale: string }
+type SuggestResponse = { source: 'ai' | 'heuristic'; suggestions: Suggestion[] }
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 // `labelKey` / `paramLabelKey` reference i18n catalog entries; the raw `value`
 // and `paramKey` are the locale-independent identifiers persisted to the API.
@@ -62,6 +68,9 @@ const ACTION_OPTIONS = [
   { value: 'send_notification', labelKey: 'automations.action.sendNotification', paramLabelKey: 'automations.param.message', paramKey: 'message' },
   { value: 'create_subtask', labelKey: 'automations.action.createSubtask', paramLabelKey: 'automations.param.title', paramKey: 'title' },
   { value: 'assign_member', labelKey: 'automations.action.assignMember', paramLabelKey: 'automations.param.userId', paramKey: 'userId' },
+  // §7.7 post-to-channel: needs a channel picker in addition to the message
+  // field, handled specially in the builder (see AutomationBuilder).
+  { value: 'post_to_channel', labelKey: 'automations.action.postToChannel', paramLabelKey: 'automations.param.messageWithVars', paramKey: 'message' },
 ] as const
 
 const RECIPES = [
@@ -182,6 +191,9 @@ export function AutomationsPage() {
           )}
         </section>
 
+        {/* AI suggestions (§7.7) */}
+        <AiSuggestionsSection workspaceId={workspaceId} />
+
         {/* Recipes */}
         <section>
           <div className="flex items-baseline justify-between mb-3">
@@ -221,6 +233,103 @@ export function AutomationsPage() {
         </section>
       </div>
     </div>
+  )
+}
+
+// ─── AiSuggestionsSection (§7.7) ──────────────────────────────────────────────
+
+function AiSuggestionsSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+
+  // Best-effort: the endpoint returns heuristic suggestions when AI is off, so
+  // this never hard-fails. Cached for 10 min; refreshable on demand.
+  const query = useQuery({
+    queryKey: ['automation-suggestions', workspaceId],
+    queryFn: () => api<SuggestResponse>(`/ai/automation-suggestions`, { method: 'POST', body: { workspaceId } }),
+    staleTime: 1000 * 60 * 10,
+    retry: false,
+  })
+
+  const createFromSuggestion = useMutation({
+    mutationFn: (s: Suggestion) =>
+      api<Automation>(`/workspaces/${workspaceId}/automations`, {
+        method: 'POST',
+        body: { name: s.name, trigger: s.trigger, actions: s.actions },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['automations', workspaceId] }),
+  })
+
+  const suggestions = query.data?.suggestions ?? []
+
+  return (
+    <section>
+      <div className="flex items-baseline justify-between mb-1">
+        <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+          <Sparkles className="h-3.5 w-3.5 text-violet-500" /> {t('automations.aiSuggestions')}
+        </h2>
+        <div className="flex items-center gap-2">
+          {query.data && (
+            <span className="text-xs text-muted-foreground">
+              {t(query.data.source === 'ai' ? 'ai.suggestionSourceAi' : 'ai.suggestionSourceHeuristic')}
+            </span>
+          )}
+          <button
+            onClick={() => query.refetch()}
+            disabled={query.isFetching}
+            className="text-xs text-accent hover:underline disabled:opacity-50"
+          >
+            {t('automations.aiSuggestRefresh')}
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">{t('automations.aiSuggestionsDesc')}</p>
+
+      {query.isLoading ? (
+        <p className="text-sm text-muted-foreground">{t('automations.aiSuggestLoading')}</p>
+      ) : query.isError ? (
+        <p className="text-sm text-muted-foreground">{t('automations.aiSuggestError')}</p>
+      ) : suggestions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t('automations.aiSuggestEmpty')}</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {suggestions.map((s, i) => (
+            <Card key={i} className="p-4 hover:shadow-md transition-shadow group">
+              <div className="flex items-start gap-3">
+                <div className="h-8 w-8 rounded-lg bg-violet-100 flex items-center justify-center shrink-0">
+                  <Sparkles className="h-4 w-4 text-violet-700" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold text-sm">{s.name}</h3>
+                    <span className="text-[10px] uppercase tracking-wide rounded bg-violet-100 text-violet-700 px-1.5 py-0.5">
+                      {t('automations.suggestedBadge')}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground flex-wrap">
+                    <code className="px-1.5 py-0.5 rounded bg-muted">{s.trigger.type}</code>
+                    <ArrowRight className="h-3 w-3" />
+                    {s.actions.map((a, j) => (
+                      <code key={j} className="px-1.5 py-0.5 rounded bg-muted">{a.type}</code>
+                    ))}
+                  </div>
+                  {s.rationale && <p className="mt-2 text-xs text-muted-foreground">{s.rationale}</p>}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-xs shrink-0"
+                  onClick={() => createFromSuggestion.mutate(s)}
+                  disabled={createFromSuggestion.isPending}
+                >
+                  {t('automations.use')}
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -351,6 +460,13 @@ function AutomationBuilder({
     { type: 'send_notification', params: { message: '' } },
   ])
 
+  // Channels for the post_to_channel action picker (DMs excluded).
+  const channelsQuery = useQuery({
+    queryKey: ['chat-channels', workspaceId],
+    queryFn: () => api<ChatChannel[]>(`/workspaces/${workspaceId}/chat/channels`),
+  })
+  const channels = (channelsQuery.data ?? []).filter((c) => !c.isDm)
+
   const createMutation = useMutation({
     mutationFn: () =>
       api<Automation>(`/workspaces/${workspaceId}/automations`, {
@@ -428,23 +544,43 @@ function AutomationBuilder({
             <div className="space-y-2">
               {actions.map((action, i) => {
                 const meta = ACTION_OPTIONS.find((o) => o.value === action.type)
+                const isPostToChannel = action.type === 'post_to_channel'
                 return (
-                  <div key={i} className="flex gap-2 items-start">
+                  <div key={i} className="flex gap-2 items-start flex-wrap">
                     <select
-                      className="rounded-md border border-border bg-background px-3 py-1.5 text-sm flex-1"
+                      className="rounded-md border border-border bg-background px-3 py-1.5 text-sm flex-1 min-w-[9rem]"
                       value={action.type}
                       onChange={(e) => {
                         const newMeta = ACTION_OPTIONS.find((o) => o.value === e.target.value)
-                        updateAction(i, { type: e.target.value, params: newMeta ? { [newMeta.paramKey]: '' } : {} })
+                        // post_to_channel carries both a channelId and a message.
+                        const params =
+                          e.target.value === 'post_to_channel'
+                            ? { channelId: '', message: '' }
+                            : newMeta
+                              ? { [newMeta.paramKey]: '' }
+                              : {}
+                        updateAction(i, { type: e.target.value, params })
                       }}
                     >
                       {ACTION_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
                       ))}
                     </select>
+                    {isPostToChannel && (
+                      <select
+                        className="rounded-md border border-border bg-background px-3 py-1.5 text-sm flex-1 min-w-[9rem]"
+                        value={(action.params.channelId as string) ?? ''}
+                        onChange={(e) => updateAction(i, { params: { ...action.params, channelId: e.target.value } })}
+                      >
+                        <option value="">{t('automations.param.selectChannel')}</option>
+                        {channels.map((c) => (
+                          <option key={c.id} value={c.id}>#{c.name}</option>
+                        ))}
+                      </select>
+                    )}
                     {meta && (
                       <Input
-                        className="flex-1"
+                        className="flex-1 min-w-[9rem]"
                         value={(action.params[meta.paramKey] as string) ?? ''}
                         onChange={(e) =>
                           updateAction(i, { params: { ...action.params, [meta.paramKey]: e.target.value } })

@@ -70,18 +70,38 @@ export class AiController {
   }
 
   @Post('task/deadline')
-  @ApiOperation({ summary: 'Suggest a deadline for a task' })
+  @ApiOperation({ summary: 'Suggest a deadline for a task (factors in current team workload)' })
   async suggestDeadline(
     @CurrentUser() user: any,
-    @Body() body: { title: string; description?: string; teamWorkload?: string; workspaceId?: string },
+    @Body() body: { title: string; description?: string; teamWorkload?: string; taskId?: string; workspaceId?: string },
   ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.suggestDeadline(body.title, body.description, body.teamWorkload, {
+    // Factor in current team workload (Plan §7.4). Prefer a client-supplied
+    // signal; otherwise enrich server-side from the task's assignees' open-task
+    // counts (access-checked, like the summarize taskId path).
+    let teamWorkload = body.teamWorkload
+    if (!teamWorkload && body.taskId) {
+      await this.ai.assertTaskWorkspaceAccess(body.taskId, user.id)
+      teamWorkload = await this.ai.buildTeamWorkloadSignal(body.taskId)
+    }
+    return this.ai.suggestDeadline(body.title, body.description, teamWorkload, {
       userId: user.id,
       workspaceId: body.workspaceId,
     })
+  }
+
+  @Post('automation-suggestions')
+  @ApiOperation({ summary: 'Suggest automation rules from recent workspace behavior (AI, with deterministic fallback)' })
+  async automationSuggestions(@CurrentUser() user: any, @Body() body: { workspaceId?: string }) {
+    if (!body?.workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    // Gate on workspace membership (the controller isn't workspace-scoped), then
+    // return best-effort suggestions — the service never throws on AI failure.
+    await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
+    return this.ai.suggestAutomations(body.workspaceId, { userId: user.id, workspaceId: body.workspaceId })
   }
 
   @Post('summarize')

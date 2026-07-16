@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { and, eq, desc, lte, sql } from 'drizzle-orm'
 import {
@@ -12,9 +12,13 @@ import {
   lists,
   projects,
   spaces,
+  chatChannels,
+  chatMessages,
+  users,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { RealtimeGateway } from '../realtime/realtime.gateway'
 
 type TriggerContext = {
   taskId?: string
@@ -27,9 +31,25 @@ type TriggerContext = {
   listId?: string
 }
 
+/**
+ * Replace `{{task.title}}`-style placeholders in an automation message with
+ * values from the trigger context. Dotted keys are supported; unknown
+ * placeholders are left intact (matches the web i18n interpolator). Pure so the
+ * post_to_channel rendering can be unit-tested without a database.
+ */
+export function renderTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, key: string) =>
+    key in vars ? vars[key] : `{{${key}}}`,
+  )
+}
+
 @Injectable()
 export class AutomationsService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    // RealtimeModule is @Global, so the gateway injects without importing chat.
+    private realtime: RealtimeGateway,
+  ) {}
 
   // ─── Time-based triggers ───────────────────────────────────────────────────
   // Fires the "Task becomes overdue" / "Task due date passes" automation
@@ -181,7 +201,7 @@ export class AutomationsService {
     try {
       const actions = rule.actions as Array<{ type: string; params: Record<string, string | undefined> }>
       for (const action of actions) {
-        await this.runAction(action, ctx)
+        await this.runAction(action, ctx, rule.createdById)
       }
       // Increment run count and update lastRunAt
       await this.db
@@ -209,6 +229,7 @@ export class AutomationsService {
   private async runAction(
     action: { type: string; params: Record<string, string | string[] | undefined> },
     ctx: TriggerContext,
+    authorHint?: string | null,
   ) {
     switch (action.type) {
       case 'change_status': {
@@ -288,8 +309,118 @@ export class AutomationsService {
         break
       }
 
+      // Plan §7.7 "post message to channel". Posts a chat message to the given
+      // channel; the message body supports `{{task.title}}`-style interpolation
+      // from the trigger context.
+      case 'post_to_channel': {
+        const channelId = typeof action.params.channelId === 'string' ? action.params.channelId : undefined
+        const template = typeof action.params.message === 'string' ? action.params.message : ''
+        if (!channelId) break
+        await this.postToChannel(channelId, template, ctx, authorHint)
+        break
+      }
+
       default:
         break
     }
+  }
+
+  // ─── post_to_channel helpers ───────────────────────────────────────────────
+
+  /**
+   * Post an automation message into a chat channel via the lowest-level insert
+   * path (avoids a Chat↔Automations DI cycle — TasksModule already imports
+   * AutomationsModule, so importing ChatModule here would cycle). The message is
+   * authored by the automation's creator (`createdById`); when that user is
+   * missing or no longer a member we fall back to a workspace admin/member —
+   * there is no dedicated system user, so the creator is the cleanest identity.
+   */
+  private async postToChannel(
+    channelId: string,
+    template: string,
+    ctx: TriggerContext,
+    authorHint?: string | null,
+  ): Promise<void> {
+    // The channel must exist and belong to the automation's workspace — a rule
+    // must never post into another workspace's channel.
+    const [channel] = await this.db
+      .select({ id: chatChannels.id, workspaceId: chatChannels.workspaceId })
+      .from(chatChannels)
+      .where(eq(chatChannels.id, channelId))
+      .limit(1)
+    if (!channel) throw new NotFoundException('Channel not found')
+    if (channel.workspaceId !== ctx.workspaceId) {
+      throw new ForbiddenException('Channel is not in this workspace')
+    }
+
+    const body = renderTemplate(template, await this.buildMessageVars(ctx)).trim()
+    if (!body) return // nothing to post (empty template / no vars)
+
+    const authorId = await this.resolveChannelAuthor(ctx.workspaceId, authorHint)
+    if (!authorId) throw new Error('No eligible author to post automation message')
+
+    const [row] = await this.db
+      .insert(chatMessages)
+      .values({ channelId, authorId, body })
+      .returning()
+
+    // Broadcast so connected clients render it live, mirroring the shape
+    // ChatService.postMessage emits (author name/avatar, empty attachments).
+    const [author] = await this.db
+      .select({ displayName: users.displayName, avatarUrl: users.avatarUrl })
+      .from(users)
+      .where(eq(users.id, authorId))
+      .limit(1)
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.message.created',
+      workspaceId: channel.workspaceId,
+      channelId,
+      message: {
+        ...row,
+        authorName: author?.displayName,
+        authorAvatarUrl: author?.avatarUrl,
+        attachments: [],
+        reactions: [],
+      },
+    })
+  }
+
+  /** Interpolation variables derived from the trigger context (the task). */
+  private async buildMessageVars(ctx: TriggerContext): Promise<Record<string, string>> {
+    const vars: Record<string, string> = {}
+    if (ctx.taskId) {
+      const [task] = await this.db
+        .select({ title: tasks.title, status: tasks.status, priority: tasks.priority })
+        .from(tasks)
+        .where(eq(tasks.id, ctx.taskId))
+        .limit(1)
+      if (task) {
+        vars['task.title'] = task.title ?? ''
+        vars['task.status'] = task.status ?? ''
+        vars['task.priority'] = task.priority ?? ''
+      }
+    }
+    if (ctx.oldValue) vars['trigger.oldValue'] = ctx.oldValue
+    if (ctx.newValue) vars['trigger.newValue'] = ctx.newValue
+    return vars
+  }
+
+  /** A valid author for the posted message: the creator if still a member, else an admin/member. */
+  private async resolveChannelAuthor(workspaceId: string, hint?: string | null): Promise<string | null> {
+    if (hint) {
+      const [member] = await this.db
+        .select({ userId: workspaceMembers.userId })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, hint)))
+        .limit(1)
+      if (member) return member.userId
+    }
+    const [fallback] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .orderBy(sql`case when ${workspaceMembers.role} = 'workspace_admin' then 0 else 1 end`)
+      .limit(1)
+    return fallback?.userId ?? null
   }
 }

@@ -11,7 +11,7 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees, users } from '@rundesk/db'
+import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees, taskActivity, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { TasksService } from '../tasks/tasks.service'
@@ -152,6 +152,182 @@ export function formatTaskSummaryInput(input: TaskSummaryInput): string {
   }
 
   return sections.join('\n\n')
+}
+
+// ─── Automation suggestions (Plan §7.7) ──────────────────────────────────────
+
+/** Trigger / action types an AI-suggested rule may use — mirrors the builder UI. */
+const SUGGESTION_TRIGGERS = new Set([
+  'task.created',
+  'task.status_changed',
+  'task.due_passed',
+  'task.comment_added',
+  'task.assignee_changed',
+  'task.overdue',
+])
+const SUGGESTION_ACTIONS = new Set([
+  'change_status',
+  'set_priority',
+  'send_notification',
+  'create_subtask',
+  'assign_member',
+  'post_to_channel',
+])
+
+export type AutomationBehavior = {
+  totalOpenTasks: number
+  overdueCount: number
+  statusTransitions: Array<{ from: string; to: string; count: number }>
+  topAssignees: Array<{ name: string; count: number }>
+  commentActivityCount: number
+}
+
+export type AutomationSuggestion = {
+  name: string
+  trigger: { type: string; filters?: Record<string, string> }
+  actions: Array<{ type: string; params: Record<string, string> }>
+  rationale: string
+}
+
+/** Compact, human-readable behavior summary fed to the model. Pure + testable. */
+export function formatAutomationBehavior(b: AutomationBehavior): string {
+  const lines: string[] = [
+    `Open tasks: ${b.totalOpenTasks}`,
+    `Currently overdue tasks: ${b.overdueCount}`,
+    `Comment activity (last 30 days): ${b.commentActivityCount}`,
+  ]
+  if (b.statusTransitions.length) {
+    lines.push('Most common status transitions (last 30 days):')
+    for (const t of b.statusTransitions.slice(0, 6)) lines.push(`- ${t.from} -> ${t.to} (${t.count}x)`)
+  } else {
+    lines.push('No recorded status transitions in the last 30 days.')
+  }
+  if (b.topAssignees.length) {
+    lines.push('Most active assignees:')
+    for (const a of b.topAssignees.slice(0, 5)) lines.push(`- ${a.name} (${a.count} open assignments)`)
+  }
+  return lines.join('\n')
+}
+
+/** Format an assignee open-task-count list into a one-line workload signal (Plan §7.4). */
+export function formatTeamWorkload(rows: Array<{ name: string; open: number }>): string {
+  if (rows.length === 0) return ''
+  const parts = rows.map((r) => `${r.name}: ${r.open} open task${r.open === 1 ? '' : 's'}`)
+  return `Current assignee workload — ${parts.join('; ')}`
+}
+
+/**
+ * Validate/normalize model-produced suggestions against the trigger/action
+ * whitelists, coercing params to a string map and dropping anything invalid.
+ * Pure so the parsing contract is unit-tested without a model. Extracted from
+ * the raw text so both the AI and fallback paths share one shape.
+ */
+export function sanitizeAutomationSuggestions(raw: unknown): AutomationSuggestion[] {
+  if (!Array.isArray(raw)) return []
+  const result: AutomationSuggestion[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const trig = (o.trigger ?? {}) as Record<string, unknown>
+    const trigType = typeof trig.type === 'string' ? trig.type : ''
+    if (!SUGGESTION_TRIGGERS.has(trigType)) continue
+
+    const rawActions = Array.isArray(o.actions) ? o.actions : []
+    const actions: Array<{ type: string; params: Record<string, string> }> = []
+    for (const a of rawActions) {
+      if (!a || typeof a !== 'object') continue
+      const ao = a as Record<string, unknown>
+      const type = typeof ao.type === 'string' ? ao.type : ''
+      if (!SUGGESTION_ACTIONS.has(type)) continue
+      actions.push({ type, params: toStringMap(ao.params) })
+    }
+    if (actions.length === 0) continue
+
+    result.push({
+      name: typeof o.name === 'string' && o.name.trim() ? o.name.trim().slice(0, 120) : 'Suggested automation',
+      trigger: { type: trigType, filters: toStringMap(trig.filters) },
+      actions,
+      rationale: typeof o.rationale === 'string' ? o.rationale.trim().slice(0, 400) : '',
+    })
+  }
+  return result
+}
+
+/** JSON.parse that returns undefined instead of throwing on malformed input. */
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+/** Coerce an unknown object into a flat Record<string,string> (numbers/bools stringified). */
+function toStringMap(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof v === 'string') out[k] = v
+      else if (typeof v === 'number' || typeof v === 'boolean') out[k] = String(v)
+    }
+  }
+  return out
+}
+
+/**
+ * Deterministic fallback used when AI is unavailable or returns nothing usable.
+ * Derives 2-4 sensible rules from the behavior stats and always returns >= 2.
+ * Pure + testable.
+ */
+export function deterministicAutomationSuggestions(b: AutomationBehavior): AutomationSuggestion[] {
+  const out: AutomationSuggestion[] = []
+
+  const top = b.statusTransitions.find((t) => t.to)
+  if (top) {
+    out.push({
+      name: `Notify when tasks move to ${top.to}`,
+      trigger: { type: 'task.status_changed', filters: { toStatus: top.to } },
+      actions: [{ type: 'send_notification', params: { message: `A task moved to ${top.to}.` } }],
+      rationale: `Tasks moved to "${top.to}" ${top.count} time(s) recently — the most common transition in your workspace.`,
+    })
+  }
+  if (b.overdueCount > 0) {
+    out.push({
+      name: 'Escalate overdue tasks to urgent',
+      trigger: { type: 'task.overdue', filters: {} },
+      actions: [{ type: 'set_priority', params: { priority: 'urgent' } }],
+      rationale: `${b.overdueCount} task(s) are currently overdue — auto-escalating keeps them visible.`,
+    })
+  }
+  if (b.commentActivityCount >= 3) {
+    out.push({
+      name: 'Capture follow-ups from discussion',
+      trigger: { type: 'task.comment_added', filters: {} },
+      actions: [{ type: 'create_subtask', params: { title: 'Follow-up from discussion' } }],
+      rationale: `Comment activity is high (${b.commentActivityCount} recently) — turn discussion into tracked follow-ups.`,
+    })
+  }
+
+  // Guarantee at least two suggestions even for a quiet/new workspace.
+  const defaults: AutomationSuggestion[] = [
+    {
+      name: 'Notify on overdue',
+      trigger: { type: 'task.overdue', filters: {} },
+      actions: [{ type: 'send_notification', params: { message: 'A task is overdue.' } }],
+      rationale: 'A safe starting rule while your workspace builds up activity history.',
+    },
+    {
+      name: 'Announce new tasks',
+      trigger: { type: 'task.created', filters: {} },
+      actions: [{ type: 'send_notification', params: { message: 'A new task was created.' } }],
+      rationale: 'Keep the team aware as new work comes in.',
+    },
+  ]
+  for (const d of defaults) {
+    if (out.length >= 2) break
+    if (!out.some((s) => s.trigger.type === d.trigger.type)) out.push(d)
+  }
+  return out.slice(0, 4)
 }
 
 // Rough per-million-token pricing (USD) for cost *estimation* in reports.
@@ -747,7 +923,10 @@ Focus on the key goals, current status, recent activity, and any blockers or ris
       model: 'claude-haiku-4-5',
       max_tokens: 256,
       system: `You are a project planning assistant. Today's date is ${today}.
-Suggest a realistic due date for the given task based on its complexity.
+Suggest a realistic due date for the given task based on its complexity, and — when
+a "Team workload" line is provided — factor in how busy the assignees already are
+(push the date out when they are heavily loaded). Mention the workload in your reasoning
+when it influenced the date.
 Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "string" }`,
       messages: [
         {
@@ -765,6 +944,159 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
       return { suggestedDate: fallback.toISOString().split('T')[0], reasoning: 'Default 7-day estimate' }
     }
     return JSON.parse(jsonMatch[0])
+  }
+
+  /**
+   * Compact current-workload signal for a task's assignees (Plan §7.4): each
+   * assignee's count of open (non-closed, non-archived) tasks across the
+   * workspace. Returns undefined when the task has no assignees so the deadline
+   * prompt omits the line entirely.
+   */
+  async buildTeamWorkloadSignal(taskId: string): Promise<string | undefined> {
+    const assignees = await this.db
+      .select({ userId: taskAssignees.userId, name: sql<string>`coalesce(${users.displayName}, ${users.email})` })
+      .from(taskAssignees)
+      .innerJoin(users, eq(users.id, taskAssignees.userId))
+      .where(eq(taskAssignees.taskId, taskId))
+    if (assignees.length === 0) return undefined
+
+    const workspaceId = await this.resolveTaskWorkspaceId(taskId)
+    if (!workspaceId) return undefined
+
+    const ids = assignees.map((a) => a.userId)
+    const counts = await this.db
+      .select({ userId: taskAssignees.userId, count: sql<number>`count(*)::int` })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          inArray(taskAssignees.userId, ids),
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, false),
+          sql`${tasks.statusCategory} <> 'closed'`,
+        ),
+      )
+      .groupBy(taskAssignees.userId)
+    const countByUser = new Map(counts.map((c) => [c.userId, c.count]))
+
+    return formatTeamWorkload(
+      assignees.map((a) => ({ name: a.name || 'Someone', open: countByUser.get(a.userId) ?? 0 })),
+    )
+  }
+
+  /** Assert the caller is a member of the workspace (used by the suggestions endpoint). */
+  async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
+    const role = await this.memberRole(workspaceId, userId)
+    if (!role) throw new ForbiddenException('You do not have access to this workspace')
+  }
+
+  // ─── AI-suggested automation rules (Plan §7.7) ────────────────────────────
+
+  /**
+   * Suggest 2-4 automation rules from recent workspace behavior (status
+   * transitions, overdue pressure, active assignees, comment volume). Uses the
+   * model when configured; otherwise — or on any AI error, including rate limits
+   * — returns a deterministic heuristic. Never throws: always best-effort.
+   */
+  async suggestAutomations(
+    workspaceId: string,
+    ctx: AiCtx = {},
+  ): Promise<{ source: 'ai' | 'heuristic'; suggestions: AutomationSuggestion[] }> {
+    const behavior = await this.collectAutomationBehavior(workspaceId)
+    const fallback = deterministicAutomationSuggestions(behavior)
+    if (!this.isAvailable()) return { source: 'heuristic', suggestions: fallback }
+
+    try {
+      const response = await this.complete('automation.suggest', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 1024,
+        system: `You configure automation rules for the Rundesk project management app.
+Given a workspace's recent behavior, suggest 2-4 useful "when trigger, then actions" rules.
+Respond ONLY with a valid JSON array of objects of this exact shape:
+[ { "name": "short label", "trigger": { "type": "TRIGGER", "filters": { "toStatus": "..." } }, "actions": [ { "type": "ACTION", "params": { } } ], "rationale": "one sentence grounded in the behavior" } ]
+"trigger.type" must be one of: task.created, task.status_changed, task.due_passed, task.comment_added, task.assignee_changed, task.overdue.
+Each "actions[].type" must be one of: change_status, set_priority, send_notification, create_subtask, assign_member, post_to_channel.
+Only use filters/params that fit the action (e.g. set_priority -> { "priority": "urgent" }; change_status -> { "status": "done" }; send_notification -> { "message": "..." }). Do not invent channel ids.`,
+        messages: [{ role: 'user', content: `Recent workspace behavior:\n${formatAutomationBehavior(behavior)}` }],
+      })
+      const text = response.content[0].type === 'text' ? response.content[0].text : ''
+      const match = text.match(/\[[\s\S]*\]/)
+      const parsed = match ? sanitizeAutomationSuggestions(safeJsonParse(match[0])) : []
+      return parsed.length ? { source: 'ai', suggestions: parsed.slice(0, 4) } : { source: 'heuristic', suggestions: fallback }
+    } catch {
+      // AI unavailable / rate-limited / malformed — degrade to the heuristic.
+      return { source: 'heuristic', suggestions: fallback }
+    }
+  }
+
+  /** Read recent workspace behavior stats used to ground automation suggestions. */
+  private async collectAutomationBehavior(workspaceId: string): Promise<AutomationBehavior> {
+    const since = new Date(Date.now() - 30 * 24 * 3_600_000)
+    const now = new Date()
+    const [transitions, overdue, assignees, comments, openTasks] = await Promise.all([
+      this.db
+        .select({
+          from: sql<string>`coalesce(${taskActivity.meta}->>'from','')`,
+          to: sql<string>`coalesce(${taskActivity.meta}->>'to','')`,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(taskActivity)
+        .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(taskActivity.action, 'status_changed'), gte(taskActivity.createdAt, since)))
+        .groupBy(sql`${taskActivity.meta}->>'from'`, sql`${taskActivity.meta}->>'to'`)
+        .orderBy(desc(sql`count(*)`))
+        .limit(6),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), lte(tasks.dueDate, now), sql`${tasks.statusCategory} <> 'closed'`)),
+      this.db
+        .select({ name: sql<string>`coalesce(${users.displayName}, ${users.email})`, count: sql<number>`count(*)::int` })
+        .from(taskAssignees)
+        .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .innerJoin(users, eq(users.id, taskAssignees.userId))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.statusCategory} <> 'closed'`))
+        .groupBy(users.id, users.displayName, users.email)
+        .orderBy(desc(sql`count(*)`))
+        .limit(5),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(taskActivity)
+        .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(taskActivity.action, 'commented'), gte(taskActivity.createdAt, since))),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.statusCategory} <> 'closed'`)),
+    ])
+
+    return {
+      totalOpenTasks: openTasks[0]?.count ?? 0,
+      overdueCount: overdue[0]?.count ?? 0,
+      statusTransitions: transitions
+        .filter((t) => t.to)
+        .map((t) => ({ from: t.from || '(none)', to: t.to, count: t.count })),
+      topAssignees: assignees.map((a) => ({ name: a.name || 'Someone', count: a.count })),
+      commentActivityCount: comments[0]?.count ?? 0,
+    }
   }
 
   isAvailable(): boolean {
