@@ -14,6 +14,8 @@ import {
   Plus,
   MessageSquare,
   X,
+  Terminal,
+  AlertTriangle,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
@@ -107,7 +109,7 @@ function writingModeLabelKey(mode: string): TranslationKey {
 export function AiPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
-  const [activeTab, setActiveTab] = useState<'chat' | 'generate' | 'notes' | 'writing'>('chat')
+  const [activeTab, setActiveTab] = useState<'chat' | 'commands' | 'generate' | 'notes' | 'writing'>('chat')
 
   return (
     <div className="h-full flex flex-col">
@@ -130,6 +132,7 @@ export function AiPage() {
         {(
           [
             { id: 'chat', labelKey: 'ai.tabChat', icon: MessageSquare },
+            { id: 'commands', labelKey: 'ai.tabCommands', icon: Terminal },
             { id: 'generate', labelKey: 'ai.tabGenerate', icon: Wand2 },
             { id: 'notes', labelKey: 'ai.tabNotes', icon: FileText },
             { id: 'writing', labelKey: 'ai.tabWriting', icon: Zap },
@@ -155,10 +158,257 @@ export function AiPage() {
         {activeTab === 'chat' && (
           <AiPanel workspaceId={workspaceId} className="h-full" />
         )}
+        {activeTab === 'commands' && <CommandsTab workspaceId={workspaceId} />}
         {activeTab === 'generate' && <TaskGeneratorTab workspaceId={workspaceId} />}
         {activeTab === 'notes' && <MeetingNotesTab workspaceId={workspaceId} />}
         {activeTab === 'writing' && <WritingTab />}
       </div>
+    </div>
+  )
+}
+
+// ─── Natural-language Commands (Plan §7.6 / §7.8) ─────────────────────────────
+
+type CommandPlanAction = {
+  tool: string
+  humanLabel: string
+  affectedTaskIds?: string[]
+  args?: Record<string, unknown>
+}
+type CommandSearchResult = {
+  query: string
+  tasks: Array<{ id: string; title: string; status: string; dueDate: string | null }>
+}
+type CommandPlan = {
+  summary: string
+  actions: CommandPlanAction[]
+  readOnlyResults: CommandSearchResult[]
+  warnings: string[]
+}
+type CommandActionResult = {
+  tool: string
+  humanLabel: string
+  status: 'succeeded' | 'skipped' | 'failed'
+  reason?: string
+}
+
+const COMMAND_SUGGESTION_KEYS = [
+  'ai.commandExampleOverdue',
+  'ai.commandExampleCreate',
+  'ai.commandExampleAssign',
+] as const
+
+function CommandsTab({ workspaceId }: { workspaceId: string }) {
+  const { t, tCount } = useTranslation()
+  const [message, setMessage] = useState('')
+  const [plan, setPlan] = useState<CommandPlan | null>(null)
+  const [results, setResults] = useState<CommandActionResult[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const preview = useMutation({
+    mutationFn: () => api<CommandPlan>('/ai/command', { method: 'POST', body: { workspaceId, message } }),
+    onSuccess: (data) => {
+      setPlan(data)
+      setResults(null)
+      setError(null)
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : t('ai.commandError')),
+  })
+
+  const execute = useMutation({
+    mutationFn: () =>
+      api<{ results: CommandActionResult[] }>('/ai/command/execute', {
+        method: 'POST',
+        body: { workspaceId, actions: plan?.actions ?? [] },
+      }),
+    onSuccess: (data) => {
+      setResults(data.results)
+      setPlan(null)
+      setError(null)
+    },
+    onError: (err) => setError(err instanceof Error ? err.message : t('ai.commandError')),
+  })
+
+  function cancelPlan() {
+    setPlan(null)
+    setError(null)
+  }
+
+  function resetAll() {
+    setPlan(null)
+    setResults(null)
+    setError(null)
+    setMessage('')
+  }
+
+  const busy = preview.isPending || execute.isPending
+
+  return (
+    <div className="p-6 max-w-2xl overflow-auto h-full space-y-4">
+      <div>
+        <h2 className="font-semibold mb-1">{t('ai.commandsTitle')}</h2>
+        <p className="text-sm text-muted-foreground">{t('ai.commandsDesc')}</p>
+      </div>
+
+      <div className="space-y-2">
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder={t('ai.commandPlaceholder')}
+          rows={3}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && message.trim() && !busy) preview.mutate()
+          }}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => preview.mutate()} disabled={!message.trim() || busy}>
+            {preview.isPending ? (
+              <><Loader2 className="h-4 w-4 animate-spin mr-1.5" /> {t('ai.commandPlanning')}</>
+            ) : (
+              <><Terminal className="h-4 w-4 mr-1.5" /> {t('ai.commandPreview')}</>
+            )}
+          </Button>
+          {(plan || results) && (
+            <Button variant="ghost" size="sm" onClick={resetAll} disabled={busy}>
+              {t('ai.commandRunAnother')}
+            </Button>
+          )}
+        </div>
+        {!plan && !results && (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {COMMAND_SUGGESTION_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setMessage(t(key))}
+                className="text-xs px-2.5 py-1 rounded-full border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              >
+                {t(key)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <Card className="p-3 border-destructive/40 bg-destructive/5 text-sm text-destructive">{error}</Card>
+      )}
+
+      {plan && (
+        <Card className="p-4 space-y-4">
+          <div className="flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {t('ai.commandPreviewHeading')}
+          </div>
+          <p className="text-sm">{plan.summary}</p>
+
+          {plan.actions.length > 0 ? (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {t('ai.commandProposedChanges')}
+              </p>
+              <ul className="space-y-1.5">
+                {plan.actions.map((action, index) => (
+                  <li key={index} className="flex items-start gap-2 text-sm rounded-md border border-border px-3 py-2">
+                    <ArrowRight className="h-4 w-4 mt-0.5 text-accent shrink-0" />
+                    <div className="flex-1">
+                      <span>{action.humanLabel}</span>
+                      {action.affectedTaskIds && action.affectedTaskIds.length > 0 && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {tCount('ai.commandAffected', action.affectedTaskIds.length)}
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('ai.commandNoActions')}</p>
+          )}
+
+          {plan.readOnlyResults.some((r) => r.tasks.length > 0) && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {t('ai.commandFoundTasks')}
+              </p>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {plan.readOnlyResults.flatMap((r) => r.tasks).slice(0, 20).map((task) => (
+                  <li key={task.id} className="flex items-center gap-2">
+                    <span className="text-foreground">{task.title}</span>
+                    <span className="rounded-full bg-muted px-1.5 py-0.5">{task.status}</span>
+                    {task.dueDate && <span>{t('ai.due', { date: task.dueDate })}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {plan.warnings.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                {t('ai.commandNotesLabel')}
+              </p>
+              {plan.warnings.map((warning, index) => (
+                <p key={index} className="text-xs text-amber-700 dark:text-amber-300">{warning}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              onClick={() => execute.mutate()}
+              disabled={busy || plan.actions.length === 0}
+            >
+              {execute.isPending ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> {t('ai.commandRunning')}</>
+              ) : (
+                <><CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> {t('ai.commandConfirm')}</>
+              )}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={cancelPlan} disabled={busy}>
+              {t('ai.commandCancel')}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {results && (
+        <Card className="p-4 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('ai.commandResults')}</p>
+          {results.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t('ai.commandNoActions')}</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {results.map((res, index) => (
+                <li key={index} className="flex items-start gap-2 text-sm">
+                  {res.status === 'succeeded' ? (
+                    <CheckCircle2 className="h-4 w-4 mt-0.5 text-emerald-500 shrink-0" />
+                  ) : res.status === 'skipped' ? (
+                    <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-500 shrink-0" />
+                  ) : (
+                    <X className="h-4 w-4 mt-0.5 text-destructive shrink-0" />
+                  )}
+                  <div className="flex-1">
+                    <span>{res.humanLabel}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {res.status === 'succeeded'
+                        ? t('ai.commandDone')
+                        : res.status === 'skipped'
+                          ? res.reason === 'no_permission'
+                            ? t('ai.commandNoPermission')
+                            : `${t('ai.commandSkipped')}${res.reason ? ` — ${res.reason}` : ''}`
+                          : `${t('ai.commandFailed')}${res.reason ? ` — ${res.reason}` : ''}`}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
     </div>
   )
 }

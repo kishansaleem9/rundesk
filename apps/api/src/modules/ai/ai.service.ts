@@ -1,12 +1,32 @@
-import { Injectable, Inject, HttpException, HttpStatus } from '@nestjs/common'
+import {
+  Injectable,
+  Inject,
+  HttpException,
+  HttpStatus,
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
-import { and, asc, desc, eq, gte, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees } from '@rundesk/db'
+import { and, asc, desc, eq, gte, inArray, lte, ne, or, sql } from 'drizzle-orm'
+import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { TasksService } from '../tasks/tasks.service'
+import {
+  COMMAND_TOOLS,
+  planFromToolCalls,
+  searchTasksInContext,
+  type CommandContext,
+  type CommandExecuteResult,
+  type CommandActionResult,
+  type CommandPlan,
+  type PlanAction,
+  type StatusCategory,
+  type ToolCall,
+} from './ai-command'
 
 export type AiCtx = { userId?: string; workspaceId?: string }
 
@@ -749,6 +769,291 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
 
   isAvailable(): boolean {
     return this.client !== null
+  }
+
+  // ─── Agentic AI commands (Plan §7.6 / §7.8) ───────────────────────────────
+
+  /** Membership role for (workspace, user), or null when not a member. */
+  private async memberRole(workspaceId: string, userId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return row?.role ?? null
+  }
+
+  private async resolveListWorkspaceId(listId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    return row?.workspaceId ?? null
+  }
+
+  private async resolveTaskWorkspaceId(taskId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    return row?.workspaceId ?? null
+  }
+
+  /**
+   * Assert the user may read a task's workspace (Plan §7.5 hardening). Reused by
+   * the `/ai/summarize` taskId path so any authed user can no longer summarize an
+   * arbitrary task by id.
+   */
+  async assertTaskWorkspaceAccess(taskId: string, userId: string): Promise<void> {
+    const workspaceId = await this.resolveTaskWorkspaceId(taskId)
+    if (!workspaceId) throw new NotFoundException('Task not found')
+    const role = await this.memberRole(workspaceId, userId)
+    if (!role) throw new ForbiddenException('You do not have access to this task')
+  }
+
+  /**
+   * Load the bounded, DB-resolved context the command planner needs: destination
+   * lists (with paths), workspace members (for assigneeEmail→userId), and the
+   * open tasks (with assignee emails) that search / bulk filters run against.
+   */
+  async loadCommandContext(workspaceId: string): Promise<CommandContext> {
+    const today = new Date().toISOString().slice(0, 10)
+    const [listRows, memberRows, taskRows] = await Promise.all([
+      this.db
+        .select({ id: lists.id, name: lists.name, projectName: projects.name, spaceName: spaces.name })
+        .from(lists)
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false)))
+        .orderBy(asc(spaces.name), asc(projects.name), asc(lists.name))
+        .limit(100),
+      this.db
+        .select({ userId: users.id, email: users.email, displayName: users.displayName })
+        .from(workspaceMembers)
+        .innerJoin(users, eq(users.id, workspaceMembers.userId))
+        .where(eq(workspaceMembers.workspaceId, workspaceId)),
+      this.db
+        .select({
+          id: tasks.id,
+          title: tasks.title,
+          listId: tasks.listId,
+          status: tasks.status,
+          statusCategory: tasks.statusCategory,
+          dueDate: tasks.dueDate,
+        })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+        .orderBy(asc(tasks.dueDate))
+        .limit(300),
+    ])
+
+    const taskIds = taskRows.map((t) => t.id)
+    const assigneeRows = taskIds.length
+      ? await this.db
+          .select({ taskId: taskAssignees.taskId, email: users.email })
+          .from(taskAssignees)
+          .innerJoin(users, eq(users.id, taskAssignees.userId))
+          .where(inArray(taskAssignees.taskId, taskIds))
+      : []
+    const emailsByTask = new Map<string, string[]>()
+    for (const row of assigneeRows) {
+      const list = emailsByTask.get(row.taskId) ?? []
+      list.push(row.email)
+      emailsByTask.set(row.taskId, list)
+    }
+
+    return {
+      today,
+      lists: listRows.map((l) => ({ id: l.id, name: l.name, path: `${l.spaceName} / ${l.projectName} / ${l.name}` })),
+      members: memberRows.map((m) => ({ userId: m.userId, email: m.email, displayName: m.displayName })),
+      tasks: taskRows.map((t) => ({
+        id: t.id,
+        title: t.title,
+        listId: t.listId,
+        status: t.status,
+        statusCategory: t.statusCategory as StatusCategory,
+        dueDate: toDayString(t.dueDate) || null,
+        assigneeEmails: emailsByTask.get(t.id) ?? [],
+      })),
+    }
+  }
+
+  /**
+   * Run a natural-language command through Anthropic **tool use** and return a
+   * preview→confirm PLAN. READ-ONLY `search_tasks` calls run immediately against
+   * the context to inform the plan; every MUTATING tool call is validated,
+   * resolved, and returned as an action to confirm — nothing mutates here.
+   * All model calls route through `complete` (rate limit + usage tracking).
+   */
+  async command(workspaceId: string, message: string, ctx: AiCtx = {}): Promise<CommandPlan> {
+    const [workspaceContext, planCtx] = await Promise.all([
+      this.buildWorkspaceContext(workspaceId, ctx.userId ?? ''),
+      this.loadCommandContext(workspaceId),
+    ])
+
+    const listCatalog = planCtx.lists
+      .slice(0, 60)
+      .map((l) => `- ${l.id}: ${l.path}`)
+      .join('\n')
+    const systemPrompt = `You are Rundesk's command assistant. Translate the user's natural-language request into tool calls.
+Today's date is ${planCtx.today}.
+Use search_tasks (READ-ONLY) to locate task ids before proposing changes; reference tasks by their id.
+For any change (create_task / set_task_status / reschedule_task / assign_task / bulk_reschedule) call the matching tool. Changes are PREVIEWED for the user to confirm and are NOT executed until they confirm — do not claim you have already made a change.
+When creating a task, pick a listId from "Available lists". Resolve people by their email.
+
+Workspace context:
+${workspaceContext}
+
+Available lists (id: path):
+${listCatalog || '(none)'}`
+
+    const messages: Anthropic.Messages.MessageParam[] = [{ role: 'user', content: message }]
+    const collected: ToolCall[] = []
+
+    // Bounded agentic loop: keep going while the model only searches (so it can
+    // act on the results), and stop as soon as it proposes any mutation.
+    for (let turn = 0; turn < 5; turn++) {
+      const response = await this.complete('command', ctx, {
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: systemPrompt,
+        tools: COMMAND_TOOLS,
+        messages,
+      })
+
+      const toolUses = response.content.filter(
+        (block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use',
+      )
+      if (toolUses.length === 0) break
+
+      messages.push({ role: 'assistant', content: response.content })
+      const toolResults: Anthropic.Messages.ToolResultBlockParam[] = []
+      let hasMutation = false
+      for (const toolUse of toolUses) {
+        const input = (toolUse.input ?? {}) as Record<string, unknown>
+        collected.push({ name: toolUse.name, input })
+        if (toolUse.name === 'search_tasks') {
+          const found = searchTasksInContext(input, planCtx)
+            .slice(0, 25)
+            .map((t) => ({ id: t.id, title: t.title, status: t.status, dueDate: t.dueDate, assigneeEmails: t.assigneeEmails }))
+          toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(found) })
+        } else {
+          hasMutation = true
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: 'Queued for the user to confirm (not executed).',
+          })
+        }
+      }
+      messages.push({ role: 'user', content: toolResults })
+      if (hasMutation) break
+    }
+
+    // Deterministic plan (Plan §7.6): honest summary + resolved actions built
+    // purely from the collected tool calls, so the preview never over-claims.
+    return planFromToolCalls(collected, planCtx)
+  }
+
+  /**
+   * Execute confirmed actions via TasksService (Plan §7.6). Each mutation is
+   * access-checked (TasksService enforces task write permission; create_task
+   * verifies non-guest workspace membership) — actions the caller can't perform
+   * are skipped and reported rather than failing the batch. TasksService already
+   * audits each mutation via its activity log.
+   */
+  async executeActions(actions: PlanAction[], userId: string): Promise<CommandExecuteResult> {
+    const results: CommandActionResult[] = []
+    for (const action of actions) {
+      try {
+        results.push(await this.executeOne(action, userId))
+      } catch (err) {
+        const skippable =
+          err instanceof ForbiddenException || err instanceof NotFoundException || err instanceof BadRequestException
+        const reason = err instanceof ForbiddenException ? 'no_permission' : err instanceof Error ? err.message : 'error'
+        results.push({
+          tool: action.tool,
+          humanLabel: action.humanLabel,
+          status: skippable ? 'skipped' : 'failed',
+          reason,
+          affectedTaskIds: action.affectedTaskIds,
+        })
+      }
+    }
+    return { results }
+  }
+
+  private async executeOne(action: PlanAction, userId: string): Promise<CommandActionResult> {
+    switch (action.tool) {
+      case 'create_task': {
+        const workspaceId = await this.resolveListWorkspaceId(action.args.listId)
+        if (!workspaceId) {
+          return { tool: action.tool, humanLabel: action.humanLabel, status: 'skipped', reason: 'List not found' }
+        }
+        const role = await this.memberRole(workspaceId, userId)
+        if (!role || role === 'guest') {
+          return { tool: action.tool, humanLabel: action.humanLabel, status: 'skipped', reason: 'no_permission' }
+        }
+        // Only assign a resolved assignee that is actually a member of this workspace.
+        let assigneeIds: string[] | undefined
+        if (action.args.assigneeId && (await this.memberRole(workspaceId, action.args.assigneeId))) {
+          assigneeIds = [action.args.assigneeId]
+        }
+        const created = await this.tasks.createTask({
+          listId: action.args.listId,
+          title: action.args.title,
+          description: action.args.description,
+          priority: action.args.priority,
+          dueDate: action.args.dueDate ? new Date(action.args.dueDate) : undefined,
+          assigneeIds,
+          createdById: userId,
+        })
+        return {
+          tool: action.tool,
+          humanLabel: action.humanLabel,
+          status: 'succeeded',
+          affectedTaskIds: created ? [created.id] : [],
+        }
+      }
+      case 'set_task_status': {
+        await this.tasks.updateTask(action.args.taskId, userId, { status: action.args.status })
+        return { tool: action.tool, humanLabel: action.humanLabel, status: 'succeeded', affectedTaskIds: action.affectedTaskIds }
+      }
+      case 'reschedule_task': {
+        await this.tasks.updateTask(action.args.taskId, userId, { dueDate: new Date(action.args.dueDate) })
+        return { tool: action.tool, humanLabel: action.humanLabel, status: 'succeeded', affectedTaskIds: action.affectedTaskIds }
+      }
+      case 'assign_task': {
+        // Guard against a tampered assigneeId: only assign an actual member.
+        const workspaceId = await this.resolveTaskWorkspaceId(action.args.taskId)
+        if (workspaceId && !(await this.memberRole(workspaceId, action.args.assigneeId))) {
+          return { tool: action.tool, humanLabel: action.humanLabel, status: 'skipped', reason: 'Assignee is not a workspace member' }
+        }
+        await this.tasks.addAssignee(action.args.taskId, action.args.assigneeId, userId)
+        return { tool: action.tool, humanLabel: action.humanLabel, status: 'succeeded', affectedTaskIds: action.affectedTaskIds }
+      }
+      case 'bulk_reschedule': {
+        const res = await this.tasks.bulkUpdateTasks(action.args.taskIds, userId, { dueDate: new Date(action.args.dueDate) })
+        const status: CommandActionResult['status'] = res.updatedCount > 0 ? 'succeeded' : 'skipped'
+        const reason =
+          res.failedCount > 0
+            ? res.updatedCount > 0
+              ? `${res.updatedCount} updated, ${res.failedCount} skipped`
+              : 'no_permission'
+            : undefined
+        return { tool: action.tool, humanLabel: action.humanLabel, status, reason, affectedTaskIds: action.args.taskIds }
+      }
+    }
   }
 
   // ─── Workspace insights (real AI over real metrics) ───────────────────────

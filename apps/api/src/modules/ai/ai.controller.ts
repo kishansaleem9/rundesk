@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService } from './ai.service'
+import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { NotGuestGuard } from '../../common/guards/not-guest.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -93,7 +94,9 @@ export class AiController {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
     // When a taskId is provided, enrich the input server-side (Plan §7.5) with
-    // recent activity, open subtasks, open blockers, and recent comments.
+    // recent activity, open subtasks, open blockers, and recent comments — but
+    // first assert the caller can access that task's workspace (Plan §7.5 hardening).
+    if (body.taskId) await this.ai.assertTaskWorkspaceAccess(body.taskId, user.id)
     const content = body.taskId ? await this.ai.buildTaskSummaryInput(body.taskId) : body.content ?? ''
     const summary = await this.ai.summarize(content, body.type ?? 'task', {
       userId: user.id,
@@ -115,7 +118,9 @@ export class AiController {
     }
     // A task summary is enriched server-side from the task's recent activity,
     // open subtasks, blockers and comments; a project summary streams the
-    // caller-provided report text (Plan §7.5).
+    // caller-provided report text (Plan §7.5). Assert task-workspace access
+    // before reading a task by id (Plan §7.5 hardening).
+    if (body.taskId) await this.ai.assertTaskWorkspaceAccess(body.taskId, user.id)
     const content = body.taskId ? await this.ai.buildTaskSummaryInput(body.taskId) : body.content ?? ''
     await this.ai.summarizeStream(content, body.type ?? 'task', res as any, {
       userId: user.id,
@@ -199,5 +204,27 @@ export class AiController {
       userId: user.id,
       workspaceId: body.workspaceId,
     })
+  }
+
+  @Post('command')
+  @ApiOperation({ summary: 'Plan a natural-language command via tool use (preview, nothing mutates)' })
+  async command(@CurrentUser() user: any, @Body() body: { workspaceId?: string; message?: string }) {
+    if (!this.ai.isAvailable()) {
+      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
+    }
+    if (!body?.workspaceId || !body?.message?.trim()) {
+      throw new HttpException('workspaceId and message are required', HttpStatus.BAD_REQUEST)
+    }
+    return this.ai.command(body.workspaceId, body.message, { userId: user.id, workspaceId: body.workspaceId })
+  }
+
+  @Post('command/execute')
+  @ApiOperation({ summary: 'Execute confirmed command actions (per-action, access-checked)' })
+  async commandExecute(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string; actions?: PlanAction[] },
+  ) {
+    // No model call — pure task mutations via TasksService, each access-checked.
+    return this.ai.executeActions(Array.isArray(body?.actions) ? body.actions : [], user.id)
   }
 }
