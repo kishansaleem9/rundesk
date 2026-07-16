@@ -150,6 +150,7 @@ type TaskDetail = {
   dueDate?: string | null
   startDate?: string | null
   timeEstimate?: number | null
+  defaultBillable?: boolean
   labels: Array<{ id: string; name: string; color: string }>
   assignees?: Array<{ user: UserLite }>
   subtasks?: Subtask[]
@@ -659,7 +660,7 @@ export function TaskDetailSheet({
               )}
               {activeTab === 'activity' && <ActivityPanel taskId={detailQuery.data.id} />}
               {activeTab === 'time' && (
-                <TimePanel taskId={detailQuery.data.id} estimate={detailQuery.data.timeEstimate} />
+                <TimePanel taskId={detailQuery.data.id} estimate={detailQuery.data.timeEstimate} defaultBillable={detailQuery.data.defaultBillable} />
               )}
             </div>
           </>
@@ -3171,7 +3172,7 @@ function ActivityPanel({ taskId }: { taskId: string }) {
 // Time entries
 // ---------------------------------------------------------------------------
 
-function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | null }) {
+function TimePanel({ taskId, estimate, defaultBillable = false }: { taskId: string; estimate?: number | null; defaultBillable?: boolean }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [manualStart, setManualStart] = useState('')
@@ -3179,6 +3180,9 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
   const [manualDescription, setManualDescription] = useState('')
   const [quickMinutes, setQuickMinutes] = useState('')
   const [startDescription, setStartDescription] = useState('')
+  // New entries inherit the project's billable default (§8.3); the user can
+  // override per entry before logging.
+  const [manualBillable, setManualBillable] = useState(defaultBillable)
   const [nowMs, setNowMs] = useState(() => Date.now())
 
   const entriesQuery = useQuery({
@@ -3234,7 +3238,7 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
           startedAt: new Date(manualStart).toISOString(),
           endedAt: new Date(manualEnd).toISOString(),
           description: manualDescription.trim() || undefined,
-          isBillable: false,
+          isBillable: manualBillable,
         }),
       }),
     onSuccess: async () => {
@@ -3257,7 +3261,7 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
           startedAt: startedAt.toISOString(),
           endedAt: endedAt.toISOString(),
           description: manualDescription.trim() || `Quick log (${mins}m)`,
-          isBillable: false,
+          isBillable: manualBillable,
         }),
       })
     },
@@ -3414,6 +3418,15 @@ function TimePanel({ taskId, estimate }: { taskId: string; estimate?: number | n
           onChange={(e) => setManualDescription(e.target.value)}
           placeholder={t('taskDetail.descriptionOptionalPlaceholder')}
         />
+        <label className="flex items-center gap-2 text-xs text-muted-foreground select-none">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-border"
+            checked={manualBillable}
+            onChange={(e) => setManualBillable(e.target.checked)}
+          />
+          {t('taskDetail.billable')}
+        </label>
         {!manualRangeValid && (manualStart || manualEnd) && (
           <div className="text-xs text-amber-600">
             {t('taskDetail.endAfterStart')}

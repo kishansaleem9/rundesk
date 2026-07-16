@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, sql, inArray } from 'drizzle-orm'
+import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, lt, sql, inArray } from 'drizzle-orm'
 import {
   chatChannels,
   chatChannelMembers,
@@ -655,8 +655,25 @@ export class ChatService {
   async listMessages(channelId: string, userId: string, opts: { limit?: number; before?: string } = {}) {
     await this.assertChannelAccess(channelId, userId)
     const limit = Math.min(opts.limit ?? 50, 200)
-    const where = opts.before
-      ? and(eq(chatMessages.channelId, channelId), isNull(chatMessages.parentMessageId))
+    // Keyset pagination (§6): when a `before` message id is supplied, only load
+    // root messages strictly older than that message so the client can page
+    // backwards through channel history. Without this the cursor was a no-op
+    // and only the newest `limit` messages were ever reachable.
+    let beforeCreatedAt: Date | null = null
+    if (opts.before) {
+      const [cursor] = await this.db
+        .select({ createdAt: chatMessages.createdAt })
+        .from(chatMessages)
+        .where(and(eq(chatMessages.id, opts.before), eq(chatMessages.channelId, channelId)))
+        .limit(1)
+      beforeCreatedAt = cursor?.createdAt ?? null
+    }
+    const where = beforeCreatedAt
+      ? and(
+          eq(chatMessages.channelId, channelId),
+          isNull(chatMessages.parentMessageId),
+          lt(chatMessages.createdAt, beforeCreatedAt),
+        )
       : and(eq(chatMessages.channelId, channelId), isNull(chatMessages.parentMessageId))
     const rows = await this.db
       .select({

@@ -22,9 +22,9 @@ export class TaskTimeEntriesController {
   start(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { description?: string },
+    @Body() body: { description?: string; isBillable?: boolean },
   ) {
-    return this.tasks.startTimer(taskId, user.id, body?.description)
+    return this.tasks.startTimer(taskId, user.id, body?.description, body?.isBillable)
   }
 
   @Post('stop/:entryId')

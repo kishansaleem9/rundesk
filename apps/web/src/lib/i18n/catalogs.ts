@@ -3231,6 +3231,9 @@ export const en = {
   'auth.seededLogins': 'Seeded test logins',
   'auth.seededOrgAdmin': 'Organization admin',
 
+  // Time tracking — billable control
+  'taskDetail.billable': 'Billable',
+
   // Gap-fill: subdirectory components (add-people dialog, favorites)
   'chat.addPeopleTo': 'Add people to #{{channel}}',
   'chat.loadingTeammates': 'Loading teammates…',
@@ -6545,6 +6548,8 @@ export const es: Record<TranslationKey, string> = {
   'auth.seededLogins': 'Inicios de sesión de prueba',
   'auth.seededOrgAdmin': 'Administrador de la organización',
 
+  'taskDetail.billable': 'Facturable',
+
   // Gap-fill: subdirectory components (add-people dialog, favorites)
   'chat.addPeopleTo': 'Añadir personas a #{{channel}}',
   'chat.loadingTeammates': 'Cargando compañeros…',
@@ -9850,6 +9855,8 @@ export const ar: Record<TranslationKey, string> = {
   'auth.registrationFailed': 'فشل التسجيل',
   'auth.seededLogins': 'حسابات دخول تجريبية',
   'auth.seededOrgAdmin': 'مسؤول المؤسسة',
+
+  'taskDetail.billable': 'قابل للفوترة',
 
   // Gap-fill: subdirectory components (add-people dialog, favorites)
   'chat.addPeopleTo': 'إضافة أشخاص إلى #{{channel}}',

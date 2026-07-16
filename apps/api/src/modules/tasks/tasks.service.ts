@@ -987,6 +987,7 @@ export class TasksService {
 
     return {
       ...row,
+      defaultBillable: await this.projectDefaultBillable(taskId),
       labels: labelRows.map((l) => l.label),
       watchers: watcherRows.map((w) => ({ ...w.watcher, user: w.user })),
       checklists: checklistRows,
@@ -2259,7 +2260,23 @@ export class TasksService {
   }
 
   // --- Time entries --------------------------------------------------------
-  async startTimer(taskId: string, userId: string, description?: string) {
+  /**
+   * Resolve the billable default for a task's project (§8.3 "set billable
+   * default per project"). New timer/manual entries inherit this when the
+   * caller doesn't set `isBillable` explicitly.
+   */
+  private async projectDefaultBillable(taskId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ def: projects.defaultBillable })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    return row?.def ?? false
+  }
+
+  async startTimer(taskId: string, userId: string, description?: string, isBillable?: boolean) {
     // If there's an already-running timer for this user, stop it first.
     const [running] = await this.db
       .select()
@@ -2270,7 +2287,13 @@ export class TasksService {
     }
     const [entry] = await this.db
       .insert(timeEntries)
-      .values({ taskId, userId, startedAt: new Date(), description })
+      .values({
+        taskId,
+        userId,
+        startedAt: new Date(),
+        description,
+        isBillable: isBillable ?? (await this.projectDefaultBillable(taskId)),
+      })
       .returning()
     return entry
   }
@@ -2302,7 +2325,11 @@ export class TasksService {
     const durationSec = Math.max(0, Math.floor((data.endedAt.getTime() - data.startedAt.getTime()) / 1000))
     const [entry] = await this.db
       .insert(timeEntries)
-      .values({ ...data, durationSec })
+      .values({
+        ...data,
+        durationSec,
+        isBillable: data.isBillable ?? (await this.projectDefaultBillable(data.taskId)),
+      })
       .returning()
     this.fireTimeLogged(entry)
     return entry
