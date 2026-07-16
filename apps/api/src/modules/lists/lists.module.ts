@@ -5,8 +5,10 @@ import { ListStatusesService } from './list-statuses.service'
 import { ListStatusesController } from './list-statuses.controller'
 import { ScopedStatusesService } from './scoped-statuses.service'
 import { SpaceStatusesController, ProjectStatusesController } from './scoped-statuses.controller'
+import { SecurityModule } from '../security/security.module'
 
 @Module({
+  imports: [SecurityModule],
   providers: [ListsService, ListStatusesService, ScopedStatusesService],
   controllers: [
     ListsController,

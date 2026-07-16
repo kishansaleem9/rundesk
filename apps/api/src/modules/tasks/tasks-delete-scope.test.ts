@@ -43,6 +43,7 @@ function makeService(db: any) {
     {} as any, // notifications
     {} as any, // r2
     { deleteEverywhere: mock.fn(async () => undefined) } as any, // calendarSync
+    { logAuditEvent: mock.fn(async () => undefined) } as any, // security
   )
 }
 
@@ -119,6 +120,29 @@ describe('TasksService.deleteTask wires the manager space gate', () => {
 
     await assert.rejects(() => svc.deleteTask('t1', 'mgr'), /own spaces/)
     // update() (the archive) must never run once the gate rejects.
+    assert.equal(db.update.mock.callCount(), 0)
+  })
+})
+
+describe('TasksService.restoreTask wires the same manager space gate (§3.3)', () => {
+  it('blocks an out-of-space manager before any un-archive happens', async () => {
+    // restore is the inverse of delete, so the manager scope must apply here
+    // too — otherwise a manager could un-archive a task outside their space.
+    const db = makeDb([
+      CTX(),
+      [{ role: 'manager' }],
+      [], // not a space member → assertManagerDeleteScope rejects
+    ])
+    const svc = makeService(db)
+    ;(svc as any).assertTaskWriteAccess = mock.fn(async () => ({
+      taskId: 't1',
+      listId: 'l1',
+      createdById: 'someone',
+      workspaceId: 'w1',
+    }))
+
+    await assert.rejects(() => svc.restoreTask('t1', 'mgr'), /own spaces/)
+    // update() (the un-archive) must never run once the gate rejects.
     assert.equal(db.update.mock.callCount(), 0)
   })
 })

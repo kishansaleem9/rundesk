@@ -5,10 +5,14 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import { SecurityService } from '../security/security.service'
 
 @Injectable()
 export class SpacesService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private security: SecurityService,
+  ) {}
 
   async createSpace(
     workspaceId: string,
@@ -89,9 +93,21 @@ export class SpacesService {
     return result[0]
   }
 
-  async deleteSpace(spaceId: string, actorId?: string) {
-    if (actorId) await this.assertManageable(spaceId, actorId)
+  async deleteSpace(spaceId: string, actorId?: string, ipAddress?: string) {
+    const space = actorId ? await this.assertManageable(spaceId, actorId) : null
     await this.db.update(spaces).set({ isArchived: true }).where(eq(spaces.id, spaceId))
+    if (actorId && space) {
+      // §13.3 — audit the container deletion (space archival).
+      await this.security.logAuditEvent({
+        workspaceId: space.workspaceId,
+        actorId,
+        action: 'space.deleted',
+        resourceType: 'space',
+        resourceId: spaceId,
+        description: `Archived space "${space.name}"`,
+        ipAddress,
+      })
+    }
   }
 
   private async assertManageable(spaceId: string, actorId: string) {
@@ -103,5 +119,6 @@ export class SpacesService {
       actorId,
       kind: 'space',
     })
+    return space
   }
 }

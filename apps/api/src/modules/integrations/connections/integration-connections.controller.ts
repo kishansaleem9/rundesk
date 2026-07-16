@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Ip, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { FastifyReply } from 'fastify'
 import { IntegrationConnectionsService } from './integration-connections.service'
@@ -91,10 +91,11 @@ export class IntegrationConnectionsController {
     @Param('provider') provider: string,
     @Query('code') code: string,
     @Query('state') state: string,
+    @Ip() ip: string,
     @Res() reply: FastifyReply,
   ) {
     try {
-      const result = await this.svc.handleOAuthCallback(provider, code, state)
+      const result = await this.svc.handleOAuthCallback(provider, code, state, ip)
       return reply.redirect(this.svc.getSuccessRedirect(result.workspaceId, result.provider))
     } catch (error: any) {
       return reply.redirect(this.svc.getFailureRedirect(error?.message ?? 'oauth_callback_failed'))

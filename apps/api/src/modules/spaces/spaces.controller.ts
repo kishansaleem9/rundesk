@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Put, Delete, Param, Body, Ip, UseGuards } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
@@ -48,8 +48,8 @@ export class SpacesController {
   }
 
   @Delete(':spaceId')
-  async deleteSpace(@Param('spaceId') spaceId: string, @CurrentUser() user: any) {
-    await this.spacesService.deleteSpace(spaceId, user.id)
+  async deleteSpace(@Param('spaceId') spaceId: string, @CurrentUser() user: any, @Ip() ip: string) {
+    await this.spacesService.deleteSpace(spaceId, user.id, ip)
     return { message: 'Space archived successfully' }
   }
 }

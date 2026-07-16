@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Res, UseGuards } from '@nestjs/common'
+import { Controller, Get, Ip, Param, Res, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ExportService } from './export.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -17,19 +17,27 @@ export class ExportController {
   async exportJson(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
+    @Ip() ip: string,
     @Res() res: any,
   ) {
     const data = await this.svc.exportWorkspace(workspaceId)
     const json = JSON.stringify(data, null, 2)
     res.header('Content-Type', 'application/json')
     res.header('Content-Disposition', `attachment; filename="rundesk-export-${workspaceId}.json"`)
-    await this.svc.logExport(workspaceId, user.id, 'json', 'full', {
-      tasks: data.tasks.length,
-      spaces: data.spaces.length,
-      projects: data.projects.length,
-      lists: data.lists.length,
-      members: data.members.length,
-    })
+    await this.svc.logExport(
+      workspaceId,
+      user.id,
+      'json',
+      'full',
+      {
+        tasks: data.tasks.length,
+        spaces: data.spaces.length,
+        projects: data.projects.length,
+        lists: data.lists.length,
+        members: data.members.length,
+      },
+      ip,
+    )
     res.send(json)
   }
 
@@ -38,15 +46,23 @@ export class ExportController {
   async exportTasksCsv(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
+    @Ip() ip: string,
     @Res() res: any,
   ) {
     const data = await this.svc.exportWorkspace(workspaceId)
     const csv = this.svc.exportToCsv(data.tasks as any[])
     res.header('Content-Type', 'text/csv')
     res.header('Content-Disposition', `attachment; filename="rundesk-tasks-${workspaceId}.csv"`)
-    await this.svc.logExport(workspaceId, user.id, 'csv', 'tasks', {
-      tasks: (data.tasks as any[]).length,
-    })
+    await this.svc.logExport(
+      workspaceId,
+      user.id,
+      'csv',
+      'tasks',
+      {
+        tasks: (data.tasks as any[]).length,
+      },
+      ip,
+    )
     res.send(csv)
   }
 }

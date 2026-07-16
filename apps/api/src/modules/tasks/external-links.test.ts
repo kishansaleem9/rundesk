@@ -204,7 +204,7 @@ function makeCaptureDb(selects: unknown[][]) {
 }
 
 function makeService(db: any) {
-  return new TasksService(db, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any)
+  return new TasksService(db, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any)
 }
 
 const CTX = [{ taskId: 't1', listId: 'l1', createdById: 'u-creator', workspaceId: 'w1' }]

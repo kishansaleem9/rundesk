@@ -70,6 +70,7 @@ const noopDeps = {
   notifs:   { notifyTaskAssigned: mock.fn(), notifyTaskMentioned: mock.fn() } as any,
   r2:       { signGet: mock.fn(), signPut: mock.fn(), deleteObject: mock.fn() } as any,
   calendar: { onTaskChanged: mock.fn(), onTaskDeleted: mock.fn() } as any,
+  security: { logAuditEvent: mock.fn(async () => undefined) } as any,
 }
 
 describe('TasksService.getTasksForWorkspace', () => {
@@ -87,6 +88,7 @@ describe('TasksService.getTasksForWorkspace', () => {
       noopDeps.notifs,
       noopDeps.r2,
       noopDeps.calendar,
+      noopDeps.security,
     )
 
     const out = await service.getTasksForWorkspace('w-1')
@@ -110,6 +112,7 @@ describe('TasksService.getTasksForWorkspace', () => {
       noopDeps.notifs,
       noopDeps.r2,
       noopDeps.calendar,
+      noopDeps.security,
     )
 
     const out = await service.getTasksForWorkspace('w-1', 50, { includeAssignees: false })
@@ -144,6 +147,7 @@ describe('TasksService.getTasksForWorkspace', () => {
       noopDeps.notifs,
       noopDeps.r2,
       noopDeps.calendar,
+      noopDeps.security,
     )
 
     const out = await service.getTasksForWorkspace('w-1')
@@ -174,6 +178,7 @@ describe('TasksService.getTasksForWorkspace', () => {
       noopDeps.notifs,
       noopDeps.r2,
       noopDeps.calendar,
+      noopDeps.security,
     )
 
     await service.getTasksForWorkspace('w-1', 100_000)

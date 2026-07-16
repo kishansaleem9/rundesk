@@ -35,7 +35,8 @@ describe('ProjectsService project event firing', () => {
     // §14.1 plan gate: no-op mock (enterprise allows everything).
     const plans = { assertCanCreateProjects: mock.fn(async () => undefined) } as any
 
-    const svc = new ProjectsService(db, webhooks, slack, plans)
+    const security = { logAuditEvent: mock.fn(async () => undefined) } as any
+    const svc = new ProjectsService(db, webhooks, slack, plans, security)
     const out = await svc.createProject('s-1', { name: 'Apollo' }, 'u-1')
     assert.equal(out.id, 'p-1')
 
@@ -64,10 +65,39 @@ describe('ProjectsService project event firing', () => {
     const webhooks = { fire: mock.fn(async () => undefined) } as any
     const slack = { notify: mock.fn(async () => undefined) } as any
 
-    const svc = new ProjectsService(db, webhooks, slack, {} as any) as any
+    const svc = new ProjectsService(db, webhooks, slack, {} as any, {} as any) as any
     await svc.fireProjectEvent('project.updated', { id: 'p-9', name: 'Ghost', spaceId: 'missing' }, 'u-1')
 
     assert.equal(webhooks.fire.mock.callCount(), 0)
     assert.equal(slack.notify.mock.callCount(), 0)
+  })
+})
+
+describe('ProjectsService.deleteProject — §13.3 audit event', () => {
+  it('archives and logs project.deleted with the actor + IP', async () => {
+    // update(projects).set(...).where(...) — a chainable thenable stub.
+    const chain = () => {
+      const q = Promise.resolve([]) as any
+      q.set = () => q
+      q.where = () => q
+      return q
+    }
+    const db = { update: mock.fn(() => chain()) } as any
+    const security = { logAuditEvent: mock.fn(async () => undefined) } as any
+    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, security) as any
+    // Manage-check is exercised elsewhere; here we assert the audit wiring.
+    svc.assertManageable = mock.fn(async () => ({ workspaceId: 'w1', name: 'Apollo', createdById: 'u1' }))
+
+    await svc.deleteProject('p1', 'actor-1', '198.51.100.4')
+
+    assert.equal(db.update.mock.callCount(), 1, 'the project is archived')
+    assert.equal(security.logAuditEvent.mock.callCount(), 1, 'one audit row written')
+    const e = security.logAuditEvent.mock.calls[0].arguments[0]
+    assert.equal(e.action, 'project.deleted')
+    assert.equal(e.resourceType, 'project')
+    assert.equal(e.resourceId, 'p1')
+    assert.equal(e.workspaceId, 'w1')
+    assert.equal(e.actorId, 'actor-1')
+    assert.equal(e.ipAddress, '198.51.100.4')
   })
 })

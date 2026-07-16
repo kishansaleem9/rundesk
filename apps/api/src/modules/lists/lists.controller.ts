@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Param, Body, UseGuards, BadRequestException } from '@nestjs/common'
+import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Ip, UseGuards, BadRequestException } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -62,8 +62,8 @@ export class ListsController {
   }
 
   @Delete(':listId')
-  async deleteList(@Param('listId') listId: string, @CurrentUser() user: any) {
-    await this.listsService.deleteList(listId, user.id)
+  async deleteList(@Param('listId') listId: string, @CurrentUser() user: any, @Ip() ip: string) {
+    await this.listsService.deleteList(listId, user.id, ip)
     return { message: 'List archived successfully' }
   }
 }

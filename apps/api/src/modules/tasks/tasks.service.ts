@@ -45,6 +45,7 @@ import { SlackService } from '../integrations/slack/slack.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { R2Service } from '../../common/storage/r2.service'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
+import { SecurityService } from '../security/security.service'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Custom statuses per List replaced the fixed enum, so we accept any string
@@ -101,6 +102,7 @@ export class TasksService {
     private notifications: NotificationsService,
     private r2: R2Service,
     private calendarSync: CalendarSyncService,
+    private security: SecurityService,
   ) {}
 
   /**
@@ -492,9 +494,23 @@ export class TasksService {
     return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
   }
 
-  /** Reject attachments over the hard cap (Plan §4). Undefined size is allowed. */
+  /**
+   * §4.5 — enforce the declared attachment size on the presign/create paths.
+   * A valid, positive `sizeBytes` is now MANDATORY: reject when it is missing,
+   * non-finite, ≤ 0, or over the hard cap. This turns the client-declared size
+   * into a real gate instead of an advisory value that silently stored 0.
+   *
+   * NOTE: R2 presigned PUT URLs (see R2Service.presignPutObject) sign only the
+   * object key + content-type — they cannot express a content-length-range
+   * condition the way a presigned POST policy can. Byte-exact enforcement of the
+   * *actual* uploaded bytes therefore requires a storage-side upload policy;
+   * until that exists this declared-size gate is the mandatory guard.
+   */
   private assertAttachmentSize(sizeBytes?: number): void {
-    if (sizeBytes != null && Number.isFinite(sizeBytes) && sizeBytes > MAX_ATTACHMENT_BYTES) {
+    if (sizeBytes == null || !Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+      throw new BadRequestException('A valid attachment sizeBytes is required')
+    }
+    if (sizeBytes > MAX_ATTACHMENT_BYTES) {
       const mb = Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))
       throw new BadRequestException(`Attachment exceeds the ${mb} MB limit`)
     }
@@ -1764,14 +1780,31 @@ export class TasksService {
 
   async removeAttachment(taskId: string, attachmentId: string, actorId: string) {
     await this.assertTaskWriteAccess(taskId, actorId)
-    const [row] = await this.db
+    const [attachment] = await this.db
+      .select({
+        id: taskAttachments.id,
+        uploadedById: taskAttachments.uploadedById,
+        storageKey: taskAttachments.storageKey,
+      })
+      .from(taskAttachments)
+      .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, taskId)))
+      .limit(1)
+    if (!attachment) throw new NotFoundException('Attachment not found')
+    // §4.5 — deletion is restricted to the uploader OR a workspace moderator
+    // (mirrors deleteComment). A plain task-writer must not be able to remove
+    // another member's attachment.
+    if (
+      attachment.uploadedById !== actorId &&
+      !(await this.isTaskWorkspaceModerator(taskId, actorId))
+    ) {
+      throw new ForbiddenException('Only the uploader or a workspace admin can delete this attachment')
+    }
+    await this.db
       .delete(taskAttachments)
       .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, taskId)))
-      .returning()
-    if (!row) throw new NotFoundException('Attachment not found')
     if (this.r2.configured) {
       try {
-        await this.r2.deleteObject(row.storageKey)
+        await this.r2.deleteObject(attachment.storageKey)
       } catch {
         // best-effort cleanup
       }
@@ -2237,7 +2270,7 @@ export class TasksService {
     }
   }
 
-  async deleteTask(taskId: string, actorId: string) {
+  async deleteTask(taskId: string, actorId: string, ipAddress?: string) {
     await this.assertTaskWriteAccess(taskId, actorId)
     // Managers can only delete within their own spaces (§3.3). Layered after the
     // general write-access check so admins/members keep their existing rights.
@@ -2251,6 +2284,16 @@ export class TasksService {
     // Fire delete event
     const ctx = await this.resolveWorkspaceForList(before.listId)
     if (ctx) {
+      // §13.3 — audit the container deletion (task archival) with actor + IP.
+      await this.security.logAuditEvent({
+        workspaceId: ctx.workspaceId,
+        actorId,
+        action: 'task.deleted',
+        resourceType: 'task',
+        resourceId: taskId,
+        description: `Archived task "${before.title}"`,
+        ipAddress,
+      })
       void this.fireTaskEvent('task.deleted', ctx.workspaceId, { taskId, listId: before.listId }, {
         taskId,
         userId: actorId,
@@ -2266,6 +2309,10 @@ export class TasksService {
   /** Restore an archived (soft-deleted) task (Plan §13.4). */
   async restoreTask(taskId: string, actorId: string) {
     await this.assertTaskWriteAccess(taskId, actorId)
+    // §3.3 — restore is the inverse of delete, so a manager must be scoped to
+    // their own spaces here too; otherwise they could un-archive a task outside
+    // their space that they were correctly blocked from deleting.
+    await this.assertManagerDeleteScope(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
     if (!before.isArchived) return before

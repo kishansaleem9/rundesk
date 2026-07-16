@@ -105,6 +105,7 @@ export class ExportService {
     format: 'json' | 'csv',
     scope: string,
     counts?: Record<string, number>,
+    ipAddress?: string,
   ) {
     await this.security.logAuditEvent({
       workspaceId,
@@ -114,6 +115,7 @@ export class ExportService {
       resourceId: workspaceId,
       description: `Exported workspace ${scope} as ${format.toUpperCase()}`,
       metadata: { format, scope, ...(counts ?? {}) },
+      ipAddress,
     })
   }
 

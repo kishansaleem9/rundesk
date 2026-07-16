@@ -14,6 +14,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module'
 import { SlackModule } from '../integrations/slack/slack.module'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module'
+import { SecurityModule } from '../security/security.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 
 @Module({
@@ -24,6 +25,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     SlackModule,
     NotificationsModule,
     CalendarSyncModule,
+    SecurityModule,
   ],
   providers: [TasksService, WorkspaceMemberGuard],
   controllers: [

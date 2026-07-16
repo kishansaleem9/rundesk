@@ -8,6 +8,7 @@ import {
   Param,
   Body,
   Query,
+  Ip,
   UseGuards,
   BadRequestException,
 } from '@nestjs/common'
@@ -242,8 +243,12 @@ export class TasksController {
   }
 
   @Delete(':taskId')
-  async delete(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.tasks.deleteTask(taskId, user.id)
+  async delete(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Ip() ip: string,
+  ) {
+    return this.tasks.deleteTask(taskId, user.id, ip)
   }
 
   @Post(':taskId/restore')

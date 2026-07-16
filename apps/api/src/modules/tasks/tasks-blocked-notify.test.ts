@@ -49,6 +49,7 @@ function makeService(db: any, notifications: any, realtime?: any) {
     notifications as any,
     {} as any, // r2
     {} as any, // calendarSync
+    { logAuditEvent: mock.fn(async () => undefined) } as any, // security
   )
 }
 

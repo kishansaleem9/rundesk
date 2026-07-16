@@ -92,9 +92,17 @@ export class ChatService {
     return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
   }
 
-  /** Reject attachments over the hard cap (Plan §6.8). Undefined size is allowed. */
+  /**
+   * §6.8 — enforce the declared attachment size on the presign/record paths.
+   * A valid, positive `sizeBytes` is mandatory (reject missing/≤0/over cap). The
+   * declared-size gate is authoritative because R2 presigned PUT URLs cannot
+   * bound the actual uploaded bytes (see R2Service.presignPutObject).
+   */
   private assertAttachmentSize(sizeBytes?: number): void {
-    if (sizeBytes != null && Number.isFinite(sizeBytes) && sizeBytes > MAX_CHAT_ATTACHMENT_BYTES) {
+    if (sizeBytes == null || !Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+      throw new BadRequestException('A valid attachment sizeBytes is required')
+    }
+    if (sizeBytes > MAX_CHAT_ATTACHMENT_BYTES) {
       const mb = Math.round(MAX_CHAT_ATTACHMENT_BYTES / (1024 * 1024))
       throw new BadRequestException(`Attachment exceeds the ${mb} MB limit`)
     }

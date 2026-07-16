@@ -4,6 +4,7 @@ import { lists, listStatuses, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { SecurityService } from '../security/security.service'
 
 /**
  * Default status pipeline seeded on every new list. Existing lists were
@@ -20,7 +21,10 @@ const DEFAULT_LIST_STATUSES = [
 
 @Injectable()
 export class ListsService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private security: SecurityService,
+  ) {}
 
   async createList(projectId: string, data: { name: string; description?: string }, actorId?: string) {
     const result = await this.db
@@ -93,14 +97,26 @@ export class ListsService {
     return result[0]
   }
 
-  async deleteList(listId: string, actorId?: string) {
-    if (actorId) await this.assertManageable(listId, actorId)
+  async deleteList(listId: string, actorId?: string, ipAddress?: string) {
+    const ctx = actorId ? await this.assertManageable(listId, actorId) : null
     await this.db.update(lists).set({ isArchived: true }).where(eq(lists.id, listId))
+    if (actorId && ctx) {
+      // §13.3 — audit the container deletion (list archival).
+      await this.security.logAuditEvent({
+        workspaceId: ctx.workspaceId,
+        actorId,
+        action: 'list.deleted',
+        resourceType: 'list',
+        resourceId: listId,
+        description: `Archived list "${ctx.name}"`,
+        ipAddress,
+      })
+    }
   }
 
   private async assertManageable(listId: string, actorId: string) {
     const [row] = await this.db
-      .select({ createdById: lists.createdById, workspaceId: spaces.workspaceId })
+      .select({ createdById: lists.createdById, workspaceId: spaces.workspaceId, name: lists.name })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -113,5 +129,6 @@ export class ListsService {
       actorId,
       kind: 'list',
     })
+    return row
   }
 }

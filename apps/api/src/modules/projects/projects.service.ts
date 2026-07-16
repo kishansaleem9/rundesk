@@ -8,6 +8,7 @@ import { isWorkspaceManager } from '../../common/permissions/container-access.gu
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
 import { PlansService } from '../plans/plans.service'
+import { SecurityService } from '../security/security.service'
 
 @Injectable()
 export class ProjectsService {
@@ -16,6 +17,7 @@ export class ProjectsService {
     private webhooks: WebhooksService,
     private slack: SlackService,
     private plans: PlansService,
+    private security: SecurityService,
   ) {}
 
   /**
@@ -173,9 +175,21 @@ export class ProjectsService {
     return result[0]
   }
 
-  async deleteProject(projectId: string, actorId?: string) {
-    if (actorId) await this.assertManageable(projectId, actorId)
+  async deleteProject(projectId: string, actorId?: string, ipAddress?: string) {
+    const ctx = actorId ? await this.assertManageable(projectId, actorId) : null
     await this.db.update(projects).set({ isArchived: true }).where(eq(projects.id, projectId))
+    if (actorId && ctx) {
+      // §13.3 — audit the container deletion (project archival).
+      await this.security.logAuditEvent({
+        workspaceId: ctx.workspaceId,
+        actorId,
+        action: 'project.deleted',
+        resourceType: 'project',
+        resourceId: projectId,
+        description: `Archived project "${ctx.name}"`,
+        ipAddress,
+      })
+    }
   }
 
   /** Restore an archived project (Plan §2.4 / §13.4). */
@@ -192,7 +206,7 @@ export class ProjectsService {
 
   private async assertManageable(projectId: string, actorId: string) {
     const [row] = await this.db
-      .select({ createdById: projects.createdById, workspaceId: spaces.workspaceId })
+      .select({ createdById: projects.createdById, workspaceId: spaces.workspaceId, name: projects.name })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(projects.id, projectId))
@@ -204,5 +218,6 @@ export class ProjectsService {
       actorId,
       kind: 'project',
     })
+    return row
   }
 }

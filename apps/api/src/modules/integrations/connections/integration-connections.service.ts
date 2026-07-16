@@ -119,7 +119,7 @@ export class IntegrationConnectionsService {
     return { authUrl: `${cfg.authUrl}?${params.toString()}` }
   }
 
-  async handleOAuthCallback(providerRaw: string, code: string, state: string) {
+  async handleOAuthCallback(providerRaw: string, code: string, state: string, ipAddress?: string) {
     const provider = this.assertProvider(providerRaw)
     const payload = this.verifyState(state)
     if (payload.provider !== provider) throw new UnauthorizedException('OAuth state provider mismatch')
@@ -187,6 +187,7 @@ export class IntegrationConnectionsService {
       resourceId: provider,
       description: `Connected ${provider}`,
       metadata: { provider, accountEmail: profile.email ?? null },
+      ipAddress,
     })
 
     return {

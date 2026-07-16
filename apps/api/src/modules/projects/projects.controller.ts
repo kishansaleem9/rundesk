@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Put, Delete, Param, Body, Ip, UseGuards } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
@@ -54,8 +54,8 @@ export class ProjectsController {
   }
 
   @Delete(':projectId')
-  async deleteProject(@Param('projectId') projectId: string, @CurrentUser() user: any) {
-    await this.projectsService.deleteProject(projectId, user.id)
+  async deleteProject(@Param('projectId') projectId: string, @CurrentUser() user: any, @Ip() ip: string) {
+    await this.projectsService.deleteProject(projectId, user.id, ip)
     return { message: 'Project archived successfully' }
   }
 

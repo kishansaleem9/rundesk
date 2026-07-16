@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Body, UseGuards, BadRequestException } fr
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { NotGuestGuard } from '../../common/guards/not-guest.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
 import type { CurrentUserPayload } from './types'
@@ -18,7 +19,11 @@ export class TaskTimeEntriesController {
     return this.tasks.listTimeEntries(taskId)
   }
 
+  // §3.3 — time tracking is a member capability; guests may read entries but
+  // must not start/stop timers or log manual time. NotGuestGuard layers on top
+  // of the class-level JwtAuthGuard + ResourceMemberGuard for the mutations only.
   @Post('start')
+  @UseGuards(NotGuestGuard)
   start(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
@@ -28,11 +33,13 @@ export class TaskTimeEntriesController {
   }
 
   @Post('stop/:entryId')
+  @UseGuards(NotGuestGuard)
   stop(@Param('entryId') entryId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.tasks.stopTimer(entryId, user.id)
   }
 
   @Post('manual')
+  @UseGuards(NotGuestGuard)
   manual(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
