@@ -5,6 +5,7 @@ import { TaskCommentsController } from './comments.controller'
 import { TaskChecklistsController } from './checklists.controller'
 import { TaskActivityController, ProjectActivityController } from './activity.controller'
 import { TaskDependenciesController } from './dependencies.controller'
+import { TaskExternalLinksController } from './external-links.controller'
 import { TaskTimeEntriesController, TimeEntriesController } from './time-entries.controller'
 import { RealtimeModule } from '../realtime/realtime.module'
 import { AutomationsModule } from '../automations/automations.module'
@@ -31,6 +32,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     TaskActivityController,
     ProjectActivityController,
     TaskDependenciesController,
+    TaskExternalLinksController,
     TaskTimeEntriesController,
     TimeEntriesController,
   ],

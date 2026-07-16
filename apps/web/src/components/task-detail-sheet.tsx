@@ -14,7 +14,26 @@ import {
   toast,
 } from '@rundesk/ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ImageIcon, Maximize2, Minimize2, Copy, Sparkles, Wand2, Paperclip, Diamond, X as XIcon } from 'lucide-react'
+import {
+  ImageIcon,
+  Maximize2,
+  Minimize2,
+  Copy,
+  Sparkles,
+  Wand2,
+  Paperclip,
+  Diamond,
+  X as XIcon,
+  Github,
+  Gitlab,
+  GitPullRequest,
+  GitCommit,
+  CircleDot,
+  ExternalLink,
+  RefreshCw,
+  Link2,
+  FileText,
+} from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
@@ -1393,6 +1412,8 @@ function OverviewPanel({
       </Field>
 
       <LinkedDocsSection taskId={taskId} workspaceId={workspaceId} />
+
+      <LinkedWorkSection taskId={taskId} />
     </div>
   )
 }
@@ -1402,6 +1423,237 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
     <div>
       <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{label}</div>
       <div>{children}</div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Linked work / Development (Plan §12.8 GitHub/GitLab, §12.2 Google Drive)
+// ---------------------------------------------------------------------------
+
+type ExternalLink = {
+  id: string
+  provider: 'github' | 'gitlab' | 'google_drive' | 'link'
+  kind: 'commit' | 'pull_request' | 'issue' | 'file' | 'link'
+  url: string
+  externalId: string | null
+  title: string | null
+  status: string | null
+  metadata: { mimeType?: string | null; thumbnailLink?: string | null; iconLink?: string | null } | null
+  createdAt: string
+}
+
+/** Icon for a link, keyed by provider + kind (PR/issue/commit get git glyphs). */
+function linkIcon(link: ExternalLink) {
+  if (link.kind === 'pull_request') return GitPullRequest
+  if (link.kind === 'issue') return CircleDot
+  if (link.kind === 'commit') return GitCommit
+  if (link.provider === 'github') return Github
+  if (link.provider === 'gitlab') return Gitlab
+  if (link.provider === 'google_drive') return FileText
+  return Link2
+}
+
+/**
+ * "Linked work" on a task: paste a GitHub/GitLab URL (commit/PR/issue) or a
+ * Google Drive file URL to attach it. Shows provider icon + kind + title, a
+ * PR/MR status badge (open=green / merged=purple / closed=red), open-in-new,
+ * a status refresh, and unlink. The live status/metadata is populated by the
+ * API when the workspace has the provider connected; otherwise links show a
+ * neutral "Linked" badge.
+ */
+function LinkedWorkSection({ taskId }: { taskId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [url, setUrl] = useState('')
+
+  const linksQuery = useQuery({
+    queryKey: ['task-external-links', taskId],
+    queryFn: () => api<ExternalLink[]>(`/tasks/${taskId}/links`),
+  })
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['task-external-links', taskId] })
+
+  const add = useMutation({
+    mutationFn: (u: string) => api(`/tasks/${taskId}/links`, { method: 'POST', body: { url: u } }),
+    onSuccess: () => {
+      setUrl('')
+      invalidate()
+    },
+    onError: () => toast.error(t('taskDetail.linkedWork.addError')),
+  })
+  const refresh = useMutation({
+    mutationFn: (linkId: string) => api(`/tasks/${taskId}/links/${linkId}/refresh`, { method: 'POST' }),
+    onSuccess: invalidate,
+  })
+  const unlink = useMutation({
+    mutationFn: (linkId: string) => api(`/tasks/${taskId}/links/${linkId}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+  })
+
+  const submit = () => {
+    const u = url.trim()
+    if (!/^https?:\/\//i.test(u)) {
+      toast.error(t('taskDetail.linkedWork.invalidUrl'))
+      return
+    }
+    add.mutate(u)
+  }
+
+  const links = linksQuery.data ?? []
+
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
+        {t('taskDetail.linkedWork.heading')}
+      </div>
+      <div className="flex items-center gap-1.5 mb-2">
+        <Input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              submit()
+            }
+          }}
+          placeholder={t('taskDetail.linkedWork.addPlaceholder')}
+          className="h-8 text-[13px]"
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 shrink-0"
+          disabled={add.isPending || !url.trim()}
+          onClick={submit}
+        >
+          {t('taskDetail.linkedWork.add')}
+        </Button>
+      </div>
+
+      {links.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t('taskDetail.linkedWork.empty')}</p>
+      ) : (
+        <div className="space-y-1">
+          {links.map((l) => (
+            <LinkedWorkRow
+              key={l.id}
+              link={l}
+              onRefresh={() => refresh.mutate(l.id)}
+              onUnlink={() => unlink.mutate(l.id)}
+              busy={refresh.isPending || unlink.isPending}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LinkedWorkStatusBadge({ status }: { status: string | null }) {
+  const { t } = useTranslation()
+  if (status === 'open')
+    return (
+      <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+        {t('taskDetail.linkedWork.statusOpen')}
+      </span>
+    )
+  if (status === 'merged')
+    return (
+      <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border border-purple-500/30 bg-purple-500/15 text-purple-600 dark:text-purple-400">
+        {t('taskDetail.linkedWork.statusMerged')}
+      </span>
+    )
+  if (status === 'closed')
+    return (
+      <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium border border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-400">
+        {t('taskDetail.linkedWork.statusClosed')}
+      </span>
+    )
+  // No live state (provider not connected, or a plain file/link).
+  return (
+    <Badge variant="outline" className="shrink-0 text-[11px]">
+      {t('taskDetail.linkedWork.linked')}
+    </Badge>
+  )
+}
+
+function LinkedWorkRow({
+  link,
+  onRefresh,
+  onUnlink,
+  busy,
+}: {
+  link: ExternalLink
+  onRefresh: () => void
+  onUnlink: () => void
+  busy: boolean
+}) {
+  const { t } = useTranslation()
+  const Icon = linkIcon(link)
+  const kindKey: TranslationKey =
+    link.kind === 'commit'
+      ? 'taskDetail.linkedWork.kindCommit'
+      : link.kind === 'pull_request'
+        ? 'taskDetail.linkedWork.kindPullRequest'
+        : link.kind === 'issue'
+          ? 'taskDetail.linkedWork.kindIssue'
+          : link.kind === 'file'
+            ? 'taskDetail.linkedWork.kindFile'
+            : 'taskDetail.linkedWork.kindLink'
+  const label =
+    link.title ||
+    link.externalId ||
+    (link.provider === 'google_drive' ? t('taskDetail.linkedWork.driveFile') : link.url)
+  // Drive files surface their mime type; everything else shows the kind.
+  const typeText =
+    link.provider === 'google_drive' && link.metadata?.mimeType ? String(link.metadata.mimeType) : t(kindKey)
+  const canRefresh =
+    ((link.provider === 'github' || link.provider === 'gitlab') &&
+      (link.kind === 'pull_request' || link.kind === 'issue')) ||
+    (link.provider === 'google_drive' && link.kind === 'file')
+
+  return (
+    <div className="group flex items-center gap-2 rounded-md border border-border/60 px-2 py-1.5 text-sm hover:bg-accent/5">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <a
+        href={link.url}
+        target="_blank"
+        rel="noreferrer"
+        className="flex min-w-0 flex-1 flex-col hover:underline"
+      >
+        <span className="truncate">{label}</span>
+        <span className="truncate text-[11px] text-muted-foreground no-underline">{typeText}</span>
+      </a>
+      <LinkedWorkStatusBadge status={link.status} />
+      {canRefresh && (
+        <button
+          type="button"
+          title={t('taskDetail.linkedWork.refresh')}
+          disabled={busy}
+          onClick={onRefresh}
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+        </button>
+      )}
+      <a
+        href={link.url}
+        target="_blank"
+        rel="noreferrer"
+        title={t('taskDetail.linkedWork.open')}
+        className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+      </a>
+      <button
+        type="button"
+        title={t('taskDetail.linkedWork.unlink')}
+        disabled={busy}
+        onClick={onUnlink}
+        className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-rose-500 group-hover:opacity-100"
+      >
+        <XIcon className="h-3.5 w-3.5" />
+      </button>
     </div>
   )
 }

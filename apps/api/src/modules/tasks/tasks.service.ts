@@ -15,6 +15,8 @@ import {
   taskAttachments,
   timeEntries,
   taskDocLinks,
+  taskExternalLinks,
+  workspaceIntegrationConnections,
   docs,
   users,
   lists,
@@ -25,6 +27,13 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import {
+  parseExternalLinkUrl,
+  isHttpUrl,
+  type ExternalLinkKind,
+  type ExternalLinkProvider,
+  type ExternalLinkRef,
+} from './external-links.util'
 import { resolveEffectiveStatuses } from '../../common/statuses/status-resolution'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
@@ -573,6 +582,256 @@ export class TasksService {
       .delete(taskDocLinks)
       .where(and(eq(taskDocLinks.taskId, taskId), eq(taskDocLinks.docId, docId)))
     return { ok: true }
+  }
+
+  // --- External-service links (Plan §12.8 GitHub/GitLab, §12.2 Google Drive) -
+  //
+  // A link is created by pasting a URL. The URL is parsed (see
+  // external-links.util) to detect provider + kind + external_id. When the
+  // workspace has a matching integration connection with a stored token, the
+  // live PR/issue state (or Drive file metadata) is fetched and persisted;
+  // otherwise the link is kept with status null — graceful, never an error.
+
+  /** External links attached to a task, most-recent first. Requires task access. */
+  async listExternalLinks(taskId: string, userId: string) {
+    await this.assertTaskWriteAccess(taskId, userId)
+    return this.db
+      .select({
+        id:         taskExternalLinks.id,
+        provider:   taskExternalLinks.provider,
+        kind:       taskExternalLinks.kind,
+        url:        taskExternalLinks.url,
+        externalId: taskExternalLinks.externalId,
+        title:      taskExternalLinks.title,
+        status:     taskExternalLinks.status,
+        metadata:   taskExternalLinks.metadata,
+        createdAt:  taskExternalLinks.createdAt,
+      })
+      .from(taskExternalLinks)
+      .where(eq(taskExternalLinks.taskId, taskId))
+      .orderBy(desc(taskExternalLinks.createdAt))
+  }
+
+  /** Link an external URL (GitHub/GitLab commit·PR·issue, Drive file, or plain link). */
+  async addExternalLink(
+    taskId: string,
+    userId: string,
+    input: { url: string; provider?: string },
+  ) {
+    const ctx = await this.assertTaskWriteAccess(taskId, userId)
+    const url = (input.url ?? '').trim()
+    if (!isHttpUrl(url)) throw new BadRequestException('A valid http(s) URL is required')
+
+    const parsed = parseExternalLinkUrl(url, input.provider)
+    // Best-effort live enrichment; falls back to null status when the provider
+    // isn't connected/configured (env-gated) or the fetch fails.
+    const enriched = await this.fetchProviderState(parsed.provider, parsed.kind, parsed.ref, ctx.workspaceId)
+
+    const metadata: Record<string, unknown> = { ref: parsed.ref }
+    if (enriched?.metadata) Object.assign(metadata, enriched.metadata)
+
+    const [row] = await this.db
+      .insert(taskExternalLinks)
+      .values({
+        taskId,
+        workspaceId: ctx.workspaceId,
+        provider: parsed.provider,
+        kind: parsed.kind,
+        url,
+        externalId: parsed.externalId,
+        title: enriched?.title ?? parsed.title,
+        status: enriched?.status ?? null,
+        metadata,
+        createdById: userId,
+      })
+      .returning()
+    return row
+  }
+
+  /** Re-fetch live state for one link (env-gated behind the provider connection). */
+  async refreshExternalLink(taskId: string, linkId: string, userId: string) {
+    const ctx = await this.assertTaskWriteAccess(taskId, userId)
+    const [link] = await this.db
+      .select()
+      .from(taskExternalLinks)
+      .where(and(eq(taskExternalLinks.id, linkId), eq(taskExternalLinks.taskId, taskId)))
+      .limit(1)
+    if (!link) throw new NotFoundException('Link not found')
+
+    const ref = (link.metadata?.ref as ExternalLinkRef | undefined) ?? {}
+    const enriched = await this.fetchProviderState(
+      link.provider as ExternalLinkProvider,
+      link.kind as ExternalLinkKind,
+      ref,
+      ctx.workspaceId,
+    )
+    if (!enriched) return link // Not configured / nothing to update — graceful.
+
+    const metadata: Record<string, unknown> = { ...(link.metadata ?? {}), ref }
+    if (enriched.metadata) Object.assign(metadata, enriched.metadata)
+    const [updated] = await this.db
+      .update(taskExternalLinks)
+      .set({
+        status: enriched.status ?? link.status,
+        title: enriched.title ?? link.title,
+        metadata,
+      })
+      .where(eq(taskExternalLinks.id, linkId))
+      .returning()
+    return updated
+  }
+
+  /** Remove a task↔external link. */
+  async removeExternalLink(taskId: string, linkId: string, userId: string) {
+    await this.assertTaskWriteAccess(taskId, userId)
+    await this.db
+      .delete(taskExternalLinks)
+      .where(and(eq(taskExternalLinks.id, linkId), eq(taskExternalLinks.taskId, taskId)))
+    return { ok: true }
+  }
+
+  /**
+   * Read-only reuse of `integration-connections`: the stored OAuth token for a
+   * provider in a workspace, or null when the provider isn't connected. Kept
+   * minimal (single token lookup) rather than pulling in the whole service.
+   */
+  private async getProviderToken(
+    workspaceId: string,
+    connectionProvider: 'github' | 'gitlab' | 'google-drive',
+  ): Promise<string | null> {
+    const [conn] = await this.db
+      .select({ status: workspaceIntegrationConnections.status, accessToken: workspaceIntegrationConnections.accessToken })
+      .from(workspaceIntegrationConnections)
+      .where(
+        and(
+          eq(workspaceIntegrationConnections.workspaceId, workspaceId),
+          eq(workspaceIntegrationConnections.provider, connectionProvider),
+        ),
+      )
+      .limit(1)
+    if (!conn || conn.status !== 'connected' || !conn.accessToken) return null
+    return conn.accessToken
+  }
+
+  /**
+   * Env-gated live provider fetch. Returns the fields to persist (status/title/
+   * metadata) or null when the provider isn't connected, the kind is
+   * un-fetchable, or the remote call fails — so linking always degrades to a
+   * plain "linked" badge instead of erroring.
+   */
+  private async fetchProviderState(
+    provider: ExternalLinkProvider,
+    kind: ExternalLinkKind,
+    ref: ExternalLinkRef,
+    workspaceId: string,
+  ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
+    try {
+      if (provider === 'github' && (kind === 'pull_request' || kind === 'issue')) {
+        const token = await this.getProviderToken(workspaceId, 'github')
+        if (!token) return null
+        return await this.fetchGithubState(kind, ref, token)
+      }
+      if (provider === 'gitlab' && (kind === 'pull_request' || kind === 'issue')) {
+        const token = await this.getProviderToken(workspaceId, 'gitlab')
+        if (!token) return null
+        return await this.fetchGitlabState(kind, ref, token)
+      }
+      if (provider === 'google_drive' && kind === 'file') {
+        const token = await this.getProviderToken(workspaceId, 'google-drive')
+        if (!token) return null
+        return await this.fetchDriveFile(ref, token)
+      }
+    } catch {
+      // Network / auth / rate-limit failure — degrade gracefully.
+      return null
+    }
+    return null
+  }
+
+  private async fetchGithubState(
+    kind: ExternalLinkKind,
+    ref: ExternalLinkRef,
+    token: string,
+  ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
+    if (!ref.owner || !ref.repo || !ref.number) return null
+    const base = process.env.GITHUB_API_URL ?? 'https://api.github.com'
+    const path = kind === 'pull_request' ? 'pulls' : 'issues'
+    const res = await fetch(`${base}/repos/${ref.owner}/${ref.repo}/${path}/${ref.number}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { state?: string; merged?: boolean; merged_at?: string | null; title?: string }
+    const status =
+      kind === 'pull_request'
+        ? body.merged || body.merged_at
+          ? 'merged'
+          : body.state === 'closed'
+            ? 'closed'
+            : 'open'
+        : body.state === 'closed'
+          ? 'closed'
+          : 'open'
+    return { status, title: body.title ?? null, metadata: { state: body.state ?? null } }
+  }
+
+  private async fetchGitlabState(
+    kind: ExternalLinkKind,
+    ref: ExternalLinkRef,
+    token: string,
+  ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
+    if (!ref.projectPath || !ref.number) return null
+    const apiBase =
+      ref.host && ref.host !== 'gitlab.com'
+        ? `https://${ref.host}/api/v4`
+        : process.env.GITLAB_API_URL ?? 'https://gitlab.com/api/v4'
+    const encoded = encodeURIComponent(ref.projectPath)
+    const path = kind === 'pull_request' ? 'merge_requests' : 'issues'
+    const res = await fetch(`${apiBase}/projects/${encoded}/${path}/${ref.number}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as { state?: string; title?: string }
+    // GitLab states: opened | closed | merged | locked.
+    const status =
+      body.state === 'merged'
+        ? 'merged'
+        : body.state === 'closed' || body.state === 'locked'
+          ? 'closed'
+          : 'open'
+    return { status, title: body.title ?? null, metadata: { state: body.state ?? null } }
+  }
+
+  private async fetchDriveFile(
+    ref: ExternalLinkRef,
+    token: string,
+  ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
+    if (!ref.fileId) return null
+    const base = process.env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com/drive/v3'
+    const res = await fetch(
+      `${base}/files/${ref.fileId}?fields=id,name,mimeType,thumbnailLink,webViewLink,iconLink`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      },
+    )
+    if (!res.ok) return null
+    const body = (await res.json()) as {
+      name?: string
+      mimeType?: string
+      thumbnailLink?: string
+      iconLink?: string
+    }
+    return {
+      status: null, // Files have no open/merged/closed state.
+      title: body.name ?? null,
+      metadata: {
+        mimeType: body.mimeType ?? null,
+        thumbnailLink: body.thumbnailLink ?? null,
+        iconLink: body.iconLink ?? null,
+      },
+    }
   }
 
   // --- Task CRUD -----------------------------------------------------------
