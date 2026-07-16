@@ -3755,6 +3755,14 @@ export const en = {
   'help.searchPlaceholder': 'Search the FAQ…',
   'help.noResults': 'No matching questions. Try the Ask AI box above or contact support.',
 
+  // Voice command interface (Plan §15.2)
+  'ai.voiceStart': 'Start voice input',
+  'ai.voiceStop': 'Stop voice input',
+  'ai.voiceListening': 'Listening…',
+  'ai.voiceUnsupported': 'Voice input is not supported in this browser',
+  'ai.voicePermissionDenied': 'Microphone access was blocked. Allow it in your browser settings to use voice input.',
+  'ai.voiceError': 'Voice input failed. Please try again.',
+
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
   'auth.email': 'Email',
@@ -7569,6 +7577,14 @@ export const es: Record<TranslationKey, string> = {
   'help.searchPlaceholder': 'Buscar en las preguntas frecuentes…',
   'help.noResults': 'No hay preguntas coincidentes. Prueba el cuadro Preguntar a la IA o contacta con soporte.',
 
+  // Voice command interface (Plan §15.2)
+  'ai.voiceStart': 'Iniciar entrada de voz',
+  'ai.voiceStop': 'Detener entrada de voz',
+  'ai.voiceListening': 'Escuchando…',
+  'ai.voiceUnsupported': 'La entrada de voz no es compatible con este navegador',
+  'ai.voicePermissionDenied': 'Se bloqueó el acceso al micrófono. Permítelo en la configuración de tu navegador para usar la entrada de voz.',
+  'ai.voiceError': 'La entrada de voz falló. Inténtalo de nuevo.',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -11376,6 +11392,14 @@ export const ar: Record<TranslationKey, string> = {
   'help.searchPlaceholder': 'ابحث في الأسئلة الشائعة…',
   'help.noResults': 'لا توجد أسئلة مطابقة. جرّب صندوق «اسأل الذكاء الاصطناعي» أعلاه أو تواصل مع الدعم.',
 
+  // Voice command interface (Plan §15.2)
+  'ai.voiceStart': 'بدء الإدخال الصوتي',
+  'ai.voiceStop': 'إيقاف الإدخال الصوتي',
+  'ai.voiceListening': 'جارٍ الاستماع…',
+  'ai.voiceUnsupported': 'الإدخال الصوتي غير مدعوم في هذا المتصفح',
+  'ai.voicePermissionDenied': 'تم حظر الوصول إلى الميكروفون. اسمح به في إعدادات متصفحك لاستخدام الإدخال الصوتي.',
+  'ai.voiceError': 'فشل الإدخال الصوتي. يُرجى المحاولة مرة أخرى.',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -15032,6 +15056,14 @@ export const ur: Record<TranslationKey, string> = {
   'help.askSources': 'متعلقہ مدد کے موضوعات',
   'help.searchPlaceholder': 'عمومی سوالات میں تلاش کریں…',
   'help.noResults': 'کوئی مماثل سوال نہیں۔ اوپر دیے گئے «اے آئی سے پوچھیں» باکس کو آزمائیں یا سپورٹ سے رابطہ کریں۔',
+
+  // Voice command interface (Plan §15.2)
+  'ai.voiceStart': 'صوتی ان پٹ شروع کریں',
+  'ai.voiceStop': 'صوتی ان پٹ روکیں',
+  'ai.voiceListening': 'سن رہے ہیں…',
+  'ai.voiceUnsupported': 'اس براؤزر میں صوتی ان پٹ کی سہولت دستیاب نہیں',
+  'ai.voicePermissionDenied': 'مائیکروفون تک رسائی مسدود کر دی گئی۔ صوتی ان پٹ استعمال کرنے کے لیے اسے اپنے براؤزر کی ترتیبات میں اجازت دیں۔',
+  'ai.voiceError': 'صوتی ان پٹ ناکام ہوگیا۔ براہِ کرم دوبارہ کوشش کریں۔',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',

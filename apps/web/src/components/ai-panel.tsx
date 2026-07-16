@@ -15,6 +15,7 @@ import {
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
+import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -42,13 +43,21 @@ const SUGGESTED_PROMPT_KEYS = [
 ] as const
 
 export function AiPanel({ workspaceId, currentView, onClose, className }: AiPanelProps) {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamBuffer, setStreamBuffer] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
+
+  // Voice dictation for the chat composer (Plan §15.2) — a final transcript is
+  // appended to the input; the user reviews it, then sends as usual.
+  const voice = useSpeechRecognition({
+    locale,
+    onResult: (transcript) =>
+      setInput((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript)),
+  })
 
   const statusQuery = useQuery({
     queryKey: ['ai-status'],
@@ -243,6 +252,20 @@ export function AiPanel({ workspaceId, currentView, onClose, className }: AiPane
             {t('aiPanel.configHint')}
           </p>
         )}
+        {voice.supported && (voice.listening || voice.interimTranscript) && (
+          <p className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shrink-0" aria-hidden />
+            <span className="font-medium">{t('ai.voiceListening')}</span>
+            {voice.interimTranscript && <span className="italic truncate">{voice.interimTranscript}</span>}
+          </p>
+        )}
+        {voice.error && (
+          <p className="mb-2 text-xs text-amber-600" role="alert">
+            {voice.error === 'not-allowed' || voice.error === 'service-not-allowed'
+              ? t('ai.voicePermissionDenied')
+              : t('ai.voiceError')}
+          </p>
+        )}
         <div className="flex gap-2">
           <Input
             value={input}
@@ -256,6 +279,15 @@ export function AiPanel({ workspaceId, currentView, onClose, className }: AiPane
             }}
             disabled={!aiAvailable || isStreaming}
             className="text-sm"
+          />
+          <MicButton
+            controller={voice}
+            disabled={isStreaming}
+            labels={{
+              start: t('ai.voiceStart'),
+              stop: t('ai.voiceStop'),
+              unsupported: t('ai.voiceUnsupported'),
+            }}
           />
           {isStreaming ? (
             <Button variant="outline" size="icon" onClick={stopStreaming} title={t('aiPanel.stop')}>

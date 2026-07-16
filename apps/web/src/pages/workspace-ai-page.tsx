@@ -24,6 +24,7 @@ import {
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 
 type GeneratedTask = {
   title: string
@@ -332,11 +333,20 @@ const COMMAND_SUGGESTION_KEYS = [
 ] as const
 
 function CommandsTab({ workspaceId }: { workspaceId: string }) {
-  const { t, tCount } = useTranslation()
+  const { t, tCount, locale } = useTranslation()
   const [message, setMessage] = useState('')
   const [plan, setPlan] = useState<CommandPlan | null>(null)
   const [results, setResults] = useState<CommandActionResult[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Push-to-talk voice input (Plan §15.2). On a final transcript we drop the
+  // spoken text into the command box — the typed path is unchanged and the
+  // transcript stays editable before the user hits Preview.
+  const voice = useSpeechRecognition({
+    locale,
+    onResult: (transcript) =>
+      setMessage((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript)),
+  })
 
   const preview = useMutation({
     mutationFn: () => api<CommandPlan>('/ai/command', { method: 'POST', body: { workspaceId, message } }),
@@ -394,6 +404,20 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && message.trim() && !busy) preview.mutate()
           }}
         />
+        {voice.supported && (voice.listening || voice.interimTranscript) && (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shrink-0" aria-hidden />
+            <span className="font-medium">{t('ai.voiceListening')}</span>
+            {voice.interimTranscript && <span className="italic truncate">{voice.interimTranscript}</span>}
+          </p>
+        )}
+        {voice.error && (
+          <p className="text-xs text-amber-700 dark:text-amber-300" role="alert">
+            {voice.error === 'not-allowed' || voice.error === 'service-not-allowed'
+              ? t('ai.voicePermissionDenied')
+              : t('ai.voiceError')}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => preview.mutate()} disabled={!message.trim() || busy}>
             {preview.isPending ? (
@@ -402,6 +426,15 @@ function CommandsTab({ workspaceId }: { workspaceId: string }) {
               <><Terminal className="h-4 w-4 mr-1.5" /> {t('ai.commandPreview')}</>
             )}
           </Button>
+          <MicButton
+            controller={voice}
+            disabled={busy}
+            labels={{
+              start: t('ai.voiceStart'),
+              stop: t('ai.voiceStop'),
+              unsupported: t('ai.voiceUnsupported'),
+            }}
+          />
           {(plan || results) && (
             <Button variant="ghost" size="sm" onClick={resetAll} disabled={busy}>
               {t('ai.commandRunAnother')}
