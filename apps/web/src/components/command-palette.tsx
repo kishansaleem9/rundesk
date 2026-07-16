@@ -90,6 +90,8 @@ export function CommandPalette({
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')
   const [dueAfter, setDueAfter] = useState<string>('')
   const [dueBefore, setDueBefore] = useState<string>('')
+  const [customFieldId, setCustomFieldId] = useState<string>('')
+  const [customFieldValue, setCustomFieldValue] = useState<string>('')
 
   // When the palette is opened with a query forwarded from the header search
   // input, seed the command query so results show immediately.
@@ -110,6 +112,20 @@ export function CommandPalette({
     queryFn: () => api<Array<{ id: string; name: string; color: string }>>(`/workspaces/${workspaceId}/labels`),
   })
 
+  type CustomFieldDef = {
+    id: string
+    name: string
+    type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
+    options: Array<{ label: string; value: string; color?: string }> | null
+    projectName: string
+  }
+  const customFieldsQuery = useQuery({
+    enabled: open && Boolean(workspaceId),
+    queryKey: ['search-custom-fields', workspaceId],
+    queryFn: () => api<CustomFieldDef[]>(`/search/${workspaceId}/custom-fields`),
+  })
+  const selectedCustomField = customFieldsQuery.data?.find((f) => f.id === customFieldId)
+
   type SavedSearch = { id: string; name: string; query: string | null; filters: Record<string, unknown> }
   const savedQuery = useQuery({
     enabled: open && Boolean(workspaceId),
@@ -126,6 +142,8 @@ export function CommandPalette({
     setAssigneeFilter((f.assigneeId as string) ?? '')
     setDueAfter((f.dueAfter as string) ?? '')
     setDueBefore((f.dueBefore as string) ?? '')
+    setCustomFieldId((f.customFieldId as string) ?? '')
+    setCustomFieldValue((f.customFieldValue as string) ?? '')
   }
   const saveCurrent = useMutation({
     mutationFn: (name: string) => {
@@ -137,6 +155,10 @@ export function CommandPalette({
       if (assigneeFilter) filters.assigneeId = assigneeFilter
       if (dueAfter) filters.dueAfter = dueAfter
       if (dueBefore) filters.dueBefore = dueBefore
+      if (customFieldId && customFieldValue) {
+        filters.customFieldId = customFieldId
+        filters.customFieldValue = customFieldValue
+      }
       return api(`/search/${workspaceId}/saved`, { method: 'POST', body: { name, query, filters } })
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-searches', workspaceId] }),
@@ -152,12 +174,13 @@ export function CommandPalette({
     queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
   })
 
+  const hasCustomField = customFieldId !== '' && customFieldValue !== ''
   const hasFilter =
     typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== '' || labelFilter !== '' ||
-    assigneeFilter !== '' || dueAfter !== '' || dueBefore !== ''
+    assigneeFilter !== '' || dueAfter !== '' || dueBefore !== '' || hasCustomField
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter, assigneeFilter, dueAfter, dueBefore],
+    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter, assigneeFilter, dueAfter, dueBefore, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeFilter !== 'all') params.set('types', typeFilter)
@@ -167,6 +190,10 @@ export function CommandPalette({
       if (assigneeFilter) params.set('assigneeId', assigneeFilter)
       if (dueAfter) params.set('dueAfter', dueAfter)
       if (dueBefore) params.set('dueBefore', dueBefore)
+      if (hasCustomField) {
+        params.set('customFieldId', customFieldId)
+        params.set('customFieldValue', customFieldValue)
+      }
       return api<SearchHit[]>(`/search/${workspaceId}?${params.toString()}`)
     },
   })
@@ -306,6 +333,48 @@ export function CommandPalette({
             className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
           />
         </FilterGroup>
+        {(customFieldsQuery.data?.length ?? 0) > 0 && (
+          <FilterGroup label={t('palette.filterCustomField')}>
+            <select
+              value={customFieldId}
+              onChange={(e) => {
+                setCustomFieldId(e.target.value)
+                setCustomFieldValue('')
+              }}
+              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+            >
+              <option value="">{t('palette.customFieldPick')}</option>
+              {customFieldsQuery.data!.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name} · {f.projectName}
+                </option>
+              ))}
+            </select>
+            {customFieldId !== '' &&
+              (selectedCustomField?.type === 'dropdown' ? (
+                <select
+                  value={customFieldValue}
+                  onChange={(e) => setCustomFieldValue(e.target.value)}
+                  className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+                >
+                  <option value="">{t('palette.filterAny')}</option>
+                  {(selectedCustomField?.options ?? []).map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type={selectedCustomField?.type === 'number' || selectedCustomField?.type === 'money' || selectedCustomField?.type === 'rating' ? 'number' : selectedCustomField?.type === 'date' ? 'date' : 'text'}
+                  value={customFieldValue}
+                  onChange={(e) => setCustomFieldValue(e.target.value)}
+                  placeholder={t('palette.customFieldValuePlaceholder')}
+                  className="h-6 w-28 rounded-md border border-border/70 bg-transparent px-1.5 text-[11px] text-muted-foreground"
+                />
+              ))}
+          </FilterGroup>
+        )}
       </div>
       {(((savedQuery.data?.length ?? 0) > 0) || hasFilter || query.trim()) && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 -mt-1">

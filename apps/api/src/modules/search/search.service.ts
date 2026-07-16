@@ -1,10 +1,11 @@
 import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
-import { ilike, or, eq, and, desc, inArray, gte, lte, type SQL } from 'drizzle-orm'
+import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 'drizzle-orm'
 import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, docs, lists, projects, spaces,
   savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
+  customFieldDefinitions, customFieldValues,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -18,7 +19,17 @@ export type SearchFilters = {
   labelId?: string
   dueAfter?: Date
   dueBefore?: Date
+  // Custom-field value filter (Plan §11.2): narrows tasks to those whose value
+  // for a given custom-field definition matches. `customFieldId` identifies the
+  // per-project definition; `customFieldValue` is the stored value to match
+  // (exact for dropdown/number/date/etc., ILIKE-contains for free-text types).
+  customFieldId?: string
+  customFieldValue?: string
 }
+
+// Free-text custom-field types get a case-insensitive "contains" match; every
+// other type (dropdown, number, money, rating, date, checkbox) matches exactly.
+const TEXT_LIKE_FIELD_TYPES = new Set(['text', 'url', 'email', 'phone'])
 
 // The Meilisearch index schema is intentionally light-weight.
 type SearchDoc = {
@@ -149,13 +160,15 @@ export class SearchService implements OnModuleInit {
     filters: SearchFilters = {},
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const trimmed = query.trim()
+    const hasCustomFieldFilter = Boolean(filters.customFieldId && filters.customFieldValue)
     const hasTaskFilter = Boolean(
       filters.statusCategory ||
         filters.priority ||
         filters.assigneeId ||
         filters.labelId ||
         filters.dueAfter ||
-        filters.dueBefore,
+        filters.dueBefore ||
+        hasCustomFieldFilter,
     )
     const wantTasks = !filters.types || filters.types.includes('task')
     // Task-specific filters imply the caller wants tasks, so docs are excluded.
@@ -220,6 +233,15 @@ export class SearchService implements OnModuleInit {
           }
           if (filters.dueAfter) conds.push(gte(tasks.dueDate, filters.dueAfter))
           if (filters.dueBefore) conds.push(lte(tasks.dueDate, filters.dueBefore))
+          if (hasCustomFieldFilter) {
+            conds.push(
+              await this.customFieldValueCondition(
+                workspaceId,
+                filters.customFieldId!,
+                filters.customFieldValue!,
+              ),
+            )
+          }
           return this.db
             .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id })
             .from(tasks)
@@ -330,6 +352,59 @@ export class SearchService implements OnModuleInit {
         url: `/app/${workspaceId}/chat?channel=${m.channelId}&message=${m.id}`,
       })),
     ]
+  }
+
+  // ── Custom-field value filter (Plan §11.2) ──────────────────────────────────
+
+  /**
+   * List every custom-field definition reachable in a workspace (across all its
+   * spaces/projects) so the search UI can offer them as a filter. Workspace
+   * ownership is enforced via the project → space → workspace join.
+   */
+  async listWorkspaceCustomFields(workspaceId: string) {
+    return this.db
+      .select({
+        id: customFieldDefinitions.id,
+        name: customFieldDefinitions.name,
+        type: customFieldDefinitions.type,
+        options: customFieldDefinitions.options,
+        projectId: customFieldDefinitions.projectId,
+        projectName: projects.name,
+      })
+      .from(customFieldDefinitions)
+      .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(spaces.workspaceId, workspaceId))
+      .orderBy(asc(projects.name), asc(customFieldDefinitions.position), asc(customFieldDefinitions.name))
+  }
+
+  /**
+   * Build the SQL condition that restricts `tasks.id` to those whose stored
+   * value for the given custom-field definition matches `value`. The field's
+   * type decides the operator: free-text types use a case-insensitive contains
+   * (ILIKE), everything else uses exact equality on the JSON scalar (`value->>'v'`).
+   * An unknown/foreign field id matches nothing, keeping results workspace-scoped.
+   */
+  private async customFieldValueCondition(workspaceId: string, fieldId: string, value: string): Promise<SQL> {
+    const [def] = await this.db
+      .select({ type: customFieldDefinitions.type })
+      .from(customFieldDefinitions)
+      .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(customFieldDefinitions.id, fieldId), eq(spaces.workspaceId, workspaceId)))
+      .limit(1)
+    if (!def) return sql`false`
+    const valueExpr = sql`${customFieldValues.value} ->> 'v'`
+    const match = TEXT_LIKE_FIELD_TYPES.has(def.type)
+      ? sql`${valueExpr} ILIKE ${`%${value}%`}`
+      : sql`${valueExpr} = ${value}`
+    return inArray(
+      tasks.id,
+      this.db
+        .select({ taskId: customFieldValues.taskId })
+        .from(customFieldValues)
+        .where(and(eq(customFieldValues.fieldId, fieldId), match)),
+    )
   }
 
   // ── Saved search presets (Plan §11.2) ───────────────────────────────────────

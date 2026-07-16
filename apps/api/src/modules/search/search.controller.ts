@@ -29,6 +29,8 @@ export class SearchController {
     @Query('labelId') labelId?: string,
     @Query('dueAfter') dueAfter?: string,
     @Query('dueBefore') dueBefore?: string,
+    @Query('customFieldId') customFieldId?: string,
+    @Query('customFieldValue') customFieldValue?: string,
   ) {
     const filters: SearchFilters = {}
     if (types) {
@@ -53,7 +55,18 @@ export class SearchController {
     }
     filters.dueAfter = parseDate(dueAfter)
     filters.dueBefore = parseDate(dueBefore)
+    // Custom-field value filter — only applied when both the field and a
+    // non-empty value are supplied (Plan §11.2).
+    if (customFieldId && customFieldValue != null && customFieldValue !== '') {
+      filters.customFieldId = customFieldId
+      filters.customFieldValue = customFieldValue
+    }
     return this.search.search(workspaceId, user.id, q ?? '', limit ? Number(limit) : 10, filters)
+  }
+
+  @Get(':workspaceId/custom-fields')
+  customFields(@Param('workspaceId') workspaceId: string) {
+    return this.search.listWorkspaceCustomFields(workspaceId)
   }
 
   @Post(':workspaceId/reindex')
