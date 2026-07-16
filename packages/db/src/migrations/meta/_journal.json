@@ -498,6 +498,13 @@
       "when": 1900000067000,
       "tag": "0070_workspace_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1900000068000,
+      "tag": "0071_row_level_security",
+      "breakpoints": true
     }
   ]
 }
