@@ -6,7 +6,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
 /** Locales the web app ships translations for (Plan §13). */
-export const SUPPORTED_LOCALES = ['en', 'es', 'ar'] as const
+export const SUPPORTED_LOCALES = ['en', 'es', 'ar', 'ur'] as const
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 @Injectable()
