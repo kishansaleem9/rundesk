@@ -665,9 +665,9 @@ export class NotificationsService {
       case 'task_due_soon':
       case 'task_overdue':
         return 'due'
-      case 'task_status_changed':
       // A task becoming blocked is a workflow/state change — route it with
       // status notifications so muting status also mutes blocked alerts.
+      case 'task_status_changed':
       case 'task_blocked':
         return 'status'
       case 'doc_mentioned':
@@ -675,11 +675,11 @@ export class NotificationsService {
         return 'doc'
       case 'chat_message':
         return 'chat'
-      case 'task_updated':
       // §7.11 — the daily AI briefing rides the general activity channel so a
       // user who mutes activity also mutes their briefing.
-      case 'ai_briefing':
       // §7.12 — proactive workload alerts ride the general activity channel too.
+      case 'task_updated':
+      case 'ai_briefing':
       case 'workload_alert':
       default:
         return 'activity'
