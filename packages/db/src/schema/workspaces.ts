@@ -38,6 +38,9 @@ export const workspaces = pgTable('workspaces', {
   slug:           text('slug').notNull(),
   logoUrl:        text('logo_url'),
   primaryColor:   text('primary_color'),
+  // Secondary brand accent (Plan §13.5). Applied app-wide alongside
+  // primaryColor; drives the design system's --accent CSS variable.
+  accentColor:    text('accent_color'),
   customDomain:   text('custom_domain'),
   // Custom-domain verification (Plan §13): a TXT token the owner adds to DNS.
   customDomainToken:    text('custom_domain_token'),

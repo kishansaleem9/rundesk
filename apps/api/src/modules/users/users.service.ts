@@ -11,6 +11,10 @@ import { R2Service } from '../../common/storage/r2.service'
 export const SUPPORTED_LOCALES = ['en', 'es', 'ar', 'ur'] as const
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
 
+/** UI theme preferences (Plan §13.1). 'system' follows the OS setting. */
+export const THEME_VALUES = ['system', 'light', 'dark'] as const
+export type ThemePreference = (typeof THEME_VALUES)[number]
+
 /** Image content types accepted for avatar uploads, mapped to a file extension. */
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -46,10 +50,13 @@ export class UsersService {
 
   async updateProfile(
     userId: string,
-    patch: { displayName?: string; bio?: string | null; timezone?: string; avatarUrl?: string | null; locale?: string },
+    patch: { displayName?: string; bio?: string | null; timezone?: string; avatarUrl?: string | null; locale?: string; theme?: string },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
       throw new BadRequestException(`Unsupported locale: ${patch.locale}`)
+    }
+    if (patch.theme !== undefined && !THEME_VALUES.includes(patch.theme as ThemePreference)) {
+      throw new BadRequestException(`Unsupported theme: ${patch.theme}`)
     }
     const [row] = await this.db
       .update(users)

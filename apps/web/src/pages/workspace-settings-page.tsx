@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Archive, Upload, RotateCcw } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
+import { applyAccentColor } from '../components/app-topbar'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
@@ -18,9 +19,11 @@ type Workspace = {
   slug: string
   logoUrl?: string | null
   primaryColor?: string | null
+  accentColor?: string | null
   customDomain?: string | null
   customDomainToken?: string | null
   customDomainVerified?: boolean | null
+  isArchived?: boolean | null
 }
 
 type Member = {
@@ -57,6 +60,7 @@ const TABS = [
   { id: 'security', labelKey: 'settings.tabSecurity', icon: Shield },
   { id: 'sso', labelKey: 'settings.tabSso', icon: KeyRound },
   { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
+  { id: 'archived', labelKey: 'settings.tabArchived', icon: Archive },
 ] as const
 
 function isUuidLike(value?: string): value is string {
@@ -133,6 +137,7 @@ export function SettingsPage() {
             {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
             {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
             {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
+            {tab === 'archived' && <ArchivedTab workspaceId={validWorkspaceId} />}
           </div>
         </div>
       </div>
@@ -149,22 +154,30 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
   })
   const [name, setName] = useState('')
   const [primaryColor, setPrimaryColor] = useState('')
+  const [accentColor, setAccentColor] = useState('')
   const [logoUrl, setLogoUrl] = useState('')
   const [customDomain, setCustomDomain] = useState('')
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const [logoError, setLogoError] = useState<string | null>(null)
 
   useEffect(() => {
     if (wsQuery.data) {
       setName(wsQuery.data.name)
       setPrimaryColor(wsQuery.data.primaryColor ?? '')
+      setAccentColor(wsQuery.data.accentColor ?? '')
       setLogoUrl(wsQuery.data.logoUrl ?? '')
       setCustomDomain(wsQuery.data.customDomain ?? '')
     }
   }, [wsQuery.data])
 
-  // Live-preview the accent color while editing.
+  // Live-preview the primary + accent colors while editing.
   useEffect(() => {
     applyBrandColor(primaryColor || null)
   }, [primaryColor])
+  useEffect(() => {
+    applyAccentColor(accentColor || null)
+  }, [accentColor])
 
   const save = useMutation({
     mutationFn: () =>
@@ -173,6 +186,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         body: JSON.stringify({
           name,
           primaryColor: primaryColor || null,
+          accentColor: accentColor || null,
           logoUrl: logoUrl || null,
           customDomain: customDomain || null,
         }),
@@ -180,8 +194,46 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     onSuccess: (updated) => {
       qc.setQueryData(['workspace', workspaceId], updated)
       qc.invalidateQueries({ queryKey: ['workspaces'] })
+      qc.invalidateQueries({ queryKey: ['workspace-branding', workspaceId] })
     },
   })
+
+  // §13.5 — direct-to-R2 logo upload, mirroring the avatar presign flow. On
+  // success we set the logoUrl field; the Save button persists it.
+  const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']
+  const LOGO_MAX_BYTES = 5 * 1024 * 1024
+  async function onLogoSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setLogoError(null)
+    if (!LOGO_TYPES.includes(file.type)) {
+      setLogoError(t('settings.logoTypeError'))
+      return
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setLogoError(t('settings.logoSizeError'))
+      return
+    }
+    setLogoUploading(true)
+    try {
+      const presign = await api<{ uploadUrl: string; publicUrl: string; storageKey: string }>(
+        `/workspaces/${workspaceId}/logo/presign`,
+        { method: 'POST', body: { contentType: file.type, sizeBytes: file.size } },
+      )
+      const put = await fetch(presign.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      })
+      if (!put.ok) throw new Error(`Storage upload failed (${put.status})`)
+      setLogoUrl(presign.publicUrl)
+    } catch (err) {
+      setLogoError(err instanceof ApiError ? err.message : t('settings.logoUploadError'))
+    } finally {
+      setLogoUploading(false)
+    }
+  }
 
   const verifyDomain = useMutation({
     mutationFn: () => api<{ verified: boolean }>(`/workspaces/${workspaceId}/verify-domain`, { method: 'POST' }),
@@ -201,6 +253,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
   const dirty =
     name !== wsQuery.data.name ||
     primaryColor !== (wsQuery.data.primaryColor ?? '') ||
+    accentColor !== (wsQuery.data.accentColor ?? '') ||
     logoUrl !== (wsQuery.data.logoUrl ?? '') ||
     customDomain !== (wsQuery.data.customDomain ?? '')
 
@@ -241,13 +294,49 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         <p className="text-xs text-muted-foreground mt-1">{t('settings.primaryColorHint')}</p>
       </div>
       <div>
+        <Label htmlFor="accent">{t('settings.accentColor')}</Label>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            aria-label={t('settings.brandAccentColor')}
+            value={/^#[0-9a-f]{6}$/i.test(accentColor) ? accentColor : '#7c5cff'}
+            onChange={(e) => setAccentColor(e.target.value)}
+            className="h-9 w-10 rounded border border-border bg-transparent p-0.5 cursor-pointer"
+          />
+          <Input id="accent" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} placeholder="#7c5cff" />
+          {accentColor && (
+            <Button variant="ghost" size="sm" onClick={() => setAccentColor('')}>{t('settings.accentClear')}</Button>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">{t('settings.accentColorHint')}</p>
+      </div>
+      <div>
         <Label htmlFor="logo">{t('settings.logoUrl')}</Label>
         <div className="flex items-center gap-2">
           {logoUrl ? (
             <img src={logoUrl} alt={t('settings.logoAlt')} className="h-9 w-9 rounded object-contain border border-border" />
           ) : null}
           <Input id="logo" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+            className="hidden"
+            onChange={onLogoSelected}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 shrink-0"
+            onClick={() => logoInputRef.current?.click()}
+            disabled={logoUploading}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            {logoUploading ? t('settings.logoUploading') : t('settings.logoUpload')}
+          </Button>
         </div>
+        <p className="text-xs text-muted-foreground mt-1">{t('settings.logoUploadHint')}</p>
+        {logoError && <p className="text-xs text-destructive mt-1">{logoError}</p>}
       </div>
       <div>
         <Label htmlFor="domain">{t('settings.customDomain')}</Label>
@@ -1089,6 +1178,129 @@ function CapacityInput({
         title={t('settings.weeklyCapacity')}
       />
       <span className="text-muted-foreground">{t('settings.hoursPerWeekUnit')}</span>
+    </div>
+  )
+}
+
+// §13.4 — Restore UI. Surfaces archived tasks (workspace-wide) and archived
+// workspaces the admin belongs to, each with a Restore action wired to the
+// existing restore endpoints.
+type ArchivedTask = {
+  id: string
+  title: string
+  listId: string
+  listName: string
+  projectName: string
+  updatedAt: string
+}
+type ArchivedWorkspaceEntry = { workspace: Workspace; role: string }
+
+function ArchivedTab({ workspaceId }: { workspaceId: string }) {
+  const qc = useQueryClient()
+  const { t } = useTranslation()
+
+  const tasksQuery = useQuery({
+    queryKey: ['archived-tasks', workspaceId],
+    queryFn: () => api<ArchivedTask[]>(`/workspaces/${workspaceId}/archived-tasks`),
+  })
+  const workspacesQuery = useQuery({
+    queryKey: ['archived-workspaces'],
+    queryFn: () => api<ArchivedWorkspaceEntry[]>(`/workspaces/archived`),
+  })
+
+  const restoreTask = useMutation({
+    mutationFn: (taskId: string) => api(`/tasks/${taskId}/restore`, { method: 'POST' }),
+    onSuccess: () => {
+      toast.success(t('settings.restoredTask'))
+      qc.invalidateQueries({ queryKey: ['archived-tasks', workspaceId] })
+    },
+    onError: () => toast.error(t('settings.restoreFailed')),
+  })
+
+  const restoreWorkspace = useMutation({
+    mutationFn: (wsId: string) => api(`/workspaces/${wsId}/restore`, { method: 'POST' }),
+    onSuccess: () => {
+      toast.success(t('settings.restoredWorkspace'))
+      qc.invalidateQueries({ queryKey: ['archived-workspaces'] })
+      qc.invalidateQueries({ queryKey: ['workspaces'] })
+    },
+    onError: () => toast.error(t('settings.restoreFailed')),
+  })
+
+  const tasks = tasksQuery.data ?? []
+  const archivedWs = workspacesQuery.data ?? []
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-muted-foreground">{t('settings.archivedSubtitle')}</p>
+
+      <Card className="overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+          <Archive className="h-4 w-4 text-muted-foreground" />
+          <h2 className="font-semibold text-sm">{t('settings.archivedTasks')}</h2>
+        </div>
+        <ul className="divide-y divide-border/60">
+          {tasksQuery.isLoading && (
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('common.loading')}</li>
+          )}
+          {!tasksQuery.isLoading && tasks.length === 0 && (
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.archivedTasksEmpty')}</li>
+          )}
+          {tasks.map((task) => (
+            <li key={task.id} className="flex items-center gap-3 px-4 py-2.5">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{task.title}</div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {task.projectName} · {task.listName}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 shrink-0"
+                disabled={restoreTask.isPending}
+                onClick={() => restoreTask.mutate(task.id)}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {restoreTask.isPending ? t('settings.restoring') : t('settings.restore')}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+          <Building2 className="h-4 w-4 text-muted-foreground" />
+          <h2 className="font-semibold text-sm">{t('settings.archivedWorkspaces')}</h2>
+        </div>
+        <ul className="divide-y divide-border/60">
+          {workspacesQuery.isLoading && (
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('common.loading')}</li>
+          )}
+          {!workspacesQuery.isLoading && archivedWs.length === 0 && (
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.archivedWorkspacesEmpty')}</li>
+          )}
+          {archivedWs.map((entry) => (
+            <li key={entry.workspace.id} className="flex items-center gap-3 px-4 py-2.5">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{entry.workspace.name}</div>
+                <div className="text-xs text-muted-foreground truncate font-mono">{entry.workspace.slug}</div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 shrink-0"
+                disabled={restoreWorkspace.isPending}
+                onClick={() => restoreWorkspace.mutate(entry.workspace.id)}
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                {restoreWorkspace.isPending ? t('settings.restoring') : t('settings.restore')}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </Card>
     </div>
   )
 }

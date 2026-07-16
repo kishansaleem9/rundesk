@@ -8,9 +8,12 @@ import '@rundesk/ui/styles.css'
 import { routeTree } from './routeTree.gen'
 import { queryClient } from './lib/query'
 import { useAuthStore, type AuthUser } from './store/auth'
+import { useThemeStore, type Theme } from './store/theme'
 import { api } from './lib/api'
 import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
+
+const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
 
 const router = createRouter({
   routeTree,
@@ -39,7 +42,7 @@ function useSessionHydration() {
   useEffect(() => {
     if (!useAuthStore.getState().isAuthenticated()) return
     let cancelled = false
-    void api<AuthUser | null>('/users/me')
+    void api<(AuthUser & { theme?: string }) | null>('/users/me')
       .then((me) => {
         if (cancelled || !me) return
         useAuthStore.getState().setUser({
@@ -49,6 +52,10 @@ function useSessionHydration() {
           role: me.role,
           avatarUrl: me.avatarUrl ?? null,
         })
+        // Cross-device theme (Plan §13.1): the server preference wins on load.
+        if (me.theme && THEME_VALUES.includes(me.theme as Theme)) {
+          useThemeStore.getState().hydrateTheme(me.theme as Theme)
+        }
       })
       .catch(() => {
         /* api() already attempted a refresh and cleared the store on failure */

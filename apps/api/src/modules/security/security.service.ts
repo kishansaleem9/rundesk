@@ -126,7 +126,7 @@ export class SecurityService {
       .orderBy(desc(apiKeys.createdAt))
   }
 
-  async createApiKey(workspaceId: string, userId: string, name: string, scope = 'read_write') {
+  async createApiKey(workspaceId: string, userId: string, name: string, scope = 'read_write', ipAddress?: string) {
     // Generate a secure random key: rd_live_<32 hex chars>
     const raw = `rd_live_${crypto.randomBytes(16).toString('hex')}`
     const keyPrefix = raw.slice(0, 12) // rd_live_xxxx
@@ -151,6 +151,7 @@ export class SecurityService {
       resourceId: key.id,
       description: `Created API key "${name}"`,
       metadata: { name, scope, keyPrefix },
+      ipAddress,
     })
 
     // Return the raw key only this once — never stored in plaintext
@@ -167,7 +168,7 @@ export class SecurityService {
     return row
   }
 
-  async revokeApiKey(workspaceId: string, keyId: string, actorId?: string) {
+  async revokeApiKey(workspaceId: string, keyId: string, actorId?: string, ipAddress?: string) {
     const row = await this.assertApiKeyOwnership(workspaceId, keyId)
     await this.db.update(apiKeys).set({ isRevoked: true }).where(eq(apiKeys.id, keyId))
     await this.logAuditEvent({
@@ -178,11 +179,12 @@ export class SecurityService {
       resourceId: keyId,
       description: `Revoked API key "${row.name}"`,
       metadata: { name: row.name, keyPrefix: row.keyPrefix },
+      ipAddress,
     })
     return { ok: true }
   }
 
-  async deleteApiKey(workspaceId: string, keyId: string, actorId?: string) {
+  async deleteApiKey(workspaceId: string, keyId: string, actorId?: string, ipAddress?: string) {
     const row = await this.assertApiKeyOwnership(workspaceId, keyId)
     await this.db.delete(apiKeys).where(eq(apiKeys.id, keyId))
     await this.logAuditEvent({
@@ -193,6 +195,7 @@ export class SecurityService {
       resourceId: keyId,
       description: `Deleted API key "${row.name}"`,
       metadata: { name: row.name, keyPrefix: row.keyPrefix },
+      ipAddress,
     })
     return { ok: true }
   }
@@ -216,11 +219,18 @@ export class SecurityService {
 
   private auditFilters(
     workspaceId: string,
-    opts: { action?: string; actionPrefix?: string; actorId?: string; from?: Date; to?: Date },
+    opts: { action?: string; actionPrefix?: string; actionPrefixes?: string[]; actorId?: string; from?: Date; to?: Date },
   ) {
     const filters = [eq(auditLogs.workspaceId, workspaceId)]
     if (opts.action) filters.push(eq(auditLogs.action, opts.action))
-    if (opts.actionPrefix) filters.push(like(auditLogs.action, `${opts.actionPrefix}%`))
+    // Action-type grouping (Plan §13.3): a group like "Members" spans several
+    // prefixes (member., role.), so match ANY of the supplied prefixes. Single
+    // `actionPrefix` is folded in for backward compatibility.
+    const prefixes = [...(opts.actionPrefix ? [opts.actionPrefix] : []), ...(opts.actionPrefixes ?? [])].filter(Boolean)
+    if (prefixes.length) {
+      const likes = prefixes.map((p) => like(auditLogs.action, `${p}%`))
+      filters.push(likes.length === 1 ? likes[0] : or(...likes)!)
+    }
     if (opts.actorId) filters.push(eq(auditLogs.actorId, opts.actorId))
     if (opts.from) filters.push(gte(auditLogs.createdAt, opts.from))
     if (opts.to) filters.push(lte(auditLogs.createdAt, opts.to))
@@ -234,6 +244,7 @@ export class SecurityService {
       limit?: number
       action?: string
       actionPrefix?: string
+      actionPrefixes?: string[]
       actorId?: string
       from?: Date
       to?: Date
@@ -256,7 +267,7 @@ export class SecurityService {
   /** Export the (filtered) audit trail as a CSV string (Plan §13.3). */
   async exportAuditLogsCsv(
     workspaceId: string,
-    opts: { action?: string; actionPrefix?: string; actorId?: string; from?: Date; to?: Date } = {},
+    opts: { action?: string; actionPrefix?: string; actionPrefixes?: string[]; actorId?: string; from?: Date; to?: Date } = {},
   ) {
     const rows = await this.db
       .select()

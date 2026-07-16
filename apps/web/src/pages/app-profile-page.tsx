@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock } from 'lucide-react'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useThemeStore, type Theme } from '../store/theme'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
@@ -270,6 +271,8 @@ function GeneralTab({ profile }: { profile: Profile }) {
         <p className="text-xs text-muted-foreground">{t('profile.timezoneHelp')}</p>
       </div>
 
+      <ThemeSelector />
+
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <span className="text-xs text-muted-foreground">
           {save.isSuccess && t('profile.saved')}
@@ -280,6 +283,47 @@ function GeneralTab({ profile }: { profile: Profile }) {
         </Button>
       </div>
     </Card>
+  )
+}
+
+// §13.1 — appearance/theme selector. Reads and writes the shared theme store,
+// which applies the theme instantly and persists it to the server (cross-device);
+// the topbar toggle stays in sync because it reads the same store.
+const THEME_OPTIONS: Array<{ value: Theme; labelKey: TranslationKey; icon: typeof Monitor }> = [
+  { value: 'system', labelKey: 'profile.themeSystem', icon: Monitor },
+  { value: 'light', labelKey: 'profile.themeLight', icon: Sun },
+  { value: 'dark', labelKey: 'profile.themeDark', icon: Moon },
+]
+
+function ThemeSelector() {
+  const { t } = useTranslation()
+  const theme = useThemeStore((s) => s.theme)
+  const setTheme = useThemeStore((s) => s.setTheme)
+  return (
+    <div className="space-y-1.5 pt-1">
+      <Label>{t('profile.theme')}</Label>
+      <p className="text-xs text-muted-foreground">{t('profile.themeDesc')}</p>
+      <div className="grid grid-cols-3 gap-2 pt-1">
+        {THEME_OPTIONS.map((opt) => {
+          const active = theme === opt.value
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setTheme(opt.value)}
+              aria-pressed={active}
+              className={cn(
+                'flex flex-col items-center gap-1.5 rounded-md border px-3 py-3 text-sm transition-colors',
+                active ? 'border-accent bg-accent/10 text-foreground' : 'border-border text-muted-foreground hover:bg-muted/40',
+              )}
+            >
+              <opt.icon className="h-4 w-4" />
+              {t(opt.labelKey)}
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { api } from '../lib/api'
+import { useAuthStore } from './auth'
 
 export type Theme = 'light' | 'dark' | 'system'
 
@@ -7,6 +9,19 @@ type ThemeState = {
   theme: Theme
   setTheme: (theme: Theme) => void
   toggle: () => void
+  /** Apply a server-sourced preference on load WITHOUT echoing it back. */
+  hydrateTheme: (theme: Theme) => void
+}
+
+/**
+ * Cross-device persistence (Plan §13.1): mirror the choice to the server so it
+ * follows the user to other devices. Fire-and-forget — the toggle stays instant
+ * and offline-safe — and only when authenticated (avoids a pointless 401 on the
+ * login screen). The server value is re-hydrated on the next load.
+ */
+function persistTheme(theme: Theme) {
+  if (!useAuthStore.getState().isAuthenticated()) return
+  void api('/users/me', { method: 'PATCH', body: { theme } }).catch(() => {})
 }
 
 const prefersDark = () =>
@@ -41,6 +56,7 @@ export const useThemeStore = create<ThemeState>()(
       setTheme: (theme) => {
         applyTheme(theme)
         set({ theme })
+        persistTheme(theme)
       },
       // Cycle light → dark → system → light.
       toggle: () => {
@@ -48,6 +64,12 @@ export const useThemeStore = create<ThemeState>()(
         const next = order[(order.indexOf(get().theme) + 1) % order.length]
         applyTheme(next)
         set({ theme: next })
+        persistTheme(next)
+      },
+      // Applied from GET /users/me on load; must not re-PATCH the server.
+      hydrateTheme: (theme) => {
+        applyTheme(theme)
+        set({ theme })
       },
     }),
     {

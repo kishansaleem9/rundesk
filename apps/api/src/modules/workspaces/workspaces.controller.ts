@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
+import { Body, Controller, Get, Ip, Param, Patch, Post, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService } from './workspaces.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -18,6 +18,13 @@ export class WorkspacesController {
   @ApiOperation({ summary: 'List workspaces the current user belongs to' })
   async getMyWorkspaces(@CurrentUser() user: any) {
     return this.workspacesService.findByMember(user.id)
+  }
+
+  // Declared before ':workspaceId' so the literal path wins over the UUID param.
+  @Get('archived')
+  @ApiOperation({ summary: 'List archived workspaces the current user belongs to (Plan §13.4)' })
+  async getArchivedWorkspaces(@CurrentUser() user: any) {
+    return this.workspacesService.listArchivedWorkspaces(user.id)
   }
 
   @Post()
@@ -42,10 +49,28 @@ export class WorkspacesController {
   @UseGuards(WorkspaceAdminGuard)
   async update(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
-    @Body() body: { name?: string; logoUrl?: string | null; primaryColor?: string | null; customDomain?: string | null },
+    @Body() body: { name?: string; logoUrl?: string | null; primaryColor?: string | null; accentColor?: string | null; customDomain?: string | null },
     @CurrentUser() user: any,
+    @Ip() ip: string,
   ) {
-    return this.workspacesService.update(workspaceId, body, { id: user.id, email: user.email })
+    return this.workspacesService.update(workspaceId, body, { id: user.id, email: user.email, ip })
+  }
+
+  @Post(':workspaceId/logo/presign')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'Presign a direct-to-R2 upload for the workspace logo (Plan §13.5)' })
+  async presignLogo(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Body() body: { contentType: string; sizeBytes?: number },
+  ) {
+    return this.workspacesService.createLogoUploadUrl(workspaceId, body)
+  }
+
+  @Get(':workspaceId/archived-tasks')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({ summary: 'List archived tasks in the workspace (Plan §13.4)' })
+  async getArchivedTasks(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
+    return this.workspacesService.listArchivedTasks(workspaceId)
   }
 
   @Post(':workspaceId/verify-domain')
@@ -61,8 +86,9 @@ export class WorkspacesController {
   async archive(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @CurrentUser() user: any,
+    @Ip() ip: string,
   ) {
-    return this.workspacesService.archiveWorkspace(workspaceId, { id: user.id, email: user.email })
+    return this.workspacesService.archiveWorkspace(workspaceId, { id: user.id, email: user.email, ip })
   }
 
   @Post(':workspaceId/restore')
@@ -101,10 +127,12 @@ export class WorkspacesController {
     @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() body: { role: string },
     @CurrentUser() user: any,
+    @Ip() ip: string,
   ) {
     return this.workspacesService.updateMemberRole(workspaceId, userId, body.role, {
       id: user.id,
       email: user.email,
+      ip,
     })
   }
 
@@ -128,10 +156,12 @@ export class WorkspacesController {
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
     @CurrentUser() user: any,
+    @Ip() ip: string,
   ) {
     return this.workspacesService.removeMember(workspaceId, userId, {
       id: user.id,
       email: user.email,
+      ip,
     })
   }
 }

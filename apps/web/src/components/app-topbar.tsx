@@ -103,19 +103,55 @@ export function AppTopbar({
 }
 
 // ---------------------------------------------------------------------------
-// Branding — apply the workspace's accent color to the CSS brand variable
-// (Plan §13). Renders nothing.
+// Branding — apply the workspace's primary + accent colors to the design
+// system's CSS variables (Plan §13.5). primaryColor drives --brand-700 (via
+// applyBrandColor); accentColor drives --accent, which the app reads as
+// `hsl(var(--accent))`, so it must be set as an "H S% L%" triple. Renders nothing.
 // ---------------------------------------------------------------------------
+function hexToHslTriple(hex: string): string | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return null
+  const int = parseInt(m[1], 16)
+  const r = ((int >> 16) & 255) / 255
+  const g = ((int >> 8) & 255) / 255
+  const b = (int & 255) / 255
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  let h = 0
+  let s = 0
+  if (max !== min) {
+    const d = max - min
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break
+      case g: h = (b - r) / d + 2; break
+      default: h = (r - g) / d + 4
+    }
+    h /= 6
+  }
+  return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`
+}
+
+/** Apply (or reset) the workspace accent color on the --accent CSS var. */
+export function applyAccentColor(hex: string | null | undefined): void {
+  if (typeof document === 'undefined') return
+  const hsl = hex ? hexToHslTriple(hex) : null
+  if (hsl) document.documentElement.style.setProperty('--accent', hsl)
+  else document.documentElement.style.removeProperty('--accent') // fall back to stylesheet default
+}
+
 function BrandingApplier({ workspaceId }: { workspaceId?: string }) {
   const { data } = useQuery({
     queryKey: ['workspace-branding', workspaceId],
-    queryFn: () => api<{ primaryColor?: string | null }>(`/workspaces/${workspaceId}`),
+    queryFn: () => api<{ primaryColor?: string | null; accentColor?: string | null }>(`/workspaces/${workspaceId}`),
     enabled: !!workspaceId,
     staleTime: 60_000,
   })
   useEffect(() => {
     applyBrandColor(data?.primaryColor ?? null)
-  }, [data?.primaryColor])
+    applyAccentColor(data?.accentColor ?? null)
+  }, [data?.primaryColor, data?.accentColor])
   return null
 }
 

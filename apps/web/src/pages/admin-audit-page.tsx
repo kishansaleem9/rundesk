@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Shield, Search, Download } from 'lucide-react'
 import { api, downloadFile } from '../lib/api'
-import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 
@@ -75,13 +74,15 @@ const ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
 
 type ActionGroup = 'all' | 'members' | 'security' | 'integrations' | 'timesheets' | 'announcements' | 'workspace'
 
-const ACTION_GROUPS: Record<Exclude<ActionGroup, 'all'>, (action: string) => boolean> = {
-  members: (a) => a.startsWith('member.') || a.startsWith('role.'),
-  security: (a) => a.startsWith('api_key.') || a.startsWith('2fa.') || a.startsWith('auth.'),
-  integrations: (a) => a.startsWith('integration.'),
-  timesheets: (a) => a.startsWith('timesheet.'),
-  announcements: (a) => a.startsWith('announcement.'),
-  workspace: (a) => a.startsWith('workspace.') || a.startsWith('feature_flag.') || a.startsWith('data.'),
+// Action-type groups map to the action prefixes sent to the server so the whole
+// trail is filtered server-side (Plan §13.3), not just the loaded page.
+const GROUP_PREFIXES: Record<Exclude<ActionGroup, 'all'>, string[]> = {
+  members: ['member.', 'role.'],
+  security: ['api_key.', '2fa.', 'auth.'],
+  integrations: ['integration.'],
+  timesheets: ['timesheet.'],
+  announcements: ['announcement.'],
+  workspace: ['workspace.', 'feature_flag.', 'data.'],
 }
 
 const GROUP_LABEL_KEYS: Record<ActionGroup, TranslationKey> = {
@@ -94,13 +95,33 @@ const GROUP_LABEL_KEYS: Record<ActionGroup, TranslationKey> = {
   workspace: 'common.workspace',
 }
 
+type Member = { userId: string; email: string; displayName: string }
+
+/** Build the shared filter query string sent to both the list and export endpoints. */
+function buildFilterParams(opts: { from: string; to: string; actorId: string; group: ActionGroup }) {
+  const p = new URLSearchParams()
+  if (opts.from) p.set('from', opts.from)
+  // Include the whole "to" day (server compares against createdAt <= to).
+  if (opts.to) p.set('to', `${opts.to}T23:59:59.999`)
+  if (opts.actorId) p.set('actorId', opts.actorId)
+  if (opts.group !== 'all') p.set('actionPrefixes', GROUP_PREFIXES[opts.group].join(','))
+  return p
+}
+
 export function AuditLogPage() {
   const { t } = useTranslation()
-  const user = useAuthStore((s) => s.user)
-  // Get the user's current workspace — we use the first workspace for the audit log
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [group, setGroup] = useState<ActionGroup>('all')
+  const [group, setGroupState] = useState<ActionGroup>('all')
+  const [from, setFromState] = useState('')
+  const [to, setToState] = useState('')
+  const [actorId, setActorIdState] = useState('')
+
+  // Any server-side filter change resets to the first page so pagination stays valid.
+  const setGroup = (g: ActionGroup) => { setGroupState(g); setPage(1) }
+  const setFrom = (v: string) => { setFromState(v); setPage(1) }
+  const setTo = (v: string) => { setToState(v); setPage(1) }
+  const setActorId = (v: string) => { setActorIdState(v); setPage(1) }
 
   // For audit log we need a workspace — get from user's workspaces
   const wsQuery = useQuery({
@@ -110,50 +131,58 @@ export function AuditLogPage() {
 
   const workspaceId = wsQuery.data?.[0]?.workspace.id
 
-  const logsQuery = useQuery({
-    queryKey: ['audit-logs', workspaceId, page],
-    queryFn: () =>
-      workspaceId
-        ? api<AuditLog[]>(`/workspaces/${workspaceId}/audit-logs?page=${page}&limit=50`)
-        : Promise.resolve([]),
+  // Actor dropdown is sourced from workspace members so it covers everyone, not
+  // just actors present on the current page.
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<Member[]>(`/workspaces/${workspaceId}/members`),
     enabled: !!workspaceId,
   })
 
-  const allLogs = logsQuery.data ?? []
-  const groupCounts = useMemo(() => {
-    const counts: Record<ActionGroup, number> = {
-      all: allLogs.length,
-      members: 0,
-      security: 0,
-      integrations: 0,
-      timesheets: 0,
-      announcements: 0,
-      workspace: 0,
-    }
-    for (const log of allLogs) {
-      for (const key of Object.keys(ACTION_GROUPS) as Array<keyof typeof ACTION_GROUPS>) {
-        if (ACTION_GROUPS[key](log.action)) counts[key] += 1
-      }
-    }
-    return counts
-  }, [allLogs])
+  const filterParams = buildFilterParams({ from, to, actorId, group })
 
-  const logs = allLogs.filter((l) => {
-    if (group !== 'all' && !ACTION_GROUPS[group](l.action)) return false
-    if (!search) return true
-    const needle = search.toLowerCase()
-    return (
-      l.action.toLowerCase().includes(needle) ||
-      l.description.toLowerCase().includes(needle) ||
-      (l.actorEmail?.toLowerCase().includes(needle) ?? false)
-    )
+  const logsQuery = useQuery({
+    queryKey: ['audit-logs', workspaceId, page, from, to, actorId, group],
+    queryFn: () => {
+      if (!workspaceId) return Promise.resolve([])
+      const params = new URLSearchParams(filterParams)
+      params.set('page', String(page))
+      params.set('limit', '50')
+      return api<AuditLog[]>(`/workspaces/${workspaceId}/audit-logs?${params.toString()}`)
+    },
+    enabled: !!workspaceId,
   })
+
+  const serverLogs = logsQuery.data ?? []
+  // Free-text search stays a client-side refinement of the current server page.
+  const logs = search
+    ? serverLogs.filter((l) => {
+        const needle = search.toLowerCase()
+        return (
+          l.action.toLowerCase().includes(needle) ||
+          l.description.toLowerCase().includes(needle) ||
+          (l.actorEmail?.toLowerCase().includes(needle) ?? false)
+        )
+      })
+    : serverLogs
+
+  const hasFilters = Boolean(from || to || actorId || group !== 'all')
+
+  function clearFilters() {
+    setFromState('')
+    setToState('')
+    setActorIdState('')
+    setGroupState('all')
+    setSearch('')
+    setPage(1)
+  }
 
   function exportCsv() {
     if (!workspaceId) return
     // Server-side export streams the FULL filtered trail, not just the loaded page.
+    const qs = filterParams.toString()
     void downloadFile(
-      `/workspaces/${workspaceId}/audit-logs/export`,
+      `/workspaces/${workspaceId}/audit-logs/export${qs ? `?${qs}` : ''}`,
       `audit-log-${new Date().toISOString().split('T')[0]}.csv`,
     )
   }
@@ -168,6 +197,38 @@ export function AuditLogPage() {
         <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv}>
           <Download className="h-3.5 w-3.5" /> {t('adminAudit.exportCsv')}
         </Button>
+      </div>
+
+      {/* Server-side filters (Plan §13.3): date range + actor, applied to the whole trail. */}
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card/40 p-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">{t('adminAudit.dateFrom')}</label>
+          <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">{t('adminAudit.dateTo')}</label>
+          <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">{t('adminAudit.actor')}</label>
+          <select
+            value={actorId}
+            onChange={(e) => setActorId(e.target.value)}
+            className="h-9 min-w-44 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">{t('adminAudit.allActors')}</option>
+            {(membersQuery.data ?? []).map((m) => (
+              <option key={m.userId} value={m.userId}>
+                {m.displayName} ({m.email})
+              </option>
+            ))}
+          </select>
+        </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
+            {t('adminAudit.clearFilters')}
+          </Button>
+        )}
       </div>
 
       <div className="relative">
@@ -193,7 +254,7 @@ export function AuditLogPage() {
                 : 'bg-card text-muted-foreground border-border hover:bg-muted/30',
             )}
           >
-            {t(GROUP_LABEL_KEYS[g])} <span className="opacity-70 tabular-nums">· {groupCounts[g]}</span>
+            {t(GROUP_LABEL_KEYS[g])}
           </button>
         ))}
       </div>
@@ -204,14 +265,14 @@ export function AuditLogPage() {
           <Card className="p-8 text-center text-muted-foreground">
             <Shield className="h-8 w-8 mx-auto mb-2 opacity-30" />
             <p>
-              {allLogs.length === 0
+              {!hasFilters && !search
                 ? t('adminAudit.emptyNoEvents')
                 : search
                   ? t('adminAudit.emptyNoMatchFilterSearch')
                   : t('adminAudit.emptyNoMatchFilter')}
             </p>
             <p className="text-xs mt-1">
-              {allLogs.length === 0
+              {!hasFilters && !search
                 ? t('adminAudit.emptyHintNoEvents')
                 : t('adminAudit.emptyHintFiltered')}
             </p>
@@ -222,12 +283,12 @@ export function AuditLogPage() {
         ))}
       </div>
 
-      {logs.length === 50 && (
+      {(page > 1 || serverLogs.length === 50) && (
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
             {t('adminAudit.previous')}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)}>
+          <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)} disabled={serverLogs.length < 50}>
             {t('common.next')}
           </Button>
         </div>
