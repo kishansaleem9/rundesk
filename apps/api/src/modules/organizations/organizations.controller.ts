@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Body, Param, UseGuards, Delete, Post, ForbiddenException } from '@nestjs/common'
+import { Controller, Get, Patch, Body, Param, Query, UseGuards, Delete, Post, ForbiddenException } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { OrganizationMemberGuard } from '../auth/guards/organization-member.guard'
@@ -19,6 +19,24 @@ export class OrganizationsController {
   async list(@CurrentUser() user: CurrentUserPayload) {
     if (user.role !== 'super_admin') throw new ForbiddenException('Super admin access required')
     return this.organizationsService.listAll()
+  }
+
+  // NOTE: this static route MUST be declared before `:organizationId` below, or
+  // Nest/Express would match `/organizations/users` against the param route.
+  @Get('users')
+  @ApiOperation({ summary: 'Global user directory — all platform users (super admin)' })
+  async listDirectory(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    if (user.role !== 'super_admin') throw new ForbiddenException('Super admin access required')
+    return this.organizationsService.listDirectory({
+      q,
+      limit: limit != null ? Number(limit) : undefined,
+      offset: offset != null ? Number(offset) : undefined,
+    })
   }
 
   @Get(':organizationId')

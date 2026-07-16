@@ -1,8 +1,35 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, and, or, sql, desc, ilike, inArray } from 'drizzle-orm'
 import { organizations, organizationMembers, workspaceMembers, workspaces, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+
+export type DirectoryWorkspace = {
+  workspaceId: string
+  workspaceName: string
+  workspaceSlug: string
+  role: string
+}
+
+export type DirectoryUser = {
+  id: string
+  displayName: string
+  email: string
+  avatarUrl: string | null
+  role: string
+  emailVerified: boolean
+  isActive: boolean
+  lastSeenAt: Date | null
+  createdAt: Date
+  workspaces: DirectoryWorkspace[]
+}
+
+export type DirectoryResult = {
+  users: DirectoryUser[]
+  total: number
+  limit: number
+  offset: number
+}
 
 @Injectable()
 export class OrganizationsService {
@@ -37,6 +64,88 @@ export class OrganizationsService {
         organizations.updatedAt,
       )
     return rows
+  }
+
+  /**
+   * Global user directory (Plan §2.1) — a platform-wide, cross-workspace list of
+   * every user, each with their per-workspace memberships. Super-admin only; the
+   * caller (controller) enforces the super_admin gate. Read-only.
+   *
+   * `q` matches name OR email (case-insensitive). Results are paginated with
+   * limit/offset and ordered newest-first; `total` is the unpaginated count so
+   * the UI can render pagination.
+   */
+  async listDirectory(opts: { q?: string; limit?: number; offset?: number } = {}): Promise<DirectoryResult> {
+    // Sanitize pagination — tolerate NaN/negatives coming from raw query strings.
+    const rawLimit = Number.isFinite(opts.limit) ? Math.trunc(opts.limit as number) : 50
+    const limit = Math.min(Math.max(rawLimit, 1), 200)
+    const rawOffset = Number.isFinite(opts.offset) ? Math.trunc(opts.offset as number) : 0
+    const offset = Math.max(rawOffset, 0)
+
+    const q = opts.q?.trim()
+    const where = q
+      ? or(ilike(users.displayName, `%${q}%`), ilike(users.email, `%${q}%`))
+      : undefined
+
+    // Unpaginated total for the current filter, so the client can paginate.
+    const [{ total }] = await this.db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(users)
+      .where(where ?? sql`true`)
+
+    const rows = await this.db
+      .select({
+        id: users.id,
+        displayName: users.displayName,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        role: users.role,
+        emailVerified: users.emailVerified,
+        isActive: users.isActive,
+        lastSeenAt: users.lastSeenAt,
+        createdAt: users.createdAt,
+      })
+      .from(users)
+      .where(where ?? sql`true`)
+      .orderBy(desc(users.createdAt))
+      .limit(limit)
+      .offset(offset)
+
+    // Fetch workspace memberships only for the page of users we're returning
+    // (join workspace_members → workspaces), then group them per user in memory.
+    const userIds = rows.map((r) => r.id)
+    const memberships = userIds.length
+      ? await this.db
+          .select({
+            userId: workspaceMembers.userId,
+            workspaceId: workspaces.id,
+            workspaceName: workspaces.name,
+            workspaceSlug: workspaces.slug,
+            role: workspaceMembers.role,
+          })
+          .from(workspaceMembers)
+          .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
+          .where(inArray(workspaceMembers.userId, userIds))
+      : []
+
+    const byUser = new Map<string, DirectoryWorkspace[]>()
+    for (const m of memberships) {
+      const list = byUser.get(m.userId) ?? []
+      list.push({
+        workspaceId: m.workspaceId,
+        workspaceName: m.workspaceName,
+        workspaceSlug: m.workspaceSlug,
+        role: m.role,
+      })
+      byUser.set(m.userId, list)
+    }
+
+    return {
+      users: rows.map((r) => ({ ...r, workspaces: byUser.get(r.id) ?? [] })),
+      total,
+      limit,
+      offset,
+    }
   }
 
   async update(id: string, patch: { name?: string; logoUrl?: string | null }) {

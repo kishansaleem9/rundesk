@@ -31,6 +31,7 @@ import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
 import { Route as AppAdminSettingsRouteImport } from './routes/app.admin.settings'
 import { Route as AppAdminIntegrationsRouteImport } from './routes/app.admin.integrations'
 import { Route as AppAdminFeaturesRouteImport } from './routes/app.admin.features'
+import { Route as AppAdminDirectoryRouteImport } from './routes/app.admin.directory'
 import { Route as AppAdminAuditRouteImport } from './routes/app.admin.audit'
 import { Route as AppAdminAnnouncementsRouteImport } from './routes/app.admin.announcements'
 import { Route as AppWorkspaceIdWorkloadRouteImport } from './routes/app.$workspaceId.workload'
@@ -184,6 +185,13 @@ const AppAdminFeaturesRoute = AppAdminFeaturesRouteImport.update({
   getParentRoute: () => AppAdminRoute,
 } as any).lazy(() =>
   import('./routes/app.admin.features.lazy').then((d) => d.Route),
+)
+const AppAdminDirectoryRoute = AppAdminDirectoryRouteImport.update({
+  id: '/directory',
+  path: '/directory',
+  getParentRoute: () => AppAdminRoute,
+} as any).lazy(() =>
+  import('./routes/app.admin.directory.lazy').then((d) => d.Route),
 )
 const AppAdminAuditRoute = AppAdminAuditRouteImport.update({
   id: '/audit',
@@ -479,6 +487,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
   '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
+  '/app/admin/directory': typeof AppAdminDirectoryRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/admin/integrations': typeof AppAdminIntegrationsRoute
   '/app/admin/settings': typeof AppAdminSettingsRoute
@@ -530,6 +539,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
   '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
+  '/app/admin/directory': typeof AppAdminDirectoryRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/admin/integrations': typeof AppAdminIntegrationsRoute
   '/app/admin/settings': typeof AppAdminSettingsRoute
@@ -587,6 +597,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/workload': typeof AppWorkspaceIdWorkloadRoute
   '/app/admin/announcements': typeof AppAdminAnnouncementsRoute
   '/app/admin/audit': typeof AppAdminAuditRoute
+  '/app/admin/directory': typeof AppAdminDirectoryRoute
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/admin/integrations': typeof AppAdminIntegrationsRoute
   '/app/admin/settings': typeof AppAdminSettingsRoute
@@ -645,6 +656,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/workload'
     | '/app/admin/announcements'
     | '/app/admin/audit'
+    | '/app/admin/directory'
     | '/app/admin/features'
     | '/app/admin/integrations'
     | '/app/admin/settings'
@@ -696,6 +708,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/workload'
     | '/app/admin/announcements'
     | '/app/admin/audit'
+    | '/app/admin/directory'
     | '/app/admin/features'
     | '/app/admin/integrations'
     | '/app/admin/settings'
@@ -752,6 +765,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/workload'
     | '/app/admin/announcements'
     | '/app/admin/audit'
+    | '/app/admin/directory'
     | '/app/admin/features'
     | '/app/admin/integrations'
     | '/app/admin/settings'
@@ -922,6 +936,13 @@ declare module '@tanstack/react-router' {
       path: '/features'
       fullPath: '/app/admin/features'
       preLoaderRoute: typeof AppAdminFeaturesRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/directory': {
+      id: '/app/admin/directory'
+      path: '/directory'
+      fullPath: '/app/admin/directory'
+      preLoaderRoute: typeof AppAdminDirectoryRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/audit': {
@@ -1305,6 +1326,7 @@ const AppWorkspaceIdRouteWithChildren = AppWorkspaceIdRoute._addFileChildren(
 interface AppAdminRouteChildren {
   AppAdminAnnouncementsRoute: typeof AppAdminAnnouncementsRoute
   AppAdminAuditRoute: typeof AppAdminAuditRoute
+  AppAdminDirectoryRoute: typeof AppAdminDirectoryRoute
   AppAdminFeaturesRoute: typeof AppAdminFeaturesRoute
   AppAdminIntegrationsRoute: typeof AppAdminIntegrationsRoute
   AppAdminSettingsRoute: typeof AppAdminSettingsRoute
@@ -1315,6 +1337,7 @@ interface AppAdminRouteChildren {
 const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminAnnouncementsRoute: AppAdminAnnouncementsRoute,
   AppAdminAuditRoute: AppAdminAuditRoute,
+  AppAdminDirectoryRoute: AppAdminDirectoryRoute,
   AppAdminFeaturesRoute: AppAdminFeaturesRoute,
   AppAdminIntegrationsRoute: AppAdminIntegrationsRoute,
   AppAdminSettingsRoute: AppAdminSettingsRoute,
