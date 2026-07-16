@@ -4268,6 +4268,19 @@ export const en = {
   // Custom-domain branded entry
   'customDomain.poweredBy': 'Powered by Rundesk',
 
+  // Auth — TOTP two-factor challenge + rate limiting (security hardening)
+  'auth.totpTitle': 'Two-factor authentication',
+  'auth.totpSubtitle': 'Enter the 6-digit code from your authenticator app to finish signing in.',
+  'auth.totpCodeLabel': 'Authentication code',
+  'auth.totpCodePlaceholder': '123456',
+  'auth.totpVerify': 'Verify',
+  'auth.totpVerifying': 'Verifying…',
+  'auth.totpInvalid': 'Invalid code. Please try again.',
+  'auth.totpBack': 'Back to sign in',
+  'auth.tooManyAttempts': 'Too many attempts. Please try again later.',
+  'profile.copy': 'Copy',
+  'profile.copied': 'Copied',
+
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
   'auth.email': 'Email',
@@ -8593,6 +8606,19 @@ export const es: Record<TranslationKey, string> = {
   // Custom-domain branded entry
   'customDomain.poweredBy': 'Con la tecnología de Rundesk',
 
+  // Auth — TOTP two-factor challenge + rate limiting (security hardening)
+  'auth.totpTitle': 'Autenticación en dos pasos',
+  'auth.totpSubtitle': 'Introduce el código de 6 dígitos de tu app de autenticación para completar el inicio de sesión.',
+  'auth.totpCodeLabel': 'Código de autenticación',
+  'auth.totpCodePlaceholder': '123456',
+  'auth.totpVerify': 'Verificar',
+  'auth.totpVerifying': 'Verificando…',
+  'auth.totpInvalid': 'Código no válido. Inténtalo de nuevo.',
+  'auth.totpBack': 'Volver al inicio de sesión',
+  'auth.tooManyAttempts': 'Demasiados intentos. Inténtalo de nuevo más tarde.',
+  'profile.copy': 'Copiar',
+  'profile.copied': 'Copiado',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -12911,6 +12937,19 @@ export const ar: Record<TranslationKey, string> = {
   // Custom-domain branded entry
   'customDomain.poweredBy': 'مُشغَّل بواسطة Rundesk',
 
+  // Auth — TOTP two-factor challenge + rate limiting (security hardening)
+  'auth.totpTitle': 'المصادقة الثنائية',
+  'auth.totpSubtitle': 'أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة لإكمال تسجيل الدخول.',
+  'auth.totpCodeLabel': 'رمز المصادقة',
+  'auth.totpCodePlaceholder': '123456',
+  'auth.totpVerify': 'تحقّق',
+  'auth.totpVerifying': 'جارٍ التحقّق…',
+  'auth.totpInvalid': 'رمز غير صالح. حاول مرة أخرى.',
+  'auth.totpBack': 'العودة إلى تسجيل الدخول',
+  'auth.tooManyAttempts': 'محاولات كثيرة جدًا. يُرجى المحاولة مرة أخرى لاحقًا.',
+  'profile.copy': 'نسخ',
+  'profile.copied': 'تم النسخ',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -17078,6 +17117,19 @@ export const ur: Record<TranslationKey, string> = {
 
   // Custom-domain branded entry
   'customDomain.poweredBy': 'Rundesk کے ذریعے تقویت یافتہ',
+
+  // Auth — TOTP two-factor challenge + rate limiting (security hardening)
+  'auth.totpTitle': 'دو عنصری تصدیق',
+  'auth.totpSubtitle': 'سائن اِن مکمل کرنے کے لیے اپنی تصدیق کنندہ ایپ سے 6 ہندسوں کا کوڈ درج کریں۔',
+  'auth.totpCodeLabel': 'تصدیقی کوڈ',
+  'auth.totpCodePlaceholder': '123456',
+  'auth.totpVerify': 'تصدیق کریں',
+  'auth.totpVerifying': 'تصدیق ہو رہی ہے…',
+  'auth.totpInvalid': 'غلط کوڈ۔ دوبارہ کوشش کریں۔',
+  'auth.totpBack': 'سائن اِن پر واپس',
+  'auth.tooManyAttempts': 'بہت زیادہ کوششیں۔ براہِ کرم بعد میں دوبارہ کوشش کریں۔',
+  'profile.copy': 'کاپی',
+  'profile.copied': 'کاپی ہو گیا',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',

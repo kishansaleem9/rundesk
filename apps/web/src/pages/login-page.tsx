@@ -76,6 +76,11 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // §14 2FA — when the account has TOTP enabled the backend answers the first
+  // login attempt with 401 { details.error: 'totp_required' }; we then reveal a
+  // code field and re-submit email+password+totpCode.
+  const [totpRequired, setTotpRequired] = useState(false)
+  const [totpCode, setTotpCode] = useState('')
   const [ssoHint, setSsoHint] = useState<SsoLookupResponse['connection']>(null)
   // Optimistically show both social buttons; the providers probe below hides any
   // that the backend reports as unconfigured. If the probe fails we degrade
@@ -174,9 +179,9 @@ export function LoginPage() {
     try {
       const data = await api<LoginResponse>('/auth/login', {
         method: 'POST',
-        body: { email, password },
+        body: { email, password, ...(totpRequired ? { totpCode: totpCode.trim() } : {}) },
       })
-      
+
       setSession(data.user, data.accessToken, data.refreshToken, data.organizations, data.workspaces)
 
       if (nextUrl && nextUrl.startsWith('/')) {
@@ -187,7 +192,22 @@ export function LoginPage() {
         navigate({ to: '/app' })
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t('auth.loginFailed'))
+      if (err instanceof ApiError) {
+        const marker = (err.details as { error?: string } | undefined)?.error
+        if (err.status === 401 && marker === 'totp_required') {
+          // Account has 2FA — reveal the code step (don't show an error).
+          setTotpRequired(true)
+          setError(null)
+        } else if (err.status === 401 && marker === 'totp_invalid') {
+          setError(t('auth.totpInvalid'))
+        } else if (err.status === 429) {
+          setError(t('auth.tooManyAttempts'))
+        } else {
+          setError(err.message)
+        }
+      } else {
+        setError(t('auth.loginFailed'))
+      }
     } finally {
       setLoading(false)
     }
@@ -206,7 +226,7 @@ export function LoginPage() {
       })
       setNotice(t('auth.resetLinkSent'))
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t('auth.resetLinkFailed'))
+      setError(err instanceof ApiError ? (err.status === 429 ? t('auth.tooManyAttempts') : err.message) : t('auth.resetLinkFailed'))
     } finally {
       setLoading(false)
     }
@@ -237,7 +257,7 @@ export function LoginPage() {
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t('auth.resetPasswordFailed'))
+      setError(err instanceof ApiError ? (err.status === 429 ? t('auth.tooManyAttempts') : err.message) : t('auth.resetPasswordFailed'))
     } finally {
       setLoading(false)
     }
@@ -408,6 +428,35 @@ export function LoginPage() {
                     placeholder="••••••••"
                   />
                   {touched.password && <FieldError message={passwordError ? t(passwordError) : null} />}
+                </div>
+              )}
+
+              {mode === 'login' && totpRequired && (
+                <div className="space-y-2">
+                  <Label htmlFor="totpCode">{t('auth.totpCodeLabel')}</Label>
+                  <Input
+                    id="totpCode"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    required
+                    leadingIcon={<Lock className="h-4 w-4" />}
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value)}
+                    placeholder={t('auth.totpCodePlaceholder')}
+                  />
+                  <p className="text-xs text-muted-foreground">{t('auth.totpSubtitle')}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTotpRequired(false)
+                      setTotpCode('')
+                      setError(null)
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {t('auth.totpBack')}
+                  </button>
                 </div>
               )}
 

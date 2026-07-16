@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle } from 'lucide-react'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { encodeQr } from '../lib/qr'
 
 type Profile = {
   id: string
@@ -608,7 +609,7 @@ function TotpCard() {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [step, setStep] = useState<'idle' | 'setup' | 'verify' | 'done' | 'backup'>('idle')
-  const [setupData, setSetupData] = useState<{ qrCodeUrl: string; secret: string } | null>(null)
+  const [setupData, setSetupData] = useState<{ otpauthUrl: string; secret: string } | null>(null)
   const [code, setCode] = useState('')
   const [backupCodes, setBackupCodes] = useState<string[]>([])
 
@@ -619,7 +620,7 @@ function TotpCard() {
   })
 
   const setupMutation = useMutation({
-    mutationFn: () => api<{ qrCodeUrl: string; secret: string; otpauthUrl: string }>('/security/totp/setup', { method: 'POST' }),
+    mutationFn: () => api<{ secret: string; otpauthUrl: string }>('/security/totp/setup', { method: 'POST' }),
     onSuccess: (data) => {
       setSetupData(data)
       setStep('setup')
@@ -675,8 +676,15 @@ function TotpCard() {
       {step === 'setup' && setupData && (
         <div className="mt-4 space-y-3 border-t border-border pt-4">
           <p className="text-sm font-medium">{t('profile.scanQr')}</p>
-          <img src={setupData.qrCodeUrl} alt={t('profile.qrAlt')} className="h-40 w-40 border border-border rounded" />
-          <p className="text-xs text-muted-foreground">{t('profile.cantScan')} <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{setupData.secret}</code></p>
+          <QrCode
+            value={setupData.otpauthUrl}
+            title={t('profile.qrAlt')}
+            className="h-40 w-40 rounded border border-border bg-white p-2"
+          />
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">{t('profile.cantScan')}</p>
+            <CopySecret secret={setupData.secret} />
+          </div>
           <div className="flex gap-2">
             <Input
               value={code}
@@ -707,6 +715,75 @@ function TotpCard() {
         </div>
       )}
     </Card>
+  )
+}
+
+// Renders a scannable QR code from an otpauth:// URI entirely on the client
+// (the backend no longer returns a pre-rendered image). Dark modules on a fixed
+// white background so it stays scannable in both light and dark themes. The
+// copyable secret below is the guaranteed fallback if the camera can't scan.
+function QrCode({ value, className, title }: { value: string; className?: string; title?: string }) {
+  const svg = useMemo(() => {
+    let matrix: boolean[][]
+    try {
+      matrix = encodeQr(value, 'M')
+    } catch {
+      return null
+    }
+    const n = matrix.length
+    const border = 4 // quiet zone (modules)
+    const dim = n + border * 2
+    let d = ''
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        if (matrix[y][x]) d += `M${x + border} ${y + border}h1v1h-1z`
+      }
+    }
+    return { d, dim }
+  }, [value])
+
+  // Encoding only throws if the payload is too large for a v40 QR — never the
+  // case for an otpauth URI. Render nothing and rely on the manual secret.
+  if (!svg) return null
+
+  return (
+    <svg
+      viewBox={`0 0 ${svg.dim} ${svg.dim}`}
+      className={className}
+      shapeRendering="crispEdges"
+      role="img"
+      aria-label={title}
+    >
+      <rect width={svg.dim} height={svg.dim} fill="#ffffff" />
+      <path d={svg.d} fill="#000000" />
+    </svg>
+  )
+}
+
+// Base32 TOTP secret shown as copy-able text — authenticator apps accept manual
+// entry, so this is the functional fallback whenever the QR can't be scanned.
+function CopySecret({ secret }: { secret: string }) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(secret)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* Clipboard blocked — the secret is selectable for manual copy. */
+    }
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <code className="flex-1 select-all break-all rounded bg-muted px-2 py-1.5 text-xs font-mono tracking-wider">
+        {secret}
+      </code>
+      <Button type="button" variant="outline" size="sm" onClick={copy} className="shrink-0">
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? t('profile.copied') : t('profile.copy')}
+      </Button>
+    </div>
   )
 }
 
