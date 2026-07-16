@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { ReportsService, type ReportDefinition } from './reports.service'
+import { ReportsService, type ReportDefinition, type ReportScheduleInput } from './reports.service'
+import { ScheduledReportsService } from './scheduled-reports.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
@@ -12,7 +13,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 @RequirePermissions('report.view.basic')
 @Controller('workspaces/:workspaceId/reports')
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(
+    private readonly reports: ReportsService,
+    private readonly scheduledReports: ScheduledReportsService,
+  ) {}
 
   @Get('overview')
   @ApiOperation({ summary: 'Workspace overview stats' })
@@ -179,9 +183,9 @@ export class ReportsController {
   createSaved(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: { id: string },
-    @Body() body: { name: string; definition: ReportDefinition },
+    @Body() body: { name: string; definition: ReportDefinition; schedule?: ReportScheduleInput },
   ) {
-    return this.reports.createSavedReport(workspaceId, user.id, body.name, body.definition ?? {})
+    return this.reports.createSavedReport(workspaceId, user.id, body.name, body.definition ?? {}, body.schedule)
   }
 
   @Patch('custom/:reportId')
@@ -189,9 +193,18 @@ export class ReportsController {
   updateSaved(
     @Param('workspaceId') workspaceId: string,
     @Param('reportId') reportId: string,
-    @Body() body: { name?: string; definition?: ReportDefinition },
+    @Body() body: { name?: string; definition?: ReportDefinition; schedule?: ReportScheduleInput },
   ) {
     return this.reports.updateSavedReport(workspaceId, reportId, body ?? {})
+  }
+
+  @Post('custom/:reportId/send-now')
+  @ApiOperation({ summary: 'Send a saved custom report immediately to its recipients (§9.5)' })
+  sendNow(
+    @Param('workspaceId') workspaceId: string,
+    @Param('reportId') reportId: string,
+  ) {
+    return this.scheduledReports.sendReportNow(workspaceId, reportId)
   }
 
   @Delete('custom/:reportId')

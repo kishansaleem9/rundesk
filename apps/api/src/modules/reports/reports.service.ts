@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { and, eq, gte, sql, desc, asc, inArray } from 'drizzle-orm'
 import {
   tasks,
@@ -47,6 +47,73 @@ export type ReportResult = {
   rows: Array<{ key: string; label: string; values: Record<string, number> }>
 }
 
+// ── Scheduled delivery (§9.5) ───────────────────────────────────────────────
+export type ReportScheduleInput = {
+  frequency?: 'none' | 'daily' | 'weekly' | string
+  hour?: number
+  dayOfWeek?: number | null
+  recipients?: string[]
+}
+
+export type ReportScheduleColumns = {
+  scheduleFrequency: 'none' | 'daily' | 'weekly'
+  scheduleHour: number
+  scheduleDayOfWeek: number | null
+  scheduleRecipients: string[]
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * Validate + clamp incoming schedule fields. Throws BadRequestException on an
+ * invalid frequency or malformed recipient email; clamps hour to 0–23 and
+ * weekday to 0–6, and defaults a weekly schedule with no weekday to Monday.
+ * Returns null when no schedule fields were supplied so a plain name/definition
+ * edit leaves the existing schedule untouched.
+ */
+export function normalizeScheduleInput(input?: ReportScheduleInput): ReportScheduleColumns | null {
+  if (!input || typeof input !== 'object') return null
+  const hasAny =
+    input.frequency !== undefined ||
+    input.hour !== undefined ||
+    input.dayOfWeek !== undefined ||
+    input.recipients !== undefined
+  if (!hasAny) return null
+
+  const freq = input.frequency
+  if (freq !== undefined && freq !== 'none' && freq !== 'daily' && freq !== 'weekly') {
+    throw new BadRequestException('Invalid schedule frequency')
+  }
+  const frequency = (freq ?? 'none') as 'none' | 'daily' | 'weekly'
+
+  let hour = 8
+  if (input.hour !== undefined) {
+    const h = Math.trunc(Number(input.hour))
+    if (!Number.isFinite(h) || h < 0 || h > 23) throw new BadRequestException('Schedule hour must be between 0 and 23')
+    hour = h
+  }
+
+  let dayOfWeek: number | null = null
+  if (input.dayOfWeek !== undefined && input.dayOfWeek !== null) {
+    const d = Math.trunc(Number(input.dayOfWeek))
+    if (!Number.isFinite(d) || d < 0 || d > 6) throw new BadRequestException('Schedule day of week must be between 0 and 6')
+    dayOfWeek = d
+  }
+  if (frequency === 'weekly' && dayOfWeek === null) dayOfWeek = 1
+
+  let recipients: string[] = []
+  if (input.recipients !== undefined) {
+    if (!Array.isArray(input.recipients)) throw new BadRequestException('Recipients must be a list of emails')
+    const cleaned = input.recipients.map((e) => String(e ?? '').trim().toLowerCase()).filter((e) => e.length > 0)
+    for (const e of cleaned) {
+      if (!EMAIL_RE.test(e)) throw new BadRequestException(`Invalid recipient email: ${e}`)
+    }
+    recipients = [...new Set(cleaned)]
+  }
+
+  return { scheduleFrequency: frequency, scheduleHour: hour, scheduleDayOfWeek: dayOfWeek, scheduleRecipients: recipients }
+}
+
 const SUPPORTED_METRICS = [
   'tasks-count',
   'tasks-completed',
@@ -85,6 +152,19 @@ function monthKey(d: Date): string {
 function csvCell(v: string | number): string {
   const s = String(v ?? '')
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+/**
+ * Serialize a run result to CSV (a `group` column + one column per metric).
+ * Shared by the CSV export endpoint and the scheduled-report email attachment.
+ */
+export function reportResultToCsv(result: ReportResult): string {
+  const header = ['group', ...result.metrics]
+  const lines = [header.map(csvCell).join(',')]
+  for (const r of result.rows) {
+    lines.push([csvCell(r.label), ...result.metrics.map((m) => csvCell(r.values[m] ?? 0))].join(','))
+  }
+  return lines.join('\n')
 }
 
 @Injectable()
@@ -1071,12 +1151,7 @@ export class ReportsService {
 
   async exportCustomReportCsv(workspaceId: string, def: ReportDefinition): Promise<string> {
     const result = await this.runCustomReport(workspaceId, def)
-    const header = ['group', ...result.metrics]
-    const lines = [header.map(csvCell).join(',')]
-    for (const r of result.rows) {
-      lines.push([csvCell(r.label), ...result.metrics.map((m) => csvCell(r.values[m] ?? 0))].join(','))
-    }
-    return lines.join('\n')
+    return reportResultToCsv(result)
   }
 
   /** Render a custom report to a server-generated PDF (Plan §9). */
@@ -1098,10 +1173,23 @@ export class ReportsService {
       .orderBy(desc(customReports.createdAt))
   }
 
-  async createSavedReport(workspaceId: string, userId: string, name: string, definition: ReportDefinition) {
+  async createSavedReport(
+    workspaceId: string,
+    userId: string,
+    name: string,
+    definition: ReportDefinition,
+    schedule?: ReportScheduleInput,
+  ) {
+    const sched = normalizeScheduleInput(schedule)
     const [row] = await this.db
       .insert(customReports)
-      .values({ workspaceId, createdById: userId, name: name?.trim() || 'Untitled report', definition })
+      .values({
+        workspaceId,
+        createdById: userId,
+        name: name?.trim() || 'Untitled report',
+        definition,
+        ...(sched ?? {}),
+      })
       .returning()
     return row
   }
@@ -1109,11 +1197,18 @@ export class ReportsService {
   async updateSavedReport(
     workspaceId: string,
     id: string,
-    patch: { name?: string; definition?: ReportDefinition },
+    patch: { name?: string; definition?: ReportDefinition; schedule?: ReportScheduleInput },
   ) {
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.name !== undefined) set.name = patch.name.trim() || 'Untitled report'
     if (patch.definition !== undefined) set.definition = patch.definition
+    const sched = normalizeScheduleInput(patch.schedule)
+    if (sched) {
+      set.scheduleFrequency = sched.scheduleFrequency
+      set.scheduleHour = sched.scheduleHour
+      set.scheduleDayOfWeek = sched.scheduleDayOfWeek
+      set.scheduleRecipients = sched.scheduleRecipients
+    }
     const [row] = await this.db
       .update(customReports)
       .set(set)

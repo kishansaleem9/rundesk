@@ -432,9 +432,84 @@ export class EmailService {
     })
   }
 
-  private async send(opts: { to: string; subject: string; html: string }) {
+  /**
+   * Send a scheduled custom report (§9.5): a compact HTML summary table of the
+   * top rows plus the full result as a CSV attachment. `columns[0]` is the group
+   * column; the rest are metric columns already resolved to their display labels.
+   */
+  async sendScheduledReport(opts: {
+    to: string
+    reportName: string
+    frequency: 'daily' | 'weekly'
+    groupLabel: string
+    columns: string[]
+    rows: Array<Array<string | number>>
+    totalRows: number
+    generatedAt: string
+    csv: string
+    appUrl: string
+  }) {
+    const cadence = opts.frequency === 'weekly' ? 'weekly' : 'daily'
+    const generated = new Date(opts.generatedAt)
+    const generatedLabel = Number.isNaN(generated.getTime())
+      ? opts.generatedAt
+      : `${generated.toISOString().slice(0, 16).replace('T', ' ')} UTC`
+
+    const header = opts.columns.map((c) => `<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #e5ecf7;font-size:12px;color:#0c215d;text-transform:uppercase;letter-spacing:.03em;">${this.esc(c)}</th>`).join('')
+    const preview = opts.rows.slice(0, 20)
+    const bodyRows = preview
+      .map((r, ri) => {
+        const cells = r
+          .map((c, ci) =>
+            `<td style="padding:6px 10px;border-bottom:1px solid #eef2f9;font-size:13px;color:#374151;${ci === 0 ? '' : 'text-align:right;font-variant-numeric:tabular-nums;'}">${this.esc(String(c ?? ''))}</td>`,
+          )
+          .join('')
+        return `<tr style="background:${ri % 2 ? '#f9fbfe' : '#ffffff'};">${cells}</tr>`
+      })
+      .join('')
+    const moreNote =
+      opts.totalRows > preview.length
+        ? `<p style="font-size:12px;color:#9ca3af;margin:10px 0 0;">+ ${opts.totalRows - preview.length} more row${opts.totalRows - preview.length === 1 ? '' : 's'} in the attached CSV.</p>`
+        : ''
+    const table = preview.length
+      ? `<table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-top:8px;">
+           <thead><tr>${header}</tr></thead>
+           <tbody>${bodyRows}</tbody>
+         </table>${moreNote}`
+      : `<p style="font-size:13px;color:#6b7280;">This report returned no rows for the selected period.</p>`
+
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] ${cadence === 'weekly' ? 'Weekly' : 'Daily'} report: ${opts.reportName}`,
+      html: this.layout({
+        heading: this.esc(opts.reportName),
+        body: `
+          <p>Here is your ${this.esc(cadence)} report, grouped by <strong>${this.esc(opts.groupLabel)}</strong>.</p>
+          <p style="font-size:12px;color:#9ca3af;margin:0 0 4px;">Generated ${this.esc(generatedLabel)}</p>
+          ${table}
+        `,
+        ctaUrl: opts.appUrl,
+        ctaLabel: 'Open in Rundesk',
+      }),
+      attachments: [
+        {
+          filename: `${(opts.reportName || 'report').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.csv`,
+          content: opts.csv,
+          contentType: 'text/csv; charset=utf-8',
+        },
+      ],
+    })
+  }
+
+  private async send(opts: {
+    to: string
+    subject: string
+    html: string
+    attachments?: Array<{ filename: string; content: string | Buffer; contentType?: string }>
+  }) {
     if (!this.transport) {
-      this.logger.log(`[DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}`)
+      const attach = opts.attachments?.length ? ` | Attachments: ${opts.attachments.map((a) => a.filename).join(', ')}` : ''
+      this.logger.log(`[DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}${attach}`)
       return
     }
 
@@ -444,6 +519,7 @@ export class EmailService {
         to: opts.to,
         subject: opts.subject,
         html: opts.html,
+        attachments: opts.attachments,
       })
       this.logger.log(`[EMAIL SENT] To: ${opts.to} | Subject: ${opts.subject}`)
     } catch (err) {

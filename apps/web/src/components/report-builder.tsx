@@ -16,6 +16,8 @@ import {
   Sigma,
   Loader2,
   Trash2,
+  CalendarClock,
+  Send,
 } from 'lucide-react'
 import { api, downloadFilePost } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -118,9 +120,49 @@ const RANGES: Array<{ days: number; labelKey: TranslationKey }> = [
 
 const FILTER_FIELDS = ['priority', 'status', 'project', 'assignee'] as const
 
+type ScheduleFrequency = 'none' | 'daily' | 'weekly'
+
+const WEEKDAYS: Array<{ value: number; labelKey: TranslationKey }> = [
+  { value: 0, labelKey: 'reportBuilder.weekdaySun' },
+  { value: 1, labelKey: 'reportBuilder.weekdayMon' },
+  { value: 2, labelKey: 'reportBuilder.weekdayTue' },
+  { value: 3, labelKey: 'reportBuilder.weekdayWed' },
+  { value: 4, labelKey: 'reportBuilder.weekdayThu' },
+  { value: 5, labelKey: 'reportBuilder.weekdayFri' },
+  { value: 6, labelKey: 'reportBuilder.weekdaySat' },
+]
+
+const hourLabel = (h?: number) => `${String(typeof h === 'number' ? h : 8).padStart(2, '0')}:00`
+/** Split a comma/newline-separated recipient string into trimmed, non-empty emails. */
+const parseRecipients = (raw: string) =>
+  raw
+    .split(/[,\n]/)
+    .map((e) => e.trim())
+    .filter((e) => e.length > 0)
+
 type ReportRow = { key: string; label: string; values: Record<string, number> }
 type ReportResult = { dimension: string; metrics: string[]; generatedAt: string; rows: ReportRow[] }
-type SavedReport = { id: string; name: string; definition: any; createdAt: string }
+type SavedReport = {
+  id: string
+  name: string
+  definition: any
+  createdAt: string
+  scheduleFrequency?: ScheduleFrequency
+  scheduleHour?: number
+  scheduleDayOfWeek?: number | null
+  scheduleRecipients?: string[]
+  lastSentAt?: string | null
+}
+
+/** "Daily 08:00" / "Mon 08:00" badge label for a scheduled saved report. */
+const scheduleBadge = (t: (k: TranslationKey, vars?: Record<string, string>) => string, r: SavedReport) => {
+  const time = hourLabel(r.scheduleHour)
+  if (r.scheduleFrequency === 'weekly') {
+    const wd = WEEKDAYS.find((w) => w.value === (r.scheduleDayOfWeek ?? 1)) ?? WEEKDAYS[1]
+    return t('reportBuilder.scheduleBadgeWeekly', { day: t(wd.labelKey), time })
+  }
+  return t('reportBuilder.scheduleBadgeDaily', { time })
+}
 
 const metricLabel = (t: (k: TranslationKey) => string, id: string) => {
   const m = METRICS.find((x) => x.id === id)
@@ -138,6 +180,7 @@ const csvCell = (v: string | number) => {
 export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const userEmail = useAuthStore((s) => s.user?.email ?? '')
   const [name, setName] = useState(() => t('reportBuilder.untitledName'))
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>(['tasks-completed', 'on-time-rate'])
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>(['assignee'])
@@ -148,6 +191,12 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
   const [aiSummary, setAiSummary] = useState<string | null>(null)
   const [aiSummarizing, setAiSummarizing] = useState(false)
   const [draftFilter, setDraftFilter] = useState<Filter>({ field: 'priority', op: 'is', value: '' })
+  // §9.5 scheduled delivery
+  const [scheduleFrequency, setScheduleFrequency] = useState<ScheduleFrequency>('none')
+  const [scheduleHour, setScheduleHour] = useState(8)
+  const [scheduleDayOfWeek, setScheduleDayOfWeek] = useState(1)
+  const [scheduleRecipients, setScheduleRecipients] = useState(() => userEmail)
+  const [lastSentAt, setLastSentAt] = useState<string | null>(null)
 
   const dimension = selectedDimensions[0] ?? 'assignee'
   const definition = useMemo(
@@ -169,23 +218,44 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
     queryFn: () => api<SavedReport[]>(`/workspaces/${workspaceId}/reports/custom`),
   })
 
+  const buildSchedule = () => ({
+    frequency: scheduleFrequency,
+    hour: scheduleHour,
+    dayOfWeek: scheduleFrequency === 'weekly' ? scheduleDayOfWeek : null,
+    recipients: parseRecipients(scheduleRecipients),
+  })
+
   const saveMutation = useMutation({
-    mutationFn: () =>
-      activeSavedId
+    mutationFn: () => {
+      const schedule = buildSchedule()
+      return activeSavedId
         ? api<SavedReport>(`/workspaces/${workspaceId}/reports/custom/${activeSavedId}`, {
             method: 'PATCH',
-            body: { name, definition },
+            body: { name, definition, schedule },
           })
         : api<SavedReport>(`/workspaces/${workspaceId}/reports/custom`, {
             method: 'POST',
-            body: { name, definition },
-          }),
+            body: { name, definition, schedule },
+          })
+    },
     onSuccess: (row) => {
       if (row?.id) setActiveSavedId(row.id)
+      if (row && 'lastSentAt' in row) setLastSentAt(row.lastSentAt ?? null)
       qc.invalidateQueries({ queryKey: ['custom-reports', workspaceId] })
       toast.success(t('reportBuilder.toastSaved'))
     },
     onError: () => toast.error(t('reportBuilder.toastSaveError')),
+  })
+
+  const sendNowMutation = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/reports/custom/${activeSavedId}/send-now`, { method: 'POST' }),
+    onSuccess: () => {
+      setLastSentAt(new Date().toISOString())
+      qc.invalidateQueries({ queryKey: ['custom-reports', workspaceId] })
+      toast.success(t('reportBuilder.toastSentNow'))
+    },
+    onError: () => toast.error(t('reportBuilder.toastSendNowError')),
   })
 
   const deleteMutation = useMutation({
@@ -241,12 +311,26 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
     setFilters(Array.isArray(d.filters) ? d.filters : [])
     setViz(d.viz ?? 'bar')
     setDays(typeof d.days === 'number' ? d.days : 30)
+    setScheduleFrequency(r.scheduleFrequency ?? 'none')
+    setScheduleHour(typeof r.scheduleHour === 'number' ? r.scheduleHour : 8)
+    setScheduleDayOfWeek(typeof r.scheduleDayOfWeek === 'number' ? r.scheduleDayOfWeek : 1)
+    setScheduleRecipients(
+      Array.isArray(r.scheduleRecipients) && r.scheduleRecipients.length
+        ? r.scheduleRecipients.join(', ')
+        : userEmail,
+    )
+    setLastSentAt(r.lastSentAt ?? null)
     setActiveSavedId(r.id)
     setAiSummary(null)
   }
   function newReport() {
     setActiveSavedId(null)
     setName(t('reportBuilder.untitledName'))
+    setScheduleFrequency('none')
+    setScheduleHour(8)
+    setScheduleDayOfWeek(1)
+    setScheduleRecipients(userEmail)
+    setLastSentAt(null)
     setAiSummary(null)
   }
   function exportCsv() {
@@ -387,6 +471,101 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
               ))}
             </div>
           </Section>
+          <Section title={t('reportBuilder.sectionSchedule')} icon={CalendarClock}>
+            <div className="space-y-2.5">
+              <select
+                value={scheduleFrequency}
+                onChange={(e) => setScheduleFrequency(e.target.value as ScheduleFrequency)}
+                className="h-8 w-full rounded-md border border-border/60 bg-card text-xs px-2"
+              >
+                <option value="none">{t('reportBuilder.scheduleOff')}</option>
+                <option value="daily">{t('reportBuilder.scheduleDaily')}</option>
+                <option value="weekly">{t('reportBuilder.scheduleWeekly')}</option>
+              </select>
+
+              {scheduleFrequency !== 'none' && (
+                <>
+                  <div className="flex gap-2">
+                    <label className="flex-1 space-y-1">
+                      <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                        {t('reportBuilder.scheduleTimeUtc')}
+                      </span>
+                      <select
+                        value={scheduleHour}
+                        onChange={(e) => setScheduleHour(parseInt(e.target.value, 10))}
+                        className="h-8 w-full rounded-md border border-border/60 bg-card text-xs px-2"
+                      >
+                        {Array.from({ length: 24 }, (_, h) => (
+                          <option key={h} value={h}>
+                            {hourLabel(h)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {scheduleFrequency === 'weekly' && (
+                      <label className="flex-1 space-y-1">
+                        <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                          {t('reportBuilder.scheduleWeekday')}
+                        </span>
+                        <select
+                          value={scheduleDayOfWeek}
+                          onChange={(e) => setScheduleDayOfWeek(parseInt(e.target.value, 10))}
+                          className="h-8 w-full rounded-md border border-border/60 bg-card text-xs px-2"
+                        >
+                          {WEEKDAYS.map((wd) => (
+                            <option key={wd.value} value={wd.value}>
+                              {t(wd.labelKey)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+
+                  <label className="block space-y-1">
+                    <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                      {t('reportBuilder.scheduleRecipients')}
+                    </span>
+                    <Input
+                      value={scheduleRecipients}
+                      onChange={(e) => setScheduleRecipients(e.target.value)}
+                      placeholder={t('reportBuilder.scheduleRecipientsPlaceholder')}
+                      className="h-8 text-xs"
+                    />
+                    <span className="block text-[10px] text-muted-foreground">
+                      {t('reportBuilder.scheduleRecipientsHint')}
+                    </span>
+                  </label>
+
+                  {activeSavedId ? (
+                    <div className="flex items-center justify-between gap-2 pt-0.5">
+                      <span className="text-[10px] text-muted-foreground truncate">
+                        {lastSentAt
+                          ? t('reportBuilder.scheduleLastSent', { when: new Date(lastSentAt).toLocaleString() })
+                          : t('reportBuilder.scheduleNeverSent')}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 shrink-0"
+                        onClick={() => sendNowMutation.mutate()}
+                        disabled={sendNowMutation.isPending}
+                      >
+                        {sendNowMutation.isPending ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Send className="h-3 w-3" />
+                        )}{' '}
+                        {sendNowMutation.isPending ? t('reportBuilder.sendingNow') : t('reportBuilder.sendNow')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground">{t('reportBuilder.scheduleSaveFirst')}</p>
+                  )}
+                </>
+              )}
+            </div>
+          </Section>
           <Section title={t('reportBuilder.sectionSavedReports')} icon={Save}>
             {savedQuery.data && savedQuery.data.length > 0 ? (
               <ul className="space-y-1">
@@ -403,6 +582,21 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
                     >
                       {r.name}
                     </button>
+                    {r.scheduleFrequency && r.scheduleFrequency !== 'none' && (
+                      <span
+                        className="shrink-0"
+                        title={
+                          r.lastSentAt
+                            ? t('reportBuilder.scheduleLastSent', { when: new Date(r.lastSentAt).toLocaleString() })
+                            : t('reportBuilder.scheduleNeverSent')
+                        }
+                      >
+                        <Badge variant="soft" className="text-[9px] gap-0.5">
+                          <CalendarClock className="h-2.5 w-2.5" />
+                          {scheduleBadge(t, r)}
+                        </Badge>
+                      </span>
+                    )}
                     <button
                       className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
                       onClick={() => deleteMutation.mutate(r.id)}
