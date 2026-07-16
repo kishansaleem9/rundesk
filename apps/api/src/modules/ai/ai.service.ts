@@ -15,6 +15,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'driz
 import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { estimateAiCostUsd } from './ai-cost'
 import { TasksService } from '../tasks/tasks.service'
 import { SearchService } from '../search/search.service'
 import { EmbeddingService } from './embedding.service'
@@ -719,16 +720,6 @@ export function mapAiWorkloadMoves(raw: unknown, loads: WorkloadLoad[]): Workloa
   }
 }
 
-// Rough per-million-token pricing (USD) for cost *estimation* in reports.
-const MODEL_PRICING: Record<string, { in: number; out: number }> = {
-  'claude-sonnet-4-6': { in: 3, out: 15 },
-  'claude-haiku-4-5': { in: 1, out: 5 },
-}
-function estimateCost(model: string, inTok: number, outTok: number): number {
-  const p = MODEL_PRICING[model] ?? { in: 1, out: 5 }
-  return (inTok / 1_000_000) * p.in + (outTok / 1_000_000) * p.out
-}
-
 @Injectable()
 export class AiService {
   private client: Anthropic | null = null
@@ -863,7 +854,7 @@ export class AiService {
     const byUser: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }> = {}
     const byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }> = {}
     for (const r of rows) {
-      const cost = estimateCost(r.model, r.inTok, r.outTok)
+      const cost = estimateAiCostUsd(r.model, r.inTok, r.outTok)
       totalCost += cost
       totalCalls += r.calls
       totalIn += r.inTok

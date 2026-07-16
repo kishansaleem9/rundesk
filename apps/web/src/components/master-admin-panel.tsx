@@ -3,12 +3,20 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge, Button, Card, Input, Switch } from '@rundesk/ui'
 import {
+  Activity,
+  AlertTriangle,
   Building2,
+  Cpu,
   CreditCard,
+  DollarSign,
+  Gauge,
+  HardDrive,
   Lock,
+  Percent,
   Receipt,
   Search,
   Shield,
+  TrendingUp,
   Users,
 } from 'lucide-react'
 import { api } from '../lib/api'
@@ -152,6 +160,8 @@ export function MasterAdminPanel() {
         )}
       </header>
 
+      <OpsMetricsSection />
+
       <div className="grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-5">
         <Card className="p-4 space-y-3 h-fit">
           <div className="flex items-center gap-2">
@@ -278,6 +288,203 @@ function Metric({
       </div>
       <div className="font-display text-2xl mt-1">{value}</div>
     </div>
+  )
+}
+
+// ── §14.5 SaaS Ops Dashboard (Internal) ──────────────────────────────────────
+
+type OpsMetrics = {
+  billingConfigured: boolean
+  totalOrganizations: number
+  totalActiveUsers: number
+  totalStorageBytes: number
+  totalAiCostUsd: number
+  mrrUsd: number
+  arrUsd: number
+  arpaUsd: number
+  ltvUsd: number
+  churnRatePct: number
+  activeSubscriptions: number
+  canceledSubscriptions: number
+  subscriptionsByTier: Record<string, number>
+  subscriptionsByStatus: Record<string, number>
+  generatedAt: string
+}
+
+type OpsOrgRow = {
+  id: string
+  name: string
+  slug: string
+  plan: string | null
+  subscriptionStatus: string | null
+  activeUsers: number
+  totalUsers: number
+  storageBytes: number
+  aiCostUsd: number
+  mrrUsd: number
+  churnRisk: boolean
+  createdAt: string
+}
+
+/** Format a USD amount as `$1,234.56`. */
+function formatUsd(n: number): string {
+  return `$${(Number.isFinite(n) ? n : 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
+/** Human-readable byte size, base 1024 (B/KB/MB/GB/TB). */
+function formatBytes(bytes: number): string {
+  const b = Number.isFinite(bytes) ? bytes : 0
+  if (b < 1024) return `${b} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = b / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i += 1
+  }
+  return `${v.toFixed(1)} ${units[i]}`
+}
+
+/**
+ * Platform-wide, cross-tenant metrics (Plan §14.5). Revenue metrics (MRR/ARR/
+ * LTV/ARPA/churn) come from the subscriptions mirror; active-users, storage and
+ * AI-cost are billing-independent and always render. Super-admin only — this
+ * panel already lives behind the /app/admin super-admin gate.
+ */
+function OpsMetricsSection() {
+  const { t } = useTranslation()
+  const metricsQuery = useQuery({
+    queryKey: ['ops-metrics'],
+    queryFn: () => api<OpsMetrics>('/ops/metrics'),
+  })
+  const orgsQuery = useQuery({
+    queryKey: ['ops-organizations'],
+    queryFn: () => api<OpsOrgRow[]>('/ops/organizations'),
+  })
+
+  const m = metricsQuery.data
+  const orgs = orgsQuery.data ?? []
+
+  return (
+    <Card className="p-5 space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="space-y-1">
+          <h2 className="font-semibold flex items-center gap-2">
+            <Gauge className="h-4 w-4 text-accent" />
+            {t('ops.title')}
+          </h2>
+          <p className="text-xs text-muted-foreground max-w-2xl">{t('ops.subtitle')}</p>
+        </div>
+        {m && (
+          <div className="text-[11px] text-muted-foreground">
+            {t('ops.asOf', { time: new Date(m.generatedAt).toLocaleString() })}
+          </div>
+        )}
+      </div>
+
+      {metricsQuery.isLoading && (
+        <div className="text-xs text-muted-foreground">{t('ops.loading')}</div>
+      )}
+      {metricsQuery.isError && (
+        <div className="text-xs text-destructive">{t('ops.error')}</div>
+      )}
+
+      {m && (
+        <>
+          {!m.billingConfigured && (
+            <div className="text-xs text-muted-foreground rounded border border-dashed border-border px-3 py-2">
+              {t('ops.noBillingData')}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+            <Metric icon={DollarSign} label={t('ops.metric.mrr')} value={formatUsd(m.mrrUsd)} />
+            <Metric icon={TrendingUp} label={t('ops.metric.arr')} value={formatUsd(m.arrUsd)} />
+            <Metric icon={CreditCard} label={t('ops.metric.ltv')} value={formatUsd(m.ltvUsd)} />
+            <Metric icon={Receipt} label={t('ops.metric.arpa')} value={formatUsd(m.arpaUsd)} />
+            <Metric icon={Percent} label={t('ops.metric.churnRate')} value={`${m.churnRatePct}%`} />
+            <Metric icon={Users} label={t('ops.metric.activeUsers')} value={m.totalActiveUsers.toLocaleString()} />
+            <Metric icon={HardDrive} label={t('ops.metric.storage')} value={formatBytes(m.totalStorageBytes)} />
+            <Metric icon={Cpu} label={t('ops.metric.aiCost')} value={formatUsd(m.totalAiCostUsd)} />
+            <Metric icon={Activity} label={t('ops.metric.activeSubs')} value={m.activeSubscriptions.toLocaleString()} />
+            <Metric icon={AlertTriangle} label={t('ops.metric.canceledSubs')} value={m.canceledSubscriptions.toLocaleString()} />
+          </div>
+        </>
+      )}
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold">{t('ops.orgTableTitle')}</h3>
+        {orgsQuery.isLoading && (
+          <div className="text-xs text-muted-foreground">{t('ops.loading')}</div>
+        )}
+        {orgsQuery.isError && (
+          <div className="text-xs text-destructive">{t('ops.error')}</div>
+        )}
+        {!orgsQuery.isLoading && !orgsQuery.isError && orgs.length === 0 && (
+          <div className="text-xs text-muted-foreground">{t('ops.empty')}</div>
+        )}
+        {orgs.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                  <th className="py-2 pr-3 font-medium">{t('ops.col.organization')}</th>
+                  <th className="py-2 px-3 font-medium">{t('ops.col.plan')}</th>
+                  <th className="py-2 px-3 font-medium">{t('ops.col.status')}</th>
+                  <th className="py-2 px-3 font-medium">{t('ops.col.users')}</th>
+                  <th className="py-2 px-3 font-medium">{t('ops.col.storage')}</th>
+                  <th className="py-2 px-3 font-medium">{t('ops.col.aiCost')}</th>
+                  <th className="py-2 px-3 font-medium">{t('ops.col.mrr')}</th>
+                  <th className="py-2 pl-3 font-medium">{t('ops.col.churnRisk')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orgs.map((o) => (
+                  <tr key={o.id} className="border-b border-border/50">
+                    <td className="py-2 pr-3">
+                      <div className="font-medium truncate max-w-[220px]">{o.name}</div>
+                      <div className="text-xs text-muted-foreground truncate max-w-[220px]">{o.slug}</div>
+                    </td>
+                    <td className="py-2 px-3">
+                      {o.plan ? (
+                        <Badge variant="soft">{t(`plan.tier.${o.plan}` as TranslationKey)}</Badge>
+                      ) : (
+                        <span className="text-muted-foreground">{t('ops.none')}</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3">
+                      {o.subscriptionStatus ? (
+                        <Badge variant={o.subscriptionStatus === 'active' || o.subscriptionStatus === 'trialing' ? 'success' : 'warning'}>
+                          {o.subscriptionStatus}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">{t('ops.none')}</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap">
+                      {o.activeUsers.toLocaleString()} / {o.totalUsers.toLocaleString()}
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap">{formatBytes(o.storageBytes)}</td>
+                    <td className="py-2 px-3 whitespace-nowrap">{formatUsd(o.aiCostUsd)}</td>
+                    <td className="py-2 px-3 whitespace-nowrap">{formatUsd(o.mrrUsd)}</td>
+                    <td className="py-2 pl-3">
+                      {o.churnRisk ? (
+                        <Badge variant="warning">{t('ops.churnRiskFlag')}</Badge>
+                      ) : (
+                        <Badge variant="success">{t('ops.churnRiskNo')}</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 

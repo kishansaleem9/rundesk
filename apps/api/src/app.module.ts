@@ -60,6 +60,7 @@ import { SampleDataModule } from './modules/sample-data/sample-data.module'
 import { BillingModule } from './modules/billing/billing.module'
 import { SupportModule } from './modules/support/support.module'
 import { ClientPortalModule } from './modules/client-portal/client-portal.module'
+import { OpsModule } from './modules/ops/ops.module'
 
 @Module({
   imports: [
@@ -129,6 +130,7 @@ import { ClientPortalModule } from './modules/client-portal/client-portal.module
     BillingModule,
     SupportModule,
     ClientPortalModule,
+    OpsModule,
   ],
   providers: [
     // Global double-submit CSRF guard. It only enforces on cookie-authenticated,
