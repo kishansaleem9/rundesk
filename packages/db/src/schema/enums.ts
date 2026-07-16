@@ -86,6 +86,8 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'task_blocked',
   // §7.11 — daily AI briefing delivered as an in-app notification.
   'ai_briefing',
+  // §7.12 — proactive alert to managers when a teammate is significantly overloaded.
+  'workload_alert',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

@@ -1,5 +1,5 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, gte, sql, desc, asc, inArray } from 'drizzle-orm'
+import { Injectable, Inject, Optional, NotFoundException, BadRequestException } from '@nestjs/common'
+import { and, eq, gte, lte, sql, desc, asc, inArray } from 'drizzle-orm'
 import {
   tasks,
   taskAssignees,
@@ -22,6 +22,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { renderReportPdf, tableToLines } from './pdf'
+import { AiService } from '../ai/ai.service'
 
 function daysAgo(n: number): Date {
   const d = new Date()
@@ -167,9 +168,105 @@ export function reportResultToCsv(result: ReportResult): string {
   return lines.join('\n')
 }
 
+// ── Contribution analytics (§7.14) ──────────────────────────────────────────
+export type ContributionPeriodType = 'this-month' | 'last-month' | 'sprint'
+export type ContributionPeriod = {
+  type: ContributionPeriodType
+  from: string
+  to: string
+  label: string
+  sprintId?: string
+}
+export type ContributionFactors = {
+  userId: string
+  name: string
+  email: string | null
+  tasksCompleted: number
+  tasksAssigned: number
+  onTimeRate: number
+  collaboration: number
+  blockersResolved: number
+  score: number
+}
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+// taskActivity actions that count as collaboration touchpoints (comments,
+// assignments, dependency/subtask/date coordination).
+const COLLABORATION_ACTIONS = new Set([
+  'commented', 'assigned', 'unassigned', 'dependency_added', 'dependency_removed',
+  'due_date_changed', 'subtask_added', 'checklist_item_toggled',
+])
+
+/** Pure month-range resolver for this-month / last-month in UTC (§7.14 period selector). */
+export function monthPeriodRange(
+  period: 'this-month' | 'last-month',
+  now: Date,
+): { from: Date; to: Date; label: string } {
+  const y = now.getUTCFullYear()
+  const m = now.getUTCMonth()
+  if (period === 'last-month') {
+    const from = new Date(Date.UTC(y, m - 1, 1))
+    const to = new Date(Date.UTC(y, m, 1) - 1)
+    return { from, to, label: `${MONTH_NAMES[from.getUTCMonth()]} ${from.getUTCFullYear()}` }
+  }
+  const from = new Date(Date.UTC(y, m, 1))
+  return { from, to: now, label: `${MONTH_NAMES[m]} ${y}` }
+}
+
+/**
+ * Composite contribution index from a member's real factors (§7.14). Weighted so
+ * completed work and resolved blockers dominate, with on-time reliability and
+ * collaboration as secondary signals. Pure + testable.
+ */
+export function scoreContribution(f: {
+  tasksCompleted: number
+  onTimeRate: number
+  collaboration: number
+  blockersResolved: number
+}): number {
+  const completed = Math.max(0, f.tasksCompleted) * 3
+  const blockers = Math.max(0, f.blockersResolved) * 2
+  const onTime = Math.round(Math.max(0, Math.min(100, f.onTimeRate)) / 10) // 0–10
+  const collab = Math.min(20, Math.max(0, f.collaboration))
+  return completed + blockers + onTime + collab
+}
+
+/** Deterministic per-member contribution narrative (§7.14 AI fallback). Pure + testable. */
+export function contributionNarrativeFallback(f: {
+  name: string
+  tasksCompleted: number
+  onTimeRate: number
+  collaboration: number
+  blockersResolved: number
+}): string {
+  if (f.tasksCompleted === 0 && f.collaboration === 0 && f.blockersResolved === 0) {
+    return `${f.name} has no recorded activity in this period.`
+  }
+  const parts: string[] = [
+    `completed ${f.tasksCompleted} task${f.tasksCompleted === 1 ? '' : 's'} (${f.onTimeRate}% on time)`,
+  ]
+  if (f.blockersResolved > 0) parts.push(`resolved ${f.blockersResolved} blocker${f.blockersResolved === 1 ? '' : 's'}`)
+  if (f.collaboration > 0) {
+    parts.push(`logged ${f.collaboration} collaboration touchpoint${f.collaboration === 1 ? '' : 's'}`)
+  }
+  const last = parts.pop() as string
+  const joined = parts.length ? `${parts.join(', ')}, and ${last}` : last
+  return `${f.name} ${joined}.`
+}
+
 @Injectable()
 export class ReportsService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    // AiService powers the §7.14 contribution narrative; @Optional so pure-DB
+    // unit tests can construct ReportsService without the AI module. When absent,
+    // narratives fall back to the deterministic template.
+    @Optional() private ai?: AiService,
+  ) {}
 
   // ─── Overview / Summary card ──────────────────────────────────────────────
   async getOverview(workspaceId: string) {
@@ -1225,6 +1322,198 @@ export class ReportsService {
       .returning()
     if (!row) throw new NotFoundException('Report not found')
     return { ok: true }
+  }
+
+  // ─── Contribution analytics (§7.14) ────────────────────────────────────────
+
+  /** Resolve the reporting window for a contribution report (month or sprint). */
+  private async resolveContributionPeriod(
+    workspaceId: string,
+    period: ContributionPeriodType,
+    sprintId: string | undefined,
+    now: Date,
+  ): Promise<{ from: Date; to: Date; meta: ContributionPeriod }> {
+    if (period === 'sprint') {
+      const rows = sprintId
+        ? await this.db
+            .select()
+            .from(sprints)
+            .where(and(eq(sprints.id, sprintId), eq(sprints.workspaceId, workspaceId)))
+            .limit(1)
+        : await this.db
+            .select()
+            .from(sprints)
+            .where(and(eq(sprints.workspaceId, workspaceId), eq(sprints.status, 'active')))
+            .orderBy(desc(sprints.startDate))
+            .limit(1)
+      const s = rows[0]
+      if (s) {
+        const from = new Date(s.startDate)
+        const to = s.endDate ? new Date(s.endDate) : now
+        return {
+          from,
+          to,
+          meta: { type: 'sprint', sprintId: s.id, from: from.toISOString(), to: to.toISOString(), label: `Sprint: ${s.name}` },
+        }
+      }
+      // No sprint available — fall back to the current month.
+      const mr = monthPeriodRange('this-month', now)
+      return {
+        from: mr.from,
+        to: mr.to,
+        meta: { type: 'sprint', from: mr.from.toISOString(), to: mr.to.toISOString(), label: 'No active sprint — this month' },
+      }
+    }
+    const mr = monthPeriodRange(period, now)
+    return {
+      from: mr.from,
+      to: mr.to,
+      meta: { type: period, from: mr.from.toISOString(), to: mr.to.toISOString(), label: mr.label },
+    }
+  }
+
+  /**
+   * Per-member contribution factors over a period (§7.14): tasks completed,
+   * on-time rate, collaboration touchpoints (comments/assignments/coordination
+   * activity), and blockers resolved — all from real data — plus a composite
+   * score and an AI narrative per member (deterministic fallback). `restrictToUserId`
+   * scopes non-privileged viewers to their own row.
+   */
+  async getContribution(
+    workspaceId: string,
+    opts: { period?: ContributionPeriodType; sprintId?: string; restrictToUserId?: string } = {},
+    ctx: { userId?: string } = {},
+  ): Promise<{ period: ContributionPeriod; source: 'ai' | 'heuristic'; members: Array<ContributionFactors & { narrative: string }> }> {
+    const now = new Date()
+    const period = opts.period ?? 'this-month'
+    const { from, to, meta } = await this.resolveContributionPeriod(workspaceId, period, opts.sprintId, now)
+
+    const members = await this.db
+      .select({ userId: users.id, name: users.displayName, email: users.email })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(
+        opts.restrictToUserId
+          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, opts.restrictToUserId))
+          : eq(workspaceMembers.workspaceId, workspaceId),
+      )
+
+    // Completed / on-time / assigned counts per assignee within the window.
+    // Bind the window bounds as ISO strings: a raw ${date} embed in a sql template
+    // carries no column type, so the driver would mishandle a bare Date — Postgres
+    // casts the string param to timestamptz in the comparison.
+    const fromIso = from.toISOString()
+    const toIso = to.toISOString()
+    const completedRows = await this.db
+      .select({
+        userId: taskAssignees.userId,
+        completed: sql<number>`count(distinct case when ${tasks.status} = 'done' and ${tasks.completedAt} >= ${fromIso} and ${tasks.completedAt} <= ${toIso} then ${tasks.id} end)::int`,
+        onTime: sql<number>`count(distinct case when ${tasks.status} = 'done' and ${tasks.completedAt} >= ${fromIso} and ${tasks.completedAt} <= ${toIso} and ${tasks.dueDate} is not null and ${tasks.completedAt} <= ${tasks.dueDate} then ${tasks.id} end)::int`,
+        assigned: sql<number>`count(distinct case when ${tasks.updatedAt} >= ${fromIso} and ${tasks.updatedAt} <= ${toIso} then ${tasks.id} end)::int`,
+      })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .groupBy(taskAssignees.userId)
+
+    // Collaboration + blockers-resolved from the activity log, per actor.
+    const activityRows = await this.db
+      .select({
+        actorId: taskActivity.actorId,
+        action: taskActivity.action,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(taskActivity.createdAt, from), lte(taskActivity.createdAt, to)))
+      .groupBy(taskActivity.actorId, taskActivity.action)
+
+    const completedByUser = new Map(completedRows.map((r) => [r.userId, r]))
+    const collabByUser = new Map<string, number>()
+    const blockersByUser = new Map<string, number>()
+    for (const r of activityRows) {
+      if (!r.actorId) continue
+      if (COLLABORATION_ACTIONS.has(r.action)) {
+        collabByUser.set(r.actorId, (collabByUser.get(r.actorId) ?? 0) + r.count)
+      }
+      if (r.action === 'dependency_removed') {
+        blockersByUser.set(r.actorId, (blockersByUser.get(r.actorId) ?? 0) + r.count)
+      }
+    }
+
+    const factors: ContributionFactors[] = members.map((m) => {
+      const c = completedByUser.get(m.userId)
+      const tasksCompleted = c?.completed ?? 0
+      const onTimeRate = tasksCompleted > 0 ? Math.round(((c?.onTime ?? 0) / tasksCompleted) * 100) : 0
+      const collaboration = collabByUser.get(m.userId) ?? 0
+      const blockersResolved = blockersByUser.get(m.userId) ?? 0
+      const score = scoreContribution({ tasksCompleted, onTimeRate, collaboration, blockersResolved })
+      return {
+        userId: m.userId,
+        name: m.name ?? m.email ?? 'Unknown',
+        email: m.email ?? null,
+        tasksCompleted,
+        tasksAssigned: c?.assigned ?? 0,
+        onTimeRate,
+        collaboration,
+        blockersResolved,
+        score,
+      }
+    })
+    factors.sort((a, b) => b.score - a.score || b.tasksCompleted - a.tasksCompleted)
+
+    // AI narrative per member (one model call; deterministic fallback each).
+    const items = factors.map((f) => ({
+      key: f.userId,
+      name: f.name,
+      facts: `completed ${f.tasksCompleted} tasks, ${f.onTimeRate}% on time, ${f.collaboration} collaboration touchpoints, ${f.blockersResolved} blockers resolved`,
+      fallback: contributionNarrativeFallback(f),
+    }))
+    const narratives = this.ai
+      ? await this.ai.narrateContributions(items, { userId: ctx.userId, workspaceId })
+      : Object.fromEntries(items.map((it) => [it.key, it.fallback]))
+    const source: 'ai' | 'heuristic' = this.ai?.isAvailable() ? 'ai' : 'heuristic'
+
+    return {
+      period: meta,
+      source,
+      members: factors.map((f) => ({ ...f, narrative: narratives[f.userId] ?? contributionNarrativeFallback(f) })),
+    }
+  }
+
+  /** Render a contribution report to a server-generated PDF (§7.14). */
+  async exportContributionPdf(
+    workspaceId: string,
+    opts: { period?: ContributionPeriodType; sprintId?: string } = {},
+    ctx: { userId?: string } = {},
+  ): Promise<Buffer> {
+    const report = await this.getContribution(workspaceId, opts, ctx)
+    const header = ['Member', 'Completed', 'On-time %', 'Collab', 'Blockers', 'Score']
+    const rows = report.members.map((m) => [
+      m.name,
+      m.tasksCompleted,
+      m.onTimeRate,
+      m.collaboration,
+      m.blockersResolved,
+      m.score,
+    ])
+    const narrativeLines = report.members.flatMap((m) => [`- ${m.name}: ${m.narrative}`])
+    const lines = [
+      `Period: ${report.period.label}`,
+      `Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+      '',
+      ...tableToLines(header, rows),
+      '',
+      'Narratives:',
+      ...narrativeLines,
+    ]
+    return renderReportPdf('Contribution report', lines)
   }
 }
 

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, Card, Badge, cn, toast } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, HeartPulse } from 'lucide-react'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, Check, HeartPulse } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -47,6 +47,7 @@ function ProjectHome() {
   const [membersOpen, setMembersOpen] = useState(false)
   const [statusesOpen, setStatusesOpen] = useState(false)
   const [dragListId, setDragListId] = useState<string | null>(null)
+  const [showSuggest, setShowSuggest] = useState(false)
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects', spaceId],
@@ -114,6 +115,10 @@ function ProjectHome() {
             <Users className="h-3.5 w-3.5 mr-1.5" />
             {t('projectShell.members')}
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setShowSuggest((v) => !v)}>
+            <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+            {t('projectShell.suggestTasks')}
+          </Button>
           <Button
             size="sm"
             className="bg-violet-600 hover:bg-violet-700 text-white"
@@ -160,6 +165,17 @@ function ProjectHome() {
               {createList.isPending ? t('projectShell.creating') : t('projectShell.createList')}
             </Button>
           </WorkCreateCard>
+        )}
+
+        {showSuggest && (
+          <SuggestTasksPanel
+            workspaceId={workspaceId}
+            projectId={projectId}
+            projectName={project?.name}
+            description={project?.description}
+            lists={lists}
+            onClose={() => setShowSuggest(false)}
+          />
         )}
 
         {isLoading ? (
@@ -231,6 +247,187 @@ function ProjectHome() {
         onOpenChange={setStatusesOpen}
       />
     </WorkHubPage>
+  )
+}
+
+// §7.10 — Smart task suggestions. Learns from similar existing projects in the
+// workspace and proposes a starter task list; each item can be accepted/rejected
+// and the selected ones are created in a chosen list via the normal task-create.
+type TaskSuggestion = { title: string; priority?: 'urgent' | 'high' | 'normal' | 'low' }
+type SuggestResult = { source: 'ai' | 'heuristic'; suggestions: TaskSuggestion[]; basis: string }
+
+function SuggestTasksPanel({
+  workspaceId,
+  projectId,
+  projectName,
+  description,
+  lists,
+  onClose,
+}: {
+  workspaceId: string
+  projectId: string
+  projectName?: string | null
+  description?: string | null
+  lists: List[]
+  onClose: () => void
+}) {
+  const { t, tCount } = useTranslation()
+  const qc = useQueryClient()
+  const [rejected, setRejected] = useState<Set<number>>(new Set())
+  const [targetListId, setTargetListId] = useState<string>(lists[0]?.id ?? '')
+
+  const suggestQ = useQuery({
+    queryKey: ['suggest-tasks', workspaceId, projectId],
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: () =>
+      api<SuggestResult>('/ai/suggest-tasks', {
+        method: 'POST',
+        body: { workspaceId, projectId, projectName, description },
+      }),
+  })
+
+  const suggestions = suggestQ.data?.suggestions ?? []
+  const chosenCount = suggestions.filter((_, i) => !rejected.has(i)).length
+
+  const toggle = (i: number) =>
+    setRejected((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+
+  const addSelected = useMutation({
+    mutationFn: async () => {
+      if (!targetListId) throw new Error('no-list')
+      let created = 0
+      for (let i = 0; i < suggestions.length; i++) {
+        if (rejected.has(i)) continue
+        await api('/tasks', {
+          method: 'POST',
+          body: {
+            listId: targetListId,
+            title: suggestions[i].title,
+            status: 'todo',
+            priority: suggestions[i].priority ?? 'normal',
+          },
+        })
+        created++
+      }
+      return created
+    },
+    onSuccess: (count) => {
+      toast.success(tCount('projectShell.suggestAdded', count))
+      qc.invalidateQueries({ queryKey: ['tasks', targetListId] })
+      qc.invalidateQueries({ queryKey: ['lists', projectId] })
+      onClose()
+    },
+    onError: () => toast.error(t('projectShell.suggestAddError')),
+  })
+
+  return (
+    <Card variant="glass" className="mb-4 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-gradient text-white">
+            <Sparkles className="h-3.5 w-3.5" />
+          </span>
+          <div>
+            <div className="text-sm font-semibold">{t('projectShell.suggestTitle')}</div>
+            <div className="text-[11px] text-muted-foreground">{t('projectShell.suggestDesc')}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {suggestQ.data && (
+            <Badge variant={suggestQ.data.source === 'ai' ? 'gradient' : 'soft'} className="text-[9px] uppercase">
+              {suggestQ.data.source === 'ai'
+                ? t('projectShell.suggestSourceAi')
+                : t('projectShell.suggestSourceHeuristic')}
+            </Badge>
+          )}
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {suggestQ.isLoading ? (
+        <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> {t('projectShell.suggestLoading')}
+        </div>
+      ) : suggestQ.isError ? (
+        <div className="py-6 text-center text-sm text-muted-foreground">{t('projectShell.suggestError')}</div>
+      ) : suggestions.length === 0 ? (
+        <div className="py-6 text-center text-sm text-muted-foreground">{t('projectShell.suggestEmpty')}</div>
+      ) : (
+        <>
+          <p className="mb-2 text-[11px] text-muted-foreground">{suggestQ.data?.basis}</p>
+          <ul className="mb-3 space-y-1.5">
+            {suggestions.map((s, i) => {
+              const isRejected = rejected.has(i)
+              return (
+                <li
+                  key={`${s.title}-${i}`}
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors',
+                    isRejected ? 'border-border/40 opacity-50' : 'border-border/60 bg-card/40',
+                  )}
+                >
+                  <button
+                    onClick={() => toggle(i)}
+                    className={cn(
+                      'flex h-5 w-5 shrink-0 items-center justify-center rounded border',
+                      isRejected ? 'border-border text-transparent' : 'border-accent bg-accent text-white',
+                    )}
+                    aria-label={isRejected ? t('projectShell.suggestAccept') : t('projectShell.suggestReject')}
+                  >
+                    <Check className="h-3 w-3" />
+                  </button>
+                  <span className={cn('flex-1 text-sm', isRejected && 'line-through')}>{s.title}</span>
+                  {s.priority && s.priority !== 'normal' && (
+                    <Badge variant="soft" className="text-[9px] uppercase">
+                      {s.priority}
+                    </Badge>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">{t('projectShell.suggestTargetList')}</span>
+            {lists.length === 0 ? (
+              <span className="text-[11px] text-warning">{t('projectShell.suggestNoLists')}</span>
+            ) : (
+              <select
+                value={targetListId}
+                onChange={(e) => setTargetListId(e.target.value)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+              >
+                {lists.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Button
+              size="sm"
+              className="ml-auto bg-violet-600 text-white hover:bg-violet-700"
+              disabled={chosenCount === 0 || !targetListId || addSelected.isPending}
+              onClick={() => addSelected.mutate()}
+            >
+              {addSelected.isPending ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {tCount('projectShell.suggestAddSelected', chosenCount)}
+            </Button>
+          </div>
+        </>
+      )}
+    </Card>
   )
 }
 

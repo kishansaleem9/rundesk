@@ -71,6 +71,7 @@ type NotificationType =
   | 'approval_needed'
   | 'task_blocked'
   | 'ai_briefing'
+  | 'workload_alert'
 
 type NotificationEventKey =
   | 'mention'
@@ -672,6 +673,8 @@ export class NotificationsService {
       // §7.11 — the daily AI briefing rides the general activity channel so a
       // user who mutes activity also mutes their briefing.
       case 'ai_briefing':
+      // §7.12 — proactive workload alerts ride the general activity channel too.
+      case 'workload_alert':
       default:
         return 'activity'
     }

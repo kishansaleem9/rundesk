@@ -10,8 +10,8 @@ import {
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
-import { and, asc, desc, eq, gte, inArray, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees, taskActivity, users } from '@rundesk/db'
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees, taskActivity, users, notifications } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { TasksService } from '../tasks/tasks.service'
@@ -438,6 +438,267 @@ export function formatBriefingFallback(data: BriefingData): string {
   return parts.length
     ? `Good morning, ${first}. ${parts.join(' ')}`
     : `Good morning, ${first}. Nothing urgent on your plate today — a good time to get ahead.`
+}
+
+// ─── Smart task suggestions (Plan §7.10) ──────────────────────────────────────
+
+export type TaskPriorityValue = 'urgent' | 'high' | 'normal' | 'low'
+export type TaskSuggestion = { title: string; priority?: TaskPriorityValue }
+export type SimilarProject = { id: string; name: string; taskTitles: string[]; score: number }
+
+const TASK_PRIORITY_VALUES = new Set<TaskPriorityValue>(['urgent', 'high', 'normal', 'low'])
+const PROJECT_STOPWORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'with', 'project', 'app', 'new', 'v1', 'v2',
+])
+
+/** Tokenize a project name/description into a lowercased keyword set (stopwords + short words removed). Pure. */
+export function projectKeywords(text: string): Set<string> {
+  const out = new Set<string>()
+  for (const raw of (text ?? '').toLowerCase().split(/[^a-z0-9]+/)) {
+    const w = raw.trim()
+    if (w.length >= 3 && !PROJECT_STOPWORDS.has(w)) out.add(w)
+  }
+  return out
+}
+
+/**
+ * Similarity between a target project name and a candidate name by keyword
+ * overlap (Jaccard) plus a substring-containment bonus. Range 0–1. Pure + testable.
+ */
+export function projectSimilarity(target: string, candidate: string): number {
+  const a = projectKeywords(target)
+  const b = projectKeywords(candidate)
+  if (a.size === 0 || b.size === 0) return 0
+  let shared = 0
+  for (const w of a) if (b.has(w)) shared++
+  const union = new Set([...a, ...b]).size
+  const jaccard = union === 0 ? 0 : shared / union
+  const ta = target.trim().toLowerCase()
+  const tc = candidate.trim().toLowerCase()
+  const contains = ta && tc && (tc.includes(ta) || ta.includes(tc)) ? 0.25 : 0
+  return Math.min(1, jaccard + contains)
+}
+
+/**
+ * Rank candidate projects by similarity to the target name; keep those with any
+ * signal, or fall back to the most recent few when nothing matches. Pure + testable.
+ */
+export function rankSimilarProjects(
+  target: string,
+  candidates: Array<{ id: string; name: string; taskTitles: string[] }>,
+  limit = 5,
+): SimilarProject[] {
+  const scored: SimilarProject[] = candidates.map((c) => ({ ...c, score: projectSimilarity(target, c.name) }))
+  scored.sort((a, b) => b.score - a.score)
+  const withSignal = scored.filter((c) => c.score > 0)
+  return (withSignal.length ? withSignal : scored).slice(0, limit)
+}
+
+/** Normalize a task title for case/space-insensitive frequency counting. */
+function taskTitleKey(title: string): string {
+  return title.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * Deterministic task suggestions (Plan §7.10 fallback): the most-frequent task
+ * titles across the similar projects, most common first (a title is counted at
+ * most once per project so one large project can't dominate). Pure + testable —
+ * the always-on fallback when the model is unavailable.
+ */
+export function deterministicTaskSuggestions(similar: SimilarProject[], limit = 8): TaskSuggestion[] {
+  const freq = new Map<string, { title: string; count: number }>()
+  for (const p of similar) {
+    const seen = new Set<string>()
+    for (const raw of p.taskTitles) {
+      const title = (raw ?? '').trim()
+      if (!title) continue
+      const key = taskTitleKey(title)
+      if (seen.has(key)) continue
+      seen.add(key)
+      const cur = freq.get(key)
+      if (cur) cur.count++
+      else freq.set(key, { title, count: 1 })
+    }
+  }
+  return [...freq.values()]
+    .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title))
+    .slice(0, limit)
+    .map((f) => ({ title: f.title }))
+}
+
+/** Validate/normalize model task suggestions against the priority whitelist, de-duping by title. Pure. */
+export function sanitizeTaskSuggestions(raw: unknown, limit = 10): TaskSuggestion[] {
+  if (!Array.isArray(raw)) return []
+  const out: TaskSuggestion[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    let title = ''
+    let priority: TaskPriorityValue | undefined
+    if (typeof item === 'string') title = item
+    else if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>
+      title = typeof o.title === 'string' ? o.title : ''
+      if (typeof o.priority === 'string' && TASK_PRIORITY_VALUES.has(o.priority as TaskPriorityValue)) {
+        priority = o.priority as TaskPriorityValue
+      }
+    }
+    title = title.trim().replace(/^\d+[.)]\s*/, '').slice(0, 200)
+    if (!title) continue
+    const key = taskTitleKey(title)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(priority ? { title, priority } : { title })
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+/** Human-readable "learned from" basis line for the suggestions response. Pure. */
+export function summarizeSuggestionBasis(similar: SimilarProject[]): string {
+  const named = similar.filter((p) => p.taskTitles.length > 0).map((p) => p.name)
+  if (named.length === 0) return 'No similar projects with tasks yet — suggesting a common starter task list.'
+  const shown = named.slice(0, 4)
+  const extra = named.length - shown.length
+  return `Learned from ${named.length} similar project${named.length === 1 ? '' : 's'}: ${shown.join(', ')}${extra > 0 ? `, +${extra} more` : ''}.`
+}
+
+// ─── Smart workload balancing (Plan §7.12) ────────────────────────────────────
+
+export type WorkloadLoad = { userId: string; name: string; open: number; taskIds: string[] }
+export type WorkloadMove = {
+  fromUserId: string
+  fromName: string
+  toUserId: string
+  toName: string
+  count: number
+  taskIds: string[]
+  rationale: string
+  source: 'ai' | 'heuristic'
+}
+export type WorkloadBalanceResult = {
+  source: 'ai' | 'heuristic'
+  average: number
+  loads: Array<{ userId: string; name: string; open: number }>
+  suggestions: WorkloadMove[]
+}
+
+/**
+ * Deterministic workload redistribution (Plan §7.12 fallback): greedily pair the
+ * most-overloaded assignee with the least-loaded one and propose moving enough
+ * tasks to close ~half the gap, drawing the specific task ids from the
+ * overloaded assignee. Only rebalances a real imbalance (source above the team
+ * average, gap ≥ 2). Pure + testable.
+ */
+export function computeWorkloadBalance(
+  loads: WorkloadLoad[],
+  opts: { source?: 'ai' | 'heuristic'; maxSuggestions?: number } = {},
+): WorkloadBalanceResult {
+  const source = opts.source ?? 'heuristic'
+  const maxSuggestions = opts.maxSuggestions ?? 3
+  const people = loads.map((l) => ({ userId: l.userId, name: l.name, remaining: [...l.taskIds] }))
+  const total = loads.reduce((s, l) => s + l.open, 0)
+  const roundedAvg = loads.length ? Math.round((total / loads.length) * 10) / 10 : 0
+
+  const load = new Map(loads.map((l) => [l.userId, l.open]))
+  const suggestions: WorkloadMove[] = []
+  for (let i = 0; i < maxSuggestions; i++) {
+    const sorted = [...people].sort((a, b) => (load.get(b.userId) ?? 0) - (load.get(a.userId) ?? 0))
+    const from = sorted[0]
+    const to = sorted[sorted.length - 1]
+    if (!from || !to || from.userId === to.userId) break
+    const fromLoad = load.get(from.userId) ?? 0
+    const toLoad = load.get(to.userId) ?? 0
+    const gap = fromLoad - toLoad
+    if (fromLoad <= roundedAvg || gap < 2) break
+    const move = Math.min(Math.floor(gap / 2), from.remaining.length)
+    if (move < 1) break
+    const taskIds = from.remaining.splice(0, move)
+    load.set(from.userId, fromLoad - move)
+    load.set(to.userId, toLoad + move)
+    suggestions.push({
+      fromUserId: from.userId,
+      fromName: from.name,
+      toUserId: to.userId,
+      toName: to.name,
+      count: move,
+      taskIds,
+      rationale: `${from.name} has ${fromLoad} open tasks vs ${to.name}'s ${toLoad}; moving ${move} rebalances toward the team average of ${roundedAvg}.`,
+      source,
+    })
+  }
+  return {
+    source,
+    average: roundedAvg,
+    loads: loads.map((l) => ({ userId: l.userId, name: l.name, open: l.open })),
+    suggestions,
+  }
+}
+
+/**
+ * Identify assignees significantly overloaded relative to the team (Plan §7.12
+ * proactive alert): open count ≥ `absoluteMin` AND ≥ team average × `factor`.
+ * Pure + testable.
+ */
+export function findOverloadedAssignees(
+  loads: Array<{ userId: string; name: string; open: number }>,
+  opts: { factor?: number; absoluteMin?: number } = {},
+): Array<{ userId: string; name: string; open: number; average: number }> {
+  const factor = opts.factor ?? 1.5
+  const absoluteMin = opts.absoluteMin ?? 6
+  if (loads.length < 2) return []
+  const total = loads.reduce((s, l) => s + l.open, 0)
+  const average = total / loads.length
+  const roundedAvg = Math.round(average * 10) / 10
+  return loads
+    .filter((l) => l.open >= absoluteMin && l.open >= average * factor)
+    .sort((a, b) => b.open - a.open)
+    .map((l) => ({ userId: l.userId, name: l.name, open: l.open, average: roundedAvg }))
+}
+
+/**
+ * Map model-proposed workload moves ({fromUserId,toUserId,count}) onto the REAL
+ * per-assignee loads, resolving the actual task ids server-side (never trusting
+ * model-invented ids) and clamping counts to what the source actually has.
+ * Pure + testable.
+ */
+export function mapAiWorkloadMoves(raw: unknown, loads: WorkloadLoad[]): WorkloadBalanceResult {
+  const byId = new Map(loads.map((l) => [l.userId, { name: l.name, remaining: [...l.taskIds] }]))
+  const total = loads.reduce((s, l) => s + l.open, 0)
+  const average = loads.length ? Math.round((total / loads.length) * 10) / 10 : 0
+  const suggestions: WorkloadMove[] = []
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') continue
+      const o = item as Record<string, unknown>
+      const from = typeof o.fromUserId === 'string' ? byId.get(o.fromUserId) : undefined
+      const to = typeof o.toUserId === 'string' ? byId.get(o.toUserId) : undefined
+      const fromId = typeof o.fromUserId === 'string' ? o.fromUserId : ''
+      const toId = typeof o.toUserId === 'string' ? o.toUserId : ''
+      if (!from || !to || fromId === toId || from.remaining.length === 0) continue
+      const want = Math.max(1, Math.min(Math.trunc(Number(o.count) || 1), from.remaining.length))
+      const taskIds = from.remaining.splice(0, want)
+      suggestions.push({
+        fromUserId: fromId,
+        fromName: from.name,
+        toUserId: toId,
+        toName: to.name,
+        count: taskIds.length,
+        taskIds,
+        rationale:
+          typeof o.rationale === 'string' && o.rationale.trim()
+            ? o.rationale.trim().slice(0, 300)
+            : `Move ${taskIds.length} task${taskIds.length === 1 ? '' : 's'} from ${from.name} to ${to.name} to balance load.`,
+        source: 'ai',
+      })
+      if (suggestions.length >= 3) break
+    }
+  }
+  return {
+    source: 'ai',
+    average,
+    loads: loads.map((l) => ({ userId: l.userId, name: l.name, open: l.open })),
+    suggestions,
+  }
 }
 
 // Rough per-million-token pricing (USD) for cost *estimation* in reports.
@@ -1618,6 +1879,316 @@ Respond ONLY with valid JSON: { "score": 0-100 integer (0 very negative, 50 neut
       return text || fallback
     } catch {
       return fallback
+    }
+  }
+
+  // ─── Smart task suggestions (Plan §7.10) ──────────────────────────────────
+
+  /** Ensure the caller is a manager/admin of the workspace (mutating AI actions). */
+  async assertWorkspaceManager(workspaceId: string, userId: string): Promise<void> {
+    const role = await this.memberRole(workspaceId, userId)
+    if (!role || !['workspace_admin', 'manager', 'super_admin'].includes(role)) {
+      throw new ForbiddenException('Only managers or admins can perform this action')
+    }
+  }
+
+  /**
+   * Suggest a task list for a project by learning from SIMILAR existing projects
+   * in the workspace (Plan §7.10): rank candidates by name/keyword similarity,
+   * summarize their task titles, and return the most-frequent titles as a
+   * deterministic fallback; refine with the model (haiku) when configured. Never
+   * throws — always best-effort so the UI can always render something.
+   */
+  async suggestTasks(
+    input: { workspaceId: string; projectId?: string; projectName?: string; description?: string },
+    ctx: AiCtx = {},
+  ): Promise<{ source: 'ai' | 'heuristic'; suggestions: TaskSuggestion[]; basis: string }> {
+    const target =
+      (input.projectName ?? '').trim() || (await this.resolveProjectName(input.projectId)) || 'this project'
+    const candidates = await this.collectCandidateProjects(input.workspaceId, input.projectId)
+    const similar = rankSimilarProjects(target, candidates)
+    const basis = summarizeSuggestionBasis(similar)
+    const fallback = deterministicTaskSuggestions(similar)
+
+    if (!this.isAvailable()) return { source: 'heuristic', suggestions: fallback, basis }
+    try {
+      const similarBlock = similar
+        .filter((p) => p.taskTitles.length)
+        .slice(0, 5)
+        .map((p) => `Project "${p.name}":\n${p.taskTitles.slice(0, 15).map((t) => `- ${t}`).join('\n')}`)
+        .join('\n\n')
+      const response = await this.complete('task.suggest', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 800,
+        system: `You plan a new project's initial task list for the Rundesk project management app.
+Learn from how SIMILAR existing projects in this workspace were broken down.
+Respond ONLY with a valid JSON array of 5-10 objects: [{ "title": "concise action-oriented task", "priority": "urgent|high|normal|low" }].
+Prefer titles/patterns seen in the similar projects and adapt them to the new project. Do not number the titles.`,
+        messages: [
+          {
+            role: 'user',
+            content: `New project: "${target}"${input.description ? `\nDescription: ${input.description}` : ''}\n\nSimilar projects and their tasks:\n${similarBlock || '(no similar projects with tasks)'}`,
+          },
+        ],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text : ''
+      const match = text.match(/\[[\s\S]*\]/)
+      const parsed = match ? sanitizeTaskSuggestions(safeJsonParse(match[0])) : []
+      return parsed.length
+        ? { source: 'ai', suggestions: parsed, basis }
+        : { source: 'heuristic', suggestions: fallback, basis }
+    } catch {
+      return { source: 'heuristic', suggestions: fallback, basis }
+    }
+  }
+
+  private async resolveProjectName(projectId?: string): Promise<string | null> {
+    if (!projectId) return null
+    const [row] = await this.db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId)).limit(1)
+    return row?.name ?? null
+  }
+
+  /** Workspace projects (excluding the target) with their bounded top-level task titles. */
+  private async collectCandidateProjects(
+    workspaceId: string,
+    excludeProjectId?: string,
+  ): Promise<Array<{ id: string; name: string; taskTitles: string[] }>> {
+    const projectRows = await this.db
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(spaces.workspaceId, workspaceId))
+      .orderBy(desc(projects.createdAt))
+      .limit(60)
+    const ids = projectRows.map((p) => p.id).filter((id) => id !== excludeProjectId)
+    if (ids.length === 0) return []
+    const taskRows = await this.db
+      .select({ projectId: lists.projectId, title: tasks.title })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .where(and(inArray(lists.projectId, ids), eq(tasks.isArchived, false), isNull(tasks.parentTaskId)))
+      .limit(3000)
+    const byProject = new Map<string, string[]>()
+    for (const r of taskRows) {
+      const list = byProject.get(r.projectId) ?? []
+      if (list.length < 40) list.push(r.title)
+      byProject.set(r.projectId, list)
+    }
+    return projectRows
+      .filter((p) => p.id !== excludeProjectId)
+      .map((p) => ({ id: p.id, name: p.name, taskTitles: byProject.get(p.id) ?? [] }))
+  }
+
+  // ─── Smart workload balancing (Plan §7.12) ────────────────────────────────
+
+  /**
+   * Per-member open-task load (non-archived, non-closed) across the workspace,
+   * with each member's task ids ordered least-urgent-first so the tasks handed
+   * off first are the safest to move. Reuses the workload report's join shape.
+   */
+  async collectWorkloadLoads(workspaceId: string): Promise<WorkloadLoad[]> {
+    const members = await this.db
+      .select({
+        userId: users.id,
+        name: sql<string>`coalesce(${users.displayName}, ${users.email})`,
+      })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), ne(workspaceMembers.role, 'guest')))
+
+    const rows = await this.db
+      .select({ userId: taskAssignees.userId, taskId: tasks.id, priority: tasks.priority, dueDate: tasks.dueDate })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.statusCategory} <> 'closed'`),
+      )
+
+    const prioRank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
+    const rank = (p: string | null) => prioRank[p ?? 'normal'] ?? 2
+    const sorted = rows.slice().sort((a, b) => {
+      // Least urgent first, then furthest-out due date first (safest to reassign).
+      const byPrio = rank(b.priority) - rank(a.priority)
+      if (byPrio !== 0) return byPrio
+      const da = a.dueDate ? new Date(a.dueDate).getTime() : Number.POSITIVE_INFINITY
+      const db = b.dueDate ? new Date(b.dueDate).getTime() : Number.POSITIVE_INFINITY
+      return db - da
+    })
+    const byUser = new Map<string, string[]>()
+    for (const r of sorted) {
+      const list = byUser.get(r.userId) ?? []
+      list.push(r.taskId)
+      byUser.set(r.userId, list)
+    }
+    return members.map((m) => {
+      const taskIds = byUser.get(m.userId) ?? []
+      return { userId: m.userId, name: m.name || 'Someone', open: taskIds.length, taskIds }
+    })
+  }
+
+  /**
+   * Redistribution suggestions from real per-assignee open-task load (Plan §7.12).
+   * Deterministic heuristic always available; refined by the model (haiku) when
+   * configured, with task ids resolved server-side from the real loads.
+   */
+  async workloadBalance(workspaceId: string, ctx: AiCtx = {}): Promise<WorkloadBalanceResult> {
+    const loads = await this.collectWorkloadLoads(workspaceId)
+    const heuristic = computeWorkloadBalance(loads, { source: 'heuristic' })
+    if (!this.isAvailable() || heuristic.suggestions.length === 0) return heuristic
+    try {
+      const loadLines = loads.map((l) => `${l.name} (id ${l.userId}): ${l.open} open`).join('\n')
+      const response = await this.complete('workload.balance', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 700,
+        system: `You balance team workload for the Rundesk project management app.
+Given each teammate's open-task count, propose up to 3 redistribution moves from overloaded to underloaded teammates.
+Respond ONLY with a valid JSON array: [{ "fromUserId": "id", "toUserId": "id", "count": integer, "rationale": "one sentence" }].
+Only move work FROM people above the team average TO people below it. Never move more tasks than the source has. Use the exact ids provided.`,
+        messages: [{ role: 'user', content: `Open-task load per teammate:\n${loadLines}\n\nTeam average: ${heuristic.average}` }],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text : ''
+      const match = text.match(/\[[\s\S]*\]/)
+      const ai = mapAiWorkloadMoves(match ? safeJsonParse(match[0]) : undefined, loads)
+      return ai.suggestions.length ? ai : heuristic
+    } catch {
+      return heuristic
+    }
+  }
+
+  /**
+   * Execute confirmed workload moves (Plan §7.12): reassign each task from
+   * `fromUserId` to `toUserId` by reusing TasksService.addAssignee +
+   * removeAssignee (each access-checked against the actor). `toUserId` must be a
+   * non-guest member of `workspaceId`; tasks the actor can't modify are skipped.
+   */
+  async executeWorkloadBalance(
+    workspaceId: string,
+    moves: Array<{ fromUserId: string; toUserId: string; taskIds: string[] }>,
+    userId: string,
+  ): Promise<{
+    reassigned: number
+    skipped: number
+    moves: Array<{ fromUserId: string; toUserId: string; reassigned: number; skipped: number }>
+  }> {
+    let reassigned = 0
+    let skipped = 0
+    const perMove: Array<{ fromUserId: string; toUserId: string; reassigned: number; skipped: number }> = []
+    const memberCache = new Map<string, boolean>()
+    const isMember = async (uid: string) => {
+      if (memberCache.has(uid)) return memberCache.get(uid) as boolean
+      const role = await this.memberRole(workspaceId, uid)
+      const ok = Boolean(role) && role !== 'guest'
+      memberCache.set(uid, ok)
+      return ok
+    }
+
+    for (const move of moves ?? []) {
+      let mReassigned = 0
+      let mSkipped = 0
+      const taskIds = Array.isArray(move?.taskIds) ? move.taskIds.slice(0, 100) : []
+      const targetOk = move?.toUserId && move.toUserId !== move.fromUserId && (await isMember(move.toUserId))
+      for (const taskId of taskIds) {
+        if (!targetOk) {
+          mSkipped++
+          continue
+        }
+        try {
+          // Access checks live in TasksService: addAssignee/removeAssignee both
+          // assertTaskWriteAccess(taskId, actor), so a caller can only reassign
+          // tasks they may edit — and only within this workspace.
+          await this.tasks.addAssignee(taskId, move.toUserId, userId)
+          await this.tasks.removeAssignee(taskId, move.fromUserId, userId)
+          mReassigned++
+        } catch {
+          mSkipped++
+        }
+      }
+      reassigned += mReassigned
+      skipped += mSkipped
+      perMove.push({ fromUserId: move.fromUserId, toUserId: move.toUserId, reassigned: mReassigned, skipped: mSkipped })
+    }
+    return { reassigned, skipped, moves: perMove }
+  }
+
+  /** Workspace managers/admins (recipients of proactive workload alerts, Plan §7.12). */
+  async workspaceManagers(workspaceId: string): Promise<Array<{ userId: string }>> {
+    return this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          inArray(workspaceMembers.role, ['workspace_admin', 'manager', 'super_admin']),
+        ),
+      )
+  }
+
+  /** Workspaces that currently have any open (non-archived, non-closed) assigned tasks. */
+  async workspacesWithOpenWork(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ workspaceId: spaces.workspaceId })
+      .from(tasks)
+      .innerJoin(taskAssignees, eq(taskAssignees.taskId, tasks.id))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(tasks.isArchived, false), sql`${tasks.statusCategory} <> 'closed'`))
+    return rows.map((r) => r.workspaceId)
+  }
+
+  /** Overloaded-user ids already alerted in this workspace since `cutoff` (dedupe). */
+  async recentlyWorkloadAlerted(workspaceId: string, cutoff: Date): Promise<Set<string>> {
+    const rows = await this.db
+      .select({ entityId: sql<string>`${notifications.target}->>'entityId'` })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.workspaceId, workspaceId),
+          eq(notifications.type, 'workload_alert'),
+          gte(notifications.createdAt, cutoff),
+        ),
+      )
+    return new Set(rows.map((r) => r.entityId).filter((id): id is string => Boolean(id)))
+  }
+
+  // ─── Contribution narratives (Plan §7.14) ─────────────────────────────────
+
+  /**
+   * Generate a one-sentence contribution narrative per member from precomputed
+   * real metrics (Plan §7.14). One model call (haiku) covers everyone; on any
+   * failure or when AI is unavailable each member falls back to its deterministic
+   * narrative. Never throws.
+   */
+  async narrateContributions(
+    items: Array<{ key: string; name: string; facts: string; fallback: string }>,
+    ctx: AiCtx = {},
+  ): Promise<Record<string, string>> {
+    const fallbackMap: Record<string, string> = {}
+    for (const it of items) fallbackMap[it.key] = it.fallback
+    if (items.length === 0 || !this.isAvailable()) return fallbackMap
+    try {
+      const block = items.map((it, i) => `${i + 1}. ${it.name} — ${it.facts}`).join('\n')
+      const response = await this.complete('contribution.narrative', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 900,
+        system: `You write one-sentence contribution summaries for team members based on their real metrics for a reporting period.
+Respond ONLY with a valid JSON object mapping each member's number to a warm, specific one-sentence summary, e.g. { "1": "...", "2": "..." }. Do not invent metrics beyond those given.`,
+        messages: [{ role: 'user', content: `Members and metrics:\n${block}` }],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text : ''
+      const parsed = safeJsonParse((text.match(/\{[\s\S]*\}/) ?? [''])[0]) as Record<string, unknown> | undefined
+      if (!parsed || typeof parsed !== 'object') return fallbackMap
+      const out: Record<string, string> = {}
+      items.forEach((it, i) => {
+        const v = parsed[String(i + 1)]
+        out[it.key] = typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : it.fallback
+      })
+      return out
+    } catch {
+      return fallbackMap
     }
   }
 }

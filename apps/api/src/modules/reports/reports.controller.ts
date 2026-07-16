@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, ForbiddenException, Get, Header, Param, Patch, Post, Query, StreamableFile, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { ReportsService, type ReportDefinition, type ReportScheduleInput } from './reports.service'
+import { ReportsService, type ContributionPeriodType, type ReportDefinition, type ReportScheduleInput } from './reports.service'
 import { ScheduledReportsService } from './scheduled-reports.service'
 import { ProjectHealthService } from './project-health.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -148,6 +148,50 @@ export class ReportsController {
     @Query('limit') limit?: string,
   ) {
     return this.reports.getWorkspaceActivity(workspaceId, limit ? parseInt(limit, 10) : 20)
+  }
+
+  // ─── Contribution analytics (§7.14) ────────────────────────────────────────
+  private parsePeriod(period?: string): ContributionPeriodType {
+    return period === 'last-month' || period === 'sprint' ? period : 'this-month'
+  }
+
+  @Get('contribution')
+  @ApiOperation({ summary: 'Per-member contribution factors + AI narrative for a period (§7.14)' })
+  async contribution(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Query('period') period?: string,
+    @Query('sprintId') sprintId?: string,
+  ) {
+    // Non-privileged viewers are scoped to their own row (like productivity).
+    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
+    return this.reports.getContribution(
+      workspaceId,
+      { period: this.parsePeriod(period), sprintId, restrictToUserId: restrict },
+      { userId: user.id },
+    )
+  }
+
+  @Post('contribution.pdf')
+  @ApiOperation({ summary: 'Contribution report as a server-rendered PDF (managers/admins only, §7.14)' })
+  async contributionPdf(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { period?: string; sprintId?: string },
+  ): Promise<StreamableFile> {
+    // Role-gate to managers/admins: getViewerScope returns a userId only for
+    // non-privileged members, which we reject for the full-team PDF export.
+    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
+    if (restrict) throw new ForbiddenException('Only managers or admins can export the contribution report')
+    const buffer = await this.reports.exportContributionPdf(
+      workspaceId,
+      { period: this.parsePeriod(body?.period), sprintId: body?.sprintId },
+      { userId: user.id },
+    )
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: 'attachment; filename="rundesk-contribution.pdf"',
+    })
   }
 
   // ─── Custom report builder ────────────────────────────────────────────────

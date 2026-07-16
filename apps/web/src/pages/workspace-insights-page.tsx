@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
   Badge,
@@ -8,6 +8,7 @@ import {
   Progress,
   PersonAvatar,
   cn,
+  toast,
 } from '@rundesk/ui'
 import {
   Sparkles,
@@ -18,11 +19,55 @@ import {
   Target,
   ChevronRight,
   Lightbulb,
-  Printer,
+  Download,
+  Check,
+  X,
+  Loader2,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, downloadFilePost } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceStore } from '../store/workspace'
 import { useTranslation } from '../lib/i18n'
+
+type WorkloadMove = {
+  fromUserId: string
+  fromName: string
+  toUserId: string
+  toName: string
+  count: number
+  taskIds: string[]
+  rationale: string
+  source: 'ai' | 'heuristic'
+}
+type WorkloadBalance = {
+  source: 'ai' | 'heuristic'
+  average: number
+  loads: Array<{ userId: string; name: string; open: number }>
+  suggestions: WorkloadMove[]
+}
+type ContributionMember = {
+  userId: string
+  name: string
+  email: string | null
+  tasksCompleted: number
+  tasksAssigned: number
+  onTimeRate: number
+  collaboration: number
+  blockersResolved: number
+  score: number
+  narrative: string
+}
+type ContributionReport = {
+  period: { type: string; from: string; to: string; label: string; sprintId?: string }
+  source: 'ai' | 'heuristic'
+  members: ContributionMember[]
+}
+type ContributionPeriod = 'this-month' | 'last-month' | 'sprint'
+
+/** Stable key for a workload move (used to dismiss/track a specific suggestion). */
+function moveKey(m: { fromUserId: string; toUserId: string }): string {
+  return `${m.fromUserId}->${m.toUserId}`
+}
 
 type HealthRow = {
   project: string
@@ -41,7 +86,14 @@ export function InsightsPage() {
   const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/insights' })
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const user = useAuthStore((s) => s.user)
+  // Managers/admins can execute workload moves and export the contribution PDF.
+  const canManage = useWorkspaceStore((s) => {
+    const ws = s.workspaces.find((w) => w.id === workspaceId) ?? s.active
+    return ['workspace_admin', 'manager', 'super_admin'].includes(ws?.role ?? '')
+  })
+  const [contribPeriod, setContribPeriod] = useState<ContributionPeriod>('this-month')
   const hour = new Date().getHours()
   const greeting =
     hour < 12 ? t('insights.greetingMorning') : hour < 18 ? t('insights.greetingAfternoon') : t('insights.greetingEvening')
@@ -58,9 +110,9 @@ export function InsightsPage() {
       return new Set()
     }
   })
-  const dismissWorkload = (name: string) =>
+  const dismissWorkload = (key: string) =>
     setDismissedWorkload((prev) => {
-      const next = new Set(prev).add(name)
+      const next = new Set(prev).add(key)
       try {
         localStorage.setItem(dismissKey, JSON.stringify([...next]))
       } catch {
@@ -128,6 +180,51 @@ export function InsightsPage() {
         }>
       >(`/tasks/workspace/${workspaceId}?limit=500`),
   })
+
+  // §7.14 — real per-member contribution factors + AI narrative for the period.
+  const contribQ = useQuery({
+    queryKey: ['contribution', workspaceId, contribPeriod],
+    queryFn: () =>
+      api<ContributionReport>(`/workspaces/${workspaceId}/reports/contribution?period=${contribPeriod}`),
+  })
+
+  // §7.12 — AI (with deterministic fallback) workload redistribution from real load.
+  const wbQ = useQuery({
+    queryKey: ['workload-balance', workspaceId],
+    retry: false,
+    staleTime: 60_000,
+    queryFn: () => api<WorkloadBalance>('/ai/workload-balance', { method: 'POST', body: { workspaceId } }),
+  })
+
+  const executeMove = useMutation({
+    mutationFn: (move: WorkloadMove) =>
+      api<{ reassigned: number; skipped: number }>('/ai/workload-balance/execute', {
+        method: 'POST',
+        body: {
+          workspaceId,
+          moves: [{ fromUserId: move.fromUserId, toUserId: move.toUserId, taskIds: move.taskIds }],
+        },
+      }),
+    onSuccess: (res, move) => {
+      toast.success(t('insights.workloadReassigned', { count: res.reassigned, from: move.fromName, to: move.toName }))
+      dismissWorkload(moveKey(move))
+      qc.invalidateQueries({ queryKey: ['workload-balance', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['workload-report', workspaceId, 14] })
+    },
+    onError: () => toast.error(t('insights.workloadReassignFailed')),
+  })
+
+  const downloadContributionPdf = async () => {
+    try {
+      await downloadFilePost(
+        `/workspaces/${workspaceId}/reports/contribution.pdf`,
+        { period: contribPeriod },
+        'rundesk-contribution.pdf',
+      )
+    } catch {
+      toast.error(t('insights.contributionPdfError'))
+    }
+  }
 
   const activeSprint = sprintsQ.data?.find((s) => s.status === 'active')
   const overview = overviewQ.data
@@ -240,21 +337,8 @@ export function InsightsPage() {
       .slice(0, 4)
   }, [tasksQ.data])
 
-  // Real contribution data (no fabricated complexity/collaboration metrics).
-  const contrib = useMemo(
-    () =>
-      (productivityQ.data ?? [])
-        .filter((r) => r.displayName || r.email)
-        .map((r) => ({
-          name: r.displayName ?? r.email,
-          tasks: r.tasksCompleted,
-          onTime: r.totalAssigned > 0 ? Math.round((r.tasksCompleted / r.totalAssigned) * 100) : 0,
-          blockers: Math.max(0, r.totalAssigned - r.tasksCompleted),
-        }))
-        .sort((a, b) => b.tasks - a.tasks)
-        .slice(0, 8),
-    [productivityQ.data],
-  )
+  // §7.14 — real contribution factors + AI narrative come from the server.
+  const contrib = contribQ.data?.members ?? []
 
   // Suggestions: prefer the AI ones; fall back to real-derived heuristics when
   // AI is unavailable. Both are clickable and navigate to Reports.
@@ -278,32 +362,10 @@ export function InsightsPage() {
     ? ai.suggestions.map((s) => ({ text: s.detail || s.title, cta: s.cta ?? t('insights.ctaOpen') }))
     : fallbackSuggestions
 
-  const workloadSuggestions = useMemo(() => {
-    const people = workloadQ.data ?? []
-    const overloaded = people.filter((p) => p.dailyLoads.some((l) => l > p.capacity))
-    const underloaded = people.filter((p) => p.dailyLoads.every((l) => l < p.capacity * 0.7))
-    const pairs: Array<{ from: string; fromLoad: number; to: string; toLoad: number; reasoning: string }> = []
-    for (const from of overloaded.slice(0, 3)) {
-      const to = underloaded[0]
-      if (!to) break
-      const fromLoad = Math.round(
-        (from.dailyLoads.reduce((a, b) => a + b, 0) / from.dailyLoads.length / from.capacity) * 100,
-      )
-      const toLoad = Math.round(
-        (to.dailyLoads.reduce((a, b) => a + b, 0) / to.dailyLoads.length / to.capacity) * 100,
-      )
-      pairs.push({
-        from: from.name,
-        fromLoad,
-        to: to.name,
-        toLoad,
-        reasoning: t('insights.workloadReasoning', { from: from.name, to: to.name }),
-      })
-    }
-    return pairs
-  }, [workloadQ.data, t])
-
-  const visibleWorkload = workloadSuggestions.filter((s) => !dismissedWorkload.has(s.from))
+  // §7.12 — AI/heuristic redistribution suggestions from the server, minus any
+  // the user has locally dismissed.
+  const workloadSuggestions = wbQ.data?.suggestions ?? []
+  const visibleWorkload = workloadSuggestions.filter((s) => !dismissedWorkload.has(moveKey(s)))
 
   return (
     <div className="p-6 space-y-7 max-w-7xl mx-auto">
@@ -418,9 +480,9 @@ export function InsightsPage() {
         </div>
       </section>
 
-      {/* Contribution analytics */}
+      {/* Contribution analytics (§7.14) */}
       <section>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
             <h2 className="font-display text-xl font-semibold flex items-center gap-2">
               <Award className="h-4 w-4 text-amber" />
@@ -431,51 +493,95 @@ export function InsightsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
-              <Printer className="h-3.5 w-3.5" /> {t('insights.exportPdf')}
-            </Button>
+            <div className="inline-flex rounded-lg border border-border/60 p-0.5 text-xs">
+              {(['this-month', 'last-month', 'sprint'] as ContributionPeriod[]).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setContribPeriod(p)}
+                  className={cn(
+                    'px-2.5 py-1 rounded-md transition-colors',
+                    contribPeriod === p
+                      ? 'bg-brand-gradient text-white'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {p === 'this-month'
+                    ? t('insights.periodThisMonth')
+                    : p === 'last-month'
+                      ? t('insights.periodLastMonth')
+                      : t('insights.periodSprint')}
+                </button>
+              ))}
+            </div>
+            {canManage && (
+              <Button variant="outline" size="sm" onClick={downloadContributionPdf}>
+                <Download className="h-3.5 w-3.5" /> {t('insights.downloadPdf')}
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={goToReports}>
               {t('insights.openInReports')}
             </Button>
           </div>
         </div>
         <Card variant="glass" className="overflow-hidden p-0">
-          <div className="grid grid-cols-[1fr_70px_120px_80px] text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border/40 px-4 py-2">
+          <div className="flex items-center justify-between border-b border-border/40 px-4 py-2">
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
+              {contribQ.data?.period.label ?? t('insights.contributionLoading')}
+            </div>
+            {contribQ.data?.source === 'ai' && (
+              <Badge variant="gradient" className="text-[9px] uppercase">
+                <Sparkles className="h-2.5 w-2.5 mr-1" />
+                {t('insights.aiNarrative')}
+              </Badge>
+            )}
+          </div>
+          <div className="grid grid-cols-[1fr_52px_100px_52px_60px_48px] gap-2 text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border/40 px-4 py-2">
             <div>{t('insights.colPerson')}</div>
             <div className="text-right">{t('insights.colTasks')}</div>
             <div className="text-right">{t('insights.colOnTime')}</div>
-            <div className="text-right">{t('insights.colOpen')}</div>
+            <div className="text-right">{t('insights.colCollab')}</div>
+            <div className="text-right">{t('insights.colBlockers')}</div>
+            <div className="text-right">{t('insights.colScore')}</div>
           </div>
           <ul className="divide-y divide-border/30">
-            {contrib.length === 0 ? (
+            {contribQ.isLoading ? (
+              <li className="px-4 py-6 text-center text-sm text-muted-foreground">
+                {t('insights.contributionLoading')}
+              </li>
+            ) : contrib.length === 0 ? (
               <li className="px-4 py-6 text-center text-sm text-muted-foreground">
                 {t('insights.noTeamActivity')}
               </li>
             ) : (
               contrib.map((c, i) => (
                 <li
-                  key={c.name}
-                  className="grid grid-cols-[1fr_70px_120px_80px] items-center px-4 py-3 hover:bg-card/40 transition-colors"
+                  key={c.userId}
+                  className="grid grid-cols-[1fr_52px_100px_52px_60px_48px] gap-2 items-center px-4 py-3 hover:bg-card/40 transition-colors"
                 >
-                  <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex items-start gap-3 min-w-0">
                     <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold tabular-nums shrink-0">
                       {i + 1}
                     </div>
                     <PersonAvatar name={c.name} size="sm" />
-                    <div className="text-sm truncate">{c.name}</div>
-                  </div>
-                  <div className="text-right text-sm tabular-nums">{c.tasks}</div>
-                  <div className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Progress value={c.onTime} className="w-12 h-1" />
-                      <span className="text-xs tabular-nums w-8 text-right">{c.onTime}%</span>
+                    <div className="min-w-0">
+                      <div className="text-sm truncate">{c.name}</div>
+                      <div className="text-[11px] text-muted-foreground leading-snug">{c.narrative}</div>
                     </div>
                   </div>
+                  <div className="text-right text-sm tabular-nums">{c.tasksCompleted}</div>
                   <div className="text-right">
-                    <Badge variant={c.blockers >= 4 ? 'warning' : 'soft'} className="text-[10px] tabular-nums">
-                      {c.blockers}
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Progress value={c.onTimeRate} className="w-10 h-1" />
+                      <span className="text-xs tabular-nums w-7 text-right">{c.onTimeRate}%</span>
+                    </div>
+                  </div>
+                  <div className="text-right text-sm tabular-nums">{c.collaboration}</div>
+                  <div className="text-right">
+                    <Badge variant={c.blockersResolved > 0 ? 'success' : 'soft'} className="text-[10px] tabular-nums">
+                      {c.blockersResolved}
                     </Badge>
                   </div>
+                  <div className="text-right text-sm font-semibold tabular-nums">{c.score}</div>
                 </li>
               ))
             )}
@@ -483,9 +589,9 @@ export function InsightsPage() {
         </Card>
       </section>
 
-      {/* Workload balancing */}
+      {/* Workload balancing (§7.12) */}
       <Card variant="glass" className="p-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between gap-2 mb-3">
           <div>
             <h2 className="font-display text-lg font-semibold flex items-center gap-2">
               <Target className="h-4 w-4 text-mint" />
@@ -493,41 +599,78 @@ export function InsightsPage() {
             </h2>
             <p className="text-xs text-muted-foreground">{t('insights.workloadDesc')}</p>
           </div>
+          {wbQ.data && visibleWorkload.length > 0 && (
+            <Badge variant={wbQ.data.source === 'ai' ? 'gradient' : 'soft'} className="text-[9px] uppercase shrink-0">
+              {wbQ.data.source === 'ai' ? (
+                <>
+                  <Sparkles className="h-2.5 w-2.5 mr-1" />
+                  {t('insights.sourceAi')}
+                </>
+              ) : (
+                t('insights.sourceHeuristic')
+              )}
+            </Badge>
+          )}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {visibleWorkload.length === 0 ? (
+          {wbQ.isLoading ? (
             <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
-              {t('insights.workloadBalanced')}
+              {t('insights.workloadLoading')}
+            </Card>
+          ) : visibleWorkload.length === 0 ? (
+            <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
+              {wbQ.isError ? t('insights.workloadUnavailable') : t('insights.workloadBalanced')}
             </Card>
           ) : (
-            visibleWorkload.map((s, i) => (
-              <Card key={`${s.from}-${s.to}-${i}`} className="p-3 bg-card/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <PersonAvatar name={s.from} size="sm" />
-                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                  <PersonAvatar name={s.to} size="sm" />
-                </div>
-                <div className="text-[10px] text-muted-foreground tabular-nums mb-2">
-                  <span className="text-warning">{s.fromLoad}%</span>
-                  <span> → </span>
-                  <span className="text-success">{s.toLoad}%</span>
-                </div>
-                <p className="text-xs leading-relaxed">{s.reasoning}</p>
-                <div className="flex items-center gap-1 mt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 text-[10px] flex-1"
-                    onClick={() => dismissWorkload(s.from)}
-                  >
-                    {t('insights.dismiss')}
-                  </Button>
-                  <Button variant="gradient" size="sm" className="h-6 text-[10px] flex-1" onClick={goToReports}>
-                    {t('insights.openWorkload')}
-                  </Button>
-                </div>
-              </Card>
-            ))
+            visibleWorkload.map((s) => {
+              const isRunning =
+                executeMove.isPending && executeMove.variables && moveKey(executeMove.variables) === moveKey(s)
+              return (
+                <Card key={moveKey(s)} className="p-3 bg-card/30">
+                  <div className="flex items-center gap-2 mb-2">
+                    <PersonAvatar name={s.fromName} size="sm" />
+                    <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                    <PersonAvatar name={s.toName} size="sm" />
+                    <Badge variant="soft" className="text-[10px] tabular-nums ml-auto">
+                      {tCount('insights.moveCount', s.count)}
+                    </Badge>
+                  </div>
+                  <p className="text-xs leading-relaxed mb-2">{s.rationale}</p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-[10px] flex-1"
+                      onClick={() => dismissWorkload(moveKey(s))}
+                      disabled={isRunning}
+                    >
+                      <X className="h-3 w-3" /> {t('insights.dismiss')}
+                    </Button>
+                    {canManage ? (
+                      <Button
+                        variant="gradient"
+                        size="sm"
+                        className="h-6 text-[10px] flex-1"
+                        onClick={() => executeMove.mutate(s)}
+                        disabled={executeMove.isPending}
+                      >
+                        {isRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                        {t('insights.accept')}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="gradient"
+                        size="sm"
+                        className="h-6 text-[10px] flex-1"
+                        onClick={goToReports}
+                      >
+                        {t('insights.openWorkload')}
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              )
+            })
           )}
         </div>
       </Card>

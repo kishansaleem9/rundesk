@@ -226,6 +226,53 @@ export class AiController {
     })
   }
 
+  @Post('suggest-tasks')
+  @ApiOperation({ summary: 'Suggest a task list for a project by learning from similar projects (AI, deterministic fallback)' })
+  async suggestTasks(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string; projectId?: string; projectName?: string; description?: string },
+  ) {
+    if (!body?.workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    // Gate on membership (controller isn't workspace-scoped); the service is
+    // best-effort and never throws on AI failure.
+    await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
+    return this.ai.suggestTasks(
+      {
+        workspaceId: body.workspaceId,
+        projectId: body.projectId,
+        projectName: body.projectName,
+        description: body.description,
+      },
+      { userId: user.id, workspaceId: body.workspaceId },
+    )
+  }
+
+  @Post('workload-balance')
+  @ApiOperation({ summary: 'Suggest workload redistribution from real per-assignee load (AI, deterministic fallback)' })
+  async workloadBalance(@CurrentUser() user: any, @Body() body: { workspaceId?: string }) {
+    if (!body?.workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
+    return this.ai.workloadBalance(body.workspaceId, { userId: user.id, workspaceId: body.workspaceId })
+  }
+
+  @Post('workload-balance/execute')
+  @ApiOperation({ summary: 'Execute confirmed workload moves (manager/admin only; reassigns via TasksService)' })
+  async workloadBalanceExecute(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string; moves?: Array<{ fromUserId: string; toUserId: string; taskIds: string[] }> },
+  ) {
+    if (!body?.workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    // Reassignment is a privileged action — managers/admins only.
+    await this.ai.assertWorkspaceManager(body.workspaceId, user.id)
+    return this.ai.executeWorkloadBalance(body.workspaceId, Array.isArray(body?.moves) ? body.moves : [], user.id)
+  }
+
   @Post('command')
   @ApiOperation({ summary: 'Plan a natural-language command via tool use (preview, nothing mutates)' })
   async command(@CurrentUser() user: any, @Body() body: { workspaceId?: string; message?: string }) {
