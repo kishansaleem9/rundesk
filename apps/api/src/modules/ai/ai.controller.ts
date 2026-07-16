@@ -37,12 +37,23 @@ export class AiController {
   @ApiOperation({ summary: 'Generate a task from a natural language prompt' })
   async generateTask(
     @CurrentUser() user: any,
-    @Body() body: { prompt: string; context?: string; workspaceId?: string },
+    @Body()
+    body: {
+      prompt: string
+      context?: string
+      workspaceId?: string
+      customFields?: Array<{ name: string; type: string; options?: string[] }>
+    },
   ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    return this.ai.generateTask(body.prompt, body.context, { userId: user.id, workspaceId: body.workspaceId })
+    return this.ai.generateTask(
+      body.prompt,
+      body.context,
+      { userId: user.id, workspaceId: body.workspaceId },
+      body.customFields,
+    )
   }
 
   @Post('task/priority')
@@ -76,16 +87,40 @@ export class AiController {
   @ApiOperation({ summary: 'Summarize a task or project' })
   async summarize(
     @CurrentUser() user: any,
-    @Body() body: { content: string; type?: 'task' | 'project'; workspaceId?: string },
+    @Body() body: { content?: string; taskId?: string; type?: 'task' | 'project'; workspaceId?: string },
   ) {
     if (!this.ai.isAvailable()) {
       throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
     }
-    const summary = await this.ai.summarize(body.content, body.type ?? 'task', {
+    // When a taskId is provided, enrich the input server-side (Plan §7.5) with
+    // recent activity, open subtasks, open blockers, and recent comments.
+    const content = body.taskId ? await this.ai.buildTaskSummaryInput(body.taskId) : body.content ?? ''
+    const summary = await this.ai.summarize(content, body.type ?? 'task', {
       userId: user.id,
       workspaceId: body.workspaceId,
     })
     return { summary }
+  }
+
+  @Post('summarize/stream')
+  @ApiOperation({ summary: 'Summarize a task or project (streaming SSE)' })
+  async summarizeStream(
+    @CurrentUser() user: any,
+    @Body() body: { content?: string; taskId?: string; type?: 'task' | 'project'; workspaceId?: string },
+    @Res() res: any,
+  ) {
+    if (!this.ai.isAvailable()) {
+      res.status(503).send({ error: 'AI features are not configured' })
+      return
+    }
+    // A task summary is enriched server-side from the task's recent activity,
+    // open subtasks, blockers and comments; a project summary streams the
+    // caller-provided report text (Plan §7.5).
+    const content = body.taskId ? await this.ai.buildTaskSummaryInput(body.taskId) : body.content ?? ''
+    await this.ai.summarizeStream(content, body.type ?? 'task', res as any, {
+      userId: user.id,
+      workspaceId: body.workspaceId,
+    })
   }
 
   @Post('writing/improve')
@@ -146,6 +181,7 @@ export class AiController {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>
       workspaceContext?: string
       workspaceId?: string
+      currentView?: string
     },
     @Res() res: any,
   ) {
@@ -154,9 +190,10 @@ export class AiController {
       return
     }
     // Real context injection (§7.6): build a grounded workspace summary
-    // server-side when a workspaceId is provided.
+    // server-side when a workspaceId is provided, passing the caller's optional
+    // current-view hint (§7.15) so answers reflect where the user is.
     const context = body.workspaceId
-      ? await this.ai.buildWorkspaceContext(body.workspaceId, user.id)
+      ? await this.ai.buildWorkspaceContext(body.workspaceId, user.id, { currentView: body.currentView })
       : body.workspaceContext ?? ''
     await this.ai.chatStream(body.messages, context, res as any, {
       userId: user.id,

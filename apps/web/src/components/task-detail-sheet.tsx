@@ -29,6 +29,52 @@ import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
+/**
+ * Stream a task/project summary from the SSE endpoint (Plan §7.5), invoking
+ * `onDelta` with the accumulated text as tokens arrive. Resolves with the full
+ * text; throws on transport/model errors so callers can fall back to /ai/summarize.
+ */
+async function streamAiSummary(
+  body: Record<string, unknown>,
+  onDelta: (full: string) => void,
+): Promise<string> {
+  const token = useAuthStore.getState().accessToken
+  const res = await fetch('/api/v1/ai/summarize/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok || !res.body) throw new Error('summary stream failed')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let acc = ''
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6)
+      if (data === '[DONE]') continue
+      let parsed: { delta?: string; error?: string }
+      try {
+        parsed = JSON.parse(data)
+      } catch {
+        continue
+      }
+      if (parsed.error) throw new Error(parsed.error)
+      if (parsed.delta) {
+        acc += parsed.delta
+        onDelta(acc)
+      }
+    }
+  }
+  return acc
+}
+
 // Enum → display-label-key maps. The raw identifier stays the persisted/compared
 // value; only the shown label is localized. Unknown values fall back to raw text.
 const PRIORITY_LABEL_KEYS: Record<string, TranslationKey> = {
@@ -796,6 +842,9 @@ function OverviewPanel({
   const [editingDescription, setEditingDescription] = useState(false)
   const [descriptionDraft, setDescriptionDraft] = useState('')
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  // Streamed AI task summary (Plan §7.5): null = closed, '' = streaming started.
+  const [summaryText, setSummaryText] = useState<string | null>(null)
+  const [summarizing, setSummarizing] = useState(false)
 
   // Wrap the current selection (or insert at the caret) with markdown syntax.
   const applyDescriptionFormat = (kind: 'bold' | 'italic' | 'code' | 'link' | 'h2' | 'ul' | 'ol' | 'quote') => {
@@ -959,19 +1008,30 @@ function OverviewPanel({
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.aiUnavailable')),
   })
-  const aiSummarize = useMutation({
-    mutationFn: () =>
-      api<{ summary: string }>(`/ai/summarize`, {
-        method: 'POST',
-        body: {
-          content: `${detail.title}\n\n${detail.description ?? ''}`,
-          type: 'task',
-          workspaceId,
-        },
-      }),
-    onSuccess: (r) => toast.success(t('taskDetail.taskSummary'), { description: r.summary, duration: 10000 }),
-    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.aiUnavailable')),
-  })
+  // Stream an enriched task summary (recent activity, open subtasks, blockers,
+  // comments — assembled server-side from taskId) into a panel (Plan §7.5), with
+  // a non-streaming fallback to /ai/summarize.
+  async function runTaskSummary() {
+    if (summarizing) return
+    setSummarizing(true)
+    setSummaryText('')
+    try {
+      await streamAiSummary({ taskId, type: 'task', workspaceId }, (full) => setSummaryText(full))
+    } catch {
+      try {
+        const r = await api<{ summary: string }>(`/ai/summarize`, {
+          method: 'POST',
+          body: { taskId, type: 'task', workspaceId },
+        })
+        setSummaryText(r.summary)
+      } catch (err) {
+        setSummaryText(null)
+        toast.error(err instanceof ApiError ? err.message : t('taskDetail.aiUnavailable'))
+      }
+    } finally {
+      setSummarizing(false)
+    }
+  }
   const aiSuggestDeadline = useMutation({
     mutationFn: () =>
       api<{ suggestedDate: string; reasoning: string }>(`/ai/task/deadline`, {
@@ -989,6 +1049,8 @@ function OverviewPanel({
   useEffect(() => {
     setEditingDescription(false)
     setDescriptionDraft('')
+    setSummaryText(null)
+    setSummarizing(false)
   }, [taskId])
   const pendingInvitesQuery = useQuery({
     queryKey: ['workspace-invitations', workspaceId],
@@ -1034,8 +1096,8 @@ function OverviewPanel({
             </button>
             <button
               type="button"
-              disabled={aiSummarize.isPending}
-              onClick={() => aiSummarize.mutate()}
+              disabled={summarizing}
+              onClick={() => runTaskSummary()}
               className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
               title={t('taskDetail.summarizeTaskAi')}
             >
@@ -1043,6 +1105,41 @@ function OverviewPanel({
             </button>
           </div>
         </div>
+        {summaryText !== null && (
+          <div className="mb-2 rounded-md border border-accent/30 bg-accent/5 p-3 text-sm whitespace-pre-wrap">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent">
+                <Sparkles className="h-3 w-3" /> {t('taskDetail.taskSummary')}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={!summaryText}
+                  onClick={() => {
+                    if (summaryText) {
+                      navigator.clipboard.writeText(summaryText)
+                      toast.success(t('taskDetail.summaryCopied'))
+                    }
+                  }}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  title={t('taskDetail.copySummary')}
+                >
+                  <Copy className="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSummaryText(null)}
+                  className="text-muted-foreground hover:text-foreground"
+                  title={t('common.close')}
+                >
+                  <XIcon className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+            {summaryText || (summarizing ? t('taskDetail.summarizing') : '')}
+            {summarizing && <span className="inline-block w-1 h-3.5 bg-accent ml-0.5 align-middle animate-pulse" />}
+          </div>
+        )}
         {editingDescription ? (
           <div>
             <div className="mb-1.5 flex flex-wrap items-center gap-0.5">

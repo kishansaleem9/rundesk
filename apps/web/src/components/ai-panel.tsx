@@ -24,6 +24,9 @@ type Message = {
 
 type AiPanelProps = {
   workspaceId: string
+  /** Optional hint about where the user is (e.g. "list Backlog", "dashboard"),
+   * forwarded so the server grounds answers to the current view (Plan §7.15). */
+  currentView?: string
   onClose?: () => void
   className?: string
 }
@@ -38,7 +41,7 @@ const SUGGESTED_PROMPT_KEYS = [
   'aiPanel.suggestion.whatsBlocking',
 ] as const
 
-export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
+export function AiPanel({ workspaceId, currentView, onClose, className }: AiPanelProps) {
   const { t } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -79,7 +82,10 @@ export function AiPanel({ workspaceId, onClose, className }: AiPanelProps) {
         },
         body: JSON.stringify({
           messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
-          workspaceContext: `Workspace ID: ${workspaceId}`,
+          // Send the real workspaceId so the server builds a grounded context
+          // via buildWorkspaceContext (Plan §7.6), plus the current-view hint.
+          workspaceId,
+          currentView,
         }),
         signal: controller.signal,
       })

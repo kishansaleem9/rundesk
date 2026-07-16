@@ -406,7 +406,8 @@ export class TasksService {
     return next
   }
 
-  private async getOpenBlockers(taskId: string) {
+  // Public so the AI module can assemble enriched task-summary input (Plan §7.5).
+  async getOpenBlockers(taskId: string) {
     const directBlockedBy = await this.db
       .select({ blockerTaskId: taskDependencies.relatedTaskId })
       .from(taskDependencies)

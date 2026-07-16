@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Plus,
   MessageSquare,
+  X,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
@@ -24,6 +25,39 @@ type GeneratedTask = {
   subtasks: string[]
   priority: string
   estimatedHours?: number | null
+  customFieldValues?: Array<{ fieldName: string; value: string | number | boolean }>
+}
+
+// Editable working copy of a generated task (Plan §7.1) — user tweaks before save.
+type EditableTask = {
+  title: string
+  description: string
+  priority: TaskPriority
+  subtasks: string[]
+  estimatedHours: number | null
+}
+
+type GenCustomFieldDef = {
+  id: string
+  name: string
+  type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
+  isRequired: boolean
+  options: Array<{ label: string; value: string }> | null
+}
+
+type GenListOption = { value: string; label: string; projectId: string }
+
+/** Coerce an editable string into the shape the custom-field value API expects. */
+function coerceCustomFieldValue(
+  type: GenCustomFieldDef['type'],
+  raw: string,
+): string | number | boolean {
+  if (type === 'checkbox') return raw === 'true'
+  if (type === 'number' || type === 'money' || type === 'rating') {
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : 0
+  }
+  return raw
 }
 
 type ExtractedTask = {
@@ -134,37 +168,145 @@ export function AiPage() {
 function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const [prompt, setPrompt] = useState('')
-  const [result, setResult] = useState<GeneratedTask | null>(null)
+  const [targetListId, setTargetListId] = useState('')
+  const [result, setResult] = useState<EditableTask | null>(null)
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Destination lists across the workspace (space / project / list), each
+  // carrying its projectId so we can resolve the project's custom fields.
+  const listOptionsQuery = useQuery({
+    queryKey: ['ai-generate-lists', workspaceId],
+    queryFn: async () => {
+      const spaces = await api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`)
+      const options: GenListOption[] = []
+      for (const space of spaces) {
+        const projects = await api<Array<{ id: string; name: string }>>(`/projects/space/${space.id}`)
+        for (const project of projects) {
+          const lists = await api<Array<{ id: string; name: string }>>(`/lists/project/${project.id}`)
+          for (const list of lists) {
+            options.push({
+              value: list.id,
+              label: `${space.name} / ${project.name} / ${list.name}`,
+              projectId: project.id,
+            })
+          }
+        }
+      }
+      return options
+    },
+  })
+  const listOptions = listOptionsQuery.data ?? []
+  const selectedProjectId = listOptions.find((o) => o.value === targetListId)?.projectId ?? ''
+
+  // Custom fields defined on the chosen destination project (Plan §7.1) —
+  // resolved the same way the task-template instantiate path does.
+  const fieldsQuery = useQuery({
+    queryKey: ['ai-generate-fields', workspaceId, selectedProjectId],
+    queryFn: () =>
+      api<GenCustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${selectedProjectId}/custom-fields`),
+    enabled: Boolean(selectedProjectId),
+  })
+  const fields = fieldsQuery.data ?? []
 
   const generate = useMutation({
-    mutationFn: () => api<GeneratedTask>('/ai/task/generate', { method: 'POST', body: { prompt } }),
-    onSuccess: (data) => { setResult(data); setSaved(false) },
+    mutationFn: () =>
+      api<GeneratedTask>('/ai/task/generate', {
+        method: 'POST',
+        body: {
+          prompt,
+          workspaceId,
+          customFields: fields.map((f) => ({
+            name: f.name,
+            type: f.type,
+            options: f.options?.map((o) => o.label),
+          })),
+        },
+      }),
+    onSuccess: (data) => {
+      setResult({
+        title: data.title ?? '',
+        description: data.description ?? '',
+        priority: (['urgent', 'high', 'normal', 'low'].includes(data.priority)
+          ? data.priority
+          : 'normal') as TaskPriority,
+        subtasks: Array.isArray(data.subtasks) ? data.subtasks : [],
+        estimatedHours: data.estimatedHours ?? null,
+      })
+      // Pre-fill editable custom-field values from the AI's suggestions, matched
+      // to the project's definitions by name.
+      const prefill: Record<string, string> = {}
+      for (const cf of data.customFieldValues ?? []) {
+        const def = fields.find((f) => f.name === cf.fieldName)
+        if (!def) continue
+        let v = ''
+        if (def.type === 'checkbox') {
+          v = cf.value === true || String(cf.value).toLowerCase() === 'true' ? 'true' : 'false'
+        } else if (def.type === 'dropdown') {
+          const opt = (def.options ?? []).find(
+            (o) => o.value === String(cf.value) || o.label.toLowerCase() === String(cf.value).toLowerCase(),
+          )
+          v = opt?.value ?? ''
+        } else {
+          v = String(cf.value)
+        }
+        if (v !== '') prefill[def.id] = v
+      }
+      setFieldValues(prefill)
+      setSaved(false)
+      setSaveError(null)
+    },
   })
+
+  function updateSubtask(index: number, value: string) {
+    setResult((prev) => (prev ? { ...prev, subtasks: prev.subtasks.map((s, i) => (i === index ? value : s)) } : prev))
+  }
+  function removeSubtask(index: number) {
+    setResult((prev) => (prev ? { ...prev, subtasks: prev.subtasks.filter((_, i) => i !== index) } : prev))
+  }
+  function addSubtask() {
+    setResult((prev) => (prev ? { ...prev, subtasks: [...prev.subtasks, ''] } : prev))
+  }
 
   async function saveTask() {
     if (!result) return
+    if (!targetListId) {
+      setSaveError(t('ai.errorSelectList'))
+      return
+    }
     setSaving(true)
+    setSaveError(null)
     try {
-      // Get first available list in workspace
-      const spaces = await api<any[]>(`/spaces/workspace/${workspaceId}`)
-      if (!spaces.length) return
-      const projects = await api<any[]>(`/projects/space/${spaces[0].id}`)
-      if (!projects.length) return
-      const lists = await api<any[]>(`/lists/project/${projects[0].id}`)
-      if (!lists.length) return
-
-      await api('/tasks', {
+      const created = await api<{ id: string }>('/tasks', {
         method: 'POST',
         body: {
-          listId: lists[0].id,
-          title: result.title,
-          description: result.description,
+          listId: targetListId,
+          title: result.title.trim() || t('ai.untitledTask'),
+          description: result.description.trim() ? result.description : null,
           priority: result.priority,
         },
       })
+      // Create each non-empty subtask as a child task (Plan §7.1).
+      for (const st of result.subtasks.map((s) => s.trim()).filter(Boolean)) {
+        await api('/tasks', {
+          method: 'POST',
+          body: { listId: targetListId, parentTaskId: created.id, title: st },
+        })
+      }
+      // Set any custom-field values against the chosen project's definitions.
+      for (const def of fields) {
+        const raw = fieldValues[def.id]
+        if (raw == null || raw === '') continue
+        await api(`/workspaces/${workspaceId}/tasks/${created.id}/custom-fields/${def.id}`, {
+          method: 'PUT',
+          body: { value: coerceCustomFieldValue(def.type, raw) },
+        })
+      }
       setSaved(true)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : t('ai.taskCreationFailed'))
     } finally {
       setSaving(false)
     }
@@ -175,9 +317,27 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
       <div className="space-y-4">
         <div>
           <h2 className="font-semibold mb-1">{t('ai.generateTitle')}</h2>
-          <p className="text-sm text-muted-foreground">
-            {t('ai.generateDesc')}
-          </p>
+          <p className="text-sm text-muted-foreground">{t('ai.generateDesc')}</p>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm font-medium">{t('ai.destinationList')}</label>
+          <select
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            value={targetListId}
+            onChange={(e) => {
+              setTargetListId(e.target.value)
+              setFieldValues({})
+            }}
+          >
+            <option value="">{t('ai.selectDestinationList')}</option>
+            {listOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-muted-foreground">{t('ai.generateListHint')}</p>
         </div>
 
         <div className="flex gap-2">
@@ -190,81 +350,171 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
             }}
             className="flex-1"
           />
-          <Button
-            onClick={() => generate.mutate()}
-            disabled={!prompt.trim() || generate.isPending}
-          >
+          <Button onClick={() => generate.mutate()} disabled={!prompt.trim() || generate.isPending}>
             {generate.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
           </Button>
         </div>
 
         {result && (
-          <Card className="p-4 space-y-3">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="font-semibold">{result.title}</p>
-                <span
-                  className={cn(
-                    'text-xs px-2 py-0.5 rounded-full font-medium',
-                    result.priority === 'urgent' && 'bg-red-100 text-red-700',
-                    result.priority === 'high' && 'bg-orange-100 text-orange-700',
-                    result.priority === 'normal' && 'bg-blue-100 text-blue-700',
-                    result.priority === 'low' && 'bg-gray-100 text-gray-700',
-                  )}
-                >
-                  {t(priorityLabelKey(result.priority))}
-                </span>
-                {result.estimatedHours && (
-                  <span className="ml-2 text-xs text-muted-foreground">~{result.estimatedHours}h</span>
-                )}
-              </div>
+          <Card className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('ai.editBeforeSave')}</p>
+              {result.estimatedHours ? (
+                <span className="text-xs text-muted-foreground">~{result.estimatedHours}h</span>
+              ) : null}
             </div>
 
-            {result.description && (
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{result.description}</p>
-            )}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('ai.fieldTitle')}</label>
+              <Input value={result.title} onChange={(e) => setResult({ ...result, title: e.target.value })} />
+            </div>
 
-            {result.subtasks.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">{t('ai.subtasks')}</p>
-                <ul className="space-y-1">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('ai.fieldPriority')}</label>
+              <select
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                value={result.priority}
+                onChange={(e) => setResult({ ...result, priority: e.target.value as TaskPriority })}
+              >
+                {PRIORITY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {t(opt.labelKey)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">{t('ai.fieldDescription')}</label>
+              <textarea
+                value={result.description}
+                onChange={(e) => setResult({ ...result, description: e.target.value })}
+                rows={4}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground">{t('ai.subtasks')}</label>
+                <Button variant="ghost" size="sm" onClick={addSubtask}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> {t('ai.addSubtask')}
+                </Button>
+              </div>
+              {result.subtasks.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t('ai.noSubtasks')}</p>
+              ) : (
+                <ul className="space-y-1.5">
                   {result.subtasks.map((s, i) => (
-                    <li key={i} className="text-sm flex items-start gap-2">
-                      <Plus className="h-3.5 w-3.5 shrink-0 mt-0.5 text-muted-foreground" />
-                      {s}
+                    <li key={i} className="flex items-center gap-2">
+                      <Input value={s} onChange={(e) => updateSubtask(i, e.target.value)} className="flex-1 text-sm" />
+                      <button
+                        type="button"
+                        onClick={() => removeSubtask(i)}
+                        className="text-muted-foreground hover:text-destructive"
+                        title={t('ai.removeSubtask')}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </li>
                   ))}
                 </ul>
+              )}
+            </div>
+
+            {fields.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">{t('ai.customFields')}</label>
+                {fields.map((def) => (
+                  <div key={def.id} className="space-y-1">
+                    <div className="text-[11px] text-muted-foreground">
+                      {def.name}
+                      {def.isRequired && <span className="text-destructive"> *</span>}
+                    </div>
+                    <GenFieldInput
+                      def={def}
+                      value={fieldValues[def.id] ?? ''}
+                      onChange={(v) => setFieldValues((prev) => ({ ...prev, [def.id]: v }))}
+                    />
+                  </div>
+                ))}
               </div>
             )}
 
-            <div className="flex gap-2 pt-1">
-              <Button
-                size="sm"
-                onClick={saveTask}
-                disabled={saving || saved}
-              >
+            <div className="flex items-center gap-2 pt-1">
+              <Button size="sm" onClick={saveTask} disabled={saving || saved || !targetListId}>
                 {saved ? (
-                  <><CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-500" /> {t('ai.saved')}</>
+                  <>
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-500" /> {t('ai.saved')}
+                  </>
                 ) : saving ? (
-                  <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> {t('common.saving')}</>
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> {t('common.saving')}
+                  </>
                 ) : (
                   t('ai.saveAsTask')
                 )}
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => generate.mutate()}
-              >
+              <Button variant="ghost" size="sm" onClick={() => generate.mutate()} disabled={generate.isPending}>
                 {t('ai.regenerate')}
               </Button>
+              {!targetListId && (
+                <span className="text-xs text-amber-700 dark:text-amber-300">{t('ai.selectListToEnable')}</span>
+              )}
             </div>
+            {saveError && <p className="text-xs text-destructive">{saveError}</p>}
           </Card>
         )}
       </div>
     </div>
   )
+}
+
+function GenFieldInput({
+  def,
+  value,
+  onChange,
+}: {
+  def: GenCustomFieldDef
+  value: string
+  onChange: (value: string) => void
+}) {
+  const { t } = useTranslation()
+  if (def.type === 'checkbox') {
+    return (
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={value === 'true'} onChange={(e) => onChange(e.target.checked ? 'true' : 'false')} />
+        {t('ai.enabled')}
+      </label>
+    )
+  }
+  if (def.type === 'dropdown') {
+    return (
+      <select
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">{t('ai.chooseValue')}</option>
+        {(def.options ?? []).map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    )
+  }
+  const inputType =
+    def.type === 'number' || def.type === 'money' || def.type === 'rating'
+      ? 'number'
+      : def.type === 'date'
+        ? 'date'
+        : def.type === 'email'
+          ? 'email'
+          : def.type === 'url'
+            ? 'url'
+            : 'text'
+  return <Input type={inputType} value={value} onChange={(e) => onChange(e.target.value)} className="text-sm" />
 }
 
 // ─── Meeting Notes ────────────────────────────────────────────────────────────

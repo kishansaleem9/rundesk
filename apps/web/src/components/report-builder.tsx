@@ -18,7 +18,56 @@ import {
   Trash2,
 } from 'lucide-react'
 import { api, downloadFilePost } from '../lib/api'
+import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+
+/**
+ * Stream a summary from the SSE endpoint (Plan §7.5), invoking `onDelta` with the
+ * accumulated text as tokens arrive. Resolves with the full text. Throws on
+ * transport/model errors so callers can fall back to the non-streaming route.
+ */
+async function streamAiSummary(
+  body: Record<string, unknown>,
+  onDelta: (full: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const token = useAuthStore.getState().accessToken
+  const res = await fetch('/api/v1/ai/summarize/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+    signal,
+  })
+  if (!res.ok || !res.body) throw new Error('summary stream failed')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let acc = ''
+  let buffer = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6)
+      if (data === '[DONE]') continue
+      let parsed: { delta?: string; error?: string }
+      try {
+        parsed = JSON.parse(data)
+      } catch {
+        continue
+      }
+      if (parsed.error) throw new Error(parsed.error)
+      if (parsed.delta) {
+        acc += parsed.delta
+        onDelta(acc)
+      }
+    }
+  }
+  return acc
+}
 
 type Metric = { id: string; labelKey: TranslationKey; agg: 'count' | 'sum' | 'avg' | 'rate' }
 type Dimension = { id: string; labelKey: TranslationKey }
@@ -97,6 +146,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
   const [days, setDays] = useState(30)
   const [activeSavedId, setActiveSavedId] = useState<string | null>(null)
   const [aiSummary, setAiSummary] = useState<string | null>(null)
+  const [aiSummarizing, setAiSummarizing] = useState(false)
   const [draftFilter, setDraftFilter] = useState<Filter>({ field: 'priority', op: 'is', value: '' })
 
   const dimension = selectedDimensions[0] ?? 'assignee'
@@ -149,15 +199,30 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
     },
   })
 
-  const aiSummarize = useMutation({
-    mutationFn: () =>
-      api<{ summary: string }>('/ai/summarize', {
-        method: 'POST',
-        body: { content: reportAsText(name, result), type: 'project' },
-      }),
-    onSuccess: (r) => setAiSummary(r.summary),
-    onError: () => toast.error(t('reportBuilder.toastAiUnavailable')),
-  })
+  // Stream the project summary token-by-token into the panel (Plan §7.5), with a
+  // non-streaming fallback to /ai/summarize if the stream can't be established.
+  async function runAiSummary() {
+    if (!result || aiSummarizing) return
+    const content = reportAsText(name, result)
+    setAiSummarizing(true)
+    setAiSummary('')
+    try {
+      await streamAiSummary({ content, type: 'project', workspaceId }, (full) => setAiSummary(full))
+    } catch {
+      try {
+        const r = await api<{ summary: string }>('/ai/summarize', {
+          method: 'POST',
+          body: { content, type: 'project', workspaceId },
+        })
+        setAiSummary(r.summary)
+      } catch {
+        setAiSummary(null)
+        toast.error(t('reportBuilder.toastAiUnavailable'))
+      }
+    } finally {
+      setAiSummarizing(false)
+    }
+  }
 
   function toggleMetric(id: string) {
     setSelectedMetrics((arr) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]))
@@ -388,8 +453,8 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => aiSummarize.mutate()} disabled={aiSummarize.isPending || !result}>
-              {aiSummarize.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} {t('reportBuilder.aiSummarize')}
+            <Button variant="ghost" size="sm" onClick={() => runAiSummary()} disabled={aiSummarizing || !result}>
+              {aiSummarizing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} {t('reportBuilder.aiSummarize')}
             </Button>
             <Button variant="outline" size="sm" onClick={exportPdf}>
               {t('reportBuilder.exportPdf')}
@@ -415,12 +480,15 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
             </Badge>
           </div>
 
-          {aiSummary && (
-            <div className="mb-5 rounded-lg border border-accent/30 bg-accent/5 p-4 text-sm">
+          {aiSummary !== null && (
+            <div className="mb-5 rounded-lg border border-accent/30 bg-accent/5 p-4 text-sm whitespace-pre-wrap">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-accent mb-1">
                 <Sparkles className="h-3.5 w-3.5" /> {t('reportBuilder.aiSummary')}
               </div>
               {aiSummary}
+              {aiSummarizing && (
+                <span className="inline-block w-1 h-3.5 bg-accent ml-0.5 align-middle animate-pulse" />
+              )}
             </div>
           )}
 

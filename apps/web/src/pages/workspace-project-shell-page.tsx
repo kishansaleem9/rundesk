@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, Card, cn } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity } from 'lucide-react'
+import { Button, Input, Card, cn, toast } from '@rundesk/ui'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -207,7 +207,7 @@ function ProjectHome() {
 
       <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} />
 
-      <ProjectActivitySection projectId={projectId} />
+      <ProjectActivitySection projectId={projectId} workspaceId={workspaceId} projectName={project?.name} />
 
       <ProjectTimeSettingsSection projectId={projectId} workspaceId={workspaceId} />
 
@@ -430,7 +430,26 @@ function activityIcon(action: string): string {
   return '•'
 }
 
-function ProjectActivitySection({ projectId }: { projectId: string }) {
+function activityAsText(activity: ProjectActivity[], projectName?: string | null): string {
+  const header = `Recent activity for project "${projectName ?? 'this project'}":`
+  const lines = activity.slice(0, 30).map((a) => {
+    const actor = a.actor?.displayName ?? a.actor?.email ?? 'Someone'
+    const action = a.action.replace(/_/g, ' ')
+    const on = a.taskTitle ? ` on "${a.taskTitle}"` : ''
+    return `- ${actor} ${action}${on}`
+  })
+  return `${header}\n${lines.join('\n')}`
+}
+
+function ProjectActivitySection({
+  projectId,
+  workspaceId,
+  projectName,
+}: {
+  projectId: string
+  workspaceId: string
+  projectName?: string | null
+}) {
   const { t } = useTranslation()
   const { data: activity = [], isLoading } = useQuery({
     queryKey: ['project-activity', projectId],
@@ -438,9 +457,43 @@ function ProjectActivitySection({ projectId }: { projectId: string }) {
   })
   const label = (action: string) => action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 
+  // Draft a status update from recent project activity (Plan §7.9). Shown for
+  // the user to copy / paste — the summarize AI turns the activity feed into prose.
+  const [draft, setDraft] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const draftUpdate = useMutation({
+    mutationFn: () =>
+      api<{ summary: string }>('/ai/summarize', {
+        method: 'POST',
+        body: { content: activityAsText(activity, projectName), type: 'project', workspaceId },
+      }),
+    onSuccess: (r) => {
+      setDraft(r.summary)
+      setCopied(false)
+    },
+    onError: () => toast.error(t('projectShell.draftUpdateError')),
+  })
+
   return (
     <section>
-      <WorkSectionTitle>
+      <WorkSectionTitle
+        action={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => draftUpdate.mutate()}
+            disabled={draftUpdate.isPending || activity.length === 0}
+            title={t('projectShell.draftUpdateTitle')}
+          >
+            {draftUpdate.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+            )}
+            {t('projectShell.draftUpdate')}
+          </Button>
+        }
+      >
         <span className="flex items-center gap-2">
           <Activity className="h-4 w-4 text-muted-foreground" />
           {t('projectShell.recentActivity')}
@@ -449,6 +502,40 @@ function ProjectActivitySection({ projectId }: { projectId: string }) {
       <p className="text-[13px] text-muted-foreground mb-4 -mt-1">
         {t('projectShell.recentActivityDesc')}
       </p>
+
+      {draft !== null && (
+        <Card className="mb-4 border-accent/30 bg-accent/5 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-accent">
+              <Sparkles className="h-3.5 w-3.5" />
+              {t('projectShell.draftUpdateHeading')}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  navigator.clipboard.writeText(draft)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1500)
+                }}
+              >
+                <Copy className="h-3.5 w-3.5 mr-1" />
+                {copied ? t('projectShell.copied') : t('projectShell.copy')}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setDraft(null)}
+                className="text-muted-foreground hover:text-foreground"
+                title={t('common.close')}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{draft}</p>
+        </Card>
+      )}
       {isLoading ? (
         <Card className="p-4 text-sm text-muted-foreground border-border/80">{t('common.loading')}</Card>
       ) : activity.length === 0 ? (

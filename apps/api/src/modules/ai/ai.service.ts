@@ -2,12 +2,137 @@ import { Injectable, Inject, HttpException, HttpStatus } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
-import { and, eq, gte, lte, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, lte, ne, or, sql } from 'drizzle-orm'
 import { aiUsage, workspaces, workspaceMembers, spaces, projects, lists, tasks, taskAssignees } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { TasksService } from '../tasks/tasks.service'
 
 export type AiCtx = { userId?: string; workspaceId?: string }
+
+/** Format a Date | string | null to YYYY-MM-DD, or '' when absent/invalid. */
+function toDayString(value: Date | string | null | undefined): string {
+  if (!value) return ''
+  const d = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
+}
+
+function truncate(input: string, max: number): string {
+  const t = (input ?? '').trim().replace(/\s+/g, ' ')
+  return t.length > max ? `${t.slice(0, max)}…` : t
+}
+
+export type WorkspaceContextData = {
+  workspaceName: string
+  role: string
+  counts: { spaces: number; projects: number; lists: number; openTasks: number }
+  spaces: Array<{ name: string; projects: string[] }>
+  openTasks: Array<{ title: string; dueDate: Date | string | null; priority: string }>
+  history: Array<{ title: string; status: string; updatedAt: Date | string | null }>
+  currentView?: string
+}
+
+/**
+ * Assemble the grounded workspace context string (Plan §7.6/§7.15). Pure and
+ * token-bounded: caps structure to 15 spaces × 8 projects, 15 open tasks, and
+ * 40 history rows. Extracted from the DB read so it can be unit-tested directly.
+ */
+export function formatWorkspaceContext(data: WorkspaceContextData): string {
+  const c = data.counts
+  const lines: string[] = [`Workspace: ${data.workspaceName}`, `Your role: ${data.role}`]
+  if (data.currentView) lines.push(`Current view: ${data.currentView}`)
+  lines.push(
+    `Workspace totals: ${c.spaces} spaces, ${c.projects} projects, ${c.lists} lists, ${c.openTasks} open tasks`,
+  )
+
+  if (data.spaces.length) {
+    const structure = data.spaces
+      .slice(0, 15)
+      .map((s) => {
+        const shown = s.projects.slice(0, 8)
+        const extra = s.projects.length > shown.length ? `, +${s.projects.length - shown.length} more` : ''
+        return `- ${s.name}${shown.length ? ` — projects: ${shown.join(', ')}${extra}` : ''}`
+      })
+      .join('\n')
+    lines.push(`Workspace structure:\n${structure}`)
+  }
+
+  if (data.openTasks.length) {
+    const mine = data.openTasks
+      .slice(0, 15)
+      .map((t) => {
+        const due = toDayString(t.dueDate)
+        return `- ${t.title}${due ? ` (due ${due})` : ''} [${t.priority}]`
+      })
+      .join('\n')
+    lines.push(`Your open assigned tasks:\n${mine}`)
+  } else {
+    lines.push('You have no open assigned tasks.')
+  }
+
+  if (data.history.length) {
+    const hist = data.history
+      .slice(0, 40)
+      .map((t) => {
+        const when = toDayString(t.updatedAt)
+        return `- ${t.title} [${t.status}]${when ? ` (updated ${when})` : ''}`
+      })
+      .join('\n')
+    lines.push(`Recent task history (last 90 days, tasks you're involved in):\n${hist}`)
+  }
+
+  return lines.join('\n')
+}
+
+export type TaskSummaryInput = {
+  title: string
+  description: string | null
+  status?: string | null
+  priority?: string | null
+  activity: Array<{ action: string; actor: string | null }>
+  subtasks: Array<{ title: string; status: string }>
+  blockers: Array<{ title: string; status: string }>
+  comments: Array<{ author: string | null; body: string }>
+}
+
+/**
+ * Assemble the enriched task-summary prompt input (Plan §7.5). Pure and bounded:
+ * caps subtasks (12), blockers (10), comments (last 6, trimmed), activity (8).
+ * Extracted from the DB reads so it can be unit-tested directly.
+ */
+export function formatTaskSummaryInput(input: TaskSummaryInput): string {
+  const sections: string[] = [`Task: ${input.title || '(untitled)'}`]
+  if (input.status) sections.push(`Status: ${input.status}`)
+  if (input.priority) sections.push(`Priority: ${input.priority}`)
+  sections.push(`Description:\n${input.description?.trim() ? input.description.trim() : '(no description)'}`)
+
+  if (input.subtasks.length) {
+    const shown = input.subtasks.slice(0, 12)
+    sections.push(
+      `Open subtasks (${input.subtasks.length}):\n${shown.map((s) => `- ${s.title} [${s.status}]`).join('\n')}`,
+    )
+  }
+  if (input.blockers.length) {
+    const shown = input.blockers.slice(0, 10)
+    sections.push(
+      `Open blockers (${input.blockers.length}):\n${shown.map((b) => `- ${b.title} [${b.status}]`).join('\n')}`,
+    )
+  }
+  if (input.comments.length) {
+    const recent = input.comments.slice(-6)
+    sections.push(
+      `Recent comments:\n${recent.map((cm) => `- ${cm.author ?? 'Someone'}: ${truncate(cm.body, 240)}`).join('\n')}`,
+    )
+  }
+  if (input.activity.length) {
+    const recent = input.activity.slice(0, 8)
+    sections.push(
+      `Recent activity:\n${recent.map((a) => `- ${a.actor ?? 'Someone'} ${a.action.replace(/_/g, ' ')}`).join('\n')}`,
+    )
+  }
+
+  return sections.join('\n\n')
+}
 
 // Rough per-million-token pricing (USD) for cost *estimation* in reports.
 const MODEL_PRICING: Record<string, { in: number; out: number }> = {
@@ -26,6 +151,7 @@ export class AiService {
   constructor(
     private config: ConfigService,
     @Inject(DB_TOKEN) private db: Db,
+    private tasks: TasksService,
   ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
@@ -164,13 +290,27 @@ export class AiService {
   }
 
   // ─── Task generation from a natural language prompt ───────────────────────
-  async generateTask(prompt: string, context?: string, ctx: AiCtx = {}): Promise<{
+  async generateTask(
+    prompt: string,
+    context?: string,
+    ctx: AiCtx = {},
+    customFields?: Array<{ name: string; type: string; options?: string[] }>,
+  ): Promise<{
     title: string
     description: string
     subtasks: string[]
     priority: 'urgent' | 'high' | 'normal' | 'low'
     estimatedHours?: number
+    customFieldValues?: Array<{ fieldName: string; value: string | number | boolean }>
   }> {
+    // When the destination project has custom fields, let the model suggest
+    // values for them (resolved by name on save, like the task-template path).
+    const fieldsBlock = customFields?.length
+      ? `\nThe destination project has these custom fields — suggest values ONLY for fields you can confidently fill, as a "customFieldValues" array of { "fieldName": string, "value": string|number|boolean }. Use the EXACT field name. Omit fields you cannot fill.\n${customFields
+          .map((f) => `- ${f.name} (${f.type}${f.options?.length ? `: ${f.options.join(', ')}` : ''})`)
+          .join('\n')}`
+      : ''
+
     const systemPrompt = `You are a project management assistant for Rundesk.
 When given a natural language description, generate a structured task definition.
 Respond ONLY with valid JSON matching this exact shape:
@@ -179,9 +319,9 @@ Respond ONLY with valid JSON matching this exact shape:
   "description": "string (detailed markdown description)",
   "subtasks": ["string", ...],
   "priority": "urgent" | "high" | "normal" | "low",
-  "estimatedHours": number | null
+  "estimatedHours": number | null${customFields?.length ? ',\n  "customFieldValues": [{ "fieldName": "string", "value": "string|number|boolean" }]' : ''}
 }
-${context ? `\nWorkspace context:\n${context}` : ''}`
+${context ? `\nWorkspace context:\n${context}` : ''}${fieldsBlock}`
 
     const response = await this.complete('task.generate', ctx, {
       model: 'claude-haiku-4-5',
@@ -368,13 +508,20 @@ Current date: ${new Date().toISOString().split('T')[0]}`
   }
 
   /**
-   * Build a real workspace context string for the chatbot (Plan §7.6): the
-   * user's role, space/project/task counts, and their open assigned tasks —
-   * so answers are grounded instead of a workspace-ID stub.
+   * Build a real workspace context string for the chatbot (Plan §7.6/§7.15):
+   * the user's role, workspace structure (space/project/list counts + names),
+   * their open assigned tasks, and their recent task history (last 90 days) —
+   * plus an optional current-view hint from the caller — so answers are grounded
+   * instead of a workspace-ID stub. Token-bounded via `formatWorkspaceContext`.
    */
-  async buildWorkspaceContext(workspaceId: string, userId: string): Promise<string> {
+  async buildWorkspaceContext(
+    workspaceId: string,
+    userId: string,
+    opts: { currentView?: string } = {},
+  ): Promise<string> {
     try {
-      const [[wsRow], [roleRow], [counts], openTasks] = await Promise.all([
+      const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+      const [[wsRow], [roleRow], [counts], spaceRows, projectRows, openTasks, history] = await Promise.all([
         this.db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1),
         this.db
           .select({ role: workspaceMembers.role })
@@ -385,6 +532,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
           .select({
             spaces: sql<number>`count(distinct ${spaces.id})::int`,
             projects: sql<number>`count(distinct ${projects.id})::int`,
+            lists: sql<number>`count(distinct ${lists.id})::int`,
             openTasks: sql<number>`count(distinct case when ${tasks.statusCategory} <> 'closed' and ${tasks.isArchived} = false then ${tasks.id} end)::int`,
           })
           .from(spaces)
@@ -392,6 +540,19 @@ Current date: ${new Date().toISOString().split('T')[0]}`
           .leftJoin(lists, eq(lists.projectId, projects.id))
           .leftJoin(tasks, eq(tasks.listId, lists.id))
           .where(eq(spaces.workspaceId, workspaceId)),
+        this.db
+          .select({ id: spaces.id, name: spaces.name })
+          .from(spaces)
+          .where(eq(spaces.workspaceId, workspaceId))
+          .orderBy(asc(spaces.name))
+          .limit(20),
+        this.db
+          .select({ id: projects.id, name: projects.name, spaceId: projects.spaceId })
+          .from(projects)
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(eq(spaces.workspaceId, workspaceId))
+          .orderBy(asc(projects.name))
+          .limit(60),
         this.db
           .select({ title: tasks.title, dueDate: tasks.dueDate, priority: tasks.priority })
           .from(tasks)
@@ -407,19 +568,150 @@ Current date: ${new Date().toISOString().split('T')[0]}`
               ne(tasks.statusCategory, 'closed'),
             ),
           )
+          .orderBy(asc(tasks.dueDate))
           .limit(15),
+        // Task history (Plan §7.15): recently updated/completed tasks the user is
+        // involved in (creator or assignee) within the last 90 days.
+        this.db
+          .select({ title: tasks.title, status: tasks.status, updatedAt: tasks.updatedAt })
+          .from(tasks)
+          .innerJoin(lists, eq(lists.id, tasks.listId))
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(
+            and(
+              eq(spaces.workspaceId, workspaceId),
+              gte(tasks.updatedAt, cutoff),
+              or(
+                eq(tasks.createdById, userId),
+                sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${userId})`,
+              ),
+            ),
+          )
+          .orderBy(desc(tasks.updatedAt))
+          .limit(40),
       ])
-      const mine = openTasks
-        .map((t) => `- ${t.title}${t.dueDate ? ` (due ${new Date(t.dueDate).toISOString().slice(0, 10)})` : ''} [${t.priority}]`)
-        .join('\n')
-      return [
-        `Workspace: ${wsRow?.name ?? 'Unknown'}`,
-        `Your role: ${roleRow?.role ?? 'member'}`,
-        `Workspace totals: ${counts?.spaces ?? 0} spaces, ${counts?.projects ?? 0} projects, ${counts?.openTasks ?? 0} open tasks`,
-        openTasks.length ? `Your open assigned tasks:\n${mine}` : 'You have no open assigned tasks.',
-      ].join('\n')
+
+      const projectsBySpace = new Map<string, string[]>()
+      for (const p of projectRows) {
+        const list = projectsBySpace.get(p.spaceId) ?? []
+        list.push(p.name)
+        projectsBySpace.set(p.spaceId, list)
+      }
+      return formatWorkspaceContext({
+        workspaceName: wsRow?.name ?? 'Unknown',
+        role: roleRow?.role ?? 'member',
+        counts: {
+          spaces: counts?.spaces ?? 0,
+          projects: counts?.projects ?? 0,
+          lists: counts?.lists ?? 0,
+          openTasks: counts?.openTasks ?? 0,
+        },
+        spaces: spaceRows.map((s) => ({ name: s.name, projects: projectsBySpace.get(s.id) ?? [] })),
+        openTasks,
+        history,
+        currentView: opts.currentView,
+      })
     } catch {
       return `Workspace ID: ${workspaceId}`
+    }
+  }
+
+  /**
+   * Assemble an enriched summary input for a task (Plan §7.5): title, status,
+   * priority and description plus recent activity, open subtasks, open blockers,
+   * and recent comments — all read via TasksService. Bounded for token safety by
+   * `formatTaskSummaryInput`.
+   */
+  async buildTaskSummaryInput(taskId: string): Promise<string> {
+    const [[taskRow], activity, subtasks, blockers, comments] = await Promise.all([
+      this.db
+        .select({
+          title: tasks.title,
+          description: tasks.description,
+          status: tasks.status,
+          priority: tasks.priority,
+        })
+        .from(tasks)
+        .where(eq(tasks.id, taskId))
+        .limit(1),
+      this.tasks.listActivity(taskId, 12),
+      this.tasks.listSubtasks(taskId),
+      this.tasks.getOpenBlockers(taskId),
+      this.tasks.listComments(taskId),
+    ])
+    return formatTaskSummaryInput({
+      title: taskRow?.title ?? '',
+      description: taskRow?.description ?? null,
+      status: taskRow?.status ?? null,
+      priority: taskRow?.priority ?? null,
+      activity: activity.map((a) => ({
+        action: a.action,
+        actor: a.actor?.displayName ?? a.actor?.email ?? null,
+      })),
+      subtasks: subtasks
+        .filter((s) => s.statusCategory !== 'closed')
+        .map((s) => ({ title: s.title, status: s.status })),
+      blockers: blockers.map((b) => ({ title: b.title, status: b.status })),
+      comments: (comments as Array<{ author?: { displayName?: string | null; email?: string | null } | null; body?: string | null }>).map((cm) => ({
+        author: cm.author?.displayName ?? cm.author?.email ?? null,
+        body: cm.body ?? '',
+      })),
+    })
+  }
+
+  /**
+   * Streaming task/project summary (Plan §7.5) — mirrors `chatStream`'s SSE
+   * framing (`{delta}` / `[DONE]` / `{error}`) so the client renders tokens as
+   * they arrive. Uses the same model as the non-streaming `summarize`.
+   */
+  async summarizeStream(
+    content: string,
+    type: 'task' | 'project',
+    res: Response,
+    ctx: AiCtx = {},
+  ): Promise<void> {
+    await this.assertWithinRateLimit(ctx)
+
+    const systemPrompt = `You are a concise summarizer for Rundesk.
+Write a clear summary of the given ${type} in plain text (3-5 sentences).
+Focus on the key goals, current status, recent activity, and any blockers or risks.`
+
+    const reply = res as any
+    if (typeof reply.hijack === 'function') reply.hijack()
+    const raw = reply.raw ?? reply
+    raw.setHeader('Content-Type', 'text/event-stream')
+    raw.setHeader('Cache-Control', 'no-cache')
+    raw.setHeader('Connection', 'keep-alive')
+    raw.flushHeaders?.()
+
+    try {
+      const stream = this.claude.messages.stream({
+        model: 'claude-haiku-4-5',
+        max_tokens: 512,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        messages: [{ role: 'user', content: content || `(no ${type} content provided)` }],
+      })
+
+      for await (const chunk of stream) {
+        if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+          raw.write(`data: ${JSON.stringify({ delta: chunk.delta.text })}\n\n`)
+        }
+      }
+      const final = await stream.finalMessage().catch(() => null)
+      void this.recordUsage(
+        'summarize',
+        'claude-haiku-4-5',
+        ctx,
+        final?.usage?.input_tokens ?? 0,
+        final?.usage?.output_tokens ?? 0,
+      )
+      raw.write('data: [DONE]\n\n')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'AI request failed'
+      raw.write(`data: ${JSON.stringify({ error: message })}\n\n`)
+    } finally {
+      raw.end()
     }
   }
 
