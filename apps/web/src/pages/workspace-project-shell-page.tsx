@@ -1,8 +1,20 @@
 import { useState } from 'react'
-import { Outlet, useMatches, useParams } from '@tanstack/react-router'
+import { Outlet, useMatches, useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, Card, Badge, cn, toast } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, Check, HeartPulse, Globe, ExternalLink } from 'lucide-react'
+import {
+  Button,
+  Input,
+  Card,
+  Badge,
+  cn,
+  toast,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@rundesk/ui'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, Check, HeartPulse, Globe, ExternalLink, MoreHorizontal, Pencil, Archive } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -14,6 +26,7 @@ import {
   WorkSectionTitle,
 } from '../components/work/work-ui'
 import { ContainerMembersSheet } from '../components/container-members-sheet'
+import { ContainerEditDialog, type ContainerEditValues } from '../components/container-edit-dialog'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
 
 type List = {
@@ -37,6 +50,7 @@ export function ProjectShell() {
 
 function ProjectHome() {
   const { t, tCount } = useTranslation()
+  const navigate = useNavigate()
   const { workspaceId, spaceId, projectId } = useParams({
     from: '/app/$workspaceId/$spaceId/$projectId',
   })
@@ -46,6 +60,7 @@ function ProjectHome() {
   const [newListDescription, setNewListDescription] = useState('')
   const [membersOpen, setMembersOpen] = useState(false)
   const [statusesOpen, setStatusesOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [dragListId, setDragListId] = useState<string | null>(null)
   const [showSuggest, setShowSuggest] = useState(false)
 
@@ -54,6 +69,58 @@ function ProjectHome() {
     queryFn: () => api<Project[]>(`/projects/space/${spaceId}`),
   })
   const project = projects.find((p) => p.id === projectId)
+
+  // §2/§13.4 — rename + edit description. PUT /projects/:id accepts a partial
+  // { name, description }; refresh the space's project list, this project's
+  // record, and the sidebar tree.
+  const editProject = useMutation({
+    mutationFn: (values: ContainerEditValues) =>
+      api(`/projects/${projectId}`, { method: 'PUT', body: values }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['projects', spaceId] })
+      qc.invalidateQueries({ queryKey: ['project', projectId] })
+      qc.invalidateQueries({ queryKey: ['space-tree'] })
+      setEditOpen(false)
+    },
+    onError: () => toast.error(t('container.saveError')),
+  })
+
+  // §2/§13.4 — DELETE /projects/:id archives the project (restorable from the
+  // space page); return to the space once it's gone from this route.
+  const archiveProject = useMutation({
+    mutationFn: () => api(`/projects/${projectId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['projects', spaceId] })
+      qc.invalidateQueries({ queryKey: ['projects-archived', spaceId] })
+      qc.invalidateQueries({ queryKey: ['space-tree'] })
+      navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId } })
+    },
+    onError: () => toast.error(t('container.deleteError')),
+  })
+
+  // §2/§13.4 — list rename + delete. The list being renamed is held in state so a
+  // single dialog serves the whole grid; delete archives via DELETE /lists/:id.
+  const [renameList, setRenameList] = useState<{ id: string; name: string } | null>(null)
+  const invalidateLists = () => {
+    qc.invalidateQueries({ queryKey: ['lists', projectId] })
+    qc.invalidateQueries({ queryKey: ['project-lists', projectId] })
+    qc.invalidateQueries({ queryKey: ['space-tree'] })
+  }
+  const renameListMutation = useMutation({
+    mutationFn: ({ id, values }: { id: string; values: ContainerEditValues }) =>
+      api(`/lists/${id}`, { method: 'PUT', body: values }),
+    onSuccess: (_data, { id }) => {
+      invalidateLists()
+      qc.invalidateQueries({ queryKey: ['list-meta', id] })
+      setRenameList(null)
+    },
+    onError: () => toast.error(t('container.saveError')),
+  })
+  const deleteListMutation = useMutation({
+    mutationFn: (id: string) => api(`/lists/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidateLists,
+    onError: () => toast.error(t('container.deleteError')),
+  })
 
   const { data: lists = [], isLoading } = useQuery({
     queryKey: ['lists', projectId],
@@ -127,6 +194,36 @@ function ProjectHome() {
             <Plus className="h-3.5 w-3.5 mr-1.5" />
             {showCreateList ? t('common.cancel') : t('projectShell.addList')}
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="px-2"
+                aria-label={t('nav.actionsFor', { name: project?.name ?? '' })}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                <Pencil className="h-3.5 w-3.5" />
+                {t('project.editAction')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => {
+                  if (window.confirm(t('project.archiveConfirm', { name: project?.name ?? '' }))) {
+                    archiveProject.mutate()
+                  }
+                }}
+              >
+                <Archive className="h-3.5 w-3.5" />
+                {t('project.archiveAction')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       }
     >
@@ -206,7 +303,7 @@ function ProjectHome() {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => handleListDrop(list.id)}
                 onDragEnd={() => setDragListId(null)}
-                className={cn('cursor-grab active:cursor-grabbing', dragListId === list.id && 'opacity-50')}
+                className={cn('relative group cursor-grab active:cursor-grabbing', dragListId === list.id && 'opacity-50')}
                 title={t('projectShell.dragToReorder')}
               >
                 <ListCard
@@ -215,6 +312,40 @@ function ProjectHome() {
                   spaceId={spaceId}
                   projectId={projectId}
                 />
+                {/* Rename / delete overlay — sibling of the card Link so it never
+                    triggers navigation (Plan §2/§13.4). */}
+                <div className="absolute right-2 top-2 z-10">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        className="rounded-md border border-border/60 bg-card/80 p-1 text-muted-foreground opacity-0 backdrop-blur transition-opacity hover:bg-accent/20 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+                        aria-label={t('nav.actionsFor', { name: list.name })}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem onClick={() => setRenameList({ id: list.id, name: list.name })}>
+                        <Pencil className="h-3.5 w-3.5" />
+                        {t('container.rename')}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => {
+                          if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
+                            deleteListMutation.mutate(list.id)
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t('list.deleteAction')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
             ))}
           </div>
@@ -247,6 +378,29 @@ function ProjectHome() {
         containerName={project?.name}
         open={statusesOpen}
         onOpenChange={setStatusesOpen}
+      />
+
+      <ContainerEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title={t('project.editTitle')}
+        initial={{ name: project?.name ?? '', description: project?.description ?? '' }}
+        fields={{ description: true }}
+        submitting={editProject.isPending}
+        onSubmit={(values) => editProject.mutate(values)}
+      />
+
+      <ContainerEditDialog
+        open={renameList !== null}
+        onOpenChange={(next) => {
+          if (!next) setRenameList(null)
+        }}
+        title={t('list.renameTitle')}
+        initial={{ name: renameList?.name ?? '' }}
+        submitting={renameListMutation.isPending}
+        onSubmit={(values) => {
+          if (renameList) renameListMutation.mutate({ id: renameList.id, values })
+        }}
       />
     </WorkHubPage>
   )

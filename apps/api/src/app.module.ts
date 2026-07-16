@@ -36,6 +36,7 @@ import { SecurityModule } from './modules/security/security.module'
 import { ExportModule } from './modules/export/export.module'
 import { WebhooksModule } from './modules/webhooks/webhooks.module'
 import { InboundWebhooksModule } from './modules/inbound-webhooks/inbound-webhooks.module'
+import { ZapierModule } from './modules/zapier/zapier.module'
 import { SlackModule } from './modules/integrations/slack/slack.module'
 import { ClickUpImportModule } from './modules/integrations/clickup-import/clickup-import.module'
 import { IntegrationConnectionsModule } from './modules/integrations/connections/integration-connections.module'
@@ -114,6 +115,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     ExportModule,
     WebhooksModule,
     InboundWebhooksModule,
+    ZapierModule,
     SlackModule,
     ClickUpImportModule,
     IntegrationConnectionsModule,

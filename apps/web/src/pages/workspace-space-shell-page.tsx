@@ -1,12 +1,21 @@
 import { useState } from 'react'
-import { Outlet, useMatches, useParams } from '@tanstack/react-router'
+import { Outlet, useMatches, useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Folder, Users, CircleDot, ArchiveRestore } from 'lucide-react'
-import { Button } from '@rundesk/ui'
+import { Folder, Users, CircleDot, ArchiveRestore, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  toast,
+} from '@rundesk/ui'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { WorkHubPage, WorkEmptyState, WorkEntityCard } from '../components/work/work-ui'
 import { ContainerMembersSheet } from '../components/container-members-sheet'
+import { ContainerEditDialog, type ContainerEditValues } from '../components/container-edit-dialog'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
 
 type Project = {
@@ -17,7 +26,14 @@ type Project = {
   icon?: string | null
 }
 
-type Space = { id: string; name: string; description?: string | null; visibility?: string | null }
+type Space = {
+  id: string
+  name: string
+  description?: string | null
+  visibility?: string | null
+  color?: string | null
+  icon?: string | null
+}
 
 export function SpaceShell() {
   const matches = useMatches()
@@ -32,9 +48,11 @@ export function SpaceShell() {
 
 function SpaceHome() {
   const { t, tCount } = useTranslation()
+  const navigate = useNavigate()
   const { workspaceId, spaceId } = useParams({ from: '/app/$workspaceId/$spaceId' })
   const [membersOpen, setMembersOpen] = useState(false)
   const [statusesOpen, setStatusesOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
 
   const { data: spaces = [] } = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -43,6 +61,32 @@ function SpaceHome() {
   const space = spaces.find((s) => s.id === spaceId)
 
   const qc = useQueryClient()
+
+  // §2/§13.4 — rename + set color/icon. PUT /spaces/:id accepts a partial
+  // { name, description, color, icon }; refresh both the space list and the
+  // sidebar tree so the change is visible everywhere.
+  const editSpace = useMutation({
+    mutationFn: (values: ContainerEditValues) =>
+      api(`/spaces/${spaceId}`, { method: 'PUT', body: values }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['space-tree'] })
+      setEditOpen(false)
+    },
+    onError: () => toast.error(t('container.saveError')),
+  })
+
+  // §2/§13.4 — DELETE /spaces/:id archives the space; leave it and return to the
+  // workspace home since this route no longer resolves to anything.
+  const deleteSpace = useMutation({
+    mutationFn: () => api(`/spaces/${spaceId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['space-tree'] })
+      navigate({ to: '/app/$workspaceId', params: { workspaceId } })
+    },
+    onError: () => toast.error(t('container.deleteError')),
+  })
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects', spaceId],
     queryFn: () => api<Project[]>(`/projects/space/${spaceId}`),
@@ -75,6 +119,36 @@ function SpaceHome() {
             <Users className="h-3.5 w-3.5 mr-1.5" />
             {t('spaceShell.members')}
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="px-2"
+                aria-label={t('nav.actionsFor', { name: space?.name ?? '' })}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                <Pencil className="h-3.5 w-3.5" />
+                {t('space.editAction')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => {
+                  if (window.confirm(t('space.deleteConfirm', { name: space?.name ?? '' }))) {
+                    deleteSpace.mutate()
+                  }
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t('space.deleteAction')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       }
     >
@@ -154,6 +228,20 @@ function SpaceHome() {
         containerName={space?.name}
         open={statusesOpen}
         onOpenChange={setStatusesOpen}
+      />
+
+      <ContainerEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        title={t('space.editTitle')}
+        initial={{
+          name: space?.name ?? '',
+          color: space?.color ?? '',
+          icon: space?.icon ?? '',
+        }}
+        fields={{ color: true, icon: true }}
+        submitting={editSpace.isPending}
+        onSubmit={(values) => editSpace.mutate(values)}
       />
     </WorkHubPage>
   )

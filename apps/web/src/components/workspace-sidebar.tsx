@@ -30,6 +30,9 @@ import {
   X,
   MoreHorizontal,
   FolderPlus,
+  Pencil,
+  Trash2,
+  Archive,
 } from 'lucide-react'
 import {
   Button,
@@ -42,6 +45,7 @@ import {
   DropdownMenuTrigger,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { ContainerEditDialog, type ContainerEditValues } from './container-edit-dialog'
 import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
@@ -178,6 +182,14 @@ export function WorkspaceSidebar() {
   const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>({})
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
+  // §2/§13.4 — the folder/project currently being renamed from the tree. One
+  // shared dialog serves the whole tree; `null` means it is closed.
+  const [treeEdit, setTreeEdit] = useState<
+    | { kind: 'folder'; spaceId: string; id: string; name: string }
+    | { kind: 'project'; id: string; name: string }
+    | null
+  >(null)
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const createFolder = async (spaceId: string) => {
     const name = window.prompt(t('nav.newFolderPrompt'))?.trim()
@@ -197,6 +209,49 @@ export function WorkspaceSidebar() {
       await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
     } catch (err) {
       window.alert(err instanceof Error ? err.message : t('nav.moveProjectError'))
+    }
+  }
+
+  // §2/§13.4 — DELETE /spaces/:spaceId/folders/:folderId removes the folder;
+  // its projects fall back to the ungrouped list (they are not deleted).
+  const deleteFolder = async (spaceId: string, folderId: string) => {
+    try {
+      await api(`/spaces/${spaceId}/folders/${folderId}`, { method: 'DELETE' })
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.deleteError'))
+    }
+  }
+
+  // §2/§13.4 — DELETE /projects/:id archives the project out of the tree.
+  const archiveProjectFromTree = async (projectId: string) => {
+    try {
+      await api(`/projects/${projectId}`, { method: 'DELETE' })
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.deleteError'))
+    }
+  }
+
+  // §2/§13.4 — rename the folder (PATCH) or project (PUT) currently in `treeEdit`.
+  const submitTreeEdit = async (values: ContainerEditValues) => {
+    if (!treeEdit) return
+    setSavingEdit(true)
+    try {
+      if (treeEdit.kind === 'folder') {
+        await api(`/spaces/${treeEdit.spaceId}/folders/${treeEdit.id}`, {
+          method: 'PATCH',
+          body: { name: values.name },
+        })
+      } else {
+        await api(`/projects/${treeEdit.id}`, { method: 'PUT', body: { name: values.name } })
+      }
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      setTreeEdit(null)
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.saveError'))
+    } finally {
+      setSavingEdit(false)
     }
   }
   const [recentItems, setRecentItems] = useState<Array<{ label: string; path: string }>>([])
@@ -724,6 +779,22 @@ export function WorkspaceSidebar() {
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-52">
+                        <DropdownMenuItem onClick={() => setTreeEdit({ kind: 'project', id: project.id, name: project.name })}>
+                          <Pencil className="h-3.5 w-3.5" />
+                          {t('container.rename')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => {
+                            if (window.confirm(t('project.archiveConfirm', { name: project.name }))) {
+                              void archiveProjectFromTree(project.id)
+                            }
+                          }}
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                          {t('project.archiveAction')}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuLabel>{t('nav.moveToFolder')}</DropdownMenuLabel>
                         {(space.folders ?? []).map((folder) => (
                           <DropdownMenuItem
@@ -816,14 +887,46 @@ export function WorkspaceSidebar() {
                       const open = expandedFolders[folder.id] ?? true
                       return (
                         <div key={folder.id} className="space-y-0.5">
-                          <button
-                            className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
-                            onClick={() => setExpandedFolders((prev) => ({ ...prev, [folder.id]: !(prev[folder.id] ?? true) }))}
-                          >
-                            <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
-                            <Folder className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{folder.name}</span>
-                          </button>
+                          <div className="group flex items-center gap-1">
+                            <button
+                              className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                              onClick={() => setExpandedFolders((prev) => ({ ...prev, [folder.id]: !(prev[folder.id] ?? true) }))}
+                            >
+                              <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
+                              <Folder className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{folder.name}</span>
+                            </button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
+                                  aria-label={t('nav.actionsFor', { name: folder.name })}
+                                >
+                                  <MoreHorizontal className="h-3.5 w-3.5" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem
+                                  onClick={() => setTreeEdit({ kind: 'folder', spaceId: space.id, id: folder.id, name: folder.name })}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  {t('container.rename')}
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => {
+                                    if (window.confirm(t('folder.deleteConfirm', { name: folder.name }))) {
+                                      void deleteFolder(space.id, folder.id)
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  {t('folder.deleteAction')}
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                           {open && (
                             <div className="ml-4 space-y-0.5">
                               {folderProjects.map((project) => renderProjectNode(project))}
@@ -1008,6 +1111,17 @@ export function WorkspaceSidebar() {
           )}
         </>
       )}
+
+      <ContainerEditDialog
+        open={treeEdit !== null}
+        onOpenChange={(next) => {
+          if (!next) setTreeEdit(null)
+        }}
+        title={treeEdit?.kind === 'folder' ? t('folder.renameTitle') : t('container.rename')}
+        initial={{ name: treeEdit?.name ?? '' }}
+        submitting={savingEdit}
+        onSubmit={submitTreeEdit}
+      />
     </aside>
   )
 }
