@@ -34,6 +34,22 @@ export function normalizeReminderLeadDays(input: unknown): number[] {
   return [...picked].sort((a, b) => a - b)
 }
 
+/**
+ * §7.11 — sanitize a stored/submitted daily-briefing preference: coerce
+ * `enabled` to a boolean and clamp `hour` to an integer 0–23 (default 8). Pure
+ * so the profile patch path and the cron's due-hour selection agree exactly.
+ */
+export function normalizeBriefingPrefs(input: unknown): { enabled: boolean; hour: number } {
+  const obj = (input ?? {}) as { enabled?: unknown; hour?: unknown }
+  const enabled = obj.enabled === true
+  let hour = 8
+  if (obj.hour !== undefined && obj.hour !== null) {
+    const h = Math.trunc(Number(obj.hour))
+    if (Number.isFinite(h)) hour = Math.min(23, Math.max(0, h))
+  }
+  return { enabled, hour }
+}
+
 /** Human label for a due-soon reminder fired `diffDays` before the due date. */
 export function reminderLeadLabel(diffDays: number): string {
   if (diffDays <= 1) return 'tomorrow'
@@ -54,6 +70,7 @@ type NotificationType =
   | 'doc_commented'
   | 'approval_needed'
   | 'task_blocked'
+  | 'ai_briefing'
 
 type NotificationEventKey =
   | 'mention'
@@ -85,6 +102,12 @@ type NotificationPreferences = {
     /** Hour of day (0–23, server time) the digest is sent. */
     hour: number
   }
+  /** §7.11 — daily AI briefing delivered in-app at a chosen hour. */
+  briefing: {
+    enabled: boolean
+    /** Hour of day (0–23, server time) the briefing is delivered. */
+    hour: number
+  }
   /** §10.4 — lead days for due-date reminders (subset of {1,2,7}). */
   reminderLeadDays: number[]
 }
@@ -93,6 +116,7 @@ type NotificationPreferencesPatch = {
   channels?: Partial<NotificationPreferences['channels']>
   events?: Partial<Record<NotificationEventKey, Partial<NotificationChannelMatrix>>>
   digest?: Partial<NotificationPreferences['digest']>
+  briefing?: Partial<NotificationPreferences['briefing']>
   reminderLeadDays?: number[]
 }
 
@@ -118,6 +142,10 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   digest: {
     enabled: false,
     frequency: 'daily',
+    hour: 8,
+  },
+  briefing: {
+    enabled: false,
     hour: 8,
   },
   reminderLeadDays: [...DEFAULT_REMINDER_LEAD_DAYS],
@@ -458,6 +486,36 @@ export class NotificationsService {
       .filter((r) => Boolean(r.email))
   }
 
+  /**
+   * §7.11 — users who enabled the daily AI briefing, with the delivery hour the
+   * briefing cron gates on. Mirrors listDigestRecipients; the jsonb predicate
+   * keeps the scan to opted-in users.
+   */
+  async listBriefingRecipients(): Promise<
+    Array<{ userId: string; email: string; displayName: string | null; enabled: boolean; hour: number }>
+  > {
+    const rows = await this.db
+      .select({
+        userId: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        prefs: users.notificationPreferences,
+      })
+      .from(users)
+      .where(sql`(${users.notificationPreferences} -> 'briefing' ->> 'enabled')::boolean = true`)
+
+    return rows.map((r) => {
+      const b = normalizeBriefingPrefs((r.prefs as Partial<NotificationPreferences> | undefined)?.briefing)
+      return {
+        userId: r.userId,
+        email: r.email,
+        displayName: r.displayName,
+        enabled: b.enabled,
+        hour: b.hour,
+      }
+    })
+  }
+
   // ---------------------------------------------------------------------------
   // Private — email dispatch
   // ---------------------------------------------------------------------------
@@ -611,6 +669,9 @@ export class NotificationsService {
       case 'chat_message':
         return 'chat'
       case 'task_updated':
+      // §7.11 — the daily AI briefing rides the general activity channel so a
+      // user who mutes activity also mutes their briefing.
+      case 'ai_briefing':
       default:
         return 'activity'
     }
@@ -640,6 +701,7 @@ export class NotificationsService {
         ...base.digest,
         ...(patch.digest ?? {}),
       },
+      briefing: normalizeBriefingPrefs({ ...base.briefing, ...(patch.briefing ?? {}) }),
       reminderLeadDays: normalizeReminderLeadDays(patch.reminderLeadDays ?? base.reminderLeadDays),
     }
   }

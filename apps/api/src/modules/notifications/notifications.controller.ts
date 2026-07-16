@@ -50,6 +50,7 @@ export class NotificationsController {
       }
       events?: Record<string, Partial<Record<'inApp' | 'web' | 'mobile' | 'email', boolean>>>
       digest?: { enabled?: boolean; frequency?: 'daily' | 'weekly'; hour?: number }
+      briefing?: { enabled?: boolean; hour?: number }
       reminderLeadDays?: number[]
     },
   ) {

@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Strea
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ReportsService, type ReportDefinition, type ReportScheduleInput } from './reports.service'
 import { ScheduledReportsService } from './scheduled-reports.service'
+import { ProjectHealthService } from './project-health.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
@@ -16,6 +17,7 @@ export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly scheduledReports: ScheduledReportsService,
+    private readonly projectHealthSvc: ProjectHealthService,
   ) {}
 
   @Get('overview')
@@ -127,6 +129,16 @@ export class ReportsController {
   @ApiOperation({ summary: 'Deterministic per-project health scores (0–100)' })
   projectHealth(@Param('workspaceId') workspaceId: string) {
     return this.reports.getProjectHealth(workspaceId)
+  }
+
+  @Get('project-health/trend')
+  @ApiOperation({ summary: 'Persisted daily project-health trend (§7.13)' })
+  projectHealthTrend(
+    @Param('workspaceId') workspaceId: string,
+    @Query('projectId') projectId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.projectHealthSvc.getTrend(workspaceId, projectId, days ? parseInt(days, 10) : 30)
   }
 
   @Get('activity')

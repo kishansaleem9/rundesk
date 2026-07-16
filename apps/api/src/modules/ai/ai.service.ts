@@ -330,6 +330,116 @@ export function deterministicAutomationSuggestions(b: AutomationBehavior): Autom
   return out.slice(0, 4)
 }
 
+// ─── Comment sentiment (Plan §7.13 project-health component) ──────────────────
+
+export type SentimentLabel = 'positive' | 'neutral' | 'negative'
+export type SentimentResult = {
+  /** 0–100: share of comments reading positive (neutral counts half). */
+  score: number
+  label: SentimentLabel
+  positive: number
+  negative: number
+  samples: number
+  source: 'ai' | 'deterministic'
+}
+
+const POSITIVE_SENTIMENT_WORDS = [
+  'thanks', 'thank', 'great', 'good', 'nice', 'awesome', 'excellent', 'perfect', 'love', 'done',
+  'resolved', 'fixed', 'solved', 'shipped', 'approved', 'ready', 'works', 'working', 'complete',
+  'completed', 'lgtm', 'progress', 'win', 'on track',
+]
+const NEGATIVE_SENTIMENT_WORDS = [
+  'blocked', 'blocker', 'broken', 'bug', 'issue', 'problem', 'fail', 'failed', 'failing', 'error',
+  'delay', 'delayed', 'stuck', 'urgent', 'wrong', 'cannot', "can't", 'cant', "won't", 'wont',
+  'missing', 'risk', 'concern', 'worried', 'confusing', 'unclear', 'slipping', 'behind', 'overdue',
+  'regression', 'crash',
+]
+
+/** Classify one comment as +1 / 0 / -1 by keyword hit counts (case-insensitive). */
+function classifyComment(text: string): -1 | 0 | 1 {
+  const t = ` ${(text ?? '').toLowerCase()} `
+  let pos = 0
+  let neg = 0
+  for (const w of POSITIVE_SENTIMENT_WORDS) if (t.includes(w)) pos++
+  for (const w of NEGATIVE_SENTIMENT_WORDS) if (t.includes(w)) neg++
+  if (pos > neg) return 1
+  if (neg > pos) return -1
+  return 0
+}
+
+/**
+ * Deterministic keyword sentiment over a set of comment bodies (Plan §7.13).
+ * Pure + testable — the always-on fallback when the model is unavailable.
+ * `score` is the share of comments that read positive (neutral counts half),
+ * so an empty set is a neutral 50.
+ */
+export function analyzeSentimentDeterministic(texts: string[]): SentimentResult {
+  const bodies = (texts ?? []).map((t) => (t ?? '').trim()).filter((t) => t.length > 0)
+  let positive = 0
+  let negative = 0
+  for (const body of bodies) {
+    const c = classifyComment(body)
+    if (c === 1) positive++
+    else if (c === -1) negative++
+  }
+  const samples = bodies.length
+  const neutral = samples - positive - negative
+  const score = samples === 0 ? 50 : Math.round(((positive + neutral * 0.5) / samples) * 100)
+  const label: SentimentLabel = score >= 60 ? 'positive' : score <= 40 ? 'negative' : 'neutral'
+  return { score, label, positive, negative, samples, source: 'deterministic' }
+}
+
+// ─── Daily AI briefing (Plan §7.11) ───────────────────────────────────────────
+
+export type BriefingData = {
+  displayName: string
+  /** Task titles due today, blocking others, overdue, and at-risk soon. */
+  dueToday: string[]
+  overdue: string[]
+  blocking: string[]
+  atRisk: string[]
+}
+
+/** True when the briefing has at least one noteworthy item across all buckets. */
+export function briefingHasContent(data: BriefingData): boolean {
+  return (
+    data.overdue.length > 0 ||
+    data.dueToday.length > 0 ||
+    data.blocking.length > 0 ||
+    data.atRisk.length > 0
+  )
+}
+
+/** Join a small set of task titles into a readable clause, capped for length. */
+function briefingList(titles: string[], max = 3): string {
+  const shown = titles.slice(0, max)
+  const extra = titles.length - shown.length
+  const joined = shown.map((t) => `“${t}”`).join(', ')
+  return extra > 0 ? `${joined} (+${extra} more)` : joined
+}
+
+/**
+ * Deterministic daily-briefing text (Plan §7.11). Pure + testable — the always-on
+ * fallback used when the model is unavailable (ANTHROPIC_API_KEY unset). Leads
+ * with the most urgent buckets (overdue, then blocking others, then due-today,
+ * then at-risk) and always returns a non-empty, human-readable body.
+ */
+export function formatBriefingFallback(data: BriefingData): string {
+  const parts: string[] = []
+  const first = (data.displayName || '').trim().split(/\s+/)[0] || 'there'
+  if (data.overdue.length)
+    parts.push(`You have ${data.overdue.length} overdue task${data.overdue.length === 1 ? '' : 's'}: ${briefingList(data.overdue)}.`)
+  if (data.blocking.length)
+    parts.push(`${data.blocking.length} of your task${data.blocking.length === 1 ? ' is' : 's are'} blocking others: ${briefingList(data.blocking)}.`)
+  if (data.dueToday.length)
+    parts.push(`${data.dueToday.length} due today: ${briefingList(data.dueToday)}.`)
+  if (data.atRisk.length)
+    parts.push(`${data.atRisk.length} at risk soon: ${briefingList(data.atRisk)}.`)
+  return parts.length
+    ? `Good morning, ${first}. ${parts.join(' ')}`
+    : `Good morning, ${first}. Nothing urgent on your plate today — a good time to get ahead.`
+}
+
 // Rough per-million-token pricing (USD) for cost *estimation* in reports.
 const MODEL_PRICING: Record<string, { in: number; out: number }> = {
   'claude-sonnet-4-6': { in: 3, out: 15 },
@@ -1442,5 +1552,72 @@ Respond ONLY with valid JSON: { "widgets": ["type", ...], "reasoning": "one sent
     const valid = new Set(availableWidgets.map((w) => w.type))
     const widgets = Array.isArray(parsed.widgets) ? (parsed.widgets as unknown[]).filter((w): w is string => typeof w === 'string' && valid.has(w)) : []
     return { widgets: widgets.length ? widgets : availableWidgets.map((w) => w.type).slice(0, 5), reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '' }
+  }
+
+  // ─── Comment sentiment for project health (Plan §7.13) ────────────────────
+
+  /**
+   * Gauge team sentiment from a project's recent task comments (Plan §7.13).
+   * Uses the model (haiku) when configured; otherwise — or on any AI error /
+   * malformed output — falls back to the deterministic keyword classifier.
+   * Never throws so the daily health cron can always fold in a sentiment score.
+   */
+  async analyzeCommentSentiment(texts: string[], ctx: AiCtx = {}): Promise<SentimentResult> {
+    const fallback = analyzeSentimentDeterministic(texts)
+    if (fallback.samples === 0 || !this.isAvailable()) return fallback
+    try {
+      const sample = texts
+        .filter((t) => (t ?? '').trim())
+        .slice(0, 40)
+        .map((t, i) => `${i + 1}. ${truncate(t, 200)}`)
+        .join('\n')
+      const response = await this.complete('project.sentiment', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 256,
+        system: `You gauge team sentiment from task comments for a project-health score.
+Respond ONLY with valid JSON: { "score": 0-100 integer (0 very negative, 50 neutral, 100 very positive), "label": "positive|neutral|negative" }.`,
+        messages: [{ role: 'user', content: `Recent comments:\n${sample}` }],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text : ''
+      const parsed = safeJsonParse((text.match(/\{[\s\S]*\}/) ?? [''])[0]) as { score?: unknown } | undefined
+      const score =
+        parsed && Number.isFinite(Number(parsed.score)) ? Math.max(0, Math.min(100, Math.round(Number(parsed.score)))) : null
+      if (score === null) return fallback
+      const label: SentimentLabel = score >= 60 ? 'positive' : score <= 40 ? 'negative' : 'neutral'
+      return { score, label, positive: fallback.positive, negative: fallback.negative, samples: fallback.samples, source: 'ai' }
+    } catch {
+      return fallback
+    }
+  }
+
+  // ─── Daily briefing generation (Plan §7.11) ───────────────────────────────
+
+  /**
+   * Generate a short daily briefing (Plan §7.11). Uses the model (haiku) when
+   * configured; otherwise — or on any AI error — returns the deterministic
+   * template. Never throws: always best-effort so the cron can always deliver.
+   */
+  async generateBriefing(data: BriefingData, ctx: AiCtx = {}): Promise<string> {
+    const fallback = formatBriefingFallback(data)
+    if (!this.isAvailable()) return fallback
+    try {
+      const lines = [
+        `Name: ${data.displayName || 'teammate'}`,
+        `Overdue (${data.overdue.length}): ${data.overdue.slice(0, 8).join('; ') || 'none'}`,
+        `Blocking others (${data.blocking.length}): ${data.blocking.slice(0, 8).join('; ') || 'none'}`,
+        `Due today (${data.dueToday.length}): ${data.dueToday.slice(0, 8).join('; ') || 'none'}`,
+        `At risk soon (${data.atRisk.length}): ${data.atRisk.slice(0, 8).join('; ') || 'none'}`,
+      ].join('\n')
+      const response = await this.complete('daily.briefing', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 400,
+        system: `You are Rundesk's daily briefing assistant. Write a warm, concise morning briefing (2-4 sentences, plain text) that leads with what is most urgent (overdue, then tasks blocking others, then due-today, then at-risk). Address the person by their first name. Do not invent tasks beyond those provided.`,
+        messages: [{ role: 'user', content: `Here is my work for today:\n${lines}` }],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
+      return text || fallback
+    } catch {
+      return fallback
+    }
   }
 }

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, Card, cn, toast } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X } from 'lucide-react'
+import { Button, Input, Card, Badge, cn, toast } from '@rundesk/ui'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, HeartPulse } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -205,6 +205,8 @@ function ProjectHome() {
         )}
       </section>
 
+      <ProjectHealthSection workspaceId={workspaceId} projectId={projectId} />
+
       <CustomFieldsSection workspaceId={workspaceId} projectId={projectId} />
 
       <ProjectActivitySection projectId={projectId} workspaceId={workspaceId} projectName={project?.name} />
@@ -229,6 +231,116 @@ function ProjectHome() {
         onOpenChange={setStatusesOpen}
       />
     </WorkHubPage>
+  )
+}
+
+// §7.13 — persisted daily project-health trend. Shows the current band + score,
+// comment sentiment, and a 30-day sparkline read from project_health_scores.
+type HealthTrend = {
+  projectId: string
+  days: number
+  current: {
+    score: number
+    band: string
+    sentiment: { score: number; label: string; samples: number } | null
+  } | null
+  points: Array<{ date: string; score: number; band: string }>
+}
+
+function HealthSparkline({ points }: { points: Array<{ date: string; score: number }> }) {
+  const W = 240
+  const H = 44
+  const pad = 3
+  const n = points.length
+  const x = (i: number) => (n <= 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (n - 1))
+  const y = (v: number) => H - pad - (Math.max(0, Math.min(100, v)) / 100) * (H - 2 * pad)
+  const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.score).toFixed(1)}`).join(' ')
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-11" preserveAspectRatio="none" role="img" aria-label="30-day health trend">
+      {/* Green-band reference line at 75. */}
+      <line x1={pad} y1={y(75)} x2={W - pad} y2={y(75)} stroke="hsl(var(--border))" strokeWidth="1" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+      <path d={d} fill="none" stroke="hsl(var(--accent))" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+function ProjectHealthSection({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
+  const { t } = useTranslation()
+  const { data, isLoading } = useQuery({
+    queryKey: ['project-health-trend', workspaceId, projectId],
+    queryFn: () =>
+      api<HealthTrend>(`/workspaces/${workspaceId}/reports/project-health/trend?projectId=${projectId}&days=30`),
+  })
+
+  const bandLabel = (band?: string) =>
+    band === 'green'
+      ? t('projectShell.bandGreen')
+      : band === 'yellow'
+        ? t('projectShell.bandYellow')
+        : band === 'red'
+          ? t('projectShell.bandRed')
+          : t('projectShell.bandEmpty')
+  const bandVariant = (band?: string): 'success' | 'warning' | 'destructive' | 'soft' =>
+    band === 'green' ? 'success' : band === 'yellow' ? 'warning' : band === 'red' ? 'destructive' : 'soft'
+  const sentimentLabel = (label?: string) =>
+    label === 'positive'
+      ? t('projectShell.sentimentPositive')
+      : label === 'negative'
+        ? t('projectShell.sentimentNegative')
+        : t('projectShell.sentimentNeutral')
+
+  const points = data?.points ?? []
+  const current = data?.current ?? null
+
+  return (
+    <section>
+      <WorkSectionTitle>
+        <span className="flex items-center gap-2">
+          <HeartPulse className="h-4 w-4 text-pink-500" />
+          {t('projectShell.healthTitle')}
+        </span>
+      </WorkSectionTitle>
+      <p className="text-[13px] text-muted-foreground mb-4 -mt-1">{t('projectShell.healthDesc')}</p>
+
+      {isLoading ? (
+        <Card className="p-4 text-sm text-muted-foreground border-border/80">{t('common.loading')}</Card>
+      ) : !current || points.length === 0 ? (
+        <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
+          {t('projectShell.healthNoData')}
+        </Card>
+      ) : (
+        <Card className="p-4 border-border/80">
+          <div className="flex items-center gap-6 flex-wrap">
+            <div>
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
+                {t('projectShell.healthScoreLabel')}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-display text-3xl font-semibold tabular-nums">{current.score}</span>
+                <Badge variant={bandVariant(current.band)}>{bandLabel(current.band)}</Badge>
+              </div>
+            </div>
+            {current.sentiment && current.sentiment.samples > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
+                  {t('projectShell.healthSentimentLabel')}
+                </div>
+                <div className="text-sm">
+                  {sentimentLabel(current.sentiment.label)}{' '}
+                  <span className="text-muted-foreground tabular-nums">({current.sentiment.score})</span>
+                </div>
+              </div>
+            )}
+            <div className="flex-1 min-w-[180px]">
+              <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
+                {t('projectShell.healthTrendLabel')}
+              </div>
+              <HealthSparkline points={points} />
+            </div>
+          </div>
+        </Card>
+      )}
+    </section>
   )
 }
 

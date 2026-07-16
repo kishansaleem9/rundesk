@@ -84,6 +84,8 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'approval_needed',
   // §4.4 — fired when a blocking dependency leaves a task blocked.
   'task_blocked',
+  // §7.11 — daily AI briefing delivered as an in-app notification.
+  'ai_briefing',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

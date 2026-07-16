@@ -538,6 +538,13 @@ export function InsightsPage() {
 function HealthCard({ project }: { project: HealthRow }) {
   const { t } = useTranslation()
   const positive = project.delta.startsWith('+')
+  // Current health band (matches the §7.13 backend thresholds: green ≥ 75,
+  // yellow ≥ 50, else red) shown as a badge alongside the score.
+  const band = project.score >= 75 ? 'green' : project.score >= 50 ? 'yellow' : 'red'
+  const bandLabel =
+    band === 'green' ? t('insights.bandGreen') : band === 'yellow' ? t('insights.bandYellow') : t('insights.bandRed')
+  const bandVariant: 'success' | 'warning' | 'destructive' =
+    band === 'green' ? 'success' : band === 'yellow' ? 'warning' : 'destructive'
   const blockerLabel =
     project.dim.blockers === 'high'
       ? t('insights.levelHigh')
@@ -582,7 +589,12 @@ function HealthCard({ project }: { project: HealthRow }) {
           </span>
         </div>
       </div>
-      <div className="text-sm font-medium truncate">{project.project}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-medium truncate">{project.project}</div>
+        <Badge variant={bandVariant} className="text-[9px] uppercase shrink-0">
+          {bandLabel}
+        </Badge>
+      </div>
       <div className="grid grid-cols-2 gap-1 mt-2 text-[10px] text-muted-foreground">
         <span>{t('insights.onTime', { value: project.dim.onTime })}</span>
         <span>{t('insights.activity', { value: project.dim.activity })}</span>

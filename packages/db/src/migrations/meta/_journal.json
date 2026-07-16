@@ -463,6 +463,13 @@
       "when": 1900000062000,
       "tag": "0065_theme_and_accent_color",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1900000063000,
+      "tag": "0066_project_health_and_briefings",
+      "breakpoints": true
     }
   ]
 }
