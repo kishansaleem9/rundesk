@@ -9,6 +9,8 @@ import {
   chatMessageSaves,
   chatCustomEmoji,
   workspaceMembers,
+  spaces,
+  spaceMembers,
   users,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -182,6 +184,25 @@ export class ChatService {
       .limit(1)
     if (!membership) throw new ForbiddenException('Workspace membership required')
 
+    // Space-scoped channels (Plan §6.1): a channel in a PRIVATE space also
+    // requires space membership. Public spaces (the default) fall back to plain
+    // workspace membership — mirrors the container-access model used elsewhere.
+    if (channel.spaceId) {
+      const [space] = await this.db
+        .select({ visibility: spaces.visibility })
+        .from(spaces)
+        .where(eq(spaces.id, channel.spaceId))
+        .limit(1)
+      if (space?.visibility === 'private') {
+        const [spaceMembership] = await this.db
+          .select({ userId: spaceMembers.userId })
+          .from(spaceMembers)
+          .where(and(eq(spaceMembers.spaceId, channel.spaceId), eq(spaceMembers.userId, userId)))
+          .limit(1)
+        if (!spaceMembership) throw new ForbiddenException('Space membership required')
+      }
+    }
+
     if (channel.isPrivate || channel.isDm) {
       const [channelMembership] = await this.db
         .select({ userId: chatChannelMembers.userId })
@@ -200,6 +221,8 @@ export class ChatService {
         id: chatChannels.id,
         name: chatChannels.name,
         description: chatChannels.description,
+        icon: chatChannels.icon,
+        spaceId: chatChannels.spaceId,
         isPrivate: chatChannels.isPrivate,
         isDm: chatChannels.isDm,
         createdById: chatChannels.createdById,
@@ -464,18 +487,33 @@ export class ChatService {
     workspaceId: string
     name: string
     description?: string
+    icon?: string
     isPrivate?: boolean
+    spaceId?: string | null
     createdById: string
     memberIds?: string[]
   }) {
     const name = data.name.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-')
     if (!name) throw new ForbiddenException('Channel name required')
+    // Optional space scoping (Plan §6.1): the space must belong to this workspace.
+    let spaceId: string | null = null
+    if (data.spaceId) {
+      const [space] = await this.db
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(and(eq(spaces.id, data.spaceId), eq(spaces.workspaceId, data.workspaceId)))
+        .limit(1)
+      if (!space) throw new BadRequestException('Space not found in this workspace')
+      spaceId = space.id
+    }
     const [row] = await this.db
       .insert(chatChannels)
       .values({
         workspaceId: data.workspaceId,
         name,
         description: data.description,
+        icon: data.icon,
+        spaceId,
         isPrivate: data.isPrivate ?? false,
         createdById: data.createdById,
       })
@@ -494,6 +532,114 @@ export class ChatService {
       channel: row,
     })
     return row
+  }
+
+  /**
+   * Edit a channel's name / description / icon (Plan §6.1). Moderator-gated
+   * (channel creator or workspace admin) via canModerateChannel. DMs aren't
+   * editable this way. Only provided fields are changed.
+   */
+  async updateChannel(
+    channelId: string,
+    userId: string,
+    patch: { name?: string; description?: string | null; icon?: string | null },
+  ) {
+    const channel = await this.assertChannelAccess(channelId, userId)
+    if (channel.isDm) throw new BadRequestException('Direct messages cannot be edited')
+    if (!(await this.canModerateChannel(channel, userId))) {
+      throw new ForbiddenException('Only the channel creator or a workspace admin can edit this channel')
+    }
+    const set: Partial<{ name: string; description: string | null; icon: string | null }> = {}
+    if (patch.name !== undefined) {
+      const name = patch.name.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-')
+      if (!name) throw new BadRequestException('Channel name required')
+      set.name = name
+    }
+    if (patch.description !== undefined) set.description = patch.description?.trim() || null
+    if (patch.icon !== undefined) set.icon = patch.icon?.trim() || null
+    if (Object.keys(set).length === 0) return channel
+    const [row] = await this.db
+      .update(chatChannels)
+      .set(set)
+      .where(eq(chatChannels.id, channelId))
+      .returning()
+    // Reuse chat.channel.created (the client handler just refetches the channel
+    // list) so other members pick up the new name / description / icon.
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.channel.created',
+      workspaceId: channel.workspaceId,
+      channel: row,
+    })
+    return row
+  }
+
+  /**
+   * Archive / unarchive a channel (Plan §6.1). Writes archivedAt; archived
+   * channels drop out of the normal list. Moderator-gated; DMs excluded.
+   */
+  async setChannelArchived(channelId: string, userId: string, archived: boolean) {
+    const channel = await this.assertChannelAccess(channelId, userId)
+    if (channel.isDm) throw new BadRequestException('Direct messages cannot be archived')
+    if (!(await this.canModerateChannel(channel, userId))) {
+      throw new ForbiddenException('Only the channel creator or a workspace admin can archive this channel')
+    }
+    const [row] = await this.db
+      .update(chatChannels)
+      .set({ archivedAt: archived ? new Date() : null })
+      .where(eq(chatChannels.id, channelId))
+      .returning()
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.channel.created',
+      workspaceId: channel.workspaceId,
+      channel: row,
+    })
+    return row
+  }
+
+  /**
+   * List a workspace's archived channels (Plan §6.1) so members can review /
+   * unarchive them. Mirrors listChannels' visibility: private channels only
+   * show to their members. DMs are never archived here, so excluded.
+   */
+  async listArchivedChannels(workspaceId: string, userId: string) {
+    const [membership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    if (!membership) throw new ForbiddenException('Workspace membership required')
+
+    const rows = await this.db
+      .select({
+        id: chatChannels.id,
+        name: chatChannels.name,
+        description: chatChannels.description,
+        icon: chatChannels.icon,
+        spaceId: chatChannels.spaceId,
+        isPrivate: chatChannels.isPrivate,
+        isDm: chatChannels.isDm,
+        createdById: chatChannels.createdById,
+        archivedAt: chatChannels.archivedAt,
+        createdAt: chatChannels.createdAt,
+      })
+      .from(chatChannels)
+      .where(
+        and(
+          eq(chatChannels.workspaceId, workspaceId),
+          isNotNull(chatChannels.archivedAt),
+          eq(chatChannels.isDm, false),
+        ),
+      )
+      .orderBy(desc(chatChannels.archivedAt))
+
+    const memberships = await this.db
+      .select({ channelId: chatChannelMembers.channelId })
+      .from(chatChannelMembers)
+      .where(eq(chatChannelMembers.userId, userId))
+    const memberSet = new Set(memberships.map((m) => m.channelId))
+    return rows
+      .filter((c) => !c.isPrivate || memberSet.has(c.id))
+      .map((c) => ({ ...c, joined: memberSet.has(c.id) }))
   }
 
   async joinChannel(channelId: string, userId: string) {
@@ -738,6 +884,22 @@ export class ChatService {
       attachmentsByMessage.set(a.messageId, list)
     }
 
+    // Thread stats (Plan §6.4): per root message, the reply count and the latest
+    // reply's timestamp so the parent can render "Last reply 3h ago" inline.
+    // Deleted-tombstone replies still count (they occupy the thread).
+    const replyStatRows = await this.db
+      .select({
+        parentId: chatMessages.parentMessageId,
+        replyCount: sql<number>`count(*)::int`,
+        lastReplyAt: sql<string | null>`max(${chatMessages.createdAt})`,
+      })
+      .from(chatMessages)
+      .where(inArray(chatMessages.parentMessageId, messageIds))
+      .groupBy(chatMessages.parentMessageId)
+    const replyStatByParent = new Map(
+      replyStatRows.map((r) => [r.parentId as string, { replyCount: r.replyCount, lastReplyAt: r.lastReplyAt }]),
+    )
+
     return ordered.map((message) => {
       const byEmoji = grouped.get(message.id)
       const reactions =
@@ -748,7 +910,14 @@ export class ChatService {
               reacted: users.has(userId),
             }))
           : []
-      return { ...message, reactions, attachments: attachmentsByMessage.get(message.id) ?? [] }
+      const stats = replyStatByParent.get(message.id)
+      return {
+        ...message,
+        reactions,
+        attachments: attachmentsByMessage.get(message.id) ?? [],
+        replyCount: stats?.replyCount ?? 0,
+        lastReplyAt: stats?.lastReplyAt ?? null,
+      }
     })
   }
 

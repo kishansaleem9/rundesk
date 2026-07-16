@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
-import { Check, Hash, Lock, MessageSquarePlus, Plus, Search, Users } from 'lucide-react'
+import { Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Hash, Lock, MessageSquarePlus, Plus, Search, Users } from 'lucide-react'
 import { Button, Input, cn } from '@rundesk/ui'
-import type { ChatChannel, ChatMember } from './chat-types'
+import type { ChatChannel, ChatMember, ChatSpace } from './chat-types'
 import { initials } from './chat-utils'
 import { usePresence, presenceDotClass, type PresenceStatus } from '../../lib/use-presence'
 import { useTranslation } from '../../lib/i18n'
@@ -22,8 +22,15 @@ export function ChatSidebar({
   onNewNameChange,
   newPrivate,
   onNewPrivateChange,
+  spaces,
+  newSpaceId,
+  onNewSpaceIdChange,
   onCreateChannel,
   createPending,
+  archivedChannels,
+  showArchived,
+  onToggleShowArchived,
+  onUnarchiveChannel,
   startingDm,
   onToggleStartDm,
   dmCandidates,
@@ -45,8 +52,15 @@ export function ChatSidebar({
   onNewNameChange: (value: string) => void
   newPrivate: boolean
   onNewPrivateChange: (value: boolean) => void
+  spaces: ChatSpace[]
+  newSpaceId: string
+  onNewSpaceIdChange: (value: string) => void
   onCreateChannel: () => void
   createPending: boolean
+  archivedChannels: ChatChannel[]
+  showArchived: boolean
+  onToggleShowArchived: () => void
+  onUnarchiveChannel: (id: string) => void
   startingDm: boolean
   onToggleStartDm: () => void
   dmCandidates: ChatMember[]
@@ -70,6 +84,35 @@ export function ChatSidebar({
     : channels
   const dmName = (c: ChatChannel) => (c.dmLabel ?? c.dmPeerName ?? '').toLowerCase()
   const filteredDms = q ? dmChannels.filter((c) => dmName(c).includes(q)) : dmChannels
+  const filteredArchived = q
+    ? archivedChannels.filter((c) => c.name.toLowerCase().includes(q))
+    : archivedChannels
+
+  // Group space-scoped channels under their space (Plan §6.1); workspace-level
+  // channels (no spaceId) stay in the top list.
+  const spaceById = new Map(spaces.map((s) => [s.id, s]))
+  const workspaceChannels = filteredChannels.filter((c) => !c.spaceId)
+  const channelsBySpace = new Map<string, ChatChannel[]>()
+  for (const c of filteredChannels) {
+    if (!c.spaceId) continue
+    const arr = channelsBySpace.get(c.spaceId) ?? []
+    arr.push(c)
+    channelsBySpace.set(c.spaceId, arr)
+  }
+  const spaceGroups = [...channelsBySpace.entries()].map(([spaceId, chans]) => ({
+    spaceId,
+    space: spaceById.get(spaceId) ?? null,
+    channels: chans,
+  }))
+
+  const channelIcon = (c: ChatChannel): ReactNode =>
+    c.icon ? (
+      <span className="h-4 w-4 shrink-0 flex items-center justify-center text-[13px] leading-none">{c.icon}</span>
+    ) : c.isPrivate ? (
+      <Lock className="h-4 w-4 shrink-0 opacity-70" />
+    ) : (
+      <Hash className="h-4 w-4 shrink-0 opacity-70" />
+    )
 
   return (
     <aside className="hidden md:flex w-[272px] shrink-0 flex-col border-r border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]">
@@ -115,6 +158,24 @@ export function ChatSidebar({
                   if (e.key === 'Escape') onToggleCreate()
                 }}
               />
+              {spaces.length > 0 && (
+                <label className="block text-[12px] text-muted-foreground px-0.5 space-y-0.5">
+                  <span>{t('chat.channelLocation')}</span>
+                  <select
+                    value={newSpaceId}
+                    onChange={(e) => onNewSpaceIdChange(e.target.value)}
+                    className="w-full h-8 rounded-md border border-border bg-background px-2 text-[13px] text-foreground"
+                  >
+                    <option value="">{t('chat.workspaceScope')}</option>
+                    {spaces.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.icon ? `${s.icon} ` : ''}
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="flex items-center gap-2 text-[12px] text-muted-foreground px-0.5">
                 <input
                   type="checkbox"
@@ -136,24 +197,84 @@ export function ChatSidebar({
           )}
 
           <div className="space-y-0.5">
-            {filteredChannels.map((c) => (
+            {workspaceChannels.map((c) => (
               <ChannelRow
                 key={c.id}
                 active={selectedId === c.id}
                 onClick={() => onSelectChannel(c.id)}
-                icon={
-                  c.isPrivate ? (
-                    <Lock className="h-4 w-4 shrink-0 opacity-70" />
-                  ) : (
-                    <Hash className="h-4 w-4 shrink-0 opacity-70" />
-                  )
-                }
+                icon={channelIcon(c)}
                 label={c.name}
                 unread={c.unreadCount ?? 0}
               />
             ))}
             {filteredChannels.length === 0 && !channelsLoading && (
               <p className="px-2 py-2 text-[12px] text-muted-foreground">{t('chat.noChannels')}</p>
+            )}
+          </div>
+
+          {/* Space-scoped channel groups (Plan §6.1). */}
+          {spaceGroups.map((group) => (
+            <div key={group.spaceId} className="mt-2">
+              <div className="flex items-center gap-1.5 px-1.5 mb-0.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+                {group.space?.icon ? (
+                  <span className="text-[12px] leading-none">{group.space.icon}</span>
+                ) : null}
+                <span className="truncate">{group.space?.name ?? t('chat.spaceChannels')}</span>
+              </div>
+              <div className="space-y-0.5">
+                {group.channels.map((c) => (
+                  <ChannelRow
+                    key={c.id}
+                    active={selectedId === c.id}
+                    onClick={() => onSelectChannel(c.id)}
+                    icon={channelIcon(c)}
+                    label={c.name}
+                    unread={c.unreadCount ?? 0}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* Archived channels (Plan §6.1): collapsed by default, unarchive inline. */}
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={onToggleShowArchived}
+              className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+            >
+              {showArchived ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              <Archive className="h-3.5 w-3.5" />
+              <span>{t('chat.archived')}</span>
+              {archivedChannels.length > 0 && <span className="ml-auto normal-case tabular-nums">{archivedChannels.length}</span>}
+            </button>
+            {showArchived && (
+              <div className="space-y-0.5 mt-0.5">
+                {filteredArchived.length === 0 ? (
+                  <p className="px-2 py-1.5 text-[12px] text-muted-foreground">{t('chat.noArchivedChannels')}</p>
+                ) : (
+                  filteredArchived.map((c) => (
+                    <div
+                      key={c.id}
+                      className="group flex items-center gap-2 rounded-md px-2 py-[7px] text-[13px] text-foreground/70 hover:bg-black/[0.04] dark:hover:bg-white/[0.05]"
+                    >
+                      {channelIcon(c)}
+                      <span className="truncate flex-1">{c.name}</span>
+                      <button
+                        type="button"
+                        title={t('chat.unarchiveChannel')}
+                        className="shrink-0 rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08]"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onUnarchiveChannel(c.id)
+                        }}
+                      >
+                        <ArchiveRestore className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             )}
           </div>
         </section>

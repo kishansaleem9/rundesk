@@ -25,16 +25,43 @@ export class ChatController {
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { name: string; description?: string; isPrivate?: boolean; memberIds?: string[] },
+    @Body() body: { name: string; description?: string; icon?: string; isPrivate?: boolean; spaceId?: string | null; memberIds?: string[] },
   ) {
     return this.chat.createChannel({
       workspaceId,
       name: body.name,
       description: body.description,
+      icon: body.icon,
       isPrivate: body.isPrivate,
+      spaceId: body.spaceId,
       createdById: user.id,
       memberIds: body.memberIds,
     })
+  }
+
+  @Get('workspaces/:workspaceId/chat/channels/archived')
+  @UseGuards(WorkspaceMemberGuard)
+  listArchived(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.listArchivedChannels(workspaceId, user.id)
+  }
+
+  @Patch('chat/channels/:channelId')
+  updateChannel(
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { name?: string; description?: string | null; icon?: string | null },
+  ) {
+    return this.chat.updateChannel(channelId, user.id, body)
+  }
+
+  @Post('chat/channels/:channelId/archive')
+  archiveChannel(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.setChannelArchived(channelId, user.id, true)
+  }
+
+  @Post('chat/channels/:channelId/unarchive')
+  unarchiveChannel(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.setChannelArchived(channelId, user.id, false)
   }
 
   @Post('workspaces/:workspaceId/chat/dms')

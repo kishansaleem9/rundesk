@@ -9,9 +9,11 @@ import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-compo
 import {
   formatDateDivider,
   formatMessageTime,
+  formatRelativeTime,
   shouldShowDateDivider,
   shouldShowMessageHeader,
 } from '../components/chat/chat-utils'
+import type { ChatSpace } from '../components/chat/chat-types'
 import {
   Hash,
   Users,
@@ -41,6 +43,9 @@ type Channel = {
   id: string
   name: string
   description?: string | null
+  icon?: string | null
+  spaceId?: string | null
+  archivedAt?: string | null
   isPrivate: boolean
   isDm: boolean
   joined: boolean
@@ -82,6 +87,8 @@ type Message = {
   pinnedByName?: string | null
   deletedAt?: string | null
   createdAt: string
+  replyCount?: number
+  lastReplyAt?: string | null
   reactions?: Array<{
     emoji: string
     count: number
@@ -156,6 +163,13 @@ export function ChatPage() {
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPrivate, setNewPrivate] = useState(false)
+  const [newSpaceId, setNewSpaceId] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  // Edit-channel dialog (§6.1): name / description / icon.
+  const [editChannelOpen, setEditChannelOpen] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editIcon, setEditIcon] = useState('')
   const [startingDm, setStartingDm] = useState(false)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [threadParentId, setThreadParentId] = useState<string | null>(null)
@@ -183,6 +197,23 @@ export function ChatPage() {
   const channels = channelsQuery.data ?? []
   const publicChannels = channels.filter((c) => !c.isDm)
   const dmChannels = channels.filter((c) => c.isDm)
+
+  // Spaces power the channel-scope picker + sidebar grouping (§6.1). Only spaces
+  // the user can see are returned by the API.
+  const spacesQuery = useQuery({
+    queryKey: ['chat-spaces', workspaceId],
+    queryFn: () => api<ChatSpace[]>(`/spaces/workspace/${workspaceId}`),
+    enabled: !!workspaceId,
+  })
+  const spaceOptions: ChatSpace[] = (spacesQuery.data ?? []).map((s) => ({ id: s.id, name: s.name, icon: s.icon }))
+
+  // Archived channels (§6.1) — only fetched while the archived section is open.
+  const archivedChannelsQuery = useQuery({
+    queryKey: ['chat-archived-channels', workspaceId],
+    queryFn: () => api<Channel[]>(`/workspaces/${workspaceId}/chat/channels/archived`),
+    enabled: !!workspaceId && showArchived,
+  })
+  const archivedChannels = archivedChannelsQuery.data ?? []
 
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
@@ -376,7 +407,9 @@ export function ChatPage() {
         )
       }
       if (event.type === 'chat.channel.created') {
+        // Reused for channel edits + archive/unarchive too (§6.1): refetch both lists.
         qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+        qc.invalidateQueries({ queryKey: ['chat-archived-channels', workspaceId] })
       }
       if (event.type === 'chat.channel.members.updated' && event.channelId) {
         qc.invalidateQueries({ queryKey: ['chat-channel-members', event.channelId] })
@@ -478,7 +511,7 @@ export function ChatPage() {
   }
 
   const createChannelMutation = useMutation({
-    mutationFn: (data: { name: string; isPrivate: boolean }) =>
+    mutationFn: (data: { name: string; isPrivate: boolean; spaceId?: string | null }) =>
       api<Channel>(`/workspaces/${workspaceId}/chat/channels`, {
         method: 'POST',
         body: JSON.stringify(data),
@@ -489,7 +522,35 @@ export function ChatPage() {
       setCreating(false)
       setNewName('')
       setNewPrivate(false)
+      setNewSpaceId('')
     },
+  })
+
+  // Edit a channel's name / description / icon (§6.1). Moderator-gated server-side.
+  const updateChannelMutation = useMutation({
+    mutationFn: ({ channelId, patch }: { channelId: string; patch: { name?: string; description?: string | null; icon?: string | null } }) =>
+      api<Channel>(`/chat/channels/${channelId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      setEditChannelOpen(false)
+      toast.success(t('chat.channelUpdated'))
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateChannel')),
+  })
+
+  // Archive / unarchive a channel (§6.1).
+  const setChannelArchivedMutation = useMutation({
+    mutationFn: ({ channelId, archived }: { channelId: string; archived: boolean }) =>
+      api<Channel>(`/chat/channels/${channelId}/${archived ? 'archive' : 'unarchive'}`, { method: 'POST' }),
+    onSuccess: async (_, { channelId, archived }) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] }),
+        qc.invalidateQueries({ queryKey: ['chat-archived-channels', workspaceId] }),
+      ])
+      toast.success(archived ? t('chat.channelArchived') : t('chat.channelUnarchived'))
+      if (archived && selectedId === channelId) setSelectedId(null)
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotArchiveChannel')),
   })
 
   const createDmMutation = useMutation({
@@ -736,11 +797,18 @@ export function ChatPage() {
         onNewNameChange={setNewName}
         newPrivate={newPrivate}
         onNewPrivateChange={setNewPrivate}
+        spaces={spaceOptions}
+        newSpaceId={newSpaceId}
+        onNewSpaceIdChange={setNewSpaceId}
         onCreateChannel={() => {
           if (!newName.trim()) return
-          createChannelMutation.mutate({ name: newName.trim(), isPrivate: newPrivate })
+          createChannelMutation.mutate({ name: newName.trim(), isPrivate: newPrivate, spaceId: newSpaceId || null })
         }}
         createPending={createChannelMutation.isPending}
+        archivedChannels={archivedChannels}
+        showArchived={showArchived}
+        onToggleShowArchived={() => setShowArchived((v) => !v)}
+        onUnarchiveChannel={(id) => setChannelArchivedMutation.mutate({ channelId: id, archived: false })}
         startingDm={startingDm}
         onToggleStartDm={() => setStartingDm((v) => !v)}
         dmCandidates={dmCandidates}
@@ -780,6 +848,21 @@ export function ChatPage() {
           }
           currentUserId={me?.id}
           onRemoveMember={selectedId ? (userId) => removeMemberMutation.mutate({ channelId: selectedId, userId }) : undefined}
+          onEditChannel={
+            selectedChannel && !selectedChannel.isDm
+              ? () => {
+                  setEditName(selectedChannel.name)
+                  setEditDescription(selectedChannel.description ?? '')
+                  setEditIcon(selectedChannel.icon ?? '')
+                  setEditChannelOpen(true)
+                }
+              : undefined
+          }
+          onArchiveChannel={
+            selectedChannel && !selectedChannel.isDm
+              ? () => setChannelArchivedMutation.mutate({ channelId: selectedChannel.id, archived: true })
+              : undefined
+          }
         />
 
         {selectedChannel && !selectedChannel.isDm && (
@@ -790,6 +873,69 @@ export function ChatPage() {
             open={addPeopleOpen}
             onOpenChange={setAddPeopleOpen}
           />
+        )}
+
+        {editChannelOpen && selectedChannel && !selectedChannel.isDm && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setEditChannelOpen(false)}
+          >
+            <Card className="w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm">{t('chat.editChannel')}</h3>
+                <button className="text-muted-foreground hover:text-foreground" onClick={() => setEditChannelOpen(false)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.channelName')}
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="mt-0.5 w-full h-8 rounded border border-border bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.channelIcon')}
+                  <input
+                    value={editIcon}
+                    onChange={(e) => setEditIcon(e.target.value)}
+                    maxLength={8}
+                    placeholder={t('chat.channelIconPlaceholder')}
+                    className="mt-0.5 w-24 h-8 rounded border border-border bg-background px-2 text-base text-foreground"
+                  />
+                </label>
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.channelDescription')}
+                  <textarea
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    rows={3}
+                    placeholder={t('chat.channelDescriptionPlaceholder')}
+                    className="mt-0.5 w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground resize-none"
+                  />
+                </label>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setEditChannelOpen(false)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!editName.trim() || updateChannelMutation.isPending}
+                  onClick={() =>
+                    updateChannelMutation.mutate({
+                      channelId: selectedChannel.id,
+                      patch: { name: editName.trim(), description: editDescription.trim(), icon: editIcon.trim() },
+                    })
+                  }
+                >
+                  {updateChannelMutation.isPending ? t('common.saving') : t('common.save')}
+                </Button>
+              </div>
+            </Card>
+          </div>
         )}
 
         {emojiManagerOpen && (
@@ -888,7 +1034,16 @@ export function ChatPage() {
                 const showAuthor = shouldShowMessageHeader(visibleRootMessages, i)
                 const showDate = shouldShowDateDivider(visibleRootMessages, i)
                 const mine = m.authorId === me?.id
-                const replyCount = repliesByParent.get(m.id)?.length ?? 0
+                // Prefer the larger of the server's thread stats (§6.4) and any
+                // replies already loaded client-side (thread open / realtime).
+                const localReplies = repliesByParent.get(m.id) ?? []
+                const replyCount = Math.max(m.replyCount ?? 0, localReplies.length)
+                const localLastReplyMs = localReplies.reduce(
+                  (max, r) => Math.max(max, new Date(r.createdAt).getTime()),
+                  0,
+                )
+                const serverLastReplyMs = m.lastReplyAt ? new Date(m.lastReplyAt).getTime() : 0
+                const lastReplyMs = Math.max(localLastReplyMs, serverLastReplyMs)
                 return (
                   <div key={m.id} className="contents">
                     {showDate && (
@@ -1220,13 +1375,20 @@ export function ChatPage() {
                         </div>
                       )}
                       {replyCount > 0 && (
-                        <button
-                          type="button"
-                          className="mt-1.5 inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-300 hover:underline"
-                          onClick={() => setThreadParentId(m.id)}
-                        >
-                          {t('chat.viewThread', { count: replyCount })}
-                        </button>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-300 hover:underline"
+                            onClick={() => setThreadParentId(m.id)}
+                          >
+                            {t('chat.viewThread', { count: replyCount })}
+                          </button>
+                          {lastReplyMs > 0 && (
+                            <span className="text-[11px] text-muted-foreground">
+                              {t('chat.lastReply', { time: formatRelativeTime(new Date(lastReplyMs).toISOString()) })}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>

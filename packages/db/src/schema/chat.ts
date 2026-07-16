@@ -1,13 +1,21 @@
 import { pgTable, text, timestamp, uuid, boolean, jsonb, integer, type AnyPgColumn, uniqueIndex } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
+import { spaces } from './spaces'
 import { users } from './users'
 
 export const chatChannels = pgTable('chat_channels', {
   id:          uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  // Optional space scoping (Plan §6.1). Null = workspace-level channel. When set,
+  // access also respects the space's visibility (private spaces need membership).
+  // ON DELETE SET NULL so deleting a space reverts its channels to workspace-level
+  // rather than discarding chat history.
+  spaceId:     uuid('space_id').references(() => spaces.id, { onDelete: 'set null' }),
   name:        text('name').notNull(),
   description: text('description'),
+  // Optional channel icon (Plan §6.1) — an emoji or short token shown in the UI.
+  icon:        text('icon'),
   isPrivate:   boolean('is_private').notNull().default(false),
   isDm:        boolean('is_dm').notNull().default(false),
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
@@ -119,6 +127,7 @@ export const chatMessageSavesRelations = relations(chatMessageSaves, ({ one }) =
 
 export const chatChannelsRelations = relations(chatChannels, ({ one, many }) => ({
   workspace: one(workspaces, { fields: [chatChannels.workspaceId], references: [workspaces.id] }),
+  space:     one(spaces, { fields: [chatChannels.spaceId], references: [spaces.id] }),
   creator:   one(users, { fields: [chatChannels.createdById], references: [users.id] }),
   members:   many(chatChannelMembers),
   messages:  many(chatMessages),

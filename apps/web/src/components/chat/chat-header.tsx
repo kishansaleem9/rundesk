@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bookmark, Check, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pin, Search, Star, UserPlus, Users, X } from 'lucide-react'
+import { Archive, Bookmark, Check, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pencil, Pin, Search, Star, UserPlus, Users, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +35,8 @@ export function ChatHeader({
   onSetNotificationLevel,
   currentUserId,
   onRemoveMember,
+  onEditChannel,
+  onArchiveChannel,
 }: {
   channel: ChatChannel | null
   workspaceId?: string
@@ -51,10 +53,13 @@ export function ChatHeader({
   onSetNotificationLevel?: (level: 'all' | 'mentions' | 'none') => void
   currentUserId?: string
   onRemoveMember?: (userId: string) => void
+  onEditChannel?: () => void
+  onArchiveChannel?: () => void
 }) {
-  // The channel creator may remove other members (backend also allows workspace
-  // admins; the control is shown to the creator).
+  // The channel creator may remove other members / edit / archive (backend also
+  // allows workspace admins; these controls are shown to the creator).
   const canRemoveMembers = !!channel?.createdById && channel.createdById === currentUserId
+  const canManageChannel = !!channel && !channel.isDm && !!channel.createdById && channel.createdById === currentUserId
   const { t } = useTranslation()
   const title = channel?.isDm
     ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage')
@@ -106,7 +111,7 @@ export function ChatHeader({
         </div>
       ) : (
         <div className="h-8 w-8 rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-300 flex items-center justify-center shrink-0">
-          <Hash className="h-4 w-4" />
+          {channel?.icon ? <span className="text-[16px] leading-none">{channel.icon}</span> : <Hash className="h-4 w-4" />}
         </div>
       )}
 
@@ -297,6 +302,23 @@ export function ChatHeader({
                     {label}
                   </DropdownMenuItem>
                 ))}
+              </>
+            )}
+            {canManageChannel && (onEditChannel || onArchiveChannel) && (
+              <>
+                <DropdownMenuSeparator />
+                {onEditChannel && (
+                  <DropdownMenuItem onClick={onEditChannel}>
+                    <Pencil className="h-4 w-4" />
+                    {t('chat.editChannel')}
+                  </DropdownMenuItem>
+                )}
+                {onArchiveChannel && (
+                  <DropdownMenuItem onClick={onArchiveChannel}>
+                    <Archive className="h-4 w-4" />
+                    {t('chat.archiveChannel')}
+                  </DropdownMenuItem>
+                )}
               </>
             )}
             {!channel?.isDm && (

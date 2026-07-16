@@ -1,7 +1,12 @@
-import { format, isToday, isYesterday } from 'date-fns'
+import { format, formatDistanceToNowStrict, isToday, isYesterday } from 'date-fns'
 
 export function formatMessageTime(iso: string) {
   return format(new Date(iso), 'h:mm a')
+}
+
+/** Relative "3 hours ago" style, matching the app's inbox time formatting. */
+export function formatRelativeTime(iso: string) {
+  return formatDistanceToNowStrict(new Date(iso), { addSuffix: true })
 }
 
 export function formatDateDivider(iso: string) {
