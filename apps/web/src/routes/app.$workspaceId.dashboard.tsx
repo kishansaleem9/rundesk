@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, cn, Input } from '@rundesk/ui'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Badge, Button, Card, cn, Input } from '@rundesk/ui'
 import { useState } from 'react'
 import {
   Activity,
@@ -8,11 +8,13 @@ import {
   ArrowLeft,
   CheckCircle2,
   Clock,
+  Star,
   TrendingUp,
 } from 'lucide-react'
 import { format, formatDistanceToNowStrict, isAfter, isBefore, isToday, startOfWeek } from 'date-fns'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceStore } from '../store/workspace'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
 import { useTranslation } from '../lib/i18n'
 import { DemoDataEmptyState } from '../components/demo-data-empty-state'
@@ -77,6 +79,27 @@ function Dashboard() {
   const displayName = user?.displayName ?? 'there'
   const userId = user?.id
   const qc = useQueryClient()
+
+  // §5.7 — only workspace admins (or a global super_admin) may set/clear the
+  // workspace-wide default dashboard. Mirrors the role gate used across the app
+  // (app.admin gates on the auth-store role; workspace pages read the per-
+  // workspace role from the workspace store).
+  const isWorkspaceAdmin = useWorkspaceStore((s) => {
+    const ws = s.workspaces.find((w) => w.id === workspaceId) ?? s.active
+    return ws?.role === 'workspace_admin'
+  })
+  const canManageWorkspaceDefault = user?.role === 'super_admin' || isWorkspaceAdmin
+
+  const setWorkspaceDefault = useMutation({
+    mutationFn: (presetId: string) =>
+      api(`/dashboards/workspace/${workspaceId}/preset/${presetId}/workspace-default`, { method: 'PUT' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] }),
+  })
+  const clearWorkspaceDefault = useMutation({
+    mutationFn: () =>
+      api(`/dashboards/workspace/${workspaceId}/workspace-default`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] }),
+  })
 
   const { data: workspace } = useQuery({
     queryKey: ['workspace', workspaceId],
@@ -166,7 +189,7 @@ function Dashboard() {
             </p>
           </div>
           {viewMode === 'custom' && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <select
                 className="h-9 px-3 rounded-md border border-border bg-card text-sm"
                 value={activePresetId || ''}
@@ -174,9 +197,44 @@ function Dashboard() {
               >
                 <option value="">{t('dashboard.defaultLayout')}</option>
                 {presets.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.isWorkspaceDefault ? ' ★' : ''}
+                  </option>
                 ))}
               </select>
+              {/* §5.7 — badge marks whichever preset is the workspace default. */}
+              {activePreset?.isWorkspaceDefault && (
+                <Badge variant="secondary" className="gap-1 whitespace-nowrap">
+                  <Star className="h-3 w-3" />
+                  {t('dashboard.workspaceDefaultBadge')}
+                </Badge>
+              )}
+              {/* §5.7 — admin-only: set/clear the workspace-wide default. */}
+              {canManageWorkspaceDefault && activePreset?.id && (
+                activePreset.isWorkspaceDefault ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={clearWorkspaceDefault.isPending}
+                    title={t('dashboard.workspaceDefaultHint')}
+                    onClick={() => clearWorkspaceDefault.mutate()}
+                  >
+                    {t('dashboard.clearWorkspaceDefault')}
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={setWorkspaceDefault.isPending}
+                    title={t('dashboard.workspaceDefaultHint')}
+                    onClick={() => setWorkspaceDefault.mutate(activePreset.id)}
+                  >
+                    <Star className="h-3.5 w-3.5 mr-1.5" />
+                    {t('dashboard.setWorkspaceDefault')}
+                  </Button>
+                )
+              )}
               <Button size="sm" onClick={() => setIsSaving(true)}>{t('dashboard.savePreset')}</Button>
             </div>
           )}

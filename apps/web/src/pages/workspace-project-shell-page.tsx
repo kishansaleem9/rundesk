@@ -14,9 +14,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, Check, HeartPulse, Globe, ExternalLink, MoreHorizontal, Pencil, Archive } from 'lucide-react'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Receipt, Activity, Sparkles, Copy, Loader2, X, Check, HeartPulse, Globe, ExternalLink, MoreHorizontal, Pencil, Archive } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import {
   WorkHubPage,
@@ -359,6 +359,8 @@ function ProjectHome() {
       <ProjectActivitySection projectId={projectId} workspaceId={workspaceId} projectName={project?.name} />
 
       <ProjectTimeSettingsSection projectId={projectId} workspaceId={workspaceId} />
+
+      <ClientInvoicesSection workspaceId={workspaceId} projectId={projectId} />
 
       <ClientPortalSection projectId={projectId} />
 
@@ -1155,6 +1157,265 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
         </div>
       </Card>
     </section>
+  )
+}
+
+// §12.10 — Client invoicing. Turns a project's unbilled billable time into a
+// client invoice and walks it through its lifecycle (draft → sent → paid, or
+// void). Gated by the `workspace.billing` permission on the API — when the
+// caller lacks it the list request 403s and we show a quiet note instead of the
+// controls (rather than pre-detecting the permission client-side).
+type ClientInvoice = {
+  id: string
+  number: string
+  status: string
+  currency: string
+  subtotalCents: number
+  totalCents: number
+  projectId: string | null
+  createdAt: string
+}
+
+type ClientInvoiceLineItem = {
+  id: string
+  description: string
+  quantityMinutes: number
+  unitAmountCents: number
+  amountCents: number
+}
+
+/** Format an integer amount of cents as localized currency, e.g. `$1,250.00`. */
+function formatCents(cents: number, currency: string): string {
+  const value = (cents || 0) / 100
+  const cur = (currency || 'usd').toUpperCase()
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur }).format(value)
+  } catch {
+    return `${value.toFixed(2)} ${cur}`
+  }
+}
+
+function ClientInvoicesSection({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [rate, setRate] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  const invoicesQuery = useQuery({
+    queryKey: ['client-invoices', workspaceId],
+    queryFn: () => api<ClientInvoice[]>(`/workspaces/${workspaceId}/client-invoices`),
+    retry: false,
+  })
+  // The whole surface is billing-permission gated on the API; a 403 means the
+  // current user simply can't see invoices — render a note, not an error.
+  const forbidden = invoicesQuery.error instanceof ApiError && invoicesQuery.error.status === 403
+  const invoices = (invoicesQuery.data ?? []).filter((inv) => inv.projectId === projectId)
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['client-invoices', workspaceId] })
+
+  const generate = useMutation({
+    mutationFn: () => {
+      const dollars = parseFloat(rate)
+      const ratePerHourCents = Number.isFinite(dollars) && dollars > 0 ? Math.round(dollars * 100) : undefined
+      return api(`/workspaces/${workspaceId}/client-invoices/generate`, {
+        method: 'POST',
+        body: { projectId, ratePerHourCents },
+      })
+    },
+    onSuccess: () => {
+      setRate('')
+      invalidate()
+      toast.success(t('invoices.generated'))
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('invoices.generateError')),
+  })
+
+  const transition = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'send' | 'paid' | 'void' }) =>
+      api(`/workspaces/${workspaceId}/client-invoices/${id}/${action}`, { method: 'POST' }),
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('invoices.actionError')),
+  })
+
+  return (
+    <section>
+      <WorkSectionTitle>
+        <span className="flex items-center gap-2">
+          <Receipt className="h-4 w-4 text-muted-foreground" />
+          {t('invoices.title')}
+        </span>
+      </WorkSectionTitle>
+      <p className="text-[13px] text-muted-foreground mb-4 -mt-1">{t('invoices.desc')}</p>
+
+      {forbidden ? (
+        <Card className="p-4 border-border/80 text-[13px] text-muted-foreground">
+          {t('invoices.noPermission')}
+        </Card>
+      ) : (
+        <Card className="p-4 border-border/80 space-y-4">
+          <form
+            className="flex flex-wrap items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              generate.mutate()
+            }}
+          >
+            <div className="space-y-1">
+              <label className="text-[12px] font-medium">{t('invoices.ratePerHour')}</label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+                placeholder={t('invoices.ratePlaceholder')}
+                className="h-8 w-32"
+              />
+            </div>
+            <Button type="submit" size="sm" disabled={generate.isPending}>
+              {generate.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  {t('invoices.generating')}
+                </>
+              ) : (
+                t('invoices.generate')
+              )}
+            </Button>
+            <span className="text-[12px] text-muted-foreground">{t('invoices.rateHelp')}</span>
+          </form>
+
+          <div className="border-t border-border/60 pt-3">
+            {invoicesQuery.isLoading ? (
+              <div className="text-[13px] text-muted-foreground">{t('invoices.loading')}</div>
+            ) : invoices.length === 0 ? (
+              <div className="text-[13px] text-muted-foreground">{t('invoices.empty')}</div>
+            ) : (
+              <ul className="divide-y divide-border/60">
+                {invoices.map((inv) => {
+                  const statusVariant =
+                    inv.status === 'paid'
+                      ? 'success'
+                      : inv.status === 'sent'
+                        ? 'warning'
+                        : inv.status === 'void'
+                          ? 'soft'
+                          : 'secondary'
+                  const statusLabel =
+                    inv.status === 'paid'
+                      ? t('invoices.statusPaid')
+                      : inv.status === 'sent'
+                        ? t('invoices.statusSent')
+                        : inv.status === 'void'
+                          ? t('invoices.statusVoid')
+                          : t('invoices.statusDraft')
+                  const isExpanded = expandedId === inv.id
+                  const closed = inv.status === 'void' || inv.status === 'paid'
+                  return (
+                    <li key={inv.id} className="py-3 first:pt-0 last:pb-0">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-medium text-[14px]">{inv.number}</span>
+                          <Badge variant={statusVariant}>{statusLabel}</Badge>
+                        </div>
+                        <span className="font-medium text-[14px]">{formatCents(inv.totalCents, inv.currency)}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          className="text-[12px] text-accent hover:underline"
+                          onClick={() => setExpandedId(isExpanded ? null : inv.id)}
+                        >
+                          {isExpanded ? t('invoices.hideLineItems') : t('invoices.viewLineItems')}
+                        </button>
+                        <span className="flex-1" />
+                        {!closed && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={transition.isPending}
+                            onClick={() => transition.mutate({ id: inv.id, action: 'send' })}
+                          >
+                            {t('invoices.send')}
+                          </Button>
+                        )}
+                        {!closed && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={transition.isPending}
+                            onClick={() => transition.mutate({ id: inv.id, action: 'paid' })}
+                          >
+                            {t('invoices.markPaid')}
+                          </Button>
+                        )}
+                        {inv.status !== 'void' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-destructive"
+                            disabled={transition.isPending}
+                            onClick={() => {
+                              if (window.confirm(t('invoices.voidConfirm', { number: inv.number }))) {
+                                transition.mutate({ id: inv.id, action: 'void' })
+                              }
+                            }}
+                          >
+                            {t('invoices.void')}
+                          </Button>
+                        )}
+                      </div>
+                      {isExpanded && (
+                        <InvoiceLineItems workspaceId={workspaceId} invoiceId={inv.id} currency={inv.currency} />
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </Card>
+      )}
+    </section>
+  )
+}
+
+function InvoiceLineItems({
+  workspaceId,
+  invoiceId,
+  currency,
+}: {
+  workspaceId: string
+  invoiceId: string
+  currency: string
+}) {
+  const { t } = useTranslation()
+  const detailQuery = useQuery({
+    queryKey: ['client-invoice', workspaceId, invoiceId],
+    queryFn: () =>
+      api<{ lineItems: ClientInvoiceLineItem[] }>(`/workspaces/${workspaceId}/client-invoices/${invoiceId}`),
+  })
+  const lineItems = detailQuery.data?.lineItems ?? []
+  return (
+    <div className="mt-2 rounded-md border border-border/60 bg-muted/20 p-2">
+      {detailQuery.isLoading ? (
+        <div className="text-[12px] text-muted-foreground">{t('invoices.lineItemsLoading')}</div>
+      ) : lineItems.length === 0 ? (
+        <div className="text-[12px] text-muted-foreground">{t('invoices.noLineItems')}</div>
+      ) : (
+        <ul className="space-y-1">
+          {lineItems.map((li) => (
+            <li key={li.id} className="flex items-center justify-between gap-3 text-[12px]">
+              <span className="truncate">{li.description}</span>
+              <span className="flex items-center gap-2 shrink-0 text-muted-foreground">
+                <span>{t('invoices.qtyMinutes', { minutes: li.quantityMinutes })}</span>
+                <span className="text-foreground font-medium">{formatCents(li.amountCents, currency)}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

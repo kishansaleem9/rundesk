@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Badge, Button, Card, Input, Switch } from '@rundesk/ui'
+import { Badge, Button, Card, Input, Switch, toast } from '@rundesk/ui'
 import {
   Activity,
   AlertTriangle,
   Building2,
   Cpu,
   CreditCard,
+  Database,
   DollarSign,
   Gauge,
   HardDrive,
@@ -161,6 +162,8 @@ export function MasterAdminPanel() {
       </header>
 
       <OpsMetricsSection />
+
+      <TenantDatabasesSection />
 
       <div className="grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-5">
         <Card className="p-4 space-y-3 h-fit">
@@ -484,6 +487,258 @@ function OpsMetricsSection() {
           </div>
         )}
       </div>
+    </Card>
+  )
+}
+
+// ── §14.2 Dedicated-database registry (super-admin) ──────────────────────────
+
+type TenantDbStatus = 'pending' | 'active' | 'disabled'
+
+/**
+ * Masked, client-safe projection returned by `GET /ops/tenant-databases`. The
+ * raw connection string is NEVER returned by the API — only a masked host, so
+ * nothing here can leak a secret back to the panel.
+ */
+type TenantDbView = {
+  organizationId: string
+  status: TenantDbStatus
+  label: string | null
+  host: string
+  lastCheckedAt: string | null
+}
+
+type TestConnectionResult =
+  | { ok: true; status: TenantDbStatus; latencyMs: number }
+  | { ok: false; status: TenantDbStatus; error: string }
+
+const TENANT_DB_STATUSES: TenantDbStatus[] = ['pending', 'active', 'disabled']
+
+function tenantDbStatusMeta(status: TenantDbStatus, t: TFunc): { variant: 'success' | 'warning' | 'soft'; label: string } {
+  if (status === 'active') return { variant: 'success', label: t('tenantDb.statusActive') }
+  if (status === 'disabled') return { variant: 'soft', label: t('tenantDb.statusDisabled') }
+  return { variant: 'warning', label: t('tenantDb.statusPending') }
+}
+
+/**
+ * §14.2 — super-admin registry of org → dedicated Postgres mappings. Lists each
+ * org's masked host + status + last health-check with Test / Disable / Remove
+ * controls, plus a form to set or replace a connection URL. Already inside the
+ * super-admin-only /app/admin route; the raw connection string is write-only.
+ */
+function TenantDatabasesSection() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [orgId, setOrgId] = useState('')
+  const [connectionUrl, setConnectionUrl] = useState('')
+  const [label, setLabel] = useState('')
+  const [status, setStatus] = useState<TenantDbStatus>('pending')
+
+  const dbsQuery = useQuery({
+    queryKey: ['tenant-databases'],
+    queryFn: () => api<TenantDbView[]>('/ops/tenant-databases'),
+  })
+  const orgsQuery = useQuery({
+    queryKey: ['tenant-db-orgs'],
+    queryFn: () => api<Array<{ id: string; name: string; slug: string }>>('/organizations'),
+  })
+  const dbs = dbsQuery.data ?? []
+  const orgs = orgsQuery.data ?? []
+  const orgName = (id: string) => orgs.find((o) => o.id === id)?.name ?? id
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['tenant-databases'] })
+
+  const upsert = useMutation({
+    mutationFn: () =>
+      api(`/ops/tenant-databases/${orgId}`, {
+        method: 'PUT',
+        body: { connectionUrl, label: label.trim() || null, status },
+      }),
+    onSuccess: () => {
+      // Never keep the raw URL around after saving — the API only echoes a mask.
+      setConnectionUrl('')
+      setLabel('')
+      invalidate()
+      toast.success(t('tenantDb.saved'))
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('tenantDb.saveError')),
+  })
+
+  const test = useMutation({
+    mutationFn: (organizationId: string) =>
+      api<TestConnectionResult>(`/ops/tenant-databases/${organizationId}/test`, { method: 'POST' }),
+    onSuccess: (res) => {
+      if (res.ok) toast.success(t('tenantDb.testOk', { ms: res.latencyMs }))
+      else toast.error(t('tenantDb.testFail', { error: res.error }))
+      invalidate()
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('tenantDb.error')),
+  })
+
+  const disable = useMutation({
+    mutationFn: (organizationId: string) =>
+      api(`/ops/tenant-databases/${organizationId}/disable`, { method: 'POST' }),
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('tenantDb.error')),
+  })
+
+  const remove = useMutation({
+    mutationFn: (organizationId: string) =>
+      api(`/ops/tenant-databases/${organizationId}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('tenantDb.error')),
+  })
+
+  const anyPending = test.isPending || disable.isPending || remove.isPending
+
+  return (
+    <Card className="p-5 space-y-5">
+      <div className="space-y-1">
+        <div className="text-[11px] uppercase tracking-widest text-muted-foreground">§14.2</div>
+        <h2 className="font-semibold flex items-center gap-2">
+          <Database className="h-4 w-4 text-accent" />
+          {t('tenantDb.title')}
+        </h2>
+        <p className="text-xs text-muted-foreground max-w-2xl">{t('tenantDb.subtitle')}</p>
+      </div>
+
+      {dbsQuery.isLoading && <div className="text-xs text-muted-foreground">{t('tenantDb.loading')}</div>}
+      {dbsQuery.isError && <div className="text-xs text-destructive">{t('tenantDb.error')}</div>}
+      {!dbsQuery.isLoading && !dbsQuery.isError && dbs.length === 0 && (
+        <div className="text-xs text-muted-foreground">{t('tenantDb.empty')}</div>
+      )}
+
+      {dbs.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                <th className="py-2 pr-3 font-medium">{t('tenantDb.colOrg')}</th>
+                <th className="py-2 px-3 font-medium">{t('tenantDb.colLabel')}</th>
+                <th className="py-2 px-3 font-medium">{t('tenantDb.colHost')}</th>
+                <th className="py-2 px-3 font-medium">{t('tenantDb.colStatus')}</th>
+                <th className="py-2 px-3 font-medium">{t('tenantDb.colLastChecked')}</th>
+                <th className="py-2 pl-3 font-medium text-right">{t('tenantDb.colActions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dbs.map((db) => {
+                const meta = tenantDbStatusMeta(db.status, t)
+                return (
+                  <tr key={db.organizationId} className="border-b border-border/50">
+                    <td className="py-2 pr-3">
+                      <div className="font-medium truncate max-w-[200px]">{orgName(db.organizationId)}</div>
+                      <div className="text-xs text-muted-foreground truncate max-w-[200px]">{db.organizationId}</div>
+                    </td>
+                    <td className="py-2 px-3">{db.label || <span className="text-muted-foreground">—</span>}</td>
+                    <td className="py-2 px-3 font-mono text-xs whitespace-nowrap">
+                      {db.host || <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="py-2 px-3">
+                      <Badge variant={meta.variant}>{meta.label}</Badge>
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap text-xs text-muted-foreground">
+                      {db.lastCheckedAt ? new Date(db.lastCheckedAt).toLocaleString() : t('tenantDb.never')}
+                    </td>
+                    <td className="py-2 pl-3">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <Button size="sm" variant="outline" disabled={anyPending} onClick={() => test.mutate(db.organizationId)}>
+                          {test.isPending ? t('tenantDb.testing') : t('tenantDb.test')}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={anyPending || db.status === 'disabled'}
+                          onClick={() => disable.mutate(db.organizationId)}
+                        >
+                          {t('tenantDb.disable')}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive"
+                          disabled={anyPending}
+                          onClick={() => {
+                            if (window.confirm(t('tenantDb.removeConfirm', { org: orgName(db.organizationId) }))) {
+                              remove.mutate(db.organizationId)
+                            }
+                          }}
+                        >
+                          {t('tenantDb.remove')}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <form
+        className="space-y-3 border-t border-border pt-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!orgId) return
+          if (!connectionUrl.trim()) {
+            toast.error(t('tenantDb.needsConnection'))
+            return
+          }
+          upsert.mutate()
+        }}
+      >
+        <h3 className="text-sm font-semibold">{t('tenantDb.formTitle')}</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-xs font-medium">{t('tenantDb.formOrg')}</label>
+            <select
+              className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm"
+              value={orgId}
+              onChange={(e) => setOrgId(e.target.value)}
+            >
+              <option value="">{t('tenantDb.formSelectOrg')}</option>
+              {orgs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium">{t('tenantDb.formStatus')}</label>
+            <select
+              className="w-full rounded-md border border-border bg-card px-2 py-1.5 text-sm"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as TenantDbStatus)}
+            >
+              {TENANT_DB_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {tenantDbStatusMeta(s, t).label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-medium">{t('tenantDb.formConnectionUrl')}</label>
+            <Input
+              type="password"
+              autoComplete="off"
+              value={connectionUrl}
+              onChange={(e) => setConnectionUrl(e.target.value)}
+              placeholder={t('tenantDb.connectionPlaceholder')}
+            />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-medium">{t('tenantDb.formLabel')}</label>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('tenantDb.labelPlaceholder')} />
+          </div>
+        </div>
+        <Button type="submit" disabled={!orgId || !connectionUrl.trim() || upsert.isPending}>
+          {upsert.isPending ? t('tenantDb.saving') : t('tenantDb.save')}
+        </Button>
+        <p className="text-[11px] text-muted-foreground">{t('tenantDb.connectionHelp')}</p>
+      </form>
     </Card>
   )
 }

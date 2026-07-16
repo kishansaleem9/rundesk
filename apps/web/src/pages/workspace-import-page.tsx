@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, Progress, RadioGroup, RadioGroupItem, Badge } from '@rundesk/ui'
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 
@@ -32,6 +32,11 @@ type ImportSummary = {
   duplicatesDetected: number
   errors: string[]
   notImported: { comments: string; attachments: string }
+  // §12.5 — populated only when a ClickUp API token was supplied (comments +
+  // attachments are pulled via the ClickUp API, which a CSV export can't carry).
+  commentsImported?: number
+  attachmentsImported?: number
+  attachmentsSkipped?: number
 }
 
 type Job = {
@@ -53,6 +58,10 @@ export function ImportPage() {
   const [filename, setFilename] = useState<string>('')
   const [projectName, setProjectName] = useState('ClickUp Import')
   const [strategy, setStrategy] = useState<ConflictStrategy>('skip')
+  // §12.5 — optional ClickUp API token. When set, the import ALSO pulls each
+  // task's comments + attachments (which the CSV export can't carry). Empty →
+  // the existing CSV-only flow is unchanged.
+  const [apiToken, setApiToken] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
 
@@ -69,7 +78,14 @@ export function ImportPage() {
     mutationFn: () =>
       api<{ jobId: string }>(`/workspaces/${workspaceId}/import/clickup`, {
         method: 'POST',
-        body: { csv, targetProjectName: projectName, strategy },
+        body: {
+          csv,
+          targetProjectName: projectName,
+          strategy,
+          // Only send a token when the field is non-empty so the CSV-only path
+          // is untouched; the API auto-enriches comments + attachments when set.
+          apiToken: apiToken.trim() || undefined,
+        },
       }),
     onSuccess: (data) => setJobId(data.jobId),
   })
@@ -108,6 +124,7 @@ export function ImportPage() {
     setPreview(null)
     setJobId(null)
     setStrategy('skip')
+    setApiToken('')
   }
 
   return (
@@ -238,7 +255,26 @@ export function ImportPage() {
             <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="ClickUp Import" />
           </div>
 
-          <NotIncludedNote note={t('import.notIncludedNote')} title={t('import.notIncludedTitle')} />
+          {/* §12.5 — optional ClickUp API token unlocks comments + attachments. */}
+          <div className="space-y-2 pt-1">
+            <label className="flex items-center gap-1.5 text-sm font-medium">
+              <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+              {t('import.apiTokenLabel')}
+              <span className="text-xs font-normal text-muted-foreground">({t('common.optional')})</span>
+            </label>
+            <Input
+              type="password"
+              autoComplete="off"
+              value={apiToken}
+              onChange={(e) => setApiToken(e.target.value)}
+              placeholder={t('import.apiTokenPlaceholder')}
+            />
+            <p className="text-xs text-muted-foreground">{t('import.apiTokenHelp')}</p>
+          </div>
+
+          {apiToken.trim() ? null : (
+            <NotIncludedNote note={t('import.notIncludedNote')} title={t('import.notIncludedTitle')} />
+          )}
 
           <Button
             onClick={() => importMut.mutate()}
@@ -304,7 +340,16 @@ export function ImportPage() {
             <Stat label={t('import.subtasks')} value={result.subtasksLinked} />
           </div>
 
-          <NotIncludedNote note={t('import.notIncludedNote')} title={t('import.notIncludedTitle')} />
+          {/* §12.5 — comments/attachments only exist when an API token was used. */}
+          {result.commentsImported != null || result.attachmentsImported != null ? (
+            <div className="grid grid-cols-3 gap-4">
+              <Stat label={t('import.commentsImported')} value={result.commentsImported ?? 0} />
+              <Stat label={t('import.attachmentsImported')} value={result.attachmentsImported ?? 0} />
+              <Stat label={t('import.attachmentsSkipped')} value={result.attachmentsSkipped ?? 0} />
+            </div>
+          ) : (
+            <NotIncludedNote note={t('import.notIncludedNote')} title={t('import.notIncludedTitle')} />
+          )}
 
           {result.errors.length > 0 && (
             <details className="rounded-md border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm">
