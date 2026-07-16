@@ -4,6 +4,7 @@ import type {
   StatusComponentStatus,
   StatusIncidentStatus,
 } from '@rundesk/db'
+import { isPlanId, type PlanId } from '../plans/plans.constants'
 
 /** Allowed ticket lifecycle statuses. */
 export const TICKET_STATUSES: readonly SupportTicketStatus[] = [
@@ -56,6 +57,57 @@ export const SLA_POLICY: Record<
   low: { firstResponseHours: 48, resolutionHours: 168 },
 }
 
+/** One priority row of an SLA table. */
+export type SlaTarget = { firstResponseHours: number; resolutionHours: number }
+
+/**
+ * SLA commitments BY TIER × priority (Plan §14.4). Higher-paying tiers get
+ * tighter clocks: for every priority, `enterprise < business < pro < free` on
+ * both first-response and resolution hours. `pro` intentionally equals the
+ * legacy priority-only SLA_POLICY, which is also the fallback used whenever the
+ * workspace's tier is unknown (see `slaPolicyFor`) — so behavior for an
+ * unresolved plan is exactly the pre-tier policy.
+ */
+export const SLA_MATRIX: Record<PlanId, Record<SupportTicketPriority, SlaTarget>> = {
+  enterprise: {
+    urgent: { firstResponseHours: 1, resolutionHours: 8 },
+    high: { firstResponseHours: 2, resolutionHours: 24 },
+    normal: { firstResponseHours: 8, resolutionHours: 48 },
+    low: { firstResponseHours: 24, resolutionHours: 96 },
+  },
+  business: {
+    urgent: { firstResponseHours: 2, resolutionHours: 12 },
+    high: { firstResponseHours: 4, resolutionHours: 48 },
+    normal: { firstResponseHours: 12, resolutionHours: 72 },
+    low: { firstResponseHours: 36, resolutionHours: 120 },
+  },
+  pro: {
+    urgent: { firstResponseHours: 4, resolutionHours: 24 },
+    high: { firstResponseHours: 8, resolutionHours: 72 },
+    normal: { firstResponseHours: 24, resolutionHours: 120 },
+    low: { firstResponseHours: 48, resolutionHours: 168 },
+  },
+  free: {
+    urgent: { firstResponseHours: 8, resolutionHours: 48 },
+    high: { firstResponseHours: 24, resolutionHours: 120 },
+    normal: { firstResponseHours: 48, resolutionHours: 168 },
+    low: { firstResponseHours: 72, resolutionHours: 240 },
+  },
+}
+
+/**
+ * Resolve the SLA target for a (tier, priority) pair. An unknown/undefined tier
+ * falls back to the legacy priority-only SLA_POLICY so callers that can't resolve
+ * a plan keep the current behavior. An unknown priority falls back to 'normal'.
+ */
+export function slaPolicyFor(
+  tier: PlanId | string | null | undefined,
+  priority: SupportTicketPriority,
+): SlaTarget {
+  const table = isPlanId(tier) ? SLA_MATRIX[tier] : SLA_POLICY
+  return table[priority] ?? SLA_POLICY.normal
+}
+
 const HOUR_MS = 60 * 60 * 1000
 
 /** Coerce an arbitrary input into a valid priority, defaulting to 'normal'. */
@@ -73,14 +125,17 @@ export function normalizeStatus(value: unknown): SupportTicketStatus {
 }
 
 /**
- * Compute the SLA due dates for a ticket of a given priority relative to a base
- * time (creation). Pure + deterministic so it's directly unit-testable.
+ * Compute the SLA due dates for a ticket of a given priority (and, optionally,
+ * plan tier) relative to a base time (creation). Pure + deterministic so it's
+ * directly unit-testable. When `tier` is omitted/unknown it uses the legacy
+ * priority-only policy, preserving pre-tier behavior.
  */
 export function computeSlaDueDates(
   priority: SupportTicketPriority,
   from: Date = new Date(),
+  tier?: PlanId | string | null,
 ): { firstResponseDueAt: Date; resolutionDueAt: Date } {
-  const policy = SLA_POLICY[priority] ?? SLA_POLICY.normal
+  const policy = slaPolicyFor(tier, priority)
   return {
     firstResponseDueAt: new Date(from.getTime() + policy.firstResponseHours * HOUR_MS),
     resolutionDueAt: new Date(from.getTime() + policy.resolutionHours * HOUR_MS),

@@ -5,7 +5,7 @@ import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SearchService, type SearchEntityType, type SearchFilters } from './search.service'
 
-const ENTITY_TYPES: SearchEntityType[] = ['task', 'doc']
+const ENTITY_TYPES: SearchEntityType[] = ['task', 'doc', 'file']
 const STATUS_CATEGORIES = new Set(['open', 'in_progress', 'closed'])
 const PRIORITIES = new Set(['urgent', 'high', 'normal', 'low'])
 

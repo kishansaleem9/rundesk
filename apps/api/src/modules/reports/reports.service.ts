@@ -1,5 +1,6 @@
 import { Injectable, Inject, Optional, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, gte, lte, sql, desc, asc, inArray } from 'drizzle-orm'
+import { and, eq, gte, lte, sql, desc, asc, inArray, or } from 'drizzle-orm'
+import type { Column, SQL } from 'drizzle-orm'
 import {
   tasks,
   taskAssignees,
@@ -9,6 +10,8 @@ import {
   labels,
   users,
   workspaceMembers,
+  spaceMembers,
+  projectMembers,
   timeEntries,
   sprints,
   sprintTasks,
@@ -258,6 +261,20 @@ export function contributionNarrativeFallback(f: {
   return `${f.name} ${joined}.`
 }
 
+/**
+ * Resolved View-Reports scope for a viewer (Plan §3.3):
+ *   • all        — admins/super-admins see every member + every container.
+ *   • user       — plain members/guests see only their own row (backward-compat
+ *                  with the previous `restrictToUserId` behaviour).
+ *   • containers — a manager sees their TEAM: tasks/time inside the spaces and
+ *                  projects they belong to (space_members / project_members),
+ *                  plus their own rows wherever those live.
+ */
+export type ViewerScope =
+  | { kind: 'all' }
+  | { kind: 'user'; userId: string }
+  | { kind: 'containers'; spaceIds: string[]; projectIds: string[]; userId: string }
+
 @Injectable()
 export class ReportsService {
   constructor(
@@ -340,24 +357,67 @@ export class ReportsService {
 
   // ─── Productivity per member ──────────────────────────────────────────────
   /**
-   * View-Reports scoping (Plan §3.3): admins/managers see everyone; plain
-   * members/guests see only their own row. Returns the userId to restrict to,
-   * or undefined for full visibility.
+   * View-Reports scoping (Plan §3.3):
+   *   • workspace_admin / super_admin → { kind: 'all' } (see everyone).
+   *   • manager                       → { kind: 'containers' } scoped to the
+   *     spaces & projects they belong to (space_members / project_members),
+   *     plus their own rows — i.e. their TEAM only, not the whole workspace.
+   *   • everyone else (member/guest)  → { kind: 'user' } (own row only).
    */
-  async getViewerScope(workspaceId: string, userId: string): Promise<string | undefined> {
+  async getViewerScope(workspaceId: string, userId: string): Promise<ViewerScope> {
     const [m] = await this.db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
-    const privileged = ['workspace_admin', 'manager', 'super_admin']
-    return m && privileged.includes(m.role) ? undefined : userId
+    if (m && (m.role === 'workspace_admin' || m.role === 'super_admin')) return { kind: 'all' }
+    if (m && m.role === 'manager') {
+      const [spaceRows, projectRows] = await Promise.all([
+        this.db
+          .select({ spaceId: spaceMembers.spaceId })
+          .from(spaceMembers)
+          .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
+          .where(and(eq(spaces.workspaceId, workspaceId), eq(spaceMembers.userId, userId))),
+        this.db
+          .select({ projectId: projectMembers.projectId })
+          .from(projectMembers)
+          .innerJoin(projects, eq(projects.id, projectMembers.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(and(eq(spaces.workspaceId, workspaceId), eq(projectMembers.userId, userId))),
+      ])
+      return {
+        kind: 'containers',
+        spaceIds: [...new Set(spaceRows.map((r) => r.spaceId))],
+        projectIds: [...new Set(projectRows.map((r) => r.projectId))],
+        userId,
+      }
+    }
+    return { kind: 'user', userId }
+  }
+
+  /**
+   * SQL predicate that a task/time row falls inside a manager's team scope: its
+   * space or project is one the manager belongs to, OR (fallback) the row is the
+   * manager's own (`ownerCol` = their userId) so their contribution is always
+   * visible even outside their containers. Returns undefined for non-container
+   * viewers, meaning "no extra restriction".
+   */
+  private containerScopeCondition(
+    viewer: ViewerScope,
+    cols: { spaceIdCol: Column; projectIdCol: Column; ownerCol: Column },
+  ): SQL | undefined {
+    if (viewer.kind !== 'containers') return undefined
+    const parts: SQL[] = []
+    if (viewer.spaceIds.length) parts.push(inArray(cols.spaceIdCol, viewer.spaceIds))
+    if (viewer.projectIds.length) parts.push(inArray(cols.projectIdCol, viewer.projectIds))
+    parts.push(eq(cols.ownerCol, viewer.userId))
+    return or(...parts)
   }
 
   async getProductivity(
     workspaceId: string,
     days = 30,
-    restrictToUserId?: string,
+    viewer: ViewerScope = { kind: 'all' },
     scope: { spaceId?: string; projectId?: string } = {},
   ) {
     const since = daysAgo(days)
@@ -368,6 +428,15 @@ export class ReportsService {
       : scope.spaceId
         ? sql`${projects.spaceId} = ${scope.spaceId}`
         : sql`true`
+    // Manager team scope (Plan §3.3): restrict counts to the manager's own
+    // containers + their own tasks. Folded into the same CASE so members with no
+    // in-scope tasks still surface with 0.
+    const viewerCond = this.containerScopeCondition(viewer, {
+      spaceIdCol: projects.spaceId,
+      projectIdCol: lists.projectId,
+      ownerCol: users.id,
+    })
+    const effectiveScope = viewerCond ? sql`(${inScope}) and (${viewerCond})` : inScope
 
     const rows = await this.db
       .select({
@@ -375,9 +444,9 @@ export class ReportsService {
         displayName: users.displayName,
         email: users.email,
         avatarUrl: users.avatarUrl,
-        tasksCompleted: sql<number>`count(distinct case when ${tasks.status} = 'done' and ${inScope} then ${tasks.id} end)::int`,
-        tasksCreated: sql<number>`count(distinct case when ${tasks.createdById} = ${users.id} and ${inScope} then ${tasks.id} end)::int`,
-        totalAssigned: sql<number>`count(distinct case when ${inScope} then ${tasks.id} end)::int`,
+        tasksCompleted: sql<number>`count(distinct case when ${tasks.status} = 'done' and ${effectiveScope} then ${tasks.id} end)::int`,
+        tasksCreated: sql<number>`count(distinct case when ${tasks.createdById} = ${users.id} and ${effectiveScope} then ${tasks.id} end)::int`,
+        totalAssigned: sql<number>`count(distinct case when ${effectiveScope} then ${tasks.id} end)::int`,
       })
       .from(users)
       .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
@@ -386,12 +455,12 @@ export class ReportsService {
       .leftJoin(lists, eq(lists.id, tasks.listId))
       .leftJoin(projects, eq(projects.id, lists.projectId))
       .where(
-        restrictToUserId
-          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, restrictToUserId))
+        viewer.kind === 'user'
+          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, viewer.userId))
           : eq(workspaceMembers.workspaceId, workspaceId),
       )
       .groupBy(users.id, users.displayName, users.email, users.avatarUrl)
-      .orderBy(desc(sql`count(distinct case when ${tasks.status} = 'done' and ${inScope} then ${tasks.id} end)`))
+      .orderBy(desc(sql`count(distinct case when ${tasks.status} = 'done' and ${effectiveScope} then ${tasks.id} end)`))
 
     return rows
   }
@@ -429,7 +498,11 @@ export class ReportsService {
   }
 
   // ─── Completion analytics ─────────────────────────────────────────────────
-  async getCompletionAnalytics(workspaceId: string, days = 30) {
+  async getCompletionAnalytics(
+    workspaceId: string,
+    days = 30,
+    filter: { spaceId?: string; projectId?: string; memberId?: string } = {},
+  ) {
     const since = daysAgo(days)
     const allTasks = await this.db
       .select({
@@ -443,7 +516,19 @@ export class ReportsService {
       .innerJoin(lists, eq(tasks.listId, lists.id))
       .innerJoin(projects, eq(lists.projectId, projects.id))
       .innerJoin(spaces, eq(projects.spaceId, spaces.id))
-      .where(and(eq(spaces.workspaceId, workspaceId), gte(tasks.createdAt, since)))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          gte(tasks.createdAt, since),
+          // Optional space/project/assignee filters (Plan §9.3). All optional —
+          // omitting them preserves the workspace-wide behaviour.
+          filter.projectId ? eq(lists.projectId, filter.projectId) : undefined,
+          filter.spaceId ? eq(projects.spaceId, filter.spaceId) : undefined,
+          filter.memberId
+            ? sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${filter.memberId})`
+            : undefined,
+        ),
+      )
 
     const completed = allTasks.filter((t) => t.status === 'done')
     const onTime = completed.filter(
@@ -486,17 +571,27 @@ export class ReportsService {
   }
 
   // ─── Time tracking report ─────────────────────────────────────────────────
-  async getTimeReport(workspaceId: string, days = 30, restrictToUserId?: string) {
+  async getTimeReport(workspaceId: string, days = 30, viewer: ViewerScope = { kind: 'all' }) {
     const since = daysAgo(days)
+    // Manager team scope (Plan §3.3): only sum time on tasks in the manager's
+    // containers + their own. `sql`true`` for admin/member keeps sums identical
+    // to the un-scoped form. The task/list/project joins are 1:1 (time_entries
+    // FK → tasks), so they never fan out a member's totals.
+    const viewerCond = this.containerScopeCondition(viewer, {
+      spaceIdCol: projects.spaceId,
+      projectIdCol: lists.projectId,
+      ownerCol: users.id,
+    })
+    const inScopeTime = viewerCond ?? sql`true`
 
     const rows = await this.db
       .select({
         userId: users.id,
         displayName: users.displayName,
         email: users.email,
-        totalSeconds: sql<number>`coalesce(sum(${timeEntries.durationSec}), 0)::int`,
-        billableSeconds: sql<number>`coalesce(sum(case when ${timeEntries.isBillable} then ${timeEntries.durationSec} else 0 end), 0)::int`,
-        entryCount: sql<number>`count(${timeEntries.id})::int`,
+        totalSeconds: sql<number>`coalesce(sum(case when ${inScopeTime} then ${timeEntries.durationSec} else 0 end), 0)::int`,
+        billableSeconds: sql<number>`coalesce(sum(case when ${inScopeTime} and ${timeEntries.isBillable} then ${timeEntries.durationSec} else 0 end), 0)::int`,
+        entryCount: sql<number>`count(case when ${inScopeTime} then ${timeEntries.id} end)::int`,
       })
       .from(users)
       .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
@@ -504,13 +599,16 @@ export class ReportsService {
         timeEntries,
         and(eq(timeEntries.userId, users.id), gte(timeEntries.startedAt, since)),
       )
+      .leftJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .leftJoin(lists, eq(lists.id, tasks.listId))
+      .leftJoin(projects, eq(projects.id, lists.projectId))
       .where(
-        restrictToUserId
-          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, restrictToUserId))
+        viewer.kind === 'user'
+          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, viewer.userId))
           : eq(workspaceMembers.workspaceId, workspaceId),
       )
       .groupBy(users.id, users.displayName, users.email)
-      .orderBy(desc(sql`coalesce(sum(${timeEntries.durationSec}), 0)`))
+      .orderBy(desc(sql`coalesce(sum(case when ${inScopeTime} then ${timeEntries.durationSec} else 0 end), 0)`))
 
     return rows.map((r) => ({
       ...r,
@@ -520,8 +618,20 @@ export class ReportsService {
   }
 
   /** Billable hours broken down by project (and its client), Plan §9. */
-  async getTimeByProject(workspaceId: string, days = 30, restrictToUserId?: string) {
+  async getTimeByProject(workspaceId: string, days = 30, viewer: ViewerScope = { kind: 'all' }) {
     const since = daysAgo(days)
+    // Members see only their own time; managers see time in their containers
+    // (or their own); admins see everything. This is a straight row filter here
+    // because the report already aggregates per project, so out-of-scope
+    // projects simply drop out.
+    const viewerFilter =
+      viewer.kind === 'user'
+        ? eq(timeEntries.userId, viewer.userId)
+        : this.containerScopeCondition(viewer, {
+            spaceIdCol: projects.spaceId,
+            projectIdCol: projects.id,
+            ownerCol: timeEntries.userId,
+          })
     const rows = await this.db
       .select({
         projectId: projects.id,
@@ -542,7 +652,7 @@ export class ReportsService {
         and(
           eq(spaces.workspaceId, workspaceId),
           gte(timeEntries.startedAt, since),
-          restrictToUserId ? eq(timeEntries.userId, restrictToUserId) : undefined,
+          viewerFilter,
         ),
       )
       .groupBy(projects.id, projects.name, clients.id, clients.name)
@@ -559,7 +669,11 @@ export class ReportsService {
    * from status_changed activity: a task is "in" meta.to from that event until
    * its next status change (or now if it's still there).
    */
-  async getStatusDurations(workspaceId: string, days = 90) {
+  async getStatusDurations(
+    workspaceId: string,
+    days = 90,
+    filter: { spaceId?: string; projectId?: string; memberId?: string } = {},
+  ) {
     const since = daysAgo(days)
     const events = await this.db
       .select({
@@ -577,6 +691,12 @@ export class ReportsService {
           eq(spaces.workspaceId, workspaceId),
           eq(taskActivity.action, 'status_changed'),
           gte(taskActivity.createdAt, since),
+          // Optional space/project/assignee filters (Plan §9.3).
+          filter.projectId ? eq(lists.projectId, filter.projectId) : undefined,
+          filter.spaceId ? eq(projects.spaceId, filter.spaceId) : undefined,
+          filter.memberId
+            ? sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${filter.memberId})`
+            : undefined,
         ),
       )
       .orderBy(asc(taskActivity.taskId), asc(taskActivity.createdAt))
@@ -1376,16 +1496,18 @@ export class ReportsService {
    * Per-member contribution factors over a period (§7.14): tasks completed,
    * on-time rate, collaboration touchpoints (comments/assignments/coordination
    * activity), and blockers resolved — all from real data — plus a composite
-   * score and an AI narrative per member (deterministic fallback). `restrictToUserId`
-   * scopes non-privileged viewers to their own row.
+   * score and an AI narrative per member (deterministic fallback). `opts.viewer`
+   * scopes the report (Plan §3.3): members to their own row, managers to their
+   * team (containers), admins to everyone.
    */
   async getContribution(
     workspaceId: string,
-    opts: { period?: ContributionPeriodType; sprintId?: string; restrictToUserId?: string } = {},
+    opts: { period?: ContributionPeriodType; sprintId?: string; viewer?: ViewerScope } = {},
     ctx: { userId?: string } = {},
   ): Promise<{ period: ContributionPeriod; source: 'ai' | 'heuristic'; members: Array<ContributionFactors & { narrative: string }> }> {
     const now = new Date()
     const period = opts.period ?? 'this-month'
+    const viewer = opts.viewer ?? { kind: 'all' }
     const { from, to, meta } = await this.resolveContributionPeriod(workspaceId, period, opts.sprintId, now)
 
     const members = await this.db
@@ -1393,10 +1515,25 @@ export class ReportsService {
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .where(
-        opts.restrictToUserId
-          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, opts.restrictToUserId))
+        viewer.kind === 'user'
+          ? and(eq(workspaceMembers.workspaceId, workspaceId), eq(users.id, viewer.userId))
           : eq(workspaceMembers.workspaceId, workspaceId),
       )
+
+    // Manager team scope (Plan §3.3): fold container membership into the
+    // per-assignee / per-actor aggregates so a manager's contribution view is
+    // restricted to their spaces & projects (plus their own rows). Undefined for
+    // admins/members, leaving those aggregates workspace-wide as before.
+    const completedViewerCond = this.containerScopeCondition(viewer, {
+      spaceIdCol: projects.spaceId,
+      projectIdCol: lists.projectId,
+      ownerCol: taskAssignees.userId,
+    })
+    const activityViewerCond = this.containerScopeCondition(viewer, {
+      spaceIdCol: projects.spaceId,
+      projectIdCol: lists.projectId,
+      ownerCol: taskActivity.actorId,
+    })
 
     // Completed / on-time / assigned counts per assignee within the window.
     // Bind the window bounds as ISO strings: a raw ${date} embed in a sql template
@@ -1416,7 +1553,7 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), completedViewerCond))
       .groupBy(taskAssignees.userId)
 
     // Collaboration + blockers-resolved from the activity log, per actor.
@@ -1431,7 +1568,14 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), gte(taskActivity.createdAt, from), lte(taskActivity.createdAt, to)))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          gte(taskActivity.createdAt, from),
+          lte(taskActivity.createdAt, to),
+          activityViewerCond,
+        ),
+      )
       .groupBy(taskActivity.actorId, taskActivity.action)
 
     const completedByUser = new Map(completedRows.map((r) => [r.userId, r]))
@@ -1490,7 +1634,7 @@ export class ReportsService {
   /** Render a contribution report to a server-generated PDF (§7.14). */
   async exportContributionPdf(
     workspaceId: string,
-    opts: { period?: ContributionPeriodType; sprintId?: string } = {},
+    opts: { period?: ContributionPeriodType; sprintId?: string; viewer?: ViewerScope } = {},
     ctx: { userId?: string } = {},
   ): Promise<Buffer> {
     const report = await this.getContribution(workspaceId, opts, ctx)

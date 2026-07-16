@@ -501,6 +501,50 @@ export class EmailService {
     })
   }
 
+  /**
+   * Send a paid-invoice receipt (§14.1) with the branded PDF invoice attached.
+   * Falls back to the dev-log path when SMTP is unconfigured, like every other
+   * email. Delivery is app-side (in addition to Stripe's own emails); the
+   * BillingService webhook guards against emailing the same invoice twice.
+   */
+  async sendInvoicePaid(opts: {
+    to: string
+    workspaceName: string
+    invoiceNumber: string
+    amountLabel: string
+    statusLabel: string
+    dateLabel: string
+    manageUrl: string
+    pdf: Buffer
+  }) {
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] Invoice ${opts.invoiceNumber} — ${opts.amountLabel}`,
+      html: this.layout({
+        heading: `Your Rundesk invoice (${opts.amountLabel})`,
+        body: `
+          <p>Hi there,</p>
+          <p>Thanks for your subscription to <strong>${this.esc(opts.workspaceName)}</strong>.
+             Your invoice <strong>${this.esc(opts.invoiceNumber)}</strong> is attached as a PDF.</p>
+          <table cellpadding="0" cellspacing="0" style="margin:12px 0;font-size:14px;color:#374151;">
+            <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Amount</td><td style="padding:2px 0;"><strong>${this.esc(opts.amountLabel)}</strong></td></tr>
+            <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Status</td><td style="padding:2px 0;">${this.esc(opts.statusLabel)}</td></tr>
+            <tr><td style="padding:2px 16px 2px 0;color:#6b7280;">Date</td><td style="padding:2px 0;">${this.esc(opts.dateLabel)}</td></tr>
+          </table>
+        `,
+        ctaUrl: opts.manageUrl,
+        ctaLabel: 'View billing',
+      }),
+      attachments: [
+        {
+          filename: `invoice-${(opts.invoiceNumber || 'rundesk').replace(/[^a-z0-9-_]+/gi, '-')}.pdf`,
+          content: opts.pdf,
+          contentType: 'application/pdf',
+        },
+      ],
+    })
+  }
+
   private async send(opts: {
     to: string
     subject: string

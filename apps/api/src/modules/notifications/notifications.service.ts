@@ -57,6 +57,62 @@ export function reminderLeadLabel(diffDays: number): string {
   return `in ${diffDays} days`
 }
 
+/** Loose shape of the deep-link target persisted on a notification row. */
+type NotificationTargetLike =
+  | { entityType?: string | null; entityId?: string | null; url?: string | null }
+  | null
+  | undefined
+
+/**
+ * §10.1 — resolve a click-through URL for a notification so the web app can
+ * jump straight to the relevant item when the notification is clicked. Pure so
+ * both the list serializer and the realtime payload agree on the same link.
+ *
+ * Resolution order:
+ *  1. The deep-link stored on the row's `target.url` at creation time. Every
+ *     first-party creation site sets this — task → its board route with
+ *     `?task=`, chat_message → channel deep link, approval_needed → time
+ *     approvals, doc → docs with `?doc=`, briefing/workload → insights.
+ *  2. A best-effort route rebuilt from `target.entityType` + `entityId` and the
+ *     notification's own `workspaceId`, for legacy rows that recorded an entity
+ *     reference but no url.
+ *  3. `null` when the notification carries no resolvable target — the caller
+ *     renders it as non-navigable rather than crashing.
+ */
+export function resolveNotificationUrl(row: {
+  workspaceId?: string | null
+  target?: NotificationTargetLike
+}): string | null {
+  const target = row?.target ?? null
+  const storedUrl = typeof target?.url === 'string' ? target.url.trim() : ''
+  if (storedUrl.length > 0) return storedUrl
+
+  const entityType = target?.entityType ?? null
+  const entityId = target?.entityId ?? null
+  const workspaceId = row?.workspaceId ?? null
+  if (!entityType || !entityId || !workspaceId) return null
+
+  switch (entityType) {
+    case 'task':
+      return `/app/${workspaceId}/tasks/${entityId}`
+    case 'doc':
+      return `/app/${workspaceId}/docs?doc=${entityId}`
+    // Channel id isn't recoverable from the message id alone, so land on the
+    // workspace chat root as a best effort (the stored url carries the channel).
+    case 'chat_message':
+      return `/app/${workspaceId}/chat`
+    case 'timesheet':
+      return `/app/${workspaceId}/time/approvals`
+    case 'insights':
+    case 'workload':
+      return `/app/${workspaceId}/insights`
+    case 'billing':
+      return `/app/${workspaceId}/settings`
+    default:
+      return null
+  }
+}
+
 type NotificationType =
   | 'task_assigned'
   | 'task_mentioned'
@@ -233,7 +289,9 @@ export class NotificationsService {
         this.realtime.emitToUser(data.userId, {
           type: 'notification.created',
           userId: data.userId,
-          notification: row,
+          // §10.1 — surface the same click-through url the list serializer adds
+          // so a live toast can navigate straight to the item.
+          notification: { ...row, url: resolveNotificationUrl(row) },
         })
       }
     }
@@ -242,7 +300,16 @@ export class NotificationsService {
       // Best-effort email — do not await, never throws
       this.sendEmail({ ...data, body: formattedBody }).catch(() => undefined)
     }
-    if (matrix.web && !inQuietHours) {
+    // §6.9 / §10.2 — Mobile push delivery. Rundesk is a PWA, so the `mobile`
+    // notification channel is served by the very same Web Push (VAPID) transport
+    // that backs the `web` channel: an installed / home-screen PWA receives Web
+    // Push exactly as a desktop browser does. Native FCM/APNs would require
+    // shipping a dedicated native app; until then Web Push IS the mobile
+    // transport. We therefore fire a single sendWebPush when EITHER channel is
+    // enabled — and because sendWebPush fans out to each of the user's
+    // subscriptions exactly once, a user with BOTH `web` and `mobile` toggled on
+    // is never double-delivered to the same subscription (dedupe by design).
+    if ((matrix.web || matrix.mobile) && !inQuietHours) {
       this.sendWebPush(data.userId, {
         title: data.title,
         body: formattedBody,
@@ -345,6 +412,10 @@ export class NotificationsService {
         typeof n.body === 'string' && n.body.length > 0
           ? formatMentionsInText(n.body, namesById)
           : n.body,
+      // §10.1 — computed click-through link so the frontend can navigate to the
+      // relevant item directly (task board, chat channel, time approvals, …).
+      // Falls back to null for notifications with no resolvable target.
+      url: resolveNotificationUrl(n),
     }))
   }
 

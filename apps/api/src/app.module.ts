@@ -39,6 +39,7 @@ import { InboundWebhooksModule } from './modules/inbound-webhooks/inbound-webhoo
 import { SlackModule } from './modules/integrations/slack/slack.module'
 import { ClickUpImportModule } from './modules/integrations/clickup-import/clickup-import.module'
 import { IntegrationConnectionsModule } from './modules/integrations/connections/integration-connections.module'
+import { ExternalLinkSyncModule } from './modules/integrations/external-link-sync/external-link-sync.module'
 import { ProjectTemplatesModule } from './modules/project-templates/project-templates.module'
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module'
 import { SearchModule } from './modules/search/search.module'
@@ -114,6 +115,7 @@ import { OpsModule } from './modules/ops/ops.module'
     SlackModule,
     ClickUpImportModule,
     IntegrationConnectionsModule,
+    ExternalLinkSyncModule,
     ProjectTemplatesModule,
     CustomFieldsModule,
     DashboardsModule,

@@ -16,8 +16,10 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { PlansService } from '../plans/plans.service'
 import {
   SLA_POLICY,
+  SLA_MATRIX,
   TICKET_STATUSES,
   TICKET_PRIORITIES,
   COMPONENT_STATUSES,
@@ -29,6 +31,9 @@ import {
 
 /** The authenticated actor as seen by the service (from JwtAuthGuard). */
 type Actor = { id: string; role?: string }
+
+/** Plan tiers that include the support ticket system (§14.4) — paid tiers only. */
+const TICKETING_TIERS = ['pro', 'business', 'enterprise']
 
 /** Workspace roles that can manage/see every ticket in their workspace. */
 const WS_STAFF_ROLES = ['workspace_admin', 'manager', 'super_admin']
@@ -45,21 +50,32 @@ const WS_STAFF_ROLES = ['workspace_admin', 'manager', 'super_admin']
  */
 @Injectable()
 export class SupportService {
-  constructor(@Inject(DB_TOKEN) private readonly db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private readonly db: Db,
+    private readonly plans: PlansService,
+  ) {}
 
   // ── SLA helpers (kept on the service for convenient injection in tests) ──────
 
-  /** The SLA policy table (hours per priority). */
+  /** The legacy priority-only SLA policy table (fallback when tier is unknown). */
   slaPolicy() {
     return SLA_POLICY
+  }
+
+  /** The full SLA commitments matrix (tier × priority) exposed for the UI/tests. */
+  slaMatrix() {
+    return SLA_MATRIX
   }
 
   // ── Tickets ─────────────────────────────────────────────────────────────────
 
   /**
-   * Create a support ticket. Auto-stamps the SLA due dates from the priority and
-   * seeds the thread with the requester's opening message. The creator must be a
-   * member of the target workspace (a super_admin may file into any workspace).
+   * Create a support ticket. Auto-stamps the SLA due dates from the workspace's
+   * plan tier AND the priority (§14.4), and seeds the thread with the requester's
+   * opening message. The creator must be a member of the target workspace (a
+   * super_admin may file into any workspace). The ticket system is a paid feature
+   * — a Free workspace is turned away with an upgrade prompt (super_admin bypasses
+   * so platform staff can still file on any workspace's behalf).
    */
   async createTicket(
     actor: Actor,
@@ -74,9 +90,13 @@ export class SupportService {
 
     await this.assertWorkspaceMember(actor, workspaceId)
 
+    // Resolve the plan once — it gates access AND sets the SLA clocks.
+    const plan = await this.plans.getWorkspacePlan(workspaceId)
+    this.assertTicketingAllowed(actor, plan)
+
     const priority = normalizePriority(input?.priority)
     const now = new Date()
-    const { firstResponseDueAt, resolutionDueAt } = computeSlaDueDates(priority, now)
+    const { firstResponseDueAt, resolutionDueAt } = computeSlaDueDates(priority, now, plan.id)
 
     const [ticket] = await this.db
       .insert(supportTickets)
@@ -460,6 +480,21 @@ export class SupportService {
     if (ticket.createdById === actor.id) return
     if (await this.isStaffFor(actor, ticket.workspaceId)) return
     throw new ForbiddenException('You do not have access to this ticket')
+  }
+
+  /**
+   * §14.4 — the ticket system is restricted to paid tiers (Pro/Business/
+   * Enterprise). A Free workspace gets a clean 403 with an upgrade message
+   * instead of filing a ticket. super_admin (platform staff) bypasses. This is a
+   * no-op for every existing workspace, which default to the enterprise tier.
+   */
+  private assertTicketingAllowed(actor: Actor, plan: { id: string; label: string }) {
+    if (actor.role === 'super_admin') return
+    if (!TICKETING_TIERS.includes(plan.id)) {
+      throw new ForbiddenException(
+        `The support ticket system is not included in the ${plan.label} plan. Upgrade to Pro, Business or Enterprise to open support tickets.`,
+      )
+    }
   }
 
   /** Ensure the actor is a member of the workspace (super_admin bypasses). */

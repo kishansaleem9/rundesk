@@ -41,6 +41,14 @@ export type PlanTier = {
   label: string
   /** Human-blurb for the UI. */
   description: string
+  /**
+   * Free-trial length in days offered when a customer starts a subscription to
+   * this tier (Plan §14.1). 0 = no trial. Passed to Stripe Checkout as
+   * `subscription_data.trial_period_days`; a `trialing` subscription still grants
+   * the tier (see BillingService.GRANTING_STATUSES), and if the trial ends
+   * unpaid the dunning path downgrades the workspace back to free.
+   */
+  trialDays: number
   limits: PlanLimits
   features: Record<PlanFeature, boolean>
 }
@@ -74,6 +82,7 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     id: 'free',
     label: 'Free',
     description: 'For individuals getting started. Up to 5 members and 3 projects.',
+    trialDays: 0,
     limits: { maxMembers: 5, maxProjects: 3 },
     features: { ...ALL_FEATURES_OFF },
   },
@@ -81,6 +90,7 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     id: 'pro',
     label: 'Pro',
     description: 'For growing teams. AI, automations, webhooks, guests and integrations.',
+    trialDays: 14,
     limits: { maxMembers: 25, maxProjects: 50 },
     features: {
       ...ALL_FEATURES_OFF,
@@ -96,6 +106,7 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     id: 'business',
     label: 'Business',
     description: 'For scaling orgs. Adds SSO/SCIM and custom roles on top of Pro.',
+    trialDays: 14,
     limits: { maxMembers: 100, maxProjects: 500 },
     features: {
       ...ALL_FEATURES_ON,
@@ -106,6 +117,7 @@ export const PLAN_TIERS: Record<PlanId, PlanTier> = {
     id: 'enterprise',
     label: 'Enterprise',
     description: 'Unlimited members and projects, every feature, priority support.',
+    trialDays: 0,
     limits: { maxMembers: null, maxProjects: null },
     features: { ...ALL_FEATURES_ON },
   },
@@ -126,6 +138,8 @@ export type ResolvedPlan = {
   id: PlanId
   label: string
   description: string
+  /** Free-trial length in days for this tier (0 = no trial). */
+  trialDays: number
   limits: PlanLimits
   features: Record<PlanFeature, boolean>
 }
@@ -145,7 +159,24 @@ export function resolvePlanConfig(planId: string | null | undefined, override?: 
     maxProjects: override?.maxProjects !== undefined ? override.maxProjects : tier.limits.maxProjects,
   }
   const features: Record<PlanFeature, boolean> = { ...tier.features, ...(override?.features ?? {}) }
-  return { id: tier.id, label: tier.label, description: tier.description, limits, features }
+  return {
+    id: tier.id,
+    label: tier.label,
+    description: tier.description,
+    trialDays: tier.trialDays,
+    limits,
+    features,
+  }
+}
+
+/**
+ * Free-trial length in days for a plan tier (Plan §14.1). 0 means "no trial".
+ * Used by BillingService to decide whether to pass Stripe Checkout a
+ * `trial_period_days`. An unknown plan id fails safe to the enterprise value
+ * (0 = no trial), matching resolvePlanConfig's fail-open default tier.
+ */
+export function trialDaysForPlan(planId: string | null | undefined): number {
+  return PLAN_TIERS[isPlanId(planId) ? planId : 'enterprise'].trialDays
 }
 
 /** A compact, serializable catalog for the UI (plan picker, marketing table). */

@@ -16,6 +16,10 @@ import { SearchService } from './search.service'
  */
 function makeDb(tableRows: Record<string, unknown[]>) {
   const fromTables: string[] = []
+  // Tables reached via a join. Recorded separately from `fromTables` so a test
+  // can assert an access-scoping join chain (e.g. task_attachments → tasks →
+  // list → project → space) that hangs off a single `.from(...)`.
+  const joinTables: string[] = []
   const chain = (): any => {
     let rows: unknown[] = []
     const c: any = {
@@ -26,8 +30,14 @@ function makeDb(tableRows: Record<string, unknown[]>) {
         return c
       },
       where: () => c,
-      innerJoin: () => c,
-      leftJoin: () => c,
+      innerJoin: (t: unknown) => {
+        joinTables.push(getTableName(t as never))
+        return c
+      },
+      leftJoin: (t: unknown) => {
+        joinTables.push(getTableName(t as never))
+        return c
+      },
       orderBy: () => c,
       limit: () => c,
       then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
@@ -36,7 +46,7 @@ function makeDb(tableRows: Record<string, unknown[]>) {
     return c
   }
   const db: any = { select: () => chain() }
-  return { db, fromTables }
+  return { db, fromTables, joinTables }
 }
 
 const config: any = { get: () => undefined }
@@ -76,5 +86,70 @@ describe('SearchService custom-field value filter (§11.2)', () => {
 
     assert.ok(!fromTables.includes('custom_field_values'), 'no custom-field join without the filter')
     assert.ok(!fromTables.includes('custom_field_definitions'), 'no definition lookup without the filter')
+  })
+})
+
+/**
+ * Guards the §11.1 "search across … files" path. Uploaded files surface as a
+ * `file` entity type sourced from `task_attachments`. Meilisearch is disabled
+ * and R2 is absent (the service is built with two args), so files come solely
+ * from the Postgres builder — the branch these tests exercise.
+ */
+describe('SearchService file search (§11.1 uploaded files)', () => {
+  it('returns a matching task attachment grouped under the file type', async () => {
+    // The mock returns this row for `.from(task_attachments)` verbatim, so it
+    // carries the columns the query projects (the join is asserted separately).
+    const attachment = {
+      id: 'a1',
+      fileName: 'Q3-invoice.pdf',
+      contentType: 'application/pdf',
+      taskId: 't1',
+      listId: 'l1',
+      projectId: 'p1',
+      spaceId: 's1',
+    }
+    const { db, fromTables } = makeDb({ task_attachments: [attachment] })
+    const svc = new SearchService(db, config)
+
+    const res = await svc.search('w1', 'u1', 'invoice', 10)
+
+    // Exactly the file hit surfaces (tasks/docs/extras are empty in the mock).
+    assert.equal(res.length, 1)
+    const hit = res[0]
+    assert.equal(hit.entityType, 'file')
+    assert.equal(hit.id, 'file-a1')
+    assert.equal(hit.title, 'Q3-invoice.pdf')
+    assert.equal(hit.content, 'application/pdf')
+    // Links to the owning task so the file opens in context.
+    assert.equal(hit.url, '/app/w1/s1/p1/l1?task=t1')
+    assert.ok(fromTables.includes('task_attachments'), 'queries task_attachments')
+  })
+
+  it('scopes files to the caller workspace via the task→list→project→space join', async () => {
+    // `types: ['file']` isolates the file query: tasks, docs and the extras
+    // (users/comments/channels/messages) are all skipped, so every recorded
+    // table below belongs to the attachment query alone.
+    const { db, fromTables, joinTables } = makeDb({
+      // The workspace-scoped join yields no rows — i.e. a file whose task lives
+      // in a space in another workspace (a container the caller can't reach).
+      task_attachments: [],
+    })
+    const svc = new SearchService(db, config)
+
+    const res = await svc.search('w1', 'u1', 'secret', 10, { types: ['file'] })
+
+    // No file leaks when the scoped join matches nothing.
+    assert.equal(res.filter((h) => h.entityType === 'file').length, 0)
+    // The attachment query drives off task_attachments and joins through the
+    // full container chain that carries `spaces.workspaceId = <caller>` — the
+    // boundary that prevents a file in an inaccessible container from surfacing.
+    assert.ok(fromTables.includes('task_attachments'), 'drives off task_attachments')
+    assert.ok(joinTables.includes('tasks'), 'joins tasks')
+    assert.ok(joinTables.includes('lists'), 'joins lists')
+    assert.ok(joinTables.includes('projects'), 'joins projects')
+    assert.ok(joinTables.includes('spaces'), 'joins spaces (the workspace boundary)')
+    // Isolation check: only the file query ran (no docs / chat-extras tables).
+    assert.ok(!fromTables.includes('docs'), 'docs not queried for a file-only search')
+    assert.ok(!fromTables.includes('chat_channel_members'), 'chat extras not queried')
   })
 })

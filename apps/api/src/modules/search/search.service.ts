@@ -1,16 +1,17 @@
-import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common'
+import { Injectable, Inject, Optional, OnModuleInit, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 'drizzle-orm'
 import {
-  tasks, taskAssignees, taskLabelAssignments, taskComments, docs, lists, projects, spaces,
+  tasks, taskAssignees, taskLabelAssignments, taskComments, taskAttachments, docs, lists, projects, spaces,
   savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
   customFieldDefinitions, customFieldValues,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { R2Service } from '../../common/storage/r2.service'
 
-export type SearchEntityType = 'task' | 'doc'
+export type SearchEntityType = 'task' | 'doc' | 'file'
 export type SearchFilters = {
   types?: SearchEntityType[]
   statusCategory?: 'open' | 'in_progress' | 'closed'
@@ -34,7 +35,7 @@ const TEXT_LIKE_FIELD_TYPES = new Set(['text', 'url', 'email', 'phone'])
 // The Meilisearch index schema is intentionally light-weight.
 type SearchDoc = {
   id: string
-  entityType: 'task' | 'doc'
+  entityType: 'task' | 'doc' | 'file'
   workspaceId: string
   title: string
   content: string
@@ -54,6 +55,10 @@ export class SearchService implements OnModuleInit {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private config: ConfigService,
+    // Uploaded "clips" live in R2 (not the DB), so file search reaches them
+    // through the storage client. Optional so unit tests can construct the
+    // service without wiring storage — clips are simply skipped when absent.
+    @Optional() private readonly r2?: R2Service,
   ) {}
 
   async onModuleInit() {
@@ -109,6 +114,33 @@ export class SearchService implements OnModuleInit {
     }])
   }
 
+  /**
+   * Index an uploaded file (task attachment) under the `file` entity type
+   * (Plan §11.1). It carries the owning task's workspace/space so Meili's
+   * workspace filter keeps it invisible to other workspaces — the same way
+   * indexed tasks are scoped — and links back to the task it belongs to.
+   */
+  async indexTaskAttachment(
+    attachment: { id: string; fileName: string; contentType: string; createdAt: Date },
+    task: { id: string; listId: string },
+    workspaceId: string,
+    spaceId: string,
+    projectId: string,
+  ) {
+    if (!this.enabled || !this.index) return
+    await this.index.addDocuments([{
+      id: `file-${attachment.id}`,
+      entityType: 'file',
+      workspaceId,
+      listId: task.listId,
+      spaceId,
+      title: attachment.fileName,
+      content: attachment.contentType,
+      url: `/app/${workspaceId}/${spaceId}/${projectId}/${task.listId}?task=${task.id}`,
+      createdAt: new Date(attachment.createdAt).getTime(),
+    }])
+  }
+
   async reindexWorkspace(workspaceId: string) {
     if (!this.enabled || !this.index) return
     const taskRows = await this.db
@@ -124,6 +156,23 @@ export class SearchService implements OnModuleInit {
       .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
 
     const docRows = await this.db.select().from(docs).where(and(eq(docs.workspaceId, workspaceId), eq(docs.isArchived, false)))
+
+    // Uploaded files (task attachments). Scoped through the owning task's
+    // list → project → space so only this workspace's files are indexed.
+    const attachmentRows = await this.db
+      .select({
+        attachment: taskAttachments,
+        taskId: tasks.id,
+        listId: tasks.listId,
+        spaceId: spaces.id,
+        projectId: projects.id,
+      })
+      .from(taskAttachments)
+      .innerJoin(tasks, eq(tasks.id, taskAttachments.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
 
     const payload: SearchDoc[] = [
       ...taskRows.map(({ task, spaceId, projectId }) => ({
@@ -146,6 +195,17 @@ export class SearchService implements OnModuleInit {
         content: d.plaintext,
         url: `/app/${workspaceId}/docs?doc=${d.id}`,
         createdAt: new Date(d.createdAt).getTime(),
+      })),
+      ...attachmentRows.map(({ attachment, taskId, listId, spaceId, projectId }) => ({
+        id: `file-${attachment.id}`,
+        entityType: 'file' as const,
+        workspaceId,
+        listId,
+        spaceId,
+        title: attachment.fileName,
+        content: attachment.contentType,
+        url: `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`,
+        createdAt: new Date(attachment.createdAt).getTime(),
       })),
     ]
     if (payload.length) await this.index.addDocuments(payload)
@@ -173,6 +233,9 @@ export class SearchService implements OnModuleInit {
     const wantTasks = !filters.types || filters.types.includes('task')
     // Task-specific filters imply the caller wants tasks, so docs are excluded.
     const wantDocs = (!filters.types || filters.types.includes('doc')) && !hasTaskFilter
+    // Uploaded files (task attachments + clips). Like docs they carry none of the
+    // task-specific filters, so a task-filtered search excludes them (Plan §11.1).
+    const wantFiles = (!filters.types || filters.types.includes('file')) && !hasTaskFilter
 
     // Nothing to match on at all → empty. (Filter-only searches are allowed.)
     if (!trimmed && !hasTaskFilter && !filters.types) return []
@@ -192,9 +255,12 @@ export class SearchService implements OnModuleInit {
         content: (h.content ?? '').slice(0, 200),
         url: h.url,
       }))
-      // Meili only indexes tasks/docs — add the other entity types from Postgres.
+      // Meili indexes tasks/docs/files — add the Postgres-only entity types
+      // (users, comments, channels, messages) for a general search.
       const extras = filters.types ? [] : await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit)
-      return [...meiliHits, ...extras]
+      // Clips live in R2, never in Meili, so they're queried separately.
+      const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
+      return [...meiliHits, ...extras, ...clipHits]
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
@@ -267,6 +333,10 @@ export class SearchService implements OnModuleInit {
           .limit(limit)
       : []
 
+    // Uploaded files: task attachments (Postgres, access-scoped) + clips (R2).
+    const fileHits = wantFiles ? await this.searchTaskAttachments(workspaceId, like, limit) : []
+    const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
+
     // Extras only for a general text search (no type/task-specific filter).
     const extras = like && !filters.types ? await this.searchExtras(workspaceId, userId, like, limit) : []
 
@@ -285,6 +355,8 @@ export class SearchService implements OnModuleInit {
         content: d.plaintext.slice(0, 200),
         url: `/app/${workspaceId}/docs?doc=${d.id}`,
       })),
+      ...fileHits,
+      ...clipHits,
       ...extras,
     ]
   }
@@ -352,6 +424,89 @@ export class SearchService implements OnModuleInit {
         url: `/app/${workspaceId}/chat?channel=${m.channelId}&message=${m.id}`,
       })),
     ]
+  }
+
+  /**
+   * Search uploaded files stored as task attachments (Plan §11.1). Access is
+   * scoped exactly like task and comment search: an attachment is reachable only
+   * through its task → list → project → space, and that space must belong to the
+   * caller's workspace. An attachment whose task lives in another workspace (or
+   * any container the caller can't reach) never satisfies the join, so it can
+   * never leak into these results. Matches the file name and its content type.
+   */
+  private async searchTaskAttachments(
+    workspaceId: string,
+    like: string | null,
+    limit: number,
+  ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
+    const conds: Array<SQL | undefined> = [eq(spaces.workspaceId, workspaceId)]
+    if (like) conds.push(or(ilike(taskAttachments.fileName, like), ilike(taskAttachments.contentType, like)))
+    const rows = await this.db
+      .select({
+        id: taskAttachments.id,
+        fileName: taskAttachments.fileName,
+        contentType: taskAttachments.contentType,
+        taskId: tasks.id,
+        listId: tasks.listId,
+        projectId: projects.id,
+        spaceId: spaces.id,
+      })
+      .from(taskAttachments)
+      .innerJoin(tasks, eq(tasks.id, taskAttachments.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(...conds))
+      .orderBy(desc(taskAttachments.createdAt))
+      .limit(limit)
+    return rows.map((f) => ({
+      id: `file-${f.id}`,
+      entityType: 'file',
+      title: f.fileName,
+      content: f.contentType,
+      url: `/app/${workspaceId}/${f.spaceId}/${f.projectId}/${f.listId}?task=${f.taskId}`,
+    }))
+  }
+
+  /**
+   * Search uploaded screen-recording "clips" (Plan §11.1). Clips are stored as
+   * R2 objects under `workspaces/<id>/clips/`, not in the DB, so we match on the
+   * file name embedded in each object key. The workspace prefix is the entire
+   * access boundary — a clip is only ever listed under its own workspace, so it
+   * cannot cross workspaces. Best-effort: any storage error (or R2 not being
+   * configured) yields no clip hits rather than failing the whole search.
+   */
+  private async searchClips(
+    workspaceId: string,
+    query: string,
+    limit: number,
+  ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
+    const r2 = this.r2
+    const needle = query.trim().toLowerCase()
+    if (!needle || !r2 || !r2.configured) return []
+    const hits: Array<{ id: string; entityType: string; title: string; content: string; url: string }> = []
+    try {
+      const listed = await r2.listObjects(`workspaces/${workspaceId}/clips/`, 200)
+      for (const obj of listed.Contents ?? []) {
+        if (!obj.Key) continue
+        const fileName = obj.Key.split('/').pop() ?? ''
+        // Keys are `<timestamp>-<sanitizedFileName>`; drop the timestamp prefix
+        // so the searchable label matches what the recorder named the clip.
+        const label = fileName.replace(/^\d+-/, '')
+        if (!label.toLowerCase().includes(needle)) continue
+        hits.push({
+          id: `file-${obj.Key}`,
+          entityType: 'file',
+          title: label,
+          content: 'Clip',
+          url: `/app/${workspaceId}/clips`,
+        })
+        if (hits.length >= limit) break
+      }
+    } catch {
+      // Storage is best-effort; a listing failure just yields no clip hits.
+    }
+    return hits
   }
 
   // ── Custom-field value filter (Plan §11.2) ──────────────────────────────────

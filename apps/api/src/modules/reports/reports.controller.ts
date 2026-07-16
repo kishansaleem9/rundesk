@@ -35,8 +35,8 @@ export class ReportsController {
     @Query('spaceId') spaceId?: string,
     @Query('projectId') projectId?: string,
   ) {
-    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
-    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30, restrict, { spaceId, projectId })
+    const viewer = await this.reports.getViewerScope(workspaceId, user.id)
+    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30, viewer, { spaceId, projectId })
   }
 
   @Get('productivity-trend')
@@ -61,14 +61,31 @@ export class ReportsController {
   completion(
     @Param('workspaceId') workspaceId: string,
     @Query('days') days?: string,
+    @Query('spaceId') spaceId?: string,
+    @Query('projectId') projectId?: string,
+    @Query('memberId') memberId?: string,
   ) {
-    return this.reports.getCompletionAnalytics(workspaceId, days ? parseInt(days, 10) : 30)
+    return this.reports.getCompletionAnalytics(workspaceId, days ? parseInt(days, 10) : 30, {
+      spaceId,
+      projectId,
+      memberId,
+    })
   }
 
   @Get('status-durations')
   @ApiOperation({ summary: 'Average time tasks spend in each status (bottlenecks)' })
-  statusDurations(@Param('workspaceId') workspaceId: string, @Query('days') days?: string) {
-    return this.reports.getStatusDurations(workspaceId, days ? parseInt(days, 10) : 90)
+  statusDurations(
+    @Param('workspaceId') workspaceId: string,
+    @Query('days') days?: string,
+    @Query('spaceId') spaceId?: string,
+    @Query('projectId') projectId?: string,
+    @Query('memberId') memberId?: string,
+  ) {
+    return this.reports.getStatusDurations(workspaceId, days ? parseInt(days, 10) : 90, {
+      spaceId,
+      projectId,
+      memberId,
+    })
   }
 
   @Get('time')
@@ -78,8 +95,8 @@ export class ReportsController {
     @CurrentUser() user: { id: string },
     @Query('days') days?: string,
   ) {
-    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
-    return this.reports.getTimeReport(workspaceId, days ? parseInt(days, 10) : 30, restrict)
+    const viewer = await this.reports.getViewerScope(workspaceId, user.id)
+    return this.reports.getTimeReport(workspaceId, days ? parseInt(days, 10) : 30, viewer)
   }
 
   @Get('time-by-project')
@@ -89,8 +106,8 @@ export class ReportsController {
     @CurrentUser() user: { id: string },
     @Query('days') days?: string,
   ) {
-    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
-    return this.reports.getTimeByProject(workspaceId, days ? parseInt(days, 10) : 30, restrict)
+    const viewer = await this.reports.getViewerScope(workspaceId, user.id)
+    return this.reports.getTimeByProject(workspaceId, days ? parseInt(days, 10) : 30, viewer)
   }
 
   @Get('sprints')
@@ -163,11 +180,12 @@ export class ReportsController {
     @Query('period') period?: string,
     @Query('sprintId') sprintId?: string,
   ) {
-    // Non-privileged viewers are scoped to their own row (like productivity).
-    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
+    // Non-privileged viewers are scoped to their own row; managers to their
+    // team (containers); admins see everyone (like productivity).
+    const viewer = await this.reports.getViewerScope(workspaceId, user.id)
     return this.reports.getContribution(
       workspaceId,
-      { period: this.parsePeriod(period), sprintId, restrictToUserId: restrict },
+      { period: this.parsePeriod(period), sprintId, viewer },
       { userId: user.id },
     )
   }
@@ -179,13 +197,14 @@ export class ReportsController {
     @CurrentUser() user: { id: string },
     @Body() body: { period?: string; sprintId?: string },
   ): Promise<StreamableFile> {
-    // Role-gate to managers/admins: getViewerScope returns a userId only for
-    // non-privileged members, which we reject for the full-team PDF export.
-    const restrict = await this.reports.getViewerScope(workspaceId, user.id)
-    if (restrict) throw new ForbiddenException('Only managers or admins can export the contribution report')
+    // Role-gate to managers/admins: getViewerScope returns a 'user' scope only
+    // for non-privileged members, which we reject for the team PDF export.
+    // Managers get a 'containers' scope so their PDF is scoped to their team.
+    const viewer = await this.reports.getViewerScope(workspaceId, user.id)
+    if (viewer.kind === 'user') throw new ForbiddenException('Only managers or admins can export the contribution report')
     const buffer = await this.reports.exportContributionPdf(
       workspaceId,
-      { period: this.parsePeriod(body?.period), sprintId: body?.sprintId },
+      { period: this.parsePeriod(body?.period), sprintId: body?.sprintId, viewer },
       { userId: user.id },
     )
     return new StreamableFile(buffer, {

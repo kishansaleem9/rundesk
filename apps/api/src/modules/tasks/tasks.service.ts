@@ -23,6 +23,7 @@ import {
   lists,
   projects,
   spaces,
+  spaceMembers,
   workspaces,
   workspaceMembers,
 } from '@rundesk/db'
@@ -351,6 +352,30 @@ export class TasksService {
     }
   }
 
+  private async indexAttachmentInSearch(
+    attachment: { id: string; fileName: string; contentType: string; createdAt: Date },
+    taskId: string,
+  ) {
+    try {
+      const ctx = await this.resolveTaskContext(taskId)
+      if (!ctx) return
+      await this.search.indexTaskAttachment(
+        {
+          id: attachment.id,
+          fileName: attachment.fileName,
+          contentType: attachment.contentType,
+          createdAt: attachment.createdAt,
+        },
+        { id: ctx.task.id, listId: ctx.task.listId },
+        ctx.space.workspaceId,
+        ctx.space.id,
+        ctx.project.id,
+      )
+    } catch {
+      // Search is best-effort; never fail a write because of it.
+    }
+  }
+
   private extractMentionIds(body: string): string[] {
     const ids = new Set<string>()
     const patterns = [
@@ -424,6 +449,43 @@ export class TasksService {
       .limit(1)
     if (assignee) return ctx
     throw new ForbiddenException('Only assignees, creators, managers, and workspace admins can edit this task')
+  }
+
+  /**
+   * §3.3 Delete Items — a workspace `manager` (not workspace_admin/super_admin)
+   * may only archive/delete a task whose Space they belong to (space_members).
+   * Admins & super_admins keep delete-any; plain members are already limited to
+   * their own tasks by assertTaskWriteAccess. This is deliberately scoped to the
+   * DELETE path (it does NOT loosen or touch assertTaskWriteAccess's other
+   * callers) so a manager's non-delete writes stay unrestricted.
+   */
+  private async assertManagerDeleteScope(taskId: string, actorId: string) {
+    const [ctx] = await this.db
+      .select({ spaceId: spaces.id, workspaceId: spaces.workspaceId })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!ctx) throw new NotFoundException('Task not found')
+
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    // Only managers are further restricted here. workspace_admin / super_admin
+    // keep delete-any; members/guests were already gated by the write-access
+    // check the caller ran first.
+    if (membership?.role !== 'manager') return
+
+    const [member] = await this.db
+      .select({ userId: spaceMembers.userId })
+      .from(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actorId)))
+      .limit(1)
+    if (!member) throw new ForbiddenException('Managers can only delete tasks in their own spaces')
   }
 
   private sanitizeFileName(input: string): string {
@@ -1644,6 +1706,8 @@ export class TasksService {
       action: 'attachment_added',
       meta: { attachmentId: row.id, fileName: row.fileName },
     })
+    // Make the uploaded file searchable under the `file` entity type (Plan §11.1).
+    void this.indexAttachmentInSearch(row, taskId)
     return {
       id: row.id,
       fileName: row.fileName,
@@ -2133,6 +2197,9 @@ export class TasksService {
 
   async deleteTask(taskId: string, actorId: string) {
     await this.assertTaskWriteAccess(taskId, actorId)
+    // Managers can only delete within their own spaces (§3.3). Layered after the
+    // general write-access check so admins/members keep their existing rights.
+    await this.assertManagerDeleteScope(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
     await this.db.update(tasks).set({ isArchived: true, updatedAt: new Date() }).where(eq(tasks.id, taskId))
