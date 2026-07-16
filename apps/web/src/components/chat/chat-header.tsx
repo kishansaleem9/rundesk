@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
-import { Archive, Bookmark, Check, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pencil, Pin, Search, Star, UserPlus, Users, X } from 'lucide-react'
+import { Archive, Bookmark, Check, FileText, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pencil, Pin, Search, Star, UserPlus, Users, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  Input,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -28,8 +26,10 @@ export function ChatHeader({
   onTogglePinned,
   showSavedPanel,
   onToggleSaved,
-  search,
-  onSearchChange,
+  showFilesPanel,
+  onToggleFiles,
+  showSearchPanel,
+  onToggleSearch,
   onLeaveChannel,
   onAddPeople,
   onSetNotificationLevel,
@@ -46,8 +46,11 @@ export function ChatHeader({
   onTogglePinned: () => void
   showSavedPanel: boolean
   onToggleSaved: () => void
-  search: string
-  onSearchChange: (value: string) => void
+  // Workspace file library (§6.8) + message search (§6.11) side panels.
+  showFilesPanel: boolean
+  onToggleFiles: () => void
+  showSearchPanel: boolean
+  onToggleSearch: () => void
   onLeaveChannel: () => void
   onAddPeople?: () => void
   onSetNotificationLevel?: (level: 'all' | 'mentions' | 'none') => void
@@ -65,9 +68,6 @@ export function ChatHeader({
     ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage')
     : channel?.name ?? t('chat.selectAChannel')
 
-  const [searchOpen, setSearchOpen] = useState(false)
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
-
   // Durable channel favorites (Plan §2). Only regular channels are favoritable
   // from here — DMs live in their own sidebar section and their #dm-… name
   // wouldn't read well as a pinned label.
@@ -82,17 +82,6 @@ export function ChatHeader({
     if (!canFavorite || !channel) return
     toggleFavorite.mutate({ entityType: 'channel', entityId: channel.id })
   }
-
-  // Reset the inline search field when switching channels.
-  useEffect(() => {
-    setSearchOpen(false)
-    onSearchChange('')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channel?.id])
-
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus()
-  }, [searchOpen])
 
   const copyLink = () => {
     try {
@@ -128,36 +117,6 @@ export function ChatHeader({
           <p className="text-[12px] text-muted-foreground truncate">{channel.description}</p>
         ) : null}
       </div>
-
-      {searchOpen && (
-        <div className="relative w-56 shrink-0">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            ref={searchInputRef}
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder={t('chat.searchMessages')}
-            className="h-8 pl-7 pr-7 text-[13px]"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                onSearchChange('')
-                setSearchOpen(false)
-              }
-            }}
-          />
-          <button
-            type="button"
-            title={t('chat.closeSearch')}
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              onSearchChange('')
-              setSearchOpen(false)
-            }}
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
 
       <div className="flex items-center gap-0.5 shrink-0">
         {!channel?.isDm && onAddPeople && (
@@ -236,9 +195,14 @@ export function ChatHeader({
         <IconBtn
           icon={Search}
           title={t('chat.search')}
-          active={searchOpen}
-          disabled={!channel}
-          onClick={() => setSearchOpen((v) => !v)}
+          active={showSearchPanel}
+          onClick={onToggleSearch}
+        />
+        <IconBtn
+          icon={FileText}
+          title={t('chat.files')}
+          active={showFilesPanel}
+          onClick={onToggleFiles}
         />
         <IconBtn
           icon={Pin}

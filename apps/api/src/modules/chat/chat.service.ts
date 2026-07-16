@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, lt, sql, inArray } from 'drizzle-orm'
+import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, lt, sql, inArray, ilike } from 'drizzle-orm'
 import {
   chatChannels,
   chatChannelMembers,
@@ -1553,6 +1553,190 @@ export class ChatService {
       .leftJoin(users, eq(users.id, chatMessages.authorId))
       .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatMessageSaves.userId, userId)))
       .orderBy(desc(chatMessageSaves.createdAt))
+  }
+
+  /**
+   * Channel ids in a workspace the requester can actually read (Plan §6.8/§6.11).
+   * A bulk equivalent of assertChannelAccess used to scope the file library and
+   * message search: excludes channels in a private space the user isn't a member
+   * of, and private / DM channels they haven't joined. Archived channels are left
+   * out so a search hit always deep-links to a channel still shown in the sidebar.
+   */
+  private async accessibleChannelIds(workspaceId: string, userId: string): Promise<string[]> {
+    const channels = await this.db
+      .select({
+        id: chatChannels.id,
+        spaceId: chatChannels.spaceId,
+        isPrivate: chatChannels.isPrivate,
+        isDm: chatChannels.isDm,
+      })
+      .from(chatChannels)
+      .where(and(eq(chatChannels.workspaceId, workspaceId), isNull(chatChannels.archivedAt)))
+    if (channels.length === 0) return []
+
+    const memberships = await this.db
+      .select({ channelId: chatChannelMembers.channelId })
+      .from(chatChannelMembers)
+      .where(eq(chatChannelMembers.userId, userId))
+    const memberSet = new Set(memberships.map((m) => m.channelId))
+
+    // Private spaces the user is NOT a member of block every channel scoped to them.
+    const blockedSpaceIds = new Set<string>()
+    const spaceIds = [...new Set(channels.map((c) => c.spaceId).filter((id): id is string => !!id))]
+    if (spaceIds.length > 0) {
+      const spaceRows = await this.db
+        .select({ id: spaces.id, visibility: spaces.visibility })
+        .from(spaces)
+        .where(inArray(spaces.id, spaceIds))
+      const privateSpaceIds = spaceRows.filter((s) => s.visibility === 'private').map((s) => s.id)
+      if (privateSpaceIds.length > 0) {
+        const mine = await this.db
+          .select({ spaceId: spaceMembers.spaceId })
+          .from(spaceMembers)
+          .where(and(eq(spaceMembers.userId, userId), inArray(spaceMembers.spaceId, privateSpaceIds)))
+        const mineSet = new Set(mine.map((m) => m.spaceId))
+        for (const id of privateSpaceIds) if (!mineSet.has(id)) blockedSpaceIds.add(id)
+      }
+    }
+
+    return channels
+      .filter((c) => {
+        if (c.spaceId && blockedSpaceIds.has(c.spaceId)) return false
+        if ((c.isPrivate || c.isDm) && !memberSet.has(c.id)) return false
+        return true
+      })
+      .map((c) => c.id)
+  }
+
+  /** Escape LIKE wildcards so a user's query is matched literally. */
+  private escapeLike(input: string): string {
+    return input.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+  }
+
+  /**
+   * Translate a coarse file-type filter (Plan §6.8/§6.11) into a content-type
+   * ILIKE pattern. 'image' | 'video' | 'audio' → the MIME top-level; 'pdf' → any
+   * pdf; anything else is a literal content-type substring. Null means "no type
+   * constraint" (empty / any / all).
+   */
+  private contentTypePattern(type?: string): string | null {
+    const t = (type ?? '').trim().toLowerCase()
+    if (!t || t === 'any' || t === 'all') return null
+    if (t === 'image' || t === 'video' || t === 'audio') return `${t}/%`
+    if (t === 'pdf') return '%pdf%'
+    return `%${this.escapeLike(t)}%`
+  }
+
+  /**
+   * Workspace file library (Plan §6.8): every attachment posted in a channel the
+   * user can read, newest first, with a fresh signed download URL. Optional
+   * filename search (`q`) and coarse content-type filter (`type`). Attachments on
+   * unsent drafts (message_id null) or deleted messages are excluded.
+   */
+  async listWorkspaceFiles(workspaceId: string, userId: string, opts: { q?: string; type?: string } = {}) {
+    const channelIds = await this.accessibleChannelIds(workspaceId, userId)
+    if (channelIds.length === 0) return []
+
+    const conds = [
+      inArray(chatMessageAttachments.channelId, channelIds),
+      isNotNull(chatMessageAttachments.messageId),
+      isNull(chatMessages.deletedAt),
+    ]
+    const q = (opts.q ?? '').trim()
+    if (q) conds.push(ilike(chatMessageAttachments.fileName, `%${this.escapeLike(q)}%`))
+    const typePattern = this.contentTypePattern(opts.type)
+    if (typePattern) conds.push(ilike(chatMessageAttachments.contentType, typePattern))
+
+    const rows = await this.db
+      .select({
+        id: chatMessageAttachments.id,
+        fileName: chatMessageAttachments.fileName,
+        contentType: chatMessageAttachments.contentType,
+        sizeBytes: chatMessageAttachments.sizeBytes,
+        storageKey: chatMessageAttachments.storageKey,
+        createdAt: chatMessageAttachments.createdAt,
+        channelId: chatMessageAttachments.channelId,
+        channelName: chatChannels.name,
+        messageId: chatMessageAttachments.messageId,
+        uploadedById: chatMessageAttachments.uploadedById,
+        uploaderName: users.displayName,
+      })
+      .from(chatMessageAttachments)
+      .innerJoin(chatMessages, eq(chatMessages.id, chatMessageAttachments.messageId))
+      .innerJoin(chatChannels, eq(chatChannels.id, chatMessageAttachments.channelId))
+      .leftJoin(users, eq(users.id, chatMessageAttachments.uploadedById))
+      .where(and(...conds))
+      .orderBy(desc(chatMessageAttachments.createdAt))
+      .limit(200)
+
+    return Promise.all(
+      rows.map(async (r) => ({
+        id: r.id,
+        fileName: r.fileName,
+        contentType: r.contentType,
+        sizeBytes: r.sizeBytes,
+        channelId: r.channelId,
+        channelName: r.channelName,
+        messageId: r.messageId,
+        uploadedById: r.uploadedById,
+        uploaderName: r.uploaderName ?? null,
+        createdAt: r.createdAt,
+        url: this.r2.configured ? await this.r2.getObjectUrl(r.storageKey) : r.storageKey,
+      })),
+    )
+  }
+
+  /**
+   * Full message search across the workspace (Plan §6.11). Searches message
+   * bodies (thread replies included) in every channel the user can read, with
+   * optional channel / sender / date-range / has-file(type) filters. Each hit
+   * carries channelId + messageId so the client can deep-link + highlight.
+   */
+  async searchMessages(
+    workspaceId: string,
+    userId: string,
+    opts: { q?: string; channelId?: string; senderId?: string; after?: string; before?: string; fileType?: string } = {},
+  ) {
+    let channelIds = await this.accessibleChannelIds(workspaceId, userId)
+    if (opts.channelId) channelIds = channelIds.filter((id) => id === opts.channelId)
+    if (channelIds.length === 0) return []
+
+    const conds = [inArray(chatMessages.channelId, channelIds), isNull(chatMessages.deletedAt)]
+    const q = (opts.q ?? '').trim()
+    if (q) conds.push(ilike(chatMessages.body, `%${this.escapeLike(q)}%`))
+    if (opts.senderId) conds.push(eq(chatMessages.authorId, opts.senderId))
+    const after = opts.after ? new Date(opts.after) : null
+    if (after && !Number.isNaN(after.getTime())) conds.push(gt(chatMessages.createdAt, after))
+    const before = opts.before ? new Date(opts.before) : null
+    if (before && !Number.isNaN(before.getTime())) conds.push(lt(chatMessages.createdAt, before))
+    // has-file(type): correlated EXISTS so a message matches when it carries at
+    // least one attachment (optionally of the requested content-type family).
+    const fileType = (opts.fileType ?? '').trim().toLowerCase()
+    if (fileType) {
+      const filePattern = this.contentTypePattern(opts.fileType)
+      const typeFrag = filePattern ? sql` and cma.content_type ilike ${filePattern}` : sql``
+      conds.push(
+        sql`exists (select 1 from chat_message_attachments cma where cma.message_id = ${chatMessages.id}${typeFrag})`,
+      )
+    }
+
+    return this.db
+      .select({
+        id: chatMessages.id,
+        channelId: chatMessages.channelId,
+        channelName: chatChannels.name,
+        parentMessageId: chatMessages.parentMessageId,
+        authorId: chatMessages.authorId,
+        authorName: users.displayName,
+        body: chatMessages.body,
+        createdAt: chatMessages.createdAt,
+      })
+      .from(chatMessages)
+      .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+      .leftJoin(users, eq(users.id, chatMessages.authorId))
+      .where(and(...conds))
+      .orderBy(desc(chatMessages.createdAt))
+      .limit(50)
   }
 
   /** Channel creator or a workspace admin/super_admin may moderate (Plan §6). */

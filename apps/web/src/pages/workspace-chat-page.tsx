@@ -30,6 +30,10 @@ import {
   Pencil,
   Trash2,
   X,
+  Paperclip,
+  FileText,
+  Download,
+  Search,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -161,6 +165,8 @@ export function ChatPage() {
   // Files uploaded (to R2) and awaiting attachment to the next sent message (§6.8).
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([])
   const [uploadingFiles, setUploadingFiles] = useState(false)
+  // Drag-and-drop over the whole conversation pane (§6.8) stages files into the composer.
+  const [paneDragging, setPaneDragging] = useState(false)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPrivate, setNewPrivate] = useState(false)
@@ -180,6 +186,9 @@ export function ChatPage() {
   const [editHistoryFor, setEditHistoryFor] = useState<string | null>(null)
   const [showPinnedPanel, setShowPinnedPanel] = useState(false)
   const [showSavedPanel, setShowSavedPanel] = useState(false)
+  // Workspace file library (§6.8) + full message search (§6.11) side panels.
+  const [showFilesPanel, setShowFilesPanel] = useState(false)
+  const [showSearchPanel, setShowSearchPanel] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
@@ -189,7 +198,6 @@ export function ChatPage() {
   const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [channelSearch, setChannelSearch] = useState('')
-  const [messageSearch, setMessageSearch] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -323,14 +331,6 @@ export function ChatPage() {
   const savedMessages = savedQuery.data ?? []
   const savedIds = useMemo(() => new Set(savedMessages.map((m) => m.id)), [savedMessages])
   const rootMessages = useMemo(() => messages.filter((m) => !m.parentMessageId), [messages])
-  const visibleRootMessages = useMemo(() => {
-    const q = messageSearch.trim().toLowerCase()
-    if (!q) return rootMessages
-    return rootMessages.filter(
-      (m) =>
-        m.body.toLowerCase().includes(q) || (m.authorName ?? '').toLowerCase().includes(q),
-    )
-  }, [rootMessages, messageSearch])
   const repliesByParent = useMemo(() => {
     const map = new Map<string, Message[]>()
     for (const message of messages) {
@@ -867,14 +867,30 @@ export function ChatPage() {
           onTogglePinned={() => {
             setShowPinnedPanel((v) => !v)
             setShowSavedPanel(false)
+            setShowFilesPanel(false)
+            setShowSearchPanel(false)
           }}
           showSavedPanel={showSavedPanel}
           onToggleSaved={() => {
             setShowSavedPanel((v) => !v)
             setShowPinnedPanel(false)
+            setShowFilesPanel(false)
+            setShowSearchPanel(false)
           }}
-          search={messageSearch}
-          onSearchChange={setMessageSearch}
+          showFilesPanel={showFilesPanel}
+          onToggleFiles={() => {
+            setShowFilesPanel((v) => !v)
+            setShowPinnedPanel(false)
+            setShowSavedPanel(false)
+            setShowSearchPanel(false)
+          }}
+          showSearchPanel={showSearchPanel}
+          onToggleSearch={() => {
+            setShowSearchPanel((v) => !v)
+            setShowPinnedPanel(false)
+            setShowSavedPanel(false)
+            setShowFilesPanel(false)
+          }}
           onLeaveChannel={() => {
             if (selectedId) leaveChannelMutation.mutate(selectedId)
           }}
@@ -1086,7 +1102,31 @@ export function ChatPage() {
           </div>
         )}
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-5 py-4"
+          onDragOver={(e) => {
+            if (!selectedId || !Array.from(e.dataTransfer.types).includes('Files')) return
+            e.preventDefault()
+            setPaneDragging(true)
+          }}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+            setPaneDragging(false)
+          }}
+          onDrop={(e) => {
+            if (!selectedId || !Array.from(e.dataTransfer.types).includes('Files')) return
+            e.preventDefault()
+            setPaneDragging(false)
+            const files = Array.from(e.dataTransfer.files ?? [])
+            if (files.length > 0) void uploadFiles(files)
+          }}
+        >
+          {paneDragging && (
+            <div className="pointer-events-none sticky top-1 z-20 mx-auto flex max-w-3xl items-center justify-center gap-2 rounded-xl border-2 border-dashed border-violet-500/60 bg-violet-500/10 py-3 text-[13px] font-medium text-violet-700 backdrop-blur-[1px] dark:text-violet-200">
+              <Paperclip className="h-4 w-4" /> {t('chat.dropToShare')}
+            </div>
+          )}
           {rootMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
               <div className="h-14 w-14 rounded-2xl bg-violet-500/10 flex items-center justify-center mb-4">
@@ -1105,17 +1145,11 @@ export function ChatPage() {
                 {t('chat.conversationStart')}
               </p>
             </div>
-          ) : visibleRootMessages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
-              <p className="text-[14px] text-muted-foreground">
-                {t('chat.noMessagesMatch', { query: messageSearch.trim() })}
-              </p>
-            </div>
           ) : (
             <div className="space-y-0 max-w-3xl mx-auto">
-              {visibleRootMessages.map((m, i) => {
-                const showAuthor = shouldShowMessageHeader(visibleRootMessages, i)
-                const showDate = shouldShowDateDivider(visibleRootMessages, i)
+              {rootMessages.map((m, i) => {
+                const showAuthor = shouldShowMessageHeader(rootMessages, i)
+                const showDate = shouldShowDateDivider(rootMessages, i)
                 const mine = m.authorId === me?.id
                 // Prefer the larger of the server's thread stats (§6.4) and any
                 // replies already loaded client-side (thread open / realtime).
@@ -1633,6 +1667,28 @@ export function ChatPage() {
             onUnsave={(id) => setSavedMutation.mutate({ messageId: id, saved: false })}
           />
         )}
+        {showFilesPanel && (
+          <FilesPanel workspaceId={workspaceId} onClose={() => setShowFilesPanel(false)} />
+        )}
+        {showSearchPanel && (
+          <SearchPanel
+            workspaceId={workspaceId}
+            channels={channels}
+            members={membersQuery.data ?? []}
+            onClose={() => setShowSearchPanel(false)}
+            onSelectResult={(r) => {
+              // Reuse the app's existing ?channel=&message= deep-link so the
+              // linked channel opens and the message scrolls + highlights (§6.11).
+              navigate({
+                to: '/app/$workspaceId/chat',
+                params: { workspaceId },
+                search: { channel: r.channelId, message: r.id } as any,
+              })
+              if (r.channelId !== selectedId) setSelectedId(r.channelId)
+              setHighlightedMessageId(r.id)
+            }}
+          />
+        )}
       </div>
     </div>
   )
@@ -1740,6 +1796,265 @@ function SavedPanel({
                 {t('chat.openThread')}
               </button>
             </Card>
+          ))
+        )}
+      </div>
+    </aside>
+  )
+}
+
+type ChatFile = {
+  id: string
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  channelId: string
+  channelName: string
+  messageId: string
+  uploadedById: string | null
+  uploaderName: string | null
+  createdAt: string
+  url: string
+}
+
+type ChatSearchResult = {
+  id: string
+  channelId: string
+  channelName: string
+  parentMessageId: string | null
+  authorId: string
+  authorName: string | null
+  body: string
+  createdAt: string
+}
+
+/**
+ * Workspace file library (Plan §6.8): every file shared in a channel the user
+ * can read, with filename search + a coarse content-type filter. Mirrors the
+ * Pinned / Saved side panels. Files carry fresh signed download URLs.
+ */
+function FilesPanel({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const [q, setQ] = useState('')
+  const [type, setType] = useState('')
+  const filesQuery = useQuery({
+    queryKey: ['chat-files', workspaceId, q, type],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (q.trim()) params.set('q', q.trim())
+      if (type) params.set('type', type)
+      return api<ChatFile[]>(`/workspaces/${workspaceId}/chat/files?${params.toString()}`)
+    },
+    enabled: !!workspaceId,
+  })
+  const files = filesQuery.data ?? []
+  const selectClass = 'h-8 w-full rounded border border-border bg-background px-2 text-[13px] text-foreground'
+  return (
+    <aside className="hidden xl:flex w-80 border-l border-border flex-col">
+      <div className="h-12 border-b border-border px-3 flex items-center justify-between">
+        <div className="text-sm font-semibold flex items-center gap-1.5">
+          <FileText className="h-3.5 w-3.5" /> {t('chat.files')}
+        </div>
+        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onClose}>
+          {t('common.close')}
+        </button>
+      </div>
+      <div className="border-b border-border p-2.5 space-y-2">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={t('chat.searchFiles')}
+            className="h-8 w-full rounded border border-border bg-background pl-7 pr-2 text-[13px] text-foreground"
+          />
+        </div>
+        <select value={type} onChange={(e) => setType(e.target.value)} className={selectClass}>
+          <option value="">{t('chat.allFileTypes')}</option>
+          <option value="image">{t('chat.fileTypeImages')}</option>
+          <option value="pdf">{t('chat.fileTypePdfs')}</option>
+          <option value="video">{t('chat.fileTypeVideos')}</option>
+          <option value="audio">{t('chat.fileTypeAudio')}</option>
+        </select>
+      </div>
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+        {filesQuery.isLoading ? (
+          <div className="p-1 text-xs text-muted-foreground">{t('common.loading')}</div>
+        ) : files.length === 0 ? (
+          <div className="p-1 text-xs text-muted-foreground">{t('chat.noFilesShared')}</div>
+        ) : (
+          files.map((f) => (
+            <a
+              key={f.id}
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              download={f.fileName}
+              className="group flex items-center gap-2 rounded-lg border border-border/60 bg-background px-2.5 py-2 hover:bg-muted/40"
+            >
+              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium text-foreground/90">{f.fileName}</div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {f.uploaderName ? t('chat.uploadedBy', { name: f.uploaderName }) : ''}
+                  {f.channelName ? ` · #${f.channelName}` : ''}
+                  {` · ${formatRelativeTime(f.createdAt)}`}
+                </div>
+              </div>
+              <Download className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+            </a>
+          ))
+        )}
+      </div>
+    </aside>
+  )
+}
+
+/**
+ * Full message search with filters (Plan §6.11): query + channel / sender /
+ * date-range / has-file(type). Hits the server search endpoint (scoped to
+ * accessible channels) and deep-links each hit back into the conversation.
+ */
+function SearchPanel({
+  workspaceId,
+  channels,
+  members,
+  onClose,
+  onSelectResult,
+}: {
+  workspaceId: string
+  channels: Channel[]
+  members: WorkspaceMember[]
+  onClose: () => void
+  onSelectResult: (r: ChatSearchResult) => void
+}) {
+  const { t } = useTranslation()
+  const [q, setQ] = useState('')
+  const [channelId, setChannelId] = useState('')
+  const [senderId, setSenderId] = useState('')
+  const [after, setAfter] = useState('')
+  const [before, setBefore] = useState('')
+  const [fileType, setFileType] = useState('')
+  const hasCriteria = !!(q.trim() || channelId || senderId || after || before || fileType)
+  const searchQuery = useQuery({
+    queryKey: ['chat-search', workspaceId, q, channelId, senderId, after, before, fileType],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (q.trim()) params.set('q', q.trim())
+      if (channelId) params.set('channelId', channelId)
+      if (senderId) params.set('senderId', senderId)
+      if (after) params.set('after', after)
+      if (before) params.set('before', before)
+      if (fileType) params.set('fileType', fileType)
+      return api<ChatSearchResult[]>(`/workspaces/${workspaceId}/chat/search?${params.toString()}`)
+    },
+    enabled: !!workspaceId && hasCriteria,
+  })
+  const results = hasCriteria ? searchQuery.data ?? [] : []
+  const clear = () => {
+    setQ('')
+    setChannelId('')
+    setSenderId('')
+    setAfter('')
+    setBefore('')
+    setFileType('')
+  }
+  const selectClass = 'h-8 w-full rounded border border-border bg-background px-1.5 text-[12px] text-foreground'
+  return (
+    <aside className="hidden xl:flex w-80 border-l border-border flex-col">
+      <div className="h-12 border-b border-border px-3 flex items-center justify-between">
+        <div className="text-sm font-semibold flex items-center gap-1.5">
+          <Search className="h-3.5 w-3.5" /> {t('chat.searchAndFilter')}
+        </div>
+        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onClose}>
+          {t('common.close')}
+        </button>
+      </div>
+      <div className="border-b border-border p-2.5 space-y-2">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          autoFocus
+          placeholder={t('chat.searchMessages')}
+          className="h-8 w-full rounded border border-border bg-background px-2 text-[13px] text-foreground"
+        />
+        <select value={channelId} onChange={(e) => setChannelId(e.target.value)} className={selectClass}>
+          <option value="">{t('chat.allChannels')}</option>
+          {channels
+            .filter((c) => !c.isDm)
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                #{c.name}
+              </option>
+            ))}
+        </select>
+        <select value={senderId} onChange={(e) => setSenderId(e.target.value)} className={selectClass}>
+          <option value="">{t('chat.anyone')}</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.displayName || m.email}
+            </option>
+          ))}
+        </select>
+        <div className="flex gap-2">
+          <label className="flex-1 text-[10px] text-muted-foreground">
+            {t('chat.after')}
+            <input
+              type="date"
+              value={after}
+              onChange={(e) => setAfter(e.target.value)}
+              className="mt-0.5 h-8 w-full rounded border border-border bg-background px-1.5 text-[12px] text-foreground"
+            />
+          </label>
+          <label className="flex-1 text-[10px] text-muted-foreground">
+            {t('chat.before')}
+            <input
+              type="date"
+              value={before}
+              onChange={(e) => setBefore(e.target.value)}
+              className="mt-0.5 h-8 w-full rounded border border-border bg-background px-1.5 text-[12px] text-foreground"
+            />
+          </label>
+        </div>
+        <select value={fileType} onChange={(e) => setFileType(e.target.value)} className={selectClass}>
+          <option value="">{t('chat.allFileTypes')}</option>
+          <option value="any">{t('chat.anyFile')}</option>
+          <option value="image">{t('chat.fileTypeImages')}</option>
+          <option value="pdf">{t('chat.fileTypePdfs')}</option>
+          <option value="video">{t('chat.fileTypeVideos')}</option>
+          <option value="audio">{t('chat.fileTypeAudio')}</option>
+        </select>
+        {hasCriteria && (
+          <button type="button" onClick={clear} className="text-[11px] text-muted-foreground hover:text-foreground">
+            {t('chat.clearFilters')}
+          </button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+        {!hasCriteria ? (
+          <div className="p-1 text-xs text-muted-foreground">{t('chat.searchPrompt')}</div>
+        ) : searchQuery.isLoading ? (
+          <div className="p-1 text-xs text-muted-foreground">{t('common.loading')}</div>
+        ) : results.length === 0 ? (
+          <div className="p-1 text-xs text-muted-foreground">{t('chat.noSearchResults')}</div>
+        ) : (
+          results.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => onSelectResult(r)}
+              className="block w-full rounded-lg border border-border/60 bg-background px-2.5 py-2 text-left hover:bg-muted/40"
+            >
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground/80">{r.authorName ?? t('chat.unknownUser')}</span>
+                <span>· #{r.channelName}</span>
+                {r.parentMessageId && (
+                  <span className="rounded bg-muted px-1 py-0.5 text-[9px]">{t('chat.threadReply')}</span>
+                )}
+              </div>
+              <div className="mt-0.5 line-clamp-2 text-[13px] text-foreground/90">{r.body}</div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">{formatRelativeTime(r.createdAt)}</div>
+            </button>
           ))
         )}
       </div>

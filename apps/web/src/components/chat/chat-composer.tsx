@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type ReactNode } from 'react'
+import { useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react'
 import { AtSign, Bold, Code, FileText, Italic, Loader2, Paperclip, Send, Smile, Sparkles, X } from 'lucide-react'
 import { Button, Popover, PopoverContent, PopoverTrigger, Textarea, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../../lib/api'
@@ -76,6 +76,9 @@ function ComposerBox({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [improving, setImproving] = useState(false)
+  // Drag-and-drop upload (Plan §6.8): dropping files onto the composer funnels
+  // them into the same presign→PUT→record flow as the paperclip button.
+  const [dragging, setDragging] = useState(false)
   const canAttach = !!onFilesSelected
   const hasAttachments = (attachments?.length ?? 0) > 0
   // Send is allowed with text OR at least one uploaded attachment.
@@ -135,6 +138,28 @@ function ComposerBox({
     onFilesSelected?.(files)
   }
 
+  // Only react to file drags (ignore text/element drags) and only when the
+  // composer actually supports attachments.
+  const isFileDrag = (e: DragEvent<HTMLDivElement>) => Array.from(e.dataTransfer.types).includes('Files')
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (!canAttach || !isFileDrag(e)) return
+    e.preventDefault()
+    setDragging(true)
+  }
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    if (!canAttach) return
+    // Ignore leaves fired while moving between the composer's own children.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+    setDragging(false)
+  }
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    if (!canAttach || !isFileDrag(e)) return
+    e.preventDefault()
+    setDragging(false)
+    const files = Array.from(e.dataTransfer.files ?? [])
+    if (files.length > 0) onFilesSelected?.(files)
+  }
+
   const handleAskAi = async () => {
     const text = value.trim()
     if (!text) {
@@ -157,7 +182,22 @@ function ComposerBox({
   }
 
   return (
-    <div className="rounded-xl border border-border/80 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-none overflow-hidden focus-within:border-violet-500/40 focus-within:ring-2 focus-within:ring-violet-500/15 transition-shadow">
+    <div
+      className={cn(
+        'relative rounded-xl border border-border/80 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-none overflow-hidden focus-within:border-violet-500/40 focus-within:ring-2 focus-within:ring-violet-500/15 transition-shadow',
+        dragging && 'border-violet-500/60 ring-2 ring-violet-500/25',
+      )}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dragging && canAttach && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-violet-500/60 bg-violet-500/10 backdrop-blur-[1px]">
+          <span className="flex items-center gap-2 text-[13px] font-medium text-violet-700 dark:text-violet-200">
+            <Paperclip className="h-4 w-4" /> {t('chat.dropToShare')}
+          </span>
+        </div>
+      )}
       {slashMatches.length > 0 && (
         <div className="border-b border-border/60 bg-muted/20 px-1.5 py-1">
           <div className="px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.commands')}</div>

@@ -198,6 +198,98 @@ describe('ChatService.editMessage (edit history, Plan §6.3)', () => {
   })
 })
 
+describe('ChatService.listWorkspaceFiles (file library, Plan §6.8)', () => {
+  it('lists files from accessible channels with a signed url, newest first', async () => {
+    const { db } = makeDb([
+      // accessibleChannelIds → channels (c1 public, c2 private): then memberships (none)
+      [
+        { id: 'c1', spaceId: null, isPrivate: false, isDm: false },
+        { id: 'c2', spaceId: null, isPrivate: true, isDm: false },
+      ],
+      [], // no channel memberships → only the public c1 is accessible
+      // attachments query
+      [
+        {
+          id: 'a1',
+          fileName: 'design-spec.pdf',
+          contentType: 'application/pdf',
+          sizeBytes: 2048,
+          storageKey: 'chat/c1/attachments/design-spec.pdf',
+          createdAt: '2026-01-02',
+          channelId: 'c1',
+          channelName: 'general',
+          messageId: 'm1',
+          uploadedById: 'u1',
+          uploaderName: 'Alice',
+        },
+      ],
+    ])
+    const svc = buildSvc(db)
+    const res = await svc.listWorkspaceFiles('w1', 'u1', {})
+    assert.equal(res.length, 1)
+    assert.equal(res[0].fileName, 'design-spec.pdf')
+    assert.equal(res[0].channelName, 'general')
+    assert.equal(res[0].uploaderName, 'Alice')
+    // r2 is not configured in tests → url falls back to the storage key.
+    assert.equal(res[0].url, 'chat/c1/attachments/design-spec.pdf')
+  })
+
+  it('returns nothing (and skips the file query) when no channel is accessible', async () => {
+    // Only a channel scoped to a PRIVATE space the user is not a member of.
+    const { db } = makeDb([
+      [{ id: 'c1', spaceId: 's1', isPrivate: false, isDm: false }], // channels
+      [], // channel memberships
+      [{ id: 's1', visibility: 'private' }], // spaces
+      [], // space memberships (not a member) → c1 blocked
+    ])
+    const svc = buildSvc(db)
+    const res = await svc.listWorkspaceFiles('w1', 'u1', {})
+    assert.deepEqual(res, [])
+  })
+})
+
+describe('ChatService.searchMessages (search + filters, Plan §6.11)', () => {
+  it('returns matching messages from accessible channels', async () => {
+    const { db } = makeDb([
+      [{ id: 'c1', spaceId: null, isPrivate: false, isDm: false }], // channels
+      [], // memberships
+      // messages query
+      [
+        {
+          id: 'm1',
+          channelId: 'c1',
+          channelName: 'general',
+          parentMessageId: null,
+          authorId: 'u1',
+          authorName: 'Alice',
+          body: 'hello world',
+          createdAt: '2026-01-01',
+        },
+      ],
+    ])
+    const svc = buildSvc(db)
+    const res = await svc.searchMessages('w1', 'u1', { q: 'hello' })
+    assert.equal(res.length, 1)
+    assert.equal(res[0].body, 'hello world')
+    assert.equal(res[0].channelName, 'general')
+  })
+
+  it('refuses to search a channel the requester cannot access', async () => {
+    const { db } = makeDb([
+      // c2 is private and the user is not a member → not accessible
+      [
+        { id: 'c1', spaceId: null, isPrivate: false, isDm: false },
+        { id: 'c2', spaceId: null, isPrivate: true, isDm: false },
+      ],
+      [], // memberships
+    ])
+    const svc = buildSvc(db)
+    // Explicitly filtering to the inaccessible c2 yields no results and no query.
+    const res = await svc.searchMessages('w1', 'u1', { channelId: 'c2', q: 'secret' })
+    assert.deepEqual(res, [])
+  })
+})
+
 describe('ChatService.getMessageEdits (Plan §6.3)', () => {
   it('returns prior versions newest-first plus the current body', async () => {
     const { db } = makeDb([

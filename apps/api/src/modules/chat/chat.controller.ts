@@ -303,6 +303,32 @@ export class ChatController {
     return this.chat.listSaved(workspaceId, user.id)
   }
 
+  @Get('workspaces/:workspaceId/chat/files')
+  @UseGuards(WorkspaceMemberGuard)
+  listFiles(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('q') q?: string,
+    @Query('type') type?: string,
+  ) {
+    return this.chat.listWorkspaceFiles(workspaceId, user.id, { q, type })
+  }
+
+  @Get('workspaces/:workspaceId/chat/search')
+  @UseGuards(WorkspaceMemberGuard)
+  search(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('q') q?: string,
+    @Query('channelId') channelId?: string,
+    @Query('senderId') senderId?: string,
+    @Query('after') after?: string,
+    @Query('before') before?: string,
+    @Query('fileType') fileType?: string,
+  ) {
+    return this.chat.searchMessages(workspaceId, user.id, { q, channelId, senderId, after, before, fileType })
+  }
+
   @Post('chat/messages/:messageId/save')
   save(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.setSaved(messageId, user.id, true)
