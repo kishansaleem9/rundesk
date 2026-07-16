@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common'
 import { ProjectsService } from './projects.service'
 import { ProjectsController } from './projects.controller'
 import { CustomRolesModule } from '../custom-roles/custom-roles.module'
+import { WebhooksModule } from '../webhooks/webhooks.module'
+import { SlackModule } from '../integrations/slack/slack.module'
 
 @Module({
-  imports: [CustomRolesModule],
+  imports: [CustomRolesModule, WebhooksModule, SlackModule],
   providers: [ProjectsService],
   controllers: [ProjectsController],
   exports: [ProjectsService],

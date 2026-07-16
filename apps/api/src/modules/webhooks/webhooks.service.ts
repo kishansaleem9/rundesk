@@ -16,6 +16,7 @@ const WEBHOOK_EVENTS = [
   'project.created',
   'project.updated',
   'member.invited',
+  'member.joined',
   'member.removed',
   'time.logged',
   'form.submitted',

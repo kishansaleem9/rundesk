@@ -7,6 +7,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { SecurityService } from '../security/security.service'
+import { WebhooksService } from '../webhooks/webhooks.service'
 
 const BASE_SLUG_FALLBACK = 'workspace'
 
@@ -25,7 +26,22 @@ export class WorkspacesService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private readonly security: SecurityService,
+    private readonly webhooks: WebhooksService,
   ) {}
+
+  /**
+   * Best-effort webhook fan-out (Plan §12.4). Mirrors the webhooks portion of
+   * TasksService.fireTaskEvent — non-blocking, failures logged not thrown, so
+   * a downed webhook can never break a membership mutation.
+   */
+  private async fireWebhook(workspaceId: string, event: string, payload: Record<string, unknown>) {
+    try {
+      await this.webhooks.fire(workspaceId, event, payload)
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[webhooks.fire] ${event} failed:`, e)
+    }
+  }
 
   async findByMember(userId: string) {
     return this.db
@@ -212,6 +228,14 @@ export class WorkspacesService {
       description: `Added ${email} to workspace as ${role}`,
       metadata: { email, role },
     })
+    // A direct add joins the member immediately (Plan §12.4). Best effort.
+    void this.fireWebhook(workspaceId, 'member.joined', {
+      workspaceId,
+      userId: user.id,
+      email,
+      role,
+      actorId: actor?.id ?? null,
+    })
     return { ok: true, userId: user.id }
   }
 
@@ -307,6 +331,11 @@ export class WorkspacesService {
       resourceType: 'user',
       resourceId: userId,
       description: `Removed member from workspace`,
+    })
+    void this.fireWebhook(workspaceId, 'member.removed', {
+      workspaceId,
+      userId,
+      actorId: actor?.id ?? null,
     })
     return { ok: true }
   }

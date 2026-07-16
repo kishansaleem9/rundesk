@@ -7,6 +7,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
+import { WebhooksService } from '../webhooks/webhooks.service'
 
 @Injectable()
 export class InvitationsService {
@@ -15,11 +16,36 @@ export class InvitationsService {
     private emailService: EmailService,
     private config: ConfigService,
     private securitySettings: WorkspaceSecuritySettingsService,
+    private webhooks: WebhooksService,
   ) {}
 
   private claimUrlForToken(token: string) {
     const appUrl = this.config.get('APP_URL', 'http://localhost:5173')
     return `${appUrl}/accept-invite?token=${token}`
+  }
+
+  /**
+   * Best-effort webhook fan-out (Plan §12.4). Mirrors the webhooks portion of
+   * TasksService.fireTaskEvent — non-blocking, failures logged not thrown, so
+   * a downed webhook can never break invite creation/acceptance.
+   */
+  private async fireWebhook(workspaceId: string, event: string, payload: Record<string, unknown>) {
+    try {
+      await this.webhooks.fire(workspaceId, event, payload)
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[webhooks.fire] ${event} failed:`, e)
+    }
+  }
+
+  /** Workspace ids an invite grants membership to (member.* events are workspace-keyed). */
+  private inviteWorkspaces(memberships: unknown): Array<{ workspaceId: string; role?: string }> {
+    if (!Array.isArray(memberships)) return []
+    return memberships
+      .filter((ws): ws is { workspaceId: string; role?: string } =>
+        Boolean(ws && typeof ws === 'object' && typeof (ws as any).workspaceId === 'string'),
+      )
+      .map((ws) => ({ workspaceId: ws.workspaceId, role: (ws as any).role }))
   }
 
   async listPending(organizationId: string) {
@@ -59,6 +85,17 @@ export class InvitationsService {
       claimUrl,
       expiresAt,
     })
+
+    // Fire member.invited per target workspace (best effort, non-blocking).
+    for (const ws of this.inviteWorkspaces(invite.workspaceMemberships)) {
+      void this.fireWebhook(ws.workspaceId, 'member.invited', {
+        workspaceId: ws.workspaceId,
+        email: invite.email,
+        role: ws.role ?? null,
+        invitationId: invite.id,
+        actorId: invitedById,
+      })
+    }
 
     return invite
   }
@@ -174,7 +211,7 @@ export class InvitationsService {
     if (invite.status !== 'pending') throw new GoneException('Invitation already used')
     if (invite.expiresAt < new Date()) throw new GoneException('Invitation expired')
 
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       let userId = currentUserId
 
       if (!userId) {
@@ -251,5 +288,21 @@ export class InvitationsService {
 
       return { userId }
     })
+
+    // Fire member.joined per workspace the invite granted (best effort). The
+    // joining user is the actor. Runs after the tx commits so the membership
+    // is durable before we advertise it.
+    for (const ws of this.inviteWorkspaces(invite.workspaceMemberships)) {
+      void this.fireWebhook(ws.workspaceId, 'member.joined', {
+        workspaceId: ws.workspaceId,
+        userId: result.userId,
+        email: invite.email,
+        role: ws.role ?? null,
+        invitationId: invite.id,
+        actorId: result.userId,
+      })
+    }
+
+    return result
   }
 }

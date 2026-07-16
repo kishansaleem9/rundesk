@@ -4,6 +4,7 @@ import { forms, formFields, formSubmissions, tasks, lists, projects, spaces, use
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
+import { WebhooksService } from '../webhooks/webhooks.service'
 
 /** Hard cap on a single form-upload file (public intake). */
 export const MAX_FORM_UPLOAD_BYTES = 25 * 1024 * 1024 // 25 MB
@@ -33,7 +34,23 @@ export class FormsService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private r2: R2Service,
+    private webhooks: WebhooksService,
   ) {}
+
+  /**
+   * Best-effort webhook fan-out (Plan §12.4). Mirrors the webhooks portion of
+   * TasksService.fireTaskEvent — non-blocking, failures logged not thrown, so
+   * a downed webhook can never break a (public) form submission.
+   */
+  private async fireWebhook(workspaceId: string, event: string, payload: Record<string, unknown>) {
+    try {
+      await this.webhooks.fire(workspaceId, event, payload)
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[webhooks.fire] ${event} failed:`, e)
+    }
+  }
+
   private readonly routingMetaKey = '__routingMeta'
   private readonly maxRoutingHistory = 10
   private readonly legacyRoutingMetaKey = '__routingMetaLegacy'
@@ -717,6 +734,15 @@ export class FormsService {
         .set({ data: patched })
         .where(eq(formSubmissions.id, submission.id))
     }
+
+    // Advertise the submission to webhooks (Plan §12.4). Best effort, and
+    // fired after the row + any routed task are durable.
+    void this.fireWebhook(formWithFields.workspaceId, 'form.submitted', {
+      workspaceId: formWithFields.workspaceId,
+      formId: formWithFields.id,
+      submissionId: submission.id,
+      createdTaskId,
+    })
 
     return {
       ok: true,

@@ -5,10 +5,60 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import { WebhooksService } from '../webhooks/webhooks.service'
+import { SlackService } from '../integrations/slack/slack.service'
 
 @Injectable()
 export class ProjectsService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private webhooks: WebhooksService,
+    private slack: SlackService,
+  ) {}
+
+  /**
+   * Best-effort fan-out of a project lifecycle event to webhooks + Slack
+   * (Plan §12.1 project update alerts, §12.4 webhooks). Mirrors
+   * TasksService.fireTaskEvent: the workspace is resolved via the project's
+   * space, delivery is non-blocking, and any failure is logged but never
+   * propagated so a downed webhook/Slack channel can't break the mutation.
+   */
+  private async fireProjectEvent(
+    eventType: 'project.created' | 'project.updated',
+    project: { id: string; name: string; spaceId: string },
+    actorId?: string,
+  ) {
+    const [space] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(spaces)
+      .where(eq(spaces.id, project.spaceId))
+      .limit(1)
+    if (!space) return
+    const workspaceId = space.workspaceId
+    const payload = {
+      project: { id: project.id, name: project.name, spaceId: project.spaceId, workspaceId },
+      actorId: actorId ?? null,
+    }
+    try {
+      await this.webhooks.fire(workspaceId, eventType, payload)
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[webhooks.fire] ${eventType} failed:`, e)
+    }
+    try {
+      const message =
+        eventType === 'project.created'
+          ? `:file_folder: New project created: *${project.name}*`
+          : `:pencil2: Project updated: *${project.name}*`
+      // Routes through the same per-channel routing rules task events use —
+      // rules are keyed by event filter (+ optional project scope), so
+      // project events are eligible without any routing-model change.
+      await this.slack.notify(workspaceId, eventType, message, { projectId: project.id })
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[slack.notify] ${eventType} failed:`, e)
+    }
+  }
 
   async createProject(
     spaceId: string,
@@ -36,6 +86,7 @@ export class ProjectsService {
         .values({ projectId: project.id, userId: actorId, role: 'admin', addedById: actorId })
         .onConflictDoNothing()
     }
+    if (project) void this.fireProjectEvent('project.created', project, actorId)
     return project
   }
 
@@ -106,6 +157,7 @@ export class ProjectsService {
       .where(eq(projects.id, projectId))
       .returning()
 
+    if (result[0]) void this.fireProjectEvent('project.updated', result[0], actorId)
     return result[0]
   }
 
