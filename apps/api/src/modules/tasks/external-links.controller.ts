@@ -24,13 +24,27 @@ export class TaskExternalLinksController {
     return this.tasks.listExternalLinks(taskId, user.id)
   }
 
+  /** §12.6 — links attached to a specific comment on this task. */
+  @Get('comment/:commentId')
+  listForComment(
+    @Param('taskId') taskId: string,
+    @Param('commentId') commentId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.tasks.listExternalLinksForComment(taskId, commentId, user.id)
+  }
+
   @Post()
   create(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: CreateExternalLinkDto,
   ) {
-    return this.tasks.addExternalLink(taskId, user.id, { url: body.url, provider: body.provider })
+    return this.tasks.addExternalLink(taskId, user.id, {
+      url: body.url,
+      provider: body.provider,
+      commentId: body.commentId,
+    })
   }
 
   @Post(':linkId/refresh')

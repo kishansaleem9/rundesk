@@ -23,6 +23,10 @@ export const taskExternalLinks = pgTable(
   {
     id:          uuid('id').primaryKey().defaultRandom(),
     taskId:      uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+    // §12.6 — when set, the link was attached to a specific comment (e.g. a
+    // Dropbox file shared in a comment). Still belongs to the task. Plain column;
+    // FK to task_comments (ON DELETE SET NULL) is added in the migration.
+    commentId:   uuid('comment_id'),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
     provider:    text('provider').notNull(),
     kind:        text('kind').notNull(),

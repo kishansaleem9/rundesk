@@ -62,6 +62,8 @@ import { BillingModule } from './modules/billing/billing.module'
 import { SupportModule } from './modules/support/support.module'
 import { ClientPortalModule } from './modules/client-portal/client-portal.module'
 import { OpsModule } from './modules/ops/ops.module'
+import { ClientInvoicingModule } from './modules/client-invoicing/client-invoicing.module'
+import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databases.module'
 
 @Module({
   imports: [
@@ -133,6 +135,8 @@ import { OpsModule } from './modules/ops/ops.module'
     SupportModule,
     ClientPortalModule,
     OpsModule,
+    ClientInvoicingModule,
+    TenantDatabasesModule,
   ],
   providers: [
     // Global double-submit CSRF guard. It only enforces on cookie-authenticated,

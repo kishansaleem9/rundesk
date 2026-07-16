@@ -6,7 +6,9 @@ const PROVIDERS = ['github', 'gitlab', 'google_drive', 'dropbox', 'link'] as con
  * Create a task ↔ external-service link (Plan §12.8 / §12.2). Only `url` is
  * required — the server parses it to detect provider + kind. `provider` is an
  * optional hint that disambiguates a generic link (e.g. an explicit
- * `google_drive` attach).
+ * `google_drive` attach). `commentId` (§12.6) optionally scopes the link to a
+ * specific comment on the task (e.g. a Dropbox file shared in a comment);
+ * omitted → a task-level link, exactly as before.
  */
 export class CreateExternalLinkDto {
   @IsString()
@@ -16,4 +18,8 @@ export class CreateExternalLinkDto {
   @IsOptional()
   @IsIn(PROVIDERS)
   provider?: (typeof PROVIDERS)[number]
+
+  @IsOptional()
+  @IsString()
+  commentId?: string
 }

@@ -12,6 +12,10 @@ export const timeEntries = pgTable('time_entries', {
   durationSec: integer('duration_sec'), // null while timer is running; set on stop or on manual create
   description: text('description'),
   isBillable:  boolean('is_billable').notNull().default(false),
+  // §12.10 — set once this entry's billable time has been rolled into a client
+  // invoice, so it is never double-invoiced. Plain column; the FK to
+  // client_invoices is added in the migration to avoid a schema import cycle.
+  clientInvoiceId: uuid('client_invoice_id'),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

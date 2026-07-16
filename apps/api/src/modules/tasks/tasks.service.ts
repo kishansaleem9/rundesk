@@ -668,6 +668,7 @@ export class TasksService {
         title:      taskExternalLinks.title,
         status:     taskExternalLinks.status,
         metadata:   taskExternalLinks.metadata,
+        commentId:  taskExternalLinks.commentId,
         createdAt:  taskExternalLinks.createdAt,
       })
       .from(taskExternalLinks)
@@ -675,15 +676,55 @@ export class TasksService {
       .orderBy(desc(taskExternalLinks.createdAt))
   }
 
+  /**
+   * §12.6 — external links attached to one specific comment on a task
+   * (e.g. Dropbox files shared in a comment), most-recent first. Requires task
+   * access. Task-level links (comment_id null) are excluded.
+   */
+  async listExternalLinksForComment(taskId: string, commentId: string, userId: string) {
+    await this.assertTaskWriteAccess(taskId, userId)
+    return this.db
+      .select({
+        id:         taskExternalLinks.id,
+        provider:   taskExternalLinks.provider,
+        kind:       taskExternalLinks.kind,
+        url:        taskExternalLinks.url,
+        externalId: taskExternalLinks.externalId,
+        title:      taskExternalLinks.title,
+        status:     taskExternalLinks.status,
+        metadata:   taskExternalLinks.metadata,
+        commentId:  taskExternalLinks.commentId,
+        createdAt:  taskExternalLinks.createdAt,
+      })
+      .from(taskExternalLinks)
+      .where(and(eq(taskExternalLinks.taskId, taskId), eq(taskExternalLinks.commentId, commentId)))
+      .orderBy(desc(taskExternalLinks.createdAt))
+  }
+
   /** Link an external URL (GitHub/GitLab commit·PR·issue, Drive file, or plain link). */
   async addExternalLink(
     taskId: string,
     userId: string,
-    input: { url: string; provider?: string },
+    input: { url: string; provider?: string; commentId?: string | null },
   ) {
     const ctx = await this.assertTaskWriteAccess(taskId, userId)
     const url = (input.url ?? '').trim()
     if (!isHttpUrl(url)) throw new BadRequestException('A valid http(s) URL is required')
+
+    // §12.6 — a link may be scoped to a specific comment (e.g. a Dropbox file
+    // shared in a comment). It still belongs to the task; validate the comment
+    // is on this task so a link can't be pinned onto another task's comment.
+    const commentId = input.commentId ?? null
+    if (commentId) {
+      const [comment] = await this.db
+        .select({ taskId: taskComments.taskId })
+        .from(taskComments)
+        .where(eq(taskComments.id, commentId))
+        .limit(1)
+      if (!comment || comment.taskId !== taskId) {
+        throw new BadRequestException('Comment does not belong to this task')
+      }
+    }
 
     const parsed = parseExternalLinkUrl(url, input.provider)
     // Best-effort live enrichment; falls back to null status when the provider
@@ -697,6 +738,7 @@ export class TasksService {
       .insert(taskExternalLinks)
       .values({
         taskId,
+        commentId,
         workspaceId: ctx.workspaceId,
         provider: parsed.provider,
         kind: parsed.kind,

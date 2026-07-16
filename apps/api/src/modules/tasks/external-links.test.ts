@@ -265,6 +265,77 @@ describe('TasksService external links — CRUD + access', () => {
     )
   })
 
+  // --- §12.6 — attach a link (e.g. Dropbox file) to a specific comment -------
+
+  it('persists a commentId when the comment belongs to the task', async () => {
+    // selects: task ctx, membership, comment lookup (on this task), connection (empty)
+    const { db, inserted } = makeCaptureDb([CTX, ADMIN, [{ taskId: 't1' }], []])
+    const svc = makeService(db)
+
+    const row = await svc.addExternalLink('t1', 'u1', {
+      url: 'https://www.dropbox.com/s/abc123/spec.pdf?dl=0',
+      provider: 'dropbox',
+      commentId: 'c1',
+    })
+
+    assert.equal(inserted.length, 1)
+    assert.equal(inserted[0].commentId, 'c1', 'the comment scope is persisted')
+    assert.equal(inserted[0].provider, 'dropbox')
+    assert.equal(inserted[0].kind, 'file')
+    assert.equal((row as any).commentId, 'c1')
+  })
+
+  it('rejects a commentId that belongs to a different task', async () => {
+    // comment lookup returns a comment whose taskId != the target task
+    const { db, inserted } = makeCaptureDb([CTX, ADMIN, [{ taskId: 't-other' }]])
+    const svc = makeService(db)
+
+    await assert.rejects(
+      () =>
+        svc.addExternalLink('t1', 'u1', {
+          url: 'https://www.dropbox.com/s/abc123/spec.pdf?dl=0',
+          provider: 'dropbox',
+          commentId: 'c-foreign',
+        }),
+      /does not belong to this task/i,
+    )
+    assert.equal(inserted.length, 0, 'nothing is inserted when validation fails')
+  })
+
+  it('rejects a commentId that does not exist', async () => {
+    // comment lookup returns no row
+    const { db } = makeCaptureDb([CTX, ADMIN, []])
+    const svc = makeService(db)
+
+    await assert.rejects(
+      () =>
+        svc.addExternalLink('t1', 'u1', {
+          url: 'https://example.com/spec',
+          commentId: 'c-missing',
+        }),
+      /does not belong to this task/i,
+    )
+  })
+
+  it('keeps task-level links working: commentId null and no comment lookup when omitted', async () => {
+    // Only task ctx + membership selects — no comment lookup, no connection query.
+    const { db, inserted } = makeCaptureDb([CTX, ADMIN])
+    const svc = makeService(db)
+
+    await svc.addExternalLink('t1', 'u1', { url: 'https://example.com/spec' })
+
+    assert.equal(inserted[0].commentId, null, 'task-level link stores commentId null')
+    assert.equal(db.select.mock.callCount(), 2, 'no comment-belongs-to-task lookup when commentId omitted')
+  })
+
+  it('lists links attached to a specific comment', async () => {
+    const links = [{ id: 'link-1', provider: 'dropbox', kind: 'file', url: 'u', commentId: 'c1' }]
+    const { db } = makeCaptureDb([CTX, ADMIN, links])
+    const svc = makeService(db)
+    const out = await svc.listExternalLinksForComment('t1', 'c1', 'u1')
+    assert.deepEqual(out, links)
+  })
+
   it('persists a generic link without any provider-connection lookup', async () => {
     // Only task ctx + membership selects; no connection query for provider=link.
     const { db, inserted } = makeCaptureDb([CTX, ADMIN])

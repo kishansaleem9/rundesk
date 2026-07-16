@@ -10,6 +10,9 @@ export const dashboardPresets = pgTable('dashboard_presets', {
   name:        text('name').notNull(),
   layout:      jsonb('layout').notNull().default([]),
   isDefault:   boolean('is_default').notNull().default(false),
+  // §5.7 — a workspace-default dashboard set by an admin. Applies to any member
+  // who has no personal default. At most one per workspace (enforced in service).
+  isWorkspaceDefault: boolean('is_workspace_default').notNull().default(false),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
