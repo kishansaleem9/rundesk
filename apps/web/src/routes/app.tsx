@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
+import { SupportWidget } from '../components/support-widget'
 
 const CommandPalette = lazy(async () => {
   const mod = await import('../components/command-palette')
@@ -73,6 +74,7 @@ function AppShell() {
         </Suspense>
       ) : null}
       <ShortcutsOverlay />
+      <SupportWidget />
     </div>
   )
 }

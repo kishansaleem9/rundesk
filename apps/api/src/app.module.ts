@@ -58,6 +58,7 @@ import { CustomRolesModule } from './modules/custom-roles/custom-roles.module'
 import { TaskTemplatesModule } from './modules/task-templates/task-templates.module'
 import { SampleDataModule } from './modules/sample-data/sample-data.module'
 import { BillingModule } from './modules/billing/billing.module'
+import { SupportModule } from './modules/support/support.module'
 
 @Module({
   imports: [
@@ -125,6 +126,7 @@ import { BillingModule } from './modules/billing/billing.module'
     TaskTemplatesModule,
     SampleDataModule,
     BillingModule,
+    SupportModule,
   ],
   providers: [
     // Global double-submit CSRF guard. It only enforces on cookie-authenticated,

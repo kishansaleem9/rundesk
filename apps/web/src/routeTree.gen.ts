@@ -12,6 +12,7 @@ import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VerifyEmailRouteImport } from './routes/verify-email'
+import { Route as StatusRouteImport } from './routes/status'
 import { Route as SsoCompleteRouteImport } from './routes/sso-complete'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as RegisterRouteImport } from './routes/register'
@@ -28,6 +29,7 @@ import { Route as AppAdminRouteImport } from './routes/app.admin'
 import { Route as AppWorkspaceIdRouteImport } from './routes/app.$workspaceId'
 import { Route as AppAdminWebhooksRouteImport } from './routes/app.admin.webhooks'
 import { Route as AppAdminUsersRouteImport } from './routes/app.admin.users'
+import { Route as AppAdminSupportRouteImport } from './routes/app.admin.support'
 import { Route as AppAdminSettingsRouteImport } from './routes/app.admin.settings'
 import { Route as AppAdminIntegrationsRouteImport } from './routes/app.admin.integrations'
 import { Route as AppAdminFeaturesRouteImport } from './routes/app.admin.features'
@@ -79,6 +81,11 @@ const AppWorkspaceIdFormsIndexLazyRouteImport = createFileRoute(
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
   id: '/verify-email',
   path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatusRoute = StatusRouteImport.update({
+  id: '/status',
+  path: '/status',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SsoCompleteRoute = SsoCompleteRouteImport.update({
@@ -164,6 +171,13 @@ const AppAdminUsersRoute = AppAdminUsersRouteImport.update({
   getParentRoute: () => AppAdminRoute,
 } as any).lazy(() =>
   import('./routes/app.admin.users.lazy').then((d) => d.Route),
+)
+const AppAdminSupportRoute = AppAdminSupportRouteImport.update({
+  id: '/support',
+  path: '/support',
+  getParentRoute: () => AppAdminRoute,
+} as any).lazy(() =>
+  import('./routes/app.admin.support.lazy').then((d) => d.Route),
 )
 const AppAdminSettingsRoute = AppAdminSettingsRouteImport.update({
   id: '/settings',
@@ -455,6 +469,7 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
+  '/status': typeof StatusRoute
   '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
@@ -491,6 +506,7 @@ export interface FileRoutesByFullPath {
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/admin/integrations': typeof AppAdminIntegrationsRoute
   '/app/admin/settings': typeof AppAdminSettingsRoute
+  '/app/admin/support': typeof AppAdminSupportRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/webhooks': typeof AppAdminWebhooksRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
@@ -511,6 +527,7 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
+  '/status': typeof StatusRoute
   '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
@@ -543,6 +560,7 @@ export interface FileRoutesByTo {
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/admin/integrations': typeof AppAdminIntegrationsRoute
   '/app/admin/settings': typeof AppAdminSettingsRoute
+  '/app/admin/support': typeof AppAdminSupportRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/webhooks': typeof AppAdminWebhooksRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
@@ -565,6 +583,7 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
+  '/status': typeof StatusRoute
   '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
@@ -601,6 +620,7 @@ export interface FileRoutesById {
   '/app/admin/features': typeof AppAdminFeaturesRoute
   '/app/admin/integrations': typeof AppAdminIntegrationsRoute
   '/app/admin/settings': typeof AppAdminSettingsRoute
+  '/app/admin/support': typeof AppAdminSupportRoute
   '/app/admin/users': typeof AppAdminUsersRoute
   '/app/admin/webhooks': typeof AppAdminWebhooksRoute
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
@@ -624,6 +644,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/sign-up'
     | '/sso-complete'
+    | '/status'
     | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
@@ -660,6 +681,7 @@ export interface FileRouteTypes {
     | '/app/admin/features'
     | '/app/admin/integrations'
     | '/app/admin/settings'
+    | '/app/admin/support'
     | '/app/admin/users'
     | '/app/admin/webhooks'
     | '/app/$workspaceId/$spaceId/$projectId'
@@ -680,6 +702,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/sign-up'
     | '/sso-complete'
+    | '/status'
     | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
@@ -712,6 +735,7 @@ export interface FileRouteTypes {
     | '/app/admin/features'
     | '/app/admin/integrations'
     | '/app/admin/settings'
+    | '/app/admin/support'
     | '/app/admin/users'
     | '/app/admin/webhooks'
     | '/app/$workspaceId/$spaceId/$projectId'
@@ -733,6 +757,7 @@ export interface FileRouteTypes {
     | '/register'
     | '/sign-up'
     | '/sso-complete'
+    | '/status'
     | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
@@ -769,6 +794,7 @@ export interface FileRouteTypes {
     | '/app/admin/features'
     | '/app/admin/integrations'
     | '/app/admin/settings'
+    | '/app/admin/support'
     | '/app/admin/users'
     | '/app/admin/webhooks'
     | '/app/$workspaceId/$spaceId/$projectId'
@@ -791,6 +817,7 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   SignUpRoute: typeof SignUpRoute
   SsoCompleteRoute: typeof SsoCompleteRoute
+  StatusRoute: typeof StatusRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
   DSlugRoute: typeof DSlugRoute
   SubmitSlugRoute: typeof SubmitSlugRoute
@@ -803,6 +830,13 @@ declare module '@tanstack/react-router' {
       path: '/verify-email'
       fullPath: '/verify-email'
       preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/status': {
+      id: '/status'
+      path: '/status'
+      fullPath: '/status'
+      preLoaderRoute: typeof StatusRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sso-complete': {
@@ -915,6 +949,13 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/app/admin/users'
       preLoaderRoute: typeof AppAdminUsersRouteImport
+      parentRoute: typeof AppAdminRoute
+    }
+    '/app/admin/support': {
+      id: '/app/admin/support'
+      path: '/support'
+      fullPath: '/app/admin/support'
+      preLoaderRoute: typeof AppAdminSupportRouteImport
       parentRoute: typeof AppAdminRoute
     }
     '/app/admin/settings': {
@@ -1330,6 +1371,7 @@ interface AppAdminRouteChildren {
   AppAdminFeaturesRoute: typeof AppAdminFeaturesRoute
   AppAdminIntegrationsRoute: typeof AppAdminIntegrationsRoute
   AppAdminSettingsRoute: typeof AppAdminSettingsRoute
+  AppAdminSupportRoute: typeof AppAdminSupportRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
   AppAdminWebhooksRoute: typeof AppAdminWebhooksRoute
 }
@@ -1341,6 +1383,7 @@ const AppAdminRouteChildren: AppAdminRouteChildren = {
   AppAdminFeaturesRoute: AppAdminFeaturesRoute,
   AppAdminIntegrationsRoute: AppAdminIntegrationsRoute,
   AppAdminSettingsRoute: AppAdminSettingsRoute,
+  AppAdminSupportRoute: AppAdminSupportRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
   AppAdminWebhooksRoute: AppAdminWebhooksRoute,
 }
@@ -1375,6 +1418,7 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   SignUpRoute: SignUpRoute,
   SsoCompleteRoute: SsoCompleteRoute,
+  StatusRoute: StatusRoute,
   VerifyEmailRoute: VerifyEmailRoute,
   DSlugRoute: DSlugRoute,
   SubmitSlugRoute: SubmitSlugRoute,
