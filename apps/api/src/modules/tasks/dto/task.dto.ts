@@ -14,7 +14,6 @@ import {
 // (useDefineForClassFields) would break by always defining the property.
 
 const PRIORITIES = ['urgent', 'high', 'normal', 'low'] as const
-const STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled'] as const
 
 export class CreateTaskDto {
   @IsString()

@@ -13,6 +13,7 @@ import { PasswordChecklist, passwordPolicyError } from '../lib/password'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { LanguageSwitcher } from '../components/language-switcher'
+import { CustomDomainBrandMark } from '../components/custom-domain-mark'
 
 type SsoLookupResponse = {
   connection: { workspaceId: string; provider: 'oidc' | 'saml'; displayName: string } | null
@@ -251,7 +252,11 @@ export function LoginPage() {
       <div className="relative z-10 grid min-h-screen lg:grid-cols-[1fr_minmax(420px,520px)]">
         {/* Left brand panel — hidden on small screens */}
         <div className="hidden flex-col justify-between p-12 lg:flex">
-          <LogoWordmark gradient />
+          <div className="space-y-6">
+            <LogoWordmark gradient />
+            {/* Co-branding when served from a verified custom domain */}
+            <CustomDomainBrandMark />
+          </div>
 
           <div className="max-w-md space-y-6 animate-fade-in">
             <h1 className="font-display text-5xl font-semibold leading-tight tracking-tight">
@@ -289,6 +294,7 @@ export function LoginPage() {
           <div className="w-full max-w-sm space-y-7 animate-slide-up">
             <div className="flex flex-col items-center gap-2 lg:hidden">
               <LogoWordmark gradient />
+              <CustomDomainBrandMark className="items-center text-center" />
             </div>
 
             <header className="space-y-1.5">

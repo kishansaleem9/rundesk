@@ -40,3 +40,15 @@ export function applyBrandColor(hex: string | null | undefined): void {
   const hsl = hex ? hexToHsl(hex) : null
   document.documentElement.style.setProperty('--brand-700', hsl ?? DEFAULT_BRAND)
 }
+
+/**
+ * Set (or reset) the workspace accent on the `--accent` CSS var. The design
+ * system reads it as `hsl(var(--accent))`, so it must be an "H S% L%" triple —
+ * exactly what hexToHsl returns. Pass null/invalid to fall back to the default.
+ */
+export function applyAccentColor(hex: string | null | undefined): void {
+  if (typeof document === 'undefined') return
+  const hsl = hex ? hexToHsl(hex) : null
+  if (hsl) document.documentElement.style.setProperty('--accent', hsl)
+  else document.documentElement.style.removeProperty('--accent')
+}

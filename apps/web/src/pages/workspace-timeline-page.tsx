@@ -56,6 +56,34 @@ const PRIORITY_LABEL: Record<string, TranslationKey> = {
   low: 'timeline.priorityLow',
 }
 
+// §5.4 — how the cross-project timeline groups its rows. "project" keeps the
+// original space·project header behaviour; the others mirror the per-list Gantt.
+type GroupMode = 'project' | 'status' | 'priority' | 'none'
+
+const GROUP_MODES: Array<{ value: GroupMode; labelKey: TranslationKey }> = [
+  { value: 'project', labelKey: 'timeline.groupProject' },
+  { value: 'status', labelKey: 'timeline.groupStatus' },
+  { value: 'priority', labelKey: 'timeline.groupPriority' },
+  { value: 'none', labelKey: 'timeline.groupNone' },
+]
+
+// Reuse the existing per-status labels; keep a canonical order for headers.
+const STATUS_LABEL: Record<string, TranslationKey> = {
+  backlog: 'taskDetail.status.backlog',
+  todo: 'taskDetail.status.todo',
+  in_progress: 'taskDetail.status.inProgress',
+  in_review: 'taskDetail.status.inReview',
+  done: 'taskDetail.status.done',
+  cancelled: 'taskDetail.status.cancelled',
+}
+const STATUS_ORDER = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
+const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low']
+
+/** Title-case a raw enum value as a last-resort header for unexpected values. */
+function humanize(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : '—'
+}
+
 export function TimelinePage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/timeline' })
@@ -63,6 +91,7 @@ export function TimelinePage() {
   const [zoom, setZoom] = useState<Zoom>('week')
   const [localPatches, setLocalPatches] = useState<Record<string, { startDate?: string | null; dueDate?: string | null }>>({})
   const [projectFilter, setProjectFilter] = useState<string>('all')
+  const [groupMode, setGroupMode] = useState<GroupMode>('project')
 
   const tasksQuery = useQuery({
     queryKey: ['timeline', workspaceId],
@@ -122,17 +151,48 @@ export function TimelinePage() {
     return { startMs, days }
   }, [tasks])
 
-  // Group tasks by space → project for nicer rendering
-  const groups = useMemo(() => {
-    const m = new Map<string, { title: string; rows: TimelineTask[] }>()
-    for (const t of tasks) {
-      const key = `${t.spaceId}:${t.projectId}`
-      const title = `${t.spaceName} · ${t.projectName}`
-      if (!m.has(key)) m.set(key, { title, rows: [] })
-      m.get(key)!.rows.push(t)
+  // Group tasks by the selected mode (§5.4). "none" renders one headerless
+  // group; the others emit a labelled header row per group. Group order is
+  // canonical for status/priority, alphabetical (space·project) for projects.
+  const groups = useMemo<Array<{ key: string; title: string | null; rows: TimelineTask[] }>>(() => {
+    if (groupMode === 'none') {
+      return [{ key: 'all', title: null, rows: tasks }]
     }
-    return Array.from(m.entries()).map(([key, g]) => ({ key, ...g }))
-  }, [tasks])
+    const m = new Map<string, { title: string; rows: TimelineTask[]; sort: number }>()
+    for (const task of tasks) {
+      let key: string
+      let title: string
+      let sort: number
+      if (groupMode === 'status') {
+        key = task.status || 'unknown'
+        title = STATUS_LABEL[task.status] ? t(STATUS_LABEL[task.status]) : humanize(task.status)
+        sort = STATUS_ORDER.indexOf(task.status)
+      } else if (groupMode === 'priority') {
+        key = task.priority || 'unknown'
+        title = PRIORITY_LABEL[task.priority] ? t(PRIORITY_LABEL[task.priority]) : humanize(task.priority)
+        sort = PRIORITY_ORDER.indexOf(task.priority)
+      } else {
+        // project
+        key = `${task.spaceId}:${task.projectId}`
+        title = `${task.spaceName} · ${task.projectName}`
+        sort = 0
+      }
+      if (!m.has(key)) m.set(key, { title, rows: [], sort })
+      m.get(key)!.rows.push(task)
+    }
+    const arr = Array.from(m.entries()).map(([key, g]) => ({ key, title: g.title, rows: g.rows, sort: g.sort }))
+    if (groupMode === 'project') {
+      arr.sort((a, b) => a.title.localeCompare(b.title))
+    } else {
+      // Known enum values in canonical order; unexpected values fall to the end.
+      arr.sort((a, b) => {
+        const as = a.sort < 0 ? Number.MAX_SAFE_INTEGER : a.sort
+        const bs = b.sort < 0 ? Number.MAX_SAFE_INTEGER : b.sort
+        return as !== bs ? as - bs : a.title.localeCompare(b.title)
+      })
+    }
+    return arr.map(({ key, title, rows }) => ({ key, title, rows }))
+  }, [tasks, groupMode, t])
 
   const todayOffsetPx = ((startOfDay(Date.now()) - startMs) / 86400_000) * dayPx
   const totalWidth = days * dayPx
@@ -156,6 +216,19 @@ export function TimelinePage() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <select
+            value={groupMode}
+            onChange={(e) => setGroupMode(e.target.value as GroupMode)}
+            className="text-xs h-8 px-2.5 rounded-md border border-border/60 bg-card/60 text-foreground backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40"
+            title={t('timeline.groupByLabel')}
+            aria-label={t('timeline.groupByLabel')}
+          >
+            {GROUP_MODES.map((g) => (
+              <option key={g.value} value={g.value}>
+                {t('timeline.groupByLabel')}: {t(g.labelKey)}
+              </option>
+            ))}
+          </select>
           {projectOptions.length > 1 && (
             <select
               value={projectFilter}
@@ -233,10 +306,12 @@ export function TimelinePage() {
               {/* Task rows */}
               {groups.map((group) => (
                 <div key={group.key}>
-                  {/* Group header */}
-                  <div className="sticky left-0 z-10 flex h-8 items-center bg-muted/40 px-4 text-xs font-medium text-muted-foreground border-b border-border/30">
-                    {group.title}
-                  </div>
+                  {/* Group header (hidden when grouping is "None") */}
+                  {group.title && (
+                    <div className="sticky left-0 z-10 flex h-8 items-center bg-muted/40 px-4 text-xs font-medium text-muted-foreground border-b border-border/30">
+                      {group.title}
+                    </div>
+                  )}
                   {group.rows.map((task) => (
                     <TaskRow
                       key={task.id}

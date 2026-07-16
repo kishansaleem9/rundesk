@@ -8,8 +8,6 @@ import {
   projects,
   lists,
   tasks,
-  taskAssignees,
-  taskComments,
   goals,
   sprints,
   forms,

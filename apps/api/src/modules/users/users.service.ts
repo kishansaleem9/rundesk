@@ -313,6 +313,7 @@ export class UsersService {
 
   publicProfile(user: typeof users.$inferSelect) {
     const { passwordHash, ...rest } = user
+    void passwordHash
     return rest
   }
 }

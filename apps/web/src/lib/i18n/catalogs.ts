@@ -4257,6 +4257,22 @@ export const en = {
 
   'topbar.viewAllNotifications': 'View all',
 
+  // Report builder — drag-and-drop metric selection (§9.5)
+  'reportBuilder.availableMetrics': 'Available metrics',
+  'reportBuilder.selectedMetrics': 'Selected metrics',
+  'reportBuilder.dropMetricsHere': 'Drag metrics here',
+  'reportBuilder.removeMetric': 'Remove metric',
+
+  // Workspace timeline — group by (§5.4)
+  'timeline.groupByLabel': 'Group by',
+  'timeline.groupProject': 'Project',
+  'timeline.groupStatus': 'Status',
+  'timeline.groupPriority': 'Priority',
+  'timeline.groupNone': 'None',
+
+  // Custom-domain branded entry
+  'customDomain.poweredBy': 'Powered by Rundesk',
+
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
   'auth.email': 'Email',
@@ -8571,6 +8587,22 @@ export const es: Record<TranslationKey, string> = {
 
   'topbar.viewAllNotifications': 'Ver todo',
 
+  // Report builder — drag-and-drop metric selection (§9.5)
+  'reportBuilder.availableMetrics': 'Métricas disponibles',
+  'reportBuilder.selectedMetrics': 'Métricas seleccionadas',
+  'reportBuilder.dropMetricsHere': 'Arrastra métricas aquí',
+  'reportBuilder.removeMetric': 'Quitar métrica',
+
+  // Workspace timeline — group by (§5.4)
+  'timeline.groupByLabel': 'Agrupar por',
+  'timeline.groupProject': 'Proyecto',
+  'timeline.groupStatus': 'Estado',
+  'timeline.groupPriority': 'Prioridad',
+  'timeline.groupNone': 'Ninguno',
+
+  // Custom-domain branded entry
+  'customDomain.poweredBy': 'Con la tecnología de Rundesk',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -12878,6 +12910,22 @@ export const ar: Record<TranslationKey, string> = {
 
   'topbar.viewAllNotifications': 'عرض الكل',
 
+  // Report builder — drag-and-drop metric selection (§9.5)
+  'reportBuilder.availableMetrics': 'المقاييس المتاحة',
+  'reportBuilder.selectedMetrics': 'المقاييس المحددة',
+  'reportBuilder.dropMetricsHere': 'اسحب المقاييس إلى هنا',
+  'reportBuilder.removeMetric': 'إزالة المقياس',
+
+  // Workspace timeline — group by (§5.4)
+  'timeline.groupByLabel': 'التجميع حسب',
+  'timeline.groupProject': 'المشروع',
+  'timeline.groupStatus': 'الحالة',
+  'timeline.groupPriority': 'الأولوية',
+  'timeline.groupNone': 'بدون',
+
+  // Custom-domain branded entry
+  'customDomain.poweredBy': 'مُشغَّل بواسطة Rundesk',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -17034,6 +17082,22 @@ export const ur: Record<TranslationKey, string> = {
   'import.attachmentsSkipped': 'چھوڑے گئے منسلکات',
 
   'topbar.viewAllNotifications': 'سب دیکھیں',
+
+  // Report builder — drag-and-drop metric selection (§9.5)
+  'reportBuilder.availableMetrics': 'دستیاب میٹرکس',
+  'reportBuilder.selectedMetrics': 'منتخب میٹرکس',
+  'reportBuilder.dropMetricsHere': 'میٹرکس یہاں گھسیٹیں',
+  'reportBuilder.removeMetric': 'میٹرک ہٹائیں',
+
+  // Workspace timeline — group by (§5.4)
+  'timeline.groupByLabel': 'گروپ بندی بلحاظ',
+  'timeline.groupProject': 'پروجیکٹ',
+  'timeline.groupStatus': 'اسٹیٹس',
+  'timeline.groupPriority': 'ترجیح',
+  'timeline.groupNone': 'کوئی نہیں',
+
+  // Custom-domain branded entry
+  'customDomain.poweredBy': 'Rundesk کے ذریعے تقویت یافتہ',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',

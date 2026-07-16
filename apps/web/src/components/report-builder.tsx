@@ -18,6 +18,7 @@ import {
   Trash2,
   CalendarClock,
   Send,
+  GripVertical,
 } from 'lucide-react'
 import { api, downloadFilePost } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -294,9 +295,6 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
     }
   }
 
-  function toggleMetric(id: string) {
-    setSelectedMetrics((arr) => (arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id]))
-  }
   function toggleDimension(id: string) {
     // Single grouping dimension drives the chart; selecting one replaces the set.
     setSelectedDimensions([id])
@@ -380,17 +378,7 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
         </div>
         <div className="flex-1 overflow-auto">
           <Section title={t('reportBuilder.sectionMetrics')} icon={Sigma}>
-            <div className="space-y-1">
-              {METRICS.map((m) => (
-                <PickRow
-                  key={m.id}
-                  label={t(m.labelKey)}
-                  hint={t(AGG_LABEL_KEYS[m.agg])}
-                  active={selectedMetrics.includes(m.id)}
-                  onToggle={() => toggleMetric(m.id)}
-                />
-              ))}
-            </div>
+            <MetricSelector selected={selectedMetrics} onChange={setSelectedMetrics} />
           </Section>
           <Section title={t('reportBuilder.sectionGroupBy')} icon={Layers}>
             <div className="space-y-1">
@@ -726,6 +714,219 @@ function Section({ title, icon: Icon, children }: { title: string; icon: React.E
         {title}
       </div>
       {children}
+    </div>
+  )
+}
+
+// §9.5 — genuine drag-and-drop metric selection. Uses the same native HTML5 DnD
+// approach as dashboard-widget-builder (setData/effectAllowed + a reorder that
+// splices the source into the target's slot). Metrics drag out of "Available"
+// into the "Selected" drop zone, reorder within Selected (their order drives the
+// report's `metrics` array and thus the primary series), and drag back out /
+// click the ✕ to remove. Clicking an available row still adds it (fallback).
+function MetricSelector({
+  selected,
+  onChange,
+}: {
+  selected: string[]
+  onChange: (updater: (arr: string[]) => string[]) => void
+}) {
+  const { t } = useTranslation()
+  const [drag, setDrag] = useState<{ id: string; from: 'available' | 'selected' } | null>(null)
+  const [overZone, setOverZone] = useState<'available' | 'selected' | null>(null)
+
+  const selectedMetrics = selected
+    .map((id) => METRICS.find((m) => m.id === id))
+    .filter((m): m is Metric => Boolean(m))
+  const available = METRICS.filter((m) => !selected.includes(m.id))
+
+  function addMetric(id: string, beforeId?: string) {
+    onChange((arr) => {
+      if (arr.includes(id)) return arr
+      const idx = beforeId ? arr.indexOf(beforeId) : -1
+      if (idx === -1) return [...arr, id]
+      const next = [...arr]
+      next.splice(idx, 0, id)
+      return next
+    })
+  }
+  // Move `sourceId` into `targetId`'s slot (same splice model as the widget grid).
+  function reorder(sourceId: string, targetId: string) {
+    if (sourceId === targetId) return
+    onChange((arr) => {
+      const from = arr.indexOf(sourceId)
+      const to = arr.indexOf(targetId)
+      if (from === -1 || to === -1) return arr
+      const next = [...arr]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+  }
+  function moveToEnd(id: string) {
+    onChange((arr) => {
+      const from = arr.indexOf(id)
+      if (from === -1) return arr
+      const next = [...arr]
+      const [moved] = next.splice(from, 1)
+      next.push(moved)
+      return next
+    })
+  }
+  function removeMetric(id: string) {
+    onChange((arr) => arr.filter((x) => x !== id))
+  }
+
+  function dropOnChip(targetId: string) {
+    if (!drag) return
+    if (drag.from === 'available') addMetric(drag.id, targetId)
+    else reorder(drag.id, targetId)
+    setDrag(null)
+    setOverZone(null)
+  }
+  function dropOnSelectedZone() {
+    if (!drag) return
+    if (drag.from === 'available') addMetric(drag.id)
+    else moveToEnd(drag.id)
+    setDrag(null)
+    setOverZone(null)
+  }
+  function dropOnAvailableZone() {
+    if (drag?.from === 'selected') removeMetric(drag.id)
+    setDrag(null)
+    setOverZone(null)
+  }
+  const endDrag = () => {
+    setDrag(null)
+    setOverZone(null)
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {/* Selected metrics — ordered drop zone */}
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+          {t('reportBuilder.selectedMetrics')}
+        </div>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setOverZone('selected')
+          }}
+          onDragLeave={() => setOverZone((z) => (z === 'selected' ? null : z))}
+          onDrop={(e) => {
+            e.preventDefault()
+            dropOnSelectedZone()
+          }}
+          className={cn(
+            'rounded-md border border-dashed p-1.5 min-h-[52px] space-y-1 transition-colors',
+            overZone === 'selected' ? 'border-accent bg-accent/5' : 'border-border/60',
+          )}
+        >
+          {selectedMetrics.length === 0 ? (
+            <div className="px-1.5 py-2 text-center text-[11px] text-muted-foreground">
+              {t('reportBuilder.dropMetricsHere')}
+            </div>
+          ) : (
+            selectedMetrics.map((m) => (
+              <div
+                key={m.id}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', m.id)
+                  setDrag({ id: m.id, from: 'selected' })
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  dropOnChip(m.id)
+                }}
+                onDragEnd={endDrag}
+                className={cn(
+                  'group flex items-center gap-1.5 rounded-md border border-accent/40 bg-card/60 px-2 py-1.5 text-xs cursor-grab active:cursor-grabbing',
+                  drag?.id === m.id && 'opacity-40',
+                )}
+              >
+                <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground" aria-label={t('dashboardWidget.dragToReorder')} />
+                <span className="flex-1 truncate">{t(m.labelKey)}</span>
+                <Badge variant="soft" className="text-[9px] uppercase">
+                  {t(AGG_LABEL_KEYS[m.agg])}
+                </Badge>
+                <button
+                  type="button"
+                  onClick={() => removeMetric(m.id)}
+                  title={t('reportBuilder.removeMetric')}
+                  aria-label={t('reportBuilder.removeMetric')}
+                  className="shrink-0 text-muted-foreground hover:text-destructive"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Available metrics — drag into Selected, or click to add. Dropping a
+          selected metric back here removes it. */}
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+          {t('reportBuilder.availableMetrics')}
+        </div>
+        <div
+          onDragOver={(e) => {
+            if (drag?.from === 'selected') {
+              e.preventDefault()
+              setOverZone('available')
+            }
+          }}
+          onDragLeave={() => setOverZone((z) => (z === 'available' ? null : z))}
+          onDrop={(e) => {
+            e.preventDefault()
+            dropOnAvailableZone()
+          }}
+          className={cn(
+            'rounded-md border border-dashed p-1 space-y-1 transition-colors min-h-[36px]',
+            overZone === 'available' ? 'border-destructive/60 bg-destructive/5' : 'border-transparent',
+          )}
+        >
+          {available.length === 0 ? (
+            <div className="px-1.5 py-1.5 text-center text-[11px] text-muted-foreground">
+              {t('reportBuilder.dropMetricsHere')}
+            </div>
+          ) : (
+            available.map((m) => (
+              <div
+                key={m.id}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', m.id)
+                  setDrag({ id: m.id, from: 'available' })
+                }}
+                onDragEnd={endDrag}
+                onClick={() => addMetric(m.id)}
+                className={cn(
+                  'group flex items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-xs text-muted-foreground cursor-grab active:cursor-grabbing hover:border-border hover:bg-card/40 hover:text-foreground',
+                  drag?.id === m.id && 'opacity-40',
+                )}
+              >
+                <GripVertical className="h-3 w-3 shrink-0 opacity-60" />
+                <span className="flex-1 truncate">{t(m.labelKey)}</span>
+                <Badge variant="soft" className="text-[9px] uppercase">
+                  {t(AGG_LABEL_KEYS[m.agg])}
+                </Badge>
+                <Plus className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100" />
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   )
 }

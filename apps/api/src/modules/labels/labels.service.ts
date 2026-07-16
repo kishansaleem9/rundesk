@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { eq, and, asc } from 'drizzle-orm'
+import { eq, asc } from 'drizzle-orm'
 import { labels } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'

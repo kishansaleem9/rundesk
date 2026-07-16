@@ -128,16 +128,15 @@ const SUPPORTED_METRICS = [
   'sprint-velocity',
 ] as const
 
-const SUPPORTED_DIMENSIONS = [
-  'assignee',
-  'status',
-  'priority',
-  'project',
-  'sprint',
-  'label',
-  'date-week',
-  'date-month',
-] as const
+type SupportedDimension =
+  | 'assignee'
+  | 'status'
+  | 'priority'
+  | 'project'
+  | 'sprint'
+  | 'label'
+  | 'date-week'
+  | 'date-month'
 
 function isoWeekKey(d: Date): string {
   // ISO week: Monday-based. Produce e.g. "2026-W25".
@@ -1173,7 +1172,7 @@ export class ReportsService {
     const days = typeof def.days === 'number' && def.days > 0 ? def.days : 30
     const since = daysAgo(days)
     const dimension =
-      (def.dimension ?? def.dimensions?.[0] ?? 'assignee') as (typeof SUPPORTED_DIMENSIONS)[number]
+      (def.dimension ?? def.dimensions?.[0] ?? 'assignee') as SupportedDimension
     const requested = (def.metrics ?? []).filter((m) =>
       (SUPPORTED_METRICS as readonly string[]).includes(m),
     )

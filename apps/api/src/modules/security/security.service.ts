@@ -1,5 +1,5 @@
-import { Injectable, Inject, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common'
-import { and, eq, desc, isNull, or, like, gte, lte } from 'drizzle-orm'
+import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common'
+import { and, eq, desc, or, like, gte, lte } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import * as OTPAuth from 'otpauth'
 import * as bcrypt from 'bcryptjs'

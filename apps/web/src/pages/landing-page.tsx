@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { LanguageSwitcher } from '../components/language-switcher'
+import { CustomDomainBrandMark } from '../components/custom-domain-mark'
 
 // ---------------------------------------------------------------------------
 // Static, translation-keyed content. Each entry references catalog keys so the
@@ -172,9 +173,13 @@ function SiteHeader({ t }: { t: T }) {
   return (
     <header className="sticky top-0 z-20 border-b border-border/40 bg-background/70 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-        <a href="#top" aria-label="Rundesk" className="shrink-0">
-          <LogoWordmark gradient />
-        </a>
+        <div className="flex min-w-0 items-center gap-3">
+          <a href="#top" aria-label="Rundesk" className="shrink-0">
+            <LogoWordmark gradient />
+          </a>
+          {/* Co-branding when served from a verified custom domain */}
+          <CustomDomainBrandMark compact className="border-l border-border/50 pl-3" />
+        </div>
         <nav className="hidden items-center gap-6 md:flex">
           {navItems.map((item) => (
             <a

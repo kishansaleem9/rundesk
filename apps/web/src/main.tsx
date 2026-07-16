@@ -12,6 +12,7 @@ import { useThemeStore, type Theme } from './store/theme'
 import { api } from './lib/api'
 import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
+import { useCustomDomainBootstrap } from './lib/custom-domain'
 
 const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
 
@@ -69,6 +70,9 @@ function useSessionHydration() {
 function App() {
   const auth = useAuthStore()
   useSessionHydration()
+  // Custom-domain branding lookup (Plan §13.5). Non-blocking: applies branding
+  // and surfaces the workspace mark when the host is a verified custom domain.
+  useCustomDomainBootstrap()
   return (
     <>
       <RouterProvider router={router} context={{ auth, queryClient }} />

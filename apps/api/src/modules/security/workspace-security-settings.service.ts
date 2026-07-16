@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common'
 import { createHash } from 'node:crypto'
-import { and, asc, eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { workspaceSecuritySettings, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -134,6 +134,7 @@ export class WorkspaceSecuritySettingsService {
     }
 
     const { workspaceId: _ws, ...values } = next
+    void _ws
     await this.db
       .insert(workspaceSecuritySettings)
       .values({ workspaceId, ...values, updatedAt: new Date(), updatedById: actorId })

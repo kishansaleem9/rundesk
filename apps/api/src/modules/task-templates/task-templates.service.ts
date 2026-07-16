@@ -435,7 +435,7 @@ export class TaskTemplatesService {
   private async resolveLabelIds(
     workspaceId: string,
     names: string[],
-    creatorId: string,
+    _creatorId: string,
   ): Promise<string[]> {
     if (!names?.length) return []
     const unique = Array.from(new Set(names.map((n) => n.trim()).filter(Boolean)))

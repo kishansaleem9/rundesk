@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { eq, and, desc, asc, sql, inArray } from 'drizzle-orm'
+import { eq, and, desc, asc, inArray } from 'drizzle-orm'
 import { sprints, sprintTasks, tasks } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import type { SprintStatus } from '@rundesk/db'

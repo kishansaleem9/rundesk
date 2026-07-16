@@ -174,6 +174,7 @@ export class AuthService {
     })
 
     const { passwordHash: _discard, ...safeUser } = user
+    void _discard
     return {
       accessToken,
       refreshToken,
