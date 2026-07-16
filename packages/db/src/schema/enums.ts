@@ -88,6 +88,9 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'ai_briefing',
   // §7.12 — proactive alert to managers when a teammate is significantly overloaded.
   'workload_alert',
+  // §14.1 — Stripe dunning: a failed payment left the subscription past_due.
+  // Written to workspace admins by the billing webhook handler.
+  'billing_past_due',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

@@ -214,6 +214,192 @@ function PlanCard({ workspaceId }: { workspaceId: string }) {
   )
 }
 
+type BillingSubscription = {
+  status: string
+  tier: string
+  currentPeriodEnd: string | null
+  cancelAtPeriodEnd: boolean
+  stripeSubscriptionId: string
+}
+type BillingInvoice = {
+  id: string
+  amount: number
+  currency: string
+  status: string
+  hostedUrl: string | null
+  pdfUrl: string | null
+  createdAt: string
+}
+type BillingStatusResponse = {
+  configured: boolean
+  plan: { id: string; label: string }
+  subscription: BillingSubscription | null
+  invoices: BillingInvoice[]
+}
+
+const BILLING_TIERS = ['pro', 'business', 'enterprise'] as const
+const BILLING_STATUS_KEYS: Record<string, TranslationKey> = {
+  active: 'billing.statusActive',
+  trialing: 'billing.statusTrialing',
+  past_due: 'billing.statusPastDue',
+  canceled: 'billing.statusCanceled',
+  unpaid: 'billing.statusUnpaid',
+}
+
+/**
+ * Plan §14.1 — the Billing section: current plan + subscription status + recent
+ * invoices (with Stripe-hosted links). "Upgrade" starts a Stripe Checkout for
+ * the chosen tier; once a subscription exists, "Manage billing" opens the Stripe
+ * Billing Portal (upgrade/downgrade/cancel). When the backend reports Stripe is
+ * not configured, a clear "Billing isn't configured" state is shown instead.
+ */
+function BillingCard({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const [tier, setTier] = useState<(typeof BILLING_TIERS)[number]>('pro')
+  const billingQuery = useQuery({
+    queryKey: ['workspace-billing', workspaceId],
+    queryFn: () => api<BillingStatusResponse>(`/workspaces/${workspaceId}/billing`),
+  })
+
+  const checkout = useMutation({
+    mutationFn: () =>
+      api<{ url: string }>(`/workspaces/${workspaceId}/billing/checkout`, { method: 'POST', body: { tier } }),
+    onSuccess: (res) => {
+      if (res?.url) {
+        toast.success(t('billing.redirecting'))
+        window.location.href = res.url
+      }
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('billing.checkoutError')),
+  })
+  const portal = useMutation({
+    mutationFn: () => api<{ url: string }>(`/workspaces/${workspaceId}/billing/portal`, { method: 'POST' }),
+    onSuccess: (res) => {
+      if (res?.url) {
+        toast.success(t('billing.redirecting'))
+        window.location.href = res.url
+      }
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('billing.portalError')),
+  })
+
+  if (billingQuery.isLoading) return <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>
+  if (!billingQuery.data) return null
+  const b = billingQuery.data
+
+  const header = (
+    <div className="flex items-center gap-2">
+      <CreditCard className="h-4 w-4 text-accent" />
+      <h3 className="font-semibold">{t('billing.title')}</h3>
+    </div>
+  )
+
+  // Clear degraded state when Stripe env is not configured on the backend.
+  if (!b.configured) {
+    return (
+      <Card className="p-6 space-y-2">
+        {header}
+        <p className="text-sm font-medium">{t('billing.notConfigured')}</p>
+        <p className="text-xs text-muted-foreground">{t('billing.notConfiguredDesc')}</p>
+      </Card>
+    )
+  }
+
+  const sub = b.subscription
+  const hasActiveSub = !!sub && !['canceled', 'incomplete_expired', 'unpaid'].includes(sub.status)
+  const statusLabel = (s: string) => (BILLING_STATUS_KEYS[s] ? t(BILLING_STATUS_KEYS[s]) : s)
+  const fmtMoney = (amount: number, currency: string) => {
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency: (currency || 'usd').toUpperCase() }).format((amount || 0) / 100)
+    } catch {
+      return `${((amount || 0) / 100).toFixed(2)} ${(currency || 'usd').toUpperCase()}`
+    }
+  }
+  const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '')
+
+  return (
+    <Card className="p-6 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        {header}
+        <span className="rounded-full bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
+          {t(`plan.tier.${b.plan.id}` as TranslationKey)}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">{t('billing.description')}</p>
+
+      {sub ? (
+        <div className="rounded-md border border-border/60 p-3 space-y-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">{t('billing.statusLabel')}</span>
+            <span className="text-sm font-medium">{statusLabel(sub.status)}</span>
+          </div>
+          {sub.currentPeriodEnd && (
+            <div className="text-xs text-muted-foreground">{t('billing.renewsOn', { date: fmtDate(sub.currentPeriodEnd) })}</div>
+          )}
+          {sub.cancelAtPeriodEnd && (
+            <div className="text-xs text-destructive">{t('billing.cancelsAtPeriodEnd')}</div>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">{t('billing.noSubscription')}</p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {hasActiveSub ? (
+          <Button onClick={() => portal.mutate()} disabled={portal.isPending}>
+            {t('billing.manageBilling')}
+          </Button>
+        ) : (
+          <>
+            <select
+              value={tier}
+              onChange={(e) => setTier(e.target.value as (typeof BILLING_TIERS)[number])}
+              aria-label={t('billing.selectTier')}
+              className="px-3 py-2 rounded-md border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {BILLING_TIERS.map((tr) => (
+                <option key={tr} value={tr}>{t(`plan.tier.${tr}` as TranslationKey)}</option>
+              ))}
+            </select>
+            <Button onClick={() => checkout.mutate()} disabled={checkout.isPending}>
+              {t('billing.upgrade')}
+            </Button>
+          </>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs text-muted-foreground mb-1.5">{t('billing.recentInvoices')}</div>
+        {b.invoices.length === 0 ? (
+          <p className="text-xs text-muted-foreground">{t('billing.noInvoices')}</p>
+        ) : (
+          <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+            {b.invoices.map((inv) => (
+              <li key={inv.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <span className="truncate">
+                  {fmtDate(inv.createdAt)} · {fmtMoney(inv.amount, inv.currency)} · <span className="text-muted-foreground">{statusLabel(inv.status)}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-3 text-xs">
+                  {inv.hostedUrl && (
+                    <a href={inv.hostedUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-accent hover:underline">
+                      <Link2 className="h-3 w-3" />{t('billing.viewInvoice')}
+                    </a>
+                  )}
+                  {inv.pdfUrl && (
+                    <a href={inv.pdfUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                      {t('billing.invoicePdf')}
+                    </a>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function GeneralTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
@@ -329,6 +515,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-5">
     <PlanCard workspaceId={workspaceId} />
+    <BillingCard workspaceId={workspaceId} />
     <Card className="p-6 space-y-5">
       {/* Personal preference (Plan §13): user's UI language. */}
       <div className="flex items-center justify-between gap-4 rounded-lg border border-border/60 bg-card/40 p-3">

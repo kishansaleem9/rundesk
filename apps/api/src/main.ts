@@ -17,6 +17,12 @@ async function bootstrap() {
     // IP-allowlist policy to see the true client IP in production. Off by
     // default so a direct deployment isn't tricked by spoofed XFF headers.
     new FastifyAdapter({ logger: false, trustProxy: process.env.TRUST_PROXY === 'true' }),
+    // rawBody buffers the untouched request body onto `req.rawBody` while normal
+    // JSON parsing continues for every route. The Stripe webhook
+    // (POST /api/v1/billing/webhook) verifies its HMAC signature against these
+    // exact bytes — a JSON round-trip would break the signature. This is the
+    // only consumer; all other routes keep using the parsed `req.body`.
+    { rawBody: true },
   )
 
   // Cookie parsing/serialisation for httpOnly access/refresh + CSRF cookies
