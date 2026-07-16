@@ -3,12 +3,15 @@ import { describe, it, mock } from 'node:test'
 import { ChatService } from './chat.service'
 
 /**
- * Unit coverage for the per-user "saved messages" methods. We mock Drizzle's
- * fluent builder with a thenable chain so each top-level `select()` resolves to
- * the next queued result set (message lookup → channel → workspace membership).
+ * Unit coverage for the chat service. We mock Drizzle's fluent builder with a
+ * thenable chain so each top-level `select()` resolves to the next queued result
+ * set (message lookup → channel → workspace membership …). `update()` resolves
+ * to the next queued update result; inserted/updated/deleted payloads are
+ * captured for assertions.
  */
-function makeDb(selectResults: any[][]) {
+function makeDb(selectResults: any[][], updateResults: any[][] = []) {
   let i = 0
+  let u = 0
   const chain = (rows: any[]): any => {
     const c: any = {
       from: () => c,
@@ -17,32 +20,42 @@ function makeDb(selectResults: any[][]) {
       leftJoin: () => c,
       innerJoin: () => c,
       orderBy: () => c,
+      groupBy: () => c,
       then: (resolve: (v: any) => any, reject: (e: any) => any) => Promise.resolve(rows).then(resolve, reject),
     }
     return c
   }
   const inserted: any[] = []
   const deleted: any[] = []
+  const updated: any[] = []
   const db: any = {
     select: mock.fn(() => chain(selectResults[i++] ?? [])),
     insert: mock.fn(() => ({
       values: (v: any) => {
         inserted.push(v)
-        return { onConflictDoNothing: async () => undefined }
+        return { onConflictDoNothing: async () => undefined, returning: async () => [] }
+      },
+    })),
+    update: mock.fn(() => ({
+      set: (v: any) => {
+        updated.push(v)
+        return { where: () => ({ returning: async () => updateResults[u++] ?? [] }) }
       },
     })),
     delete: mock.fn(() => ({ where: async () => { deleted.push(true) } })),
   }
-  return { db, inserted, deleted }
+  return { db, inserted, deleted, updated }
 }
 
 function buildSvc(db: any) {
   const realtime = { emitToWorkspace: mock.fn() } as any
-  const notifications = {} as any
+  const notifications = { create: mock.fn(async () => null) } as any
   const tasks = {} as any
   const ai = { isAvailable: () => false } as any
   const r2 = { configured: false, getObjectUrl: async (k: string) => k } as any
-  return new ChatService(db, realtime, notifications, tasks, ai, r2)
+  const reminders = { create: mock.fn() } as any
+  const presence = { statusFor: mock.fn(async () => ({})) } as any
+  return new ChatService(db, realtime, notifications, tasks, ai, r2, reminders, presence)
 }
 
 describe('ChatService.setSaved', () => {
@@ -99,5 +112,107 @@ describe('ChatService.listSaved', () => {
     const res = await svc.listSaved('w1', 'u1')
     assert.equal(res.length, 2)
     assert.equal(res[0].channelName, 'general')
+  })
+})
+
+describe('ChatService.extractSpecialMentions (@here / @channel, Plan §6.9)', () => {
+  const parse = (body: string) => (buildSvc(makeDb([]).db) as any).extractSpecialMentions(body)
+
+  it('detects @here', () => {
+    assert.deepEqual(parse('hey @here standup now'), { here: true, channel: false })
+  })
+  it('detects @channel at the start', () => {
+    assert.deepEqual(parse('@channel please review'), { here: false, channel: true })
+  })
+  it('detects both, case-insensitively', () => {
+    assert.deepEqual(parse('@Here and @CHANNEL'), { here: true, channel: true })
+  })
+  it('does not match an email-like a@channel.com', () => {
+    assert.deepEqual(parse('mail me at a@channel.com'), { here: false, channel: false })
+  })
+  it('does not match a bare word "here"', () => {
+    assert.deepEqual(parse('over here somewhere'), { here: false, channel: false })
+  })
+})
+
+describe('ChatService.parseReminderWhen (/remind, Plan §6.3)', () => {
+  const svc = buildSvc(makeDb([]).db)
+  const now = new Date('2026-07-16T12:00:00.000Z')
+
+  it('parses "in 2 hours <note>"', () => {
+    const { when, note, phrase } = svc.parseReminderWhen('in 2 hours review the PR', now)
+    assert.equal(note, 'review the PR')
+    assert.match(phrase, /in 2 hours/)
+    assert.equal(when.getTime(), now.getTime() + 2 * 3_600_000)
+  })
+
+  it('strips a leading "me" and "to", defaulting to +1 hour with no time', () => {
+    const { when, note } = svc.parseReminderWhen('me to call mom', now)
+    assert.equal(note, 'call mom')
+    assert.equal(when.getTime(), now.getTime() + 3_600_000)
+  })
+
+  it('parses "in 30 minutes"', () => {
+    const { when, note } = svc.parseReminderWhen('in 30 minutes hydrate', now)
+    assert.equal(note, 'hydrate')
+    assert.equal(when.getTime(), now.getTime() + 30 * 60_000)
+  })
+})
+
+describe('ChatService.editMessage (edit history, Plan §6.3)', () => {
+  it('snapshots the previous body before overwriting', async () => {
+    const { db, inserted, updated } = makeDb(
+      [
+        [{ id: 'm1', channelId: 'c1', authorId: 'u1', body: 'old body', deletedAt: null }], // existing
+        [{ id: 'c1', workspaceId: 'w1', isPrivate: false, isDm: false }],                    // channel (access)
+        [{ userId: 'u1' }],                                                                  // membership
+        [{ id: 'c1', workspaceId: 'w1' }],                                                   // channel (emit)
+      ],
+      [[{ id: 'm1', channelId: 'c1', body: 'new body', editedAt: new Date() }]],
+    )
+    const svc = buildSvc(db)
+    await svc.editMessage('m1', 'u1', 'new body')
+    // A chat_message_edits row captured the prior body.
+    const editRow = inserted.find((v) => v && 'previousBody' in v)
+    assert.ok(editRow, 'expected a chat_message_edits insert')
+    assert.equal(editRow.previousBody, 'old body')
+    assert.equal(editRow.messageId, 'm1')
+    // The message row was updated to the new body.
+    assert.equal(updated.length, 1)
+    assert.equal(updated[0].body, 'new body')
+  })
+
+  it('does not snapshot a no-op edit', async () => {
+    const { db, inserted } = makeDb(
+      [
+        [{ id: 'm1', channelId: 'c1', authorId: 'u1', body: 'same', deletedAt: null }],
+        [{ id: 'c1', workspaceId: 'w1', isPrivate: false, isDm: false }],
+        [{ userId: 'u1' }],
+        [{ id: 'c1', workspaceId: 'w1' }],
+      ],
+      [[{ id: 'm1', channelId: 'c1', body: 'same', editedAt: new Date() }]],
+    )
+    const svc = buildSvc(db)
+    await svc.editMessage('m1', 'u1', 'same')
+    assert.equal(inserted.find((v) => v && 'previousBody' in v), undefined)
+  })
+})
+
+describe('ChatService.getMessageEdits (Plan §6.3)', () => {
+  it('returns prior versions newest-first plus the current body', async () => {
+    const { db } = makeDb([
+      [{ id: 'm1', channelId: 'c1', body: 'current', editedAt: '2026-01-03' }], // existing
+      [{ id: 'c1', workspaceId: 'w1', isPrivate: false, isDm: false }],          // channel (access)
+      [{ userId: 'u1' }],                                                        // membership
+      [
+        { id: 'e2', previousBody: 'v1', editedAt: '2026-01-02' },
+        { id: 'e1', previousBody: 'v0', editedAt: '2026-01-01' },
+      ], // edits
+    ])
+    const svc = buildSvc(db)
+    const res = await svc.getMessageEdits('m1', 'u1')
+    assert.equal(res.current.body, 'current')
+    assert.equal(res.edits.length, 2)
+    assert.equal(res.edits[0].previousBody, 'v1')
   })
 })

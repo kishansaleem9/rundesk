@@ -30,8 +30,9 @@ function parseInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = []
   let rest = text
   let k = 0
-  // Combined matcher for the next inline token.
-  const token = /(`[^`]+`)|(\[[^\]]+\]\([^)\s]+\))|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|((?:https?:\/\/|www\.)[^\s)]+)/
+  // Combined matcher for the next inline token. Order matters: code spans first
+  // (literal content), then links, then ~~strike~~, **bold**, *italic*, bare URL.
+  const token = /(`[^`]+`)|(\[[^\]]+\]\([^)\s]+\))|(~~[^~]+~~)|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|((?:https?:\/\/|www\.)[^\s)]+)/
 
   while (rest.length > 0) {
     const m = token.exec(rest)
@@ -64,12 +65,15 @@ function parseInline(text: string, keyPrefix: string): ReactNode[] {
         nodes.push(matched)
       }
     } else if (m[3]) {
+      // ~~strikethrough~~
+      nodes.push(<del key={key}>{parseInline(matched.slice(2, -2), key)}</del>)
+    } else if (m[4]) {
       // **bold**
       nodes.push(<strong key={key}>{parseInline(matched.slice(2, -2), key)}</strong>)
-    } else if (m[4]) {
+    } else if (m[5]) {
       // *italic* or _italic_
       nodes.push(<em key={key}>{parseInline(matched.slice(1, -1), key)}</em>)
-    } else if (m[5]) {
+    } else if (m[6]) {
       // bare URL
       const withProto = matched.startsWith('www.') ? `https://${matched}` : matched
       const href = safeHref(withProto)
@@ -88,7 +92,35 @@ function parseInline(text: string, keyPrefix: string): ReactNode[] {
   return nodes
 }
 
-export function Markdown({ source, className }: { source: string; className?: string }) {
+/** Inline renderer signature — lets callers (e.g. chat) inject mention chips. */
+export type InlineRenderer = (text: string, keyPrefix: string) => ReactNode[]
+
+/**
+ * True when `text` uses any block-level Markdown (fenced code, headings,
+ * blockquotes, lists, horizontal rules). Lets chat keep the cheap inline path
+ * for ordinary one-line messages and only reach for full block rendering when
+ * the author actually wrote a list / quote / code block.
+ */
+export function hasBlockMarkdown(text: string): boolean {
+  if (!text) return false
+  for (const raw of text.replace(/\r\n/g, '\n').split('\n')) {
+    const line = raw.trim()
+    if (line.startsWith('```')) return true
+    if (/^#{1,3}\s+/.test(line)) return true
+    if (/^>\s?/.test(line)) return true
+    if (/^[-*]\s+/.test(line)) return true
+    if (/^\d+\.\s+/.test(line)) return true
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) return true
+  }
+  return false
+}
+
+/**
+ * Render a Markdown source string to block-level React nodes. `inline` defaults
+ * to the shared inline parser, but callers can pass a custom one — chat injects
+ * a renderer that turns @-mentions into chips before applying inline markdown.
+ */
+export function renderMarkdownBlocks(source: string, inline: InlineRenderer = parseInline): ReactNode[] {
   const lines = source.replace(/\r\n/g, '\n').split('\n')
   const blocks: ReactNode[] = []
   let i = 0
@@ -131,7 +163,7 @@ export function Markdown({ source, className }: { source: string; className?: st
     const heading = /^(#{1,3})\s+(.*)$/.exec(line)
     if (heading) {
       const level = heading[1].length
-      const content = parseInline(heading[2], `h${key}`)
+      const content = inline(heading[2], `h${key}`)
       blocks.push(
         level === 1 ? (
           <h3 key={key++} className="mt-3 mb-1 text-base font-semibold">{content}</h3>
@@ -154,7 +186,7 @@ export function Markdown({ source, className }: { source: string; className?: st
       }
       blocks.push(
         <blockquote key={key++} className="my-2 border-l-2 border-border pl-3 text-muted-foreground">
-          {parseInline(buf.join(' '), `q${key}`)}
+          {inline(buf.join(' '), `q${key}`)}
         </blockquote>,
       )
       continue
@@ -167,10 +199,11 @@ export function Markdown({ source, className }: { source: string; className?: st
         items.push(lines[i].replace(/^\s*[-*]\s+/, ''))
         i++
       }
+      const listKey = key++
       blocks.push(
-        <ul key={key++} className="my-2 list-disc space-y-0.5 pl-5">
+        <ul key={listKey} className="my-2 list-disc space-y-0.5 pl-5">
           {items.map((it, idx) => (
-            <li key={idx}>{parseInline(it, `ul${key}-${idx}`)}</li>
+            <li key={idx}>{inline(it, `ul${listKey}-${idx}`)}</li>
           ))}
         </ul>,
       )
@@ -184,10 +217,11 @@ export function Markdown({ source, className }: { source: string; className?: st
         items.push(lines[i].replace(/^\s*\d+\.\s+/, ''))
         i++
       }
+      const listKey = key++
       blocks.push(
-        <ol key={key++} className="my-2 list-decimal space-y-0.5 pl-5">
+        <ol key={listKey} className="my-2 list-decimal space-y-0.5 pl-5">
           {items.map((it, idx) => (
-            <li key={idx}>{parseInline(it, `ol${key}-${idx}`)}</li>
+            <li key={idx}>{inline(it, `ol${listKey}-${idx}`)}</li>
           ))}
         </ol>,
       )
@@ -209,17 +243,22 @@ export function Markdown({ source, className }: { source: string; className?: st
       buf.push(lines[i])
       i++
     }
+    const paraKey = key++
     blocks.push(
-      <p key={key++} className="my-1 leading-relaxed">
+      <p key={paraKey} className="my-1 leading-relaxed">
         {buf.map((ln, idx) => (
           <Fragment key={idx}>
             {idx > 0 && <br />}
-            {parseInline(ln, `p${key}-${idx}`)}
+            {inline(ln, `p${paraKey}-${idx}`)}
           </Fragment>
         ))}
       </p>,
     )
   }
 
-  return <div className={className}>{blocks}</div>
+  return blocks
+}
+
+export function Markdown({ source, className }: { source: string; className?: string }) {
+  return <div className={className}>{renderMarkdownBlocks(source)}</div>
 }

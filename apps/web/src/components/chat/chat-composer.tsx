@@ -40,6 +40,7 @@ function ComposerBox({
   onFilesSelected,
   onRemoveAttachment,
   uploading,
+  enableSlashCommands,
 }: {
   value: string
   onChange: (value: string) => void
@@ -56,9 +57,22 @@ function ComposerBox({
   onFilesSelected?: (files: File[]) => void
   onRemoveAttachment?: (id: string) => void
   uploading?: boolean
+  // Slash commands (Plan §6.3): show the /task //remind hint while the composer
+  // input is a bare leading command token. Only the main composer opts in.
+  enableSlashCommands?: boolean
 }) {
   const { t } = useTranslation()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // Slash-command autocomplete: matches while the user is still typing the
+  // command name (a leading "/word", no space yet). Clears once args begin.
+  const slashCommands = [
+    { cmd: '/task', desc: t('chat.slashTaskDesc') },
+    { cmd: '/remind', desc: t('chat.slashRemindDesc') },
+  ]
+  const slashMatches =
+    enableSlashCommands && /^\/\w*$/.test(value)
+      ? slashCommands.filter((c) => c.cmd.startsWith(value.toLowerCase()))
+      : []
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [improving, setImproving] = useState(false)
@@ -144,6 +158,25 @@ function ComposerBox({
 
   return (
     <div className="rounded-xl border border-border/80 bg-background shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-none overflow-hidden focus-within:border-violet-500/40 focus-within:ring-2 focus-within:ring-violet-500/15 transition-shadow">
+      {slashMatches.length > 0 && (
+        <div className="border-b border-border/60 bg-muted/20 px-1.5 py-1">
+          <div className="px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.commands')}</div>
+          {slashMatches.map((c) => (
+            <button
+              key={c.cmd}
+              type="button"
+              className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+              onClick={() => {
+                onChange(`${c.cmd} `)
+                requestAnimationFrame(() => textareaRef.current?.focus())
+              }}
+            >
+              <span className="font-mono text-[13px] text-foreground">{c.cmd}</span>
+              <span className="text-[12px] text-muted-foreground">{c.desc}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <Textarea
         ref={textareaRef}
         value={value}
@@ -316,6 +349,7 @@ export function ChatComposer({
         onFilesSelected={onFilesSelected}
         onRemoveAttachment={onRemoveAttachment}
         uploading={uploading}
+        enableSlashCommands
       />
 
       <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">

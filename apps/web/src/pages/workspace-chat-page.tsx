@@ -13,7 +13,7 @@ import {
   shouldShowDateDivider,
   shouldShowMessageHeader,
 } from '../components/chat/chat-utils'
-import type { ChatSpace } from '../components/chat/chat-types'
+import type { ChatSpace, ChatMessageEditHistory } from '../components/chat/chat-types'
 import {
   Hash,
   Users,
@@ -93,6 +93,7 @@ type Message = {
     emoji: string
     count: number
     reacted: boolean
+    users?: Array<{ id: string; name: string }>
   }>
   attachments?: Array<{
     id: string
@@ -175,6 +176,8 @@ export function ChatPage() {
   const [threadParentId, setThreadParentId] = useState<string | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editingBody, setEditingBody] = useState('')
+  // Edit history (§6.3): the message whose prior versions are being viewed.
+  const [editHistoryFor, setEditHistoryFor] = useState<string | null>(null)
   const [showPinnedPanel, setShowPinnedPanel] = useState(false)
   const [showSavedPanel, setShowSavedPanel] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
@@ -675,6 +678,30 @@ export function ChatPage() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotEditMessage')),
   })
 
+  // Edit history (§6.3): prior versions of a message, fetched on demand.
+  const editHistoryQuery = useQuery({
+    queryKey: ['chat-message-edits', editHistoryFor],
+    queryFn: () => api<ChatMessageEditHistory>(`/chat/messages/${editHistoryFor}/edits`),
+    enabled: !!editHistoryFor,
+  })
+
+  // Slash commands (§6.3): /task and /remind run server-side, which posts a
+  // confirmation message (delivered via realtime) instead of the literal command.
+  const runCommandMutation = useMutation({
+    mutationFn: ({ command, text }: { command: 'task' | 'remind'; text: string }) =>
+      api<{ kind: 'task' | 'remind' }>(`/chat/channels/${selectedId}/commands`, {
+        method: 'POST',
+        body: JSON.stringify({ command, text }),
+      }),
+    onSuccess: (res) => {
+      setInput('')
+      setPendingAttachments([])
+      if (selectedId) qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+      toast.success(res?.kind === 'remind' ? t('chat.reminderCreated') : t('chat.taskCreatedFromMessage'))
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotRunCommand')),
+  })
+
   const deleteMessageMutation = useMutation({
     mutationFn: (messageId: string) => api(`/chat/messages/${messageId}`, { method: 'DELETE' }),
     onSuccess: () => {
@@ -740,6 +767,15 @@ export function ChatPage() {
     // Allow sending with text OR at least one uploaded attachment (§6.8).
     if (!body && pendingAttachments.length === 0) return
     if (uploadingFiles) return
+    // Slash commands (§6.3): a leading /task or /remind runs server-side instead
+    // of posting a literal message. Only for fresh top-level sends (not replies /
+    // attachment posts), so normal messages are untouched.
+    const slash = /^\/(task|remind)\b\s*([\s\S]*)$/i.exec(body)
+    if (slash && !replyTo && pendingAttachments.length === 0) {
+      if (runCommandMutation.isPending) return
+      runCommandMutation.mutate({ command: slash[1].toLowerCase() as 'task' | 'remind', text: slash[2] ?? '' })
+      return
+    }
     sendMutation.mutate({
       body,
       parentMessageId: replyTo?.id ?? undefined,
@@ -1003,6 +1039,53 @@ export function ChatPage() {
           </div>
         )}
 
+        {editHistoryFor && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setEditHistoryFor(null)}
+          >
+            <Card className="w-full max-w-lg p-4 max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-sm">{t('chat.editHistory')}</h3>
+                <button className="text-muted-foreground hover:text-foreground" onClick={() => setEditHistoryFor(null)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-2.5">
+                {editHistoryQuery.isLoading ? (
+                  <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
+                ) : (editHistoryQuery.data?.edits.length ?? 0) === 0 ? (
+                  <div className="text-xs text-muted-foreground">{t('chat.noEditHistory')}</div>
+                ) : (
+                  <>
+                    <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 p-3">
+                      <div className="text-[11px] font-medium text-violet-600 dark:text-violet-300 mb-1">
+                        {t('chat.currentVersion')}
+                        {editHistoryQuery.data?.current.editedAt
+                          ? ` · ${formatRelativeTime(editHistoryQuery.data.current.editedAt)}`
+                          : ''}
+                      </div>
+                      <ChatMessageBody
+                        text={editHistoryQuery.data?.current.body ?? ''}
+                        namesById={namesById}
+                        className="text-[13px]"
+                      />
+                    </div>
+                    {editHistoryQuery.data?.edits.map((e) => (
+                      <div key={e.id} className="rounded-lg border border-border/70 bg-background p-3">
+                        <div className="text-[11px] text-muted-foreground mb-1">
+                          {t('chat.previousVersion')} · {formatRelativeTime(e.editedAt)}
+                        </div>
+                        <ChatMessageBody text={e.previousBody} namesById={namesById} className="text-[13px] opacity-80" />
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
+
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-4">
           {rootMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
@@ -1149,7 +1232,16 @@ export function ChatPage() {
                       ) : (
                         <div className="text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90">
                           {m.body && <ChatMessageBody text={m.body} namesById={namesById} />}
-                          {m.editedAt && <span className="text-[10px] text-muted-foreground ml-1">{t('chat.edited')}</span>}
+                          {m.editedAt && (
+                            <button
+                              type="button"
+                              className="text-[10px] text-muted-foreground ml-1 hover:text-foreground hover:underline"
+                              title={t('chat.viewEditHistory')}
+                              onClick={() => setEditHistoryFor(m.id)}
+                            >
+                              {t('chat.edited')}
+                            </button>
+                          )}
                           {!m.deletedAt && m.attachments && m.attachments.length > 0 && (
                             <ChatAttachmentList attachments={m.attachments} />
                           )}
@@ -1352,6 +1444,17 @@ export function ChatPage() {
                           {m.reactions.map((r) => {
                             const code = /^:([a-z0-9_]+):$/.exec(r.emoji)?.[1]
                             const customUrl = code ? emojiByCode.get(code) : undefined
+                            const emojiLabel = code ? `:${code}:` : r.emoji
+                            // Who reacted (§6.5): name the reactors in the tooltip,
+                            // showing the current user as "You".
+                            const reactorNames = (r.users ?? []).map((u) => (u.id === me?.id ? t('chat.you') : u.name))
+                            const shownNames =
+                              reactorNames.length <= 6
+                                ? reactorNames.join(', ')
+                                : `${reactorNames.slice(0, 6).join(', ')} +${reactorNames.length - 6}`
+                            const reactionTitle = reactorNames.length
+                              ? t('chat.reactedWith', { names: shownNames, emoji: emojiLabel })
+                              : emojiLabel
                             return (
                               <button
                                 key={`${m.id}-${r.emoji}`}
@@ -1361,7 +1464,7 @@ export function ChatPage() {
                                   r.reacted ? 'border-accent/60 bg-accent/10 text-accent' : 'border-border/70',
                                 )}
                                 onClick={() => toggleReactionMutation.mutate({ messageId: m.id, emoji: r.emoji })}
-                                title={code ? `:${code}:` : undefined}
+                                title={reactionTitle}
                               >
                                 {customUrl ? (
                                   <img src={customUrl} alt={code} className="h-3.5 w-3.5 object-contain" />
@@ -1422,9 +1525,35 @@ export function ChatPage() {
           onFilesSelected={(files) => void uploadFiles(files)}
           onRemoveAttachment={(id) => setPendingAttachments((prev) => prev.filter((a) => a.id !== id))}
           uploading={uploadingFiles}
-          mentionMenu={
-            showMentions && mentionCandidates.length > 0 ? (
+          mentionMenu={(() => {
+            if (!showMentions) return undefined
+            const mentionQuery = input.slice(input.lastIndexOf('@') + 1).toLowerCase()
+            // @here / @channel broadcast mentions (§6.9) — offered in real
+            // (non-DM) channels; insert the literal token the server parses.
+            const specials =
+              selectedChannel && !selectedChannel.isDm
+                ? (['here', 'channel'] as const).filter((s) => s.startsWith(mentionQuery))
+                : []
+            if (mentionCandidates.length === 0 && specials.length === 0) return undefined
+            return (
               <div className="mb-2 max-h-36 overflow-auto rounded-lg border border-border/80 bg-background shadow-sm">
+                {specials.map((s) => (
+                  <button
+                    key={`special-${s}`}
+                    type="button"
+                    className="w-full px-3 py-2 text-left text-[13px] hover:bg-violet-500/8"
+                    onClick={() => {
+                      const at = input.lastIndexOf('@')
+                      const prefix = at >= 0 ? input.slice(0, at) : input
+                      setInput(`${prefix}@${s} `)
+                    }}
+                  >
+                    <span className="font-medium text-accent">@{s}</span>
+                    <span className="ml-2 text-muted-foreground">
+                      {s === 'here' ? t('chat.mentionHereDesc') : t('chat.mentionChannelDesc')}
+                    </span>
+                  </button>
+                ))}
                 {mentionCandidates.slice(0, 6).map((member) => (
                   <button
                     key={member.userId}
@@ -1441,8 +1570,8 @@ export function ChatPage() {
                   </button>
                 ))}
               </div>
-            ) : undefined
-          }
+            )
+          })()}
         />
         </div>
         {threadParent && (

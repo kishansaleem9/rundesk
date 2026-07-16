@@ -41,8 +41,18 @@ export type ChatMessage = {
     emoji: string
     count: number
     reacted: boolean
+    // Who reacted (Plan §6.5) — id + display name, for the pill tooltip.
+    users?: Array<{ id: string; name: string }>
   }>
   attachments?: ChatAttachment[]
+}
+
+// Message edit history (Plan §6.3): prior versions newest-first plus the live one.
+export type ChatMessageEdit = { id: string; previousBody: string; editedAt: string }
+export type ChatMessageEditHistory = {
+  messageId: string
+  current: { body: string; editedAt: string | null }
+  edits: ChatMessageEdit[]
 }
 
 export type ChatAttachment = {

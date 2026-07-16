@@ -6,11 +6,14 @@ import {
   chatMessages,
   chatMessageAttachments,
   chatMessageReactions,
+  chatMessageEdits,
   chatMessageSaves,
   chatCustomEmoji,
   workspaceMembers,
   spaces,
   spaceMembers,
+  projects,
+  lists,
   users,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -19,6 +22,8 @@ import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
 import { TasksService } from '../tasks/tasks.service'
+import { TaskRemindersService } from '../reminders/task-reminders.service'
+import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
 
 const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
@@ -37,6 +42,8 @@ export class ChatService {
     private tasks: TasksService,
     private ai: AiService,
     private r2: R2Service,
+    private reminders: TaskRemindersService,
+    private presence: PresenceService,
   ) {}
 
   private sanitizeFileName(input: string): string {
@@ -171,6 +178,52 @@ export class ChatService {
       while ((match = pattern.exec(body)) !== null) ids.add(match[1])
     }
     return [...ids]
+  }
+
+  /**
+   * Detect the broadcast mentions @here / @channel (Plan §6.9). `@channel`
+   * targets every channel member; `@here` targets only the currently-present
+   * members. Word-boundaried + case-insensitive so "@channel," or "@Here" match
+   * but an email like "a@channel.com" does not (the trailing `.` isn't allowed).
+   */
+  private extractSpecialMentions(body: string): { here: boolean; channel: boolean } {
+    return {
+      here: /(^|\s)@here\b(?!\.)/i.test(body),
+      channel: /(^|\s)@channel\b(?!\.)/i.test(body),
+    }
+  }
+
+  /**
+   * Resolve the member ids a @here / @channel broadcast should notify. @channel
+   * is every member; @here narrows to members the presence service reports as
+   * online, falling back to all members if presence is unavailable or nobody
+   * registers as present. Excludes the author.
+   */
+  private async resolveBroadcastTargets(
+    channelId: string,
+    authorId: string,
+    special: { here: boolean; channel: boolean },
+    memberIds: string[],
+  ): Promise<Set<string>> {
+    const targets = new Set<string>()
+    if (!special.here && !special.channel) return targets
+    const others = memberIds.filter((id) => id !== authorId)
+    if (special.channel) {
+      for (const id of others) targets.add(id)
+      return targets
+    }
+    // @here only: narrow to present members via the presence service.
+    try {
+      const statuses = await this.presence.statusFor(others)
+      const present = others.filter((id) => statuses[id] === 'online')
+      // If presence has no signal for anyone (e.g. never-seen), treat @here like
+      // @channel so the broadcast isn't silently dropped.
+      const chosen = present.length > 0 ? present : others
+      for (const id of chosen) targets.add(id)
+    } catch {
+      for (const id of others) targets.add(id)
+    }
+    return targets
   }
 
   private async assertChannelAccess(channelId: string, userId: string) {
@@ -863,6 +916,16 @@ export class ChatService {
       grouped.set(reaction.messageId, byEmoji)
     }
 
+    // Reactor identities (Plan §6.5): map each reactor id → display name so the
+    // client can show "Alice, Bob reacted with 👍" on the reaction pill.
+    const reactorIds = [...new Set(reactionRows.map((r) => r.userId))]
+    const reactorNames = reactorIds.length
+      ? await this.db.select({ id: users.id, name: users.displayName }).from(users).where(inArray(users.id, reactorIds))
+      : []
+    const reactorNameById = new Map(reactorNames.map((r) => [r.id, r.name]))
+    const reactorUsers = (ids: Set<string>) =>
+      [...ids].map((id) => ({ id, name: reactorNameById.get(id) ?? 'teammate' }))
+
     // Hydrate per-message attachments (Plan §6.8). Separate query, keyed by
     // message id, with fresh signed download URLs.
     const attachmentRows = await this.db
@@ -904,10 +967,11 @@ export class ChatService {
       const byEmoji = grouped.get(message.id)
       const reactions =
         byEmoji
-          ? [...byEmoji.entries()].map(([emoji, users]) => ({
+          ? [...byEmoji.entries()].map(([emoji, ids]) => ({
               emoji,
-              count: users.size,
-              reacted: users.has(userId),
+              count: ids.size,
+              reacted: ids.has(userId),
+              users: reactorUsers(ids),
             }))
           : []
       const stats = replyStatByParent.get(message.id)
@@ -989,10 +1053,17 @@ export class ChatService {
       usersForEmoji.add(reaction.userId)
       grouped.set(reaction.emoji, usersForEmoji)
     }
+    // Reactor identities (Plan §6.5) so the pill tooltip can name who reacted.
+    const reactorIds = [...new Set(reactionRows.map((r) => r.userId))]
+    const reactorNames = reactorIds.length
+      ? await this.db.select({ id: users.id, name: users.displayName }).from(users).where(inArray(users.id, reactorIds))
+      : []
+    const reactorNameById = new Map(reactorNames.map((r) => [r.id, r.name]))
     const reactions = [...grouped.entries()].map(([emoji, usersForEmoji]) => ({
       emoji,
       count: usersForEmoji.size,
       reacted: usersForEmoji.has(userId),
+      users: [...usersForEmoji].map((id) => ({ id, name: reactorNameById.get(id) ?? 'teammate' })),
     }))
 
     return { ...row, reactions }
@@ -1110,49 +1181,63 @@ export class ChatService {
     })
 
     // Per-channel notification levels: 'all' (default) hears every message,
-    // 'mentions' only @-mentions, 'none' is muted.
+    // 'mentions' only @-mentions, 'none' is muted. Load member ids + levels once.
     const levelRows = await this.db
       .select({ userId: chatChannelMembers.userId, level: chatChannelMembers.notificationLevel })
       .from(chatChannelMembers)
       .where(eq(chatChannelMembers.channelId, data.channelId))
     const levelByUser = new Map(levelRows.map((r) => [r.userId, r.level]))
+    const channelMemberIds = levelRows.map((r) => r.userId)
 
+    // Broadcast mentions @here / @channel (Plan §6.9): fan a mention-level ping
+    // out to (present) channel members, respecting each member's DND + level.
+    const special = this.extractSpecialMentions(body)
+    const broadcastTargets = await this.resolveBroadcastTargets(
+      data.channelId,
+      data.authorId,
+      special,
+      channelMemberIds,
+    )
+
+    // Everyone who should get a *mention* ping: explicit @uuid mentions (verified
+    // as workspace members) plus @here/@channel broadcast targets.
+    const mentionTargets = new Set<string>(broadcastTargets)
     if (mentionIds.size > 0) {
       const memberRows = await this.db
         .select({ userId: workspaceMembers.userId })
         .from(workspaceMembers)
         .where(eq(workspaceMembers.workspaceId, channel.workspaceId))
       const workspaceMemberIds = new Set(memberRows.map((m) => m.userId))
-
       for (const userId of mentionIds) {
         if (userId === data.authorId) continue
         if (!workspaceMemberIds.has(userId)) continue
-        // Muted members don't get pinged even on @mention.
-        if ((levelByUser.get(userId) ?? 'all') === 'none') continue
-        void this.notifications.create({
-          userId,
-          workspaceId: channel.workspaceId,
-          actorId: data.authorId,
-          type: 'task_mentioned',
-          title: channel.isDm ? `You were mentioned by ${author?.displayName ?? 'a teammate'}` : `You were mentioned in ${channelLabel}`,
-          body: body.slice(0, 180),
-          target: {
-            entityType: 'chat_message',
-            entityId: row.id,
-            url: `/app/${channel.workspaceId}/chat?channel=${data.channelId}&message=${row.id}`,
-          },
-          emailContext: { taskTitle: channelLabel, workspaceName: 'Workspace' },
-        })
+        mentionTargets.add(userId)
       }
     }
 
+    for (const userId of mentionTargets) {
+      if (userId === data.authorId) continue
+      // Muted members don't get pinged even on @mention / @channel.
+      if ((levelByUser.get(userId) ?? 'all') === 'none') continue
+      void this.notifications.create({
+        userId,
+        workspaceId: channel.workspaceId,
+        actorId: data.authorId,
+        type: 'task_mentioned',
+        title: channel.isDm ? `You were mentioned by ${author?.displayName ?? 'a teammate'}` : `You were mentioned in ${channelLabel}`,
+        body: body.slice(0, 180),
+        target: {
+          entityType: 'chat_message',
+          entityId: row.id,
+          url: `/app/${channel.workspaceId}/chat?channel=${data.channelId}&message=${row.id}`,
+        },
+        emailContext: { taskTitle: channelLabel, workspaceName: 'Workspace' },
+      })
+    }
+
     // Notify channel members about new messages (except author and already-mentioned users).
-    const memberRows = await this.db
-      .select({ userId: chatChannelMembers.userId })
-      .from(chatChannelMembers)
-      .where(eq(chatChannelMembers.channelId, data.channelId))
-    const notifiedIds = new Set([...mentionIds, data.authorId])
-    for (const { userId } of memberRows) {
+    const notifiedIds = new Set([...mentionTargets, data.authorId])
+    for (const userId of channelMemberIds) {
       if (notifiedIds.has(userId)) continue
       // Only 'all' members hear non-mention messages; 'mentions'/'none' opt out.
       if ((levelByUser.get(userId) ?? 'all') !== 'all') continue
@@ -1199,15 +1284,142 @@ export class ChatService {
     return task
   }
 
+  /** First usable (non-archived) list in a workspace — the default target for a
+   *  slash command's task/reminder. Null when the workspace has no list yet. */
+  private async resolveDefaultList(workspaceId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: lists.id })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false)))
+      .orderBy(asc(lists.createdAt))
+      .limit(1)
+    return row?.id ?? null
+  }
+
+  /**
+   * Parse the "<when> <what>" tail of a `/remind` command into an absolute time
+   * plus the reminder note (Plan §6.3). Understands a leading "me", relative
+   * phrases ("in 20 minutes", "in 2 hours", "in 3 days", "tomorrow", "tonight")
+   * and clock times ("at 3pm", "at 14:30"). Falls back to +1 hour when no time
+   * phrase is recognised so the command always yields a real reminder.
+   */
+  parseReminderWhen(input: string, now: Date = new Date()): { when: Date; note: string; phrase: string } {
+    let rest = (input ?? '').trim().replace(/^me\b[\s,]*/i, '').trim()
+    let when: Date | null = null
+    let phrase = ''
+
+    const rel = /^in\s+(\d+)\s*(minutes?|mins?|m|hours?|hrs?|h|days?|d)\b/i.exec(rest)
+    const at = /^at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i.exec(rest)
+    if (rel) {
+      const n = Number(rel[1])
+      const unit = rel[2].toLowerCase()
+      const ms = /^h/.test(unit) ? n * 3_600_000 : /^d/.test(unit) ? n * 86_400_000 : n * 60_000
+      when = new Date(now.getTime() + ms)
+      phrase = rel[0]
+      rest = rest.slice(rel[0].length).trim()
+    } else if (/^tomorrow\b/i.test(rest)) {
+      const d = new Date(now.getTime() + 86_400_000)
+      d.setHours(9, 0, 0, 0)
+      when = d
+      phrase = 'tomorrow'
+      rest = rest.replace(/^tomorrow\b/i, '').trim()
+    } else if (/^tonight\b/i.test(rest)) {
+      const d = new Date(now)
+      d.setHours(20, 0, 0, 0)
+      if (d.getTime() <= now.getTime()) d.setTime(d.getTime() + 86_400_000)
+      when = d
+      phrase = 'tonight'
+      rest = rest.replace(/^tonight\b/i, '').trim()
+    } else if (at) {
+      let hour = Number(at[1]) % 24
+      const min = at[2] ? Number(at[2]) : 0
+      const mer = at[3]?.toLowerCase()
+      if (mer === 'pm' && hour < 12) hour += 12
+      if (mer === 'am' && hour === 12) hour = 0
+      const d = new Date(now)
+      d.setHours(hour, min, 0, 0)
+      if (d.getTime() <= now.getTime()) d.setTime(d.getTime() + 86_400_000) // next day if already past
+      when = d
+      phrase = at[0]
+      rest = rest.slice(at[0].length).trim()
+    }
+
+    if (!when) {
+      when = new Date(now.getTime() + 3_600_000)
+      phrase = 'in 1 hour'
+    }
+    // A leading "to " reads awkwardly as a task title ("to review the PR" → "review the PR").
+    const note = rest.replace(/^to\s+/i, '').trim()
+    return { when, note, phrase }
+  }
+
+  /**
+   * Run a leading slash command from the composer (Plan §6.3). `/task <text>`
+   * creates a task from the text; `/remind <when> <text>` schedules a reminder
+   * (backed by a task, since reminders are task-scoped here). Either way a
+   * confirmation message is posted to the channel instead of the literal command.
+   */
+  async runCommand(channelId: string, userId: string, command: string, text: string) {
+    const channel = await this.assertChannelAccess(channelId, userId)
+    const cmd = (command ?? '').trim().toLowerCase().replace(/^\//, '')
+    const trimmed = (text ?? '').trim()
+
+    if (cmd === 'task') {
+      if (!trimmed) throw new BadRequestException('Usage: /task <description>')
+      const listId = await this.resolveDefaultList(channel.workspaceId)
+      if (!listId) throw new BadRequestException('No list is available to create a task in yet — create a space, project and list first.')
+      const title = trimmed.split('\n')[0].slice(0, 200)
+      const task = await this.tasks.createTask({ listId, title, description: trimmed, createdById: userId })
+      const message = await this.postMessage({
+        channelId,
+        authorId: userId,
+        body: `✅ **Task created:** ${title}`,
+      })
+      return { kind: 'task' as const, task, message }
+    }
+
+    if (cmd === 'remind') {
+      const { when, note, phrase } = this.parseReminderWhen(trimmed)
+      if (!note) throw new BadRequestException('Usage: /remind <when> <what> (e.g. /remind in 2 hours review the PR)')
+      const listId = await this.resolveDefaultList(channel.workspaceId)
+      if (!listId) throw new BadRequestException('No list is available to attach a reminder to yet — create a space, project and list first.')
+      const title = note.split('\n')[0].slice(0, 200)
+      // Back the reminder with a task carrying its text, then schedule via the
+      // existing reminders service (no schema/service changes to reminders).
+      const task = await this.tasks.createTask({ listId, title, description: note, createdById: userId })
+      if (!task) throw new BadRequestException('Could not create the reminder task')
+      const reminder = await this.reminders.create(channel.workspaceId, userId, task.id, when, note)
+      const message = await this.postMessage({
+        channelId,
+        authorId: userId,
+        body: `⏰ **Reminder set** (${phrase}) — ${title}`,
+      })
+      return { kind: 'remind' as const, reminder, task, message }
+    }
+
+    throw new BadRequestException(`Unknown command: /${cmd}`)
+  }
+
   async editMessage(messageId: string, userId: string, body: string) {
     const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!existing) throw new NotFoundException('Message not found')
     if (existing.deletedAt) throw new ForbiddenException('Cannot edit a deleted message')
     await this.assertChannelAccess(existing.channelId, userId)
     if (existing.authorId !== userId) throw new ForbiddenException('Not your message')
+    const now = new Date()
+    const trimmed = body.trim()
+    // Preserve the prior version (Plan §6.3): snapshot the body being replaced
+    // before overwriting it. Skip no-op edits so the history stays meaningful.
+    if (trimmed !== existing.body) {
+      await this.db
+        .insert(chatMessageEdits)
+        .values({ messageId, previousBody: existing.body, editedAt: now })
+    }
     const [row] = await this.db
       .update(chatMessages)
-      .set({ body: body.trim(), editedAt: new Date() })
+      .set({ body: trimmed, editedAt: now })
       .where(eq(chatMessages.id, messageId))
       .returning()
     const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, row.channelId))
@@ -1221,6 +1433,30 @@ export class ChatService {
       })
     }
     return row
+  }
+
+  /**
+   * The edit history of a message (Plan §6.3) — the prior bodies newest-first,
+   * plus the message's current body as the live version. Channel-access gated.
+   */
+  async getMessageEdits(messageId: string, userId: string) {
+    const [existing] = await this.db
+      .select({ id: chatMessages.id, channelId: chatMessages.channelId, body: chatMessages.body, editedAt: chatMessages.editedAt })
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1)
+    if (!existing) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(existing.channelId, userId)
+    const edits = await this.db
+      .select({ id: chatMessageEdits.id, previousBody: chatMessageEdits.previousBody, editedAt: chatMessageEdits.editedAt })
+      .from(chatMessageEdits)
+      .where(eq(chatMessageEdits.messageId, messageId))
+      .orderBy(desc(chatMessageEdits.editedAt))
+    return {
+      messageId,
+      current: { body: existing.body, editedAt: existing.editedAt },
+      edits,
+    }
   }
 
   // Pin / unpin a message for the whole channel (any channel member may pin).

@@ -242,6 +242,23 @@ export class ChatController {
     return this.chat.getMessageById(messageId, user.id)
   }
 
+  @Get('chat/messages/:messageId/edits')
+  getMessageEdits(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.chat.getMessageEdits(messageId, user.id)
+  }
+
+  @Post('chat/channels/:channelId/commands')
+  runCommand(
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { command: string; text: string },
+  ) {
+    return this.chat.runCommand(channelId, user.id, body.command, body.text)
+  }
+
   @Get('chat/messages/:messageId/thread')
   getThread(
     @Param('messageId') messageId: string,

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, jsonb, integer, type AnyPgColumn, uniqueIndex } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, jsonb, integer, type AnyPgColumn, uniqueIndex, index } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { spaces } from './spaces'
@@ -55,6 +55,26 @@ export const chatMessages = pgTable('chat_messages', {
   deletedAt:       timestamp('deleted_at', { withTimezone: true }),
   createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Chat message edit history (Plan §6.3). Each time a message is edited we
+// snapshot the PRIOR body here so earlier versions survive the in-place edit.
+// `editedAt` is the moment that previous version was superseded.
+export const chatMessageEdits = pgTable(
+  'chat_message_edits',
+  {
+    id:           uuid('id').primaryKey().defaultRandom(),
+    messageId:    uuid('message_id').notNull().references((): AnyPgColumn => chatMessages.id, { onDelete: 'cascade' }),
+    previousBody: text('previous_body').notNull(),
+    editedAt:     timestamp('edited_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byMessage: index('chat_message_edits_message_idx').on(t.messageId),
+  }),
+)
+
+export const chatMessageEditsRelations = relations(chatMessageEdits, ({ one }) => ({
+  message: one(chatMessages, { fields: [chatMessageEdits.messageId], references: [chatMessages.id] }),
+}))
 
 // Files shared in chat (Plan §6.8). Uploaded to R2; the row holds metadata +
 // the object key. Uploaded first (message_id null), then linked when the
@@ -144,6 +164,7 @@ export const chatMessagesRelations = relations(chatMessages, ({ one, many }) => 
   parent:    one(chatMessages, { fields: [chatMessages.parentMessageId], references: [chatMessages.id], relationName: 'thread' }),
   replies:   many(chatMessages, { relationName: 'thread' }),
   reactions: many(chatMessageReactions),
+  edits:     many(chatMessageEdits),
 }))
 
 export const chatMessageReactionsRelations = relations(chatMessageReactions, ({ one }) => ({

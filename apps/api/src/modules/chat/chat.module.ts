@@ -5,11 +5,13 @@ import { RealtimeModule } from '../realtime/realtime.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { TasksModule } from '../tasks/tasks.module'
+import { RemindersModule } from '../reminders/reminders.module'
+import { PresenceModule } from '../presence/presence.module'
 import { AiModule } from '../ai/ai.module'
 import { StorageModule } from '../../common/storage/storage.module'
 
 @Module({
-  imports: [RealtimeModule, NotificationsModule, TasksModule, AiModule, StorageModule],
+  imports: [RealtimeModule, NotificationsModule, TasksModule, RemindersModule, PresenceModule, AiModule, StorageModule],
   providers: [ChatService, WorkspaceMemberGuard],
   controllers: [ChatController],
   exports: [ChatService],
