@@ -68,6 +68,104 @@ function extractTaskLinks(text: string): TaskLink[] {
   return links
 }
 
+/** Non-global variant of the task-URL pattern, for membership `.test()` checks. */
+const TASK_URL_TEST_RE = new RegExp(`/app/${UUID}/${UUID}/${UUID}/${UUID}\\?task=${UUID}`)
+
+/** http(s) and `www.` URL tokens in free text. */
+const EXTERNAL_URL_RE = /(?:https?:\/\/|www\.)[^\s<>]+/gi
+
+/** How many inline link previews we unfurl per message (Plan §6.3). */
+const MAX_LINK_PREVIEWS = 2
+
+/**
+ * Extract up to MAX_LINK_PREVIEWS external http(s) links from a message body,
+ * EXCLUDING the app's own task URLs (those already render a task card — Plan
+ * §6.10 — so we never double-render). Trailing prose punctuation is trimmed,
+ * `www.` is normalized to https, and the result is deduped, order-preserving.
+ */
+function extractExternalLinks(text: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of text.match(EXTERNAL_URL_RE) ?? []) {
+    let url = raw.replace(/[.,;:!?)\]}'"]+$/, '')
+    if (/^www\./i.test(url)) url = `https://${url}`
+    if (!/^https?:\/\//i.test(url)) continue
+    if (TASK_URL_TEST_RE.test(url)) continue // rendered as a task card already
+    if (seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+    if (out.length >= MAX_LINK_PREVIEWS) break
+  }
+  return out
+}
+
+/** Server-unfurled OG metadata (mirrors the API's `UnfurlResult`). */
+type LinkPreview = {
+  url?: string
+  title?: string
+  description?: string
+  image?: string
+  siteName?: string
+}
+
+/**
+ * A compact, clickable link preview (Plan §6.3). Lazy-fetches server-side
+ * OG metadata (SSRF-guarded on the API) via react-query, keyed + cached by URL.
+ * Renders nothing until there is at least a title/description/site-name/image,
+ * so a link with no metadata (or a disallowed URL → `{}`) leaves only the plain
+ * linkified text in the body. Clicking opens the original link in a new tab.
+ */
+function ChatLinkPreview({ url }: { url: string }) {
+  const { t } = useTranslation()
+  const query = useQuery({
+    queryKey: ['chat-unfurl', url],
+    queryFn: () => api<LinkPreview>(`/chat/unfurl?url=${encodeURIComponent(url)}`),
+    retry: false,
+    staleTime: 10 * 60_000,
+  })
+
+  const data = query.data
+  if (!data || (!data.title && !data.description && !data.siteName && !data.image)) return null
+
+  let host = ''
+  try {
+    host = new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    host = ''
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={t('chat.linkPreviewOpen')}
+      className="mt-1.5 flex w-full max-w-md overflow-hidden rounded-lg border border-border/70 bg-background transition-colors hover:border-accent/40 hover:bg-accent/[0.04]"
+    >
+      {data.image && (
+        <img
+          src={data.image}
+          alt=""
+          loading="lazy"
+          className="h-[76px] w-[76px] shrink-0 object-cover"
+          onError={(e) => {
+            e.currentTarget.style.display = 'none'
+          }}
+        />
+      )}
+      <div className="min-w-0 flex-1 px-3 py-2">
+        <div className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {data.siteName || host}
+        </div>
+        {data.title && <div className="mt-0.5 truncate text-[13px] font-semibold text-foreground">{data.title}</div>}
+        {data.description && (
+          <div className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground">{data.description}</div>
+        )}
+      </div>
+    </a>
+  )
+}
+
 type TaskCardData = {
   id: string
   title: string
@@ -174,13 +272,22 @@ export function ChatMessageBody({
   text,
   namesById,
   className,
+  linkPreviews = true,
 }: {
   text: string
   namesById: Record<string, string>
   className?: string
+  /** Render inline unfurled previews for external links (Plan §6.3). Off in the
+   *  edit-history diff, where preview cards would be noise. Task cards are
+   *  unaffected. */
+  linkPreviews?: boolean
 }) {
   const inline = chatInline(namesById)
   const taskLinks = useMemo(() => extractTaskLinks(text), [text])
+  const externalLinks = useMemo(
+    () => (linkPreviews ? extractExternalLinks(text) : []),
+    [text, linkPreviews],
+  )
 
   const body = hasBlockMarkdown(text) ? (
     <div className={cn('break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0', className)}>
@@ -190,13 +297,16 @@ export function ChatMessageBody({
     <span className={cn('whitespace-pre-wrap break-words', className)}>{inline(text, 't')}</span>
   )
 
-  if (taskLinks.length === 0) return body
+  if (taskLinks.length === 0 && externalLinks.length === 0) return body
 
   return (
     <>
       {body}
       {taskLinks.map((link) => (
         <ChatTaskCard key={link.taskId} link={link} />
+      ))}
+      {externalLinks.map((link) => (
+        <ChatLinkPreview key={link} url={link} />
       ))}
     </>
   )

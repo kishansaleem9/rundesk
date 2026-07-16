@@ -25,8 +25,14 @@ import { TasksService } from '../tasks/tasks.service'
 import { TaskRemindersService } from '../reminders/task-reminders.service'
 import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
+import { fetchLinkPreview, type UnfurlResult } from './link-unfurl'
 
 const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
+
+/** Link-preview cache tuning (Plan §6.3). Short TTL so previews stay fresh but
+ *  repeated views of the same link don't refetch. */
+const UNFURL_CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
+const UNFURL_CACHE_MAX_ENTRIES = 500
 
 /** Hard cap on a single chat attachment (Plan §6.8) — mirrors task attachments. */
 export const MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
@@ -68,6 +74,8 @@ export function normalizeSaveTags(tags: unknown): string[] {
 @Injectable()
 export class ChatService {
   private aiUserId: string | null = null
+  /** In-memory unfurl cache (Plan §6.3): url → { fetchedAt, metadata }. */
+  private unfurlCache = new Map<string, { at: number; value: UnfurlResult }>()
 
   constructor(
     @Inject(DB_TOKEN) private db: Db,
@@ -1925,5 +1933,33 @@ export class ChatService {
       .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatChannels.name, 'general')))
     if (existing.length > 0) return existing[0]
     return this.createChannel({ workspaceId, name: 'general', createdById: userId })
+  }
+
+  /**
+   * Fetch Open-Graph / Twitter-card metadata for a pasted link so the client can
+   * render an inline preview (Plan §6.3). SSRF-hardened and best-effort: any
+   * disallowed URL, timeout, or fetch error resolves to `{}` — we never throw to
+   * the client and never surface an internal error. Results (including empty
+   * ones, to avoid hammering a bad URL) are cached briefly in memory.
+   */
+  async unfurl(rawUrl: unknown): Promise<UnfurlResult> {
+    const url = typeof rawUrl === 'string' ? rawUrl.trim() : ''
+    if (!url) return {}
+
+    const now = Date.now()
+    const hit = this.unfurlCache.get(url)
+    if (hit && now - hit.at < UNFURL_CACHE_TTL_MS) return hit.value
+
+    let value: UnfurlResult
+    try {
+      value = await fetchLinkPreview(url)
+    } catch {
+      value = {}
+    }
+
+    // Cheap size bound: clear when the map grows past the cap rather than track LRU.
+    if (this.unfurlCache.size >= UNFURL_CACHE_MAX_ENTRIES) this.unfurlCache.clear()
+    this.unfurlCache.set(url, { at: now, value })
+    return value
   }
 }

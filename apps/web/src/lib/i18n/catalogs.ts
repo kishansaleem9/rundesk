@@ -3424,6 +3424,9 @@ export const en = {
   // Inbox unread badge (§6.12)
   'nav.unreadNotifications': '{{count}} unread notifications',
 
+  // Link previews (§6.3)
+  'chat.linkPreviewOpen': 'Open link in a new tab',
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -6912,6 +6915,9 @@ export const es: Record<TranslationKey, string> = {
   // Inbox unread badge (§6.12)
   'nav.unreadNotifications': '{{count}} notificaciones sin leer',
 
+  // Link previews (§6.3)
+  'chat.linkPreviewOpen': 'Abrir enlace en una pestaña nueva',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -10392,6 +10398,9 @@ export const ar: Record<TranslationKey, string> = {
   // Inbox unread badge (§6.12)
   'nav.unreadNotifications': '{{count}} إشعارات غير مقروءة',
 
+  // Link previews (§6.3)
+  'chat.linkPreviewOpen': 'افتح الرابط في علامة تبويب جديدة',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -13721,6 +13730,9 @@ export const ur: Record<TranslationKey, string> = {
   'chat.removeTag': 'ٹیگ ہٹائیں',
   // Inbox unread badge (§6.12)
   'nav.unreadNotifications': '{{count}} غیر پڑھی اطلاعات',
+
+  // Link previews (§6.3)
+  'chat.linkPreviewOpen': 'لنک نئے ٹیب میں کھولیں',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',

@@ -1134,6 +1134,7 @@ export function ChatPage() {
                         text={editHistoryQuery.data?.current.body ?? ''}
                         namesById={namesById}
                         className="text-[13px]"
+                        linkPreviews={false}
                       />
                     </div>
                     {editHistoryQuery.data?.edits.map((e) => (
@@ -1141,7 +1142,7 @@ export function ChatPage() {
                         <div className="text-[11px] text-muted-foreground mb-1">
                           {t('chat.previousVersion')} · {formatRelativeTime(e.editedAt)}
                         </div>
-                        <ChatMessageBody text={e.previousBody} namesById={namesById} className="text-[13px] opacity-80" />
+                        <ChatMessageBody text={e.previousBody} namesById={namesById} className="text-[13px] opacity-80" linkPreviews={false} />
                       </div>
                     ))}
                   </>

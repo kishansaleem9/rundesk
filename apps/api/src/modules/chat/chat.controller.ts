@@ -140,6 +140,13 @@ export class ChatController {
     return this.chat.getChannelReceipts(channelId, user.id)
   }
 
+  @Get('chat/unfurl')
+  unfurl(@Query('url') url?: string) {
+    // Best-effort link preview (Plan §6.3). JWT-guarded (class-level). SSRF-safe:
+    // the service validates the URL and returns {} for anything disallowed.
+    return this.chat.unfurl(url)
+  }
+
   @Get('chat/workspaces/:workspaceId/custom-emoji')
   listCustomEmoji(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.listCustomEmoji(workspaceId, user.id)
