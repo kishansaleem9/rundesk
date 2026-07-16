@@ -128,6 +128,26 @@ export class WorkspacesController {
     return this.workspacesService.restoreWorkspace(workspaceId, { id: user.id, email: user.email })
   }
 
+  @Get(':workspaceId/onboarding')
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Guided onboarding checklist state for the current user (Plan §14.3)' })
+  async getOnboarding(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.workspacesService.getOnboardingStatus(workspaceId, user.id)
+  }
+
+  @Post(':workspaceId/onboarding/dismiss')
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Dismiss the onboarding checklist for the current user (Plan §14.3)' })
+  async dismissOnboarding(
+    @Param('workspaceId', new ParseUUIDPipe()) _workspaceId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.workspacesService.dismissOnboarding(user.id)
+  }
+
   @Get(':workspaceId/members')
   @UseGuards(WorkspaceMemberGuard)
   async listMembers(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {

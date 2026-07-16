@@ -19,6 +19,7 @@ import { formatDistanceToNowStrict, isToday, isPast } from 'date-fns'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
+import { OnboardingChecklist } from '../components/onboarding-checklist'
 import { useTranslation } from '../lib/i18n'
 
 type Notification = {
@@ -197,6 +198,7 @@ function WorkspaceHome() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-6">
+      <OnboardingChecklist workspaceId={workspaceId} />
       {visibleAnnouncement && (
         <Card
           variant="glass"

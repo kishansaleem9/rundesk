@@ -1,9 +1,9 @@
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
 import * as dns from 'dns'
-import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces } from '@rundesk/db'
+import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
@@ -37,6 +37,50 @@ function slugify(input: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '')
     .slice(0, 40) || BASE_SLUG_FALLBACK
+}
+
+/**
+ * Guided-onboarding checklist (Plan §14.3). Raw counts of the workspace's core
+ * objects, plus whether the AI assistant has been used and how many members it
+ * has. Each is cheap to compute and drives a checklist step's "done" state.
+ */
+export type OnboardingCounts = {
+  spaces: number
+  projects: number
+  tasks: number
+  members: number
+  aiEvents: number
+}
+
+/** Per-step done-state for the onboarding checklist. Verifiable from real data. */
+export type OnboardingSteps = {
+  /** ≥1 space created. */
+  space: boolean
+  /** ≥1 project created (in any space). */
+  project: boolean
+  /** ≥1 task created (in any list). */
+  task: boolean
+  /** ≥2 workspace members — i.e. at least one teammate beyond the creator. */
+  invite: boolean
+  /** The AI assistant has been used at least once in this workspace. */
+  ai: boolean
+}
+
+/**
+ * Pure done-state computation for the onboarding checklist — kept side-effect
+ * free so it is unit-testable without a database. A step is "done" the moment
+ * the workspace has real data proving it, so steps auto-check as the user works.
+ */
+export function computeOnboardingSteps(counts: OnboardingCounts): OnboardingSteps {
+  return {
+    space: counts.spaces > 0,
+    project: counts.projects > 0,
+    task: counts.tasks > 0,
+    // The workspace creator is always a member; a second member means an
+    // invite was accepted (or a member added), so "invite a teammate" is done.
+    invite: counts.members > 1,
+    ai: counts.aiEvents > 0,
+  }
 }
 
 @Injectable()
@@ -535,5 +579,86 @@ export class WorkspacesService {
       .where(eq(workspaces.slug, slug))
       .limit(1)
     return Boolean(wsHit)
+  }
+
+  // --- Guided onboarding checklist (Plan §14.3) ------------------------------
+
+  private async count(query: Promise<Array<{ c: number }>>): Promise<number> {
+    const [row] = await query
+    return row?.c ?? 0
+  }
+
+  /**
+   * Compute the onboarding checklist for a member of `workspaceId`: each step's
+   * done-state is derived from real workspace data (counts of spaces, projects,
+   * tasks, members and AI usage), and `dismissed` reflects the per-user flag
+   * persisted on the notification-preferences jsonb. The widget hides once every
+   * step is done OR the user has dismissed it.
+   */
+  async getOnboardingStatus(workspaceId: string, userId: string) {
+    const cnt = sql<number>`count(*)::int`
+
+    const spacesCount = await this.count(
+      this.db.select({ c: cnt }).from(spaces).where(eq(spaces.workspaceId, workspaceId)),
+    )
+    const projectsCount = await this.count(
+      this.db
+        .select({ c: cnt })
+        .from(projects)
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(spaces.workspaceId, workspaceId)),
+    )
+    const tasksCount = await this.count(
+      this.db
+        .select({ c: cnt })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(spaces.workspaceId, workspaceId)),
+    )
+    const membersCount = await this.count(
+      this.db
+        .select({ c: cnt })
+        .from(workspaceMembers)
+        .where(eq(workspaceMembers.workspaceId, workspaceId)),
+    )
+    const aiCount = await this.count(
+      this.db.select({ c: cnt }).from(aiUsage).where(eq(aiUsage.workspaceId, workspaceId)),
+    )
+
+    const [userRow] = await this.db
+      .select({ prefs: users.notificationPreferences })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+    const dismissed =
+      (userRow?.prefs as { onboarding?: { dismissed?: boolean } } | undefined)?.onboarding
+        ?.dismissed === true
+
+    const counts: OnboardingCounts = {
+      spaces: spacesCount,
+      projects: projectsCount,
+      tasks: tasksCount,
+      members: membersCount,
+      aiEvents: aiCount,
+    }
+    return { dismissed, counts, steps: computeOnboardingSteps(counts) }
+  }
+
+  /**
+   * Persist the per-user "onboarding dismissed" flag. Uses a JSONB concat merge
+   * so it only sets the `onboarding` key and never clobbers other notification
+   * preferences — no migration, no new column.
+   */
+  async dismissOnboarding(userId: string) {
+    await this.db
+      .update(users)
+      .set({
+        notificationPreferences: sql`coalesce(${users.notificationPreferences}, '{}'::jsonb) || '{"onboarding":{"dismissed":true}}'::jsonb`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+    return { dismissed: true }
   }
 }

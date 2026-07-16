@@ -111,6 +111,12 @@ type NotificationPreferences = {
   }
   /** §10.4 — lead days for due-date reminders (subset of {1,2,7}). */
   reminderLeadDays: number[]
+  /**
+   * §14.3 — guided-onboarding widget state. Written by WorkspacesService via a
+   * JSONB concat merge; preserved here so a notification-prefs write never drops
+   * the dismissed flag.
+   */
+  onboarding?: { dismissed?: boolean }
 }
 
 type NotificationPreferencesPatch = {
@@ -706,6 +712,11 @@ export class NotificationsService {
       },
       briefing: normalizeBriefingPrefs({ ...base.briefing, ...(patch.briefing ?? {}) }),
       reminderLeadDays: normalizeReminderLeadDays(patch.reminderLeadDays ?? base.reminderLeadDays),
+      // §14.3 — carry through the onboarding-dismissed flag untouched (set out of
+      // band by WorkspacesService) so editing notification prefs never resets it.
+      ...((patch as Partial<NotificationPreferences>).onboarding
+        ? { onboarding: (patch as Partial<NotificationPreferences>).onboarding }
+        : {}),
     }
   }
 

@@ -1,7 +1,31 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
-import { WorkspacesService } from './workspaces.service'
+import { WorkspacesService, computeOnboardingSteps } from './workspaces.service'
+
+// §14.3 — onboarding checklist done-state is derived purely from real workspace
+// counts, so each step auto-checks the moment the data proving it exists.
+describe('computeOnboardingSteps (§14.3 onboarding done-state)', () => {
+  it('all steps are incomplete for a brand-new workspace (only the creator, no data)', () => {
+    const steps = computeOnboardingSteps({ spaces: 0, projects: 0, tasks: 0, members: 1, aiEvents: 0 })
+    assert.deepEqual(steps, { space: false, project: false, task: false, invite: false, ai: false })
+  })
+
+  it('marks each step done once its underlying object exists', () => {
+    const steps = computeOnboardingSteps({ spaces: 2, projects: 1, tasks: 5, members: 3, aiEvents: 4 })
+    assert.deepEqual(steps, { space: true, project: true, task: true, invite: true, ai: true })
+  })
+
+  it('invite requires a SECOND member — the lone creator does not count', () => {
+    assert.equal(computeOnboardingSteps({ spaces: 0, projects: 0, tasks: 0, members: 1, aiEvents: 0 }).invite, false)
+    assert.equal(computeOnboardingSteps({ spaces: 0, projects: 0, tasks: 0, members: 2, aiEvents: 0 }).invite, true)
+  })
+
+  it('reports steps independently (partial progress)', () => {
+    const steps = computeOnboardingSteps({ spaces: 1, projects: 1, tasks: 0, members: 1, aiEvents: 0 })
+    assert.deepEqual(steps, { space: true, project: true, task: false, invite: false, ai: false })
+  })
+})
 
 describe('WorkspacesService.updateMemberRole role allowlist', () => {
   it('rejects assigning super_admin (privilege escalation guard)', async () => {
