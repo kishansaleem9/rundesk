@@ -199,6 +199,8 @@ export function ChatPage() {
   const [showSearchPanel, setShowSearchPanel] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
+  // Right-click context menu (Plan §6.10) anchored at the cursor for a message.
+  const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null)
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
   const [newEmojiCode, setNewEmojiCode] = useState('')
   const [newEmojiUrl, setNewEmojiUrl] = useState('')
@@ -686,6 +688,16 @@ export function ChatPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
   })
 
+  // Dismiss the right-click message menu (Plan §6.10) on Escape.
+  useEffect(() => {
+    if (!messageMenu) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMessageMenu(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [messageMenu])
+
   const setPinnedMutation = useMutation({
     mutationFn: ({ messageId, pinned }: { messageId: string; pinned: boolean }) =>
       api<Message>(`/chat/messages/${messageId}/pin`, {
@@ -1104,6 +1116,53 @@ export function ChatPage() {
           </div>
         )}
 
+        {/* Right-click message context menu (Plan §6.10). A full-screen backdrop
+            handles click-away and swallows a second right-click. */}
+        {messageMenu && (
+          <div
+            className="fixed inset-0 z-50"
+            onClick={() => setMessageMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setMessageMenu(null)
+            }}
+          >
+            <div
+              className="absolute min-w-[208px] rounded-lg border border-border bg-card shadow-lg p-1"
+              style={{
+                top: Math.min(messageMenu.y, window.innerHeight - 120),
+                left: Math.min(messageMenu.x, window.innerWidth - 224),
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                disabled={createTaskFromMessage.isPending}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+                onClick={() => {
+                  createTaskFromMessage.mutate(messageMenu.message.id)
+                  setMessageMenu(null)
+                }}
+              >
+                <ListTodo className="h-3.5 w-3.5 text-muted-foreground" />
+                {t('chat.createTaskFromMessage')}
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                onClick={() => {
+                  setReplyTo(messageMenu.message)
+                  setThreadParentId(messageMenu.message.id)
+                  setMessageMenu(null)
+                }}
+              >
+                <Reply className="h-3.5 w-3.5 text-muted-foreground" />
+                {t('chat.reply')}
+              </button>
+            </div>
+          </div>
+        )}
+
         {editHistoryFor && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -1135,6 +1194,7 @@ export function ChatPage() {
                         namesById={namesById}
                         className="text-[13px]"
                         linkPreviews={false}
+                        customEmoji={emojiByCode}
                       />
                     </div>
                     {editHistoryQuery.data?.edits.map((e) => (
@@ -1142,7 +1202,7 @@ export function ChatPage() {
                         <div className="text-[11px] text-muted-foreground mb-1">
                           {t('chat.previousVersion')} · {formatRelativeTime(e.editedAt)}
                         </div>
-                        <ChatMessageBody text={e.previousBody} namesById={namesById} className="text-[13px] opacity-80" linkPreviews={false} />
+                        <ChatMessageBody text={e.previousBody} namesById={namesById} className="text-[13px] opacity-80" linkPreviews={false} customEmoji={emojiByCode} />
                       </div>
                     ))}
                   </>
@@ -1231,6 +1291,13 @@ export function ChatPage() {
                       'relative flex gap-3 group rounded-md px-2 py-0.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.03] transition-colors',
                       highlightedMessageId === m.id && 'ring-1 ring-violet-500/40 bg-violet-500/5',
                     )}
+                    onContextMenu={(e) => {
+                      // Right-click → message actions (Plan §6.10). Suppress the
+                      // browser's own menu and anchor ours at the cursor.
+                      if (m.deletedAt || editingMessageId === m.id) return
+                      e.preventDefault()
+                      setMessageMenu({ message: m, x: e.clientX, y: e.clientY })
+                    }}
                   >
                     <div className="w-9 shrink-0">
                       {showAuthor && (
@@ -1315,7 +1382,7 @@ export function ChatPage() {
                         </div>
                       ) : (
                         <div className="text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90">
-                          {m.body && <ChatMessageBody text={m.body} namesById={namesById} />}
+                          {m.body && <ChatMessageBody text={m.body} namesById={namesById} customEmoji={emojiByCode} />}
                           {m.editedAt && (
                             <button
                               type="button"
@@ -1626,6 +1693,7 @@ export function ChatPage() {
           onFilesSelected={(files) => void uploadFiles(files)}
           onRemoveAttachment={(id) => setPendingAttachments((prev) => prev.filter((a) => a.id !== id))}
           uploading={uploadingFiles}
+          customEmoji={customEmoji}
           mentionMenu={(() => {
             if (!showMentions) return undefined
             const mentionQuery = input.slice(input.lastIndexOf('@') + 1).toLowerCase()
@@ -1683,6 +1751,7 @@ export function ChatPage() {
             onReply={handleThreadReply}
             pending={sendMutation.isPending}
             namesById={namesById}
+            customEmoji={customEmoji}
           />
         )}
         {selectedProfile && (
@@ -2269,6 +2338,7 @@ function ThreadPanel({
   onReply,
   pending,
   namesById,
+  customEmoji,
 }: {
   parent: Message
   replies: Message[]
@@ -2276,6 +2346,7 @@ function ThreadPanel({
   onReply: (body: string) => void
   pending: boolean
   namesById: Record<string, string>
+  customEmoji?: CustomEmoji[]
 }) {
   const [draft, setDraft] = useState('')
   const { t } = useTranslation()
@@ -2318,6 +2389,7 @@ function ThreadPanel({
           }}
           disabled={false}
           sending={pending}
+          customEmoji={customEmoji}
         />
       </div>
     </aside>

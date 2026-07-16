@@ -1,5 +1,5 @@
-import { Injectable, Inject, BadRequestException, NotFoundException } from '@nestjs/common'
-import { and, eq } from 'drizzle-orm'
+import { Injectable, Inject, Optional, BadRequestException, NotFoundException } from '@nestjs/common'
+import { and, eq, inArray } from 'drizzle-orm'
 import {
   spaces,
   projects,
@@ -12,10 +12,13 @@ import {
   users,
   customFieldDefinitions,
   customFieldValues,
+  taskComments,
+  taskAttachments,
   clickupImportJobs,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
+import { R2Service } from '../../../common/storage/r2.service'
 import {
   parseClickUpCsv,
   dupKey,
@@ -27,6 +30,15 @@ import {
   type ParsedTask,
   type CustomFieldColumn,
 } from './clickup-csv.util'
+import {
+  ClickUpApiClient,
+  extractCommentText,
+  clickupDate,
+  safeAttachmentName,
+  type ClickUpClientLike,
+  type ClickUpComment,
+  type ClickUpAttachment,
+} from './clickup-api.util'
 
 /** How to handle a row that duplicates an existing / already-seen task. */
 export type ConflictStrategy = 'skip' | 'create' | 'merge'
@@ -36,14 +48,24 @@ export type ImportDto = {
   targetSpaceId?: string
   targetProjectName?: string
   strategy?: ConflictStrategy
+  /**
+   * Optional ClickUp personal/OAuth API token. When supplied, the import ALSO
+   * pulls each task's comments + attachments (which the CSV cannot carry) via
+   * the ClickUp REST API and imports them. Omit it and the CSV-only path runs
+   * exactly as before.
+   */
+  apiToken?: string
 }
+
+/** ClickUp task id → our task id, so the API enrichment can target our rows. */
+export type TaskIdMapping = Array<{ clickupTaskId: string; taskId: string }>
 
 /**
  * ClickUp CSV export does NOT contain comments or file attachments — those live
  * only behind the ClickUp API (an OAuth/personal token). We never fabricate
- * them; the report states plainly that they are not part of the CSV. If a token
- * is later wired up (CLICKUP_API_TOKEN), an API path would fetch them — that is
- * out of scope for the CSV importer.
+ * them from a CSV; this note states plainly that they are not part of the CSV.
+ * When a token IS supplied, the API enrichment path fetches + imports them and
+ * this note is replaced with the real imported counts (see `enrichTasks`).
  */
 const NOT_IMPORTED = {
   comments:
@@ -51,6 +73,18 @@ const NOT_IMPORTED = {
   attachments:
     'ClickUp CSV exports do not include file attachments. Importing them requires the ClickUp API (a token) — not available from a CSV, so no attachments were imported.',
 } as const
+
+/** Per-run report for the optional ClickUp API comment + attachment enrichment. */
+export type EnrichmentReport = {
+  attempted: boolean
+  tasksEnriched: number
+  commentsImported: number
+  attachmentsImported: number
+  attachmentsSkipped: number
+  r2Configured: boolean
+  /** Set when attachment bytes were skipped wholesale (e.g. R2 not configured). */
+  attachmentsSkippedReason?: string
+}
 
 export type ImportSummary = {
   spacesCreated: number
@@ -65,13 +99,26 @@ export type ImportSummary = {
   customFieldsCreated: number
   customFieldValuesSet: number
   duplicatesDetected: number
+  /** ClickUp-API-only: comments imported (0 unless an apiToken was supplied). */
+  commentsImported: number
+  /** ClickUp-API-only: attachments re-uploaded to R2 + rowed. */
+  attachmentsImported: number
+  /** ClickUp-API-only: attachments skipped (R2 off, download failed, etc.). */
+  attachmentsSkipped: number
   errors: string[]
-  notImported: typeof NOT_IMPORTED
+  notImported: { comments: string; attachments: string }
+  /** Present only when the API enrichment path ran. */
+  enrichment?: EnrichmentReport
 }
 
 @Injectable()
 export class ClickUpImportService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    // Optional so unit tests can construct the service with just a db stand-in.
+    // At runtime R2Service is provided by the global StorageModule.
+    @Optional() private r2?: R2Service,
+  ) {}
 
   // ── Preview ─────────────────────────────────────────────────────────────────
   /**
@@ -164,22 +211,7 @@ export class ClickUpImportService {
     dto: ImportDto,
   ): Promise<ImportSummary> {
     const strategy: ConflictStrategy = dto.strategy ?? 'create'
-    const summary: ImportSummary = {
-      spacesCreated: 0,
-      projectsCreated: 0,
-      listsCreated: 0,
-      tasksCreated: 0,
-      tasksUpdated: 0,
-      tasksSkipped: 0,
-      labelsCreated: 0,
-      assigneesLinked: 0,
-      subtasksLinked: 0,
-      customFieldsCreated: 0,
-      customFieldValuesSet: 0,
-      duplicatesDetected: 0,
-      errors: [],
-      notImported: NOT_IMPORTED,
-    }
+    const summary = this.emptySummary()
 
     try {
       const { rows, customFieldColumns } = parseClickUpCsv(dto.csv)
@@ -317,6 +349,22 @@ export class ClickUpImportService {
         }
       }
 
+      // Optional third pass: if an API token was supplied, ALSO pull the two
+      // things the CSV cannot carry — comments + attachments — for every task
+      // we could map back to its ClickUp id. Reuses the in-memory id-mapping
+      // the CSV import just built. Errors are collected, never thrown.
+      if (dto.apiToken?.trim()) {
+        const mapping: TaskIdMapping = Array.from(created.entries()).map(([clickupTaskId, entry]) => ({
+          clickupTaskId,
+          taskId: entry.ourId,
+        }))
+        try {
+          await this.enrichTasks(workspaceId, userId, dto.apiToken, mapping, { summary })
+        } catch (e: any) {
+          summary.errors.push(`ClickUp API enrichment failed: ${e?.message ?? 'unknown error'}`)
+        }
+      }
+
       await this.db
         .update(clickupImportJobs)
         .set({
@@ -341,7 +389,269 @@ export class ClickUpImportService {
     }
   }
 
+  // ── ClickUp API enrichment (comments + attachments — Plan §12.5 gap) ──────────
+
+  /**
+   * Follow-up path for an already-finished CSV job: import the comments +
+   * attachments the CSV omitted, given an API token and a ClickUp→our task-id
+   * mapping. Validates each target task belongs to the workspace, runs the same
+   * `enrichTasks` core, and folds the result back into the stored job report.
+   */
+  async enrichJob(
+    workspaceId: string,
+    jobId: string,
+    userId: string,
+    input: { apiToken: string; mapping: TaskIdMapping },
+  ): Promise<ImportSummary> {
+    const job = await this.getJob(workspaceId, jobId)
+    if (!input.apiToken?.trim()) {
+      throw new BadRequestException('apiToken is required to import ClickUp comments + attachments')
+    }
+    const mapping = Array.isArray(input.mapping) ? input.mapping : []
+    const summary = await this.enrichTasks(workspaceId, userId, input.apiToken, mapping)
+
+    const prevResult = (job.result ?? {}) as Record<string, unknown>
+    await this.db
+      .update(clickupImportJobs)
+      .set({
+        result: {
+          ...prevResult,
+          enrichment: summary.enrichment,
+          commentsImported: summary.commentsImported,
+          attachmentsImported: summary.attachmentsImported,
+          attachmentsSkipped: summary.attachmentsSkipped,
+        } as Record<string, unknown>,
+        updatedAt: new Date(),
+      })
+      .where(eq(clickupImportJobs.id, jobId))
+      .catch(() => undefined)
+
+    return summary
+  }
+
+  /**
+   * Import each mapped task's ClickUp comments + attachments. Shared by the
+   * in-job token path (via `processImport`) and the follow-up `enrichJob`
+   * endpoint. Per-item failures are collected into `summary.errors`, never
+   * thrown, so one bad comment/file can't sink the batch.
+   */
+  async enrichTasks(
+    workspaceId: string,
+    userId: string,
+    apiToken: string,
+    mapping: TaskIdMapping,
+    opts: { client?: ClickUpClientLike; summary?: ImportSummary } = {},
+  ): Promise<ImportSummary> {
+    const summary = opts.summary ?? this.emptySummary()
+    if (!apiToken?.trim()) {
+      summary.errors.push('ClickUp API enrichment skipped: no API token provided')
+      return summary
+    }
+
+    const pairs = mapping.filter((m) => m?.clickupTaskId && m?.taskId)
+    const r2Ready = !!this.r2?.configured
+    if (pairs.length === 0) {
+      summary.enrichment = {
+        attempted: true,
+        tasksEnriched: 0,
+        commentsImported: 0,
+        attachmentsImported: 0,
+        attachmentsSkipped: 0,
+        r2Configured: r2Ready,
+      }
+      return summary
+    }
+
+    // Guard against a crafted mapping: only touch tasks in this workspace.
+    const validIds = await this.loadWorkspaceTaskIds(
+      workspaceId,
+      pairs.map((p) => p.taskId),
+    )
+    const memberByKey = await this.loadMemberIndex(workspaceId)
+    const client: ClickUpClientLike = opts.client ?? new ClickUpApiClient({ apiToken })
+
+    let tasksEnriched = 0
+    for (const { clickupTaskId, taskId } of pairs) {
+      if (!validIds.has(taskId)) {
+        summary.errors.push(`Enrich: task ${taskId} is not in this workspace — skipped`)
+        continue
+      }
+      tasksEnriched++
+
+      // Comments — a whole-task fetch failure is recorded, then we move on.
+      try {
+        const comments = await client.getTaskComments(clickupTaskId)
+        for (const c of comments) {
+          try {
+            await this.importComment(taskId, userId, c, memberByKey)
+            summary.commentsImported++
+          } catch (e: any) {
+            summary.errors.push(`Comment ${c?.id} on ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+          }
+        }
+      } catch (e: any) {
+        summary.errors.push(`Comments for ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+      }
+
+      // Attachments — re-upload bytes to R2, then row the metadata.
+      try {
+        const attachments = await client.getTaskAttachments(clickupTaskId)
+        for (const att of attachments) {
+          try {
+            const outcome = await this.importAttachment(workspaceId, taskId, userId, att, client, r2Ready)
+            if (outcome === 'imported') summary.attachmentsImported++
+            else summary.attachmentsSkipped++
+          } catch (e: any) {
+            summary.attachmentsSkipped++
+            summary.errors.push(`Attachment ${att?.id} on ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+          }
+        }
+      } catch (e: any) {
+        summary.errors.push(`Attachments for ClickUp task ${clickupTaskId}: ${e?.message ?? 'error'}`)
+      }
+    }
+
+    summary.enrichment = {
+      attempted: true,
+      tasksEnriched,
+      commentsImported: summary.commentsImported,
+      attachmentsImported: summary.attachmentsImported,
+      attachmentsSkipped: summary.attachmentsSkipped,
+      r2Configured: r2Ready,
+      ...(r2Ready
+        ? {}
+        : {
+            attachmentsSkippedReason:
+              'R2 storage is not configured — attachment bytes were not downloaded or stored.',
+          }),
+    }
+
+    // Replace the CSV "not imported" note with the honest imported counts.
+    summary.notImported = {
+      comments:
+        summary.commentsImported > 0
+          ? `Imported ${summary.commentsImported} comment(s) from the ClickUp API.`
+          : NOT_IMPORTED.comments,
+      attachments:
+        summary.attachmentsImported > 0
+          ? `Imported ${summary.attachmentsImported} attachment(s) from the ClickUp API.`
+          : r2Ready
+            ? NOT_IMPORTED.attachments
+            : 'R2 storage is not configured — ClickUp attachments were skipped.',
+    }
+
+    return summary
+  }
+
+  /**
+   * Insert one ClickUp comment as a `task_comments` row. When the ClickUp author
+   * can't be resolved to a workspace user, we fall back to the importing user
+   * for `author_id` (a NOT NULL FK) and preserve the original author + timestamp
+   * as text at the head of the body. The original timestamp is also mirrored
+   * into `created_at` when ClickUp provided one.
+   */
+  private async importComment(
+    taskId: string,
+    userId: string,
+    c: ClickUpComment,
+    memberByKey: Map<string, string>,
+  ): Promise<void> {
+    const text = extractCommentText(c)
+    const emailKey = c.user?.email?.trim().toLowerCase()
+    const nameKey = c.user?.username?.trim().toLowerCase()
+    const resolvedAuthor =
+      (emailKey ? memberByKey.get(emailKey) : undefined) ??
+      (nameKey ? memberByKey.get(nameKey) : undefined) ??
+      null
+    const createdAt = clickupDate(c.date)
+
+    let body = text
+    if (!resolvedAuthor) {
+      const who = c.user?.username || c.user?.email || 'Unknown ClickUp user'
+      const when = createdAt ? createdAt.toISOString() : (c.date ?? 'unknown date')
+      body = `**${who}** _(ClickUp comment · ${when})_\n\n${text}`.trim()
+    }
+
+    await this.db.insert(taskComments).values({
+      taskId,
+      authorId: resolvedAuthor ?? userId,
+      body: body || '(empty ClickUp comment)',
+      ...(createdAt ? { createdAt } : {}),
+    })
+  }
+
+  /**
+   * Stream one ClickUp attachment to R2 and create a `task_attachments` row,
+   * reusing the exact task-attachment storage-key convention + R2 upload path.
+   * Returns 'skipped' (not an error) when R2 is off or the bytes can't be
+   * fetched, so a missing file degrades gracefully.
+   */
+  private async importAttachment(
+    workspaceId: string,
+    taskId: string,
+    userId: string,
+    att: ClickUpAttachment,
+    client: ClickUpClientLike,
+    r2Ready: boolean,
+  ): Promise<'imported' | 'skipped'> {
+    if (!r2Ready || !this.r2) return 'skipped'
+    const dl = await client.downloadAttachment(att)
+    if (!dl) return 'skipped'
+
+    const fileName = att.title || safeAttachmentName(att.id)
+    const key = `workspaces/${workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${safeAttachmentName(fileName)}`
+    await this.r2.putObject(key, dl.buffer, dl.contentType, {
+      source: 'clickup-import',
+      clickupattachmentid: String(att.id).slice(0, 200),
+    })
+    await this.db.insert(taskAttachments).values({
+      taskId,
+      uploadedById: userId,
+      fileName,
+      contentType: dl.contentType,
+      sizeBytes: att.size ?? dl.buffer.length,
+      storageKey: key,
+    })
+    return 'imported'
+  }
+
+  /** Subset of `ids` that are tasks inside `workspaceId` (crafted-mapping guard). */
+  private async loadWorkspaceTaskIds(workspaceId: string, ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set()
+    const rows = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, ids)))
+    return new Set(rows.map((r) => r.id))
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  /** A zeroed summary. Comments/attachments stay 0 unless enrichment runs. */
+  private emptySummary(): ImportSummary {
+    return {
+      spacesCreated: 0,
+      projectsCreated: 0,
+      listsCreated: 0,
+      tasksCreated: 0,
+      tasksUpdated: 0,
+      tasksSkipped: 0,
+      labelsCreated: 0,
+      assigneesLinked: 0,
+      subtasksLinked: 0,
+      customFieldsCreated: 0,
+      customFieldValuesSet: 0,
+      duplicatesDetected: 0,
+      commentsImported: 0,
+      attachmentsImported: 0,
+      attachmentsSkipped: 0,
+      errors: [],
+      notImported: { ...NOT_IMPORTED },
+    }
+  }
 
   private async updateProgress(jobId: string, processed: number, summary: ImportSummary) {
     await this.db

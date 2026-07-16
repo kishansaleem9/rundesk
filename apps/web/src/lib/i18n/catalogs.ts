@@ -4102,6 +4102,8 @@ export const en = {
   'list.deleteAction': 'Delete list',
   'list.deleteConfirm': 'Delete the list "{{name}}"? It will be archived.',
 
+  'palette.entityFiles': 'Files',
+
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
   'auth.email': 'Email',
@@ -8261,6 +8263,8 @@ export const es: Record<TranslationKey, string> = {
   'list.deleteAction': 'Eliminar lista',
   'list.deleteConfirm': '¿Eliminar la lista "{{name}}"? Se archivará.',
 
+  'palette.entityFiles': 'Archivos',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -12413,6 +12417,8 @@ export const ar: Record<TranslationKey, string> = {
   'list.deleteAction': 'حذف القائمة',
   'list.deleteConfirm': 'هل تريد حذف القائمة "{{name}}"؟ ستتم أرشفتها.',
 
+  'palette.entityFiles': 'الملفات',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -16414,6 +16420,8 @@ export const ur: Record<TranslationKey, string> = {
   'list.renameTitle': 'فہرست کا نام تبدیل کریں',
   'list.deleteAction': 'فہرست حذف کریں',
   'list.deleteConfirm': 'کیا فہرست "{{name}}" حذف کریں؟ یہ آرکائیو ہو جائے گی۔',
+
+  'palette.entityFiles': 'فائلیں',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',

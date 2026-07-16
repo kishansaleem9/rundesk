@@ -22,6 +22,7 @@ import {
   LayoutDashboard,
   List as ListIcon,
   MessageSquare,
+  Paperclip,
   Plus,
   Settings,
   Sparkles,
@@ -43,6 +44,7 @@ function getWorkspaceIdFromPath(pathname: string) {
 const ENTITY_ICON: Record<string, React.ElementType> = {
   task: CheckCircle2,
   doc: FileText,
+  file: Paperclip,
   project: Folder,
   list: ListIcon,
   channel: MessageSquare,
@@ -50,10 +52,11 @@ const ENTITY_ICON: Record<string, React.ElementType> = {
   comment: MessageSquare,
   user: Users,
 }
-const ENTITY_ORDER = ['task', 'doc', 'comment', 'channel', 'message', 'user']
+const ENTITY_ORDER = ['task', 'doc', 'file', 'comment', 'channel', 'message', 'user']
 const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
   task: 'palette.entityTasks',
   doc: 'palette.entityDocs',
+  file: 'palette.entityFiles',
   comment: 'palette.entityComments',
   channel: 'palette.entityChannels',
   message: 'palette.entityMessages',

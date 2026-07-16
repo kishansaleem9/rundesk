@@ -1445,6 +1445,7 @@ type ExternalLink = {
     | {
         mimeType?: string | null
         thumbnailLink?: string | null
+        previewUrl?: string | null
         iconLink?: string | null
         recordingUrl?: string | null
       }
@@ -1690,6 +1691,11 @@ function LinkedWorkRow({
     ((link.provider === 'google_drive' || link.provider === 'dropbox') && link.kind === 'file')
   const isMeeting = link.kind === 'meeting'
   const recording = link.metadata?.recordingUrl ?? null
+  // §12.2 / §12.6 — inline preview for Drive/Dropbox file links when the API has
+  // stored a thumbnail/preview URL in the link metadata. When absent (or the
+  // image fails to load) the icon + name row above is the graceful fallback.
+  const isFilePreview = link.kind === 'file' && (link.provider === 'google_drive' || link.provider === 'dropbox')
+  const thumbUrl = isFilePreview ? link.metadata?.thumbnailLink || link.metadata?.previewUrl || null : null
 
   const submitRecording = () => {
     const u = recordingUrl.trim()
@@ -1745,6 +1751,27 @@ function LinkedWorkRow({
           <XIcon className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* Inline Drive/Dropbox thumbnail preview (§12.2 / §12.6). */}
+      {thumbUrl && (
+        <a
+          href={link.url}
+          target="_blank"
+          rel="noreferrer"
+          title={t('taskDetail.linkedWork.open')}
+          className="block px-2 pb-2"
+        >
+          <img
+            src={thumbUrl}
+            alt={label}
+            loading="lazy"
+            className="max-h-40 max-w-full rounded border border-border/60 object-contain"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+            }}
+          />
+        </a>
+      )}
 
       {/* Recording link — attach after the meeting, or open an attached one. */}
       {isMeeting && (

@@ -26,15 +26,62 @@ function mentionChip(label: string, key: string): ReactNode {
  * the shared inline-markdown parser (bold/italic/strike/code/links). Reused for
  * every text position inside block markdown (list items, quotes, paragraphs).
  */
-function chatInline(namesById: Record<string, string>) {
+/**
+ * Render a plain (non-mention) text run: substitute any `:shortcode:` that maps
+ * to a known workspace custom emoji (Plan §6.3) with its inline image, and pass
+ * the text around those tokens through the shared inline-markdown parser. When
+ * the workspace has no custom emoji this is just plain inline markdown, so the
+ * fast path is unchanged.
+ */
+function renderTextRun(
+  text: string,
+  keyPrefix: string,
+  emojiByCode?: Map<string, string>,
+): ReactNode[] {
+  if (!emojiByCode || emojiByCode.size === 0) return renderInlineMarkdown(text, keyPrefix)
+  const nodes: ReactNode[] = []
+  const re = /:([a-z0-9_]+):/gi
+  let last = 0
+  let n = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const code = m[1].toLowerCase()
+    const url = emojiByCode.get(code)
+    if (!url) continue // not a known custom emoji — leave the literal text as-is
+    if (m.index > last) {
+      nodes.push(
+        <Fragment key={`${keyPrefix}-r${n}`}>{renderInlineMarkdown(text.slice(last, m.index), `${keyPrefix}-r${n}`)}</Fragment>,
+      )
+      n++
+    }
+    nodes.push(
+      <img
+        key={`${keyPrefix}-e${n}`}
+        src={url}
+        alt={`:${code}:`}
+        title={`:${code}:`}
+        loading="lazy"
+        className="inline-block h-[1.25em] w-[1.25em] object-contain align-[-0.25em]"
+      />,
+    )
+    n++
+    last = m.index + m[0].length
+  }
+  if (last < text.length) {
+    nodes.push(
+      <Fragment key={`${keyPrefix}-r${n}`}>{renderInlineMarkdown(text.slice(last), `${keyPrefix}-r${n}`)}</Fragment>,
+    )
+  }
+  return nodes
+}
+
+function chatInline(namesById: Record<string, string>, emojiByCode?: Map<string, string>) {
   return (text: string, keyPrefix: string): ReactNode[] => {
     const segments = parseMentionSegments(text, namesById, 'teammate')
-    return segments.map((seg, i) =>
-      seg.type === 'mention' ? (
-        mentionChip(seg.label, `${keyPrefix}-m${i}`)
-      ) : (
-        <Fragment key={`${keyPrefix}-t${i}`}>{renderInlineMarkdown(seg.value, `${keyPrefix}-${i}`)}</Fragment>
-      ),
+    return segments.flatMap((seg, i) =>
+      seg.type === 'mention'
+        ? [mentionChip(seg.label, `${keyPrefix}-m${i}`)]
+        : renderTextRun(seg.value, `${keyPrefix}-t${i}`, emojiByCode),
     )
   }
 }
@@ -273,6 +320,7 @@ export function ChatMessageBody({
   namesById,
   className,
   linkPreviews = true,
+  customEmoji,
 }: {
   text: string
   namesById: Record<string, string>
@@ -281,8 +329,11 @@ export function ChatMessageBody({
    *  edit-history diff, where preview cards would be noise. Task cards are
    *  unaffected. */
   linkPreviews?: boolean
+  /** Workspace custom emoji map (shortcode → image URL) so `:shortcode:` tokens
+   *  render as inline emoji images (Plan §6.3). Same map the reactions use. */
+  customEmoji?: Map<string, string>
 }) {
-  const inline = chatInline(namesById)
+  const inline = chatInline(namesById, customEmoji)
   const taskLinks = useMemo(() => extractTaskLinks(text), [text])
   const externalLinks = useMemo(
     () => (linkPreviews ? extractExternalLinks(text) : []),

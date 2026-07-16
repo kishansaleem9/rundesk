@@ -22,6 +22,12 @@ function formatBytes(bytes: number): string {
 const COMMON_EMOJIS = ['😀', '👍', '🎉', '❤️', '🙏', '🔥', '✅', '👀', '🚀', '😂', '🙌', '💯']
 
 /**
+ * A workspace custom emoji (Plan §6.3). Same shape the reaction picker's
+ * `/chat/workspaces/:id/custom-emoji` query returns; extra fields are ignored.
+ */
+type ComposerCustomEmoji = { id: string; shortcode: string; imageUrl: string }
+
+/**
  * Shared editor surface (textarea + working toolbar). Used by both the main
  * channel composer and the thread reply composer so the icon row behaves
  * identically in both places.
@@ -41,6 +47,7 @@ function ComposerBox({
   onRemoveAttachment,
   uploading,
   enableSlashCommands,
+  customEmoji,
 }: {
   value: string
   onChange: (value: string) => void
@@ -60,6 +67,10 @@ function ComposerBox({
   // Slash commands (Plan §6.3): show the /task //remind hint while the composer
   // input is a bare leading command token. Only the main composer opts in.
   enableSlashCommands?: boolean
+  // Workspace custom emoji (Plan §6.3) — the same list the reaction picker uses.
+  // Shown below the standard grid; clicking inserts the `:shortcode:` token that
+  // the message body renderer substitutes back into the emoji image.
+  customEmoji?: ComposerCustomEmoji[]
 }) {
   const { t } = useTranslation()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -123,6 +134,13 @@ function ComposerBox({
 
   const handleEmoji = (emoji: string) => {
     insertAtCursor(emoji)
+    setEmojiOpen(false)
+  }
+
+  // Custom workspace emoji (Plan §6.3): insert the `:shortcode:` token so the
+  // message body renderer substitutes it back into the emoji image on send.
+  const handleCustomEmoji = (shortcode: string) => {
+    insertAtCursor(`:${shortcode}:`)
     setEmojiOpen(false)
   }
 
@@ -283,7 +301,7 @@ function ComposerBox({
                 <Smile className="h-4 w-4" />
               </button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-auto p-2">
+            <PopoverContent align="start" className="w-auto max-w-[248px] p-2">
               <div className="grid grid-cols-6 gap-1">
                 {COMMON_EMOJIS.map((emoji) => (
                   <button
@@ -296,6 +314,26 @@ function ComposerBox({
                   </button>
                 ))}
               </div>
+              {customEmoji && customEmoji.length > 0 && (
+                <div className="mt-2 border-t border-border/60 pt-2">
+                  <div className="px-0.5 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {t('chat.customEmoji')}
+                  </div>
+                  <div className="grid max-h-32 grid-cols-6 gap-1 overflow-y-auto">
+                    {customEmoji.map((ce) => (
+                      <button
+                        key={ce.id}
+                        type="button"
+                        title={`:${ce.shortcode}:`}
+                        className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
+                        onClick={() => handleCustomEmoji(ce.shortcode)}
+                      >
+                        <img src={ce.imageUrl} alt={ce.shortcode} loading="lazy" className="h-5 w-5 object-contain" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </PopoverContent>
           </Popover>
           <ToolBtn icon={Bold} title={t('chat.bold')} disabled={disabled} onClick={() => wrapSelection('**', 'bold')} />
@@ -341,6 +379,7 @@ export function ChatComposer({
   onFilesSelected,
   onRemoveAttachment,
   uploading,
+  customEmoji,
 }: {
   channelLabel: string
   value: string
@@ -356,6 +395,7 @@ export function ChatComposer({
   onFilesSelected?: (files: File[]) => void
   onRemoveAttachment?: (id: string) => void
   uploading?: boolean
+  customEmoji?: ComposerCustomEmoji[]
 }) {
   const { t } = useTranslation()
   return (
@@ -389,6 +429,7 @@ export function ChatComposer({
         onFilesSelected={onFilesSelected}
         onRemoveAttachment={onRemoveAttachment}
         uploading={uploading}
+        customEmoji={customEmoji}
         enableSlashCommands
       />
 
@@ -411,12 +452,14 @@ export function ThreadReplyComposer({
   onSend,
   disabled,
   sending,
+  customEmoji,
 }: {
   value: string
   onChange: (value: string) => void
   onSend: () => void
   disabled: boolean
   sending: boolean
+  customEmoji?: ComposerCustomEmoji[]
 }) {
   const { t } = useTranslation()
   return (
@@ -428,6 +471,7 @@ export function ThreadReplyComposer({
       sending={sending}
       placeholder={t('chat.replyInThread')}
       sendLabel={t('chat.reply')}
+      customEmoji={customEmoji}
     />
   )
 }

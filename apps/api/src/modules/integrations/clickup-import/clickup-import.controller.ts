@@ -24,7 +24,10 @@ export class ClickUpImportController {
 
   @Post()
   @UseGuards(WorkspaceAdminGuard)
-  @ApiOperation({ summary: 'Start a ClickUp CSV import (admin only) — returns a job id to poll' })
+  @ApiOperation({
+    summary:
+      'Start a ClickUp CSV import (admin only) — returns a job id to poll. Supply apiToken to ALSO import comments + attachments via the ClickUp API.',
+  })
   run(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
@@ -34,6 +37,8 @@ export class ClickUpImportController {
       targetSpaceId?: string
       targetProjectName?: string
       strategy?: ConflictStrategy
+      /** Optional: also pull comments + attachments the CSV cannot carry. */
+      apiToken?: string
     },
   ) {
     return this.svc.startImport(workspaceId, user.id, body)
@@ -43,5 +48,27 @@ export class ClickUpImportController {
   @ApiOperation({ summary: 'Poll an import job — status, progress counts, and final report' })
   job(@Param('workspaceId') workspaceId: string, @Param('jobId') jobId: string) {
     return this.svc.getJob(workspaceId, jobId)
+  }
+
+  @Post('jobs/:jobId/enrich')
+  @UseGuards(WorkspaceAdminGuard)
+  @ApiOperation({
+    summary:
+      'Import ClickUp comments + attachments for an already-imported job (admin only). Body: { apiToken, mapping: [{ clickupTaskId, taskId }] }.',
+  })
+  enrich(
+    @Param('workspaceId') workspaceId: string,
+    @Param('jobId') jobId: string,
+    @CurrentUser() user: any,
+    @Body()
+    body: {
+      apiToken: string
+      mapping?: Array<{ clickupTaskId: string; taskId: string }>
+    },
+  ) {
+    return this.svc.enrichJob(workspaceId, jobId, user.id, {
+      apiToken: body.apiToken,
+      mapping: body.mapping ?? [],
+    })
   }
 }
