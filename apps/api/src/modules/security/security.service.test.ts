@@ -86,3 +86,54 @@ describe('SecurityService.exportAuditLogsCsv — filtered CSV (§13.3)', () => {
     assert.match(first, /203\.0\.113\.5/)
   })
 })
+
+describe('SecurityService.exportAuditLogsCsv — formula injection neutralized (security)', () => {
+  it('prefixes cells starting with = + - @ so spreadsheets do not execute them', async () => {
+    const rows = [
+      {
+        createdAt: new Date('2026-07-16T10:00:00.000Z'),
+        actorEmail: '=cmd|calc', // classic CSV/DDE injection payload
+        actorId: 'a1',
+        action: '+SUM(A1)',
+        resourceType: 'user',
+        resourceId: 'u2',
+        description: '@evil',
+        ipAddress: '-1+1',
+      },
+    ]
+    const { db } = buildDb(rows)
+    const svc = new SecurityService(db)
+    const csv = await svc.exportAuditLogsCsv('ws', {})
+    const [, first] = csv.split('\n')
+    // Each dangerous leading character is escaped with a single quote inside the quoted cell.
+    assert.match(first, /"'=cmd\|calc"/)
+    assert.match(first, /"'\+SUM\(A1\)"/)
+    assert.match(first, /"'@evil"/)
+    assert.match(first, /"'-1\+1"/)
+    // A benign value (resource "user:u2") is left untouched — no spurious quote prefix.
+    assert.match(first, /"user:u2"/)
+  })
+})
+
+// ─── TOTP setup: no third-party QR / secret leak ────────────────────────────
+
+function buildTotpDb(user: { email: string; displayName: string } | undefined) {
+  return {
+    select: () => ({ from: () => ({ where: async () => (user ? [user] : []) }) }),
+    delete: () => ({ where: async () => undefined }),
+    insert: () => ({ values: async () => undefined }),
+  } as any
+}
+
+describe('SecurityService.setupTotp — client-side QR, no secret leak (security)', () => {
+  it('returns an otpauth:// URI + secret and never a Google Charts URL', async () => {
+    const svc = new SecurityService(buildTotpDb({ email: 'u@acme.test', displayName: 'U' }))
+    const result = await svc.setupTotp('user-1')
+    assert.match(result.otpauthUrl, /^otpauth:\/\/totp\//)
+    assert.ok(typeof result.secret === 'string' && result.secret.length > 0)
+    // The deprecated Google Charts field must be gone, and the secret must not
+    // be embedded in any third-party URL anywhere in the response.
+    assert.ok(!('qrCodeUrl' in result), 'qrCodeUrl field must be dropped')
+    assert.doesNotMatch(JSON.stringify(result), /googleapis\.com|chart\?/)
+  })
+})

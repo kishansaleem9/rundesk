@@ -6,6 +6,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
+import { CreateWebhookDto, UpdateWebhookDto } from './dto/webhook.dto'
 
 @ApiTags('webhooks')
 @ApiBearerAuth()
@@ -33,7 +34,7 @@ export class WebhooksController {
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
-    @Body() body: { name: string; url: string; events: string[]; secret?: string },
+    @Body() body: CreateWebhookDto,
   ) {
     return this.svc.create(workspaceId, user.id, body)
   }
@@ -44,7 +45,7 @@ export class WebhooksController {
   update(
     @Param('workspaceId') workspaceId: string,
     @Param('webhookId') webhookId: string,
-    @Body() body: any,
+    @Body() body: UpdateWebhookDto,
   ) {
     return this.svc.update(workspaceId, webhookId, body)
   }

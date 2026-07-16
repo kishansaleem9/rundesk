@@ -21,7 +21,7 @@ export class TotpController {
   }
 
   @Post('setup')
-  @ApiOperation({ summary: 'Begin 2FA setup — returns QR code URL and secret' })
+  @ApiOperation({ summary: 'Begin 2FA setup — returns the otpauth:// URI and secret for client-side QR rendering' })
   setup(@CurrentUser() user: any) {
     return this.svc.setupTotp(user.id)
   }

@@ -189,7 +189,7 @@ export class OAuthService {
   async upsertUserAndLink(
     provider: OAuthProvider,
     profile: OAuthProfile,
-    tokens: OAuthTokens,
+    _tokens: OAuthTokens,
     meta: { ip?: string; userAgent?: string } = {},
   ): Promise<{ userId: string; isNewUser: boolean }> {
     let user = (await this.db.select().from(users).where(eq(users.email, profile.email)).limit(1))[0]
@@ -219,7 +219,13 @@ export class OAuthService {
       }
     }
 
-    // Link (or refresh the stored tokens on) the oauth_accounts row.
+    // Link the oauth_accounts row. We deliberately do NOT persist the provider
+    // access/refresh tokens: they are used transiently during the callback to
+    // fetch the profile and are never read back anywhere in the app, so storing
+    // them at rest would be an unnecessary plaintext-secret liability. The
+    // columns are left null. (If a future feature needs offline provider access,
+    // reintroduce them encrypted at rest — e.g. AES-256-GCM with
+    // TOKEN_ENCRYPTION_KEY — rather than in plaintext.)
     const existingLink = (
       await this.db
         .select()
@@ -232,9 +238,9 @@ export class OAuthService {
         .update(oauthAccounts)
         .set({
           userId: user.id,
-          accessToken: tokens.accessToken,
-          refreshToken: tokens.refreshToken,
-          expiresAt: tokens.expiresAt,
+          accessToken: null,
+          refreshToken: null,
+          expiresAt: null,
         })
         .where(eq(oauthAccounts.id, existingLink.id))
     } else {
@@ -242,9 +248,9 @@ export class OAuthService {
         userId: user.id,
         provider,
         providerId: profile.providerId,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: tokens.expiresAt,
+        accessToken: null,
+        refreshToken: null,
+        expiresAt: null,
       })
     }
 

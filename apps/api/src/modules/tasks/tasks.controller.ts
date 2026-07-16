@@ -18,7 +18,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
-import { CreateTaskDto } from './dto/task.dto'
+import { CreateTaskDto, AddAttachmentDto } from './dto/task.dto'
 import type { CurrentUserPayload } from './types'
 
 @ApiTags('tasks')
@@ -41,9 +41,16 @@ export class TasksController {
   @UseGuards(WorkspaceMemberGuard)
   async getWorkspaceTasks(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Query('limit') limit?: string,
   ) {
-    return this.tasks.getTasksForWorkspace(workspaceId, limit ? Number(limit) : 500)
+    // Pass the caller so the listing is scoped to containers they can access
+    // (the guard only checks workspace membership, not private space/project
+    // membership).
+    return this.tasks.getTasksForWorkspace(workspaceId, limit ? Number(limit) : 500, {
+      actorId: user.id,
+      actorRole: user.role,
+    })
   }
 
   @Get('workspace/:workspaceId/members/:userId')
@@ -336,16 +343,24 @@ export class TasksController {
   }
 
   // --- Attachments ---------------------------------------------------------
+  // Listing returns working signed R2 download URLs, so it needs the same
+  // membership + private-container gate as viewing the task (ResourceMemberGuard,
+  // mirroring the GET read routes). The service re-asserts read access as
+  // defense-in-depth.
   @Get(':taskId/attachments')
-  async listAttachments(@Param('taskId') taskId: string) {
-    return this.tasks.listAttachments(taskId)
+  @UseGuards(ResourceMemberGuard)
+  async listAttachments(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.tasks.listAttachments(taskId, user.id)
   }
 
   @Post(':taskId/attachments')
   async addAttachment(
     @Param('taskId') taskId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { fileName: string; url?: string; storageKey?: string; contentType?: string; sizeBytes?: number },
+    @Body() body: AddAttachmentDto,
   ) {
     return this.tasks.addAttachment(taskId, user.id, body)
   }

@@ -66,3 +66,32 @@ export class CreateTaskDto {
   @IsString({ each: true })
   labelIds?: string[]
 }
+
+/**
+ * Add-attachment body. Previously an untyped `@Body() any`, which let a caller
+ * send an arbitrary `storageKey` that the service stored/served verbatim — a
+ * cross-tenant object-reference risk. Declaring the shape (with the global
+ * `whitelist` ValidationPipe) drops unknown fields; the service additionally
+ * enforces that a client `storageKey` sits under this task's own R2 prefix.
+ */
+export class AddAttachmentDto {
+  @IsString()
+  @IsNotEmpty()
+  fileName!: string
+
+  @IsOptional()
+  @IsString()
+  url?: string
+
+  @IsOptional()
+  @IsString()
+  storageKey?: string
+
+  @IsOptional()
+  @IsString()
+  contentType?: string
+
+  @IsOptional()
+  @IsInt()
+  sizeBytes?: number
+}

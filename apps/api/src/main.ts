@@ -63,19 +63,25 @@ async function bootstrap() {
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Rundesk API')
-    .setDescription('Rundesk internal PM platform API')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build()
-  const document = SwaggerModule.createDocument(app, swaggerConfig)
-  SwaggerModule.setup('api/docs', app, document)
+  // Only mount interactive API docs outside production: the schema enumerates
+  // every route/DTO and is a reconnaissance aid an attacker should not be
+  // handed. NODE_ENV must be 'production' to disable it.
+  const swaggerEnabled = process.env.NODE_ENV !== 'production'
+  if (swaggerEnabled) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Rundesk API')
+      .setDescription('Rundesk internal PM platform API')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build()
+    const document = SwaggerModule.createDocument(app, swaggerConfig)
+    SwaggerModule.setup('api/docs', app, document)
+  }
 
   const port = process.env.PORT ?? 3001
   await app.listen(port, '0.0.0.0')
   logger.log(`API running on http://localhost:${port}/api/v1`)
-  logger.log(`Swagger docs at http://localhost:${port}/api/docs`)
+  if (swaggerEnabled) logger.log(`Swagger docs at http://localhost:${port}/api/docs`)
 }
 
 bootstrap()

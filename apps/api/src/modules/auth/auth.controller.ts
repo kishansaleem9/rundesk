@@ -5,6 +5,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 import { AuthService } from './auth.service'
 import { LocalAuthGuard } from './guards/local-auth.guard'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
+import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { RegisterDto } from './dto/register.dto'
 import { SignupDto } from './dto/signup.dto'
@@ -23,6 +24,10 @@ type RequestWithCookies = FastifyRequest & { cookies?: Record<string, string | u
 
 @ApiTags('auth')
 @Controller('auth')
+// Controller-level so it runs BEFORE route guards (e.g. LocalAuthGuard): brute
+// -force attempts with wrong passwords must still count toward the limit. Only
+// routes carrying @RateLimit are actually throttled; everything else is a no-op.
+@UseGuards(RateLimitGuard)
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
@@ -40,6 +45,7 @@ export class AuthController {
   }
 
   @Post('signup')
+  @RateLimit({ limit: 10, windowMs: 60_000 })
   @ApiOperation({ summary: 'Atomic organization signup with initial workspace and optional invites' })
   async signup(@Body() dto: SignupDto, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
     const bundle = await this.authService.signUp(dto, sessionMeta(req))
@@ -56,17 +62,28 @@ export class AuthController {
   }
 
   @Post('login')
+  @RateLimit({ limit: 10, windowMs: 60_000 })
   @UseGuards(LocalAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with email and password' })
   @ApiBody({ type: LoginDto })
-  async login(@CurrentUser() user: any, @Req() req: FastifyRequest, @Res({ passthrough: true }) res: FastifyReply) {
+  async login(
+    @CurrentUser() user: any,
+    @Body() dto: LoginDto,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    // Password already validated by LocalAuthGuard. Enforce the second factor
+    // for accounts with a verified TOTP secret BEFORE issuing any token; this is
+    // a no-op (and the flow is unchanged) for password-only accounts.
+    await this.authService.assertTotpSatisfied(user.id, dto.totpCode)
     const bundle = await this.authService.login(user, sessionMeta(req))
     this.issueCookies(res, bundle)
     return bundle
   }
 
   @Post('refresh')
+  @RateLimit({ limit: 30, windowMs: 60_000 })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token (rotates the refresh token)' })
   async refresh(
@@ -83,6 +100,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @RateLimit({ limit: 5, windowMs: 60_000 })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request a password reset link' })
   async forgotPassword(@Body() body: { email: string }) {
@@ -90,6 +108,7 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @RateLimit({ limit: 10, windowMs: 60_000 })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password with a valid reset token' })
   async resetPassword(@Body() body: { token: string; password: string }) {
@@ -97,6 +116,7 @@ export class AuthController {
   }
 
   @Post('verify-email')
+  @RateLimit({ limit: 10, windowMs: 60_000 })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify a user email address with a token' })
   async verifyEmail(@Body() body: { token: string }) {
@@ -104,6 +124,7 @@ export class AuthController {
   }
 
   @Post('resend-verification')
+  @RateLimit({ limit: 5, windowMs: 60_000 })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend the email-verification link' })
   async resendVerification(@Body() body: { email: string }) {

@@ -24,6 +24,7 @@ import {
   projects,
   spaces,
   spaceMembers,
+  projectMembers,
   workspaces,
   workspaceMembers,
 } from '@rundesk/db'
@@ -37,6 +38,7 @@ import {
   type ExternalLinkRef,
 } from './external-links.util'
 import { resolveEffectiveStatuses } from '../../common/statuses/status-resolution'
+import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
 import { AutomationsService } from '../automations/automations.service'
@@ -451,6 +453,77 @@ export class TasksService {
       .limit(1)
     if (assignee) return ctx
     throw new ForbiddenException('Only assignees, creators, managers, and workspace admins can edit this task')
+  }
+
+  /**
+   * Read-access gate for a task. Unlike assertTaskWriteAccess this does NOT
+   * require the caller to be a creator/assignee: ANY workspace member who can
+   * reach the task's container may view it (comment-/view-only roles and guests
+   * included), matching how the GET routes are authorized by ResourceMemberGuard
+   * (workspace membership + `checkContainerAccess`). It still blocks
+   * cross-workspace / non-member callers and outsiders to a private space or
+   * project. Used by read paths that hand back sensitive data (e.g. signed R2
+   * attachment URLs) as a service-layer defense-in-depth behind the route guard.
+   */
+  private async assertTaskReadAccess(taskId: string, actorId: string) {
+    const [ctx] = await this.db
+      .select({
+        taskId: tasks.id,
+        listId: tasks.listId,
+        createdById: tasks.createdById,
+        workspaceId: spaces.workspaceId,
+        spaceId: spaces.id,
+        spaceVisibility: spaces.visibility,
+        projectId: projects.id,
+        projectVisibility: projects.visibility,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!ctx) throw new NotFoundException('Task not found')
+
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    if (!membership) throw new NotFoundException('Workspace not found')
+
+    // Managers/admins/super_admins bypass private-container membership.
+    if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return ctx
+
+    // A private space requires the actor to be a member of it.
+    if (ctx.spaceVisibility === 'private') {
+      const [sm] = await this.db
+        .select({ userId: spaceMembers.userId })
+        .from(spaceMembers)
+        .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actorId)))
+        .limit(1)
+      if (!sm) throw new ForbiddenException('This space is private')
+    }
+
+    // An explicitly-private project requires project membership (or admin of the
+    // owning space). A project that inherits (null) is covered by the space check.
+    if (ctx.projectVisibility === 'private' && ctx.projectId) {
+      const [pm] = await this.db
+        .select({ userId: projectMembers.userId })
+        .from(projectMembers)
+        .where(and(eq(projectMembers.projectId, ctx.projectId), eq(projectMembers.userId, actorId)))
+        .limit(1)
+      if (!pm) {
+        const [sadm] = await this.db
+          .select({ role: spaceMembers.role })
+          .from(spaceMembers)
+          .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actorId)))
+          .limit(1)
+        if (sadm?.role !== 'admin') throw new ForbiddenException('This project is private')
+      }
+    }
+
+    return ctx
   }
 
   /**
@@ -882,12 +955,14 @@ export class TasksService {
     if (!ref.owner || !ref.repo || !ref.number) return null
     const base = process.env.GITHUB_API_URL ?? 'https://api.github.com'
     const path = kind === 'pull_request' ? 'pulls' : 'issues'
-    const res = await fetch(`${base}/repos/${ref.owner}/${ref.repo}/${path}/${ref.number}`, {
+    // Fixed/operator host (not user-derived), but routed through safeFetch for
+    // defense-in-depth: blocks private/reserved IPs + DNS rebinding on the sink.
+    const res = await safeFetch(`${base}/repos/${ref.owner}/${ref.repo}/${path}/${ref.number}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(15_000),
+      timeoutMs: 15_000,
     })
-    if (!res.ok) return null
-    const body = (await res.json()) as { state?: string; merged?: boolean; merged_at?: string | null; title?: string }
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as { state?: string; merged?: boolean; merged_at?: string | null; title?: string }
     const status =
       kind === 'pull_request'
         ? body.merged || body.merged_at
@@ -901,24 +976,49 @@ export class TasksService {
     return { status, title: body.title ?? null, metadata: { state: body.state ?? null } }
   }
 
+  /**
+   * Hosts the GitLab refresh may send the workspace OAuth token to: gitlab.com
+   * plus any operator-approved self-hosted hosts from GITLAB_ALLOWED_HOSTS
+   * (comma-separated, default none). Read per-call so operators can change the
+   * allowlist without a code change; lowercased for case-insensitive matching.
+   */
+  private gitlabAllowedHosts(): Set<string> {
+    const hosts = new Set<string>(['gitlab.com'])
+    for (const raw of (process.env.GITLAB_ALLOWED_HOSTS ?? '').split(',')) {
+      const h = raw.trim().toLowerCase()
+      if (h) hosts.add(h)
+    }
+    return hosts
+  }
+
   private async fetchGitlabState(
     kind: ExternalLinkKind,
     ref: ExternalLinkRef,
     token: string,
   ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
     if (!ref.projectPath || !ref.number) return null
+    // SSRF / token-exfiltration guard: `ref.host` is derived from the pasted URL,
+    // so it must NEVER be used verbatim as the target of an authenticated request
+    // (a member could paste https://gitlab.evil.com/... and receive the workspace
+    // token). Only reach gitlab.com or an operator-approved host; anything else is
+    // skipped WITHOUT sending the token. safeFetch additionally pins DNS and blocks
+    // private/reserved IPs (incl. cloud metadata) on every redirect hop.
+    const allowedHostnames = this.gitlabAllowedHosts()
+    const host = (ref.host ?? 'gitlab.com').toLowerCase()
+    if (!allowedHostnames.has(host)) return null
     const apiBase =
-      ref.host && ref.host !== 'gitlab.com'
-        ? `https://${ref.host}/api/v4`
-        : process.env.GITLAB_API_URL ?? 'https://gitlab.com/api/v4'
+      host === 'gitlab.com'
+        ? process.env.GITLAB_API_URL ?? 'https://gitlab.com/api/v4'
+        : `https://${host}/api/v4`
     const encoded = encodeURIComponent(ref.projectPath)
     const path = kind === 'pull_request' ? 'merge_requests' : 'issues'
-    const res = await fetch(`${apiBase}/projects/${encoded}/${path}/${ref.number}`, {
+    const res = await safeFetch(`${apiBase}/projects/${encoded}/${path}/${ref.number}`, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(15_000),
+      allowedHostnames,
+      timeoutMs: 15_000,
     })
-    if (!res.ok) return null
-    const body = (await res.json()) as { state?: string; title?: string }
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as { state?: string; title?: string }
     // GitLab states: opened | closed | merged | locked.
     const status =
       body.state === 'merged'
@@ -935,15 +1035,16 @@ export class TasksService {
   ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
     if (!ref.fileId) return null
     const base = process.env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com/drive/v3'
-    const res = await fetch(
+    // Fixed/operator host; routed through safeFetch for defense-in-depth.
+    const res = await safeFetch(
       `${base}/files/${ref.fileId}?fields=id,name,mimeType,thumbnailLink,webViewLink,iconLink`,
       {
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(15_000),
+        timeoutMs: 15_000,
       },
     )
-    if (!res.ok) return null
-    const body = (await res.json()) as {
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as {
       name?: string
       mimeType?: string
       thumbnailLink?: string
@@ -966,14 +1067,15 @@ export class TasksService {
   ): Promise<{ status: string | null; title: string | null; metadata?: Record<string, unknown> } | null> {
     if (!ref.sharedUrl) return null
     const base = process.env.DROPBOX_API_URL ?? 'https://api.dropboxapi.com/2'
-    const res = await fetch(`${base}/sharing/get_shared_link_metadata`, {
+    // Fixed/operator host; routed through safeFetch for defense-in-depth.
+    const res = await safeFetch(`${base}/sharing/get_shared_link_metadata`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: ref.sharedUrl }),
-      signal: AbortSignal.timeout(15_000),
+      timeoutMs: 15_000,
     })
-    if (!res.ok) return null
-    const body = (await res.json()) as { name?: string; '.tag'?: string; size?: number }
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as { name?: string; '.tag'?: string; size?: number }
     return {
       status: null, // Files have no open/merged/closed state.
       title: body.name ?? null,
@@ -1470,33 +1572,87 @@ export class TasksService {
    * keyed on the returned task ids — so the client can filter
    * "tasks assigned to me" without another round trip.
    */
+  /**
+   * Filter denormalised workspace-task rows down to those the actor may see,
+   * enforcing private-container membership. Mirrors `checkContainerAccess`'s rule
+   * but batched (two membership queries, not one per row): a manager-tier actor
+   * (or super_admin) sees everything; a private space requires space membership;
+   * an explicitly-private project requires project membership or admin of the
+   * owning space. Rows must carry spaceId/spaceVisibility/projectId/projectVisibility.
+   */
+  private async filterTasksByContainerAccess<
+    T extends {
+      spaceId: string
+      spaceVisibility: string | null
+      projectId: string
+      projectVisibility: string | null
+    },
+  >(rows: T[], workspaceId: string, actor: { id: string; role?: string }): Promise<T[]> {
+    if (rows.length === 0) return rows
+    // Platform super_admins bypass the guard without a workspace_members row.
+    if (actor.role === 'super_admin') return rows
+
+    const [wm] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
+      .limit(1)
+    if (!wm) return [] // not a member — surface nothing (fail closed; the route guard already blocks)
+    if (['workspace_admin', 'manager', 'super_admin'].includes(wm.role)) return rows
+
+    const spaceRows = await this.db
+      .select({ spaceId: spaceMembers.spaceId, role: spaceMembers.role })
+      .from(spaceMembers)
+      .where(eq(spaceMembers.userId, actor.id))
+    const projectRows = await this.db
+      .select({ projectId: projectMembers.projectId })
+      .from(projectMembers)
+      .where(eq(projectMembers.userId, actor.id))
+    const spaceRoleById = new Map(spaceRows.map((s) => [s.spaceId, s.role]))
+    const memberProjects = new Set(projectRows.map((p) => p.projectId))
+
+    return rows.filter((r) => {
+      // Private space → must be a space member.
+      if (r.spaceVisibility === 'private' && !spaceRoleById.has(r.spaceId)) return false
+      // Explicitly-private project → project member, or admin of the owning space.
+      if (r.projectVisibility === 'private') {
+        if (memberProjects.has(r.projectId)) return true
+        return spaceRoleById.get(r.spaceId) === 'admin'
+      }
+      return true
+    })
+  }
+
   async getTasksForWorkspace(
     workspaceId: string,
     limit = 500,
-    opts: { includeAssignees?: boolean } = {},
+    opts: { includeAssignees?: boolean; actorId?: string; actorRole?: string } = {},
   ) {
-    const { includeAssignees = true } = opts
+    const { includeAssignees = true, actorId, actorRole } = opts
     const safeLimit = Math.min(Math.max(limit, 1), 1000)
 
-    const rows = await this.db
+    const rawRows = await this.db
       .select({
-        id:             tasks.id,
-        title:          tasks.title,
-        status:         tasks.status,
-        statusCategory: tasks.statusCategory,
-        priority:       tasks.priority,
-        isMilestone:    tasks.isMilestone,
-        listId:         lists.id,
-        listName:       lists.name,
-        projectId:      projects.id,
-        projectName:    projects.name,
-        spaceId:        spaces.id,
-        spaceName:      spaces.name,
-        startDate:      tasks.startDate,
-        dueDate:        tasks.dueDate,
-        completedAt:    tasks.completedAt,
-        createdAt:      tasks.createdAt,
-        updatedAt:      tasks.updatedAt,
+        id:                tasks.id,
+        title:             tasks.title,
+        status:            tasks.status,
+        statusCategory:    tasks.statusCategory,
+        priority:          tasks.priority,
+        isMilestone:       tasks.isMilestone,
+        listId:            lists.id,
+        listName:          lists.name,
+        projectId:         projects.id,
+        projectName:       projects.name,
+        spaceId:           spaces.id,
+        spaceName:         spaces.name,
+        startDate:         tasks.startDate,
+        dueDate:           tasks.dueDate,
+        completedAt:       tasks.completedAt,
+        createdAt:         tasks.createdAt,
+        updatedAt:         tasks.updatedAt,
+        // Selected only to scope private containers; stripped from the response.
+        spaceVisibility:   spaces.visibility,
+        projectVisibility: projects.visibility,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -1505,6 +1661,16 @@ export class TasksService {
       .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
       .orderBy(desc(tasks.updatedAt))
       .limit(safeLimit)
+
+    // The workspace listing is guarded only by workspace membership, so without
+    // this it would leak tasks in private spaces/projects the caller can't reach.
+    // Scope to accessible containers when the caller is known; unknown-actor
+    // (internal) callers stay unfiltered to preserve existing behavior.
+    const scopedRows = actorId
+      ? await this.filterTasksByContainerAccess(rawRows, workspaceId, { id: actorId, role: actorRole })
+      : rawRows
+    // Drop the visibility helper columns so the response shape is unchanged.
+    const rows = scopedRows.map(({ spaceVisibility: _sv, projectVisibility: _pv, ...rest }) => rest)
 
     type AssigneeRef = {
       userId: string
@@ -1722,7 +1888,11 @@ export class TasksService {
     }
   }
 
-  async listAttachments(taskId: string) {
+  async listAttachments(taskId: string, actorId: string) {
+    // Returns working signed R2 download URLs — gate on task read access so a
+    // caller can't enumerate another workspace's / private container's files by
+    // guessing task ids (IDOR).
+    await this.assertTaskReadAccess(taskId, actorId)
     const rows = await this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId))
     return Promise.all(rows.map(async (row) => ({
       id: row.id,
@@ -1741,8 +1911,24 @@ export class TasksService {
     actorId: string,
     data: { fileName: string; url?: string; storageKey?: string; contentType?: string; sizeBytes?: number },
   ) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    const ctx = await this.assertTaskWriteAccess(taskId, actorId)
     this.assertAttachmentSize(data.sizeBytes)
+
+    // Cross-tenant object-reference guard. A client-supplied `storageKey` must
+    // sit under THIS task's own R2 upload prefix (exactly what
+    // createAttachmentUploadUrl signs) — otherwise a caller could register an
+    // attachment pointing at another workspace's object and get a signed URL for
+    // it. The `url` path stays open for genuine external hyperlinks but must be a
+    // real http(s) URL, so it can't smuggle a raw storage key past this check.
+    const prefix = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/`
+    if (data.storageKey != null) {
+      if (!data.storageKey.startsWith(prefix)) {
+        throw new BadRequestException('storageKey must reference this task’s own upload prefix')
+      }
+    } else if (data.url != null && !isHttpUrl(data.url)) {
+      throw new BadRequestException('A file attachment requires a storageKey from the presign step')
+    }
+
     const [task] = await this.db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
     if (!task) throw new NotFoundException('Task not found')
     const storageKey = data.storageKey ?? data.url

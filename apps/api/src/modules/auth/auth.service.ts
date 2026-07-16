@@ -53,24 +53,24 @@ export class AuthService {
     const now = new Date()
 
     // Account currently locked from prior failed attempts (auto-releasing).
+    // Enforcement stays server-side (a locked account cannot log in), but the
+    // client always sees the SAME generic "Invalid credentials" message — a
+    // distinct "account locked" response would let an attacker enumerate which
+    // emails belong to real accounts.
     if (settings.lockoutEnabled && user.lockedUntil && new Date(user.lockedUntil) > now) {
-      const mins = Math.max(1, Math.ceil((new Date(user.lockedUntil).getTime() - now.getTime()) / 60000))
-      throw new UnauthorizedException(
-        `Account temporarily locked due to failed logins. Try again in ${mins} minute${mins === 1 ? '' : 's'}.`,
-      )
+      throw new UnauthorizedException('Invalid credentials')
     }
 
     if (!compareSync(password, user.passwordHash)) {
       if (settings.lockoutEnabled) {
         const attempts = (user.failedLoginAttempts ?? 0) + 1
         if (attempts >= settings.lockoutThreshold) {
+          // Still lock the account server-side, but do not disclose it.
           const lockedUntil = new Date(now.getTime() + settings.lockoutDurationMinutes * 60000)
           await this.db.update(users).set({ failedLoginAttempts: 0, lockedUntil }).where(eq(users.id, user.id))
-          throw new UnauthorizedException(
-            `Account locked after ${settings.lockoutThreshold} failed attempts. Try again in ${settings.lockoutDurationMinutes} minutes.`,
-          )
+        } else {
+          await this.db.update(users).set({ failedLoginAttempts: attempts }).where(eq(users.id, user.id))
         }
-        await this.db.update(users).set({ failedLoginAttempts: attempts }).where(eq(users.id, user.id))
       }
       throw new UnauthorizedException('Invalid credentials')
     }
@@ -83,6 +83,40 @@ export class AuthService {
     }
 
     return user
+  }
+
+  /**
+   * Second factor enforcement, run AFTER the password has been validated and
+   * BEFORE any session token is issued.
+   *
+   * - If the account has no VERIFIED TOTP secret, this is a no-op (returns) so
+   *   password-only accounts — including the entire existing test suite — behave
+   *   exactly as before.
+   * - If TOTP is enabled but no `totpCode` was supplied, throws HTTP 401 with a
+   *   machine-readable `{ error: 'totp_required' }` body so the frontend can
+   *   prompt for the code. No tokens are issued.
+   * - If a code is supplied it is verified via the security module's
+   *   {@link SecurityService.validateTotp}, which also accepts a one-time backup
+   *   code. An invalid code throws 401.
+   */
+  async assertTotpSatisfied(userId: string, totpCode?: string): Promise<void> {
+    const { enabled } = await this.security.getTotpStatus(userId)
+    if (!enabled) return
+
+    if (!totpCode) {
+      throw new UnauthorizedException({
+        error: 'totp_required',
+        message: 'A two-factor authentication code is required.',
+      })
+    }
+
+    const ok = await this.security.validateTotp(userId, totpCode)
+    if (!ok) {
+      throw new UnauthorizedException({
+        error: 'totp_invalid',
+        message: 'Invalid two-factor authentication code.',
+      })
+    }
   }
 
   async login(user: typeof users.$inferSelect, meta: SessionMeta = {}) {

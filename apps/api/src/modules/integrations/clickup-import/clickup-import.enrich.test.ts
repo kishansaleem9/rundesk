@@ -133,10 +133,21 @@ describe('ClickUpImportService.enrichTasks — attachments', () => {
           jsonInit(),
         )
       }
-      // attachment bytes
+      // attachment bytes are fetched via the SSRF-guarded path (safeFetchImpl),
+      // not fetchImpl — this branch is only a fallback and should be unused.
       return new Response(Buffer.from('hello'), { status: 200, headers: { 'content-type': 'image/png' } })
     }
-    const client = new ClickUpApiClient({ apiToken: 'tok', fetchImpl })
+    const client = new ClickUpApiClient({
+      apiToken: 'tok',
+      fetchImpl,
+      // Attachment downloads go through safeFetch; serve the bytes here.
+      safeFetchImpl: async () => ({
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+        body: Buffer.from('hello'),
+        text: () => 'hello',
+      }),
+    })
 
     const summary = await svc.enrichTasks('ws-1', 'user-1', 'tok', [{ clickupTaskId: 'cu-1', taskId: 'our-1' }], {
       client,

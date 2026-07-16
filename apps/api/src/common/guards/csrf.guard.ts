@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common'
-import { ACCESS_TOKEN_COOKIE, CSRF_HEADER, CSRF_TOKEN_COOKIE } from '../../modules/auth/auth-cookies'
+import { timingSafeEqual } from 'node:crypto'
+import { ACCESS_TOKEN_COOKIE, CSRF_HEADER, CSRF_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from '../../modules/auth/auth-cookies'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -10,16 +11,31 @@ export type CsrfRequest = {
 }
 
 /**
+ * Constant-time string comparison. Returns false immediately on a length
+ * mismatch (timingSafeEqual throws on unequal-length buffers), otherwise
+ * compares in time independent of how many leading bytes match — so an attacker
+ * cannot recover the token byte-by-byte from response timing.
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, 'utf8')
+  const bufB = Buffer.from(b, 'utf8')
+  if (bufA.length !== bufB.length) return false
+  return timingSafeEqual(bufA, bufB)
+}
+
+/**
  * Double-submit CSRF decision (pure + unit-testable).
  *
  * Enforced ONLY for cookie-authenticated, state-changing requests:
  *   1. Safe methods (GET/HEAD/OPTIONS) are always allowed — never mutate state.
  *   2. Bearer-authenticated requests (Authorization header present) are exempt:
  *      a cross-site attacker cannot attach that header, so they can't be CSRF'd.
- *   3. Requests without an `access_token` cookie are not cookie-authenticated,
- *      so there is nothing for CSRF to protect (JwtAuthGuard handles authn).
- *   4. Otherwise the `X-CSRF-Token` header MUST be present and equal to the
- *      `csrf_token` cookie.
+ *   3. Requests carrying NEITHER an `access_token` NOR a `refresh_token` cookie
+ *      are not cookie-authenticated, so there is nothing for CSRF to protect.
+ *      The refresh_token cookie counts too: cookie-auth refresh/logout present
+ *      only a refresh_token, and those state-changing calls must be protected.
+ *   4. Otherwise the `X-CSRF-Token` header MUST be present and equal (in
+ *      constant time) to the `csrf_token` cookie.
  */
 export function isCsrfRequestAllowed(req: CsrfRequest): boolean {
   const method = (req.method ?? 'GET').toUpperCase()
@@ -29,16 +45,13 @@ export function isCsrfRequestAllowed(req: CsrfRequest): boolean {
   if (typeof authHeader === 'string' && /^bearer\s+/i.test(authHeader)) return true
 
   const accessCookie = req.cookies?.[ACCESS_TOKEN_COOKIE]
-  if (!accessCookie) return true // not authenticated via cookie → not a CSRF target
+  const refreshCookie = req.cookies?.[REFRESH_TOKEN_COOKIE]
+  if (!accessCookie && !refreshCookie) return true // no cookie-auth material → not a CSRF target
 
   const headerToken = req.headers?.[CSRF_HEADER]
   const cookieToken = req.cookies?.[CSRF_TOKEN_COOKIE]
-  return Boolean(
-    cookieToken &&
-      typeof headerToken === 'string' &&
-      headerToken.length > 0 &&
-      headerToken === cookieToken,
-  )
+  if (!cookieToken || typeof headerToken !== 'string' || headerToken.length === 0) return false
+  return constantTimeEqual(headerToken, cookieToken)
 }
 
 /**

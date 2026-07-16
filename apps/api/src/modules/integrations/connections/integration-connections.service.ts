@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { and, desc, eq } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Db } from '@rundesk/db'
@@ -48,6 +49,7 @@ export class IntegrationConnectionsService {
   constructor(
     @Inject(DB_TOKEN) private readonly db: Db,
     private readonly security: SecurityService,
+    private readonly config: ConfigService,
   ) {}
 
   async list(workspaceId: string) {
@@ -503,8 +505,19 @@ export class IntegrationConnectionsService {
     return ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'].filter((k) => !process.env[k])
   }
 
-  private getStateSecret() {
-    return process.env.INTEGRATIONS_OAUTH_STATE_SECRET ?? process.env.JWT_SECRET ?? 'rundesk-oauth-state'
+  /**
+   * HMAC key for the signed OAuth `state` (the CSRF/binding token round-tripped
+   * through the provider). Prefers a dedicated secret when operators set one,
+   * otherwise falls back to the always-present `JWT_ACCESS_SECRET` via
+   * `getOrThrow` — mirroring the social-login `OAuthService`. The previous code
+   * referenced a `JWT_SECRET` that is never defined app-wide and a hardcoded
+   * literal, which resolved to a forgeable, predictable key.
+   */
+  private getStateSecret(): string {
+    return (
+      this.config.get<string>('INTEGRATIONS_OAUTH_STATE_SECRET') ??
+      this.config.getOrThrow<string>('JWT_ACCESS_SECRET')
+    )
   }
 
   private getRedirectUri(provider: Provider) {

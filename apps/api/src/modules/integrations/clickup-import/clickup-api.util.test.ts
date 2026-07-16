@@ -6,6 +6,7 @@ import {
   clickupDate,
   safeAttachmentName,
   type FetchLike,
+  type SafeFetchLike,
 } from './clickup-api.util'
 
 /**
@@ -113,10 +114,18 @@ describe('ClickUpApiClient.getTaskAttachments', () => {
 })
 
 describe('ClickUpApiClient.downloadAttachment', () => {
-  it('streams bytes on success', async () => {
-    const fetchImpl: FetchLike = async () =>
-      new Response(Buffer.from('hello'), { status: 200, headers: { 'content-type': 'image/png' } })
-    const client = new ClickUpApiClient({ apiToken: 'tok', fetchImpl })
+  const safeRes = (over: Partial<{ status: number; body: Buffer; contentType: string }> = {}): SafeFetchLike => {
+    const status = over.status ?? 200
+    const body = over.body ?? Buffer.from('hello')
+    const headers = over.contentType ? { 'content-type': over.contentType } : {}
+    return async () => ({ status, headers, body, text: () => body.toString('utf8') })
+  }
+
+  it('streams bytes on success (via the SSRF-guarded fetch)', async () => {
+    const client = new ClickUpApiClient({
+      apiToken: 'tok',
+      safeFetchImpl: safeRes({ contentType: 'image/png' }),
+    })
     const dl = await client.downloadAttachment({
       id: 'a',
       url: 'https://attachments.clickup.com/a.png',
@@ -128,19 +137,30 @@ describe('ClickUpApiClient.downloadAttachment', () => {
   })
 
   it('returns null (never throws) on http error, network throw, or missing url', async () => {
-    const notFound = new ClickUpApiClient({ apiToken: 'tok', fetchImpl: async () => new Response('', { status: 404 }) })
+    const notFound = new ClickUpApiClient({ apiToken: 'tok', safeFetchImpl: safeRes({ status: 404 }) })
     assert.equal(await notFound.downloadAttachment({ id: 'a', url: 'https://x/a' }), null)
 
     const throwing = new ClickUpApiClient({
       apiToken: 'tok',
-      fetchImpl: async () => {
+      safeFetchImpl: async () => {
         throw new Error('network down')
       },
     })
     assert.equal(await throwing.downloadAttachment({ id: 'a', url: 'https://x/a' }), null)
 
-    const ok = new ClickUpApiClient({ apiToken: 'tok', fetchImpl: async () => new Response('x') })
+    const ok = new ClickUpApiClient({ apiToken: 'tok', safeFetchImpl: safeRes() })
     assert.equal(await ok.downloadAttachment({ id: 'a' }), null)
+  })
+
+  it('blocks a private/reserved target via the real safeFetch guard → null (no injection)', async () => {
+    // No safeFetchImpl → the real safeFetch is used. A literal link-local IP
+    // (the cloud-metadata endpoint) is rejected synchronously, so no network
+    // request is made and the download degrades to null.
+    const client = new ClickUpApiClient({ apiToken: 'tok' })
+    assert.equal(
+      await client.downloadAttachment({ id: 'a', url: 'http://169.254.169.254/latest/meta-data/' }),
+      null,
+    )
   })
 })
 

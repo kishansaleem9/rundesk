@@ -14,7 +14,7 @@ export class SecurityService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
   // ── TOTP setup ──────────────────────────────────────────────────────────────
-  async setupTotp(userId: string): Promise<{ otpauthUrl: string; secret: string; qrCodeUrl: string }> {
+  async setupTotp(userId: string): Promise<{ otpauthUrl: string; secret: string }> {
     const [user] = await this.db.select({ email: users.email, displayName: users.displayName }).from(users).where(eq(users.id, userId))
     if (!user) throw new NotFoundException('User not found')
 
@@ -34,11 +34,13 @@ export class SecurityService {
 
     await this.db.insert(userTotpSecrets).values({ userId, secret, verified: false })
 
+    // Return the raw otpauth:// URI so the CLIENT renders the QR code locally.
+    // We must never send the TOTP seed to a third party — the previous Google
+    // Charts QR URL embedded the base32 secret in a request to
+    // chart.googleapis.com (also a deprecated/dead API).
     const otpauthUrl = totp.toString()
-    // Google Charts QR code
-    const qrCodeUrl = `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(otpauthUrl)}`
 
-    return { otpauthUrl, secret, qrCodeUrl }
+    return { otpauthUrl, secret }
   }
 
   async verifyAndActivateTotp(userId: string, code: string): Promise<{ backupCodes: string[] }> {
@@ -276,7 +278,14 @@ export class SecurityService {
       .orderBy(desc(auditLogs.createdAt))
       .limit(10000)
 
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const esc = (v: unknown) => {
+      let s = String(v ?? '')
+      // Neutralize spreadsheet formula/CSV injection: a cell that begins with
+      // =, +, -, @, tab, or CR can be executed as a formula by Excel/Sheets.
+      // Prefix such values with a single quote before quoting the field.
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`
+      return `"${s.replace(/"/g, '""')}"`
+    }
     const header = ['Timestamp', 'Actor', 'Action', 'Resource', 'Description', 'IP address']
     const lines = rows.map((r) =>
       [

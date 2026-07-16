@@ -19,14 +19,17 @@ const PG_ERROR_MAP: Record<string, { status: number; message: string }> = {
   UNDEFINED_VALUE: { status: HttpStatus.BAD_REQUEST, message: 'A required field is missing' },
 }
 
-function mapDatabaseError(exception: unknown): { status: number; message: string } | null {
+function mapDatabaseError(exception: unknown): { status: number; message: string; column?: string } | null {
   const code = (exception as { code?: unknown })?.code
   if (typeof code !== 'string') return null
   const mapped = PG_ERROR_MAP[code]
   if (!mapped) return null
+  // Surface the offending column for SERVER-SIDE logging only. It must never
+  // appear in the client-facing message — that would leak the internal DB
+  // schema (column names). The client always gets the generic mapped message.
   const column = (exception as { column_name?: string })?.column_name
   if (code === '23502' && column) {
-    return { status: mapped.status, message: `Required field missing: ${column}` }
+    return { ...mapped, column }
   }
   return mapped
 }
@@ -60,6 +63,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
       this.logger.error(
         `[${errorId}] ${method} ${url} requestId=${requestId}\n${stack}`,
       )
+    } else if (dbError?.column) {
+      // NOT-NULL violation: record the internal column name server-side only,
+      // so operators can debug without exposing the schema to the client.
+      const method = req?.method ?? 'UNKNOWN'
+      const url = req?.url ?? 'UNKNOWN'
+      this.logger.warn(`[${errorId}] ${method} ${url} NOT NULL violation on column "${dbError.column}"`)
     }
 
     reply.status(status).send({

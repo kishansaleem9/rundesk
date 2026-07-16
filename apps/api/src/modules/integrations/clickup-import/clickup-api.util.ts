@@ -15,11 +15,20 @@
  *    `null` so one failure can't sink an entire enrichment batch.
  */
 
+import { safeFetch, type SafeFetchOptions, type SafeFetchResponse } from '../../../common/http/safe-fetch'
+
 /** ClickUp REST API v2 base. Auth header is `Authorization: <token>` (raw). */
 export const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'
 
 /** ClickUp returns at most 25 comments per page. */
 export const COMMENT_PAGE_SIZE = 25
+
+/** Generous cap on a single attachment download (defence-in-depth, not a limit
+ * users are expected to hit). Kept high so real imports don't regress. */
+export const DEFAULT_DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
+
+/** The guarded-fetch shape used for attachment downloads (defaults to `safeFetch`). */
+export type SafeFetchLike = (url: string, opts?: SafeFetchOptions) => Promise<SafeFetchResponse>
 
 export type ClickUpUser = {
   id?: number
@@ -72,6 +81,15 @@ export type ClickUpApiClientOptions = {
   maxRetries?: number
   timeoutMs?: number
   downloadTimeoutMs?: number
+  /** Cap on a single attachment download's bytes (see DEFAULT_DOWNLOAD_MAX_BYTES). */
+  downloadMaxBytes?: number
+  /**
+   * SSRF-hardened fetch for attachment downloads. Attachment URLs come from
+   * ClickUp's API response (semi-trusted) and may redirect to arbitrary hosts,
+   * so downloads go through `safeFetch` (private/reserved-IP block + DNS pinning
+   * + per-hop redirect re-validation). Injectable so tests stay hermetic.
+   */
+  safeFetchImpl?: SafeFetchLike
   /** Injectable so tests don't actually wait during backoff. */
   sleep?: (ms: number) => Promise<void>
 }
@@ -115,6 +133,8 @@ export class ClickUpApiClient implements ClickUpClientLike {
   private readonly maxRetries: number
   private readonly timeoutMs: number
   private readonly downloadTimeoutMs: number
+  private readonly downloadMaxBytes: number
+  private readonly safeFetchImpl: SafeFetchLike
   private readonly sleep: (ms: number) => Promise<void>
 
   constructor(opts: ClickUpApiClientOptions) {
@@ -125,6 +145,8 @@ export class ClickUpApiClient implements ClickUpClientLike {
     this.maxRetries = opts.maxRetries ?? 3
     this.timeoutMs = opts.timeoutMs ?? 20_000
     this.downloadTimeoutMs = opts.downloadTimeoutMs ?? 60_000
+    this.downloadMaxBytes = opts.downloadMaxBytes ?? DEFAULT_DOWNLOAD_MAX_BYTES
+    this.safeFetchImpl = opts.safeFetchImpl ?? ((url, o) => safeFetch(url, o))
     this.sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
   }
 
@@ -175,6 +197,11 @@ export class ClickUpApiClient implements ClickUpClientLike {
    * Stream an attachment's bytes. Returns `null` (never throws) on any failure
    * so one broken file is skipped, not fatal. The auth header is only sent to
    * clickup.com hosts so the token never leaks to a third-party CDN.
+   *
+   * The download goes through the SSRF-hardened `safeFetch`: attachment URLs are
+   * only semi-trusted (they come from ClickUp's API response and may redirect),
+   * so private/reserved-IP targets are blocked with DNS pinning and every
+   * redirect hop is re-validated. A blocked/failed fetch simply yields `null`.
    */
   async downloadAttachment(att: ClickUpAttachment): Promise<{ buffer: Buffer; contentType: string } | null> {
     const url = att.url_w_query ?? att.url
@@ -182,13 +209,15 @@ export class ClickUpApiClient implements ClickUpClientLike {
     try {
       const headers: Record<string, string> = {}
       if (isClickUpHost(urlHost(url))) headers.Authorization = this.apiToken
-      const res = await this.fetchImpl(url, {
+      const res = await this.safeFetchImpl(url, {
+        method: 'GET',
         headers,
-        signal: AbortSignal.timeout(this.downloadTimeoutMs),
+        timeoutMs: this.downloadTimeoutMs,
+        maxBytes: this.downloadMaxBytes,
       })
-      if (!res.ok) return null
-      const buffer = Buffer.from(await res.arrayBuffer())
-      const contentType = att.mimetype || res.headers.get('content-type') || 'application/octet-stream'
+      if (res.status < 200 || res.status >= 300) return null
+      const buffer = res.body
+      const contentType = att.mimetype || res.headers['content-type'] || 'application/octet-stream'
       return { buffer, contentType }
     } catch {
       return null

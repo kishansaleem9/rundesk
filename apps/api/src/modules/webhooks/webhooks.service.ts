@@ -4,6 +4,8 @@ import * as crypto from 'crypto'
 import { webhooks, webhookDeliveries } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { assertSafeUrl, safeFetch, SsrfBlockedError } from '../../common/http/safe-fetch'
+import type { CreateWebhookDto, UpdateWebhookDto } from './dto/webhook.dto'
 
 const WEBHOOK_EVENTS = [
   'task.created',
@@ -38,19 +40,33 @@ export class WebhooksService {
       .orderBy(desc(webhooks.createdAt))
   }
 
+  /**
+   * Reject a webhook target URL that is not a public http/https endpoint before
+   * it is ever persisted: non-http(s) schemes and literal private/reserved IPs
+   * (loopback, link-local incl. the 169.254.169.254 cloud-metadata endpoint,
+   * RFC-1918, CGNAT, …) are refused here. Hostnames that resolve to a private
+   * address are additionally blocked at delivery time by {@link safeFetch}'s
+   * DNS-pinned guard, so DNS-rebinding cannot repoint a "public" host inward.
+   */
+  private assertPublicHttpUrl(url: string) {
+    try {
+      assertSafeUrl(url)
+    } catch (err) {
+      if (err instanceof SsrfBlockedError) {
+        throw new BadRequestException(`url is not an allowed webhook target: ${err.message}`)
+      }
+      throw new BadRequestException('url must be a valid absolute http(s) URL')
+    }
+  }
+
   async create(
     workspaceId: string,
     userId: string,
-    dto: { name: string; url: string; events: string[]; secret?: string },
+    dto: CreateWebhookDto,
   ) {
     if (typeof dto?.name !== 'string' || !dto.name.trim()) throw new BadRequestException('name is required')
     if (typeof dto?.url !== 'string' || !dto.url.trim()) throw new BadRequestException('url is required')
-    try {
-      // eslint-disable-next-line no-new
-      new URL(dto.url)
-    } catch {
-      throw new BadRequestException('url must be a valid absolute URL')
-    }
+    this.assertPublicHttpUrl(dto.url)
     if (!Array.isArray(dto.events) || dto.events.length === 0) {
       throw new BadRequestException('events must be a non-empty array')
     }
@@ -77,9 +93,12 @@ export class WebhooksService {
   async update(
     workspaceId: string,
     webhookId: string,
-    patch: { name?: string; url?: string; events?: string[]; isEnabled?: boolean },
+    patch: UpdateWebhookDto,
   ) {
     await this.assertOwnership(workspaceId, webhookId)
+    // Re-validate the target on update too: without this an admin could create a
+    // benign webhook and later PATCH `url` to an internal address (SSRF).
+    if (typeof patch.url === 'string') this.assertPublicHttpUrl(patch.url)
     const [row] = await this.db
       .update(webhooks)
       .set({ ...patch, updatedAt: new Date() })
@@ -180,6 +199,12 @@ export class WebhooksService {
    * Post with retry. Retries on network errors AND on HTTP 5xx responses with
    * exponential backoff (250ms, 750ms, 1.5s). 4xx responses are treated as
    * permanent failures and not retried.
+   *
+   * All delivery traffic goes through {@link safeFetch}, which enforces
+   * http/https only, blocks private/reserved IPs with DNS pinning, and
+   * re-validates every redirect hop — so a webhook can never be used to read an
+   * internal endpoint (e.g. the cloud-metadata service). A {@link SsrfBlockedError}
+   * is a permanent block: it is recorded as a failed delivery and never retried.
    */
   private async postWithRetry(
     url: string,
@@ -203,21 +228,27 @@ export class WebhooksService {
     while (attempt < maxAttempts) {
       attempt++
       try {
-        const res = await fetch(url, {
-          ...init,
-          signal: AbortSignal.timeout(10_000),
+        const res = await safeFetch(url, {
+          method: init.method,
+          headers: init.headers,
+          body: init.body,
+          timeoutMs: 10_000,
         })
         lastStatus = res.status
-        lastBody = await res.text().catch(() => '')
+        lastBody = res.text()
         lastError = undefined
         // Success — done
-        if (res.ok) return { attempts: attempt, lastStatus, lastBody }
+        if (res.status >= 200 && res.status < 300) return { attempts: attempt, lastStatus, lastBody }
         // 4xx — permanent failure, do not retry
         if (res.status >= 400 && res.status < 500) {
           return { attempts: attempt, lastStatus, lastBody }
         }
         // 5xx — fall through to retry
       } catch (err: any) {
+        // SSRF-blocked targets are permanent: don't retry, record the failure.
+        if (err instanceof SsrfBlockedError) {
+          return { attempts: attempt, lastStatus: undefined, lastBody: undefined, lastError: `Blocked: ${err.message}` }
+        }
         lastError = err?.message ?? 'Delivery failed'
         lastStatus = undefined
         lastBody = undefined

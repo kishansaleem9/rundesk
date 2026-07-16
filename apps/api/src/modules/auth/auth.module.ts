@@ -13,6 +13,7 @@ import { WorkspacesModule } from '../workspaces/workspaces.module'
 import { EmailModule } from '../email/email.module'
 import { WorkspaceMemberGuard } from './guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from './guards/workspace-admin.guard'
+import { RateLimitGuard } from '../../common/guards/rate-limit.guard'
 import { SecurityModule } from '../security/security.module'
 
 @Module({
@@ -38,6 +39,9 @@ import { SecurityModule } from '../security/security.module'
     LocalStrategy,
     WorkspaceMemberGuard,
     WorkspaceAdminGuard,
+    // Registered so the DI container hands out ONE shared instance whose
+    // in-memory sliding-window Map is consistent across all auth routes.
+    RateLimitGuard,
   ],
   exports: [AuthService, OAuthService, WorkspaceMemberGuard, WorkspaceAdminGuard],
 })
