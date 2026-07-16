@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api, ApiError } from '../lib/api'
+import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import {
   Card,
@@ -20,6 +22,8 @@ import {
   Users,
   Target,
   Calendar,
+  Gauge,
+  ListFilter,
   Plus,
   GripVertical,
   X,
@@ -44,6 +48,8 @@ type WidgetType =
   | 'time'
   | 'pie-status'
   | 'bar-priority'
+  | 'project-health'
+  | 'task-list'
 
 const WIDGET_CATALOG: Array<{
   type: WidgetType
@@ -62,6 +68,8 @@ const WIDGET_CATALOG: Array<{
   { type: 'time', labelKey: 'dashboardWidget.name.time', descKey: 'dashboardWidget.desc.time', icon: Calendar, category: 'metrics' },
   { type: 'pie-status', labelKey: 'dashboardWidget.name.pieStatus', descKey: 'dashboardWidget.desc.pieStatus', icon: PieChart, category: 'charts' },
   { type: 'bar-priority', labelKey: 'dashboardWidget.name.barPriority', descKey: 'dashboardWidget.desc.barPriority', icon: BarChart3, category: 'charts' },
+  { type: 'project-health', labelKey: 'dashboardWidget.name.projectHealth', descKey: 'dashboardWidget.desc.projectHealth', icon: Gauge, category: 'charts' },
+  { type: 'task-list', labelKey: 'dashboardWidget.name.taskList', descKey: 'dashboardWidget.desc.taskList', icon: ListFilter, category: 'lists' },
 ]
 
 type Widget = { id: string; type: WidgetType; w: 1 | 2 | 3; h: 1 | 2 }
@@ -405,10 +413,11 @@ function WidgetPreview({
   if (widget.type === 'pie-status') return <PieStatusWidget workspaceId={workspaceId} />
   if (widget.type === 'sprint-burndown') return <SprintBurndownWidget workspaceId={workspaceId} />
   if (widget.type === 'team-load') return <TeamLoadWidget workspaceId={workspaceId} />
-  if (widget.type === 'activity') return <ActivityWidget />
-  ;
+  if (widget.type === 'activity') return <ActivityWidget workspaceId={workspaceId} />
   if (widget.type === 'goals') return <GoalsWidget workspaceId={workspaceId} />
   if (widget.type === 'bar-priority') return <BarPriorityWidget workspaceId={workspaceId} />
+  if (widget.type === 'project-health') return <ProjectHealthWidget workspaceId={workspaceId} />
+  if (widget.type === 'task-list') return <TaskListWidget workspaceId={workspaceId} />
   return null
 }
 
@@ -459,22 +468,69 @@ function BarPriorityWidget({ workspaceId }: { workspaceId: string }) {
   )
 }
 
+type DueTask = {
+  id: string
+  title: string
+  priority?: 'urgent' | 'high' | 'normal' | 'low' | null
+  listId: string
+  projectId: string
+  projectName: string
+  spaceId: string
+}
+
+function priorityDotClass(priority?: string | null): string {
+  switch (priority) {
+    case 'urgent':
+      return 'bg-destructive'
+    case 'high':
+      return 'bg-warning'
+    case 'low':
+      return 'bg-muted-foreground'
+    default:
+      return 'bg-accent'
+  }
+}
+
 function TasksDueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
   const { t } = useTranslation()
   const q = useQuery({
     queryKey: ['reports-overview', workspaceId],
     queryFn: () =>
-      api<{ dueToday: number; total: number }>(
+      api<{ dueToday: number; total: number; dueTodayList: DueTask[] }>(
         `/workspaces/${workspaceId}/reports/overview`,
       ),
   })
+  const list = q.data?.dueTodayList ?? []
   return (
-    <Tile
-      label={t('dashboardWidget.dueToday')}
-      value={q.data?.dueToday ?? '—'}
-      hint={q.data ? t('dashboardWidget.ofTotal', { total: q.data.total }) : t('common.loading')}
-      Icon={Icon}
-    />
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between text-xs uppercase tracking-wider text-muted-foreground">
+        {t('dashboardWidget.dueToday')}
+        <Icon className="h-3.5 w-3.5" />
+      </div>
+      <div className="flex items-baseline gap-2 mt-1">
+        <span className="font-display text-3xl font-semibold tabular-nums">{q.data?.dueToday ?? '—'}</span>
+        <span className="text-[10px] text-muted-foreground">
+          {q.data ? t('dashboardWidget.ofTotal', { total: q.data.total }) : t('common.loading')}
+        </span>
+      </div>
+      <ul className="mt-2 space-y-1 overflow-hidden flex-1">
+        {q.data && list.length === 0 && (
+          <li className="text-[11px] text-muted-foreground">{t('dashboardWidget.dueTodayEmpty')}</li>
+        )}
+        {list.slice(0, 6).map((task) => (
+          <li key={task.id}>
+            <Link
+              to="/app/$workspaceId/$spaceId/$projectId/$listId"
+              params={{ workspaceId, spaceId: task.spaceId, projectId: task.projectId, listId: task.listId }}
+              className="flex items-center gap-1.5 text-[11px] hover:text-accent transition-colors"
+            >
+              <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', priorityDotClass(task.priority))} />
+              <span className="truncate">{task.title}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -499,19 +555,43 @@ function OverdueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspace
 
 function CompletionTile({ Icon, workspaceId }: { Icon: React.ElementType; workspaceId: string }) {
   const { t } = useTranslation()
+  const [period, setPeriod] = useState<'week' | 'month'>('week')
+  const days = period === 'week' ? 7 : 30
   const q = useQuery({
-    queryKey: ['reports-overview', workspaceId],
+    queryKey: ['reports-completion', workspaceId, days],
     queryFn: () =>
-      api<{ completionRate: number }>(`/workspaces/${workspaceId}/reports/overview`),
+      api<{ completionRate: number; completed: number; total: number }>(
+        `/workspaces/${workspaceId}/reports/completion?days=${days}`,
+      ),
   })
   return (
-    <Tile
-      label={t('dashboardWidget.completion')}
-      value={q.data ? `${q.data.completionRate}%` : '—'}
-      hint={t('dashboardWidget.allTime')}
-      Icon={Icon}
-      tone="success"
-    />
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between text-xs uppercase tracking-wider text-muted-foreground">
+        {t('dashboardWidget.completion')}
+        <Icon className="h-3.5 w-3.5" />
+      </div>
+      <div className="font-display text-3xl font-semibold tabular-nums mt-2 text-success">
+        {q.data ? `${q.data.completionRate}%` : '—'}
+      </div>
+      <div className="text-[11px] text-muted-foreground">
+        {q.data ? t('dashboardWidget.completedOfTotal', { completed: q.data.completed, total: q.data.total }) : t('common.loading')}
+      </div>
+      <div className="mt-auto flex items-center gap-1 pt-1">
+        {(['week', 'month'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => setPeriod(p)}
+            className={cn(
+              'text-[10px] px-1.5 py-0.5 rounded transition-colors',
+              period === p ? 'bg-accent/15 text-accent font-medium' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {p === 'week' ? t('dashboardWidget.thisWeek') : t('dashboardWidget.thisMonth')}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -779,34 +859,240 @@ function SprintBurndownWidget({ workspaceId }: { workspaceId: string }) {
     </div>
   )
 }
-function ActivityWidget() {
+type ActivityRow = {
+  id: string
+  action: string
+  createdAt: string
+  taskTitle: string
+  actorName: string | null
+  spaceId: string
+  projectId: string
+  listId: string
+}
+
+// Compact translated verb per activity action; unmapped actions fall back to
+// the generic "updated" key so the feed always reads as a sentence.
+const ACTIVITY_VERB: Record<string, TranslationKey> = {
+  created: 'dashboardWidget.action.created',
+  updated: 'dashboardWidget.action.updated',
+  archived: 'dashboardWidget.action.archived',
+  restored: 'dashboardWidget.action.restored',
+  status_changed: 'dashboardWidget.action.statusChanged',
+  priority_changed: 'dashboardWidget.action.priorityChanged',
+  assigned: 'dashboardWidget.action.assigned',
+  unassigned: 'dashboardWidget.action.unassigned',
+  commented: 'dashboardWidget.action.commented',
+  label_added: 'dashboardWidget.action.labeled',
+  label_removed: 'dashboardWidget.action.labeled',
+  due_date_changed: 'dashboardWidget.action.dueDateChanged',
+  moved: 'dashboardWidget.action.moved',
+}
+
+// Workspace-wide team activity (§9.1): recent task_activity across the whole
+// workspace, not the viewer's own notifications.
+function ActivityWidget({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const q = useQuery({
-    queryKey: ['notifications', 'feed'],
-    queryFn: () =>
-      api<Array<{ id: string; title: string; body?: string; createdAt: string }>>(
-        `/notifications?unreadOnly=false`,
-      ),
+    queryKey: ['reports-activity', workspaceId],
+    queryFn: () => api<ActivityRow[]>(`/workspaces/${workspaceId}/reports/activity?limit=8`),
   })
-  const items = (q.data ?? []).slice(0, 6)
+  const items = q.data ?? []
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">{t('dashboardWidget.recentActivity')}</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5">{t('dashboardWidget.teamActivity')}</div>
       <ul className="flex-1 space-y-1 text-[11px] overflow-hidden">
         {items.length === 0 && (
           <li className="text-muted-foreground">{t('dashboardWidget.noRecentActivity')}</li>
         )}
-        {items.map((n) => {
-          const minutes = Math.max(1, Math.round((Date.now() - new Date(n.createdAt).getTime()) / 60000))
+        {items.map((a) => {
+          const minutes = Math.max(1, Math.round((Date.now() - new Date(a.createdAt).getTime()) / 60000))
           const ts = minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.round(minutes / 60)}h` : `${Math.round(minutes / 1440)}d`
+          const verb = t(ACTIVITY_VERB[a.action] ?? 'dashboardWidget.action.updated')
           return (
-            <li key={n.id} className="truncate">
-              <span className="text-foreground">{n.title}</span>
-              <span className="text-muted-foreground"> · {ts}</span>
+            <li key={a.id} className="truncate">
+              <Link
+                to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                params={{ workspaceId, spaceId: a.spaceId, projectId: a.projectId, listId: a.listId }}
+                className="hover:text-accent transition-colors"
+              >
+                <span className="text-foreground font-medium">{a.actorName ?? t('dashboardWidget.someone')}</span>
+                <span className="text-muted-foreground"> {verb} </span>
+                <span className="text-foreground">{a.taskTitle}</span>
+                <span className="text-muted-foreground"> · {ts}</span>
+              </Link>
             </li>
           )
         })}
       </ul>
+    </div>
+  )
+}
+
+type HealthRow = {
+  projectId: string
+  name: string
+  score: number
+  band: 'green' | 'yellow' | 'red' | 'empty'
+  total: number
+  open: number
+  overdueOpen: number
+  blockedOpen: number
+}
+
+// Project health scores (§5.7): color-coded bars from a deterministic backend
+// formula (see reports.service getProjectHealth).
+function ProjectHealthWidget({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const q = useQuery({
+    queryKey: ['reports-project-health', workspaceId],
+    queryFn: () => api<HealthRow[]>(`/workspaces/${workspaceId}/reports/project-health`),
+  })
+  const projects = (q.data ?? []).filter((p) => p.total > 0).slice(0, 6)
+  const barColor = (band: HealthRow['band']) =>
+    band === 'green' ? 'bg-success' : band === 'yellow' ? 'bg-warning' : 'bg-destructive'
+  const textColor = (band: HealthRow['band']) =>
+    band === 'green' ? 'text-success' : band === 'yellow' ? 'text-warning' : 'text-destructive'
+  if (q.isError) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">{t('dashboardWidget.name.projectHealth')}</div>
+        <div className="flex-1 flex items-center justify-center text-[11px] text-muted-foreground">
+          {t('dashboardWidget.healthLoadError')}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col h-full">
+      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">{t('dashboardWidget.name.projectHealth')}</div>
+      <ul className="flex-1 space-y-1.5 overflow-hidden">
+        {q.data && projects.length === 0 && (
+          <li className="text-[11px] text-muted-foreground">{t('dashboardWidget.noProjects')}</li>
+        )}
+        {projects.map((p) => (
+          <li key={p.projectId} className="flex items-center gap-2 text-[11px]">
+            <span className="w-16 truncate" title={p.name}>{p.name}</span>
+            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div className={cn('h-full rounded-full', barColor(p.band))} style={{ width: `${p.score}%` }} />
+            </div>
+            <span className={cn('tabular-nums w-7 text-right font-medium', textColor(p.band))}>{p.score}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+type WorkspaceTask = {
+  id: string
+  title: string
+  statusCategory: 'open' | 'in_progress' | 'closed'
+  priority?: 'urgent' | 'high' | 'normal' | 'low'
+  dueDate?: string | null
+  listId: string
+  projectId: string
+  spaceId: string
+  assignees: Array<{ userId: string }>
+}
+
+// Configurable, filterable task list (§5.7): filter by assignee=me, status,
+// priority, and due window over the existing denormalized workspace task query.
+function TaskListWidget({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const userId = useAuthStore((s) => s.user?.id)
+  const [mineOnly, setMineOnly] = useState(true)
+  const [status, setStatus] = useState<'any' | 'open' | 'in_progress' | 'closed'>('any')
+  const [priority, setPriority] = useState<'any' | 'urgent' | 'high' | 'normal' | 'low'>('any')
+  const [due, setDue] = useState<'any' | 'overdue' | 'today' | 'week'>('any')
+
+  const q = useQuery({
+    queryKey: ['dashboard-tasks', workspaceId],
+    queryFn: () => api<WorkspaceTask[]>(`/tasks/workspace/${workspaceId}?limit=500`),
+  })
+
+  const now = new Date()
+  const isSameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString()
+  const weekEnd = new Date(now)
+  weekEnd.setDate(weekEnd.getDate() + 7)
+
+  const filtered = (q.data ?? []).filter((task) => {
+    if (mineOnly && !(task.assignees ?? []).some((a) => a.userId === userId)) return false
+    if (status !== 'any' && task.statusCategory !== status) return false
+    if (priority !== 'any' && (task.priority ?? 'normal') !== priority) return false
+    if (due !== 'any') {
+      if (!task.dueDate) return false
+      const d = new Date(task.dueDate)
+      if (due === 'overdue' && !(d < now && !isSameDay(d, now))) return false
+      if (due === 'today' && !isSameDay(d, now)) return false
+      if (due === 'week' && !(d >= now && d <= weekEnd)) return false
+    }
+    return true
+  })
+  const rows = filtered.slice(0, 20)
+
+  const selectCls =
+    'text-[10px] bg-card/60 border border-border/60 rounded px-1 py-0.5 text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent'
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between text-xs uppercase tracking-wider text-muted-foreground mb-1.5">
+        {t('dashboardWidget.name.taskList')}
+        <ListFilter className="h-3.5 w-3.5" />
+      </div>
+      <div className="flex flex-wrap items-center gap-1 mb-1.5">
+        <button
+          type="button"
+          onClick={() => setMineOnly((v) => !v)}
+          className={cn(
+            'text-[10px] px-1.5 py-0.5 rounded border transition-colors',
+            mineOnly ? 'bg-accent/15 text-accent border-accent/30' : 'text-muted-foreground border-border/60 hover:text-foreground',
+          )}
+        >
+          {t('dashboardWidget.filterMine')}
+        </button>
+        <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value as typeof status)} aria-label={t('dashboardWidget.filterStatus')}>
+          <option value="any">{t('dashboardWidget.filterStatus')}</option>
+          <option value="open">{t('dashboardWidget.statusOpen')}</option>
+          <option value="in_progress">{t('dashboardWidget.statusInProgress')}</option>
+          <option value="closed">{t('dashboardWidget.statusClosed')}</option>
+        </select>
+        <select className={selectCls} value={priority} onChange={(e) => setPriority(e.target.value as typeof priority)} aria-label={t('dashboardWidget.filterPriority')}>
+          <option value="any">{t('dashboardWidget.filterPriority')}</option>
+          <option value="urgent">{t('dashboardWidget.priorityUrgent')}</option>
+          <option value="high">{t('dashboardWidget.priorityHigh')}</option>
+          <option value="normal">{t('dashboardWidget.priorityNormal')}</option>
+          <option value="low">{t('dashboardWidget.priorityLow')}</option>
+        </select>
+        <select className={selectCls} value={due} onChange={(e) => setDue(e.target.value as typeof due)} aria-label={t('dashboardWidget.filterDue')}>
+          <option value="any">{t('dashboardWidget.filterDue')}</option>
+          <option value="overdue">{t('dashboardWidget.dueOverdue')}</option>
+          <option value="today">{t('dashboardWidget.dueToday')}</option>
+          <option value="week">{t('dashboardWidget.thisWeek')}</option>
+        </select>
+      </div>
+      <ul className="flex-1 space-y-1 overflow-auto">
+        {q.data && rows.length === 0 && (
+          <li className="text-[11px] text-muted-foreground">{t('dashboardWidget.noMatchingTasks')}</li>
+        )}
+        {rows.map((task) => (
+          <li key={task.id}>
+            <Link
+              to="/app/$workspaceId/$spaceId/$projectId/$listId"
+              params={{ workspaceId, spaceId: task.spaceId, projectId: task.projectId, listId: task.listId }}
+              className="flex items-center gap-1.5 text-[11px] hover:text-accent transition-colors"
+            >
+              <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', priorityDotClass(task.priority))} />
+              <span className="truncate flex-1">{task.title}</span>
+              {task.dueDate && (
+                <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                  {new Date(task.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                </span>
+              )}
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <div className="text-[10px] text-muted-foreground mt-1">{t('dashboardWidget.taskCount', { count: filtered.length })}</div>
     </div>
   )
 }

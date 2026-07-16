@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useParams, Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
   Button,
@@ -10,6 +10,9 @@ import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   cn,
 } from '@rundesk/ui'
 import { Users, Calendar, AlertTriangle, Download } from 'lucide-react'
@@ -206,43 +209,16 @@ export function WorkloadPage() {
                     {p.capacity}h
                   </Badge>
                 </div>
-                {dates.map((d, i) => {
-                  const load = p.dailyLoads[i] ?? 0
-                  const ratio = Math.min(2, load / p.capacity)
-                  const isWeekend = d.getDay() === 0 || d.getDay() === 6
-                  return (
-                    <Tooltip key={i}>
-                      <TooltipTrigger asChild>
-                        <div
-                          className={cn(
-                            'w-12 h-[58px] flex items-center justify-center border-r border-border/30 last:border-r-0 cursor-pointer transition-colors',
-                            isWeekend && 'opacity-40',
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              'h-8 w-8 rounded-md flex items-center justify-center text-[10px] font-semibold tabular-nums transition-transform group-hover:scale-95',
-                              loadColor(ratio),
-                            )}
-                          >
-                            {load > 0 ? load.toFixed(1) : ''}
-                          </div>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <div className="space-y-0.5 text-[11px]">
-                          <div className="font-medium">{p.name}</div>
-                          <div className="text-muted-foreground">
-                            {d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-                          </div>
-                          <div>
-                            {t('workload.capacityTooltip', { load: load.toFixed(1), capacity: p.capacity })}
-                          </div>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  )
-                })}
+                {dates.map((d, i) => (
+                  <WorkloadCell
+                    key={i}
+                    workspaceId={workspaceId}
+                    person={p}
+                    date={d}
+                    index={i}
+                    days={days}
+                  />
+                ))}
               </div>
             ))}
           </div>
@@ -267,4 +243,167 @@ function loadColor(ratio: number): string {
   if (ratio <= 1) return 'bg-warning/70 text-warning-foreground'
   if (ratio <= 1.3) return 'bg-destructive/70 text-destructive-foreground'
   return 'bg-destructive text-destructive-foreground shadow-[0_0_12px_hsl(var(--destructive)/0.5)]'
+}
+
+type WorkloadDayTask = {
+  id: string
+  title: string
+  status: string
+  statusCategory: string
+  priority?: 'urgent' | 'high' | 'normal' | 'low' | null
+  hours: number
+  listId: string
+  listName: string
+  projectId: string
+  projectName: string
+  spaceId: string
+  spaceName: string
+}
+
+function priorityDot(priority?: string | null): string {
+  switch (priority) {
+    case 'urgent':
+      return 'bg-destructive'
+    case 'high':
+      return 'bg-warning'
+    case 'low':
+      return 'bg-muted-foreground'
+    default:
+      return 'bg-accent'
+  }
+}
+
+/** Local YYYY-MM-DD (avoids the UTC shift toISOString would introduce). */
+function toDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * A single workload heat-map cell (§5.6). Empty cells are hover-only; loaded
+ * cells become a click target that opens a popover listing the tasks that
+ * compose that day's load for that person, each linking to its list.
+ */
+function WorkloadCell({
+  workspaceId,
+  person,
+  date,
+  index,
+  days,
+}: {
+  workspaceId: string
+  person: { userId?: string; name: string; capacity: number; dailyLoads: number[] }
+  date: Date
+  index: number
+  days: number
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const load = person.dailyLoads[index] ?? 0
+  const ratio = Math.min(2, load / person.capacity)
+  const isWeekend = date.getDay() === 0 || date.getDay() === 6
+  const dateStr = toDateStr(date)
+  const canOpen = load > 0 && Boolean(person.userId)
+
+  const dayQuery = useQuery({
+    queryKey: ['workload-day', workspaceId, person.userId, dateStr, days],
+    queryFn: () =>
+      api<WorkloadDayTask[]>(
+        `/workspaces/${workspaceId}/reports/workload/day?userId=${person.userId}&date=${dateStr}&days=${days}`,
+      ),
+    enabled: open && canOpen,
+  })
+
+  const cell = (
+    <div
+      className={cn(
+        'w-12 h-[58px] flex items-center justify-center border-r border-border/30 last:border-r-0 transition-colors',
+        canOpen && 'cursor-pointer',
+        isWeekend && 'opacity-40',
+      )}
+    >
+      <div
+        className={cn(
+          'h-8 w-8 rounded-md flex items-center justify-center text-[10px] font-semibold tabular-nums transition-transform group-hover:scale-95',
+          loadColor(ratio),
+        )}
+      >
+        {load > 0 ? load.toFixed(1) : ''}
+      </div>
+    </div>
+  )
+
+  const tooltip = (
+    <TooltipContent>
+      <div className="space-y-0.5 text-[11px]">
+        <div className="font-medium">{person.name}</div>
+        <div className="text-muted-foreground">
+          {date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+        </div>
+        <div>{t('workload.capacityTooltip', { load: load.toFixed(1), capacity: person.capacity })}</div>
+        {canOpen && <div className="text-muted-foreground">{t('workload.clickForTasks')}</div>}
+      </div>
+    </TooltipContent>
+  )
+
+  if (!canOpen) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>{cell}</TooltipTrigger>
+        {tooltip}
+      </Tooltip>
+    )
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>{cell}</PopoverTrigger>
+        </TooltipTrigger>
+        {tooltip}
+      </Tooltip>
+      <PopoverContent align="center" className="w-72 p-0">
+        <div className="px-3 py-2 border-b border-border/60">
+          <div className="text-sm font-medium">{person.name}</div>
+          <div className="text-[11px] text-muted-foreground">
+            {date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+            {' · '}
+            {t('workload.capacityTooltip', { load: load.toFixed(1), capacity: person.capacity })}
+          </div>
+        </div>
+        <div className="max-h-64 overflow-auto p-1.5">
+          {dayQuery.isLoading && (
+            <div className="px-2 py-3 text-[11px] text-muted-foreground">{t('common.loading')}</div>
+          )}
+          {dayQuery.isError && (
+            <div className="px-2 py-3 text-[11px] text-muted-foreground">{t('workload.dayLoadError')}</div>
+          )}
+          {dayQuery.data && dayQuery.data.length === 0 && (
+            <div className="px-2 py-3 text-[11px] text-muted-foreground">{t('workload.noDayTasks')}</div>
+          )}
+          {dayQuery.data?.map((task) => (
+            <Link
+              key={task.id}
+              to="/app/$workspaceId/$spaceId/$projectId/$listId"
+              params={{ workspaceId, spaceId: task.spaceId, projectId: task.projectId, listId: task.listId }}
+              onClick={() => setOpen(false)}
+              className="block rounded-md px-2 py-1.5 hover:bg-card/70 transition-colors"
+            >
+              <div className="flex items-center gap-1.5">
+                <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', priorityDot(task.priority))} />
+                <span className="text-[12px] truncate flex-1">{task.title}</span>
+                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">{task.hours}h</span>
+              </div>
+              <div className="flex items-center gap-1.5 pl-3 mt-0.5">
+                <Badge variant="soft" className="text-[9px] capitalize">
+                  {task.status.replace(/_/g, ' ')}
+                </Badge>
+                <span className="text-[10px] text-muted-foreground truncate">{task.projectName}</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }

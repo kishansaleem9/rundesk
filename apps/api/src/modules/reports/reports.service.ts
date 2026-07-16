@@ -4,6 +4,7 @@ import {
   tasks,
   taskAssignees,
   taskActivity,
+  taskDependencies,
   taskLabelAssignments,
   labels,
   users,
@@ -95,10 +96,18 @@ export class ReportsService {
     const allTasksQuery = await this.db
       .select({
         id: tasks.id,
+        title: tasks.title,
         status: tasks.status,
+        statusCategory: tasks.statusCategory,
         priority: tasks.priority,
         dueDate: tasks.dueDate,
         completedAt: tasks.completedAt,
+        listId: lists.id,
+        listName: lists.name,
+        projectId: projects.id,
+        projectName: projects.name,
+        spaceId: spaces.id,
+        spaceName: spaces.name,
       })
       .from(tasks)
       .innerJoin(lists, eq(tasks.listId, lists.id))
@@ -112,11 +121,12 @@ export class ReportsService {
     const overdue = allTasksQuery.filter(
       (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== 'done',
     ).length
-    const dueToday = allTasksQuery.filter((t) => {
+    const dueTodayTasks = allTasksQuery.filter((t) => {
       if (!t.dueDate) return false
       const d = new Date(t.dueDate)
       return d.toDateString() === now.toDateString() && t.status !== 'done'
-    }).length
+    })
+    const dueToday = dueTodayTasks.length
 
     const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0
 
@@ -127,7 +137,28 @@ export class ReportsService {
       if (key in byPriority) byPriority[key]++
     }
 
-    return { total, completed, overdue, dueToday, completionRate, byPriority }
+    // §9.1: return the actual due-today tasks (not just the count) so the
+    // real-time widget can render the list with links, ordered by priority.
+    const prioRank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
+    const dueTodayList = dueTodayTasks
+      .sort((a, b) => (prioRank[a.priority ?? 'normal'] ?? 2) - (prioRank[b.priority ?? 'normal'] ?? 2))
+      .slice(0, 50)
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        statusCategory: t.statusCategory,
+        priority: t.priority,
+        dueDate: t.dueDate,
+        listId: t.listId,
+        listName: t.listName,
+        projectId: t.projectId,
+        projectName: t.projectName,
+        spaceId: t.spaceId,
+        spaceName: t.spaceName,
+      }))
+
+    return { total, completed, overdue, dueToday, completionRate, byPriority, dueTodayList }
   }
 
   // ─── Productivity per member ──────────────────────────────────────────────
@@ -268,6 +299,9 @@ export class ReportsService {
       completed: completed.length,
       onTime,
       late,
+      // Share of tasks created in the window that are now done — lets the
+      // completion widget offer a this-week / this-month period toggle (§9.1).
+      completionRate: allTasks.length > 0 ? Math.round((completed.length / allTasks.length) * 100) : 0,
       onTimeRate: completed.length > 0 ? Math.round((onTime / completed.length) * 100) : 0,
       trend: Object.entries(byDay).map(([date, count]) => ({ date, count })),
       statusBreakdown,
@@ -566,6 +600,275 @@ export class ReportsService {
         dailyLoads: (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10),
       }
     })
+  }
+
+  /**
+   * Drill-down for a single workload heat-map cell (§5.6): the tasks assigned
+   * to `userId` that contribute load on `dateStr` (YYYY-MM-DD). Mirrors the
+   * span/estimate maths in getWorkload exactly so the per-task `hours` sum to
+   * the cell's displayed load. `days` is the same horizon the heat-map uses so
+   * the range clamping matches.
+   */
+  async getWorkloadDay(workspaceId: string, userId: string, dateStr: string, days = 14) {
+    const horizon = Math.min(Math.max(days, 1), 90)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(start)
+    end.setDate(end.getDate() + horizon - 1)
+    end.setHours(0, 0, 0, 0)
+
+    const target = new Date(dateStr)
+    if (Number.isNaN(target.getTime())) return []
+    target.setHours(0, 0, 0, 0)
+
+    const rows = await this.db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        priority: tasks.priority,
+        startDate: tasks.startDate,
+        dueDate: tasks.dueDate,
+        timeEstimate: tasks.timeEstimate,
+        listId: lists.id,
+        listName: lists.name,
+        projectId: projects.id,
+        projectName: projects.name,
+        spaceId: spaces.id,
+        spaceName: spaces.name,
+      })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(taskAssignees.userId, userId),
+          eq(tasks.isArchived, false),
+          sql`${tasks.status} != 'done'`,
+        ),
+      )
+
+    const toDayStart = (value: Date) => {
+      const next = new Date(value)
+      next.setHours(0, 0, 0, 0)
+      return next
+    }
+
+    const prioRank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
+    const result = []
+    for (const task of rows) {
+      const estimateHours = Math.max(0.5, Math.round(((task.timeEstimate ?? 4 * 3600) / 3600) * 10) / 10)
+      const rawStart = task.startDate ? toDayStart(new Date(task.startDate)) : start
+      const rawEnd = task.dueDate ? toDayStart(new Date(task.dueDate)) : rawStart
+      const rangeStart = rawStart < start ? start : rawStart
+      const rangeEnd = rawEnd > end ? end : rawEnd
+      if (target < rangeStart || target > rangeEnd) continue
+      const spanDays = Math.max(1, Math.floor((rangeEnd.getTime() - rangeStart.getTime()) / 86400000) + 1)
+      const perDay = estimateHours / spanDays
+      result.push({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        statusCategory: task.statusCategory,
+        priority: task.priority,
+        startDate: task.startDate,
+        dueDate: task.dueDate,
+        hours: Math.round(perDay * 10) / 10,
+        listId: task.listId,
+        listName: task.listName,
+        projectId: task.projectId,
+        projectName: task.projectName,
+        spaceId: task.spaceId,
+        spaceName: task.spaceName,
+      })
+    }
+    result.sort(
+      (a, b) =>
+        (prioRank[a.priority ?? 'normal'] ?? 2) - (prioRank[b.priority ?? 'normal'] ?? 2) || b.hours - a.hours,
+    )
+    return result
+  }
+
+  /**
+   * Deterministic per-project health scores 0–100 (§5.7). Transparent weighted
+   * formula from real signals — no AI, no randomness:
+   *   score = 100 × ( 0.35·onTime + 0.30·notOverdue + 0.15·notBlocked + 0.20·recentActivity )
+   *   • onTime         = completed-with-due tasks finished on/before due date
+   *                      (1 if some completed but none had due dates; 0.6 neutral if none completed)
+   *   • notOverdue     = 1 − (open tasks past due ÷ open tasks)
+   *   • notBlocked     = 1 − (open tasks blocked by an incomplete task ÷ open tasks)
+   *   • recentActivity = min(1, activity events in last 7d ÷ open tasks)
+   * Bands: green ≥ 75, yellow ≥ 50, red < 50; empty projects score 0.
+   */
+  async getProjectHealth(workspaceId: string) {
+    const now = Date.now()
+    const activitySince = daysAgo(7)
+
+    const projectRows = await this.db
+      .select({ id: projects.id, name: projects.name, color: projects.color })
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(projects.isArchived, false)))
+      .orderBy(asc(projects.name))
+
+    const taskRows = await this.db
+      .select({
+        id: tasks.id,
+        projectId: lists.projectId,
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        dueDate: tasks.dueDate,
+        completedAt: tasks.completedAt,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+
+    const statusById = new Map(taskRows.map((t) => [t.id, t.statusCategory]))
+
+    // Blocked open tasks: normalize both dependency directions to
+    // (blockedId ← blockerId); a blocker still open means real blockage.
+    const depRows = await this.db
+      .select({
+        taskId: taskDependencies.taskId,
+        relatedTaskId: taskDependencies.relatedTaskId,
+        type: taskDependencies.type,
+      })
+      .from(taskDependencies)
+      .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskDependencies.type, ['blocks', 'blocked_by'])))
+
+    const blockedSet = new Set<string>()
+    for (const d of depRows) {
+      const blockedId = d.type === 'blocks' ? d.relatedTaskId : d.taskId
+      const blockerId = d.type === 'blocks' ? d.taskId : d.relatedTaskId
+      const blockerStatus = statusById.get(blockerId)
+      if (blockerStatus && blockerStatus !== 'closed') blockedSet.add(blockedId)
+    }
+
+    const activityRows = await this.db
+      .select({
+        projectId: lists.projectId,
+        count: sql<number>`count(${taskActivity.id})::int`,
+      })
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(taskActivity.createdAt, activitySince)))
+      .groupBy(lists.projectId)
+    const activityByProject = new Map(activityRows.map((r) => [r.projectId, r.count]))
+
+    type PHRow = (typeof taskRows)[number]
+    const byProject = new Map<string, PHRow[]>()
+    for (const t of taskRows) {
+      const arr = byProject.get(t.projectId) ?? []
+      arr.push(t)
+      byProject.set(t.projectId, arr)
+    }
+
+    const W = { onTime: 0.35, overdue: 0.3, blockers: 0.15, activity: 0.2 }
+    const isClosed = (t: PHRow) => t.statusCategory === 'closed' || t.status === 'done'
+
+    const results = projectRows.map((p) => {
+      const ts = byProject.get(p.id) ?? []
+      const total = ts.length
+      const completed = ts.filter(isClosed)
+      const open = ts.filter((t) => !isClosed(t))
+      const openCount = open.length
+
+      const completedWithDue = completed.filter((t) => t.dueDate && t.completedAt)
+      const onTimeCount = completedWithDue.filter(
+        (t) => new Date(t.completedAt as Date) <= new Date(t.dueDate as Date),
+      ).length
+      const onTimeScore =
+        completedWithDue.length > 0 ? onTimeCount / completedWithDue.length : completed.length > 0 ? 1 : 0.6
+
+      const overdueOpen = open.filter((t) => t.dueDate && new Date(t.dueDate).getTime() < now).length
+      const overdueScore = openCount > 0 ? 1 - overdueOpen / openCount : 1
+
+      const blockedOpen = open.filter((t) => blockedSet.has(t.id)).length
+      const blockerScore = openCount > 0 ? 1 - blockedOpen / openCount : 1
+
+      const recentActivity = activityByProject.get(p.id) ?? 0
+      const activityScore = openCount > 0 ? Math.min(1, recentActivity / openCount) : 1
+
+      const raw =
+        onTimeScore * W.onTime + overdueScore * W.overdue + blockerScore * W.blockers + activityScore * W.activity
+      const score = total === 0 ? 0 : Math.round(raw * 100)
+      const band = total === 0 ? 'empty' : score >= 75 ? 'green' : score >= 50 ? 'yellow' : 'red'
+
+      return {
+        projectId: p.id,
+        name: p.name,
+        color: p.color,
+        score,
+        band,
+        total,
+        open: openCount,
+        completed: completed.length,
+        overdueOpen,
+        blockedOpen,
+        recentActivity,
+        components: {
+          onTime: Math.round(onTimeScore * 100),
+          overdue: Math.round(overdueScore * 100),
+          blockers: Math.round(blockerScore * 100),
+          activity: Math.round(activityScore * 100),
+        },
+      }
+    })
+
+    // Healthiest first; empty projects (score 0) naturally sink to the bottom.
+    results.sort((a, b) => b.score - a.score)
+    return results
+  }
+
+  /**
+   * Workspace-wide recent task activity feed (§9.1). Unlike /notifications
+   * (per-user), this returns the latest task_activity events across the whole
+   * workspace with actor + task context for linking.
+   */
+  async getWorkspaceActivity(workspaceId: string, limit = 20) {
+    const safeLimit = Math.min(Math.max(limit, 1), 100)
+    const rows = await this.db
+      .select({
+        id: taskActivity.id,
+        action: taskActivity.action,
+        meta: taskActivity.meta,
+        createdAt: taskActivity.createdAt,
+        taskId: tasks.id,
+        taskTitle: tasks.title,
+        actorId: users.id,
+        actorName: users.displayName,
+        actorAvatarUrl: users.avatarUrl,
+        listId: lists.id,
+        listName: lists.name,
+        projectId: projects.id,
+        projectName: projects.name,
+        spaceId: spaces.id,
+        spaceName: spaces.name,
+      })
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .leftJoin(users, eq(users.id, taskActivity.actorId))
+      .where(eq(spaces.workspaceId, workspaceId))
+      .orderBy(desc(taskActivity.createdAt))
+      .limit(safeLimit)
+    return rows
   }
 
   // ─── Custom report builder (real metrics × dimension × filters) ────────────

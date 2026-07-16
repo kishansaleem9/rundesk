@@ -108,6 +108,32 @@ export class ReportsController {
     return this.reports.getWorkload(workspaceId, days ? parseInt(days, 10) : 14)
   }
 
+  @Get('workload/day')
+  @ApiOperation({ summary: "Tasks composing one workload heat-map cell (user × day)" })
+  workloadDay(
+    @Param('workspaceId') workspaceId: string,
+    @Query('userId') userId: string,
+    @Query('date') date: string,
+    @Query('days') days?: string,
+  ) {
+    return this.reports.getWorkloadDay(workspaceId, userId, date, days ? parseInt(days, 10) : 14)
+  }
+
+  @Get('project-health')
+  @ApiOperation({ summary: 'Deterministic per-project health scores (0–100)' })
+  projectHealth(@Param('workspaceId') workspaceId: string) {
+    return this.reports.getProjectHealth(workspaceId)
+  }
+
+  @Get('activity')
+  @ApiOperation({ summary: 'Workspace-wide recent task activity feed' })
+  activity(
+    @Param('workspaceId') workspaceId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.reports.getWorkspaceActivity(workspaceId, limit ? parseInt(limit, 10) : 20)
+  }
+
   // ─── Custom report builder ────────────────────────────────────────────────
   @Post('custom/run')
   @ApiOperation({ summary: 'Run an ad-hoc custom report definition' })
