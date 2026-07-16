@@ -22,6 +22,7 @@ import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as SubmitSlugRouteImport } from './routes/submit.$slug'
+import { Route as PortalTokenRouteImport } from './routes/portal.$token'
 import { Route as DSlugRouteImport } from './routes/d.$slug'
 import { Route as AppProfileRouteImport } from './routes/app.profile'
 import { Route as AppHelpRouteImport } from './routes/app.help'
@@ -131,6 +132,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const SubmitSlugRoute = SubmitSlugRouteImport.update({
   id: '/submit/$slug',
   path: '/submit/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalTokenRoute = PortalTokenRouteImport.update({
+  id: '/portal/$token',
+  path: '/portal/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DSlugRoute = DSlugRouteImport.update({
@@ -476,6 +482,7 @@ export interface FileRoutesByFullPath {
   '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
   '/d/$slug': typeof DSlugRoute
+  '/portal/$token': typeof PortalTokenRoute
   '/submit/$slug': typeof SubmitSlugRoute
   '/app/': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
@@ -534,6 +541,7 @@ export interface FileRoutesByTo {
   '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
   '/d/$slug': typeof DSlugRoute
+  '/portal/$token': typeof PortalTokenRoute
   '/submit/$slug': typeof SubmitSlugRoute
   '/app': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
@@ -590,6 +598,7 @@ export interface FileRoutesById {
   '/app/help': typeof AppHelpRoute
   '/app/profile': typeof AppProfileRoute
   '/d/$slug': typeof DSlugRoute
+  '/portal/$token': typeof PortalTokenRoute
   '/submit/$slug': typeof SubmitSlugRoute
   '/app/': typeof AppIndexRoute
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
@@ -651,6 +660,7 @@ export interface FileRouteTypes {
     | '/app/help'
     | '/app/profile'
     | '/d/$slug'
+    | '/portal/$token'
     | '/submit/$slug'
     | '/app/'
     | '/app/$workspaceId/$spaceId'
@@ -709,6 +719,7 @@ export interface FileRouteTypes {
     | '/app/help'
     | '/app/profile'
     | '/d/$slug'
+    | '/portal/$token'
     | '/submit/$slug'
     | '/app'
     | '/app/$workspaceId/$spaceId'
@@ -764,6 +775,7 @@ export interface FileRouteTypes {
     | '/app/help'
     | '/app/profile'
     | '/d/$slug'
+    | '/portal/$token'
     | '/submit/$slug'
     | '/app/'
     | '/app/$workspaceId/$spaceId'
@@ -820,6 +832,7 @@ export interface RootRouteChildren {
   StatusRoute: typeof StatusRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
   DSlugRoute: typeof DSlugRoute
+  PortalTokenRoute: typeof PortalTokenRoute
   SubmitSlugRoute: typeof SubmitSlugRoute
 }
 
@@ -900,6 +913,13 @@ declare module '@tanstack/react-router' {
       path: '/submit/$slug'
       fullPath: '/submit/$slug'
       preLoaderRoute: typeof SubmitSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portal/$token': {
+      id: '/portal/$token'
+      path: '/portal/$token'
+      fullPath: '/portal/$token'
+      preLoaderRoute: typeof PortalTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/d/$slug': {
@@ -1421,6 +1441,7 @@ const rootRouteChildren: RootRouteChildren = {
   StatusRoute: StatusRoute,
   VerifyEmailRoute: VerifyEmailRoute,
   DSlugRoute: DSlugRoute,
+  PortalTokenRoute: PortalTokenRoute,
   SubmitSlugRoute: SubmitSlugRoute,
 }
 export const routeTree = rootRouteImport

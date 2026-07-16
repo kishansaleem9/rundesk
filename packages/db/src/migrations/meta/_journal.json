@@ -519,6 +519,13 @@
       "when": 1900000070000,
       "tag": "0073_support_help_center",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1900000071000,
+      "tag": "0074_client_portals",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, useMatches, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, Card, Badge, cn, toast } from '@rundesk/ui'
-import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, Check, HeartPulse } from 'lucide-react'
+import { List as ListIcon, Plus, Settings, Trash2, Users, CircleDot, DollarSign, Activity, Sparkles, Copy, Loader2, X, Check, HeartPulse, Globe, ExternalLink } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -228,6 +228,8 @@ function ProjectHome() {
       <ProjectActivitySection projectId={projectId} workspaceId={workspaceId} projectName={project?.name} />
 
       <ProjectTimeSettingsSection projectId={projectId} workspaceId={workspaceId} />
+
+      <ClientPortalSection projectId={projectId} />
 
       <ContainerMembersSheet
         kind="project"
@@ -999,6 +1001,224 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
         </div>
       </Card>
     </section>
+  )
+}
+
+// §14.7 — Client-facing portal. Creates a tokenized, read-only, branded view of
+// this project for external clients (no workspace access). Admins can copy the
+// public link, enable/disable, toggle show-completed, revoke, and see when a
+// client last opened it.
+type AdminPortal = {
+  id: string
+  projectId: string
+  clientId: string | null
+  token: string
+  url: string
+  name: string | null
+  isEnabled: boolean
+  showCompleted: boolean
+  createdById: string | null
+  createdAt: string
+  lastViewedAt: string | null
+}
+
+function ClientPortalSection({ projectId }: { projectId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [newName, setNewName] = useState('')
+
+  const portalsQuery = useQuery({
+    queryKey: ['client-portals', projectId],
+    queryFn: () => api<AdminPortal[]>(`/projects/${projectId}/portal`),
+  })
+  const portals = portalsQuery.data ?? []
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['client-portals', projectId] })
+
+  const createPortal = useMutation({
+    mutationFn: () =>
+      api<AdminPortal>(`/projects/${projectId}/portal`, {
+        method: 'POST',
+        body: { name: newName.trim() || undefined },
+      }),
+    onSuccess: () => {
+      setNewName('')
+      invalidate()
+      toast.success(t('clientPortal.created'))
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('clientPortal.createError')),
+  })
+  const updatePortal = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) =>
+      api(`/portals/${id}`, { method: 'PATCH', body: patch }),
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('clientPortal.updateError')),
+  })
+  const removePortal = useMutation({
+    mutationFn: (id: string) => api(`/portals/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      invalidate()
+      toast.success(t('clientPortal.revoked'))
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('clientPortal.updateError')),
+  })
+
+  const publicUrl = (portal: AdminPortal) => `${window.location.origin}${portal.url}`
+  const copyLink = (portal: AdminPortal) => {
+    void navigator.clipboard
+      .writeText(publicUrl(portal))
+      .then(() => toast.success(t('clientPortal.copied')))
+      .catch(() => toast.error(t('clientPortal.copyError')))
+  }
+
+  return (
+    <section>
+      <WorkSectionTitle>
+        <span className="flex items-center gap-2">
+          <Globe className="h-4 w-4 text-muted-foreground" />
+          {t('clientPortal.sectionTitle')}
+        </span>
+      </WorkSectionTitle>
+      <p className="text-[13px] text-muted-foreground mb-4 -mt-1">{t('clientPortal.sectionDesc')}</p>
+
+      <Card className="p-4 border-border/80 space-y-4">
+        {/* Create */}
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            createPortal.mutate()
+          }}
+        >
+          <Input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder={t('clientPortal.namePlaceholder')}
+            className="h-8 flex-1"
+          />
+          <Button type="submit" size="sm" disabled={createPortal.isPending}>
+            {createPortal.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <><Plus className="h-3.5 w-3.5 mr-1.5" /> {t('clientPortal.create')}</>
+            )}
+          </Button>
+        </form>
+
+        {portals.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">{t('clientPortal.noPortal')}</p>
+        ) : (
+          <ul className="space-y-3">
+            {portals.map((portal) => (
+              <li key={portal.id} className="rounded-lg border border-border/70 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px] font-medium truncate">
+                        {portal.name || t('clientPortal.untitled')}
+                      </span>
+                      <span
+                        className={cn(
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium',
+                          portal.isEnabled
+                            ? 'bg-emerald-500/15 text-emerald-600'
+                            : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {portal.isEnabled ? t('clientPortal.enabled') : t('clientPortal.disabled')}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[12px] text-muted-foreground truncate font-mono">
+                      {publicUrl(portal)}
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      {portal.lastViewedAt
+                        ? t('clientPortal.lastViewed', {
+                            when: formatDistanceToNowStrict(new Date(portal.lastViewedAt), { addSuffix: true }),
+                          })
+                        : t('clientPortal.neverViewed')}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button size="sm" variant="outline" onClick={() => copyLink(portal)} title={t('clientPortal.copyLink')}>
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <a href={publicUrl(portal)} target="_blank" rel="noreferrer" title={t('clientPortal.openLink')}>
+                      <Button size="sm" variant="outline" type="button">
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Button>
+                    </a>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => {
+                        if (window.confirm(t('clientPortal.revokeConfirm'))) removePortal.mutate(portal.id)
+                      }}
+                      title={t('clientPortal.revoke')}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Toggles */}
+                <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-border/50 pt-3">
+                  <PortalToggle
+                    label={t('clientPortal.enabledSetting')}
+                    checked={portal.isEnabled}
+                    disabled={updatePortal.isPending}
+                    onChange={(next) => updatePortal.mutate({ id: portal.id, patch: { isEnabled: next } })}
+                  />
+                  <PortalToggle
+                    label={t('clientPortal.showCompleted')}
+                    checked={portal.showCompleted}
+                    disabled={updatePortal.isPending}
+                    onChange={(next) => updatePortal.mutate({ id: portal.id, patch: { showCompleted: next } })}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </section>
+  )
+}
+
+function PortalToggle({
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <label className="flex items-center gap-2 cursor-pointer text-[13px]">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          'relative h-5 w-9 shrink-0 rounded-full transition-colors',
+          checked ? 'bg-brand-700' : 'bg-muted',
+          disabled && 'opacity-60',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
+            checked && 'translate-x-4',
+          )}
+        />
+      </button>
+      <span>{label}</span>
+    </label>
   )
 }
 
