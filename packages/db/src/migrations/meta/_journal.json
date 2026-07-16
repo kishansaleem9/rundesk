@@ -484,6 +484,13 @@
       "when": 1900000065000,
       "tag": "0068_task_external_links",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1900000066000,
+      "tag": "0069_clickup_import_jobs",
+      "breakpoints": true
     }
   ]
 }
