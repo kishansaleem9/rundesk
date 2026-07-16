@@ -76,6 +76,13 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [ssoHint, setSsoHint] = useState<SsoLookupResponse['connection']>(null)
+  // Optimistically show both social buttons; the providers probe below hides any
+  // that the backend reports as unconfigured. If the probe fails we degrade
+  // gracefully by leaving both visible (an unconfigured click just bounces back).
+  const [oauthProviders, setOauthProviders] = useState<{ google: boolean; microsoft: boolean }>({
+    google: true,
+    microsoft: true,
+  })
   const [touched, setTouched] = useState({
     email: false,
     password: false,
@@ -91,14 +98,39 @@ export function LoginPage() {
     import.meta.env.DEV ||
     String(import.meta.env.VITE_SHOW_SEEDED_LOGINS).toLowerCase() === 'true'
 
-  // Surface SSO errors propagated back from the IdP callback redirect.
+  // Surface SSO / OAuth errors propagated back from a provider callback redirect.
   useEffect(() => {
     const ssoError = searchParams.get('ssoError')
+    const oauthError = searchParams.get('error')
     if (ssoError) {
       setError(ssoError)
       window.history.replaceState({}, '', '/login')
+    } else if (oauthError) {
+      // Backend uses short codes (e.g. oauth_unconfigured); show a generic
+      // localized failure rather than the raw code.
+      setError(t('auth.loginFailed'))
+      window.history.replaceState({}, '', '/login')
     }
-  }, [searchParams])
+  }, [searchParams, t])
+
+  // Probe which social login providers are configured (env creds present) so we
+  // only render buttons that can actually complete a sign-in.
+  useEffect(() => {
+    let cancelled = false
+    api<{ google: boolean; microsoft: boolean }>('/auth/oauth/providers', {
+      method: 'GET',
+      skipAuth: true,
+    })
+      .then((res) => {
+        if (!cancelled) setOauthProviders(res)
+      })
+      .catch(() => {
+        /* degrade gracefully — leave both buttons visible */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Debounced lookup: ask whether the email domain has SSO enforced.
   useEffect(() => {
@@ -125,6 +157,13 @@ export function LoginPage() {
     const params = new URLSearchParams({ workspaceId: ssoHint.workspaceId })
     if (nextUrl) params.set('redirectTo', nextUrl)
     window.location.href = `/api/v1/auth/sso/${ssoHint.provider}/start?${params.toString()}`
+  }
+
+  // Full-page redirect into the backend OAuth start route (same /api/v1 base the
+  // rest of the app uses). The backend bounces the browser to the provider, then
+  // back to /sso-complete with the session already set as cookies.
+  function startOAuth(provider: 'google' | 'microsoft') {
+    window.location.href = `/api/v1/auth/oauth/${provider}`
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -279,14 +318,30 @@ export function LoginPage() {
                   {t('auth.continueWithProvider', { provider: ssoHint.displayName })}
                 </Button>
               )}
-              <Button variant="glass" size="lg" className="w-full justify-center" type="button" disabled>
-                <GoogleIcon />
-                {t('auth.continueWithGoogle')}
-              </Button>
-              <Button variant="glass" size="lg" className="w-full justify-center" type="button" disabled>
-                <MicrosoftIcon />
-                {t('auth.continueWithMicrosoft')}
-              </Button>
+              {oauthProviders.google && (
+                <Button
+                  variant="glass"
+                  size="lg"
+                  className="w-full justify-center"
+                  type="button"
+                  onClick={() => startOAuth('google')}
+                >
+                  <GoogleIcon />
+                  {t('auth.continueWithGoogle')}
+                </Button>
+              )}
+              {oauthProviders.microsoft && (
+                <Button
+                  variant="glass"
+                  size="lg"
+                  className="w-full justify-center"
+                  type="button"
+                  onClick={() => startOAuth('microsoft')}
+                >
+                  <MicrosoftIcon />
+                  {t('auth.continueWithMicrosoft')}
+                </Button>
+              )}
             </div>
 
             <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
