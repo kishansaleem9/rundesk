@@ -305,6 +305,112 @@ function OverviewTab({
 
 // ─── Productivity ─────────────────────────────────────────────────────────────
 
+/**
+ * Self-contained inline SVG line chart for the "completed tasks" trend.
+ * Renders a polyline over the time-bucketed data points with a soft gradient
+ * area fill, a y-axis (task counts) with gridlines, x-axis time-bucket labels,
+ * a dot at every point, and a per-point hover tooltip (native SVG <title>).
+ * Responsive via viewBox + w-full/h-auto; no charting dependency.
+ */
+function ProductivityTrendChart({
+  data,
+  bucket,
+}: {
+  data: Array<{ period: string; tasksCompleted: number }>
+  bucket: 'week' | 'month'
+}) {
+  const W = 640
+  const H = 200
+  const pad = { top: 16, right: 14, bottom: 28, left: 32 }
+  const innerW = W - pad.left - pad.right
+  const innerH = H - pad.top - pad.bottom
+  const max = Math.max(1, ...data.map((d) => d.tasksCompleted))
+  const x = (i: number) =>
+    pad.left + (data.length <= 1 ? innerW / 2 : (i / (data.length - 1)) * innerW)
+  const y = (v: number) => pad.top + (1 - v / max) * innerH
+
+  const linePoints = data.map((d, i) => `${x(i)},${y(d.tasksCompleted)}`).join(' ')
+  const areaPath =
+    `M ${x(0)} ${H - pad.bottom} ` +
+    data.map((d, i) => `L ${x(i)} ${y(d.tasksCompleted)}`).join(' ') +
+    ` L ${x(data.length - 1)} ${H - pad.bottom} Z`
+
+  // Distinct y-axis ticks (0 · midpoint · max), de-duped for tiny ranges.
+  const yTicks = Array.from(new Set([0, Math.round(max / 2), max]))
+  // Thin the x-axis labels so they never overlap on long ranges.
+  const labelStep = Math.max(1, Math.ceil(data.length / 8))
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full h-auto"
+      role="img"
+      preserveAspectRatio="xMidYMid meet"
+    >
+      <defs>
+        <linearGradient id="prod-trend-grad" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="hsl(var(--brand-700))" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="hsl(var(--brand-700))" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* y-axis gridlines + task-count labels */}
+      {yTicks.map((v) => (
+        <g key={v}>
+          <line
+            x1={pad.left}
+            x2={W - pad.right}
+            y1={y(v)}
+            y2={y(v)}
+            stroke="hsl(var(--border))"
+            strokeWidth="1"
+            opacity="0.6"
+          />
+          <text x={pad.left - 7} y={y(v) + 3} fontSize="9.5" fill="hsl(var(--muted-foreground))" textAnchor="end">
+            {v}
+          </text>
+        </g>
+      ))}
+
+      {/* soft area fill under the line */}
+      {data.length > 1 && <path d={areaPath} fill="url(#prod-trend-grad)" />}
+
+      {/* the trend line */}
+      <polyline
+        points={linePoints}
+        fill="none"
+        stroke="hsl(var(--brand-700))"
+        strokeWidth="2.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+
+      {/* data points, x-axis time-bucket labels, and per-point hover tooltips */}
+      {data.map((d, i) => (
+        <g key={d.period}>
+          <circle
+            cx={x(i)}
+            cy={y(d.tasksCompleted)}
+            r="3.5"
+            fill="hsl(var(--brand-700))"
+            stroke="hsl(var(--background))"
+            strokeWidth="1.5"
+          />
+          {/* wider invisible hit target makes the tooltip easy to hover */}
+          <circle cx={x(i)} cy={y(d.tasksCompleted)} r="11" fill="transparent">
+            <title>{`${d.period}: ${d.tasksCompleted}`}</title>
+          </circle>
+          {(i % labelStep === 0 || i === data.length - 1) && (
+            <text x={x(i)} y={H - 8} fontSize="9" fill="hsl(var(--muted-foreground))" textAnchor="middle">
+              {bucket === 'month' ? d.period : d.period.slice(5)}
+            </text>
+          )}
+        </g>
+      ))}
+    </svg>
+  )
+}
+
 function ProductivityTab({
   workspaceId,
   days,
@@ -356,7 +462,6 @@ function ProductivityTab({
       ),
   })
   const trend = trendQuery.data ?? []
-  const trendMax = Math.max(1, ...trend.map((t) => t.tasksCompleted))
 
   const rows = useMemo(() => query.data ?? [], [query.data])
   useEffect(() => {
@@ -426,19 +531,8 @@ function ProductivityTab({
         {trend.length === 0 ? (
           <div className="text-center text-muted-foreground py-6 text-sm">{t('reports.noCompletedTasks')}</div>
         ) : (
-          <div className="flex items-end gap-1.5 h-32 border-b border-border pb-0">
-            {trend.map((t) => (
-              <div key={t.period} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`${t.period}: ${t.tasksCompleted}`}>
-                <div className="text-[10px] tabular-nums text-muted-foreground">{t.tasksCompleted}</div>
-                <div
-                  className="w-full max-w-[28px] rounded-t bg-brand-700"
-                  style={{ height: `${Math.max(2, (t.tasksCompleted / trendMax) * 100)}%` }}
-                />
-                <div className="text-[9px] text-muted-foreground truncate w-full text-center">
-                  {bucket === 'month' ? t.period : t.period.slice(5)}
-                </div>
-              </div>
-            ))}
+          <div className="max-w-3xl">
+            <ProductivityTrendChart data={trend} bucket={bucket} />
           </div>
         )}
       </div>
@@ -520,15 +614,38 @@ function CompletionTab({
     statusBreakdown: Record<string, number>
   }
 
+  // Scope filters — mirror the productivity tab's space/project pickers and add
+  // an assignee (member) picker. All three flow through to the completion +
+  // status-durations endpoints as query params (and into the react-query keys).
+  const [spaceFilter, setSpaceFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState('')
+  const [memberFilter, setMemberFilter] = useState('')
+
+  const spacesQuery = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
+  })
+  const projectsQuery = useQuery({
+    queryKey: ['projects', spaceFilter],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/projects/space/${spaceFilter}`),
+    enabled: !!spaceFilter,
+  })
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () =>
+      api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
+  })
+  const scopeParams = `${spaceFilter ? `&spaceId=${spaceFilter}` : ''}${projectFilter ? `&projectId=${projectFilter}` : ''}${memberFilter ? `&memberId=${memberFilter}` : ''}`
+
   const query = useQuery({
-    queryKey: ['reports-completion', workspaceId, days],
-    queryFn: () => api<Data>(`/workspaces/${workspaceId}/reports/completion?days=${days}`),
+    queryKey: ['reports-completion', workspaceId, days, spaceFilter, projectFilter, memberFilter],
+    queryFn: () => api<Data>(`/workspaces/${workspaceId}/reports/completion?days=${days}${scopeParams}`),
   })
   const durQuery = useQuery({
-    queryKey: ['reports-status-durations', workspaceId, days],
+    queryKey: ['reports-status-durations', workspaceId, days, spaceFilter, projectFilter, memberFilter],
     queryFn: () =>
       api<Array<{ status: string; avgHours: number; samples: number }>>(
-        `/workspaces/${workspaceId}/reports/status-durations?days=${days}`,
+        `/workspaces/${workspaceId}/reports/status-durations?days=${days}${scopeParams}`,
       ),
   })
   const durations = durQuery.data ?? []
@@ -564,6 +681,49 @@ function CompletionTab({
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={spaceFilter}
+          onChange={(e) => {
+            setSpaceFilter(e.target.value)
+            setProjectFilter('')
+          }}
+          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+        >
+          <option value="">{t('reports.allSpaces')}</option>
+          {(spacesQuery.data ?? []).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={projectFilter}
+          onChange={(e) => setProjectFilter(e.target.value)}
+          disabled={!spaceFilter}
+          className="h-8 rounded-md border border-border bg-background px-2 text-sm disabled:opacity-50"
+        >
+          <option value="">{t('reports.allProjects')}</option>
+          {(projectsQuery.data ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={memberFilter}
+          onChange={(e) => setMemberFilter(e.target.value)}
+          className="h-8 rounded-md border border-border bg-background px-2 text-sm"
+        >
+          <option value="">{t('reports.allMembers')}</option>
+          {(membersQuery.data ?? []).map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.displayName || m.email}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label={t('reports.totalTasks')} value={d?.total ?? '—'} icon={BarChart3} />
         <StatCard label={t('reports.completed')} value={d?.completed ?? '—'} icon={CheckCircle2} />

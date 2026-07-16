@@ -4104,6 +4104,8 @@ export const en = {
 
   'palette.entityFiles': 'Files',
 
+  'reports.allMembers': 'All members',
+
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
   'auth.email': 'Email',
@@ -8265,6 +8267,8 @@ export const es: Record<TranslationKey, string> = {
 
   'palette.entityFiles': 'Archivos',
 
+  'reports.allMembers': 'Todos los miembros',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -12419,6 +12423,8 @@ export const ar: Record<TranslationKey, string> = {
 
   'palette.entityFiles': 'الملفات',
 
+  'reports.allMembers': 'جميع الأعضاء',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -16422,6 +16428,8 @@ export const ur: Record<TranslationKey, string> = {
   'list.deleteConfirm': 'کیا فہرست "{{name}}" حذف کریں؟ یہ آرکائیو ہو جائے گی۔',
 
   'palette.entityFiles': 'فائلیں',
+
+  'reports.allMembers': 'تمام اراکین',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',
