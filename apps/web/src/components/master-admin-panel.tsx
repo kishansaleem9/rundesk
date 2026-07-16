@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge, Button, Card, Input, Switch } from '@rundesk/ui'
 import {
   Building2,
@@ -250,6 +250,8 @@ export function MasterAdminPanel() {
                 {t('masterAdmin.applyHelp')}
               </p>
             </Card>
+
+            <WorkspacePlansCard orgId={selectedOrg.id} />
           </div>
           </>
           )}
@@ -276,5 +278,86 @@ function Metric({
       </div>
       <div className="font-display text-2xl mt-1">{value}</div>
     </div>
+  )
+}
+
+const PLAN_OPTIONS = ['free', 'pro', 'business', 'enterprise'] as const
+
+/**
+ * Plan §14.1 — super-admin control to set each workspace's commercial plan. Lists
+ * the selected org's workspaces (super_admin bypasses the org guard) with a per-
+ * row plan picker that PATCHes /workspaces/:id/plan. Setting a workspace to
+ * `enterprise` restores unlimited + every feature.
+ */
+function WorkspacePlansCard({ orgId }: { orgId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const workspacesQuery = useQuery({
+    queryKey: ['admin-org-workspaces', orgId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string; slug: string; plan: string }>>(`/organizations/${orgId}/workspaces`),
+  })
+  const setPlan = useMutation({
+    mutationFn: ({ workspaceId, plan }: { workspaceId: string; plan: string }) =>
+      api(`/workspaces/${workspaceId}/plan`, { method: 'PATCH', body: { plan } }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['admin-org-workspaces', orgId] })
+      qc.invalidateQueries({ queryKey: ['workspace-plan', vars.workspaceId] })
+    },
+  })
+  const workspaces = workspacesQuery.data ?? []
+
+  return (
+    <Card className="p-4 space-y-3">
+      <h3 className="font-semibold flex items-center gap-2">
+        <CreditCard className="h-4 w-4 text-accent" />
+        {t('masterAdmin.planTitle')}
+      </h3>
+      <p className="text-xs text-muted-foreground">{t('masterAdmin.planSubtitle')}</p>
+      {workspacesQuery.isLoading && (
+        <div className="text-xs text-muted-foreground">{t('masterAdmin.planLoading')}</div>
+      )}
+      {!workspacesQuery.isLoading && workspaces.length === 0 && (
+        <div className="text-xs text-muted-foreground">{t('masterAdmin.planNoWorkspaces')}</div>
+      )}
+      <div className="space-y-2">
+        {workspaces.map((ws) => {
+          const value = drafts[ws.id] ?? ws.plan ?? 'enterprise'
+          const dirty = value !== (ws.plan ?? 'enterprise')
+          return (
+            <div key={ws.id} className="flex items-center gap-3 justify-between rounded border border-border px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{ws.name}</div>
+                <div className="text-xs text-muted-foreground truncate">{ws.slug}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <select
+                  aria-label={t('masterAdmin.planPlanCol')}
+                  className="rounded-md border border-border bg-card px-2 py-1 text-sm"
+                  value={value}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [ws.id]: e.target.value }))}
+                >
+                  {PLAN_OPTIONS.map((p) => (
+                    <option key={p} value={p}>
+                      {t(`plan.tier.${p}` as TranslationKey)}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  size="sm"
+                  disabled={!dirty || setPlan.isPending}
+                  onClick={() => setPlan.mutate({ workspaceId: ws.id, plan: value })}
+                >
+                  {t('common.save')}
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      {setPlan.isSuccess && <div className="text-xs text-success">{t('masterAdmin.planSaved')}</div>}
+      {setPlan.isError && <div className="text-xs text-destructive">{t('masterAdmin.planSaveError')}</div>}
+    </Card>
   )
 }

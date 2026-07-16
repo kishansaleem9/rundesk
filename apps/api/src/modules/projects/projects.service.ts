@@ -7,6 +7,7 @@ import { assertCanManageContainer } from '../../common/permissions/container-acc
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
+import { PlansService } from '../plans/plans.service'
 
 @Injectable()
 export class ProjectsService {
@@ -14,6 +15,7 @@ export class ProjectsService {
     @Inject(DB_TOKEN) private db: Db,
     private webhooks: WebhooksService,
     private slack: SlackService,
+    private plans: PlansService,
   ) {}
 
   /**
@@ -65,6 +67,16 @@ export class ProjectsService {
     data: { name: string; description?: string; color?: string; icon?: string; folderId?: string },
     actorId?: string,
   ) {
+    // Plan §14.1: enforce the plan's project cap. Resolve the owning workspace via
+    // the space, then check. No-op for enterprise (unlimited) — every existing
+    // workspace by default.
+    const [space] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(spaces)
+      .where(eq(spaces.id, spaceId))
+      .limit(1)
+    if (space) await this.plans.assertCanCreateProjects(space.workspaceId)
+
     const result = await this.db
       .insert(projects)
       .values({

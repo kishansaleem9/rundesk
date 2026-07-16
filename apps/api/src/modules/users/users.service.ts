@@ -1,8 +1,20 @@
 import { Injectable, Inject, UnauthorizedException, BadRequestException } from '@nestjs/common'
-import { eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import * as bcrypt from 'bcryptjs'
-import { users } from '@rundesk/db'
+import {
+  users,
+  oauthAccounts,
+  sessions,
+  workspaceMembers,
+  workspaces,
+  organizationMembers,
+  organizations,
+  tasks,
+  taskAssignees,
+  taskComments,
+  timeEntries,
+} from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
@@ -105,6 +117,198 @@ export class UsersService {
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, userId))
     return { ok: true }
+  }
+
+  /**
+   * GDPR data portability (Plan §14.6). Assemble a JSON bundle of everything we
+   * hold that is personal to THIS user: their profile, their workspace/org
+   * memberships, the tasks they authored or are assigned to, their comments, and
+   * their time entries. Strictly scoped to the requesting user's own data —
+   * secrets (password hash, OAuth tokens) are never included.
+   */
+  async exportUserData(userId: string) {
+    const user = await this.findById(userId)
+    if (!user) throw new BadRequestException('User not found')
+
+    const [
+      workspaceMemberships,
+      orgMemberships,
+      tasksCreated,
+      tasksAssigned,
+      comments,
+      timeEntryRows,
+      connectedAccounts,
+    ] = await Promise.all([
+      this.db
+        .select({
+          workspaceId: workspaces.id,
+          name: workspaces.name,
+          slug: workspaces.slug,
+          role: workspaceMembers.role,
+          joinedAt: workspaceMembers.joinedAt,
+        })
+        .from(workspaceMembers)
+        .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
+        .where(eq(workspaceMembers.userId, userId)),
+      this.db
+        .select({
+          organizationId: organizations.id,
+          name: organizations.name,
+          slug: organizations.slug,
+          role: organizationMembers.role,
+          joinedAt: organizationMembers.joinedAt,
+        })
+        .from(organizationMembers)
+        .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
+        .where(eq(organizationMembers.userId, userId)),
+      this.db
+        .select({ id: tasks.id, title: tasks.title, status: tasks.status, createdAt: tasks.createdAt })
+        .from(tasks)
+        .where(eq(tasks.createdById, userId))
+        .orderBy(desc(tasks.createdAt))
+        .limit(5000),
+      this.db
+        .select({ taskId: tasks.id, title: tasks.title, assignedAt: taskAssignees.assignedAt })
+        .from(taskAssignees)
+        .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+        .where(eq(taskAssignees.userId, userId))
+        .orderBy(desc(taskAssignees.assignedAt))
+        .limit(5000),
+      this.db
+        .select({ id: taskComments.id, taskId: taskComments.taskId, body: taskComments.body, createdAt: taskComments.createdAt })
+        .from(taskComments)
+        .where(eq(taskComments.authorId, userId))
+        .orderBy(desc(taskComments.createdAt))
+        .limit(5000),
+      this.db
+        .select({
+          id: timeEntries.id,
+          taskId: timeEntries.taskId,
+          startedAt: timeEntries.startedAt,
+          endedAt: timeEntries.endedAt,
+          durationSec: timeEntries.durationSec,
+          description: timeEntries.description,
+          isBillable: timeEntries.isBillable,
+        })
+        .from(timeEntries)
+        .where(eq(timeEntries.userId, userId))
+        .orderBy(desc(timeEntries.startedAt))
+        .limit(5000),
+      this.db
+        .select({ provider: oauthAccounts.provider, connectedAt: oauthAccounts.createdAt })
+        .from(oauthAccounts)
+        .where(eq(oauthAccounts.userId, userId)),
+    ])
+
+    return {
+      format: 'rundesk.gdpr.export.v1',
+      exportedAt: new Date().toISOString(),
+      profile: this.publicProfile(user),
+      memberships: { workspaces: workspaceMemberships, organizations: orgMemberships },
+      tasks: { created: tasksCreated, assigned: tasksAssigned },
+      comments,
+      timeEntries: timeEntryRows,
+      connectedAccounts,
+      counts: {
+        workspaces: workspaceMemberships.length,
+        organizations: orgMemberships.length,
+        tasksCreated: tasksCreated.length,
+        tasksAssigned: tasksAssigned.length,
+        comments: comments.length,
+        timeEntries: timeEntryRows.length,
+      },
+    }
+  }
+
+  /**
+   * GDPR right to erasure (Plan §14.6). Irreversibly anonymizes the account:
+   * scrubs all PII from the users row, deletes sessions (revokes access), OAuth
+   * links, task assignments and every workspace/org membership. Authored content
+   * (tasks, comments, time entries) is retained but de-identified — the FKs point
+   * at a scrubbed, de-membered row, preserving workspace integrity without
+   * keeping the person identifiable.
+   *
+   * Safety guards (never orphan an org/workspace):
+   *   - Requires typing the exact account email to confirm.
+   *   - Refuses to delete the last active super admin.
+   *   - Refuses to delete the last admin of any workspace (transfer admin first).
+   */
+  async deleteAccount(userId: string, confirmation: { confirmEmail?: string }): Promise<{
+    ok: true
+    anonymized: true
+    userId: string
+  }> {
+    const user = await this.findById(userId)
+    if (!user) throw new BadRequestException('User not found')
+
+    // 1. Confirmation — the caller must retype their exact account email.
+    const typed = (confirmation?.confirmEmail ?? '').trim().toLowerCase()
+    if (!typed || typed !== user.email.toLowerCase()) {
+      throw new BadRequestException('Type your account email exactly to confirm account deletion')
+    }
+
+    // 2. Never delete the last active super admin.
+    if (user.role === 'super_admin') {
+      const [{ c }] = await this.db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(users)
+        .where(and(eq(users.role, 'super_admin'), eq(users.isActive, true)))
+      if (c <= 1) {
+        throw new BadRequestException(
+          'Cannot delete the last active super admin. Grant super admin to another account first.',
+        )
+      }
+    }
+
+    // 3. Never delete the last admin of a workspace — would orphan it.
+    const adminOf = await this.db
+      .select({ workspaceId: workspaceMembers.workspaceId, name: workspaces.name })
+      .from(workspaceMembers)
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
+      .where(and(eq(workspaceMembers.userId, userId), eq(workspaceMembers.role, 'workspace_admin' as any)))
+    for (const ws of adminOf) {
+      const [{ c }] = await this.db
+        .select({ c: sql<number>`count(*)::int` })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, ws.workspaceId), eq(workspaceMembers.role, 'workspace_admin' as any)))
+      if (c <= 1) {
+        throw new BadRequestException(
+          `You are the last admin of "${ws.name}". Transfer workspace admin to another member before deleting your account.`,
+        )
+      }
+    }
+
+    // 4. Irreversibly anonymize + revoke, atomically. The anonymized email is
+    //    keyed by the user id so it stays unique even across many deletions.
+    const anonEmail = `deleted+${userId}@deleted.rundesk.local`
+    await this.db.transaction(async (tx) => {
+      await tx.delete(sessions).where(eq(sessions.userId, userId))
+      await tx.delete(oauthAccounts).where(eq(oauthAccounts.userId, userId))
+      await tx.delete(taskAssignees).where(eq(taskAssignees.userId, userId))
+      await tx.delete(workspaceMembers).where(eq(workspaceMembers.userId, userId))
+      await tx.delete(organizationMembers).where(eq(organizationMembers.userId, userId))
+      await tx
+        .update(users)
+        .set({
+          email: anonEmail,
+          displayName: 'Deleted User',
+          bio: null,
+          avatarUrl: null,
+          passwordHash: null,
+          timezone: 'UTC',
+          locale: 'en',
+          theme: 'system',
+          isActive: false,
+          emailVerified: false,
+          lastSeenAt: null,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId))
+    })
+
+    return { ok: true, anonymized: true, userId }
   }
 
   publicProfile(user: typeof users.$inferSelect) {

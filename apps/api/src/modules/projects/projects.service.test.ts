@@ -32,8 +32,10 @@ describe('ProjectsService project event firing', () => {
     } as any
     const webhooks = { fire: mock.fn(async () => undefined) } as any
     const slack = { notify: mock.fn(async () => undefined) } as any
+    // §14.1 plan gate: no-op mock (enterprise allows everything).
+    const plans = { assertCanCreateProjects: mock.fn(async () => undefined) } as any
 
-    const svc = new ProjectsService(db, webhooks, slack)
+    const svc = new ProjectsService(db, webhooks, slack, plans)
     const out = await svc.createProject('s-1', { name: 'Apollo' }, 'u-1')
     assert.equal(out.id, 'p-1')
 
@@ -62,7 +64,7 @@ describe('ProjectsService project event firing', () => {
     const webhooks = { fire: mock.fn(async () => undefined) } as any
     const slack = { notify: mock.fn(async () => undefined) } as any
 
-    const svc = new ProjectsService(db, webhooks, slack) as any
+    const svc = new ProjectsService(db, webhooks, slack, {} as any) as any
     await svc.fireProjectEvent('project.updated', { id: 'p-9', name: 'Ghost', spaceId: 'missing' }, 'u-1')
 
     assert.equal(webhooks.fire.mock.callCount(), 0)

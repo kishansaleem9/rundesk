@@ -10,6 +10,7 @@ import { R2Service } from '../../common/storage/r2.service'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { SecurityService } from '../security/security.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
+import { PlansService } from '../plans/plans.service'
 
 const BASE_SLUG_FALLBACK = 'workspace'
 
@@ -45,6 +46,7 @@ export class WorkspacesService {
     private readonly security: SecurityService,
     private readonly webhooks: WebhooksService,
     private readonly r2: R2Service,
+    private readonly plans: PlansService,
   ) {}
 
   /**
@@ -283,6 +285,9 @@ export class WorkspacesService {
     if (!user) throw new BadRequestException(`No user with email ${email}`)
     const existing = await this.getMembership(workspaceId, user.id)
     if (existing) throw new ConflictException('User is already a member')
+    // Plan §14.1: enforce the plan's member cap. No-op for enterprise (unlimited),
+    // which is every existing workspace by default.
+    await this.plans.assertCanAddMembers(workspaceId)
     await this.db.insert(workspaceMembers).values({
       workspaceId,
       userId: user.id,

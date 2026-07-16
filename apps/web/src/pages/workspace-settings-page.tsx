@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Archive, Upload, RotateCcw } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Archive, Upload, RotateCcw, CreditCard } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
@@ -10,7 +10,7 @@ import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
 import { RolesTab } from '../components/roles-tab'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { LanguageSwitcher } from '../components/language-switcher'
 
 type Workspace = {
@@ -145,6 +145,75 @@ export function SettingsPage() {
   )
 }
 
+type PlanUsageResponse = {
+  plan: 'free' | 'pro' | 'business' | 'enterprise'
+  label: string
+  description: string
+  limits: { maxMembers: number | null; maxProjects: number | null }
+  features: Record<string, boolean>
+  usage: { members: number; projects: number }
+}
+
+const PLAN_FEATURE_KEYS = [
+  'ai', 'automations', 'sso', 'customRoles', 'webhooks', 'guests', 'integrations', 'customBranding', 'prioritySupport',
+] as const
+
+/**
+ * Plan §14.1 — a small read-only Plan card: current tier, member/project usage vs
+ * the plan cap, and the tier's included features. Changing the plan is a
+ * super-admin action (master-admin panel), hence the "managed by your admin" hint.
+ */
+function PlanCard({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const planQuery = useQuery({
+    queryKey: ['workspace-plan', workspaceId],
+    queryFn: () => api<PlanUsageResponse>(`/workspaces/${workspaceId}/plan`),
+  })
+  if (planQuery.isLoading) return <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>
+  if (!planQuery.data) return null
+  const p = planQuery.data
+  const usageLine = (used: number, limit: number | null) =>
+    limit == null ? `${used} · ${t('plan.unlimited')}` : t('plan.ofLimit', { used, limit })
+  const enabledFeatures = PLAN_FEATURE_KEYS.filter((f) => p.features?.[f])
+  return (
+    <Card className="p-6 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <CreditCard className="h-4 w-4 text-accent" />
+          <h3 className="font-semibold">{t('plan.title')}</h3>
+        </div>
+        <span className="rounded-full bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
+          {t(`plan.tier.${p.plan}` as TranslationKey)}
+        </span>
+      </div>
+      {p.description && <p className="text-xs text-muted-foreground">{p.description}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-md border border-border/60 p-3">
+          <div className="text-xs text-muted-foreground">{t('plan.members')}</div>
+          <div className="text-sm font-medium mt-0.5">{usageLine(p.usage.members, p.limits.maxMembers)}</div>
+        </div>
+        <div className="rounded-md border border-border/60 p-3">
+          <div className="text-xs text-muted-foreground">{t('plan.projects')}</div>
+          <div className="text-sm font-medium mt-0.5">{usageLine(p.usage.projects, p.limits.maxProjects)}</div>
+        </div>
+      </div>
+      {enabledFeatures.length > 0 && (
+        <div>
+          <div className="text-xs text-muted-foreground mb-1.5">{t('plan.featuresTitle')}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {enabledFeatures.map((f) => (
+              <span key={f} className="rounded-full border border-border/60 bg-card/40 px-2 py-0.5 text-[11px]">
+                {t(`plan.feature.${f}` as TranslationKey)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground">{t('plan.changeHint')}</p>
+    </Card>
+  )
+}
+
 function GeneralTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
@@ -258,6 +327,8 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     customDomain !== (wsQuery.data.customDomain ?? '')
 
   return (
+    <div className="space-y-5">
+    <PlanCard workspaceId={workspaceId} />
     <Card className="p-6 space-y-5">
       {/* Personal preference (Plan §13): user's UI language. */}
       <div className="flex items-center justify-between gap-4 rounded-lg border border-border/60 bg-card/40 p-3">
@@ -402,6 +473,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         </div>
       </div>
     </Card>
+    </div>
   )
 }
 

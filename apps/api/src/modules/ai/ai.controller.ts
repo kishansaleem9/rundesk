@@ -4,11 +4,18 @@ import { AiService } from './ai.service'
 import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { NotGuestGuard } from '../../common/guards/not-guest.guard'
+import { PlanFeatureGuard } from '../plans/plan-feature.guard'
+import { RequirePlan } from '../plans/require-plan.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('ai')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, NotGuestGuard)
+// Plan §14.1: gate the whole AI surface on the workspace's plan `ai` feature.
+// The guard resolves the workspaceId from the request body/query/param; when a
+// gated request carries a workspaceId whose plan lacks AI it 403s, otherwise it's
+// a no-op — and always a no-op for enterprise (every existing workspace).
+@RequirePlan('ai')
+@UseGuards(JwtAuthGuard, NotGuestGuard, PlanFeatureGuard)
 @Controller('ai')
 export class AiController {
   constructor(private readonly ai: AiService) {}

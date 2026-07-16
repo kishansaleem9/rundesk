@@ -7,6 +7,7 @@ import { AuthModule } from '../auth/auth.module'
 import { EmailModule } from '../email/email.module'
 import { SecurityModule } from '../security/security.module'
 import { WebhooksModule } from '../webhooks/webhooks.module'
+import { PlansModule } from '../plans/plans.module'
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module'
     EmailModule,
     SecurityModule,
     WebhooksModule,
+    PlansModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

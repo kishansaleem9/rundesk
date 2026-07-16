@@ -5,12 +5,14 @@ import { WorkloadAlertService } from './workload-alert.service'
 import { AiController } from './ai.controller'
 import { TasksModule } from '../tasks/tasks.module'
 import { NotificationsModule } from '../notifications/notifications.module'
+import { PlansModule } from '../plans/plans.module'
 
 @Module({
   // NotificationsModule supplies NotificationsService for briefing + workload
   // alert delivery (§7.11/§7.12). AiModule already depends on it transitively via
   // TasksModule and Notifications imports neither Ai nor Tasks, so no cycle.
-  imports: [TasksModule, NotificationsModule],
+  // PlansModule supplies PlanFeatureGuard + PlansService for the §14.1 AI gate.
+  imports: [TasksModule, NotificationsModule, PlansModule],
   controllers: [AiController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;
   // WorkloadAlertService owns the daily @Cron that alerts managers about

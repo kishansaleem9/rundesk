@@ -8,6 +8,7 @@ import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
+import { PlansService } from '../plans/plans.service'
 
 @Injectable()
 export class InvitationsService {
@@ -17,6 +18,7 @@ export class InvitationsService {
     private config: ConfigService,
     private securitySettings: WorkspaceSecuritySettingsService,
     private webhooks: WebhooksService,
+    private plans: PlansService,
   ) {}
 
   private claimUrlForToken(token: string) {
@@ -58,6 +60,13 @@ export class InvitationsService {
   async create(organizationId: string, invitedById: string, dto: { email: string, orgRole?: string, workspaceMemberships?: any[] }) {
     const org = await this.db.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1)
     if (org.length === 0) throw new NotFoundException('Organization not found')
+
+    // Plan §14.1: an invite that grants workspace membership counts against the
+    // target workspace's plan member cap. Block before sending the invite when a
+    // target is already at capacity. No-op for enterprise (unlimited) workspaces.
+    for (const ws of this.inviteWorkspaces(dto.workspaceMemberships)) {
+      await this.plans.assertCanAddMembers(ws.workspaceId)
+    }
 
     const token = randomBytes(32).toString('base64url')
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)

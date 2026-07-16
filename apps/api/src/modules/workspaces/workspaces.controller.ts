@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Ip, Param, Patch, Post, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService } from './workspaces.service'
+import { PlansService } from '../plans/plans.service'
+import type { PlanLimitsOverride } from '../plans/plans.constants'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
@@ -12,7 +14,10 @@ import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 @UseGuards(JwtAuthGuard)
 @Controller('workspaces')
 export class WorkspacesController {
-  constructor(private readonly workspacesService: WorkspacesService) {}
+  constructor(
+    private readonly workspacesService: WorkspacesService,
+    private readonly plans: PlansService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List workspaces the current user belongs to' })
@@ -43,6 +48,28 @@ export class WorkspacesController {
   @ApiOperation({ summary: 'Get a workspace by id (must be a member)' })
   async getOne(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.workspacesService.findById(workspaceId)
+  }
+
+  @Get(':workspaceId/plan')
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Get the workspace plan + limits + current usage (Plan §14.1)' })
+  async getPlan(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
+    return this.plans.getUsage(workspaceId)
+  }
+
+  @Patch(':workspaceId/plan')
+  @ApiOperation({ summary: "Set a workspace's plan (Super Admin only, Plan §14.1)" })
+  async setPlan(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Body() body: { plan: string; planLimits?: PlanLimitsOverride | null },
+    @CurrentUser() user: any,
+  ) {
+    // Changing a workspace's commercial plan is a platform-level (billing) action,
+    // reserved for the Super Admin — mirrors the OrganizationsController gate.
+    if (user.role !== 'super_admin') {
+      throw new ForbiddenException('Only a Super Admin can change a workspace plan')
+    }
+    return this.plans.setWorkspacePlan(workspaceId, body.plan, body.planLimits)
   }
 
   @Patch(':workspaceId')

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid, unique, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, unique, integer, jsonb } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { userRoleEnum, orgRoleEnum } from './enums'
 import { users } from './users'
@@ -46,6 +46,18 @@ export const workspaces = pgTable('workspaces', {
   customDomainToken:    text('custom_domain_token'),
   customDomainVerified: boolean('custom_domain_verified').notNull().default(false),
   isArchived:     boolean('is_archived').notNull().default(false),
+  // Commercial plan tier (Plan §14.1). Defaults to 'enterprise' so the internal
+  // tool keeps every feature + unlimited limits — gating is opt-in SaaS
+  // scaffolding that never restricts an enterprise workspace. Tier definitions
+  // live in apps/api/src/modules/plans/plans.constants.ts.
+  plan:           text('plan').notNull().default('enterprise'),
+  // Optional per-workspace override of the tier's numeric limits / feature flags
+  // (e.g. a negotiated deal). NULL = use the code-defined tier defaults.
+  planLimits:     jsonb('plan_limits').$type<{
+    maxMembers?: number | null
+    maxProjects?: number | null
+    features?: Record<string, boolean>
+  }>(),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

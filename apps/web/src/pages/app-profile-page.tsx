@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles } from 'lucide-react'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
@@ -327,6 +327,132 @@ function ThemeSelector() {
   )
 }
 
+/**
+ * Plan §14.6 — GDPR privacy & data controls: export a JSON copy of the caller's
+ * own data (data portability), and delete/anonymize the account (right to
+ * erasure) behind a strong "type your email" confirmation. Server-side guards
+ * refuse to orphan the last super admin / last workspace admin — those failures
+ * surface here as the mutation error message.
+ */
+function PrivacyDataCard() {
+  const { t } = useTranslation()
+  const clear = useAuthStore((s) => s.clear)
+  const email = useAuthStore((s) => s.user?.email ?? '')
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmEmail, setConfirmEmail] = useState('')
+
+  const doExport = async () => {
+    setExporting(true)
+    setExportError(null)
+    try {
+      const data = await api('/users/me/export')
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `rundesk-my-data-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      setExportError(t('profile.exportFailed'))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const del = useMutation({
+    mutationFn: () => api('/users/me/delete', { method: 'POST', body: { confirmEmail } }),
+    onSuccess: () => clear(), // logs out; the auth guard redirects to sign-in
+  })
+
+  const confirmValid = email.length > 0 && confirmEmail.trim().toLowerCase() === email.trim().toLowerCase()
+
+  return (
+    <Card className="p-6 space-y-5">
+      <div>
+        <h2 className="font-semibold mb-1">{t('profile.privacyTitle')}</h2>
+        <p className="text-sm text-muted-foreground">{t('profile.privacySubtitle')}</p>
+      </div>
+
+      <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 p-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{t('profile.exportData')}</div>
+          <p className="text-xs text-muted-foreground mt-0.5">{t('profile.exportHelp')}</p>
+          {exportError && <p className="text-xs text-destructive mt-1">{exportError}</p>}
+        </div>
+        <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={doExport} disabled={exporting}>
+          <Download className="h-3.5 w-3.5" />
+          {exporting ? t('profile.exporting') : t('profile.exportData')}
+        </Button>
+      </div>
+
+      <div className="rounded-md border border-destructive/30 p-3">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <span className="text-sm font-semibold">{t('profile.dangerZone')}</span>
+        </div>
+        <div className="mt-2 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-medium">{t('profile.deleteAccountTitle')}</div>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('profile.deleteAccountHelp')}</p>
+          </div>
+          {!confirmOpen && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-destructive/50 text-destructive hover:bg-destructive/10 shrink-0 gap-1.5"
+              onClick={() => setConfirmOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t('profile.deleteAccountCta')}
+            </Button>
+          )}
+        </div>
+        {confirmOpen && (
+          <div className="mt-3 space-y-2 border-t border-destructive/20 pt-3">
+            <p className="text-sm font-medium">{t('profile.deleteDialogTitle')}</p>
+            <p className="text-xs text-muted-foreground">{t('profile.deleteDialogBody')}</p>
+            <Label>{t('profile.deleteConfirmLabel', { email })}</Label>
+            <Input
+              value={confirmEmail}
+              onChange={(e) => setConfirmEmail(e.target.value)}
+              placeholder={t('profile.deleteConfirmPlaceholder')}
+              autoComplete="off"
+            />
+            {del.error instanceof ApiError && <p className="text-xs text-destructive">{del.error.message}</p>}
+            <div className="flex items-center gap-2 pt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-destructive/60 text-destructive hover:bg-destructive/10"
+                disabled={!confirmValid || del.isPending}
+                onClick={() => del.mutate()}
+              >
+                {del.isPending ? t('profile.deleting') : t('profile.deleteConfirmCta')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setConfirmOpen(false)
+                  setConfirmEmail('')
+                }}
+                disabled={del.isPending}
+              >
+                {t('profile.deleteCancel')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function SecurityTab() {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -472,6 +598,8 @@ function SecurityTab() {
           )}
         </div>
       </Card>
+
+      <PrivacyDataCard />
     </div>
   )
 }
