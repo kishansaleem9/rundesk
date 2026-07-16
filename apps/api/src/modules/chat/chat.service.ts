@@ -31,6 +31,40 @@ const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
 /** Hard cap on a single chat attachment (Plan §6.8) — mirrors task attachments. */
 export const MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 
+/** Max members in a group DM incl. the creator (Plan §6.2). */
+export const MAX_GROUP_DM_MEMBERS = 8
+
+/**
+ * Per-message delivery status for the author (Plan §6.2). Given a message's
+ * createdAt and the read/delivery receipts of the *other* channel members,
+ * a message is "seen" once any other member has read it (lastReadAt >=
+ * createdAt), else "delivered" once any other member's client acknowledged it
+ * (lastDeliveredAt >= createdAt), else just "sent". Seen supersedes Delivered.
+ */
+export type MessageDeliveryStatus = 'sent' | 'delivered' | 'seen'
+export function computeDeliveryStatus(
+  createdAt: Date,
+  otherMembers: Array<{ lastReadAt: Date | null; lastDeliveredAt: Date | null }>,
+): MessageDeliveryStatus {
+  const at = createdAt.getTime()
+  let delivered = false
+  for (const m of otherMembers) {
+    if (m.lastReadAt && m.lastReadAt.getTime() >= at) return 'seen'
+    if (m.lastDeliveredAt && m.lastDeliveredAt.getTime() >= at) delivered = true
+  }
+  return delivered ? 'delivered' : 'sent'
+}
+
+/** Normalize user-supplied bookmark tags (Plan §6.7): trim, lowercase, dedupe,
+ *  drop empties, cap count + length so the Saved panel stays tidy. */
+export function normalizeSaveTags(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return []
+  const cleaned = tags
+    .map((t) => (typeof t === 'string' ? t.trim().toLowerCase() : ''))
+    .filter((t) => t.length > 0 && t.length <= 32)
+  return [...new Set(cleaned)].slice(0, 20)
+}
+
 @Injectable()
 export class ChatService {
   private aiUserId: string | null = null
@@ -371,6 +405,23 @@ export class ChatService {
     return { ok: true, lastReadAt: now }
   }
 
+  /** Mark the channel's messages delivered to the caller (Plan §6.2). Mirrors
+   *  markChannelRead but only advances the delivery marker — the client calls
+   *  this when it receives/opens a channel's messages, so senders can see
+   *  "Delivered" before the recipient actually reads. */
+  async markChannelDelivered(channelId: string, userId: string) {
+    await this.assertChannelAccess(channelId, userId)
+    const now = new Date()
+    await this.db
+      .insert(chatChannelMembers)
+      .values({ channelId, userId, lastDeliveredAt: now })
+      .onConflictDoUpdate({
+        target: [chatChannelMembers.channelId, chatChannelMembers.userId],
+        set: { lastDeliveredAt: now },
+      })
+    return { ok: true, lastDeliveredAt: now }
+  }
+
   /** Set the caller's notification level for a channel ('all' | 'mentions' | 'none'). */
   async setChannelNotificationLevel(channelId: string, userId: string, level: string) {
     if (!['all', 'mentions', 'none'].includes(level)) {
@@ -484,6 +535,11 @@ export class ChatService {
     const peers = [...new Set((peerUserIds ?? []).filter(Boolean))].filter((id) => id !== currentUserId)
     if (peers.length === 0) throw new BadRequestException('Select at least one other person for a direct message')
     if (peers.length === 1) return this.ensureDmChannel(workspaceId, currentUserId, peers[0])
+
+    // Cap group size incl. the creator (Plan §6.2).
+    if (peers.length + 1 > MAX_GROUP_DM_MEMBERS) {
+      throw new BadRequestException(`A group direct message can include at most ${MAX_GROUP_DM_MEMBERS} people`)
+    }
 
     // Every participant (creator + peers) must belong to the workspace.
     const participants = [currentUserId, ...peers]
@@ -757,6 +813,9 @@ export class ChatService {
         userId: chatChannelMembers.userId,
         displayName: users.displayName,
         lastReadAt: chatChannelMembers.lastReadAt,
+        // Delivery marker (Plan §6.2): drives the "Delivered" state that precedes
+        // "Seen" on the sender's own messages.
+        lastDeliveredAt: chatChannelMembers.lastDeliveredAt,
       })
       .from(chatChannelMembers)
       .innerJoin(users, eq(users.id, chatChannelMembers.userId))
@@ -897,6 +956,16 @@ export class ChatService {
     const ordered = rows.reverse()
     if (ordered.length === 0) return ordered
 
+    // Delivery/read receipts of the OTHER members (Plan §6.2) so each of the
+    // caller's own messages can carry a 'sent' | 'delivered' | 'seen' status.
+    const otherMembers = await this.db
+      .select({
+        lastReadAt: chatChannelMembers.lastReadAt,
+        lastDeliveredAt: chatChannelMembers.lastDeliveredAt,
+      })
+      .from(chatChannelMembers)
+      .where(and(eq(chatChannelMembers.channelId, channelId), ne(chatChannelMembers.userId, userId)))
+
     const messageIds = ordered.map((m) => m.id)
     const reactionRows = await this.db
       .select({
@@ -975,12 +1044,17 @@ export class ChatService {
             }))
           : []
       const stats = replyStatByParent.get(message.id)
+      // Delivery indicator only for the caller's own messages (Plan §6.2);
+      // null for others so the UI never renders it on someone else's message.
+      const deliveryStatus =
+        message.authorId === userId ? computeDeliveryStatus(message.createdAt, otherMembers) : null
       return {
         ...message,
         reactions,
         attachments: attachmentsByMessage.get(message.id) ?? [],
         replyCount: stats?.replyCount ?? 0,
         lastReplyAt: stats?.lastReplyAt ?? null,
+        deliveryStatus,
       }
     })
   }
@@ -1516,22 +1590,48 @@ export class ChatService {
   }
 
   // Save / unsave a message for the current user only (private bookmark).
-  async setSaved(messageId: string, userId: string, saved: boolean) {
+  // Optional tags (Plan §6.7) are stored on the save row when saving.
+  async setSaved(messageId: string, userId: string, saved: boolean, tags?: unknown) {
     const [existing] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!existing) throw new NotFoundException('Message not found')
     await this.assertChannelAccess(existing.channelId, userId)
     if (saved) {
-      await this.db.insert(chatMessageSaves).values({ messageId, userId }).onConflictDoNothing()
-    } else {
+      const normalized = normalizeSaveTags(tags)
       await this.db
-        .delete(chatMessageSaves)
-        .where(and(eq(chatMessageSaves.messageId, messageId), eq(chatMessageSaves.userId, userId)))
+        .insert(chatMessageSaves)
+        .values({ messageId, userId, tags: normalized })
+        .onConflictDoUpdate({
+          target: [chatMessageSaves.messageId, chatMessageSaves.userId],
+          set: { tags: normalized },
+        })
+      return { messageId, saved, tags: normalized }
     }
+    await this.db
+      .delete(chatMessageSaves)
+      .where(and(eq(chatMessageSaves.messageId, messageId), eq(chatMessageSaves.userId, userId)))
     return { messageId, saved }
   }
 
-  // List the current user's saved messages across a workspace (newest first).
-  async listSaved(workspaceId: string, userId: string) {
+  /** Replace the tags on an already-saved message (Plan §6.7). */
+  async updateSavedTags(messageId: string, userId: string, tags: unknown) {
+    const normalized = normalizeSaveTags(tags)
+    const [row] = await this.db
+      .update(chatMessageSaves)
+      .set({ tags: normalized })
+      .where(and(eq(chatMessageSaves.messageId, messageId), eq(chatMessageSaves.userId, userId)))
+      .returning()
+    if (!row) throw new NotFoundException('Saved message not found')
+    return { messageId, tags: normalized }
+  }
+
+  // List the current user's saved messages across a workspace (newest first),
+  // optionally filtered by a tag and/or a free-text query over the body (§6.7).
+  async listSaved(workspaceId: string, userId: string, opts: { tag?: string; q?: string } = {}) {
+    const conditions = [eq(chatChannels.workspaceId, workspaceId), eq(chatMessageSaves.userId, userId)]
+    const tag = opts.tag?.trim().toLowerCase()
+    if (tag) conditions.push(sql`${chatMessageSaves.tags} @> ARRAY[${tag}]::text[]`)
+    const q = opts.q?.trim()
+    if (q) conditions.push(ilike(chatMessages.body, `%${q}%`))
     return this.db
       .select({
         id: chatMessages.id,
@@ -1544,6 +1644,7 @@ export class ChatService {
         pinnedAt: chatMessages.pinnedAt,
         createdAt: chatMessages.createdAt,
         savedAt: chatMessageSaves.createdAt,
+        tags: chatMessageSaves.tags,
         authorName: users.displayName,
         authorAvatarUrl: users.avatarUrl,
       })
@@ -1551,7 +1652,7 @@ export class ChatService {
       .innerJoin(chatMessages, eq(chatMessages.id, chatMessageSaves.messageId))
       .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
       .leftJoin(users, eq(users.id, chatMessages.authorId))
-      .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatMessageSaves.userId, userId)))
+      .where(and(...conditions))
       .orderBy(desc(chatMessageSaves.createdAt))
   }
 

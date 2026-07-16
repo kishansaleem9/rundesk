@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
-import { ChatService } from './chat.service'
+import { ChatService, computeDeliveryStatus, normalizeSaveTags, MAX_GROUP_DM_MEMBERS } from './chat.service'
 
 /**
  * Unit coverage for the chat service. We mock Drizzle's fluent builder with a
@@ -33,7 +33,11 @@ function makeDb(selectResults: any[][], updateResults: any[][] = []) {
     insert: mock.fn(() => ({
       values: (v: any) => {
         inserted.push(v)
-        return { onConflictDoNothing: async () => undefined, returning: async () => [] }
+        return {
+          onConflictDoNothing: async () => undefined,
+          onConflictDoUpdate: async () => undefined,
+          returning: async () => [],
+        }
       },
     })),
     update: mock.fn(() => ({
@@ -70,9 +74,9 @@ describe('ChatService.setSaved', () => {
     const { db, inserted } = makeDb(accessGranted())
     const svc = buildSvc(db)
     const res = await svc.setSaved('m1', 'u1', true)
-    assert.deepEqual(res, { messageId: 'm1', saved: true })
+    assert.deepEqual(res, { messageId: 'm1', saved: true, tags: [] })
     assert.equal(inserted.length, 1)
-    assert.deepEqual(inserted[0], { messageId: 'm1', userId: 'u1' })
+    assert.deepEqual(inserted[0], { messageId: 'm1', userId: 'u1', tags: [] })
   })
 
   it('deletes the save row when unsaving', async () => {
@@ -287,6 +291,73 @@ describe('ChatService.searchMessages (search + filters, Plan §6.11)', () => {
     // Explicitly filtering to the inaccessible c2 yields no results and no query.
     const res = await svc.searchMessages('w1', 'u1', { channelId: 'c2', q: 'secret' })
     assert.deepEqual(res, [])
+  })
+})
+
+describe('computeDeliveryStatus (delivery receipts, Plan §6.2)', () => {
+  const t0 = new Date('2026-07-16T12:00:00.000Z') // message createdAt
+  const before = new Date('2026-07-16T11:59:00.000Z')
+  const after = new Date('2026-07-16T12:01:00.000Z')
+
+  it('is "sent" when no other member has received or read it', () => {
+    assert.equal(computeDeliveryStatus(t0, [{ lastReadAt: before, lastDeliveredAt: before }]), 'sent')
+    assert.equal(computeDeliveryStatus(t0, []), 'sent')
+  })
+
+  it('is "delivered" when a member received it but nobody has read it', () => {
+    assert.equal(computeDeliveryStatus(t0, [{ lastReadAt: null, lastDeliveredAt: after }]), 'delivered')
+    assert.equal(computeDeliveryStatus(t0, [{ lastReadAt: before, lastDeliveredAt: after }]), 'delivered')
+  })
+
+  it('is "seen" when any member read it — Seen supersedes Delivered', () => {
+    assert.equal(computeDeliveryStatus(t0, [{ lastReadAt: after, lastDeliveredAt: after }]), 'seen')
+    // one member only delivered, another has seen → seen wins
+    assert.equal(
+      computeDeliveryStatus(t0, [
+        { lastReadAt: null, lastDeliveredAt: after },
+        { lastReadAt: after, lastDeliveredAt: after },
+      ]),
+      'seen',
+    )
+  })
+
+  it('treats a receipt exactly at the message time as delivered/seen (>=)', () => {
+    assert.equal(computeDeliveryStatus(t0, [{ lastReadAt: null, lastDeliveredAt: new Date(t0) }]), 'delivered')
+    assert.equal(computeDeliveryStatus(t0, [{ lastReadAt: new Date(t0), lastDeliveredAt: null }]), 'seen')
+  })
+})
+
+describe('normalizeSaveTags (bookmark tags, Plan §6.7)', () => {
+  it('trims, lowercases, dedupes, and drops empties', () => {
+    assert.deepEqual(normalizeSaveTags([' Urgent ', 'urgent', 'FollowUp', '', '   ']), ['urgent', 'followup'])
+  })
+  it('returns [] for non-array input', () => {
+    assert.deepEqual(normalizeSaveTags(undefined), [])
+    assert.deepEqual(normalizeSaveTags('nope'), [])
+  })
+  it('caps at 20 tags', () => {
+    const many = Array.from({ length: 30 }, (_, i) => `t${i}`)
+    assert.equal(normalizeSaveTags(many).length, 20)
+  })
+})
+
+describe('ChatService.createGroupDm member cap (Plan §6.2)', () => {
+  it(`rejects more than ${MAX_GROUP_DM_MEMBERS} members (creator + peers)`, async () => {
+    const { db } = makeDb([]) // cap check runs before any query
+    const svc = buildSvc(db)
+    // 8 distinct peers + the creator = 9 members → over the cap of 8.
+    const peers = Array.from({ length: MAX_GROUP_DM_MEMBERS }, (_, i) => `peer-${i}`)
+    await assert.rejects(() => svc.createGroupDm('w1', 'creator', peers), /at most 8 people/)
+  })
+
+  it('allows exactly the cap (7 peers + creator = 8) — passes the cap check', async () => {
+    // With the max peers the cap passes, so the flow proceeds to workspace
+    // membership validation. We return no members, so it fails THERE instead —
+    // proving the cap did not reject 7 peers.
+    const { db } = makeDb([[]]) // membership query → empty
+    const svc = buildSvc(db)
+    const peers = Array.from({ length: MAX_GROUP_DM_MEMBERS - 1 }, (_, i) => `peer-${i}`)
+    await assert.rejects(() => svc.createGroupDm('w1', 'creator', peers), /membership required/)
   })
 })
 

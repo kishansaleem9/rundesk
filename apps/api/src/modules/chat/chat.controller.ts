@@ -116,6 +116,11 @@ export class ChatController {
     return this.chat.markChannelRead(channelId, user.id)
   }
 
+  @Post('chat/channels/:channelId/delivered')
+  markDelivered(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.markChannelDelivered(channelId, user.id)
+  }
+
   @Patch('chat/channels/:channelId/notifications')
   setNotificationLevel(
     @Param('channelId') channelId: string,
@@ -299,8 +304,13 @@ export class ChatController {
 
   @Get('workspaces/:workspaceId/chat/saved')
   @UseGuards(WorkspaceMemberGuard)
-  listSaved(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.chat.listSaved(workspaceId, user.id)
+  listSaved(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('tag') tag?: string,
+    @Query('q') q?: string,
+  ) {
+    return this.chat.listSaved(workspaceId, user.id, { tag, q })
   }
 
   @Get('workspaces/:workspaceId/chat/files')
@@ -330,12 +340,25 @@ export class ChatController {
   }
 
   @Post('chat/messages/:messageId/save')
-  save(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.chat.setSaved(messageId, user.id, true)
+  save(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { tags?: string[] } = {},
+  ) {
+    return this.chat.setSaved(messageId, user.id, true, body.tags)
   }
 
   @Delete('chat/messages/:messageId/save')
   unsave(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.setSaved(messageId, user.id, false)
+  }
+
+  @Patch('chat/saves/:messageId/tags')
+  updateSavedTags(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { tags?: string[] },
+  ) {
+    return this.chat.updateSavedTags(messageId, user.id, body.tags)
   }
 }

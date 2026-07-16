@@ -30,6 +30,11 @@ export const chatChannelMembers = pgTable(
     channelId: uuid('channel_id').notNull().references(() => chatChannels.id, { onDelete: 'cascade' }),
     userId:    uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }),
+    // Delivery receipt (Plan §6.2): when the user's client last acknowledged
+    // receiving this channel's messages. Mirrors lastReadAt — a message is
+    // "Delivered" to a member whose lastDeliveredAt >= the message's createdAt,
+    // and "Seen" once lastReadAt >= createdAt (Seen supersedes Delivered).
+    lastDeliveredAt: timestamp('last_delivered_at', { withTimezone: true }),
     // Per-channel notification preference: 'all' | 'mentions' | 'none' (0039).
     notificationLevel: text('notification_level').$type<'all' | 'mentions' | 'none'>().notNull().default('all'),
     joinedAt:  timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
@@ -133,6 +138,9 @@ export const chatMessageSaves = pgTable(
     id:        uuid('id').primaryKey().defaultRandom(),
     messageId: uuid('message_id').notNull().references(() => chatMessages.id, { onDelete: 'cascade' }),
     userId:    uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    // User-defined bookmark tags (Plan §6.7) for organizing/filtering saved
+    // messages in the Saved panel. Empty array = untagged.
+    tags:      text('tags').array().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

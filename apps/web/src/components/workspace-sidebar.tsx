@@ -238,6 +238,15 @@ export function WorkspaceSidebar() {
     queryFn: () => api<any>(`/dashboards/dock/${workspaceId}`),
     enabled: !!workspaceId,
   })
+  // Inbox unread badge (Plan §6.12). Reuse the topbar bell's exact query key so
+  // React Query shares a single fetch/cache instead of duplicating it.
+  const unreadCountQuery = useQuery({
+    queryKey: ['notifications-unread-count'],
+    queryFn: () => api<{ count: number }>('/notifications/unread-count'),
+    refetchInterval: 30000,
+    enabled: !!workspaceId,
+  })
+  const unreadCount = unreadCountQuery.data?.count ?? 0
   const { t } = useTranslation()
   // Localize the fixed set of app-defined nav/recent labels for display, while the
   // stored label stays English (a stable id for icon lookup + persistence). User
@@ -500,6 +509,15 @@ export function WorkspaceSidebar() {
                         >
                           <Icon className="h-4 w-4 shrink-0" />
                           <span className="truncate flex-1">{navLabel(item.label)}</span>
+                          {item.path.endsWith('/inbox') && unreadCount > 0 && (
+                            <span
+                              className="ml-auto shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-gradient text-white text-[10px] font-semibold flex items-center justify-center tabular-nums"
+                              title={t('nav.unreadNotifications', { count: unreadCount })}
+                              aria-label={t('nav.unreadNotifications', { count: unreadCount })}
+                            >
+                              {unreadCount > 99 ? '99+' : unreadCount}
+                            </span>
+                          )}
                         </Link>
                         <button
                           className="h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-accent/15 opacity-0 group-hover:opacity-100"

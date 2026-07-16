@@ -3411,6 +3411,19 @@ export const en = {
   'chat.taskDue': 'Due {date}',
   'chat.unassigned': 'Unassigned',
 
+  // Chat delivery receipts (§6.2), group DM cap (§6.2), saved-message tags (§6.7)
+  'chat.groupDmLimit': 'Group messages can include up to {{count}} people.',
+  'chat.delivered': 'Delivered',
+  'chat.seen': 'Seen',
+  'chat.searchSaved': 'Search saved messages',
+  'chat.allTags': 'All',
+  'chat.noSavedMatch': 'No saved messages match your filters.',
+  'chat.addTag': 'Add tag',
+  'chat.addTagPlaceholder': 'New tag',
+  'chat.removeTag': 'Remove tag',
+  // Inbox unread badge (§6.12)
+  'nav.unreadNotifications': '{{count}} unread notifications',
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -6886,6 +6899,19 @@ export const es: Record<TranslationKey, string> = {
   'chat.taskDue': 'Vence {date}',
   'chat.unassigned': 'Sin asignar',
 
+  // Chat delivery receipts (§6.2), group DM cap (§6.2), saved-message tags (§6.7)
+  'chat.groupDmLimit': 'Los mensajes de grupo pueden incluir hasta {{count}} personas.',
+  'chat.delivered': 'Entregado',
+  'chat.seen': 'Visto',
+  'chat.searchSaved': 'Buscar mensajes guardados',
+  'chat.allTags': 'Todas',
+  'chat.noSavedMatch': 'Ningún mensaje guardado coincide con tus filtros.',
+  'chat.addTag': 'Añadir etiqueta',
+  'chat.addTagPlaceholder': 'Nueva etiqueta',
+  'chat.removeTag': 'Quitar etiqueta',
+  // Inbox unread badge (§6.12)
+  'nav.unreadNotifications': '{{count}} notificaciones sin leer',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -10353,6 +10379,19 @@ export const ar: Record<TranslationKey, string> = {
   'chat.taskDue': 'تُستحق {date}',
   'chat.unassigned': 'غير معيّن',
 
+  // Chat delivery receipts (§6.2), group DM cap (§6.2), saved-message tags (§6.7)
+  'chat.groupDmLimit': 'يمكن أن تضم المحادثات الجماعية حتى {{count}} أشخاص.',
+  'chat.delivered': 'تم التسليم',
+  'chat.seen': 'تمت المشاهدة',
+  'chat.searchSaved': 'ابحث في الرسائل المحفوظة',
+  'chat.allTags': 'الكل',
+  'chat.noSavedMatch': 'لا توجد رسائل محفوظة تطابق عوامل التصفية.',
+  'chat.addTag': 'إضافة وسم',
+  'chat.addTagPlaceholder': 'وسم جديد',
+  'chat.removeTag': 'إزالة الوسم',
+  // Inbox unread badge (§6.12)
+  'nav.unreadNotifications': '{{count}} إشعارات غير مقروءة',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -13669,6 +13708,19 @@ export const ur: Record<TranslationKey, string> = {
   'chat.viewTask': 'ٹاسک دیکھیں',
   'chat.taskDue': 'مقررہ تاریخ {date}',
   'chat.unassigned': 'غیر تفویض شدہ',
+
+  // Chat delivery receipts (§6.2), group DM cap (§6.2), saved-message tags (§6.7)
+  'chat.groupDmLimit': 'گروپ پیغامات میں زیادہ سے زیادہ {{count}} افراد شامل ہو سکتے ہیں۔',
+  'chat.delivered': 'پہنچا دیا گیا',
+  'chat.seen': 'دیکھ لیا گیا',
+  'chat.searchSaved': 'محفوظ پیغامات تلاش کریں',
+  'chat.allTags': 'تمام',
+  'chat.noSavedMatch': 'کوئی محفوظ پیغام آپ کے فلٹرز سے میل نہیں کھاتا۔',
+  'chat.addTag': 'ٹیگ شامل کریں',
+  'chat.addTagPlaceholder': 'نیا ٹیگ',
+  'chat.removeTag': 'ٹیگ ہٹائیں',
+  // Inbox unread badge (§6.12)
+  'nav.unreadNotifications': '{{count}} غیر پڑھی اطلاعات',
 
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',

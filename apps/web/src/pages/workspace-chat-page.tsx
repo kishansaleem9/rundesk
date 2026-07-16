@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, cn, toast } from '@rundesk/ui'
+import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
 import { AddPeopleDialog } from '../components/chat/add-people-dialog'
@@ -34,6 +34,9 @@ import {
   FileText,
   Download,
   Search,
+  Check,
+  CheckCheck,
+  Tag,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -93,6 +96,11 @@ type Message = {
   createdAt: string
   replyCount?: number
   lastReplyAt?: string | null
+  // Delivery indicator for the author's own messages (Plan §6.2), computed
+  // server-side in listMessages: 'sent' | 'delivered' | 'seen' (or null).
+  deliveryStatus?: 'sent' | 'delivered' | 'seen' | null
+  // Saved-message tags (Plan §6.7) — present on rows from the Saved list.
+  tags?: string[]
   reactions?: Array<{
     emoji: string
     count: number
@@ -270,7 +278,9 @@ export function ChatPage() {
   const receiptsQuery = useQuery({
     queryKey: ['chat-receipts', selectedId],
     queryFn: () =>
-      api<Array<{ userId: string; displayName: string; lastReadAt: string | null }>>(`/chat/channels/${selectedId}/receipts`),
+      api<Array<{ userId: string; displayName: string; lastReadAt: string | null; lastDeliveredAt: string | null }>>(
+        `/chat/channels/${selectedId}/receipts`,
+      ),
     enabled: !!selectedId,
     refetchInterval: 20000,
   })
@@ -313,6 +323,24 @@ export function ChatPage() {
       .map((r) => r.displayName)
       .filter(Boolean)
   }, [lastMessage, receiptsQuery.data, me?.id])
+
+  // Per-message delivery indicator for the caller's own messages (Plan §6.2).
+  // Computed live from the polling receipts query so it updates as members read,
+  // falling back to the server-computed status until receipts load. Mirrors the
+  // server: 'seen' if any other member read it, else 'delivered' if any other
+  // member's client received it, else 'sent'. Seen supersedes Delivered.
+  const deliveryStatusFor = (message: Message): 'sent' | 'delivered' | 'seen' | null => {
+    if (message.authorId !== me?.id) return null
+    const others = (receiptsQuery.data ?? []).filter((r) => r.userId !== me?.id)
+    if (others.length === 0) return message.deliveryStatus ?? null
+    const at = new Date(message.createdAt).getTime()
+    let delivered = false
+    for (const r of others) {
+      if (r.lastReadAt && new Date(r.lastReadAt).getTime() >= at) return 'seen'
+      if (r.lastDeliveredAt && new Date(r.lastDeliveredAt).getTime() >= at) delivered = true
+    }
+    return delivered ? 'delivered' : message.deliveryStatus ?? 'sent'
+  }
 
   const pinnedQuery = useQuery({
     queryKey: ['chat-pinned', selectedId],
@@ -397,6 +425,12 @@ export function ChatPage() {
           if (prev.some((m) => m.id === msg.id)) return prev
           return [...prev, msg]
         })
+        // Delivery receipt (Plan §6.2): a message from someone else reached this
+        // client — mark it delivered even if the channel isn't open, so the
+        // sender can see "Delivered" before it's actually read.
+        if (msg.authorId !== me?.id) {
+          void api(`/chat/channels/${msg.channelId}/delivered`, { method: 'POST' }).catch(() => undefined)
+        }
       }
       if (event.type === 'chat.message.updated' && event.channelId && event.messageId) {
         qc.setQueryData<Message[] | undefined>(['chat-messages', event.channelId], (prev) => {
@@ -437,6 +471,9 @@ export function ChatPage() {
   useEffect(() => {
     if (!selectedId || messages.length === 0) return
     let cancelled = false
+    // Opening a channel implies both delivery and read (Plan §6.2). Mark
+    // delivered first so senders never see "Seen" without "Delivered".
+    void api(`/chat/channels/${selectedId}/delivered`, { method: 'POST' }).catch(() => undefined)
     void api(`/chat/channels/${selectedId}/read`, { method: 'POST' })
       .then(() => {
         if (!cancelled) {
@@ -716,6 +753,18 @@ export function ChatPage() {
   const setSavedMutation = useMutation({
     mutationFn: ({ messageId, saved }: { messageId: string; saved: boolean }) =>
       api(`/chat/messages/${messageId}/save`, { method: saved ? 'POST' : 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chat-saved', workspaceId] })
+    },
+    onError: (error) => {
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateSaved'))
+    },
+  })
+
+  // Update the tags on a saved message (Plan §6.7).
+  const updateSavedTagsMutation = useMutation({
+    mutationFn: ({ messageId, tags }: { messageId: string; tags: string[] }) =>
+      api(`/chat/saves/${messageId}/tags`, { method: 'PATCH', body: JSON.stringify({ tags }) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['chat-saved', workspaceId] })
     },
@@ -1527,6 +1576,23 @@ export function ChatPage() {
                           )}
                         </div>
                       )}
+                      {mine && !m.deletedAt && (() => {
+                        // Subtle Delivered/Seen indicator on my own messages
+                        // (Plan §6.2). Seen supersedes Delivered; 'sent' shows
+                        // nothing to avoid clutter.
+                        const status = deliveryStatusFor(m)
+                        if (status !== 'delivered' && status !== 'seen') return null
+                        return (
+                          <div className="mt-0.5 flex items-center justify-end gap-0.5 text-[10px] text-muted-foreground">
+                            {status === 'seen' ? (
+                              <CheckCheck className="h-3 w-3 text-violet-500" />
+                            ) : (
+                              <Check className="h-3 w-3" />
+                            )}
+                            <span>{status === 'seen' ? t('chat.seen') : t('chat.delivered')}</span>
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
                   </div>
@@ -1665,6 +1731,7 @@ export function ChatPage() {
               setShowSavedPanel(false)
             }}
             onUnsave={(id) => setSavedMutation.mutate({ messageId: id, saved: false })}
+            onUpdateTags={(messageId, tags) => updateSavedTagsMutation.mutate({ messageId, tags })}
           />
         )}
         {showFilesPanel && (
@@ -1744,6 +1811,8 @@ function PinnedPanel({
   )
 }
 
+type SavedMessage = Message & { channelName?: string; savedAt?: string }
+
 function SavedPanel({
   messages,
   loading,
@@ -1751,15 +1820,38 @@ function SavedPanel({
   onClose,
   onOpenThread,
   onUnsave,
+  onUpdateTags,
 }: {
-  messages: Array<Message & { channelName?: string; savedAt?: string }>
+  messages: SavedMessage[]
   loading?: boolean
   namesById: Record<string, string>
   onClose: () => void
   onOpenThread: (id: string, channelId: string) => void
   onUnsave: (id: string) => void
+  onUpdateTags: (messageId: string, tags: string[]) => void
 }) {
   const { t } = useTranslation()
+  // Search + tag filter (Plan §6.7) — applied client-side over the loaded saves.
+  const [search, setSearch] = useState('')
+  const [activeTag, setActiveTag] = useState<string | null>(null)
+  const allTags = useMemo(() => {
+    const set = new Set<string>()
+    for (const m of messages) for (const tag of m.tags ?? []) set.add(tag)
+    return [...set].sort()
+  }, [messages])
+  const q = search.trim().toLowerCase()
+  const filtered = messages.filter((m) => {
+    if (activeTag && !(m.tags ?? []).includes(activeTag)) return false
+    if (q && !m.body.toLowerCase().includes(q)) return false
+    return true
+  })
+  const chip = (active: boolean) =>
+    cn(
+      'text-[10px] rounded-full px-2 py-0.5 border transition-colors',
+      active
+        ? 'bg-violet-500/15 border-violet-500/40 text-violet-600 dark:text-violet-300'
+        : 'border-border text-muted-foreground hover:text-foreground',
+    )
   return (
     <aside className="hidden xl:flex w-80 border-l border-border flex-col">
       <div className="h-12 border-b border-border px-3 flex items-center justify-between">
@@ -1770,36 +1862,143 @@ function SavedPanel({
           {t('common.close')}
         </button>
       </div>
+      <div className="border-b border-border px-3 py-2 space-y-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('chat.searchSaved')}
+            className="h-8 pl-8 text-[13px]"
+          />
+        </div>
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            <button type="button" className={chip(!activeTag)} onClick={() => setActiveTag(null)}>
+              {t('chat.allTags')}
+            </button>
+            {allTags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className={chip(activeTag === tag)}
+                onClick={() => setActiveTag((prev) => (prev === tag ? null : tag))}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {loading ? (
           <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
         ) : messages.length === 0 ? (
           <div className="text-xs text-muted-foreground">{t('chat.noSavedMessages')}</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-xs text-muted-foreground">{t('chat.noSavedMatch')}</div>
         ) : (
-          messages.map((m) => (
-            <Card key={m.id} className="p-3 group">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs text-muted-foreground truncate">
-                  {m.authorName ?? t('chat.unknownUser')}
-                  {m.channelName ? <span className="opacity-70"> · #{m.channelName}</span> : null}
-                </div>
-                <button
-                  className="text-[11px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={() => onUnsave(m.id)}
-                  title={t('chat.removeFromSaved')}
-                >
-                  {t('chat.remove')}
-                </button>
-              </div>
-              <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
-              <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id, m.channelId)}>
-                {t('chat.openThread')}
-              </button>
-            </Card>
+          filtered.map((m) => (
+            <SavedMessageCard
+              key={m.id}
+              m={m}
+              namesById={namesById}
+              onOpenThread={onOpenThread}
+              onUnsave={onUnsave}
+              onUpdateTags={onUpdateTags}
+            />
           ))
         )}
       </div>
     </aside>
+  )
+}
+
+function SavedMessageCard({
+  m,
+  namesById,
+  onOpenThread,
+  onUnsave,
+  onUpdateTags,
+}: {
+  m: SavedMessage
+  namesById: Record<string, string>
+  onOpenThread: (id: string, channelId: string) => void
+  onUnsave: (id: string) => void
+  onUpdateTags: (messageId: string, tags: string[]) => void
+}) {
+  const { t } = useTranslation()
+  const [adding, setAdding] = useState(false)
+  const [tagInput, setTagInput] = useState('')
+  const tags = m.tags ?? []
+  const commitTag = () => {
+    const tag = tagInput.trim().toLowerCase()
+    if (tag && !tags.includes(tag)) onUpdateTags(m.id, [...tags, tag])
+    setTagInput('')
+    setAdding(false)
+  }
+  const removeTag = (tag: string) => onUpdateTags(m.id, tags.filter((x) => x !== tag))
+  return (
+    <Card className="p-3 group">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-muted-foreground truncate">
+          {m.authorName ?? t('chat.unknownUser')}
+          {m.channelName ? <span className="opacity-70"> · #{m.channelName}</span> : null}
+        </div>
+        <button
+          className="text-[11px] text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={() => onUnsave(m.id)}
+          title={t('chat.removeFromSaved')}
+        >
+          {t('chat.remove')}
+        </button>
+      </div>
+      <MentionText text={m.body} namesById={namesById} className="text-sm mt-1" />
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className="inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-600 dark:text-violet-300"
+          >
+            {tag}
+            <button type="button" className="hover:text-destructive" onClick={() => removeTag(tag)} title={t('chat.removeTag')}>
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </span>
+        ))}
+        {adding ? (
+          <input
+            autoFocus
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commitTag()
+              }
+              if (e.key === 'Escape') {
+                setTagInput('')
+                setAdding(false)
+              }
+            }}
+            onBlur={commitTag}
+            placeholder={t('chat.addTagPlaceholder')}
+            className="h-5 w-24 rounded border border-border bg-background px-1.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        ) : (
+          <button
+            type="button"
+            className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            onClick={() => setAdding(true)}
+          >
+            <Tag className="h-2.5 w-2.5" /> {t('chat.addTag')}
+          </button>
+        )}
+      </div>
+      <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => onOpenThread(m.id, m.channelId)}>
+        {t('chat.openThread')}
+      </button>
+    </Card>
   )
 }
 

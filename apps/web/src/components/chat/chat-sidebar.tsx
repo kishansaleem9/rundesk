@@ -73,10 +73,19 @@ export function ChatSidebar({
   const { t, tCount } = useTranslation()
 
   // Multi-select DM composer: pick one teammate for a 1:1, or several for a
-  // group DM (Plan §6.2). Selection is local to the sidebar.
+  // group DM (Plan §6.2). Selection is local to the sidebar. The current user is
+  // always a member, so peers are capped at (max members − 1) to keep the group
+  // at or under MAX_GROUP_DM_MEMBERS — mirrors the API cap.
+  const MAX_GROUP_DM_MEMBERS = 8
+  const MAX_DM_PEERS = MAX_GROUP_DM_MEMBERS - 1
   const [selectedPeers, setSelectedPeers] = useState<string[]>([])
   const togglePeer = (userId: string) =>
-    setSelectedPeers((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]))
+    setSelectedPeers((prev) => {
+      if (prev.includes(userId)) return prev.filter((id) => id !== userId)
+      if (prev.length >= MAX_DM_PEERS) return prev // at cap: ignore further picks
+      return [...prev, userId]
+    })
+  const atPeerLimit = selectedPeers.length >= MAX_DM_PEERS
 
   const q = channelSearch.trim().toLowerCase()
   const filteredChannels = q
@@ -307,6 +316,11 @@ export function ChatSidebar({
                   <p className="text-[11px] text-muted-foreground px-1 pb-0.5">
                     {t('chat.selectTeammates')}
                   </p>
+                  {atPeerLimit && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 px-1 pb-0.5">
+                      {t('chat.groupDmLimit', { count: MAX_GROUP_DM_MEMBERS })}
+                    </p>
+                  )}
                   <div className="space-y-0.5 max-h-48 overflow-y-auto">
                     {dmCandidates.map((m) => {
                       const checked = selectedPeers.includes(m.userId)
@@ -314,11 +328,12 @@ export function ChatSidebar({
                         <button
                           key={m.userId}
                           type="button"
-                          disabled={startDmPending}
+                          disabled={startDmPending || (!checked && atPeerLimit)}
                           onClick={() => togglePeer(m.userId)}
                           className={cn(
                             'w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left disabled:opacity-60',
                             checked ? 'bg-violet-500/12' : 'hover:bg-violet-500/10',
+                            !checked && atPeerLimit && 'cursor-not-allowed',
                           )}
                         >
                           <MemberAvatar label={initials(m.displayName || m.email)} status={statusOf(m.userId)} />
