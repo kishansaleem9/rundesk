@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2 } from 'lucide-react'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Profile = {
   id: string
@@ -539,5 +539,99 @@ function TotpCard() {
 }
 
 function NotificationsTab() {
-  return <PushNotificationsPanel />
+  return (
+    <div className="space-y-5">
+      <PushNotificationsPanel />
+      <ReminderLeadTimeCard />
+    </div>
+  )
+}
+
+// §10.4 — per-user due-date reminder lead time. Checkboxes for 1 day / 2 days /
+// 1 week persist to the notification-preferences endpoint as `reminderLeadDays`.
+const LEAD_OPTIONS: Array<{ days: number; labelKey: TranslationKey }> = [
+  { days: 1, labelKey: 'profile.reminderLead1Day' },
+  { days: 2, labelKey: 'profile.reminderLead2Days' },
+  { days: 7, labelKey: 'profile.reminderLead1Week' },
+]
+
+function ReminderLeadTimeCard() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const prefsQuery = useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: () => api<{ reminderLeadDays?: number[] }>('/notifications/preferences'),
+  })
+
+  const [selected, setSelected] = useState<number[]>([1, 2])
+
+  useEffect(() => {
+    if (prefsQuery.data) setSelected(prefsQuery.data.reminderLeadDays ?? [1, 2])
+  }, [prefsQuery.data])
+
+  const toggle = (day: number) =>
+    setSelected((cur) =>
+      cur.includes(day) ? cur.filter((d) => d !== day) : [...cur, day].sort((a, b) => a - b),
+    )
+
+  const save = useMutation({
+    mutationFn: () =>
+      api('/notifications/preferences', {
+        method: 'POST',
+        body: { reminderLeadDays: [...selected].sort((a, b) => a - b) },
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['notification-preferences'] })
+    },
+  })
+
+  return (
+    <Card className="p-6">
+      <div className="flex items-start gap-3 mb-4">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shrink-0">
+          <CalendarClock className="h-4 w-4" />
+        </div>
+        <div>
+          <h2 className="font-semibold mb-0.5">{t('profile.reminderLeadTitle')}</h2>
+          <p className="text-sm text-muted-foreground">{t('profile.reminderLeadSubtitle')}</p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {LEAD_OPTIONS.map((opt) => {
+          const checked = selected.includes(opt.days)
+          return (
+            <label
+              key={opt.days}
+              className={cn(
+                'flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors',
+                checked ? 'border-accent/50 bg-accent/5' : 'border-border hover:bg-muted/40',
+              )}
+            >
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={checked}
+                onChange={() => toggle(opt.days)}
+              />
+              <span className="text-sm">{t(opt.labelKey)}</span>
+            </label>
+          )
+        })}
+      </div>
+
+      {selected.length === 0 && (
+        <p className="text-xs text-muted-foreground mt-3">{t('profile.reminderLeadNone')}</p>
+      )}
+
+      <div className="flex items-center gap-3 mt-4">
+        <Button variant="gradient" size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+          {save.isPending ? t('common.saving') : t('profile.reminderLeadSave')}
+        </Button>
+        {save.isSuccess && (
+          <span className="text-xs text-emerald-600">{t('profile.reminderLeadSaved')}</span>
+        )}
+      </div>
+    </Card>
+  )
 }

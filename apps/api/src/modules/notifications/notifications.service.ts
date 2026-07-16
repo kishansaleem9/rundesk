@@ -9,6 +9,38 @@ import { ConfigService } from '@nestjs/config'
 import webpush from 'web-push'
 import { extractMentionUserIds, formatMentionsInText } from '../../common/utils/mentions'
 
+// --- Reminder lead time (§10.4) --------------------------------------------
+// Per-user "remind me N days before a task is due" offsets. Stored on the
+// notification_preferences jsonb. The UI exposes 1 day / 2 days / 1 week.
+export const ALLOWED_REMINDER_LEAD_DAYS = [1, 2, 7] as const
+export const DEFAULT_REMINDER_LEAD_DAYS: number[] = [1, 2]
+
+/**
+ * Sanitize a stored/submitted lead-days value into a clean, sorted, de-duped
+ * array drawn from {@link ALLOWED_REMINDER_LEAD_DAYS}.
+ *
+ * - Absent/invalid input (not an array) → the default `[1, 2]`.
+ * - An explicit empty array is respected (→ `[]`, meaning "overdue only").
+ * - Out-of-set or non-integer entries are dropped.
+ */
+export function normalizeReminderLeadDays(input: unknown): number[] {
+  if (!Array.isArray(input)) return [...DEFAULT_REMINDER_LEAD_DAYS]
+  const allowed = new Set<number>(ALLOWED_REMINDER_LEAD_DAYS)
+  const picked = new Set<number>()
+  for (const raw of input) {
+    const n = typeof raw === 'number' ? raw : Number(raw)
+    if (Number.isInteger(n) && allowed.has(n)) picked.add(n)
+  }
+  return [...picked].sort((a, b) => a - b)
+}
+
+/** Human label for a due-soon reminder fired `diffDays` before the due date. */
+export function reminderLeadLabel(diffDays: number): string {
+  if (diffDays <= 1) return 'tomorrow'
+  if (diffDays === 7) return 'in 1 week'
+  return `in ${diffDays} days`
+}
+
 type NotificationType =
   | 'task_assigned'
   | 'task_mentioned'
@@ -21,6 +53,7 @@ type NotificationType =
   | 'doc_mentioned'
   | 'doc_commented'
   | 'approval_needed'
+  | 'task_blocked'
 
 type NotificationEventKey =
   | 'mention'
@@ -52,12 +85,15 @@ type NotificationPreferences = {
     /** Hour of day (0–23, server time) the digest is sent. */
     hour: number
   }
+  /** §10.4 — lead days for due-date reminders (subset of {1,2,7}). */
+  reminderLeadDays: number[]
 }
 
 type NotificationPreferencesPatch = {
   channels?: Partial<NotificationPreferences['channels']>
   events?: Partial<Record<NotificationEventKey, Partial<NotificationChannelMatrix>>>
   digest?: Partial<NotificationPreferences['digest']>
+  reminderLeadDays?: number[]
 }
 
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
@@ -84,6 +120,7 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
     frequency: 'daily',
     hour: 8,
   },
+  reminderLeadDays: [...DEFAULT_REMINDER_LEAD_DAYS],
 }
 
 @Injectable()
@@ -226,7 +263,11 @@ export class NotificationsService {
   }
 
   async updatePreferences(userId: string, patch: NotificationPreferencesPatch) {
-    const merged = this.mergePreferences(DEFAULT_NOTIFICATION_PREFERENCES, patch)
+    // Merge onto the user's *current* preferences (defaults filled in) so a
+    // partial patch — e.g. only `reminderLeadDays` from the profile page — never
+    // clobbers unrelated settings back to defaults.
+    const current = await this.getUserPreferences(userId)
+    const merged = this.mergePreferences(current, patch)
     const [row] = await this.db
       .update(users)
       .set({ notificationPreferences: merged, updatedAt: new Date() })
@@ -560,6 +601,9 @@ export class NotificationsService {
       case 'task_overdue':
         return 'due'
       case 'task_status_changed':
+      // A task becoming blocked is a workflow/state change — route it with
+      // status notifications so muting status also mutes blocked alerts.
+      case 'task_blocked':
         return 'status'
       case 'doc_mentioned':
       case 'doc_commented':
@@ -596,6 +640,7 @@ export class NotificationsService {
         ...base.digest,
         ...(patch.digest ?? {}),
       },
+      reminderLeadDays: normalizeReminderLeadDays(patch.reminderLeadDays ?? base.reminderLeadDays),
     }
   }
 

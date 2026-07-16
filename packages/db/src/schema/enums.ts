@@ -82,6 +82,8 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'doc_mentioned',
   'doc_commented',
   'approval_needed',
+  // §4.4 — fired when a blocking dependency leaves a task blocked.
+  'task_blocked',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

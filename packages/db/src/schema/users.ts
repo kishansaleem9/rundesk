@@ -20,6 +20,11 @@ export const users = pgTable('users', {
   // window, never a permanent ban.
   failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
   lockedUntil:         timestamp('locked_until', { withTimezone: true }),
+  // Notification settings. The column default seeds channels + events; the
+  // notifications service merges additional keys on read so they can evolve
+  // without a data migration: `digest` (email digest, §10) and
+  // `reminderLeadDays` (§10.4 — int[] of lead days for due-date reminders,
+  // default [1, 2]; 0063 backfills existing rows explicitly).
   notificationPreferences: jsonb('notification_preferences').notNull().default({
     channels: {
       webEnabled: true,

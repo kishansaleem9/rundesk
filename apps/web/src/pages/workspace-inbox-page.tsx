@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
-import { Bell, AtSign, MessageSquare, UserPlus, RefreshCw } from 'lucide-react'
+import { Bell, AtSign, MessageSquare, UserPlus, RefreshCw, Ban } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
 import { MentionText } from '../components/mention-text'
@@ -18,6 +18,7 @@ type Notification = {
     | 'task_overdue'
     | 'task_status_changed'
     | 'task_updated'
+    | 'task_blocked'
     | 'chat_message'
     | 'doc_mentioned'
     | 'doc_commented'
@@ -44,6 +45,7 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; labelK
   chat_message: { icon: MessageSquare, color: 'text-indigo-500', labelKey: 'inbox.type.newMessage' },
   task_status_changed: { icon: RefreshCw, color: 'text-cyan-500', labelKey: 'inbox.type.statusChanged' },
   task_updated: { icon: RefreshCw, color: 'text-cyan-500', labelKey: 'inbox.type.taskUpdated' },
+  task_blocked: { icon: Ban, color: 'text-red-500', labelKey: 'inbox.type.blocked' },
 }
 
 /** Humanize an unknown notification-type id (e.g. `task_foo` → `Task foo`) for display. */

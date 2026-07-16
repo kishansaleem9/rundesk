@@ -256,6 +256,70 @@ export class TasksService {
     }
   }
 
+  /**
+   * §4.4 — notify a task's assignees + watchers (minus the actor) when a newly
+   * added blocking dependency leaves it blocked. Best-effort: swallows errors so
+   * a notification failure never breaks the dependency write.
+   */
+  private async notifyTaskBlocked(blockedTaskId: string, blockerTaskId: string, actorId: string) {
+    try {
+      // Only notify when the blocker is genuinely open — i.e. this dependency
+      // actually leaves the task blocked. A done/cancelled blocker doesn't block.
+      const openBlockers = await this.getOpenBlockers(blockedTaskId)
+      const blocker = openBlockers.find((b) => b.id === blockerTaskId)
+      if (!blocker) return
+
+      const [blockedTask] = await this.db
+        .select({ id: tasks.id, title: tasks.title, listId: tasks.listId })
+        .from(tasks)
+        .where(eq(tasks.id, blockedTaskId))
+        .limit(1)
+      if (!blockedTask) return
+
+      const ctx = await this.resolveWorkspaceForList(blockedTask.listId)
+      if (!ctx) return
+      const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+      const taskUrl = this.buildTaskUrl(
+        ctx.workspaceId,
+        ctx.spaceId,
+        ctx.projectId,
+        blockedTask.listId,
+        blockedTaskId,
+      )
+
+      const [assigneeRows, watcherRows] = await Promise.all([
+        this.db
+          .select({ userId: taskAssignees.userId })
+          .from(taskAssignees)
+          .where(eq(taskAssignees.taskId, blockedTaskId)),
+        this.db
+          .select({ userId: taskWatchers.userId })
+          .from(taskWatchers)
+          .where(eq(taskWatchers.taskId, blockedTaskId)),
+      ])
+
+      const recipientIds = [...new Set([...assigneeRows, ...watcherRows].map((r) => r.userId))].filter(
+        (id) => id !== actorId,
+      )
+      if (recipientIds.length === 0) return
+
+      for (const userId of recipientIds) {
+        void this.notifications.create({
+          userId,
+          workspaceId: ctx.workspaceId,
+          actorId,
+          type: 'task_blocked',
+          title: `"${blockedTask.title}" is blocked`,
+          body: `Blocked by "${blocker.title}".`,
+          target: { entityType: 'task', entityId: blockedTaskId, url: taskUrl },
+          emailContext: { taskTitle: blockedTask.title, workspaceName },
+        })
+      }
+    } catch {
+      // Best-effort — never fail the dependency write on a notification error.
+    }
+  }
+
   private async indexTaskInSearch(taskId: string) {
     try {
       const ctx = await this.resolveTaskContext(taskId)
@@ -2235,6 +2299,12 @@ export class TasksService {
       .onConflictDoNothing()
       .returning()
     await this.logActivity({ taskId, actorId, action: 'dependency_added', meta: { relatedTaskId, type } })
+    // §4.4 — a new blocking edge may leave a task blocked; notify its
+    // assignees + watchers. Only for a freshly-created blocking dependency.
+    if (created && (type === 'blocks' || type === 'blocked_by')) {
+      const blocked = type === 'blocks' ? relatedTaskId : taskId
+      void this.notifyTaskBlocked(blocked, /* blocker */ type === 'blocks' ? taskId : relatedTaskId, actorId)
+    }
     return created
   }
 
