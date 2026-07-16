@@ -3245,6 +3245,17 @@ export const en = {
   'favorites.remove': 'Remove from favorites',
   'favorites.updateError': 'Could not update favorites',
 
+  // Profile — avatar upload
+  'profile.uploadPhoto': 'Upload photo',
+  'profile.changePhoto': 'Change photo',
+  'profile.removePhoto': 'Remove photo',
+  'profile.uploadingPhoto': 'Uploading…',
+  'profile.removingPhoto': 'Removing…',
+  'profile.photoHint': 'JPG, PNG, WebP, or GIF. Only image files up to 5MB.',
+  'profile.photoTypeError': 'Only image files (PNG, JPEG, WebP, or GIF) are allowed.',
+  'profile.photoSizeError': 'Image must be 5MB or smaller.',
+  'profile.photoUploadError': "Couldn't upload photo. Please try again.",
+
   // Auth — sign in
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
@@ -6561,6 +6572,16 @@ export const es: Record<TranslationKey, string> = {
   'favorites.remove': 'Eliminar de favoritos',
   'favorites.updateError': 'No se pudieron actualizar los favoritos',
 
+  'profile.uploadPhoto': 'Subir foto',
+  'profile.changePhoto': 'Cambiar foto',
+  'profile.removePhoto': 'Quitar foto',
+  'profile.uploadingPhoto': 'Subiendo…',
+  'profile.removingPhoto': 'Quitando…',
+  'profile.photoHint': 'JPG, PNG, WebP o GIF. Solo imágenes de hasta 5 MB.',
+  'profile.photoTypeError': 'Solo se permiten archivos de imagen (PNG, JPEG, WebP o GIF).',
+  'profile.photoSizeError': 'La imagen debe pesar 5 MB o menos.',
+  'profile.photoUploadError': 'No se pudo subir la foto. Inténtalo de nuevo.',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -9869,6 +9890,16 @@ export const ar: Record<TranslationKey, string> = {
   'favorites.remove': 'إزالة من المفضّلة',
   'favorites.updateError': 'تعذّر تحديث المفضّلة',
 
+  'profile.uploadPhoto': 'رفع صورة',
+  'profile.changePhoto': 'تغيير الصورة',
+  'profile.removePhoto': 'إزالة الصورة',
+  'profile.uploadingPhoto': 'جارٍ الرفع…',
+  'profile.removingPhoto': 'جارٍ الإزالة…',
+  'profile.photoHint': 'JPG أو PNG أو WebP أو GIF. صور فقط بحجم أقصاه 5 ميغابايت.',
+  'profile.photoTypeError': 'يُسمح بملفات الصور فقط (PNG أو JPEG أو WebP أو GIF).',
+  'profile.photoSizeError': 'يجب ألا يزيد حجم الصورة عن 5 ميغابايت.',
+  'profile.photoUploadError': 'تعذّر رفع الصورة. يُرجى المحاولة مرة أخرى.',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -13027,6 +13058,16 @@ export const ur: Record<TranslationKey, string> = {
   'favorites.add': 'پسندیدہ میں شامل کریں',
   'favorites.remove': 'پسندیدہ سے ہٹائیں',
   'favorites.updateError': 'پسندیدہ اپ ڈیٹ نہیں ہو سکے',
+  'profile.uploadPhoto': 'تصویر اپ لوڈ کریں',
+  'profile.changePhoto': 'تصویر تبدیل کریں',
+  'profile.removePhoto': 'تصویر ہٹائیں',
+  'profile.uploadingPhoto': 'اپ لوڈ ہو رہی ہے…',
+  'profile.removingPhoto': 'ہٹائی جا رہی ہے…',
+  'profile.photoHint': 'JPG، PNG، WebP یا GIF۔ صرف تصاویر، زیادہ سے زیادہ 5MB۔',
+  'profile.photoTypeError': 'صرف تصویری فائلوں (PNG، JPEG، WebP یا GIF) کی اجازت ہے۔',
+  'profile.photoSizeError': 'تصویر 5MB یا اس سے کم ہونی چاہیے۔',
+  'profile.photoUploadError': 'تصویر اپ لوڈ نہیں ہو سکی۔ براہِ کرم دوبارہ کوشش کریں۔',
+
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',
   'auth.email': 'ای میل',

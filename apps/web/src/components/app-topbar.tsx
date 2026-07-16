@@ -686,12 +686,12 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
           className="rounded-full ring-2 ring-transparent transition-all hover:ring-border focus-visible:outline-none focus-visible:ring-ring"
           aria-label={t('topbar.userMenu')}
         >
-          <PersonAvatar name={user?.displayName ?? '?'} size="md" />
+          <PersonAvatar name={user?.displayName ?? '?'} imageUrl={user?.avatarUrl} size="md" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[240px]">
         <div className="px-3 py-2.5 flex items-center gap-3">
-          <PersonAvatar name={user?.displayName ?? '?'} size="lg" />
+          <PersonAvatar name={user?.displayName ?? '?'} imageUrl={user?.avatarUrl} size="lg" />
           <div className="min-w-0">
             <div className="text-sm font-medium truncate">{user?.displayName}</div>
             <div className="text-xs text-muted-foreground truncate">{user?.email}</div>

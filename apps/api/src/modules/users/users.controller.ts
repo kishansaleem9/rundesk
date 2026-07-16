@@ -26,6 +26,14 @@ export class UsersController {
     return this.users.updateProfile(user.id, body)
   }
 
+  @Post('me/avatar/presign')
+  presignAvatar(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { contentType: string; sizeBytes?: number },
+  ) {
+    return this.users.createAvatarUploadUrl(user.id, body)
+  }
+
   @Post('me/change-password')
   changePassword(
     @CurrentUser() user: CurrentUserPayload,

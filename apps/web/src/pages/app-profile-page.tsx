@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, Label, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe } from 'lucide-react'
+import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
@@ -72,6 +72,31 @@ export function ProfilePage() {
   )
 }
 
+/** Image types + size cap accepted for avatar uploads (mirrors the API). */
+const AVATAR_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024 // 5 MB
+
+/** Direct-to-R2 PUT with upload progress, mirroring the clips upload flow. */
+function putFileWithProgress(args: {
+  url: string
+  file: File
+  contentType: string
+  onProgress: (percent: number) => void
+}): Promise<{ ok: boolean; status: number }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', args.url, true)
+    xhr.setRequestHeader('Content-Type', args.contentType)
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return
+      args.onProgress(Math.min(100, Math.max(0, Math.round((event.loaded / event.total) * 100))))
+    }
+    xhr.onerror = () => reject(new Error('Network error while uploading image'))
+    xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status })
+    xhr.send(args.file)
+  })
+}
+
 function GeneralTab({ profile }: { profile: Profile }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -79,6 +104,10 @@ function GeneralTab({ profile }: { profile: Profile }) {
   const [displayName, setDisplayName] = useState(profile.displayName)
   const [bio, setBio] = useState(profile.bio ?? '')
   const [timezone, setTimezone] = useState(profile.timezone)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarProgress, setAvatarProgress] = useState(0)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
 
   useEffect(() => {
     setDisplayName(profile.displayName)
@@ -86,17 +115,77 @@ function GeneralTab({ profile }: { profile: Profile }) {
     setTimezone(profile.timezone)
   }, [profile])
 
+  // Push a fresh profile into both the query cache and the auth store so the
+  // topbar avatar updates immediately (and persists across reloads).
+  function applyProfile(updated: Profile) {
+    qc.setQueryData(['users', 'me'], updated)
+    setUser({
+      id: updated.id,
+      email: updated.email,
+      displayName: updated.displayName,
+      role: updated.role as string,
+      avatarUrl: updated.avatarUrl ?? null,
+    })
+  }
+
   const save = useMutation({
     mutationFn: () =>
       api<Profile>('/users/me', {
         method: 'PATCH',
         body: JSON.stringify({ displayName, bio, timezone }),
       }),
-    onSuccess: (updated) => {
-      qc.setQueryData(['users', 'me'], updated)
-      setUser({ id: updated.id, email: updated.email, displayName: updated.displayName, role: updated.role as string })
-    },
+    onSuccess: applyProfile,
   })
+
+  const removeAvatar = useMutation({
+    mutationFn: () => api<Profile>('/users/me', { method: 'PATCH', body: { avatarUrl: null } }),
+    onSuccess: (updated) => {
+      applyProfile(updated)
+      setAvatarError(null)
+    },
+    onError: (err) => setAvatarError(err instanceof ApiError ? err.message : t('profile.photoUploadError')),
+  })
+
+  async function onAvatarSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    // Reset the input so picking the same file again still fires onChange.
+    e.target.value = ''
+    if (!file) return
+    setAvatarError(null)
+    if (!AVATAR_TYPES.includes(file.type)) {
+      setAvatarError(t('profile.photoTypeError'))
+      return
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      setAvatarError(t('profile.photoSizeError'))
+      return
+    }
+    setAvatarUploading(true)
+    setAvatarProgress(0)
+    try {
+      const presign = await api<{ uploadUrl: string; publicUrl: string; storageKey: string }>(
+        '/users/me/avatar/presign',
+        { method: 'POST', body: { contentType: file.type, sizeBytes: file.size } },
+      )
+      const put = await putFileWithProgress({
+        url: presign.uploadUrl,
+        file,
+        contentType: file.type,
+        onProgress: setAvatarProgress,
+      })
+      if (!put.ok) throw new Error(`Storage upload failed (${put.status})`)
+      const updated = await api<Profile>('/users/me', {
+        method: 'PATCH',
+        body: { avatarUrl: presign.publicUrl },
+      })
+      applyProfile(updated)
+    } catch (err) {
+      setAvatarError(err instanceof ApiError ? err.message : t('profile.photoUploadError'))
+    } finally {
+      setAvatarUploading(false)
+      setAvatarProgress(0)
+    }
+  }
 
   const dirty =
     displayName !== profile.displayName ||
@@ -106,13 +195,55 @@ function GeneralTab({ profile }: { profile: Profile }) {
   return (
     <Card className="p-6 space-y-5">
       <div className="flex items-center gap-4">
-        <div className="h-16 w-16 rounded-full bg-brand-700 text-white flex items-center justify-center text-xl font-semibold">
-          {profile.displayName.charAt(0).toUpperCase()}
-        </div>
-        <div>
+        <PersonAvatar name={profile.displayName} imageUrl={profile.avatarUrl} size="xl" />
+        <div className="min-w-0">
           <div className="text-base font-semibold">{profile.displayName}</div>
           <div className="text-sm text-muted-foreground">{profile.email}</div>
           <div className="text-xs text-muted-foreground mt-0.5 capitalize">{profile.role.replace('_', ' ')}</div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={onAvatarSelected}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarUploading || removeAvatar.isPending}
+            >
+              <Camera className="h-3.5 w-3.5" />
+              {avatarUploading
+                ? t('profile.uploadingPhoto')
+                : profile.avatarUrl
+                  ? t('profile.changePhoto')
+                  : t('profile.uploadPhoto')}
+            </Button>
+            {profile.avatarUrl && !avatarUploading && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                onClick={() => removeAvatar.mutate()}
+                disabled={removeAvatar.isPending}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {removeAvatar.isPending ? t('profile.removingPhoto') : t('profile.removePhoto')}
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">{t('profile.photoHint')}</p>
+          {avatarUploading && (
+            <div className="mt-2 h-1.5 w-40 rounded bg-muted overflow-hidden">
+              <div
+                className="h-full bg-brand-gradient transition-[width] duration-200"
+                style={{ width: `${Math.max(4, avatarProgress)}%` }}
+              />
+            </div>
+          )}
+          {avatarError && <p className="text-xs text-destructive mt-1.5">{avatarError}</p>}
         </div>
       </div>
 

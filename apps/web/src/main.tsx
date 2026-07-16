@@ -47,6 +47,7 @@ function useSessionHydration() {
           email: me.email,
           displayName: me.displayName,
           role: me.role,
+          avatarUrl: me.avatarUrl ?? null,
         })
       })
       .catch(() => {
