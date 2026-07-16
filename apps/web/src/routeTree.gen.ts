@@ -12,11 +12,15 @@ import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VerifyEmailRouteImport } from './routes/verify-email'
+import { Route as TrustRouteImport } from './routes/trust'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as StatusRouteImport } from './routes/status'
 import { Route as SsoCompleteRouteImport } from './routes/sso-complete'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as RegisterRouteImport } from './routes/register'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as DpaRouteImport } from './routes/dpa'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
 import { Route as IndexRouteImport } from './routes/index'
@@ -84,6 +88,16 @@ const VerifyEmailRoute = VerifyEmailRouteImport.update({
   path: '/verify-email',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TrustRoute = TrustRouteImport.update({
+  id: '/trust',
+  path: '/trust',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StatusRoute = StatusRouteImport.update({
   id: '/status',
   path: '/status',
@@ -104,11 +118,21 @@ const RegisterRoute = RegisterRouteImport.update({
   path: '/register',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/register.lazy').then((d) => d.Route))
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() => import('./routes/login.lazy').then((d) => d.Route))
+const DpaRoute = DpaRouteImport.update({
+  id: '/dpa',
+  path: '/dpa',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
@@ -471,11 +495,15 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accept-invite': typeof AcceptInviteRoute
   '/app': typeof AppRouteWithChildren
+  '/dpa': typeof DpaRoute
   '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
   '/status': typeof StatusRoute
+  '/terms': typeof TermsRoute
+  '/trust': typeof TrustRoute
   '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
@@ -530,11 +558,15 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accept-invite': typeof AcceptInviteRoute
+  '/dpa': typeof DpaRoute
   '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
   '/status': typeof StatusRoute
+  '/terms': typeof TermsRoute
+  '/trust': typeof TrustRoute
   '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
@@ -587,11 +619,15 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/accept-invite': typeof AcceptInviteRoute
   '/app': typeof AppRouteWithChildren
+  '/dpa': typeof DpaRoute
   '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
   '/register': typeof RegisterRoute
   '/sign-up': typeof SignUpRoute
   '/sso-complete': typeof SsoCompleteRoute
   '/status': typeof StatusRoute
+  '/terms': typeof TermsRoute
+  '/trust': typeof TrustRoute
   '/verify-email': typeof VerifyEmailRoute
   '/app/$workspaceId': typeof AppWorkspaceIdRouteWithChildren
   '/app/admin': typeof AppAdminRouteWithChildren
@@ -649,11 +685,15 @@ export interface FileRouteTypes {
     | '/'
     | '/accept-invite'
     | '/app'
+    | '/dpa'
     | '/login'
+    | '/privacy'
     | '/register'
     | '/sign-up'
     | '/sso-complete'
     | '/status'
+    | '/terms'
+    | '/trust'
     | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
@@ -708,11 +748,15 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/accept-invite'
+    | '/dpa'
     | '/login'
+    | '/privacy'
     | '/register'
     | '/sign-up'
     | '/sso-complete'
     | '/status'
+    | '/terms'
+    | '/trust'
     | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
@@ -764,11 +808,15 @@ export interface FileRouteTypes {
     | '/'
     | '/accept-invite'
     | '/app'
+    | '/dpa'
     | '/login'
+    | '/privacy'
     | '/register'
     | '/sign-up'
     | '/sso-complete'
     | '/status'
+    | '/terms'
+    | '/trust'
     | '/verify-email'
     | '/app/$workspaceId'
     | '/app/admin'
@@ -825,11 +873,15 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AcceptInviteRoute: typeof AcceptInviteRoute
   AppRoute: typeof AppRouteWithChildren
+  DpaRoute: typeof DpaRoute
   LoginRoute: typeof LoginRoute
+  PrivacyRoute: typeof PrivacyRoute
   RegisterRoute: typeof RegisterRoute
   SignUpRoute: typeof SignUpRoute
   SsoCompleteRoute: typeof SsoCompleteRoute
   StatusRoute: typeof StatusRoute
+  TermsRoute: typeof TermsRoute
+  TrustRoute: typeof TrustRoute
   VerifyEmailRoute: typeof VerifyEmailRoute
   DSlugRoute: typeof DSlugRoute
   PortalTokenRoute: typeof PortalTokenRoute
@@ -843,6 +895,20 @@ declare module '@tanstack/react-router' {
       path: '/verify-email'
       fullPath: '/verify-email'
       preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trust': {
+      id: '/trust'
+      path: '/trust'
+      fullPath: '/trust'
+      preLoaderRoute: typeof TrustRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/status': {
@@ -873,11 +939,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RegisterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dpa': {
+      id: '/dpa'
+      path: '/dpa'
+      fullPath: '/dpa'
+      preLoaderRoute: typeof DpaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/app': {
@@ -1434,11 +1514,15 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AcceptInviteRoute: AcceptInviteRoute,
   AppRoute: AppRouteWithChildren,
+  DpaRoute: DpaRoute,
   LoginRoute: LoginRoute,
+  PrivacyRoute: PrivacyRoute,
   RegisterRoute: RegisterRoute,
   SignUpRoute: SignUpRoute,
   SsoCompleteRoute: SsoCompleteRoute,
   StatusRoute: StatusRoute,
+  TermsRoute: TermsRoute,
+  TrustRoute: TrustRoute,
   VerifyEmailRoute: VerifyEmailRoute,
   DSlugRoute: DSlugRoute,
   PortalTokenRoute: PortalTokenRoute,

@@ -4,6 +4,7 @@ import { Toaster, TooltipProvider } from '@rundesk/ui'
 import type { AuthState } from '../store/auth'
 import { RouteErrorBoundary } from '../components/route-error-boundary'
 import { NotFound } from '../components/not-found'
+import { CookieConsentBanner } from '../components/cookie-consent-banner'
 
 export interface RouterContext {
   auth: AuthState
@@ -24,6 +25,7 @@ function RootLayout() {
       <div className="min-h-screen bg-background text-foreground font-sans">
         <Outlet />
       </div>
+      <CookieConsentBanner />
       <Toaster />
     </TooltipProvider>
   )

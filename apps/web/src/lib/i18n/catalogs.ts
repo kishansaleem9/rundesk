@@ -4106,6 +4106,14 @@ export const en = {
 
   'reports.allMembers': 'All members',
 
+  // Cookie consent banner (Plan §14.6) + DPA footer link
+  'cookie.title': 'Your privacy',
+  'cookie.message': 'We use cookies to keep you signed in, remember your preferences, and measure how Rundesk is used.',
+  'cookie.accept': 'Accept',
+  'cookie.decline': 'Decline',
+  'cookie.privacy': 'Privacy Policy',
+  'landing.footerDpa': 'DPA',
+
   'auth.signInTitle': 'Welcome back',
   'auth.signInSubtitle': 'Sign in to your Rundesk workspace',
   'auth.email': 'Email',
@@ -4163,7 +4171,7 @@ export const en = {
   'auth.heroFeature1': 'AI agents trained on your workspace',
   'auth.heroFeature2': 'Real-time collaboration with your team',
   'auth.heroFeature3': 'Every feature, exactly when you need it',
-  'auth.heroSecurity': 'SOC 2 Type II · Data residency in your region · Encrypted at rest',
+  'auth.heroSecurity': 'Working toward SOC 2 Type II · Data residency in your region · Encrypted at rest',
 
   // Settings — language
   'settings.language': 'Language',
@@ -8269,6 +8277,14 @@ export const es: Record<TranslationKey, string> = {
 
   'reports.allMembers': 'Todos los miembros',
 
+  // Cookie consent banner (Plan §14.6) + DPA footer link
+  'cookie.title': 'Tu privacidad',
+  'cookie.message': 'Usamos cookies para mantener tu sesión iniciada, recordar tus preferencias y medir cómo se usa Rundesk.',
+  'cookie.accept': 'Aceptar',
+  'cookie.decline': 'Rechazar',
+  'cookie.privacy': 'Política de privacidad',
+  'landing.footerDpa': 'Acuerdo de datos',
+
   'auth.signInTitle': 'Bienvenido de nuevo',
   'auth.signInSubtitle': 'Inicia sesión en tu espacio de Rundesk',
   'auth.email': 'Correo electrónico',
@@ -8324,7 +8340,7 @@ export const es: Record<TranslationKey, string> = {
   'auth.heroFeature1': 'Agentes de IA entrenados en tu espacio de trabajo',
   'auth.heroFeature2': 'Colaboración en tiempo real con tu equipo',
   'auth.heroFeature3': 'Cada función, justo cuando la necesitas',
-  'auth.heroSecurity': 'SOC 2 Tipo II · Residencia de datos en tu región · Cifrado en reposo',
+  'auth.heroSecurity': 'En camino hacia SOC 2 Tipo II · Residencia de datos en tu región · Cifrado en reposo',
 
   'settings.language': 'Idioma',
   'settings.languageDesc': 'Elige el idioma de la interfaz de Rundesk.',
@@ -12425,6 +12441,14 @@ export const ar: Record<TranslationKey, string> = {
 
   'reports.allMembers': 'جميع الأعضاء',
 
+  // Cookie consent banner (Plan §14.6) + DPA footer link
+  'cookie.title': 'خصوصيتك',
+  'cookie.message': 'نستخدم ملفات تعريف الارتباط لإبقائك مسجَّلاً للدخول، وتذكُّر تفضيلاتك، وقياس كيفية استخدام Rundesk.',
+  'cookie.accept': 'قبول',
+  'cookie.decline': 'رفض',
+  'cookie.privacy': 'سياسة الخصوصية',
+  'landing.footerDpa': 'اتفاقية معالجة البيانات',
+
   'auth.signInTitle': 'مرحبًا بعودتك',
   'auth.signInSubtitle': 'سجّل الدخول إلى مساحة عمل Rundesk',
   'auth.email': 'البريد الإلكتروني',
@@ -12480,7 +12504,7 @@ export const ar: Record<TranslationKey, string> = {
   'auth.heroFeature1': 'وكلاء ذكاء اصطناعي مدرَّبون على مساحة عملك',
   'auth.heroFeature2': 'تعاون فوري مع فريقك',
   'auth.heroFeature3': 'كل ميزة، تمامًا عندما تحتاج إليها',
-  'auth.heroSecurity': 'SOC 2 من النوع الثاني · إقامة البيانات في منطقتك · مشفَّرة أثناء التخزين',
+  'auth.heroSecurity': 'نعمل على تحقيق SOC 2 من النوع الثاني · إقامة البيانات في منطقتك · مشفَّرة أثناء التخزين',
 
   'settings.language': 'اللغة',
   'settings.languageDesc': 'اختر لغة واجهة Rundesk.',
@@ -16431,6 +16455,14 @@ export const ur: Record<TranslationKey, string> = {
 
   'reports.allMembers': 'تمام اراکین',
 
+  // Cookie consent banner (Plan §14.6) + DPA footer link
+  'cookie.title': 'آپ کی رازداری',
+  'cookie.message': 'ہم کوکیز کا استعمال آپ کو سائن اِن رکھنے، آپ کی ترجیحات یاد رکھنے اور Rundesk کے استعمال کا اندازہ لگانے کے لیے کرتے ہیں۔',
+  'cookie.accept': 'قبول کریں',
+  'cookie.decline': 'مسترد کریں',
+  'cookie.privacy': 'رازداری کی پالیسی',
+  'landing.footerDpa': 'ڈیٹا پروسیسنگ معاہدہ',
+
   'auth.signInTitle': 'واپسی پر خوش آمدید',
   'auth.signInSubtitle': 'اپنے Rundesk ورک اسپیس میں سائن اِن کریں',
   'auth.email': 'ای میل',
@@ -16484,7 +16516,7 @@ export const ur: Record<TranslationKey, string> = {
   'auth.heroFeature1': 'آپ کے ورک اسپیس پر تربیت یافتہ AI ایجنٹس',
   'auth.heroFeature2': 'آپ کی ٹیم کے ساتھ حقیقی وقت میں تعاون',
   'auth.heroFeature3': 'ہر فیچر، بالکل اُسی وقت جب آپ کو ضرورت ہو',
-  'auth.heroSecurity': 'SOC 2 Type II · آپ کے علاقے میں ڈیٹا رہائش · آرام کی حالت میں خفیہ کردہ',
+  'auth.heroSecurity': 'SOC 2 Type II کی جانب گامزن · آپ کے علاقے میں ڈیٹا رہائش · آرام کی حالت میں خفیہ کردہ',
   'settings.language': 'زبان',
   'settings.languageDesc': 'Rundesk انٹرفیس کے لیے زبان منتخب کریں۔',
   'settings.languageSaved': 'زبان اپ ڈیٹ ہو گئی',

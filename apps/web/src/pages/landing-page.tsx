@@ -533,9 +533,10 @@ function SiteFooter({ t, year }: { t: T; year: number }) {
     { labelKey: 'landing.footerContact', href: '#' },
   ]
   const legalLinks: Array<{ labelKey: TranslationKey; href: string }> = [
-    { labelKey: 'landing.footerPrivacy', href: '#' },
-    { labelKey: 'landing.footerTerms', href: '#' },
-    { labelKey: 'landing.footerSecurity', href: '#' },
+    { labelKey: 'landing.footerPrivacy', href: '/privacy' },
+    { labelKey: 'landing.footerTerms', href: '/terms' },
+    { labelKey: 'landing.footerDpa', href: '/dpa' },
+    { labelKey: 'landing.footerSecurity', href: '/trust' },
   ]
 
   return (
