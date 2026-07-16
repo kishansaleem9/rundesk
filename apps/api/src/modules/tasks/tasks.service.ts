@@ -1263,6 +1263,9 @@ export class TasksService {
       dueDate: Date | null
       timeEstimate: number | null
       isArchived: boolean
+      // Cross-list move: relocate every selected task into this list
+      // (Plan §5.1 bulk "Move to list").
+      listId: string
       assigneeIdsAdd: string[]
       assigneeIdsRemove: string[]
       labelIdsAdd: string[]
@@ -1315,7 +1318,26 @@ export class TasksService {
       labelIdsRemove.length > 0 ||
       dependenciesAdd.length > 0 ||
       dependenciesRemove.length > 0
-    if (Object.keys(fieldPatch).length === 0 && !hasRelationshipOps) {
+
+    // Optional cross-list move (Plan §5.1 bulk "Move to list"). Validate the
+    // target list exists and capture its workspace up front so we can reject
+    // moves that would cross a workspace boundary, and append moved tasks after
+    // whatever's already in the destination list.
+    const moveListId = typeof patch.listId === 'string' && patch.listId ? patch.listId : undefined
+    let moveTargetWorkspaceId: string | null = null
+    let movePosition = 0
+    if (moveListId) {
+      const target = await this.resolveWorkspaceForList(moveListId)
+      if (!target) throw new NotFoundException('Target list not found')
+      moveTargetWorkspaceId = target.workspaceId
+      const [maxRow] = await this.db
+        .select({ maxPos: sql<number>`coalesce(max(${tasks.position}), -1)` })
+        .from(tasks)
+        .where(eq(tasks.listId, moveListId))
+      movePosition = (maxRow?.maxPos ?? -1) + 1
+    }
+
+    if (Object.keys(fieldPatch).length === 0 && !hasRelationshipOps && !moveListId) {
       throw new BadRequestException('patch did not include any supported bulk operation')
     }
 
@@ -1358,6 +1380,17 @@ export class TasksService {
             .limit(1)
           if (existing) {
             await this.removeDependency(existing.id, actorId)
+          }
+        }
+        if (moveListId) {
+          const moveCtx = await this.assertTaskWriteAccess(taskId, actorId)
+          if (moveTargetWorkspaceId && moveCtx.workspaceId !== moveTargetWorkspaceId) {
+            throw new BadRequestException('Cannot move a task to a list in a different workspace')
+          }
+          // moveTask logs a 'moved' activity + emits realtime events, so the
+          // bulk move stays audit-aware exactly like the single-task move.
+          if (moveCtx.listId !== moveListId) {
+            next = await this.moveTask(taskId, actorId, moveListId, movePosition++)
           }
         }
         if (!next || hasRelationshipOps) {

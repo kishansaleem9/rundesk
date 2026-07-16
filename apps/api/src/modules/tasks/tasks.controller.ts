@@ -152,6 +152,8 @@ export class TasksController {
         dueDate: string | null
         timeEstimate: number | null
         isArchived: boolean
+        // Cross-list move target (Plan §5.1 bulk "Move to list").
+        listId: string
         assigneeIdsAdd: string[]
         assigneeIdsRemove: string[]
         labelIdsAdd: string[]
