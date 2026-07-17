@@ -356,12 +356,13 @@ export class WorkspacesService {
    * plan limits and every other internal column are never returned. Returns
    * null when no verified, non-archived workspace claims the host.
    *
-   * SCOPE: TLS certificate provisioning for a custom domain is an
-   * infrastructure / reverse-proxy concern (e.g. an ACME-enabled edge that
-   * terminates HTTPS for the verified host) and is intentionally OUT of
-   * application scope. With this method the application side is complete: the
-   * app now fully resolves Host -> workspace and serves that workspace's
-   * branding — the only remaining step to go live is the cert at the edge.
+   * TLS: certificate ACME/issuance/storage stays a reverse-proxy concern, but
+   * the app now owns the AUTHORIZATION half of it. `isCustomDomainAuthorized`
+   * (exposed at `GET /public/tls/authorize`) lets a TLS-terminating proxy ask,
+   * per incoming Host, whether to obtain a certificate — answered "yes" only for
+   * the very hosts this method would serve. Custom-domain HTTPS is therefore
+   * fully automatic in production with no per-domain manual cert step: the app
+   * decides which hosts are eligible; the proxy performs ACME and stores certs.
    */
   async resolveByCustomDomain(host: string): Promise<PublicWorkspaceBranding | null> {
     const normalized = normalizeHost(host)
@@ -402,6 +403,26 @@ export class WorkspacesService {
       accentColor: match.accentColor,
       customDomain: match.customDomain,
     }
+  }
+
+  /**
+   * On-demand-TLS authorization decision for a TLS-terminating reverse proxy
+   * (Plan §13.5 / §2.2). Returns true IF AND ONLY IF `host` is the VERIFIED
+   * custom domain of a live (non-archived) workspace — i.e. exactly the set of
+   * hosts the app is willing to serve. It DELEGATES to `resolveByCustomDomain`
+   * (same `normalizeHost` canonicalization, same verified + non-archived guards)
+   * so the certificate-issuance decision can NEVER diverge from the
+   * Host -> workspace serving decision: if the app serves a host it authorizes a
+   * certificate for it, and if it does not it refuses. An unverified, unknown,
+   * archived, or blank host returns false — which is what stops a proxy from
+   * being steered into requesting ACME certificates for arbitrary
+   * attacker-supplied domains.
+   *
+   * See `WorkspacesPublicController.authorizeTls` for the public HTTP "ask"
+   * contract a proxy (e.g. Caddy `on_demand_tls`) calls to reach this decision.
+   */
+  async isCustomDomainAuthorized(host: string): Promise<boolean> {
+    return (await this.resolveByCustomDomain(host)) !== null
   }
 
   async listMembers(workspaceId: string) {

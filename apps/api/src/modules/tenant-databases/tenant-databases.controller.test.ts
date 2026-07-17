@@ -14,6 +14,41 @@ describe('TenantDatabasesController super-admin gate', () => {
     await assert.rejects(() => ctrl.test('org', member as any), ForbiddenException)
     await assert.rejects(() => ctrl.disable('org', member as any), ForbiddenException)
     await assert.rejects(() => ctrl.remove('org', member as any), ForbiddenException)
+    // New §14.2 provisioning / data-migration ops surface — also super-admin only.
+    await assert.rejects(() => ctrl.provision('org', member as any), ForbiddenException)
+    await assert.rejects(() => ctrl.schemaStatus('org', member as any), ForbiddenException)
+    await assert.rejects(() => ctrl.migrateData('org', { dryRun: true }, member as any), ForbiddenException)
+  })
+
+  it('forwards provision / schema-status / migrate-data to the service for a super admin', async () => {
+    const calls: string[] = []
+    let migrateOpts: any
+    const svc = {
+      provisionSchema: (org: string) => {
+        calls.push(`provision:${org}`)
+        return Promise.resolve({ ok: true })
+      },
+      getSchemaStatus: (org: string) => {
+        calls.push(`status:${org}`)
+        return Promise.resolve({ ok: true })
+      },
+      migrateOrgData: (org: string, opts: any) => {
+        calls.push(`migrate:${org}`)
+        migrateOpts = opts
+        return Promise.resolve({ ok: true })
+      },
+    }
+    const ctrl = new TenantDatabasesController(svc as any)
+
+    await ctrl.provision('o1', superAdmin as any)
+    await ctrl.schemaStatus('o2', superAdmin as any)
+    await ctrl.migrateData('o3', { dryRun: true }, superAdmin as any)
+    assert.deepEqual(calls, ['provision:o1', 'status:o2', 'migrate:o3'])
+    assert.equal(migrateOpts.dryRun, true, 'dryRun flag forwarded to the service')
+
+    // Missing body defaults dryRun to false (safe: a real copy is explicit).
+    await ctrl.migrateData('o4', {} as any, superAdmin as any)
+    assert.equal(migrateOpts.dryRun, false)
   })
 
   it('forwards to the service for a super admin (list)', async () => {

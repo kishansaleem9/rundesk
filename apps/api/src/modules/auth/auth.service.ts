@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, ConflictException, ForbiddenException, BadRequestException, Inject, Logger } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
-import { randomUUID, randomBytes } from 'node:crypto'
+import { randomUUID, randomBytes, createHash } from 'node:crypto'
 import { and, eq, isNull, desc } from 'drizzle-orm'
 import { compareSync, hashSync } from 'bcryptjs'
 import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications } from '@rundesk/db'
@@ -27,6 +27,20 @@ function slugify(input: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '')
     .slice(0, 40) || 'workspace'
+}
+
+/**
+ * One-way hash of a refresh token for storage/lookup.
+ *
+ * Only this SHA-256 digest is ever persisted in `sessions.refreshToken` — never
+ * the raw signed JWT — so read access to the DB no longer yields directly-usable
+ * refresh tokens. The raw JWT is still handed back to the client (response body
+ * + httpOnly cookie); only the stored copy is hashed. Lookups hash the incoming
+ * token the same way and match on the digest. The column stays `text` (a hex
+ * digest fits), so this needs no schema migration.
+ */
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
 }
 
 @Injectable()
@@ -182,9 +196,11 @@ export class AuthService {
 
     const expiresAt = new Date(Date.now() + ttlMinutes * 60_000)
 
+    // Store only the hash of the refresh token at rest (the raw JWT is still
+    // returned to the client below). See hashRefreshToken().
     await this.db.insert(sessions).values({
       userId: user.id,
-      refreshToken,
+      refreshToken: hashRefreshToken(refreshToken),
       userAgent: meta.userAgent,
       ipAddress: meta.ip,
       expiresAt,
@@ -425,6 +441,32 @@ export class AuthService {
     return this.login(user, meta)
   }
 
+  /**
+   * Locate the session row for a presented refresh token.
+   *
+   * Primary path: match on the token's SHA-256 hash — how all new/rotated
+   * sessions are stored (see hashRefreshToken).
+   *
+   * Migration-in-place fallback: if the hash misses, retry with the raw token to
+   * catch sessions written before hashing-at-rest was introduced. On a legacy
+   * hit we transparently re-store that row's `refreshToken` as the hash, so it is
+   * upgraded on first use. This is what avoids force-logging-out every existing
+   * session on deploy. The legacy branch can be deleted once all sessions have
+   * rotated past the old plaintext storage.
+   */
+  private async findSessionByRefreshToken(token: string) {
+    const hashed = hashRefreshToken(token)
+    const [byHash] = await this.db.select().from(sessions).where(eq(sessions.refreshToken, hashed))
+    if (byHash) return byHash
+
+    const [legacy] = await this.db.select().from(sessions).where(eq(sessions.refreshToken, token))
+    if (legacy) {
+      await this.db.update(sessions).set({ refreshToken: hashed }).where(eq(sessions.id, legacy.id))
+      return { ...legacy, refreshToken: hashed }
+    }
+    return undefined
+  }
+
   async refresh(token: string, meta: SessionMeta = {}) {
     let payload: any
     try {
@@ -435,7 +477,9 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token')
     }
 
-    const [session] = await this.db.select().from(sessions).where(eq(sessions.refreshToken, token))
+    // The token is a real, signature-verified JWT (checked above); we only look
+    // up the session ROW by the token's hash here.
+    const session = await this.findSessionByRefreshToken(token)
     if (!session || session.isRevoked || session.expiresAt < new Date()) {
       throw new UnauthorizedException('Session expired')
     }
@@ -448,10 +492,12 @@ export class AuthService {
   }
 
   async logout(refreshToken: string) {
-    await this.db
-      .update(sessions)
-      .set({ isRevoked: true })
-      .where(eq(sessions.refreshToken, refreshToken))
+    // Locate by hash (with the legacy raw-token fallback) then revoke by id, so
+    // logout keeps working for both hashed and not-yet-upgraded sessions.
+    const session = await this.findSessionByRefreshToken(refreshToken)
+    if (session) {
+      await this.db.update(sessions).set({ isRevoked: true }).where(eq(sessions.id, session.id))
+    }
   }
 
   async listSessions(userId: string, currentRefreshToken?: string | null) {
@@ -468,6 +514,10 @@ export class AuthService {
       .from(sessions)
       .where(eq(sessions.userId, userId))
 
+    // Stored tokens are SHA-256 hashes, so hash the presented token before
+    // comparing. The raw fallback matches legacy sessions not yet upgraded.
+    const hashedCurrent = currentRefreshToken ? hashRefreshToken(currentRefreshToken) : null
+
     return rows
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .map((row) => ({
@@ -477,7 +527,9 @@ export class AuthService {
         isRevoked: row.isRevoked,
         expiresAt: row.expiresAt,
         createdAt: row.createdAt,
-        isCurrent: Boolean(currentRefreshToken) && row.refreshToken === currentRefreshToken,
+        isCurrent:
+          Boolean(currentRefreshToken) &&
+          (row.refreshToken === hashedCurrent || row.refreshToken === currentRefreshToken),
       }))
   }
 
@@ -497,8 +549,15 @@ export class AuthService {
       .select({ id: sessions.id, refreshToken: sessions.refreshToken })
       .from(sessions)
       .where(eq(sessions.userId, userId))
+    // Keep the current session; stored tokens are hashes, so compare against the
+    // hash (raw fallback covers legacy, not-yet-upgraded sessions).
+    const hashedCurrent = currentRefreshToken ? hashRefreshToken(currentRefreshToken) : null
     const idsToRevoke = userSessions
-      .filter((s) => !currentRefreshToken || s.refreshToken !== currentRefreshToken)
+      .filter(
+        (s) =>
+          !currentRefreshToken ||
+          (s.refreshToken !== hashedCurrent && s.refreshToken !== currentRefreshToken),
+      )
       .map((s) => s.id)
     for (const id of idsToRevoke) {
       await this.db.update(sessions).set({ isRevoked: true }).where(eq(sessions.id, id))

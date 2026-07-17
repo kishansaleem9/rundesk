@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 import { ForbiddenException } from '@nestjs/common'
 import { WorkspacesService, computeOnboardingSteps, normalizeHost } from './workspaces.service'
+import { WorkspacesPublicController } from './workspaces.controller'
 
 // §14.3 — onboarding checklist done-state is derived purely from real workspace
 // counts, so each step auto-checks the moment the data proving it exists.
@@ -256,5 +257,128 @@ describe('WorkspacesService.resolveByCustomDomain (§13.5 Host -> workspace)', (
     const svc = new WorkspacesService(db, {} as any, {} as any, {} as any, {} as any)
     assert.equal(await svc.resolveByCustomDomain(''), null)
     assert.equal(selected, false)
+  })
+})
+
+// §13.5 / §2.2 — isCustomDomainAuthorized is the on-demand-TLS authorization
+// decision. It is a thin boolean over resolveByCustomDomain, so the "issue a
+// certificate?" answer can never diverge from "does the app serve this host?":
+// true only for a VERIFIED, non-archived custom domain; false for everything
+// else. False for arbitrary hosts is what stops a proxy from being steered into
+// requesting ACME certificates for domains an attacker does not control.
+describe('WorkspacesService.isCustomDomainAuthorized (§13.5 on-demand TLS ask)', () => {
+  function svcWithRows(rows: any[]) {
+    const db = { select: () => ({ from: () => ({ where: async () => rows }) }) } as any
+    return new WorkspacesService(db, {} as any, {} as any, {} as any, {} as any)
+  }
+
+  const verified = {
+    id: 'ws-1',
+    name: 'Acme',
+    slug: 'acme',
+    logoUrl: null,
+    primaryColor: null,
+    accentColor: null,
+    customDomain: 'example.com',
+    customDomainVerified: true,
+    isArchived: false,
+  }
+
+  it('authorizes a verified, live custom domain (case/port/scheme/www-insensitive)', async () => {
+    for (const host of ['example.com', 'EXAMPLE.com', 'www.example.com', 'Example.com:443', 'https://www.example.com/']) {
+      assert.equal(await svcWithRows([verified]).isCustomDomainAuthorized(host), true, `host ${host}`)
+    }
+  })
+
+  it('refuses an unverified domain', async () => {
+    assert.equal(await svcWithRows([{ ...verified, customDomainVerified: false }]).isCustomDomainAuthorized('example.com'), false)
+  })
+
+  it('refuses an archived workspace', async () => {
+    assert.equal(await svcWithRows([{ ...verified, isArchived: true }]).isCustomDomainAuthorized('example.com'), false)
+  })
+
+  it('refuses an unknown/arbitrary host', async () => {
+    assert.equal(await svcWithRows([verified]).isCustomDomainAuthorized('attacker.example'), false)
+  })
+
+  it('refuses a blank host', async () => {
+    assert.equal(await svcWithRows([verified]).isCustomDomainAuthorized(''), false)
+  })
+})
+
+// §13.5 / §2.2 — the public GET /public/tls/authorize endpoint is the HTTP "ask"
+// a TLS-terminating proxy (e.g. Caddy on_demand_tls) calls: a 2xx means "issue a
+// cert for this host", a non-2xx (403 ForbiddenException) means "do not".
+// Exercised end-to-end (controller -> service -> normalizeHost /
+// resolveByCustomDomain) so the 200-vs-403 contract is genuinely under test.
+describe('WorkspacesPublicController.authorizeTls (§13.5 on-demand TLS ask)', () => {
+  function controllerWithRows(rows: any[]) {
+    const db = { select: () => ({ from: () => ({ where: async () => rows }) }) } as any
+    const svc = new WorkspacesService(db, {} as any, {} as any, {} as any, {} as any)
+    return new WorkspacesPublicController(svc)
+  }
+
+  const verified = {
+    id: 'ws-1',
+    name: 'Acme',
+    slug: 'acme',
+    logoUrl: null,
+    primaryColor: null,
+    accentColor: null,
+    customDomain: 'example.com',
+    customDomainVerified: true,
+    isArchived: false,
+  }
+
+  it('returns { ok: true } (HTTP 200) for a verified custom domain via ?domain=', async () => {
+    assert.deepEqual(await controllerWithRows([verified]).authorizeTls('example.com'), { ok: true })
+  })
+
+  it('authorizes case/port-insensitively, exactly like the resolver', async () => {
+    assert.deepEqual(await controllerWithRows([verified]).authorizeTls('EXAMPLE.com:443'), { ok: true })
+  })
+
+  it('accepts ?host= as an alias, then the Host header as a last resort', async () => {
+    assert.deepEqual(await controllerWithRows([verified]).authorizeTls(undefined, 'example.com'), { ok: true })
+    assert.deepEqual(await controllerWithRows([verified]).authorizeTls(undefined, undefined, 'example.com'), { ok: true })
+  })
+
+  it('?domain= takes precedence over ?host= and the Host header', async () => {
+    // A matching ?domain= authorizes even when the other sources would not…
+    assert.deepEqual(
+      await controllerWithRows([verified]).authorizeTls('example.com', 'nope.example', 'nope.example'),
+      { ok: true },
+    )
+    // …and a non-matching ?domain= refuses even when the Host header would match.
+    await assert.rejects(
+      () => controllerWithRows([verified]).authorizeTls('nope.example', undefined, 'example.com'),
+      ForbiddenException,
+    )
+  })
+
+  it('throws ForbiddenException (non-2xx) for an unverified domain', async () => {
+    await assert.rejects(
+      () => controllerWithRows([{ ...verified, customDomainVerified: false }]).authorizeTls('example.com'),
+      ForbiddenException,
+    )
+  })
+
+  it('throws ForbiddenException (non-2xx) for an archived workspace', async () => {
+    await assert.rejects(
+      () => controllerWithRows([{ ...verified, isArchived: true }]).authorizeTls('example.com'),
+      ForbiddenException,
+    )
+  })
+
+  it('throws ForbiddenException (non-2xx) for an unknown/arbitrary host', async () => {
+    await assert.rejects(
+      () => controllerWithRows([verified]).authorizeTls('attacker.example'),
+      ForbiddenException,
+    )
+  })
+
+  it('throws ForbiddenException (non-2xx) when no host is supplied at all', async () => {
+    await assert.rejects(() => controllerWithRows([verified]).authorizeTls(), ForbiddenException)
   })
 })

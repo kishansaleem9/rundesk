@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { describe, it, mock } from 'node:test'
 import { UnauthorizedException } from '@nestjs/common'
 import { hashSync } from 'bcryptjs'
-import { AuthService } from './auth.service'
+import { AuthService, hashRefreshToken } from './auth.service'
 
 // AuthService has a wide constructor; these unit tests exercise only
 // `assertTotpSatisfied` (2FA-at-login) and the `validateUser` enumeration fix,
@@ -211,5 +212,295 @@ describe('AuthService.validateUser (no lockout enumeration)', () => {
     assert.equal(setCalls.length, 1)
     assert.equal(setCalls[0].failedLoginAttempts, 1)
     assert.equal(setCalls[0].lockedUntil, undefined)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Refresh-token hashing at rest (sessions.refreshToken stores a SHA-256 hash,
+// never the raw JWT). These tests exercise the issue/rotation storage, the
+// hash-based lookup in refresh/logout, the legacy raw-token migration fallback,
+// and the isCurrent/keep-current comparisons that also hash the presented token.
+// ---------------------------------------------------------------------------
+
+/** Extract { column, value } from a single drizzle `eq(column, value)` condition. */
+function readEq(cond: any): { column?: string; value?: unknown } {
+  let column: string | undefined
+  let value: unknown
+  for (const chunk of cond?.queryChunks ?? []) {
+    const kind = chunk?.constructor?.name
+    if (kind === 'Param') value = chunk.value
+    else if (typeof chunk?.name === 'string' && column === undefined) column = chunk.name
+  }
+  return { column, value }
+}
+
+/**
+ * Chainable drizzle stand-in that returns queued select rows in order and
+ * records every insert, update, and the value each `.where(eq(...))` matches on
+ * — enough to assert WHICH value a lookup keyed on (hash vs raw).
+ */
+function recordingDb(selectResults: any[][] = []) {
+  const queue = [...selectResults]
+  const selectWheres: Array<{ column?: string; value?: unknown }> = []
+  const inserts: any[] = []
+  const updates: Array<{ set: any; where: { column?: string; value?: unknown } }> = []
+
+  const db: any = {
+    select: () => {
+      const rows = queue.shift() ?? []
+      const node: any = Promise.resolve(rows)
+      node.from = () => node
+      node.innerJoin = () => node
+      node.orderBy = () => node
+      node.limit = () => node
+      node.where = (cond: any) => {
+        selectWheres.push(readEq(cond))
+        return node
+      }
+      return node
+    },
+    insert: () => ({
+      values: (values: any) => {
+        inserts.push(values)
+        const node: any = Promise.resolve([{ id: 'sess-new', ...values }])
+        node.returning = () => Promise.resolve([{ id: 'sess-new', ...values }])
+        return node
+      },
+    }),
+    update: () => ({
+      set: (set: any) => ({
+        where: (cond: any) => {
+          updates.push({ set, where: readEq(cond) })
+          return Promise.resolve(undefined)
+        },
+      }),
+    }),
+  }
+
+  return { db, selectWheres, inserts, updates }
+}
+
+type SvcOverrides = {
+  db?: any
+  usersService?: any
+  workspacesService?: any
+  jwtService?: any
+  config?: any
+  featureFlagsService?: any
+  security?: any
+  securitySettings?: any
+}
+
+function makeAuthService(over: SvcOverrides = {}) {
+  return new AuthService(
+    (over.db ?? {}) as any,
+    (over.usersService ?? {}) as any,
+    (over.workspacesService ?? {}) as any,
+    (over.jwtService ?? {}) as any,
+    (over.config ?? {}) as any,
+    (over.featureFlagsService ?? {}) as any,
+    {} as any, // emailService (unused by these paths)
+    (over.security ?? {}) as any,
+    (over.securitySettings ?? {}) as any,
+  ) as any
+}
+
+describe('hashRefreshToken (refresh-token hashing at rest)', () => {
+  it('is the SHA-256 hex digest of the token, never the token itself', () => {
+    const raw = 'header.payload.signature'
+    assert.equal(hashRefreshToken(raw), createHash('sha256').update(raw).digest('hex'))
+    assert.notEqual(hashRefreshToken(raw), raw)
+    assert.match(hashRefreshToken(raw), /^[0-9a-f]{64}$/)
+  })
+
+  it('is deterministic and distinct per token', () => {
+    assert.equal(hashRefreshToken('a'), hashRefreshToken('a'))
+    assert.notEqual(hashRefreshToken('a'), hashRefreshToken('b'))
+  })
+})
+
+describe('AuthService.login — refresh token stored hashed', () => {
+  it('persists the SHA-256 hash but hands the raw token back to the client', async () => {
+    const { db, inserts } = recordingDb([[]]) // org-memberships lookup → none
+    const svc = makeAuthService({
+      db,
+      workspacesService: { findByMember: async () => [] },
+      securitySettings: {
+        get: async () => ({
+          sessionTimeoutMinutes: 60,
+          maxConcurrentSessions: 0,
+          ipAllowlistEnabled: false,
+          ipAllowlist: [],
+          ipAllowlistIncludeAdmins: false,
+        }),
+      },
+      featureFlagsService: { resolveForUser: async () => ({ flags: {} }) },
+      jwtService: { sign: (payload: any) => (payload?.type === 'refresh' ? 'RAW-REFRESH-JWT' : 'ACCESS-JWT') },
+      config: { getOrThrow: () => 'refresh-secret' },
+      security: { logAuditEvent: async () => undefined },
+    })
+
+    const bundle = await svc.login({ id: 'u1', email: 'a@b.com', role: 'member', passwordHash: 'x' })
+
+    assert.equal(inserts.length, 1)
+    // Stored value is the hash — never the raw JWT.
+    assert.equal(inserts[0].refreshToken, hashRefreshToken('RAW-REFRESH-JWT'))
+    assert.notEqual(inserts[0].refreshToken, 'RAW-REFRESH-JWT')
+    // The raw token is still returned to the caller (cookie/body).
+    assert.equal(bundle.refreshToken, 'RAW-REFRESH-JWT')
+  })
+})
+
+describe('AuthService.refresh — locate session by hash', () => {
+  it('looks the session up by the token hash, then rotates (revoke + re-issue)', async () => {
+    const raw = 'RAW-REFRESH'
+    const stored = {
+      id: 's1',
+      refreshToken: hashRefreshToken(raw),
+      isRevoked: false,
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+    const { db, selectWheres, updates } = recordingDb([[stored]])
+    const svc = makeAuthService({
+      db,
+      jwtService: { verify: () => ({ sub: 'u1', type: 'refresh' }) },
+      usersService: { findById: async () => ({ id: 'u1', email: 'a@b.com', role: 'member' }) },
+      config: { getOrThrow: () => 'refresh-secret' },
+    })
+    const login = mock.fn(async () => ({ accessToken: 'a', refreshToken: 'NEW', user: {}, workspaces: [], organizations: [] }))
+    svc.login = login
+
+    await svc.refresh(raw)
+
+    // The first lookup keys on the HASH of the presented token, not the raw value.
+    assert.equal(selectWheres[0].column, 'refresh_token')
+    assert.equal(selectWheres[0].value, hashRefreshToken(raw))
+    assert.notEqual(selectWheres[0].value, raw)
+    // The located session is revoked by id (rotation) and a new one issued via login().
+    assert.ok(updates.some((u) => u.set.isRevoked === true && u.where.value === 's1'))
+    assert.equal(login.mock.callCount(), 1)
+  })
+})
+
+describe('AuthService.logout — locate session by hash', () => {
+  it('finds the session by token hash and revokes it by id', async () => {
+    const raw = 'RAW-REFRESH'
+    const stored = {
+      id: 's9',
+      refreshToken: hashRefreshToken(raw),
+      isRevoked: false,
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+    const { db, selectWheres, updates } = recordingDb([[stored]])
+    const svc = makeAuthService({ db })
+
+    await svc.logout(raw)
+
+    assert.equal(selectWheres[0].value, hashRefreshToken(raw))
+    assert.ok(updates.some((u) => u.set.isRevoked === true && u.where.column === 'id' && u.where.value === 's9'))
+  })
+})
+
+describe('AuthService — legacy plaintext session fallback (migration-in-place)', () => {
+  it('falls back to the raw lookup and upgrades the stored token to its hash', async () => {
+    const raw = 'RAW-LEGACY'
+    const legacy = {
+      id: 's2',
+      refreshToken: raw, // stored plaintext (pre-hashing)
+      isRevoked: false,
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+    // First (hash) lookup misses; second (raw) lookup hits the old plaintext row.
+    const { db, selectWheres, updates } = recordingDb([[], [legacy]])
+    const svc = makeAuthService({
+      db,
+      jwtService: { verify: () => ({ sub: 'u1' }) },
+      usersService: { findById: async () => ({ id: 'u1', email: 'a@b.com', role: 'member' }) },
+      config: { getOrThrow: () => 'refresh-secret' },
+    })
+    svc.login = mock.fn(async () => ({ accessToken: 'a', refreshToken: 'NEW', user: {}, workspaces: [], organizations: [] }))
+
+    await svc.refresh(raw)
+
+    assert.equal(selectWheres[0].value, hashRefreshToken(raw)) // hash lookup (missed)
+    assert.equal(selectWheres[1].value, raw) // raw fallback (hit)
+    // The old row's refreshToken is re-stored as the hash (upgraded on first use).
+    assert.ok(updates.some((u) => u.set.refreshToken === hashRefreshToken(raw) && u.where.value === 's2'))
+  })
+})
+
+describe('AuthService.refresh — unknown token yields no session', () => {
+  it('throws (no rotation) when neither the hash nor the raw lookup finds a session', async () => {
+    const { db } = recordingDb([[], []]) // both lookups miss
+    const login = mock.fn(async () => ({}) as any)
+    const svc = makeAuthService({
+      db,
+      jwtService: { verify: () => ({ sub: 'u1' }) },
+      config: { getOrThrow: () => 'refresh-secret' },
+    })
+    svc.login = login
+
+    await assert.rejects(
+      () => svc.refresh('WRONG'),
+      (err: any) => {
+        assert.ok(err instanceof UnauthorizedException)
+        assert.equal(err.message, 'Session expired')
+        return true
+      },
+    )
+    assert.equal(login.mock.callCount(), 0)
+  })
+})
+
+describe('AuthService.listSessions — isCurrent matches by hash', () => {
+  it('marks the row whose stored hash matches the presented raw token, and never leaks the token', async () => {
+    const now = Date.now()
+    const rows = [
+      { id: 's1', userAgent: 'ua1', ipAddress: 'ip1', isRevoked: false, expiresAt: new Date(now + 1000), createdAt: new Date(now), refreshToken: hashRefreshToken('CUR') },
+      { id: 's2', userAgent: 'ua2', ipAddress: 'ip2', isRevoked: false, expiresAt: new Date(now + 1000), createdAt: new Date(now - 1000), refreshToken: hashRefreshToken('OTHER') },
+    ]
+    const { db } = recordingDb([rows])
+    const svc = makeAuthService({ db })
+
+    const list = await svc.listSessions('u1', 'CUR')
+    const s1 = list.find((r: any) => r.id === 's1')
+    const s2 = list.find((r: any) => r.id === 's2')
+
+    assert.equal(s1.isCurrent, true)
+    assert.equal(s2.isCurrent, false)
+    // The refresh token (hash or otherwise) must never appear in the response.
+    assert.ok(!('refreshToken' in s1))
+  })
+
+  it('still matches a legacy session whose token is stored raw', async () => {
+    const now = Date.now()
+    const rows = [
+      { id: 's1', userAgent: 'ua', ipAddress: 'ip', isRevoked: false, expiresAt: new Date(now + 1000), createdAt: new Date(now), refreshToken: 'CUR' },
+    ]
+    const { db } = recordingDb([rows])
+    const svc = makeAuthService({ db })
+
+    const list = await svc.listSessions('u1', 'CUR')
+    assert.equal(list[0].isCurrent, true)
+  })
+})
+
+describe('AuthService.revokeOtherSessions — keeps the current session by hash', () => {
+  it('revokes every session except the one whose stored hash matches the presented token', async () => {
+    const rows = [
+      { id: 's1', refreshToken: hashRefreshToken('CUR') },
+      { id: 's2', refreshToken: hashRefreshToken('OTHER') },
+      { id: 's3', refreshToken: hashRefreshToken('OTHER2') },
+    ]
+    const { db, updates } = recordingDb([rows])
+    const svc = makeAuthService({ db })
+
+    const res = await svc.revokeOtherSessions('u1', 'CUR')
+
+    assert.equal(res.revoked, 2)
+    // The current session (s1) is preserved; only the others are revoked.
+    assert.ok(updates.every((u) => u.where.value !== 's1'))
+    assert.ok(updates.some((u) => u.where.value === 's2'))
+    assert.ok(updates.some((u) => u.where.value === 's3'))
   })
 })

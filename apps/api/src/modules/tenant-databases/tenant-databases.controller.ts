@@ -43,6 +43,31 @@ export class TenantDatabasesController {
     return this.tenantDatabases.testConnection(organizationId)
   }
 
+  @Post(':organizationId/provision')
+  @ApiOperation({ summary: 'Provision the dedicated DB schema (run Drizzle migrations) — super admin' })
+  async provision(@Param('organizationId') organizationId: string, @CurrentUser() user: CurrentUserPayload) {
+    if (user.role !== 'super_admin') throw new ForbiddenException('Super admin access required')
+    return this.tenantDatabases.provisionSchema(organizationId)
+  }
+
+  @Get(':organizationId/schema-status')
+  @ApiOperation({ summary: 'Report dedicated DB schema presence + reachability — super admin' })
+  async schemaStatus(@Param('organizationId') organizationId: string, @CurrentUser() user: CurrentUserPayload) {
+    if (user.role !== 'super_admin') throw new ForbiddenException('Super admin access required')
+    return this.tenantDatabases.getSchemaStatus(organizationId)
+  }
+
+  @Post(':organizationId/migrate-data')
+  @ApiOperation({ summary: 'Copy the org\'s core data shared → dedicated (supports dryRun) — super admin' })
+  async migrateData(
+    @Param('organizationId') organizationId: string,
+    @Body() body: { dryRun?: boolean },
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    if (user.role !== 'super_admin') throw new ForbiddenException('Super admin access required')
+    return this.tenantDatabases.migrateOrgData(organizationId, { dryRun: body?.dryRun ?? false })
+  }
+
   @Post(':organizationId/disable')
   @ApiOperation({ summary: 'Disable routing to the dedicated database — super admin' })
   async disable(@Param('organizationId') organizationId: string, @CurrentUser() user: CurrentUserPayload) {

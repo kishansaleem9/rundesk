@@ -14,6 +14,7 @@ import { EmailModule } from '../email/email.module'
 import { WorkspaceMemberGuard } from './guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from './guards/workspace-admin.guard'
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard'
+import { RateLimitCleanupService } from '../../common/guards/rate-limit-cleanup.service'
 import { SecurityModule } from '../security/security.module'
 
 @Module({
@@ -39,9 +40,14 @@ import { SecurityModule } from '../security/security.module'
     LocalStrategy,
     WorkspaceMemberGuard,
     WorkspaceAdminGuard,
-    // Registered so the DI container hands out ONE shared instance whose
-    // in-memory sliding-window Map is consistent across all auth routes.
+    // Registered so the DI container hands out ONE shared instance (and injects
+    // DB_TOKEN). Limits are enforced globally across replicas via the shared
+    // `rate_limit_counters` store, with a per-instance in-memory fallback on DB
+    // blips — see RateLimitGuard.
     RateLimitGuard,
+    // Hourly prune of expired rows in the shared rate-limit counter table so it
+    // can't grow unbounded.
+    RateLimitCleanupService,
   ],
   exports: [AuthService, OAuthService, WorkspaceMemberGuard, WorkspaceAdminGuard],
 })

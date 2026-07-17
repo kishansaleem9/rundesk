@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Ip, NotFoundException, Param, Patch, Post, Query, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
+import { Body, Controller, Get, Header, Headers, Ip, NotFoundException, Param, Patch, Post, Query, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService } from './workspaces.service'
 import { PlansService } from '../plans/plans.service'
@@ -220,6 +220,10 @@ export class WorkspacesController {
  * domain belongs to and apply its branding before anyone signs in. GET is a
  * safe method, so the global CsrfGuard admits it too. Returns only the safe
  * public branding projection, or 404 when no verified workspace claims the host.
+ *
+ * It also hosts the on-demand-TLS authorization ("ask") endpoint a
+ * TLS-terminating reverse proxy calls to decide whether to obtain a certificate
+ * for an incoming Host — see `authorizeTls` for the operational contract.
  */
 @ApiTags('workspaces-public')
 @Controller()
@@ -238,5 +242,69 @@ export class WorkspacesPublicController {
     const workspace = await this.workspacesService.resolveByCustomDomain(host)
     if (!workspace) throw new NotFoundException('No workspace is served on that domain')
     return workspace
+  }
+
+  /**
+   * On-demand TLS authorization ("ask") endpoint for a TLS-terminating reverse
+   * proxy (Plan §13.5 / §2.2). This closes the custom-domain TLS caveat at the
+   * app layer: certificate provisioning used to be noted as a manual ops step,
+   * but the app now OWNS the authorization decision (which hosts may get a
+   * certificate) while the proxy owns ACME + certificate storage.
+   *
+   * OPERATIONAL CONTRACT — point the proxy's on-demand-TLS "ask" at:
+   *
+   *     GET /api/v1/public/tls/authorize?domain={host}
+   *
+   * It returns HTTP 200 (`{ ok: true }`) IF AND ONLY IF {host} is the VERIFIED
+   * custom domain of a live (non-archived) workspace, and HTTP 403 otherwise. A
+   * TLS-terminating proxy (e.g. Caddy `on_demand_tls` with `ask`, or any proxy
+   * exposing an on-demand-TLS authorization hook) treats a 2xx as "yes, obtain /
+   * renew a certificate for this host" and any non-2xx as "no". Wiring this in
+   * makes custom-domain HTTPS FULLY AUTOMATIC in production — the proxy obtains
+   * and renews certificates on demand ONLY for domains a workspace owner has
+   * verified (via the DNS-TXT `verifyCustomDomain` flow), with NO per-domain
+   * manual certificate step — and it refuses every other host, which prevents an
+   * attacker from steering the proxy into requesting ACME certificates for
+   * arbitrary domains it does not control.
+   *
+   * Example Caddyfile:
+   *
+   *     {
+   *       on_demand_tls {
+   *         ask http://rundesk-api:3001/api/v1/public/tls/authorize
+   *       }
+   *     }
+   *     https:// {
+   *       tls { on_demand }
+   *       reverse_proxy rundesk-api:3001
+   *     }
+   *
+   * Caddy appends `?domain=<sni-host>` to the ask URL automatically. The
+   * decision reuses `resolveByCustomDomain`, so it can never diverge from which
+   * host the app actually serves, and is a single cheap lookup over the small
+   * set of workspaces that set a custom domain. Because that decision keys on
+   * the `?domain=` query value, a short `Cache-Control` hint lets the proxy/edge
+   * skip re-asking for the same host on every handshake without meaningfully
+   * delaying propagation when a domain is later unverified or archived. The
+   * header is only emitted on the 200 path, so a refusal is never cached.
+   */
+  @Get('public/tls/authorize')
+  @Header('Cache-Control', 'public, max-age=60')
+  @ApiOperation({ summary: 'On-demand TLS authorization for a verified custom domain (no auth)' })
+  async authorizeTls(
+    @Query('domain') domainParam?: string,
+    @Query('host') hostParam?: string,
+    @Headers('host') hostHeader?: string,
+  ) {
+    // Caddy sends the SNI host as ?domain=; accept ?host= as an alias and fall
+    // back to the request's own Host header (same precedence as workspaceByDomain).
+    const host = (domainParam && domainParam.trim()) || (hostParam && hostParam.trim()) || hostHeader || ''
+    const authorized = await this.workspacesService.isCustomDomainAuthorized(host)
+    // A non-2xx means "do NOT issue a certificate for this host". 403 (rather
+    // than 404) makes the refusal explicit: the host is a valid request target
+    // but is NOT authorized for certificate issuance until its workspace owner
+    // has verified it — the guard against ACME issuance for arbitrary domains.
+    if (!authorized) throw new ForbiddenException('TLS is not authorized for that host')
+    return { ok: true }
   }
 }
