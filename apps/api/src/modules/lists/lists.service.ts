@@ -98,7 +98,7 @@ export class ListsService {
   }
 
   async deleteList(listId: string, actorId?: string, ipAddress?: string) {
-    const ctx = actorId ? await this.assertManageable(listId, actorId) : null
+    const ctx = actorId ? await this.assertManageable(listId, actorId, 'delete') : null
     await this.db.update(lists).set({ isArchived: true }).where(eq(lists.id, listId))
     if (actorId && ctx) {
       // §13.3 — audit the container deletion (list archival).
@@ -114,9 +114,14 @@ export class ListsService {
     }
   }
 
-  private async assertManageable(listId: string, actorId: string) {
+  private async assertManageable(listId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {
     const [row] = await this.db
-      .select({ createdById: lists.createdById, workspaceId: spaces.workspaceId, name: lists.name })
+      .select({
+        createdById: lists.createdById,
+        workspaceId: spaces.workspaceId,
+        name: lists.name,
+        spaceId: projects.spaceId,
+      })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -128,6 +133,9 @@ export class ListsService {
       createdById: row.createdById,
       actorId,
       kind: 'list',
+      action,
+      // Managers may delete a list only within a space they belong to.
+      spaceId: row.spaceId,
     })
     return row
   }

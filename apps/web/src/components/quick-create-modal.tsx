@@ -154,7 +154,8 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     mutationFn: () =>
       api<{ id: string }>(`/tasks`, {
         method: 'POST',
-        body: { listId, title, status: 'todo', priority: 'normal' },
+        // Omit status → backend seeds the list's first/default status.
+        body: { listId, title, priority: 'normal' },
       }),
     onSuccess: (task) => {
       qc.invalidateQueries({ queryKey: ['tasks', listId] })

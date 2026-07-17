@@ -176,7 +176,7 @@ export class ProjectsService {
   }
 
   async deleteProject(projectId: string, actorId?: string, ipAddress?: string) {
-    const ctx = actorId ? await this.assertManageable(projectId, actorId) : null
+    const ctx = actorId ? await this.assertManageable(projectId, actorId, 'delete') : null
     await this.db.update(projects).set({ isArchived: true }).where(eq(projects.id, projectId))
     if (actorId && ctx) {
       // §13.3 — audit the container deletion (project archival).
@@ -204,9 +204,14 @@ export class ProjectsService {
     return row
   }
 
-  private async assertManageable(projectId: string, actorId: string) {
+  private async assertManageable(projectId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {
     const [row] = await this.db
-      .select({ createdById: projects.createdById, workspaceId: spaces.workspaceId, name: projects.name })
+      .select({
+        createdById: projects.createdById,
+        workspaceId: spaces.workspaceId,
+        name: projects.name,
+        spaceId: projects.spaceId,
+      })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(projects.id, projectId))
@@ -217,6 +222,9 @@ export class ProjectsService {
       createdById: row.createdById,
       actorId,
       kind: 'project',
+      action,
+      // Managers may delete a project only within a space they belong to.
+      spaceId: row.spaceId,
     })
     return row
   }

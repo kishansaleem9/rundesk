@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Ip, Param, Patch, Post, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
@@ -40,7 +40,12 @@ export class FoldersController {
 
   @Delete(':folderId')
   @RequirePermissions('space.create')
-  remove(@Param('spaceId') spaceId: string, @Param('folderId') folderId: string) {
-    return this.folders.remove(spaceId, folderId)
+  remove(
+    @Param('spaceId') spaceId: string,
+    @Param('folderId') folderId: string,
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.folders.remove(spaceId, folderId, user.id, ip)
   }
 }

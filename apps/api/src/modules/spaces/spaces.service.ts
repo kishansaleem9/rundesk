@@ -94,7 +94,7 @@ export class SpacesService {
   }
 
   async deleteSpace(spaceId: string, actorId?: string, ipAddress?: string) {
-    const space = actorId ? await this.assertManageable(spaceId, actorId) : null
+    const space = actorId ? await this.assertManageable(spaceId, actorId, 'delete') : null
     await this.db.update(spaces).set({ isArchived: true }).where(eq(spaces.id, spaceId))
     if (actorId && space) {
       // §13.3 — audit the container deletion (space archival).
@@ -110,7 +110,7 @@ export class SpacesService {
     }
   }
 
-  private async assertManageable(spaceId: string, actorId: string) {
+  private async assertManageable(spaceId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {
     const space = await this.getSpace(spaceId)
     if (!space) throw new NotFoundException('Space not found')
     await assertCanManageContainer(this.db, {
@@ -118,6 +118,9 @@ export class SpacesService {
       createdById: space.createdById,
       actorId,
       kind: 'space',
+      action,
+      // Deleting an entire space is admin-only (space.delete not in MANAGER_DELTA).
+      adminOnlyDelete: true,
     })
     return space
   }

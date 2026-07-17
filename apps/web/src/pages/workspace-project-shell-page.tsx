@@ -467,7 +467,7 @@ function SuggestTasksPanel({
           body: {
             listId: targetListId,
             title: suggestions[i].title,
-            status: 'todo',
+            // Let the backend seed the list's first/default status.
             priority: suggestions[i].priority ?? 'normal',
           },
         })

@@ -4,6 +4,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { taskExternalLinks, workspaceIntegrationConnections } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
+import { safeFetch } from '../../../common/http/safe-fetch'
 import type { ExternalLinkRef } from '../../tasks/external-links.util'
 
 /**
@@ -248,12 +249,14 @@ export class ExternalLinkRefreshService {
     if (!ref.owner || !ref.repo || !ref.number) return null
     const base = process.env.GITHUB_API_URL ?? 'https://api.github.com'
     const path = kind === 'pull_request' ? 'pulls' : 'issues'
-    const res = await fetch(`${base}/repos/${ref.owner}/${ref.repo}/${path}/${ref.number}`, {
+    // Fixed/operator host (not user-derived), but routed through safeFetch for
+    // defense-in-depth: blocks private/reserved IPs + DNS rebinding on the sink.
+    const res = await safeFetch(`${base}/repos/${ref.owner}/${ref.repo}/${path}/${ref.number}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(15_000),
+      timeoutMs: 15_000,
     })
-    if (!res.ok) return null
-    const body = (await res.json()) as { state?: string; merged?: boolean; merged_at?: string | null; title?: string }
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as { state?: string; merged?: boolean; merged_at?: string | null; title?: string }
     const status =
       kind === 'pull_request'
         ? body.merged || body.merged_at
@@ -267,20 +270,48 @@ export class ExternalLinkRefreshService {
     return { status, title: body.title ?? null, metadata: { state: body.state ?? null } }
   }
 
+  /**
+   * Hosts the GitLab refresh may send the workspace OAuth token to: gitlab.com
+   * plus any operator-approved self-hosted hosts from GITLAB_ALLOWED_HOSTS
+   * (comma-separated, default none). Read per-call so operators can change the
+   * allowlist without a code change; lowercased for case-insensitive matching.
+   * Kept identical to TasksService.gitlabAllowedHosts so the cron and the manual
+   * "refresh" button honour the same allowlist.
+   */
+  private gitlabAllowedHosts(): Set<string> {
+    const hosts = new Set<string>(['gitlab.com'])
+    for (const raw of (process.env.GITLAB_ALLOWED_HOSTS ?? '').split(',')) {
+      const h = raw.trim().toLowerCase()
+      if (h) hosts.add(h)
+    }
+    return hosts
+  }
+
   private async fetchGitlabState(kind: string, ref: ExternalLinkRef, token: string) {
     if (!ref.projectPath || !ref.number) return null
+    // SSRF / token-exfiltration guard: `ref.host` is derived from the pasted URL,
+    // so it must NEVER be used verbatim as the target of an authenticated request
+    // (a member could paste https://gitlab.evil.com/... and — on the next cron
+    // run — the workspace's GitLab token would be sent there). Only reach
+    // gitlab.com or an operator-approved host; anything else is skipped WITHOUT
+    // sending the token. safeFetch additionally pins DNS and blocks private/
+    // reserved IPs (incl. cloud metadata) on every redirect hop.
+    const allowedHostnames = this.gitlabAllowedHosts()
+    const host = (ref.host ?? 'gitlab.com').toLowerCase()
+    if (!allowedHostnames.has(host)) return null
     const apiBase =
-      ref.host && ref.host !== 'gitlab.com'
-        ? `https://${ref.host}/api/v4`
-        : process.env.GITLAB_API_URL ?? 'https://gitlab.com/api/v4'
+      host === 'gitlab.com'
+        ? process.env.GITLAB_API_URL ?? 'https://gitlab.com/api/v4'
+        : `https://${host}/api/v4`
     const encoded = encodeURIComponent(ref.projectPath)
     const path = kind === 'pull_request' ? 'merge_requests' : 'issues'
-    const res = await fetch(`${apiBase}/projects/${encoded}/${path}/${ref.number}`, {
+    const res = await safeFetch(`${apiBase}/projects/${encoded}/${path}/${ref.number}`, {
       headers: { Authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(15_000),
+      allowedHostnames,
+      timeoutMs: 15_000,
     })
-    if (!res.ok) return null
-    const body = (await res.json()) as { state?: string; title?: string }
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as { state?: string; title?: string }
     const status =
       body.state === 'merged'
         ? 'merged'
@@ -293,12 +324,13 @@ export class ExternalLinkRefreshService {
   private async fetchDriveFile(ref: ExternalLinkRef, token: string) {
     if (!ref.fileId) return null
     const base = process.env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com/drive/v3'
-    const res = await fetch(
+    // Fixed/operator host; routed through safeFetch for defense-in-depth.
+    const res = await safeFetch(
       `${base}/files/${ref.fileId}?fields=id,name,mimeType,thumbnailLink,webViewLink,iconLink`,
-      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) },
+      { headers: { Authorization: `Bearer ${token}` }, timeoutMs: 15_000 },
     )
-    if (!res.ok) return null
-    const body = (await res.json()) as {
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as {
       name?: string
       mimeType?: string
       thumbnailLink?: string
@@ -318,14 +350,15 @@ export class ExternalLinkRefreshService {
   private async fetchDropboxFile(ref: ExternalLinkRef, token: string) {
     if (!ref.sharedUrl) return null
     const base = process.env.DROPBOX_API_URL ?? 'https://api.dropboxapi.com/2'
-    const res = await fetch(`${base}/sharing/get_shared_link_metadata`, {
+    // Fixed/operator host; routed through safeFetch for defense-in-depth.
+    const res = await safeFetch(`${base}/sharing/get_shared_link_metadata`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: ref.sharedUrl }),
-      signal: AbortSignal.timeout(15_000),
+      timeoutMs: 15_000,
     })
-    if (!res.ok) return null
-    const body = (await res.json()) as { name?: string; '.tag'?: string; size?: number }
+    if (res.status < 200 || res.status >= 300) return null
+    const body = JSON.parse(res.text()) as { name?: string; '.tag'?: string; size?: number }
     return {
       status: null,
       title: body.name ?? null,

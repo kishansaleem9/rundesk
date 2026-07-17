@@ -1280,9 +1280,12 @@ function ListDetail() {
               await refetch()
             }}
             onAddTask={async (title) => {
+              // Omit status so the backend seeds the list's first/default status
+              // (resolveStatusForList) — a hardcoded 'todo' would mis-seed lists
+              // whose status set doesn't start with (or lack) 'todo'.
               await api('/tasks', {
                 method: 'POST',
-                body: JSON.stringify({ listId, title, status: 'todo', priority: 'normal' }),
+                body: JSON.stringify({ listId, title, priority: 'normal' }),
               })
               await refetch()
             }}
