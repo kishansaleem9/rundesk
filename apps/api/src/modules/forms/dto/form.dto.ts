@@ -34,6 +34,9 @@ export class CreateFormDto {
 export class AddFormFieldDto {
   @IsString()
   @IsNotEmpty()
+  // Only field types the public submit page can render — otherwise the field's
+  // input never renders and (if required) the form becomes unsubmittable.
+  @IsIn(['short_text', 'long_text', 'email', 'number', 'date', 'dropdown', 'multi_select', 'file'])
   type!: string
 
   @IsString()
