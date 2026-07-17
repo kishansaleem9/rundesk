@@ -604,6 +604,17 @@ function ListDetail() {
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
+  // The Table "Fields" popover is a native <details>; native <details> doesn't
+  // close on an outside click, so wire one up to match the other toolbar popovers.
+  const fieldsDetailsRef = useRef<HTMLDetailsElement | null>(null)
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const d = fieldsDetailsRef.current
+      if (d?.open && e.target instanceof Node && !d.contains(e.target)) d.open = false
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [])
   // Board: collapsed columns (ephemeral) + per-status WIP limits (persisted).
   const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(() => new Set())
   const [wipLimits, setWipLimits] = useState<Record<string, number>>({})
@@ -1008,7 +1019,7 @@ function ListDetail() {
               <option value="assignee">{t('list.groupByAssignee')}</option>
             </WorkFilterSelect>
             {activeView === 'table' && projectFields.length > 0 && (
-              <details className="relative">
+              <details ref={fieldsDetailsRef} className="relative">
                 <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
                   {t('list.table.fields', { shown: projectFields.length - hiddenFields.size, total: projectFields.length })}
                 </summary>
