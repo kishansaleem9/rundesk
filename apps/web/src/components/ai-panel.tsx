@@ -266,7 +266,9 @@ export function AiPanel({ workspaceId, currentView, onClose, className }: AiPane
               : t('ai.voiceError')}
           </p>
         )}
-        <div className="flex gap-2">
+        {/* relative z-50 lifts the composer above the fixed support-widget launcher
+            (bottom-6 right-6 z-40), which otherwise intercepts clicks on the Send button. */}
+        <div className="relative z-50 flex gap-2">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}

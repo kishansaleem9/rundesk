@@ -353,7 +353,9 @@ function ComposerBox({
         </div>
         <Button
           size="sm"
-          className="h-8 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white shadow-sm"
+          /* relative z-50: keep the send button clickable above the fixed support-widget
+             launcher (bottom-6 right-6 z-40), which otherwise intercepts its clicks. */
+          className="relative z-50 h-8 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white shadow-sm"
           onClick={onSend}
           disabled={!canSend}
         >
