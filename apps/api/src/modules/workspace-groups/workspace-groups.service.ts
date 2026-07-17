@@ -98,7 +98,9 @@ export class WorkspaceGroupsService {
 
   async create(workspaceId: string, actorId: string | null, input: GroupCreateInput) {
     if (!input.name?.trim()) throw new BadRequestException('Group name is required')
-    const memberIds = input.memberIds ?? []
+    // Coerce a non-array memberIds (e.g. a stray string) to empty — otherwise
+    // `.length`/`.map` on a non-array threw and surfaced as a 500.
+    const memberIds = Array.isArray(input.memberIds) ? input.memberIds : []
     if (memberIds.length > 0) await this.assertMembersOfWorkspace(workspaceId, memberIds)
 
     try {
