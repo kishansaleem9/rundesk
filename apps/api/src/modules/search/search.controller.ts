@@ -2,6 +2,9 @@ import { Controller, Get, Post, Delete, Param, Query, Body, UseGuards } from '@n
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
+import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SearchService, type SearchEntityType, type SearchFilters } from './search.service'
 
@@ -12,7 +15,10 @@ const PRIORITIES = new Set(['urgent', 'high', 'normal', 'low'])
 @ApiTags('search')
 @ApiBearerAuth()
 @Controller('search')
-@UseGuards(JwtAuthGuard, ResourceMemberGuard)
+// SEARCH is default-enabled; FeatureFlagGuard (after JwtAuthGuard) enforces the
+// flag at the API so a disabled workspace can't reach search via direct calls.
+@UseGuards(JwtAuthGuard, ResourceMemberGuard, FeatureFlagGuard)
+@FeatureFlag(FLAGS.SEARCH)
 export class SearchController {
   constructor(private search: SearchService) {}
 

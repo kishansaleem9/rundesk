@@ -2,6 +2,9 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } f
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
+import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ChatService } from './chat.service'
 import type { CurrentUserPayload } from '../tasks/types'
@@ -9,7 +12,12 @@ import type { CurrentUserPayload } from '../tasks/types'
 @ApiTags('chat')
 @ApiBearerAuth()
 @Controller()
-@UseGuards(JwtAuthGuard)
+// Backend feature-flag enforcement (defense-in-depth alongside the frontend
+// gate): if a workspace disables Chat, its API 404s. CHAT is default-enabled,
+// so existing workspaces are unaffected. FeatureFlagGuard runs after
+// JwtAuthGuard so request.user (→ workspace/role context) is populated.
+@UseGuards(JwtAuthGuard, FeatureFlagGuard)
+@FeatureFlag(FLAGS.CHAT)
 export class ChatController {
   constructor(private chat: ChatService) {}
 

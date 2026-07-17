@@ -6,12 +6,18 @@ import { ProjectHealthService } from './project-health.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
+import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('reports')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, PermissionsGuard)
+// REPORTING is default-enabled; FeatureFlagGuard (after JwtAuthGuard) 404s the
+// reports API only where a workspace has explicitly disabled the flag.
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, PermissionsGuard, FeatureFlagGuard)
 @RequirePermissions('report.view.basic')
+@FeatureFlag(FLAGS.REPORTING)
 @Controller('workspaces/:workspaceId/reports')
 export class ReportsController {
   constructor(
