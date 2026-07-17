@@ -464,8 +464,13 @@ export class CustomRolesService {
     return raw.toLowerCase()
   }
 
-  private normalisePermissions(raw: string[]): Permission[] {
+  private normalisePermissions(raw: unknown): Permission[] {
     const seen = new Set<Permission>()
+    // Guard non-array input (e.g. permissions:{}) — otherwise `for…of` on a
+    // non-iterable threw and surfaced as a 500 instead of a clean 400.
+    if (!Array.isArray(raw)) {
+      throw new BadRequestException('permissions must be an array of permission keys')
+    }
     for (const candidate of raw) {
       if (typeof candidate !== 'string') continue
       const trimmed = candidate.trim()
