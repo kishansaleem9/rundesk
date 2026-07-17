@@ -19,6 +19,7 @@ import {
   Maximize2,
   Minimize2,
   Copy,
+  Trash2,
   Sparkles,
   Wand2,
   Paperclip,
@@ -443,6 +444,18 @@ export function TaskDetailSheet({
     },
   })
 
+  const deleteTask = useMutation({
+    mutationFn: () => api(`/tasks/${taskId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      toast.success(t('taskDetail.taskDeleted'))
+      await qc.invalidateQueries()
+      onOpenChange(false)
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotDelete'))
+    },
+  })
+
   const commitTitle = () => {
     const next = titleDraft.trim()
     const current = detailQuery.data?.title ?? ''
@@ -516,6 +529,19 @@ export function TaskDetailSheet({
               >
                 <Copy className="h-3.5 w-3.5" />
                 {t('taskDetail.duplicate')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  if (window.confirm(t('taskDetail.confirmDeleteTask'))) deleteTask.mutate()
+                }}
+                disabled={deleteTask.isPending}
+                className="absolute left-[7.25rem] top-3 h-7 gap-1.5 px-2.5 text-xs text-red-600 hover:text-red-600 opacity-90 hover:opacity-100"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t('taskDetail.deleteTask')}
               </Button>
               <Button
                 type="button"

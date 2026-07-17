@@ -51,6 +51,9 @@ export function sprintDayProgress(startDate: string, endDate: string) {
   const totalMs = Math.max(1, end.getTime() - start.getTime())
   const elapsed = Math.min(totalMs, Math.max(0, now.getTime() - start.getTime()))
   const totalDays = Math.max(1, Math.ceil(totalMs / (24 * 60 * 60 * 1000)))
-  const currentDay = Math.min(totalDays, Math.max(1, Math.ceil(elapsed / (24 * 60 * 60 * 1000)) + 1))
+  // floor (not ceil): during the sprint's first calendar day `elapsed` is a tiny
+  // positive value, and ceil(…)+1 wrongly reported "Day 2" from the moment a
+  // same-day sprint was created. floor(elapsed/day)+1 gives Day 1 on day one.
+  const currentDay = Math.min(totalDays, Math.max(1, Math.floor(elapsed / (24 * 60 * 60 * 1000)) + 1))
   return { currentDay, totalDays }
 }

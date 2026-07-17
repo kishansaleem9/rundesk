@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Button, Card, Input, cn } from '@rundesk/ui'
+import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import {
   Sparkles,
   Wand2,
@@ -690,6 +690,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
           })),
         },
       }),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('ai.actionFailed')),
     onSuccess: (data) => {
       setResult({
         title: data.title ?? '',
@@ -1097,6 +1098,7 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
 
   const extract = useMutation({
     mutationFn: () => api<ExtractedTask[]>('/ai/meeting-notes', { method: 'POST', body: { notes } }),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('ai.actionFailed')),
     onSuccess: (data) => {
       setTasks(data)
       setSelected(new Set(data.map((_, i) => i)))
@@ -1580,6 +1582,7 @@ function WritingTab() {
   const improve = useMutation({
     mutationFn: () => api<{ improved: string }>('/ai/writing/improve', { method: 'POST', body: { text, mode } }),
     onSuccess: (data) => setResult(data.improved),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('ai.actionFailed')),
   })
 
   function copy() {

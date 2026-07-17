@@ -801,15 +801,6 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => exportDoc('md')}
-                disabled={!editor}
-              >
-                <Download className="h-3.5 w-3.5 mr-1" />
-                MD
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
                 onClick={() => exportDoc('txt')}
                 disabled={!editor}
               >
@@ -1052,7 +1043,12 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
         method: 'POST',
         body: JSON.stringify({ resolved }),
       }),
-    onSuccess: invalidate,
+    onSuccess: (_data, vars) => {
+      invalidate()
+      // Resolving hides the thread from the default view; surface feedback + a
+      // hint that it's still reachable via "Show resolved" so it doesn't feel lost.
+      toast.success(vars.resolved ? t('docs.commentResolvedHint') : t('docs.commentReopened'))
+    },
   })
 
   const deleteComment = useMutation({

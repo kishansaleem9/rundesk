@@ -301,3 +301,33 @@
     transition: transform 0.1s ease;
   }
 }
+
+/* ===========================================================================
+ * Rich-text document content (Tiptap / ProseMirror)
+ *
+ * The docs editor and the public share viewer both render into `.ProseMirror`,
+ * and the app tags the wrapper with Tailwind Typography `prose` classes — but
+ * the @tailwindcss/typography plugin isn't installed, so headings, lists, code
+ * and quotes would otherwise collapse to plain paragraph text under Tailwind's
+ * preflight reset. These explicit rules restore block formatting for both the
+ * editor and the read-only public viewer.
+ * ========================================================================= */
+.ProseMirror h1 { font-size: 1.875rem; line-height: 1.25; font-weight: 700; margin: 0.8em 0 0.4em; }
+.ProseMirror h2 { font-size: 1.5rem; line-height: 1.3; font-weight: 700; margin: 0.8em 0 0.4em; }
+.ProseMirror h3 { font-size: 1.25rem; line-height: 1.35; font-weight: 600; margin: 0.7em 0 0.35em; }
+.ProseMirror h4 { font-size: 1.1rem; font-weight: 600; margin: 0.6em 0 0.3em; }
+.ProseMirror p { margin: 0.4em 0; }
+.ProseMirror ul { list-style: disc; padding-left: 1.5rem; margin: 0.5em 0; }
+.ProseMirror ol { list-style: decimal; padding-left: 1.5rem; margin: 0.5em 0; }
+.ProseMirror li { margin: 0.2em 0; }
+.ProseMirror li > p { margin: 0.1em 0; }
+/* Task-list (checkbox) items keep their flex layout with no list marker. */
+.ProseMirror ul[data-type='taskList'] { list-style: none; padding-left: 0.25rem; }
+.ProseMirror ul[data-type='taskList'] li { display: flex; align-items: flex-start; gap: 0.5rem; }
+.ProseMirror ul[data-type='taskList'] li > label { margin-top: 0.15rem; }
+.ProseMirror blockquote { border-left: 3px solid hsl(var(--border)); padding-left: 1rem; margin: 0.6em 0; color: hsl(var(--muted-foreground)); }
+.ProseMirror pre { background: hsl(var(--muted)); border-radius: 0.5rem; padding: 0.85rem 1rem; margin: 0.6em 0; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.875em; line-height: 1.5; }
+.ProseMirror pre code { background: none; padding: 0; font-size: inherit; }
+.ProseMirror code { background: hsl(var(--muted)); border-radius: 0.3rem; padding: 0.1em 0.35em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.875em; }
+.ProseMirror a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 2px; }
+.ProseMirror hr { border: none; border-top: 1px solid hsl(var(--border)); margin: 1em 0; }

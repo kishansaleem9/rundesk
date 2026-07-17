@@ -2127,6 +2127,11 @@ function TableView({
   const { t, tCount, locale } = useTranslation()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
+  // Disambiguate single-click (open task) from double-click (inline rename): a
+  // bare onClick fired on the first click of a dbl-click and opened the sheet
+  // before onDoubleClick could run, so rename was unreachable. Hold the open
+  // briefly; a second click cancels it and enters edit mode instead.
+  const openClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [titleDraft, setTitleDraft] = useState('')
   const [statusOpenFor, setStatusOpenFor] = useState<string | null>(null)
   const [priorityOpenFor, setPriorityOpenFor] = useState<string | null>(null)
@@ -2387,10 +2392,19 @@ function TableView({
                   <div
                     className="flex-1 min-w-[240px] px-3 flex items-center cursor-pointer"
                     onClick={() => {
-                      if (!isEditing) onOpenTask(task.id)
+                      if (isEditing) return
+                      if (openClickTimer.current) clearTimeout(openClickTimer.current)
+                      openClickTimer.current = setTimeout(() => {
+                        openClickTimer.current = null
+                        onOpenTask(task.id)
+                      }, 200)
                     }}
                     onDoubleClick={(e) => {
                       e.stopPropagation()
+                      if (openClickTimer.current) {
+                        clearTimeout(openClickTimer.current)
+                        openClickTimer.current = null
+                      }
                       setTitleDraft(task.title)
                       setEditingTitleId(task.id)
                     }}

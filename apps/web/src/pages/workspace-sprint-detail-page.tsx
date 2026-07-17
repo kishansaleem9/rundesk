@@ -445,7 +445,15 @@ function BurndownChart({
       <path d={actualPath} fill="none" stroke="hsl(var(--accent-violet))" strokeWidth="2.5" strokeLinejoin="round" />
       {data.map((d, i) =>
         i % Math.max(1, Math.floor(data.length / 5)) === 0 || i === data.length - 1 ? (
-          <text key={i} x={x(i)} y={H - 6} fontSize="9.5" fill="hsl(var(--muted-foreground))" textAnchor="middle">
+          <text
+            key={i}
+            x={x(i)}
+            y={H - 6}
+            fontSize="9.5"
+            fill="hsl(var(--muted-foreground))"
+            /* Anchor the first/last ticks inward so the end dates aren't clipped at the card edge. */
+            textAnchor={i === data.length - 1 ? 'end' : i === 0 ? 'start' : 'middle'}
+          >
             {d.day}
           </text>
         ) : null,

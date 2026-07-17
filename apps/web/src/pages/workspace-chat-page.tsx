@@ -2362,7 +2362,7 @@ function ThreadPanel({
   const [draft, setDraft] = useState('')
   const { t } = useTranslation()
   return (
-    <aside className="hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col">
+    <aside className="relative z-50 hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col">
       <div className="h-[52px] shrink-0 border-b border-border/80 px-4 flex items-center justify-between bg-background">
         <div className="text-[14px] font-semibold text-foreground">{t('chat.thread')}</div>
         <button

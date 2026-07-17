@@ -5,7 +5,6 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { useEffect } from 'react'
-import { devServerApiOrigin } from '../lib/dev-api-origin'
 
 export const Route = createFileRoute('/d/$slug')({
   component: PublicDocViewer,
@@ -23,12 +22,13 @@ type PublicDoc = {
 function PublicDocViewer() {
   const { slug } = Route.useParams() as { slug: string }
 
-  const apiOrigin = typeof window !== 'undefined' ? devServerApiOrigin() : ''
-
   const docQuery = useQuery({
     queryKey: ['public-doc', slug],
     queryFn: async () => {
-      const res = await fetch(`${apiOrigin}/api/v1/public/docs/${encodeURIComponent(slug)}`)
+      // Same-origin relative path (the Vite proxy in dev, same host in prod) so a
+      // public share link resolves on whatever hostname it's opened from — not
+      // only the one pinned in VITE_DEV_API_ORIGIN.
+      const res = await fetch(`/api/v1/public/docs/${encodeURIComponent(slug)}`)
       if (!res.ok) throw new Error(res.status === 404 ? 'Not found' : 'Failed to load')
       return (await res.json()) as PublicDoc
     },

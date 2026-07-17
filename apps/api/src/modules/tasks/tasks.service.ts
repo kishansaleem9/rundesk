@@ -1912,7 +1912,12 @@ export class TasksService {
     data: { fileName: string; url?: string; storageKey?: string; contentType?: string; sizeBytes?: number },
   ) {
     const ctx = await this.assertTaskWriteAccess(taskId, actorId)
-    this.assertAttachmentSize(data.sizeBytes)
+    // Only an uploaded file carries a mandatory declared byte size. An external
+    // hyperlink attachment (url present, no storageKey) has no size to validate,
+    // so requiring one here wrongly 400'd every "attach by link".
+    if (data.storageKey != null || data.url == null) {
+      this.assertAttachmentSize(data.sizeBytes)
+    }
 
     // Cross-tenant object-reference guard. A client-supplied `storageKey` must
     // sit under THIS task's own R2 upload prefix (exactly what

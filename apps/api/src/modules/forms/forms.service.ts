@@ -122,7 +122,12 @@ export class FormsService {
     submitterEmail?: string | null,
     submitterName?: string | null,
   ): Promise<string | undefined> {
-    if (!formWithFields.targetListId) return undefined
+    // Task routing can be configured two ways: a form-level default target list,
+    // or a field mapped to `targetListId` (the routing dropdown). Only bail early
+    // when NEITHER exists — otherwise a field-routed form (the common case, since
+    // the builder exposes routing via the field mapping) would never create a task.
+    const hasRoutingField = formWithFields.fields.some((field) => field.taskField === 'targetListId')
+    if (!formWithFields.targetListId && !hasRoutingField) return undefined
 
     let taskTitle = `Form submission: ${formWithFields.title}`
     let taskDescription = ''
@@ -174,7 +179,10 @@ export class FormsService {
     }
 
     if (!targetListId) {
-      throw new BadRequestException('No target list configured for this form submission')
+      // A routing field was present but the submitter picked no target and the
+      // form has no default list — store the submission without a task rather
+      // than recording a spurious routing error.
+      return undefined
     }
     const [targetList] = await this.db
       .select({ id: lists.id, workspaceId: spaces.workspaceId })
@@ -357,6 +365,19 @@ export class FormsService {
     const [form] = await this.db.select().from(forms).where(and(eq(forms.slug, slug), eq(forms.isArchived, false)))
     if (!form) throw new NotFoundException('Form not found')
     if (!form.isEnabled) throw new ForbiddenException('This form is currently disabled')
+    // The "Public form (no login required)" toggle must actually gate anonymous
+    // access — this slug route is the only (unauthenticated) way to view/submit,
+    // so a non-public form has to be refused here.
+    if (!form.isPublic) throw new ForbiddenException('This form is not publicly accessible')
+    return this.attachFields(form)
+  }
+
+  /**
+   * Load a form's fields (options unpacked). No enabled/public gating — used by
+   * getFormBySlug after its public checks, and by authenticated callers (routing
+   * retry) that already hold an authorized form row.
+   */
+  private async attachFields(form: typeof forms.$inferSelect) {
     const fields = await this.db
       .select()
       .from(formFields)
@@ -778,7 +799,7 @@ export class FormsService {
       .limit(1)
     if (!submission) throw new NotFoundException('Submission not found')
 
-    const formWithFields = await this.getFormBySlug(form.slug)
+    const formWithFields = await this.attachFields(form)
     const cleanData = this.stripInternalDataKeys(this.toSubmissionDataRecord(submission.data))
     try {
       const createdTaskId = await this.createTaskForSubmission(
