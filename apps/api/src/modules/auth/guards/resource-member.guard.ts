@@ -41,7 +41,13 @@ export class ResourceMemberGuard implements CanActivate {
     if (!resolved) throw new NotFoundException('Resource not found')
     const { workspaceId, container } = resolved
 
-    if (user.role === 'super_admin') return true
+    if (user.role === 'super_admin') {
+      // Still populate workspace context so downstream guards/handlers that read
+      // req.workspaceMember.workspaceId (e.g. PermissionsGuard) work for a
+      // super_admin acting on a route whose workspace is only derivable here.
+      req.workspaceMember = { workspaceId, userId: user.id, role: 'super_admin' }
+      return true
+    }
 
     const [member] = await this.db
       .select({ role: workspaceMembers.role })

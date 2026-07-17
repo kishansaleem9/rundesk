@@ -39,15 +39,20 @@ export class PermissionsGuard implements CanActivate {
 
     const req = ctx.switchToHttp().getRequest()
     const user = req.user
+    if (!user?.id) throw new ForbiddenException('Not authenticated')
+
+    // Super admins bypass — a global break-glass role with every permission by
+    // definition, regardless of (and without needing) workspace context. This
+    // MUST run before the workspaceId requirement below: on routes where the
+    // workspace is only derivable by ResourceMemberGuard (e.g. POST /projects
+    // carries just `spaceId`), that guard short-circuits for super_admin without
+    // populating `req.workspaceMember`, so `workspaceId` would be undefined here
+    // and a super-admin would be wrongly 403'd on a core action.
+    if (user.role === 'super_admin') return true
+
     const workspaceId: string | undefined =
       req.params?.workspaceId ?? req.workspaceMember?.workspaceId ?? req.body?.workspaceId
-
-    if (!user?.id) throw new ForbiddenException('Not authenticated')
     if (!workspaceId) throw new ForbiddenException('Workspace context required')
-
-    // Super admins bypass — they're a global break-glass role and always
-    // have every permission by definition.
-    if (user.role === 'super_admin') return true
 
     const resolution = await this.roles.resolveForUser(workspaceId, user.id)
     if (!resolution) throw new ForbiddenException('Not a workspace member')

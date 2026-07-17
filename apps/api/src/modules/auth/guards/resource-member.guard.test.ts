@@ -53,3 +53,11 @@ test('ALLOWS super_admin without a membership row', async () => {
   const g = new ResourceMemberGuard(makeDb([{ w: WS }], []))
   assert.equal(await g.canActivate(ctxFor({ id: 'root', role: 'super_admin' }, { taskId: 't-1' })), true)
 })
+
+test('populates req.workspaceMember for super_admin (so PermissionsGuard has workspace context)', async () => {
+  const g = new ResourceMemberGuard(makeDb([{ w: WS }], []))
+  const req = { user: { id: 'root', role: 'super_admin' }, params: {}, body: { spaceId: 'sp-1' } } as Record<string, unknown>
+  const ctx = { switchToHttp: () => ({ getRequest: () => req }) } as unknown as ExecutionContext
+  assert.equal(await g.canActivate(ctx), true)
+  assert.deepEqual(req.workspaceMember, { workspaceId: WS, userId: 'root', role: 'super_admin' })
+})
