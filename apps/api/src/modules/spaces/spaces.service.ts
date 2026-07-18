@@ -81,12 +81,15 @@ export class SpacesService {
     actorId?: string,
   ) {
     if (actorId) await this.assertManageable(spaceId, actorId)
+    // Whitelist updatable columns instead of spreading the untyped request body
+    // (prevents stray/wrong-typed fields reaching the row — crash + mass-assign).
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['name', 'description', 'color', 'icon'] as const) {
+      if (data[key] !== undefined) set[key] = data[key]
+    }
     const result = await this.db
       .update(spaces)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
+      .set(set)
       .where(eq(spaces.id, spaceId))
       .returning()
 

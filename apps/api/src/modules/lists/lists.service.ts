@@ -85,12 +85,15 @@ export class ListsService {
 
   async updateList(listId: string, data: Partial<{ name: string; description: string }>, actorId?: string) {
     if (actorId) await this.assertManageable(listId, actorId)
+    // Whitelist updatable columns rather than spreading the untyped body — a
+    // stray `position: true` would otherwise hit the integer column and 500.
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['name', 'description'] as const) {
+      if (data[key] !== undefined) set[key] = data[key]
+    }
     const result = await this.db
       .update(lists)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
+      .set(set)
       .where(eq(lists.id, listId))
       .returning()
 

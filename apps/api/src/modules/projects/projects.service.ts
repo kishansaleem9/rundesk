@@ -162,12 +162,17 @@ export class ProjectsService {
     actorId?: string,
   ) {
     if (actorId) await this.assertManageable(projectId, actorId)
+    // Whitelist the updatable columns instead of spreading the raw body: the
+    // controller body is untyped at runtime, so a stray field like `position: true`
+    // would otherwise reach the integer column (500) and any real column could be
+    // mass-assigned. Only copy a field when it was actually provided.
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['name', 'description', 'color', 'icon', 'folderId', 'defaultBillable', 'clientId'] as const) {
+      if (data[key] !== undefined) set[key] = data[key]
+    }
     const result = await this.db
       .update(projects)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
+      .set(set)
       .where(eq(projects.id, projectId))
       .returning()
 
