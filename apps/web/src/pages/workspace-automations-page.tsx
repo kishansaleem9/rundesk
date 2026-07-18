@@ -307,9 +307,9 @@ function AiSuggestionsSection({ workspaceId }: { workspaceId: string }) {
                     </span>
                   </div>
                   <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground flex-wrap">
-                    <code className="px-1.5 py-0.5 rounded bg-muted">{s.trigger.type}</code>
+                    <code className="px-1.5 py-0.5 rounded bg-muted">{s.trigger && typeof s.trigger === 'object' ? s.trigger.type : String(s.trigger ?? '')}</code>
                     <ArrowRight className="h-3 w-3" />
-                    {s.actions.map((a, j) => (
+                    {(Array.isArray(s.actions) ? s.actions : []).map((a, j) => (
                       <code key={j} className="px-1.5 py-0.5 rounded bg-muted">{a.type}</code>
                     ))}
                   </div>
@@ -354,9 +354,18 @@ function AutomationRow({
     enabled: expanded,
   })
 
-  const triggerOpt = TRIGGER_OPTIONS.find((o) => o.value === automation.trigger.type)
-  const triggerLabel = triggerOpt ? t(triggerOpt.labelKey) : automation.trigger.type
-  const actionLabels = automation.actions.map((a) => {
+  // Defend against malformed rows (e.g. a trigger stored as a bare string or
+  // actions stored as a non-array): a single bad automation must not crash the
+  // whole page via the route error boundary.
+  const triggerType = (automation.trigger && typeof automation.trigger === 'object')
+    ? automation.trigger.type
+    : typeof automation.trigger === 'string'
+      ? (automation.trigger as string)
+      : ''
+  const triggerOpt = TRIGGER_OPTIONS.find((o) => o.value === triggerType)
+  const triggerLabel = triggerOpt ? t(triggerOpt.labelKey) : (triggerType || '—')
+  const actionList = Array.isArray(automation.actions) ? automation.actions : []
+  const actionLabels = actionList.map((a) => {
     const opt = ACTION_OPTIONS.find((o) => o.value === a.type)
     return opt ? t(opt.labelKey) : a.type
   })

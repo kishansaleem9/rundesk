@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { and, eq, desc, lte, sql } from 'drizzle-orm'
 import {
@@ -108,6 +108,38 @@ export class AutomationsService {
     return this.assertOwnership(workspaceId, id)
   }
 
+  /**
+   * Reject/normalise a trigger + actions payload. Persisting a non-object
+   * trigger or a non-array `actions` (both reachable via the untyped controller
+   * body) stores data the reader can't render — it crashed the automations page
+   * via `actions.map is not a function`. Validate at the write boundary so the
+   * column invariant (trigger is an object, actions is an array of typed steps)
+   * always holds.
+   */
+  private normaliseTrigger(trigger: unknown): { type: string; filters?: Record<string, string | string[] | undefined> } {
+    if (!trigger || typeof trigger !== 'object' || Array.isArray(trigger)) {
+      throw new BadRequestException('Automation trigger must be an object with a "type"')
+    }
+    const t = trigger as { type?: unknown; filters?: unknown }
+    if (typeof t.type !== 'string' || !t.type.trim()) {
+      throw new BadRequestException('Automation trigger requires a string "type"')
+    }
+    return { type: t.type, filters: (t.filters as Record<string, string | string[] | undefined>) ?? undefined }
+  }
+
+  private normaliseActions(actions: unknown): Array<{ type: string; params: Record<string, string | string[] | undefined> }> {
+    if (!Array.isArray(actions)) {
+      throw new BadRequestException('Automation "actions" must be an array')
+    }
+    return actions.map((a, i) => {
+      if (!a || typeof a !== 'object' || Array.isArray(a) || typeof (a as { type?: unknown }).type !== 'string') {
+        throw new BadRequestException(`Automation action #${i + 1} must be an object with a string "type"`)
+      }
+      const act = a as { type: string; params?: unknown }
+      return { type: act.type, params: (act.params as Record<string, string | string[] | undefined>) ?? {} }
+    })
+  }
+
   async create(
     workspaceId: string,
     userId: string,
@@ -117,9 +149,11 @@ export class AutomationsService {
       actions: Array<{ type: string; params: Record<string, string | string[] | undefined> }>
     },
   ) {
+    const trigger = this.normaliseTrigger(dto.trigger)
+    const actions = this.normaliseActions(dto.actions)
     const [row] = await this.db
       .insert(automations)
-      .values({ workspaceId, createdById: userId, ...dto })
+      .values({ workspaceId, createdById: userId, name: dto.name, trigger, actions })
       .returning()
     return row
   }
@@ -135,9 +169,16 @@ export class AutomationsService {
     },
   ) {
     await this.assertOwnership(workspaceId, id)
+    // Only touch trigger/actions when the caller sends them, but validate the
+    // shape when present so an update can't reintroduce a non-array actions.
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (patch.name !== undefined) set.name = patch.name
+    if (patch.isEnabled !== undefined) set.isEnabled = patch.isEnabled
+    if (patch.trigger !== undefined) set.trigger = this.normaliseTrigger(patch.trigger)
+    if (patch.actions !== undefined) set.actions = this.normaliseActions(patch.actions)
     const [row] = await this.db
       .update(automations)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(automations.id, id))
       .returning()
     if (!row) throw new NotFoundException('Automation not found')
