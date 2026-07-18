@@ -110,9 +110,13 @@ export class CustomFieldsService {
     if (patch.options != null && !Array.isArray(patch.options)) {
       throw new BadRequestException('Custom field "options" must be an array')
     }
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['name', 'isRequired', 'options', 'position'] as const) {
+      if (patch[key] !== undefined) set[key] = patch[key]
+    }
     const [row] = await this.db
       .update(customFieldDefinitions)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(customFieldDefinitions.id, def.id))
       .returning()
     return row

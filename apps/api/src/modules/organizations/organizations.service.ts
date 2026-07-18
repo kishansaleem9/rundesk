@@ -149,9 +149,13 @@ export class OrganizationsService {
   }
 
   async update(id: string, patch: { name?: string; logoUrl?: string | null }) {
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['name', 'logoUrl'] as const) {
+      if (patch[key] !== undefined) set[key] = patch[key]
+    }
     const [updated] = await this.db
       .update(organizations)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(organizations.id, id))
       .returning()
     if (!updated) throw new NotFoundException('Organization not found')

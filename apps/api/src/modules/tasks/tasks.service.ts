@@ -2997,9 +2997,15 @@ export class TasksService {
   }
 
   async updateChecklist(checklistId: string, patch: { title?: string; position?: number }) {
+    if (patch.position !== undefined && (typeof patch.position !== 'number' || !Number.isInteger(patch.position))) {
+      throw new BadRequestException('Checklist position must be an integer')
+    }
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (patch.title !== undefined) set.title = patch.title
+    if (patch.position !== undefined) set.position = patch.position
     const [updated] = await this.db
       .update(taskChecklists)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(taskChecklists.id, checklistId))
       .returning()
     if (!updated) throw new NotFoundException('Checklist not found')

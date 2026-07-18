@@ -223,14 +223,15 @@ export class DashboardsService {
 
   async updateDockConfig(userId: string, workspaceId: string, patch: { pinnedLinks?: any[], appearance?: any }) {
     const existing = await this.getDockConfig(userId, workspaceId)
+    // Whitelist the two jsonb columns; never spread the raw body onto the row.
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (patch.pinnedLinks !== undefined) set.pinnedLinks = Array.isArray(patch.pinnedLinks) ? patch.pinnedLinks : []
+    if (patch.appearance !== undefined) set.appearance = patch.appearance
 
     if (existing) {
       const [updated] = await this.db
         .update(userDockConfigs)
-        .set({
-          ...patch,
-          updatedAt: new Date(),
-        })
+        .set(set)
         .where(eq(userDockConfigs.id, existing.id))
         .returning()
       return updated

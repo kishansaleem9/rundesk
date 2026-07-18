@@ -70,9 +70,17 @@ export class UsersService {
     if (patch.theme !== undefined && !THEME_VALUES.includes(patch.theme as ThemePreference)) {
       throw new BadRequestException(`Unsupported theme: ${patch.theme}`)
     }
+    // SECURITY: whitelist the self-editable profile columns. Spreading the raw
+    // body let a caller mass-assign any users column — most critically `role`,
+    // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
+    // super-admin. Only copy the fields a user is allowed to change themselves.
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme'] as const) {
+      if (patch[key] !== undefined) set[key] = patch[key]
+    }
     const [row] = await this.db
       .update(users)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(users.id, userId))
       .returning()
     if (!row) throw new BadRequestException('User not found')

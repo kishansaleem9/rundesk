@@ -45,6 +45,9 @@ export class ViewsService {
 
   async update(viewId: string, patch: { name?: string; config?: Record<string, unknown>; position?: number; isDefault?: boolean }) {
     assertConfigObject(patch.config)
+    if (patch.position !== undefined && (typeof patch.position !== 'number' || !Number.isInteger(patch.position))) {
+      throw new BadRequestException('View position must be an integer')
+    }
     const [existing] = await this.db.select().from(taskViews).where(eq(taskViews.id, viewId)).limit(1)
     if (!existing) throw new NotFoundException('View not found')
     if (patch.isDefault === true) {
@@ -53,9 +56,13 @@ export class ViewsService {
         .set({ isDefault: false, updatedAt: new Date() })
         .where(eq(taskViews.listId, existing.listId))
     }
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['name', 'config', 'position', 'isDefault'] as const) {
+      if (patch[key] !== undefined) set[key] = patch[key]
+    }
     const [row] = await this.db
       .update(taskViews)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(taskViews.id, viewId))
       .returning()
     if (!row) throw new NotFoundException('View not found')

@@ -505,9 +505,20 @@ export class FormsService {
       coverImageUrl?: string | null
     },
   ) {
+    // Whitelist updatable columns (never spread the untyped body): keeps stray/
+    // wrong-typed fields off the row — targetListId: true 500'd the UUID column.
+    // targetListId is a UUID column — a non-string/non-null value (e.g. true)
+    // would 500 the DB, so reject it up front.
+    if (patch.targetListId !== undefined && patch.targetListId !== null && typeof patch.targetListId !== 'string') {
+      throw new BadRequestException('targetListId must be a string or null')
+    }
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['title', 'description', 'targetListId', 'isPublic', 'isEnabled', 'confirmationMsg', 'coverImageUrl'] as const) {
+      if (patch[key] !== undefined) set[key] = patch[key]
+    }
     const [form] = await this.db
       .update(forms)
-      .set({ ...patch, updatedAt: new Date() })
+      .set(set)
       .where(eq(forms.id, formId))
       .returning()
     if (!form) throw new NotFoundException('Form not found')
