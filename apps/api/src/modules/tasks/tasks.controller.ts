@@ -141,6 +141,20 @@ export class TasksController {
       if (Number.isNaN(d.getTime())) throw new BadRequestException(`${label} is not a valid date`)
       return d
     }
+    // Type-check the non-string fields before they reach the DB. The body is an
+    // untyped inline shape (no DTO), so e.g. `position: true` would otherwise hit
+    // the integer column and 500 with a Postgres type error instead of a 400.
+    if (body.position !== undefined && (typeof body.position !== 'number' || !Number.isInteger(body.position))) {
+      throw new BadRequestException('position must be an integer')
+    }
+    if (body.timeEstimate !== undefined && body.timeEstimate !== null && typeof body.timeEstimate !== 'number') {
+      throw new BadRequestException('timeEstimate must be a number or null')
+    }
+    for (const flag of ['isArchived', 'isMilestone'] as const) {
+      if (body[flag] !== undefined && typeof body[flag] !== 'boolean') {
+        throw new BadRequestException(`${flag} must be a boolean`)
+      }
+    }
     const patch: Record<string, unknown> = { ...body }
     if ('startDate' in body) patch.startDate = toDate('startDate', body.startDate)
     if ('dueDate'   in body) patch.dueDate   = toDate('dueDate', body.dueDate)
