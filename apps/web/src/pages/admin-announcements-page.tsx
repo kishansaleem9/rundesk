@@ -39,7 +39,13 @@ export function AnnouncementsAdminPage() {
   const qc = useQueryClient()
   const workspacesQuery = useQuery({
     queryKey: ['announcement-admin-workspaces'],
-    queryFn: () => api<Array<{ id: string; name: string }>>('/workspaces'),
+    // GET /workspaces returns `{ workspace, role }[]`, not a flat workspace list —
+    // reading `w.id`/`w.name` off the wrapper gave every <option> an empty value,
+    // so the selected workspaceId was '' and Publish POSTed to `/workspaces//announcements` (404).
+    queryFn: async () => {
+      const rows = await api<Array<{ workspace: { id: string; name: string } }>>('/workspaces')
+      return rows.map((r) => r.workspace).filter((w): w is { id: string; name: string } => Boolean(w?.id))
+    },
   })
   const workspaces = workspacesQuery.data ?? []
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
