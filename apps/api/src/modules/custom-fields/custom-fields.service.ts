@@ -64,6 +64,12 @@ export class CustomFieldsService {
     },
   ) {
     await this.assertProjectInWorkspace(workspaceId, projectId)
+    // `options` must be an array when present — a non-array (e.g. {} or a bare
+    // string) passes the length check below (undefined === 0 is false) and gets
+    // stored, then crashes every reader that does `options.map(...)`.
+    if (dto.options != null && !Array.isArray(dto.options)) {
+      throw new BadRequestException('Custom field "options" must be an array')
+    }
     if (dto.type === 'dropdown' && (!dto.options || dto.options.length === 0)) {
       throw new BadRequestException('Dropdown fields require at least one option')
     }
@@ -101,6 +107,9 @@ export class CustomFieldsService {
     },
   ) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
+    if (patch.options != null && !Array.isArray(patch.options)) {
+      throw new BadRequestException('Custom field "options" must be an array')
+    }
     const [row] = await this.db
       .update(customFieldDefinitions)
       .set({ ...patch, updatedAt: new Date() })

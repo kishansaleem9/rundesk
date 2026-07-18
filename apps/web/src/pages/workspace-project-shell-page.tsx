@@ -853,7 +853,7 @@ function CustomFieldsSection({
                 </div>
                 <div className="text-[12px] text-muted-foreground capitalize">
                   {typeOpt ? t(typeOpt.labelKey) : f.type}
-                  {f.options && f.options.length > 0 && (
+                  {Array.isArray(f.options) && f.options.length > 0 && (
                     <> — {f.options.map((o) => o.label).join(', ')}</>
                   )}
                 </div>

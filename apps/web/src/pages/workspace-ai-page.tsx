@@ -686,7 +686,7 @@ function TaskGeneratorTab({ workspaceId }: { workspaceId: string }) {
           customFields: fields.map((f) => ({
             name: f.name,
             type: f.type,
-            options: f.options?.map((o) => o.label),
+            options: Array.isArray(f.options) ? f.options.map((o) => o.label) : undefined,
           })),
         },
       }),

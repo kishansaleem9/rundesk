@@ -439,7 +439,7 @@ function FieldRenderer({ field }: { field: FormField }) {
       return (
         <select className="h-10 w-full rounded-md border border-input bg-card px-3 text-sm">
           <option value="">Choose…</option>
-          {field.options?.map((o) => (
+          {(Array.isArray(field.options) ? field.options : []).map((o) => (
             <option key={o}>{o}</option>
           ))}
         </select>
@@ -447,7 +447,7 @@ function FieldRenderer({ field }: { field: FormField }) {
     case 'multi':
       return (
         <div className="grid grid-cols-2 gap-1.5">
-          {field.options?.map((o) => (
+          {(Array.isArray(field.options) ? field.options : []).map((o) => (
             <label key={o} className="flex items-center gap-2 rounded-md border border-border/60 px-2.5 py-1.5 text-sm cursor-pointer hover:bg-card/60">
               <input type="checkbox" />
               {o}
