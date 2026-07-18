@@ -1,10 +1,18 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { eq, asc } from 'drizzle-orm'
 import { taskViews } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
 type ViewType = 'list' | 'board' | 'calendar' | 'gantt' | 'table'
+
+/** A view `config` is a keyed object — reject a string/array/primitive so a
+ *  reader that reaches into `config.columns` etc. never meets a wrong type. */
+function assertConfigObject(config: unknown) {
+  if (config != null && (typeof config !== 'object' || Array.isArray(config))) {
+    throw new BadRequestException('View "config" must be an object')
+  }
+}
 
 @Injectable()
 export class ViewsService {
@@ -19,6 +27,7 @@ export class ViewsService {
   }
 
   async create(data: { listId: string; name: string; type: ViewType; config?: Record<string, unknown>; createdById: string }) {
+    assertConfigObject(data.config)
     const existing = await this.listByList(data.listId)
     const [row] = await this.db
       .insert(taskViews)
@@ -35,6 +44,7 @@ export class ViewsService {
   }
 
   async update(viewId: string, patch: { name?: string; config?: Record<string, unknown>; position?: number; isDefault?: boolean }) {
+    assertConfigObject(patch.config)
     const [existing] = await this.db.select().from(taskViews).where(eq(taskViews.id, viewId)).limit(1)
     if (!existing) throw new NotFoundException('View not found')
     if (patch.isDefault === true) {

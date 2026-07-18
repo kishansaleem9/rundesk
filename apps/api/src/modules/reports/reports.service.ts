@@ -1396,6 +1396,9 @@ export class ReportsService {
     definition: ReportDefinition,
     schedule?: ReportScheduleInput,
   ) {
+    if (definition == null || typeof definition !== 'object' || Array.isArray(definition)) {
+      throw new BadRequestException('Report "definition" must be an object')
+    }
     const sched = normalizeScheduleInput(schedule)
     const [row] = await this.db
       .insert(customReports)
@@ -1417,7 +1420,12 @@ export class ReportsService {
   ) {
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.name !== undefined) set.name = patch.name.trim() || 'Untitled report'
-    if (patch.definition !== undefined) set.definition = patch.definition
+    if (patch.definition !== undefined) {
+      if (patch.definition == null || typeof patch.definition !== 'object' || Array.isArray(patch.definition)) {
+        throw new BadRequestException('Report "definition" must be an object')
+      }
+      set.definition = patch.definition
+    }
     const sched = normalizeScheduleInput(patch.schedule)
     if (sched) {
       set.scheduleFrequency = sched.scheduleFrequency
