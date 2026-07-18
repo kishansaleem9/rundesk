@@ -32,6 +32,13 @@ import {
 /** The authenticated actor as seen by the service (from JwtAuthGuard). */
 type Actor = { id: string; role?: string }
 
+/**
+ * Trim a value only when it is actually a string. A number/object/array from a
+ * malformed request body threw on `.trim()` and surfaced as a 500 — this returns
+ * '' for any non-string so the downstream "is required" checks produce a 400.
+ */
+const trimStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+
 /** Plan tiers that include the support ticket system (§14.4) — paid tiers only. */
 const TICKETING_TIERS = ['pro', 'business', 'enterprise']
 
@@ -82,8 +89,8 @@ export class SupportService {
     input: { workspaceId?: string; subject?: string; body?: string; priority?: string },
   ) {
     const workspaceId = input?.workspaceId
-    const subject = input?.subject?.trim()
-    const body = input?.body?.trim() ?? ''
+    const subject = trimStr(input?.subject)
+    const body = trimStr(input?.body)
 
     if (!workspaceId) throw new BadRequestException('workspaceId is required')
     if (!subject) throw new BadRequestException('subject is required')
@@ -201,7 +208,7 @@ export class SupportService {
    * bumps `updated_at` and re-opens a resolved/closed ticket into 'pending'.
    */
   async addMessage(actor: Actor, ticketId: string, input: { body?: string }) {
-    const body = input?.body?.trim()
+    const body = trimStr(input?.body)
     if (!body) throw new BadRequestException('Message body is required')
 
     const ticket = await this.loadTicket(ticketId)
@@ -310,7 +317,7 @@ export class SupportService {
   /** super_admin: create a status-page component. */
   async createComponent(actor: Actor, input: { name?: string; status?: string; position?: number }) {
     this.assertSuperAdmin(actor)
-    const name = input?.name?.trim()
+    const name = trimStr(input?.name)
     if (!name) throw new BadRequestException('Component name is required')
     const status = (COMPONENT_STATUSES as readonly string[]).includes(input?.status ?? '')
       ? input!.status!
@@ -330,7 +337,7 @@ export class SupportService {
   ) {
     this.assertSuperAdmin(actor)
     const patch: Record<string, unknown> = {}
-    if (input.name !== undefined) patch.name = input.name.trim()
+    if (input.name !== undefined) patch.name = trimStr(input.name)
     if (input.status !== undefined) {
       if (!(COMPONENT_STATUSES as readonly string[]).includes(input.status)) {
         throw new BadRequestException('Invalid component status')
@@ -362,7 +369,7 @@ export class SupportService {
     input: { title?: string; body?: string; impact?: string; status?: string; componentId?: string | null },
   ) {
     this.assertSuperAdmin(actor)
-    const title = input?.title?.trim()
+    const title = trimStr(input?.title)
     if (!title) throw new BadRequestException('Incident title is required')
     const status = (INCIDENT_STATUSES as readonly string[]).includes(input?.status ?? '')
       ? input!.status!
@@ -371,8 +378,8 @@ export class SupportService {
       .insert(statusIncidents)
       .values({
         title,
-        body: input?.body?.trim() ?? '',
-        impact: input?.impact?.trim() || 'minor',
+        body: trimStr(input?.body),
+        impact: trimStr(input?.impact) || 'minor',
         status,
         componentId: input?.componentId || null,
       })
@@ -388,9 +395,9 @@ export class SupportService {
   ) {
     this.assertSuperAdmin(actor)
     const patch: Record<string, unknown> = {}
-    if (input.title !== undefined) patch.title = input.title.trim()
-    if (input.body !== undefined) patch.body = input.body.trim()
-    if (input.impact !== undefined) patch.impact = input.impact.trim() || 'minor'
+    if (input.title !== undefined) patch.title = trimStr(input.title)
+    if (input.body !== undefined) patch.body = trimStr(input.body)
+    if (input.impact !== undefined) patch.impact = trimStr(input.impact) || 'minor'
     if (input.componentId !== undefined) patch.componentId = input.componentId || null
     if (input.status !== undefined) {
       if (!(INCIDENT_STATUSES as readonly string[]).includes(input.status)) {

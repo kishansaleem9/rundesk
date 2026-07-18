@@ -97,7 +97,7 @@ export class WorkspaceGroupsService {
   }
 
   async create(workspaceId: string, actorId: string | null, input: GroupCreateInput) {
-    if (!input.name?.trim()) throw new BadRequestException('Group name is required')
+    if (typeof input.name !== 'string' || !input.name.trim()) throw new BadRequestException('Group name is required')
     // Coerce a non-array memberIds (e.g. a stray string) to empty — otherwise
     // `.length`/`.map` on a non-array threw and surfaced as a 500.
     const memberIds = Array.isArray(input.memberIds) ? input.memberIds : []

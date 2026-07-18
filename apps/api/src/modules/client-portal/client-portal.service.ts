@@ -178,7 +178,7 @@ export class ClientPortalService {
           projectId,
           clientId,
           token,
-          name: body.name?.trim() || null,
+          name: typeof body.name === 'string' ? body.name.trim() || null : null,
           showCompleted: body.showCompleted ?? true,
           createdById: userId,
         })
@@ -208,7 +208,7 @@ export class ClientPortalService {
     await this.assertProjectManageAccess(portal.projectId, userId)
 
     const patch: Partial<typeof clientPortals.$inferInsert> = {}
-    if (body.name !== undefined) patch.name = body.name?.trim() || null
+    if (body.name !== undefined) patch.name = typeof body.name === 'string' ? body.name.trim() || null : null
     if (body.isEnabled !== undefined) patch.isEnabled = body.isEnabled
     if (body.showCompleted !== undefined) patch.showCompleted = body.showCompleted
     if (Object.keys(patch).length === 0) return this.toAdminView(portal)

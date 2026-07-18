@@ -618,8 +618,11 @@ export class ChatService {
     createdById: string
     memberIds?: string[]
   }) {
+    // A non-string name (missing, number, object) threw on `.trim()` → 500.
+    // Validate the type first and return a 400 instead.
+    if (typeof data.name !== 'string' || !data.name.trim()) throw new BadRequestException('Channel name required')
     const name = data.name.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-')
-    if (!name) throw new ForbiddenException('Channel name required')
+    if (!name) throw new BadRequestException('Channel name required')
     // Optional space scoping (Plan §6.1): the space must belong to this workspace.
     let spaceId: string | null = null
     if (data.spaceId) {

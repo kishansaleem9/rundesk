@@ -123,7 +123,7 @@ export class ScopedStatusesService {
   }
 
   async create(scope: TemplateScope, containerId: string, input: StatusInput) {
-    const name = input.name?.trim()
+    const name = typeof input.name === 'string' ? input.name.trim() : ''
     if (!name) throw new BadRequestException('Status name is required')
     if (name.length > NAME_MAX_LEN) {
       throw new BadRequestException(`Status name must be ${NAME_MAX_LEN} characters or fewer`)

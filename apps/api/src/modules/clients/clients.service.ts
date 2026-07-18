@@ -23,11 +23,14 @@ export class ClientsService {
   }
 
   async create(workspaceId: string, name: string, contactEmail: string | undefined, createdById: string) {
-    const trimmed = (name ?? '').trim()
-    if (!trimmed) throw new BadRequestException('Client name is required')
+    // Reject a non-string name up front — `.trim()` on a number/object threw and
+    // surfaced as a 500 instead of a 400.
+    if (typeof name !== 'string' || !name.trim()) throw new BadRequestException('Client name is required')
+    const trimmed = name.trim()
+    const email = typeof contactEmail === 'string' ? contactEmail.trim() || null : null
     const [row] = await this.db
       .insert(clients)
-      .values({ workspaceId, name: trimmed, contactEmail: contactEmail?.trim() || null, createdById })
+      .values({ workspaceId, name: trimmed, contactEmail: email, createdById })
       .onConflictDoNothing()
       .returning()
     if (!row) throw new BadRequestException('A client with that name already exists')

@@ -95,7 +95,9 @@ export class DocsService {
         workspaceId: data.workspaceId,
         spaceId: data.spaceId ?? null,
         parentDocId: data.parentDocId ?? null,
-        title: data.title?.trim() || 'Untitled',
+        // Coerce defensively: a non-string title (e.g. a number from a
+        // malformed client) would throw on `.trim()` and surface as a 500.
+        title: (typeof data.title === 'string' ? data.title.trim() : '') || 'Untitled',
         icon: data.icon,
         createdById: data.createdById,
         content: { type: 'doc', content: [{ type: 'paragraph' }] },
