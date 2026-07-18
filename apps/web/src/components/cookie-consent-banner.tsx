@@ -48,12 +48,17 @@ export function CookieConsentBanner() {
   }
 
   return (
+    // Anchored to the bottom-right as a compact card rather than a full-width
+    // bottom bar: a centered bar overlapped bottom-anchored inputs (notably the
+    // chat composer), intercepting clicks until dismissed. A corner toast never
+    // covers centered content. The wrapper keeps `pointer-events-none` so only
+    // the card itself is interactive.
     <div
       role="region"
       aria-label={t('cookie.title')}
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-4 pt-2"
+      className="pointer-events-none fixed bottom-0 right-0 z-50 flex justify-end p-4"
     >
-      <div className="card-glass animate-slide-up pointer-events-auto flex w-full max-w-3xl flex-col gap-4 rounded-xl border border-border bg-card/95 p-4 shadow-lg backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between">
+      <div className="card-glass animate-slide-up pointer-events-auto flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-4 rounded-xl border border-border bg-card/95 p-4 shadow-lg backdrop-blur-xl">
         <div className="flex items-start gap-3">
           <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-gradient text-white">
             <Cookie className="h-5 w-5" aria-hidden />
@@ -71,12 +76,11 @@ export function CookieConsentBanner() {
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center justify-end gap-2">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => decide('declined')}
-            className="flex-1 sm:flex-none"
           >
             {t('cookie.decline')}
           </Button>
@@ -84,7 +88,6 @@ export function CookieConsentBanner() {
             variant="gradient"
             size="sm"
             onClick={() => decide('accepted')}
-            className="flex-1 sm:flex-none"
           >
             {t('cookie.accept')}
           </Button>
