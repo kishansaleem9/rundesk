@@ -159,7 +159,8 @@ export class DocsService {
     userId: string,
     data: { docId: string; name: string; description?: string },
   ) {
-    const name = data.name?.trim()
+    // Coerce non-string name/description so `.trim()` can't throw a 500.
+    const name = (typeof data.name === 'string' ? data.name : '').trim()
     if (!name) throw new ForbiddenException('Template name is required')
     const [doc] = await this.db.select().from(docs).where(eq(docs.id, data.docId)).limit(1)
     if (!doc || doc.workspaceId !== workspaceId) throw new NotFoundException('Doc not found in this workspace')
@@ -168,7 +169,7 @@ export class DocsService {
       .values({
         workspaceId,
         name,
-        description: data.description?.trim() || null,
+        description: (typeof data.description === 'string' ? data.description.trim() : '') || null,
         icon: doc.icon,
         content: doc.content,
         plaintext: doc.plaintext,

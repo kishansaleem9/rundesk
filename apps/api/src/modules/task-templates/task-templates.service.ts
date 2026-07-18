@@ -563,7 +563,9 @@ export class TaskTemplatesService {
   // -------------------------------------------------------- validation
 
   private normaliseName(raw: string): string {
-    const trimmed = (raw ?? '').trim()
+    // Non-string names (number/object/array) threw on `.trim()` → 500; coerce to
+    // '' so the "Name is required" 400 fires instead.
+    const trimmed = (typeof raw === 'string' ? raw : '').trim()
     if (!trimmed) throw new BadRequestException('Name is required')
     if (trimmed.length > NAME_MAX) {
       throw new BadRequestException(`Name must be ${NAME_MAX} characters or fewer`)

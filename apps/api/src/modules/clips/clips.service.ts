@@ -80,7 +80,9 @@ export class ClipsService {
   }
 
   async remove(workspaceId: string, storageKey: string) {
-    if (!storageKey.startsWith(this.clipPrefix(workspaceId))) {
+    // A missing/non-string storageKey threw on `.startsWith()` → 500. Validate
+    // the type so a malformed body yields a 400.
+    if (typeof storageKey !== 'string' || !storageKey.startsWith(this.clipPrefix(workspaceId))) {
       throw new BadRequestException('Invalid clip key for workspace')
     }
     await this.r2.deleteObject(storageKey)
@@ -99,7 +101,7 @@ export class ClipsService {
       expiresInMinutes?: number
     },
   ) {
-    if (!body.storageKey.startsWith(this.clipPrefix(workspaceId))) {
+    if (typeof body.storageKey !== 'string' || !body.storageKey.startsWith(this.clipPrefix(workspaceId))) {
       throw new BadRequestException('Invalid clip key for workspace')
     }
     const expiresInSeconds = Math.max(60, Math.min(7 * 24 * 60 * 60, (body.expiresInMinutes ?? 60) * 60))
