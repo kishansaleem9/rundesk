@@ -21,6 +21,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { STRIPE_CLIENT } from '../billing/stripe.provider'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 
 /**
  * Default billable rate applied when the caller supplies none.
@@ -44,6 +45,8 @@ export type GenerateInvoiceOpts = {
   notes?: string
   /** The user generating the invoice (stamped as `created_by_id`). */
   createdById?: string
+  /** The generating user's global role, for the per-item task-privacy check. */
+  createdByRole?: string | null
 }
 
 /** One rolled-up billable-time line, before it is written to the DB. */
@@ -125,6 +128,13 @@ export class ClientInvoicingService {
       .limit(1)
     if (!client) throw new BadRequestException('The project client no longer exists')
 
+    // Per-item task privacy (§2): never roll a private task's title into a line
+    // item unless the caller may see that task. The caller is `createdById` (the
+    // user generating the invoice) — usually a manager/admin (unrestricted), but
+    // the helper is applied unconditionally so a non-manager caller is correct.
+    const actorId = opts.createdById ?? ''
+    const isManager = actorId ? await resolveIsManager(this.db, workspaceId, actorId, opts.createdByRole) : false
+
     // Billable + not-yet-invoiced + has a duration, for tasks in this project.
     const rows = await this.db
       .select({
@@ -144,6 +154,7 @@ export class ClientInvoicingService {
           eq(timeEntries.isBillable, true),
           isNull(timeEntries.clientInvoiceId),
           isNotNull(timeEntries.durationSec),
+          taskVisibilityFilter(this.db, actorId, isManager),
         ),
       )
 

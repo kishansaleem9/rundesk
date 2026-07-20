@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import type { CurrentUserPayload } from '../tasks/types'
 
 /**
  * §12.10 Client invoicing. Workspace-scoped routes for generating client
@@ -32,7 +33,7 @@ export class ClientInvoicingController {
   @ApiOperation({ summary: 'Generate a draft invoice from a project’s unbilled billable time' })
   generate(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: CurrentUserPayload,
     @Body()
     body: {
       projectId?: string
@@ -48,6 +49,7 @@ export class ClientInvoicingController {
       dueInDays: body?.dueInDays,
       notes: body?.notes,
       createdById: user.id,
+      createdByRole: user.role,
     })
   }
 

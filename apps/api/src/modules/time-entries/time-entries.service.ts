@@ -5,6 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 
 @Injectable()
 export class TimeEntriesService {
@@ -133,11 +134,21 @@ export class TimeEntriesService {
     return parsed.toISOString().slice(0, 10)
   }
 
-  async listForWorkspace(workspaceId: string, opts: { userId?: string; since?: Date } = {}) {
+  async listForWorkspace(
+    workspaceId: string,
+    opts: { userId?: string; since?: Date; actorId?: string; actorRole?: string | null } = {},
+  ) {
+    // Per-item task privacy (§2): drop entries whose task is a private task the
+    // caller may not see (a private task's title would otherwise leak via
+    // `taskTitle`). Managers are unrestricted — the filter resolves to undefined.
+    const isManager = opts.actorId
+      ? await resolveIsManager(this.db, workspaceId, opts.actorId, opts.actorRole)
+      : false
     const where = and(
       eq(spaces.workspaceId, workspaceId),
       opts.userId ? eq(timeEntries.userId, opts.userId) : undefined,
       opts.since ? gte(timeEntries.startedAt, opts.since) : undefined,
+      taskVisibilityFilter(this.db, opts.actorId ?? '', isManager),
     )
     const rows = await this.db
       .select({

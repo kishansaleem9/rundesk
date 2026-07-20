@@ -96,8 +96,11 @@ export class WorkspacesController {
   @Get(':workspaceId/archived-tasks')
   @UseGuards(WorkspaceAdminGuard)
   @ApiOperation({ summary: 'List archived tasks in the workspace (Plan §13.4)' })
-  async getArchivedTasks(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
-    return this.workspacesService.listArchivedTasks(workspaceId)
+  async getArchivedTasks(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.workspacesService.listArchivedTasks(workspaceId, { id: user.id, role: user.role })
   }
 
   @Post(':workspaceId/verify-domain')

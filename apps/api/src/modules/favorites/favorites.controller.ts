@@ -15,7 +15,7 @@ export class FavoritesController {
 
   @Get()
   list(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.favorites.list(workspaceId, user.id)
+    return this.favorites.list(workspaceId, user.id, user.role)
   }
 
   @Post('toggle')
@@ -24,7 +24,7 @@ export class FavoritesController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: { entityType: string; entityId: string },
   ) {
-    return this.favorites.toggle(workspaceId, user.id, body.entityType, body.entityId)
+    return this.favorites.toggle(workspaceId, user.id, body.entityType, body.entityId, user.role)
   }
 
   @Delete()

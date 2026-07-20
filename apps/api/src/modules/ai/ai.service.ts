@@ -23,6 +23,7 @@ import { EmbeddingService } from './embedding.service'
 import { embedText, cosineSimilarity } from './embedding'
 import { ATTACHMENT_TEXT_CAP, extractAttachmentText, isExtractableAttachment } from './attachment-text'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import {
   assembleKnowledgeContext,
   deterministicKnowledgeAnswer,
@@ -1582,7 +1583,18 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
             .innerJoin(lists, eq(lists.id, tasks.listId))
             .innerJoin(projects, eq(projects.id, lists.projectId))
             .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-            .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, taskIds), spaceOk, projectOk))
+            // Per-item task privacy (§2): on top of container access, drop a task
+            // hit for a private task the caller didn't create / isn't assigned to.
+            // We are past the manager early-return above, so isManager is false.
+            .where(
+              and(
+                eq(spaces.workspaceId, workspaceId),
+                inArray(tasks.id, taskIds),
+                spaceOk,
+                projectOk,
+                taskVisibilityFilter(this.db, userId, false),
+              ),
+            )
         : Promise.resolve([] as Array<{ id: string }>),
       commentIds.length
         ? this.db
@@ -1894,7 +1906,14 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
    * lists (with paths), workspace members (for assigneeEmail→userId), and the
    * open tasks (with assignee emails) that search / bulk filters run against.
    */
-  async loadCommandContext(workspaceId: string): Promise<CommandContext> {
+  async loadCommandContext(
+    workspaceId: string,
+    actorId: string,
+    actorRole?: string | null,
+  ): Promise<CommandContext> {
+    // Per-item privacy (§2): a non-manager caller must not see private tasks/lists
+    // they don't own (or, for tasks, aren't assigned to). Managers are unrestricted.
+    const isManager = actorId ? await resolveIsManager(this.db, workspaceId, actorId, actorRole) : false
     const today = new Date().toISOString().slice(0, 10)
     const [listRows, memberRows, taskRows] = await Promise.all([
       this.db
@@ -1902,7 +1921,7 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false)))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false), listVisibilityFilter(actorId, isManager)))
         .orderBy(asc(spaces.name), asc(projects.name), asc(lists.name))
         .limit(100),
       this.db
@@ -1923,7 +1942,7 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), taskVisibilityFilter(this.db, actorId, isManager)))
         .orderBy(asc(tasks.dueDate))
         .limit(300),
     ])
@@ -1969,7 +1988,7 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
   async command(workspaceId: string, message: string, ctx: AiCtx = {}): Promise<CommandPlan> {
     const [workspaceContext, planCtx] = await Promise.all([
       this.buildWorkspaceContext(workspaceId, ctx.userId ?? ''),
-      this.loadCommandContext(workspaceId),
+      this.loadCommandContext(workspaceId, ctx.userId ?? ''),
     ])
 
     const listCatalog = planCtx.lists

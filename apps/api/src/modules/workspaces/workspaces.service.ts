@@ -6,6 +6,7 @@ import * as dns from 'dns'
 import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { R2Service } from '../../common/storage/r2.service'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { SecurityService } from '../security/security.service'
@@ -212,7 +213,16 @@ export class WorkspacesService {
    * task → list → project → space tree so we can scope by workspace and show the
    * list/project a task belongs to. Restore uses the existing task-restore route.
    */
-  async listArchivedTasks(workspaceId: string) {
+  async listArchivedTasks(workspaceId: string, actor?: { id: string; role?: string }) {
+    // §2 per-item privacy: drop private tasks the actor may not see. Admin /
+    // super-admin callers resolve as managers (undefined filter) and still see all.
+    const visFilter = actor
+      ? taskVisibilityFilter(
+          this.db,
+          actor.id,
+          await resolveIsManager(this.db, workspaceId, actor.id, actor.role),
+        )
+      : undefined
     return this.db
       .select({
         id: tasks.id,
@@ -226,7 +236,7 @@ export class WorkspacesService {
       .innerJoin(lists, eq(tasks.listId, lists.id))
       .innerJoin(projects, eq(lists.projectId, projects.id))
       .innerJoin(spaces, eq(projects.spaceId, spaces.id))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, true)))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, true), visFilter))
       .orderBy(desc(tasks.updatedAt))
       .limit(200)
   }

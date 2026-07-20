@@ -11,6 +11,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 
 export type FavoriteEntityType = 'space' | 'list' | 'task' | 'doc' | 'channel'
 const ENTITY_TYPES: FavoriteEntityType[] = ['space', 'list', 'task', 'doc', 'channel']
@@ -41,6 +42,7 @@ export class FavoritesService {
     workspaceId: string,
     entityType: FavoriteEntityType,
     ids: string[],
+    actor: { id: string; isManager: boolean },
   ): Promise<Map<string, ResolvedEntity>> {
     const out = new Map<string, ResolvedEntity>()
     if (ids.length === 0) return out
@@ -59,7 +61,7 @@ export class FavoritesService {
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), inArray(lists.id, ids)))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(lists.id, ids), listVisibilityFilter(actor.id, actor.isManager)))
       for (const r of rows) {
         out.set(r.id, {
           entityType,
@@ -75,7 +77,7 @@ export class FavoritesService {
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, ids)))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, ids), taskVisibilityFilter(this.db, actor.id, actor.isManager)))
       for (const r of rows) {
         out.set(r.id, {
           entityType,
@@ -105,11 +107,16 @@ export class FavoritesService {
   }
 
   /** List a user's favorites in a workspace, hydrated + pruned of dangling rows. */
-  async list(workspaceId: string, userId: string) {
+  async list(workspaceId: string, userId: string, actorRole?: string) {
     const rows = await this.db
       .select()
       .from(favorites)
       .where(and(eq(favorites.workspaceId, workspaceId), eq(favorites.userId, userId)))
+
+    // §2 per-item privacy: the favorites owner is the actor — hide private
+    // tasks/lists they may not see (creator/assignee/manager only).
+    const isManager = await resolveIsManager(this.db, workspaceId, userId, actorRole)
+    const actor = { id: userId, isManager }
 
     // Group ids by type, resolve each type in one query.
     const byType = new Map<FavoriteEntityType, string[]>()
@@ -120,7 +127,7 @@ export class FavoritesService {
     }
     const resolved = new Map<string, ResolvedEntity>() // key: `${type}:${id}`
     for (const [type, ids] of byType) {
-      const map = await this.resolveBatch(workspaceId, type, ids)
+      const map = await this.resolveBatch(workspaceId, type, ids, actor)
       for (const [id, meta] of map) resolved.set(`${type}:${id}`, meta)
     }
 
@@ -146,12 +153,14 @@ export class FavoritesService {
   }
 
   /** Add or remove a favorite; returns the new favorited state. */
-  async toggle(workspaceId: string, userId: string, entityType: string, entityId: string) {
+  async toggle(workspaceId: string, userId: string, entityType: string, entityId: string, actorRole?: string) {
     this.assertType(entityType)
     if (!entityId) throw new BadRequestException('entityId is required')
 
-    // The target must exist and belong to this workspace.
-    const resolved = await this.resolveBatch(workspaceId, entityType, [entityId])
+    // The target must exist, belong to this workspace, and be visible to the
+    // caller — you cannot favorite a private task/list you may not see (§2).
+    const isManager = await resolveIsManager(this.db, workspaceId, userId, actorRole)
+    const resolved = await this.resolveBatch(workspaceId, entityType, [entityId], { id: userId, isManager })
     if (!resolved.has(entityId)) throw new NotFoundException('That item does not exist in this workspace')
 
     const [existing] = await this.db

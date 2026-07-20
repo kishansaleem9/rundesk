@@ -5,6 +5,8 @@ import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { SprintsService } from './sprints.service'
 import { CreateSprintDto } from './dto/sprint.dto'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import type { CurrentUserPayload } from '../tasks/types'
 import type { SprintStatus } from '@rundesk/db'
 
 @ApiTags('sprints')
@@ -16,8 +18,8 @@ export class SprintsController {
 
   @Get('workspaces/:workspaceId/sprints')
   @UseGuards(WorkspaceMemberGuard)
-  list(@Param('workspaceId') workspaceId: string) {
-    return this.sprints.list(workspaceId)
+  list(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.sprints.list(workspaceId, { id: user.id, role: user.role })
   }
 
   @Post('workspaces/:workspaceId/sprints')
@@ -37,8 +39,8 @@ export class SprintsController {
   }
 
   @Get('sprints/:sprintId')
-  get(@Param('sprintId') sprintId: string) {
-    return this.sprints.getDetail(sprintId)
+  get(@Param('sprintId') sprintId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.sprints.getDetail(sprintId, { id: user.id, role: user.role })
   }
 
   @Patch('sprints/:sprintId')
@@ -65,8 +67,8 @@ export class SprintsController {
   }
 
   @Get('sprints/:sprintId/tasks')
-  listTasks(@Param('sprintId') sprintId: string) {
-    return this.sprints.listTasks(sprintId)
+  listTasks(@Param('sprintId') sprintId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.sprints.listTasks(sprintId, { id: user.id, role: user.role })
   }
 
   @Post('sprints/:sprintId/tasks')

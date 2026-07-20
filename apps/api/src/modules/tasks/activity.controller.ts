@@ -2,6 +2,8 @@ import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import type { CurrentUserPayload } from './types'
 import { TasksService } from './tasks.service'
 
 @ApiTags('tasks')
@@ -25,8 +27,15 @@ export class ProjectActivityController {
   constructor(private tasks: TasksService) {}
 
   @Get()
-  list(@Param('projectId') projectId: string, @Query('limit') limit?: string) {
+  list(
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('limit') limit?: string,
+  ) {
     const n = limit ? parseInt(limit, 10) : 100
-    return this.tasks.listProjectActivity(projectId, Math.min(Number.isFinite(n) && n > 0 ? n : 100, 200))
+    return this.tasks.listProjectActivity(projectId, Math.min(Number.isFinite(n) && n > 0 ? n : 100, 200), {
+      id: user.id,
+      role: user.role,
+    })
   }
 }

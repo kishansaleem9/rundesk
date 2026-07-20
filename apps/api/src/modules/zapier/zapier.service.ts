@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import {
   lists,
   projects,
@@ -13,6 +13,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { WebhooksService } from '../webhooks/webhooks.service'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 
 const SAMPLE_LIMIT = 5
 
@@ -94,19 +95,25 @@ export class ZapierService {
    * (`{ id, event, payload, timestamp }`), so a Zap built from the sample maps
    * identically to real deliveries.
    */
-  async sample(workspaceId: string, event: string) {
+  async sample(workspaceId: string, event: string, userId?: string) {
     const known = this.webhooks.getAvailableEvents()
     if (!known.includes(event)) throw new BadRequestException(`Unknown event "${event}"`)
 
-    if (event.startsWith('comment.')) return this.sampleComments(workspaceId, event)
-    if (event.startsWith('time.')) return this.sampleTimeEntries(workspaceId, event)
-    if (event.startsWith('task.')) return this.sampleTasks(workspaceId, event)
+    // Per-item task privacy (§2): the samples are workspace-scoped, so a private
+    // task (or its comments / time entries) must be hidden unless the API-key
+    // owner may see it. Managers are unrestricted.
+    const actorId = userId ?? ''
+    const isManager = actorId ? await resolveIsManager(this.db, workspaceId, actorId) : false
+
+    if (event.startsWith('comment.')) return this.sampleComments(workspaceId, event, actorId, isManager)
+    if (event.startsWith('time.')) return this.sampleTimeEntries(workspaceId, event, actorId, isManager)
+    if (event.startsWith('task.')) return this.sampleTasks(workspaceId, event, actorId, isManager)
     // Other real events (project.*, member.*, form.submitted) have no first-class
     // sample source; an empty list is a valid Zapier perform-list response.
     return []
   }
 
-  private async sampleTasks(workspaceId: string, event: string) {
+  private async sampleTasks(workspaceId: string, event: string, actorId: string, isManager: boolean) {
     const rows = await this.db
       .select({
         id: tasks.id,
@@ -122,14 +129,14 @@ export class ZapierService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(spaces.workspaceId, workspaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), taskVisibilityFilter(this.db, actorId, isManager)))
       .orderBy(desc(tasks.createdAt))
       .limit(SAMPLE_LIMIT)
 
     return rows.map((task) => this.envelope(event, { task }, task.id, task.createdAt))
   }
 
-  private async sampleComments(workspaceId: string, event: string) {
+  private async sampleComments(workspaceId: string, event: string, actorId: string, isManager: boolean) {
     const rows = await this.db
       .select({
         id: taskComments.id,
@@ -143,7 +150,7 @@ export class ZapierService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(spaces.workspaceId, workspaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), taskVisibilityFilter(this.db, actorId, isManager)))
       .orderBy(desc(taskComments.createdAt))
       .limit(SAMPLE_LIMIT)
 
@@ -157,7 +164,7 @@ export class ZapierService {
     )
   }
 
-  private async sampleTimeEntries(workspaceId: string, event: string) {
+  private async sampleTimeEntries(workspaceId: string, event: string, actorId: string, isManager: boolean) {
     const rows = await this.db
       .select({
         id: timeEntries.id,
@@ -173,7 +180,7 @@ export class ZapierService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(spaces.workspaceId, workspaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), taskVisibilityFilter(this.db, actorId, isManager)))
       .orderBy(desc(timeEntries.createdAt))
       .limit(SAMPLE_LIMIT)
 

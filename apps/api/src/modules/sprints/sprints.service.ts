@@ -1,9 +1,10 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
-import { eq, and, desc, asc, inArray } from 'drizzle-orm'
+import { eq, and, desc, asc, inArray, type SQL } from 'drizzle-orm'
 import { sprints, sprintTasks, tasks } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import type { SprintStatus } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 
 function isTaskDone(status: string, statusCategory: string) {
   return statusCategory === 'closed' || status === 'done'
@@ -36,7 +37,7 @@ function eachDayInclusive(start: Date, end: Date) {
 export class SprintsService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
-  private async loadSprintTaskRows(sprintIds: string[]) {
+  private async loadSprintTaskRows(sprintIds: string[], visFilter?: SQL) {
     if (sprintIds.length === 0) return []
     return this.db
       .select({
@@ -52,8 +53,21 @@ export class SprintsService {
       })
       .from(sprintTasks)
       .innerJoin(tasks, eq(tasks.id, sprintTasks.taskId))
-      .where(inArray(sprintTasks.sprintId, sprintIds))
+      .where(and(inArray(sprintTasks.sprintId, sprintIds), visFilter))
       .orderBy(asc(sprintTasks.addedAt))
+  }
+
+  /**
+   * §2 per-item task-visibility WHERE fragment for a sprint's workspace.
+   * undefined = no restriction (no actor, or the actor is a manager).
+   */
+  private async sprintTaskVisFilter(
+    workspaceId: string,
+    actor?: { id: string; role?: string },
+  ): Promise<SQL | undefined> {
+    if (!actor) return undefined
+    const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
+    return taskVisibilityFilter(this.db, actor.id, isManager)
   }
 
   private aggregateStats(
@@ -117,14 +131,15 @@ export class SprintsService {
     })
   }
 
-  async list(workspaceId: string) {
+  async list(workspaceId: string, actor?: { id: string; role?: string }) {
     const rows = await this.db
       .select()
       .from(sprints)
       .where(eq(sprints.workspaceId, workspaceId))
       .orderBy(desc(sprints.startDate))
 
-    const taskRows = await this.loadSprintTaskRows(rows.map((s) => s.id))
+    const visFilter = await this.sprintTaskVisFilter(workspaceId, actor)
+    const taskRows = await this.loadSprintTaskRows(rows.map((s) => s.id), visFilter)
     const statsMap = this.aggregateStats(taskRows)
 
     return rows.map((s) => {
@@ -138,9 +153,10 @@ export class SprintsService {
     })
   }
 
-  async getDetail(sprintId: string) {
+  async getDetail(sprintId: string, actor?: { id: string; role?: string }) {
     const sprint = await this.get(sprintId)
-    const taskRows = await this.loadSprintTaskRows([sprintId])
+    const visFilter = await this.sprintTaskVisFilter(sprint.workspaceId, actor)
+    const taskRows = await this.loadSprintTaskRows([sprintId], visFilter)
     const stats = this.aggregateStats(taskRows).get(sprintId) ?? {
       taskCount: 0,
       completedTasks: 0,
@@ -216,8 +232,10 @@ export class SprintsService {
     return { ok: true }
   }
 
-  async listTasks(sprintId: string) {
-    const rows = await this.loadSprintTaskRows([sprintId])
+  async listTasks(sprintId: string, actor?: { id: string; role?: string }) {
+    const sprint = await this.get(sprintId)
+    const visFilter = await this.sprintTaskVisFilter(sprint.workspaceId, actor)
+    const rows = await this.loadSprintTaskRows([sprintId], visFilter)
     return rows.map((r) => ({
       id: r.taskId,
       title: r.title,

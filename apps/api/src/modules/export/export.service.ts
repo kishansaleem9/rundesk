@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common'
-import { eq } from 'drizzle-orm'
+import { and, eq, type SQL } from 'drizzle-orm'
 import {
   workspaces,
   workspaceMembers,
@@ -14,6 +14,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 
 @Injectable()
@@ -23,7 +24,7 @@ export class ExportService {
     private readonly security: SecurityService,
   ) {}
 
-  async exportWorkspace(workspaceId: string): Promise<{
+  async exportWorkspace(workspaceId: string, actor?: { id: string; role?: string }): Promise<{
     workspace: object
     members: object[]
     spaces: object[]
@@ -35,6 +36,17 @@ export class ExportService {
     forms: object[]
     exportedAt: string
   }> {
+    // §2 per-item privacy: when an actor is supplied, drop private tasks/lists
+    // they may not see. Admin / super-admin exporters resolve as managers
+    // (undefined filter) and still get everything.
+    let taskVis: SQL | undefined
+    let listVis: SQL | undefined
+    if (actor) {
+      const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
+      taskVis = taskVisibilityFilter(this.db, actor.id, isManager)
+      listVis = listVisibilityFilter(actor.id, isManager)
+    }
+
     // Load all workspace data in parallel
     const [
       wsData,
@@ -70,14 +82,14 @@ export class ExportService {
         .from(lists)
         .innerJoin(projects, eq(lists.projectId, projects.id))
         .innerJoin(spaces, eq(projects.spaceId, spaces.id))
-        .where(eq(spaces.workspaceId, workspaceId)),
+        .where(and(eq(spaces.workspaceId, workspaceId), listVis)),
       this.db
         .select()
         .from(tasks)
         .innerJoin(lists, eq(tasks.listId, lists.id))
         .innerJoin(projects, eq(lists.projectId, projects.id))
         .innerJoin(spaces, eq(projects.spaceId, spaces.id))
-        .where(eq(spaces.workspaceId, workspaceId)),
+        .where(and(eq(spaces.workspaceId, workspaceId), taskVis)),
       this.db.select().from(goals).where(eq(goals.workspaceId, workspaceId)),
       this.db.select().from(sprints).where(eq(sprints.workspaceId, workspaceId)),
       this.db.select().from(forms).where(eq(forms.workspaceId, workspaceId)),

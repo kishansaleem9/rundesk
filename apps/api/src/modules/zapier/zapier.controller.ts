@@ -37,7 +37,7 @@ export class ZapierController {
   @Get('triggers/:event/sample')
   @ApiOperation({ summary: 'Perform-list / sample data for a trigger — recent real, workspace-scoped items' })
   sample(@ZapierCtx() ctx: ZapierContext, @Param('event') event: string) {
-    return this.svc.sample(ctx.workspaceId, event)
+    return this.svc.sample(ctx.workspaceId, event, ctx.userId)
   }
 
   @Get('app-manifest')

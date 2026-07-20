@@ -27,6 +27,8 @@ export class WorkspaceTimeEntriesController {
     return this.time.listForWorkspace(workspaceId, {
       userId: canModerate ? userId : actor.id,
       since: since ? new Date(since) : undefined,
+      actorId: actor.id,
+      actorRole: actor.role,
     })
   }
 

@@ -24,6 +24,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { renderReportPdf, tableToLines } from './pdf'
 import { AiService } from '../ai/ai.service'
 
@@ -285,7 +286,8 @@ export class ReportsService {
   ) {}
 
   // ─── Overview / Summary card ──────────────────────────────────────────────
-  async getOverview(workspaceId: string) {
+  async getOverview(workspaceId: string, actor?: { id: string; role?: string | null }) {
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const allTasksQuery = await this.db
       .select({
         id: tasks.id,
@@ -306,7 +308,7 @@ export class ReportsService {
       .innerJoin(lists, eq(tasks.listId, lists.id))
       .innerJoin(projects, eq(lists.projectId, projects.id))
       .innerJoin(spaces, eq(projects.spaceId, spaces.id))
-      .where(eq(spaces.workspaceId, workspaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), visFilter))
 
     const now = new Date()
     const total = allTasksQuery.length
@@ -413,13 +415,40 @@ export class ReportsService {
     return or(...parts)
   }
 
+  /**
+   * §2 per-item task privacy. Returns a WHERE fragment that hides private tasks
+   * the actor may not see (only their creator, an assignee, or a workspace
+   * manager/admin/super_admin see them; everyone else sees just public tasks).
+   * AND it into any query that reads the unaliased `tasks` table.
+   *
+   * Returns `undefined` — a no-op inside drizzle's `and()` — for managers and for
+   * trusted internal/system callers that pass no actor (the scheduled-report
+   * mailer, the project-health cron, and unit tests), so those workspace-wide
+   * aggregates are unchanged. Every user-facing controller path threads the
+   * caller, so per-item privacy is enforced on every request a real user makes.
+   */
+  private async taskVisibilityFilterForWorkspace(
+    workspaceId: string,
+    actor?: { id: string; role?: string | null },
+  ): Promise<SQL | undefined> {
+    if (!actor) return undefined
+    const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
+    return taskVisibilityFilter(this.db, actor.id, isManager)
+  }
+
   async getProductivity(
     workspaceId: string,
     days = 30,
     viewer: ViewerScope = { kind: 'all' },
     scope: { spaceId?: string; projectId?: string } = {},
+    actor?: { id: string; role?: string | null },
   ) {
     const since = daysAgo(days)
+    // §2 per-item privacy: exclude private tasks the caller can't see from the
+    // per-member counts. Applied in the tasks left-join ON (not the WHERE) so a
+    // member whose only tasks are hidden still appears with 0 rather than
+    // vanishing from the report.
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     // Optional space/project scope (Plan §9). Applied inside the CASE counts so
     // every member still appears (with 0) rather than being filtered out.
     const inScope = scope.projectId
@@ -450,7 +479,7 @@ export class ReportsService {
       .from(users)
       .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
       .leftJoin(taskAssignees, eq(taskAssignees.userId, users.id))
-      .leftJoin(tasks, and(eq(tasks.id, taskAssignees.taskId), gte(tasks.updatedAt, since)))
+      .leftJoin(tasks, and(eq(tasks.id, taskAssignees.taskId), gte(tasks.updatedAt, since), visFilter))
       .leftJoin(lists, eq(lists.id, tasks.listId))
       .leftJoin(projects, eq(projects.id, lists.projectId))
       .where(
@@ -470,8 +499,10 @@ export class ReportsService {
     days = 90,
     bucket: 'week' | 'month' = 'week',
     scope: { spaceId?: string; projectId?: string } = {},
+    actor?: { id: string; role?: string | null },
   ) {
     const since = daysAgo(days)
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const periodExpr =
       bucket === 'month'
         ? sql<string>`to_char(${tasks.completedAt} at time zone 'UTC', 'YYYY-MM')`
@@ -490,7 +521,7 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), gte(tasks.completedAt, since), scopeCond))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(tasks.completedAt, since), scopeCond, visFilter))
       .groupBy(periodExpr)
       .orderBy(periodExpr)
     return rows
@@ -501,8 +532,10 @@ export class ReportsService {
     workspaceId: string,
     days = 30,
     filter: { spaceId?: string; projectId?: string; memberId?: string } = {},
+    actor?: { id: string; role?: string | null },
   ) {
     const since = daysAgo(days)
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const allTasks = await this.db
       .select({
         id: tasks.id,
@@ -526,6 +559,7 @@ export class ReportsService {
           filter.memberId
             ? sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${filter.memberId})`
             : undefined,
+          visFilter,
         ),
       )
 
@@ -570,7 +604,12 @@ export class ReportsService {
   }
 
   // ─── Time tracking report ─────────────────────────────────────────────────
-  async getTimeReport(workspaceId: string, days = 30, viewer: ViewerScope = { kind: 'all' }) {
+  async getTimeReport(
+    workspaceId: string,
+    days = 30,
+    viewer: ViewerScope = { kind: 'all' },
+    actor?: { id: string; role?: string | null },
+  ) {
     const since = daysAgo(days)
     // Manager team scope (Plan §3.3): only sum time on tasks in the manager's
     // containers + their own. `sql`true`` for admin/member keeps sums identical
@@ -581,7 +620,12 @@ export class ReportsService {
       projectIdCol: lists.projectId,
       ownerCol: users.id,
     })
-    const inScopeTime = viewerCond ?? sql`true`
+    // §2 per-item privacy: also drop time logged on private tasks the caller
+    // can't see. Folded into the same CASE as the container scope (undefined for
+    // managers/system callers, so their sums are unchanged); time_entries.task_id
+    // is NOT NULL so the joined task row is always present for the check.
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
+    const inScopeTime = and(viewerCond, visFilter) ?? sql`true`
 
     const rows = await this.db
       .select({
@@ -617,8 +661,14 @@ export class ReportsService {
   }
 
   /** Billable hours broken down by project (and its client), Plan §9. */
-  async getTimeByProject(workspaceId: string, days = 30, viewer: ViewerScope = { kind: 'all' }) {
+  async getTimeByProject(
+    workspaceId: string,
+    days = 30,
+    viewer: ViewerScope = { kind: 'all' },
+    actor?: { id: string; role?: string | null },
+  ) {
     const since = daysAgo(days)
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     // Members see only their own time; managers see time in their containers
     // (or their own); admins see everything. This is a straight row filter here
     // because the report already aggregates per project, so out-of-scope
@@ -652,6 +702,7 @@ export class ReportsService {
           eq(spaces.workspaceId, workspaceId),
           gte(timeEntries.startedAt, since),
           viewerFilter,
+          visFilter,
         ),
       )
       .groupBy(projects.id, projects.name, clients.id, clients.name)
@@ -672,8 +723,10 @@ export class ReportsService {
     workspaceId: string,
     days = 90,
     filter: { spaceId?: string; projectId?: string; memberId?: string } = {},
+    actor?: { id: string; role?: string | null },
   ) {
     const since = daysAgo(days)
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const events = await this.db
       .select({
         taskId: taskActivity.taskId,
@@ -696,6 +749,7 @@ export class ReportsService {
           filter.memberId
             ? sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${filter.memberId})`
             : undefined,
+          visFilter,
         ),
       )
       .orderBy(asc(taskActivity.taskId), asc(taskActivity.createdAt))
@@ -732,7 +786,7 @@ export class ReportsService {
   }
 
   // ─── Sprint velocity ──────────────────────────────────────────────────────
-  async getSprintVelocity(workspaceId: string) {
+  async getSprintVelocity(workspaceId: string, actor?: { id: string; role?: string | null }) {
     const recentSprints = await this.db
       .select()
       .from(sprints)
@@ -740,12 +794,18 @@ export class ReportsService {
       .orderBy(desc(sprints.startDate))
       .limit(10)
 
+    // §2 per-item privacy: exclude private tasks the caller can't see from both
+    // the task count and the story-point sums. Joining sprint_tasks → tasks is
+    // 1:1 on an FK, so with no filter (managers/system callers) no rows drop.
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
+
     const results = await Promise.all(
       recentSprints.map(async (sprint) => {
         const taskRows = await this.db
           .select({ taskId: sprintTasks.taskId })
           .from(sprintTasks)
-          .where(eq(sprintTasks.sprintId, sprint.id))
+          .innerJoin(tasks, eq(tasks.id, sprintTasks.taskId))
+          .where(and(eq(sprintTasks.sprintId, sprint.id), visFilter))
 
         // Sum story points from sprint_tasks
         const [pointsRow] = await this.db
@@ -755,7 +815,7 @@ export class ReportsService {
           })
           .from(sprintTasks)
           .innerJoin(tasks, eq(tasks.id, sprintTasks.taskId))
-          .where(eq(sprintTasks.sprintId, sprint.id))
+          .where(and(eq(sprintTasks.sprintId, sprint.id), visFilter))
 
         const plannedPoints = Number(pointsRow?.planned ?? 0)
         const completedPoints = Number(pointsRow?.completed ?? 0)
@@ -815,7 +875,7 @@ export class ReportsService {
     }
   }
 
-  async getWorkload(workspaceId: string, days = 14) {
+  async getWorkload(workspaceId: string, days = 14, actor?: { id: string; role?: string | null }) {
     const horizon = Math.min(Math.max(days, 1), 90)
     const start = new Date()
     start.setHours(0, 0, 0, 0)
@@ -835,6 +895,7 @@ export class ReportsService {
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .where(eq(workspaceMembers.workspaceId, workspaceId))
 
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const assignments = await this.db
       .select({
         userId: taskAssignees.userId,
@@ -848,7 +909,7 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.status} != 'done'`))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.status} != 'done'`, visFilter))
 
     const dayCount = horizon
     const perUser = new Map<string, number[]>()
@@ -905,7 +966,13 @@ export class ReportsService {
    * the cell's displayed load. `days` is the same horizon the heat-map uses so
    * the range clamping matches.
    */
-  async getWorkloadDay(workspaceId: string, userId: string, dateStr: string, days = 14) {
+  async getWorkloadDay(
+    workspaceId: string,
+    userId: string,
+    dateStr: string,
+    days = 14,
+    actor?: { id: string; role?: string | null },
+  ) {
     const horizon = Math.min(Math.max(days, 1), 90)
     const start = new Date()
     start.setHours(0, 0, 0, 0)
@@ -917,6 +984,7 @@ export class ReportsService {
     if (Number.isNaN(target.getTime())) return []
     target.setHours(0, 0, 0, 0)
 
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const rows = await this.db
       .select({
         id: tasks.id,
@@ -945,6 +1013,7 @@ export class ReportsService {
           eq(taskAssignees.userId, userId),
           eq(tasks.isArchived, false),
           sql`${tasks.status} != 'done'`,
+          visFilter,
         ),
       )
 
@@ -1000,9 +1069,15 @@ export class ReportsService {
    *   • recentActivity = min(1, activity events in last 7d ÷ open tasks)
    * Bands: green ≥ 75, yellow ≥ 50, red < 50; empty projects score 0.
    */
-  async getProjectHealth(workspaceId: string) {
+  async getProjectHealth(workspaceId: string, actor?: { id: string; role?: string | null }) {
     const now = Date.now()
     const activitySince = daysAgo(7)
+
+    // §2 per-item privacy: the health signals (task counts, blockers, activity)
+    // are computed only over tasks the caller can see. undefined for
+    // managers/super-admins and for the daily health cron (no actor), so the
+    // persisted snapshots stay workspace-wide.
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
 
     const projectRows = await this.db
       .select({ id: projects.id, name: projects.name, color: projects.color })
@@ -1024,7 +1099,7 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), visFilter))
 
     const statusById = new Map(taskRows.map((t) => [t.id, t.statusCategory]))
 
@@ -1041,7 +1116,7 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskDependencies.type, ['blocks', 'blocked_by'])))
+      .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskDependencies.type, ['blocks', 'blocked_by']), visFilter))
 
     const blockedSet = new Set<string>()
     for (const d of depRows) {
@@ -1061,7 +1136,7 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), gte(taskActivity.createdAt, activitySince)))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(taskActivity.createdAt, activitySince), visFilter))
       .groupBy(lists.projectId)
     const activityByProject = new Map(activityRows.map((r) => [r.projectId, r.count]))
 
@@ -1135,8 +1210,9 @@ export class ReportsService {
    * (per-user), this returns the latest task_activity events across the whole
    * workspace with actor + task context for linking.
    */
-  async getWorkspaceActivity(workspaceId: string, limit = 20) {
+  async getWorkspaceActivity(workspaceId: string, limit = 20, actor?: { id: string; role?: string | null }) {
     const safeLimit = Math.min(Math.max(limit, 1), 100)
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const rows = await this.db
       .select({
         id: taskActivity.id,
@@ -1161,16 +1237,25 @@ export class ReportsService {
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .leftJoin(users, eq(users.id, taskActivity.actorId))
-      .where(eq(spaces.workspaceId, workspaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), visFilter))
       .orderBy(desc(taskActivity.createdAt))
       .limit(safeLimit)
     return rows
   }
 
   // ─── Custom report builder (real metrics × dimension × filters) ────────────
-  async runCustomReport(workspaceId: string, def: ReportDefinition): Promise<ReportResult> {
+  async runCustomReport(
+    workspaceId: string,
+    def: ReportDefinition,
+    actor?: { id: string; role?: string | null },
+  ): Promise<ReportResult> {
     const days = typeof def.days === 'number' && def.days > 0 ? def.days : 30
     const since = daysAgo(days)
+    // §2 per-item privacy: exclude private tasks the caller can't see from the
+    // base task set; every metric/dimension below derives from these rows, so the
+    // whole report inherits the filter. undefined for managers/system callers
+    // (e.g. the scheduled-report mailer), keeping their reports workspace-wide.
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const dimension =
       (def.dimension ?? def.dimensions?.[0] ?? 'assignee') as SupportedDimension
     const requested = (def.metrics ?? []).filter((m) =>
@@ -1197,7 +1282,7 @@ export class ReportsService {
       .innerJoin(lists, eq(tasks.listId, lists.id))
       .innerJoin(projects, eq(lists.projectId, projects.id))
       .innerJoin(spaces, eq(projects.spaceId, spaces.id))
-      .where(and(eq(spaces.workspaceId, workspaceId), gte(tasks.createdAt, since)))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(tasks.createdAt, since), visFilter))
 
     const taskIds = taskRows.map((t) => t.id)
     type TaskRow = (typeof taskRows)[number]
@@ -1365,14 +1450,22 @@ export class ReportsService {
     return { dimension, metrics, generatedAt: new Date().toISOString(), rows }
   }
 
-  async exportCustomReportCsv(workspaceId: string, def: ReportDefinition): Promise<string> {
-    const result = await this.runCustomReport(workspaceId, def)
+  async exportCustomReportCsv(
+    workspaceId: string,
+    def: ReportDefinition,
+    actor?: { id: string; role?: string | null },
+  ): Promise<string> {
+    const result = await this.runCustomReport(workspaceId, def, actor)
     return reportResultToCsv(result)
   }
 
   /** Render a custom report to a server-generated PDF (Plan §9). */
-  async exportCustomReportPdf(workspaceId: string, def: ReportDefinition): Promise<Buffer> {
-    const result = await this.runCustomReport(workspaceId, def)
+  async exportCustomReportPdf(
+    workspaceId: string,
+    def: ReportDefinition,
+    actor?: { id: string; role?: string | null },
+  ): Promise<Buffer> {
+    const result = await this.runCustomReport(workspaceId, def, actor)
     const header = ['Group', ...result.metrics]
     const rows = result.rows.map((r) => [r.label, ...result.metrics.map((m) => r.values[m] ?? 0)])
     const title = `Custom report — by ${result.dimension}`
@@ -1510,12 +1603,19 @@ export class ReportsService {
   async getContribution(
     workspaceId: string,
     opts: { period?: ContributionPeriodType; sprintId?: string; viewer?: ViewerScope } = {},
-    ctx: { userId?: string } = {},
+    ctx: { userId?: string; role?: string | null } = {},
   ): Promise<{ period: ContributionPeriod; source: 'ai' | 'heuristic'; members: Array<ContributionFactors & { narrative: string }> }> {
     const now = new Date()
     const period = opts.period ?? 'this-month'
     const viewer = opts.viewer ?? { kind: 'all' }
     const { from, to, meta } = await this.resolveContributionPeriod(workspaceId, period, opts.sprintId, now)
+
+    // §2 per-item privacy: exclude private tasks the caller can't see from the
+    // per-assignee completion and per-actor activity aggregates below.
+    const visFilter = await this.taskVisibilityFilterForWorkspace(
+      workspaceId,
+      ctx.userId ? { id: ctx.userId, role: ctx.role } : undefined,
+    )
 
     const members = await this.db
       .select({ userId: users.id, name: users.displayName, email: users.email })
@@ -1560,7 +1660,7 @@ export class ReportsService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), completedViewerCond))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), completedViewerCond, visFilter))
       .groupBy(taskAssignees.userId)
 
     // Collaboration + blockers-resolved from the activity log, per actor.
@@ -1581,6 +1681,7 @@ export class ReportsService {
           gte(taskActivity.createdAt, from),
           lte(taskActivity.createdAt, to),
           activityViewerCond,
+          visFilter,
         ),
       )
       .groupBy(taskActivity.actorId, taskActivity.action)
@@ -1642,7 +1743,7 @@ export class ReportsService {
   async exportContributionPdf(
     workspaceId: string,
     opts: { period?: ContributionPeriodType; sprintId?: string; viewer?: ViewerScope } = {},
-    ctx: { userId?: string } = {},
+    ctx: { userId?: string; role?: string | null } = {},
   ): Promise<Buffer> {
     const report = await this.getContribution(workspaceId, opts, ctx)
     const header = ['Member', 'Completed', 'On-time %', 'Collab', 'Blockers', 'Score']

@@ -10,6 +10,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 
 export type SearchEntityType = 'task' | 'doc' | 'file'
 export type SearchFilters = {
@@ -220,6 +221,11 @@ export class SearchService implements OnModuleInit {
     filters: SearchFilters = {},
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const trimmed = query.trim()
+    // §2 per-item privacy: private tasks are only searchable by their creator,
+    // assignees, or a workspace manager. Computed once and applied to every
+    // task-bearing branch (Postgres task hits, comment hits, attachment hits,
+    // and as a post-filter over Meili task hits, which aren't visibility-indexed).
+    const isManager = await resolveIsManager(this.db, workspaceId, userId)
     const hasCustomFieldFilter = Boolean(filters.customFieldId && filters.customFieldValue)
     const hasTaskFilter = Boolean(
       filters.statusCategory ||
@@ -257,10 +263,12 @@ export class SearchService implements OnModuleInit {
       }))
       // Meili indexes tasks/docs/files — add the Postgres-only entity types
       // (users, comments, channels, messages) for a general search.
-      const extras = filters.types ? [] : await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit)
+      // Meili has no visibility field — drop private task hits the caller can't see.
+      const safeMeili = await this.dropHiddenTaskHits(meiliHits, userId, isManager)
+      const extras = filters.types ? [] : await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
-      return [...meiliHits, ...extras, ...clipHits]
+      return [...safeMeili, ...extras, ...clipHits]
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
@@ -271,6 +279,7 @@ export class SearchService implements OnModuleInit {
           const conds: Array<SQL | undefined> = [
             eq(spaces.workspaceId, workspaceId),
             eq(tasks.isArchived, false),
+            taskVisibilityFilter(this.db, userId, isManager),
           ]
           if (like) conds.push(or(ilike(tasks.title, like), ilike(tasks.description, like)))
           if (filters.statusCategory) conds.push(eq(tasks.statusCategory, filters.statusCategory))
@@ -334,11 +343,11 @@ export class SearchService implements OnModuleInit {
       : []
 
     // Uploaded files: task attachments (Postgres, access-scoped) + clips (R2).
-    const fileHits = wantFiles ? await this.searchTaskAttachments(workspaceId, like, limit) : []
+    const fileHits = wantFiles ? await this.searchTaskAttachments(workspaceId, userId, isManager, like, limit) : []
     const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
 
     // Extras only for a general text search (no type/task-specific filter).
-    const extras = like && !filters.types ? await this.searchExtras(workspaceId, userId, like, limit) : []
+    const extras = like && !filters.types ? await this.searchExtras(workspaceId, userId, like, limit, isManager) : []
 
     return [
       ...taskHits.map((t) => ({
@@ -361,8 +370,28 @@ export class SearchService implements OnModuleInit {
     ]
   }
 
+  /**
+   * Drop private task hits (from the Meili index, which carries no visibility
+   * field) that the caller may not see. Non-task hits pass through untouched.
+   */
+  private async dropHiddenTaskHits<T extends { id: string; entityType: string }>(
+    hits: T[],
+    userId: string,
+    isManager: boolean,
+  ): Promise<T[]> {
+    if (isManager) return hits
+    const taskIds = hits.filter((h) => h.entityType === 'task').map((h) => h.id)
+    if (taskIds.length === 0) return hits
+    const visible = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(inArray(tasks.id, taskIds), taskVisibilityFilter(this.db, userId, false)))
+    const ok = new Set(visible.map((r) => r.id))
+    return hits.filter((h) => h.entityType !== 'task' || ok.has(h.id))
+  }
+
   /** Search users, comments, channels, and messages (Plan §11.1). */
-  private async searchExtras(workspaceId: string, userId: string, like: string, limit: number) {
+  private async searchExtras(workspaceId: string, userId: string, like: string, limit: number, isManager = false) {
     // Chat search must respect channel access (Plan §6): a user may only see
     // hits from public channels or channels they belong to — never from private
     // channels or DMs they're not a member of. Compute their channels once and
@@ -390,7 +419,7 @@ export class SearchService implements OnModuleInit {
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), ilike(taskComments.body, like)))
+        .where(and(eq(spaces.workspaceId, workspaceId), ilike(taskComments.body, like), taskVisibilityFilter(this.db, userId, isManager)))
         .orderBy(desc(taskComments.createdAt))
         .limit(limit),
       this.db
@@ -436,10 +465,15 @@ export class SearchService implements OnModuleInit {
    */
   private async searchTaskAttachments(
     workspaceId: string,
+    userId: string,
+    isManager: boolean,
     like: string | null,
     limit: number,
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
-    const conds: Array<SQL | undefined> = [eq(spaces.workspaceId, workspaceId)]
+    const conds: Array<SQL | undefined> = [
+      eq(spaces.workspaceId, workspaceId),
+      taskVisibilityFilter(this.db, userId, isManager),
+    ]
     if (like) conds.push(or(ilike(taskAttachments.fileName, like), ilike(taskAttachments.contentType, like)))
     const rows = await this.db
       .select({

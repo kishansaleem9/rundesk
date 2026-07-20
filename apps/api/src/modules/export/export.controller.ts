@@ -20,7 +20,7 @@ export class ExportController {
     @Ip() ip: string,
     @Res() res: any,
   ) {
-    const data = await this.svc.exportWorkspace(workspaceId)
+    const data = await this.svc.exportWorkspace(workspaceId, { id: user.id, role: user.role })
     const json = JSON.stringify(data, null, 2)
     res.header('Content-Type', 'application/json')
     res.header('Content-Disposition', `attachment; filename="rundesk-export-${workspaceId}.json"`)
@@ -49,7 +49,7 @@ export class ExportController {
     @Ip() ip: string,
     @Res() res: any,
   ) {
-    const data = await this.svc.exportWorkspace(workspaceId)
+    const data = await this.svc.exportWorkspace(workspaceId, { id: user.id, role: user.role })
     const csv = this.svc.exportToCsv(data.tasks as any[])
     res.header('Content-Type', 'text/csv')
     res.header('Content-Disposition', `attachment; filename="rundesk-tasks-${workspaceId}.csv"`)

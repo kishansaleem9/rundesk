@@ -3282,7 +3282,22 @@ export class TasksService {
   }
 
   /** Aggregated activity across every task in a project (Plan §4 timeline). */
-  async listProjectActivity(projectId: string, limit = 100) {
+  async listProjectActivity(projectId: string, limit = 100, actor?: { id: string; role?: string }) {
+    // §2 per-item privacy: don't surface activity for private tasks the actor
+    // can't see (the feed carries task titles).
+    let visFilter: SQL | undefined
+    if (actor) {
+      const [ctx] = await this.db
+        .select({ workspaceId: spaces.workspaceId })
+        .from(projects)
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(projects.id, projectId))
+        .limit(1)
+      if (ctx) {
+        const isManager = await resolveIsManager(this.db, ctx.workspaceId, actor.id, actor.role)
+        visFilter = taskVisibilityFilter(this.db, actor.id, isManager)
+      }
+    }
     const rows = await this.db
       .select({
         id: taskActivity.id,
@@ -3299,7 +3314,7 @@ export class TasksService {
       .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .leftJoin(users, eq(users.id, taskActivity.actorId))
-      .where(eq(lists.projectId, projectId))
+      .where(and(eq(lists.projectId, projectId), visFilter))
       .orderBy(desc(taskActivity.createdAt))
       .limit(limit)
     return rows.map((r) => ({
