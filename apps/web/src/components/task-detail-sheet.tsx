@@ -36,6 +36,8 @@ import {
   FileText,
   Box,
   Video,
+  Lock,
+  Globe,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
@@ -214,6 +216,7 @@ type TaskDetail = {
   description: string | null
   coverColor?: string | null
   isMilestone?: boolean
+  visibility?: string | null
   status: TaskStatus
   priority: TaskPriority
   dueDate?: string | null
@@ -422,6 +425,17 @@ export function TaskDetailSheet({
     },
   })
 
+  const updateVisibility = useMutation({
+    mutationFn: (visibility: 'public' | 'private') =>
+      api(`/tasks/${taskId}`, { method: 'PATCH', body: { visibility } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['task', taskId] })
+      void qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateVisibility')),
+  })
+
   const updateMilestone = useMutation({
     mutationFn: (isMilestone: boolean) =>
       api(`/tasks/${taskId}`, { method: 'PATCH', body: { isMilestone } }),
@@ -622,6 +636,21 @@ export function TaskDetailSheet({
                   </SheetTitle>
                 )}
                 <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    title={detailQuery.data.visibility === 'private' ? t('taskDetail.makePublic') : t('taskDetail.makePrivate')}
+                    aria-pressed={detailQuery.data.visibility === 'private'}
+                    disabled={updateVisibility.isPending}
+                    onClick={() =>
+                      updateVisibility.mutate(detailQuery.data.visibility === 'private' ? 'public' : 'private')
+                    }
+                    className={cn(
+                      'h-8 w-8 inline-flex items-center justify-center rounded hover:text-foreground disabled:opacity-50',
+                      detailQuery.data.visibility === 'private' ? 'text-amber-500' : 'text-muted-foreground',
+                    )}
+                  >
+                    {detailQuery.data.visibility === 'private' ? <Lock className="h-4 w-4" /> : <Globe className="h-4 w-4" />}
+                  </button>
                   <button
                     type="button"
                     title={detailQuery.data.isMilestone ? t('taskDetail.unmarkMilestone') : t('taskDetail.markMilestone')}

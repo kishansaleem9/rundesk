@@ -33,6 +33,8 @@ import {
   Pencil,
   Trash2,
   Archive,
+  Lock,
+  Globe,
 } from 'lucide-react'
 import {
   Button,
@@ -276,6 +278,24 @@ export function WorkspaceSidebar() {
     }
   }
 
+  // §2 per-item privacy — toggle a list/folder public⇄private from the tree.
+  const setListVisibility = async (listId: string, next: 'public' | 'private') => {
+    try {
+      await api(`/lists/${listId}`, { method: 'PUT', body: { visibility: next } })
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.saveError'))
+    }
+  }
+  const setFolderVisibility = async (spaceId: string, folderId: string, next: 'public' | 'private') => {
+    try {
+      await api(`/spaces/${spaceId}/folders/${folderId}`, { method: 'PATCH', body: { visibility: next } })
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.saveError'))
+    }
+  }
+
   // §2.3 — create (POST) or rename (PUT) a space from the shared space dialog.
   const submitSpaceDialog = async (values: ContainerEditValues) => {
     if (!spaceDialog || !workspaceId) return
@@ -372,11 +392,11 @@ export function WorkspaceSidebar() {
         spaces.map(async (space) => {
           const [projects, folders] = await Promise.all([
             api<Array<{ id: string; name: string; folderId?: string | null }>>(`/projects/space/${space.id}`),
-            api<Array<{ id: string; name: string }>>(`/spaces/${space.id}/folders`).catch(() => []),
+            api<Array<{ id: string; name: string; visibility?: string | null }>>(`/spaces/${space.id}/folders`).catch(() => []),
           ])
           const projectsWithLists = await Promise.all(
             projects.map(async (project) => {
-              const lists = await api<Array<{ id: string; name: string }>>(`/lists/project/${project.id}`)
+              const lists = await api<Array<{ id: string; name: string; visibility?: string | null }>>(`/lists/project/${project.id}`)
               return { ...project, lists }
             }),
           )
@@ -969,10 +989,18 @@ export function WorkspaceSidebar() {
                                 <MoreHorizontal className="h-3 w-3" />
                               </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuContent align="end" className="w-44">
                               <DropdownMenuItem onClick={() => setTreeEdit({ kind: 'list', id: list.id, name: list.name })}>
                                 <Pencil className="h-3.5 w-3.5" />
                                 {t('container.rename')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  void setListVisibility(list.id, list.visibility === 'private' ? 'public' : 'private')
+                                }
+                              >
+                                {list.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                                {list.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -1076,6 +1104,18 @@ export function WorkspaceSidebar() {
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                   {t('container.rename')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    void setFolderVisibility(
+                                      space.id,
+                                      folder.id,
+                                      folder.visibility === 'private' ? 'public' : 'private',
+                                    )
+                                  }
+                                >
+                                  {folder.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                                  {folder.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
