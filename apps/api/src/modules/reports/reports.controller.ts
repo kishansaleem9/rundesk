@@ -28,27 +28,31 @@ export class ReportsController {
 
   @Get('overview')
   @ApiOperation({ summary: 'Workspace overview stats' })
-  overview(@Param('workspaceId') workspaceId: string) {
-    return this.reports.getOverview(workspaceId)
+  overview(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
+  ) {
+    return this.reports.getOverview(workspaceId, { id: user.id, role: user.role })
   }
 
   @Get('productivity')
   @ApiOperation({ summary: 'Per-member productivity report' })
   async productivity(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; role?: string },
     @Query('days') days?: string,
     @Query('spaceId') spaceId?: string,
     @Query('projectId') projectId?: string,
   ) {
     const viewer = await this.reports.getViewerScope(workspaceId, user.id)
-    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30, viewer, { spaceId, projectId })
+    return this.reports.getProductivity(workspaceId, days ? parseInt(days, 10) : 30, viewer, { spaceId, projectId }, { id: user.id, role: user.role })
   }
 
   @Get('productivity-trend')
   @ApiOperation({ summary: 'Completed-tasks trend by week or month' })
   productivityTrend(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Query('days') days?: string,
     @Query('bucket') bucket?: string,
     @Query('spaceId') spaceId?: string,
@@ -59,6 +63,7 @@ export class ReportsController {
       days ? parseInt(days, 10) : 90,
       bucket === 'month' ? 'month' : 'week',
       { spaceId, projectId },
+      { id: user.id, role: user.role },
     )
   }
 
@@ -66,60 +71,67 @@ export class ReportsController {
   @ApiOperation({ summary: 'Task completion analytics' })
   completion(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Query('days') days?: string,
     @Query('spaceId') spaceId?: string,
     @Query('projectId') projectId?: string,
     @Query('memberId') memberId?: string,
   ) {
-    return this.reports.getCompletionAnalytics(workspaceId, days ? parseInt(days, 10) : 30, {
-      spaceId,
-      projectId,
-      memberId,
-    })
+    return this.reports.getCompletionAnalytics(
+      workspaceId,
+      days ? parseInt(days, 10) : 30,
+      { spaceId, projectId, memberId },
+      { id: user.id, role: user.role },
+    )
   }
 
   @Get('status-durations')
   @ApiOperation({ summary: 'Average time tasks spend in each status (bottlenecks)' })
   statusDurations(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Query('days') days?: string,
     @Query('spaceId') spaceId?: string,
     @Query('projectId') projectId?: string,
     @Query('memberId') memberId?: string,
   ) {
-    return this.reports.getStatusDurations(workspaceId, days ? parseInt(days, 10) : 90, {
-      spaceId,
-      projectId,
-      memberId,
-    })
+    return this.reports.getStatusDurations(
+      workspaceId,
+      days ? parseInt(days, 10) : 90,
+      { spaceId, projectId, memberId },
+      { id: user.id, role: user.role },
+    )
   }
 
   @Get('time')
   @ApiOperation({ summary: 'Time tracking report' })
   async time(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; role?: string },
     @Query('days') days?: string,
   ) {
     const viewer = await this.reports.getViewerScope(workspaceId, user.id)
-    return this.reports.getTimeReport(workspaceId, days ? parseInt(days, 10) : 30, viewer)
+    return this.reports.getTimeReport(workspaceId, days ? parseInt(days, 10) : 30, viewer, { id: user.id, role: user.role })
   }
 
   @Get('time-by-project')
   @ApiOperation({ summary: 'Billable hours by project + client' })
   async timeByProject(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; role?: string },
     @Query('days') days?: string,
   ) {
     const viewer = await this.reports.getViewerScope(workspaceId, user.id)
-    return this.reports.getTimeByProject(workspaceId, days ? parseInt(days, 10) : 30, viewer)
+    return this.reports.getTimeByProject(workspaceId, days ? parseInt(days, 10) : 30, viewer, { id: user.id, role: user.role })
   }
 
   @Get('sprints')
   @ApiOperation({ summary: 'Sprint velocity report' })
-  sprints(@Param('workspaceId') workspaceId: string) {
-    return this.reports.getSprintVelocity(workspaceId)
+  sprints(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
+  ) {
+    return this.reports.getSprintVelocity(workspaceId, { id: user.id, role: user.role })
   }
 
   @Get('goals')
@@ -132,26 +144,31 @@ export class ReportsController {
   @ApiOperation({ summary: 'Team workload and capacity heatmap report' })
   workload(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Query('days') days?: string,
   ) {
-    return this.reports.getWorkload(workspaceId, days ? parseInt(days, 10) : 14)
+    return this.reports.getWorkload(workspaceId, days ? parseInt(days, 10) : 14, { id: user.id, role: user.role })
   }
 
   @Get('workload/day')
   @ApiOperation({ summary: "Tasks composing one workload heat-map cell (user × day)" })
   workloadDay(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Query('userId') userId: string,
     @Query('date') date: string,
     @Query('days') days?: string,
   ) {
-    return this.reports.getWorkloadDay(workspaceId, userId, date, days ? parseInt(days, 10) : 14)
+    return this.reports.getWorkloadDay(workspaceId, userId, date, days ? parseInt(days, 10) : 14, { id: user.id, role: user.role })
   }
 
   @Get('project-health')
   @ApiOperation({ summary: 'Deterministic per-project health scores (0–100)' })
-  projectHealth(@Param('workspaceId') workspaceId: string) {
-    return this.reports.getProjectHealth(workspaceId)
+  projectHealth(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
+  ) {
+    return this.reports.getProjectHealth(workspaceId, { id: user.id, role: user.role })
   }
 
   @Get('project-health/trend')
@@ -168,9 +185,10 @@ export class ReportsController {
   @ApiOperation({ summary: 'Workspace-wide recent task activity feed' })
   activity(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Query('limit') limit?: string,
   ) {
-    return this.reports.getWorkspaceActivity(workspaceId, limit ? parseInt(limit, 10) : 20)
+    return this.reports.getWorkspaceActivity(workspaceId, limit ? parseInt(limit, 10) : 20, { id: user.id, role: user.role })
   }
 
   // ─── Contribution analytics (§7.14) ────────────────────────────────────────
@@ -182,7 +200,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Per-member contribution factors + AI narrative for a period (§7.14)' })
   async contribution(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; role?: string },
     @Query('period') period?: string,
     @Query('sprintId') sprintId?: string,
   ) {
@@ -192,7 +210,7 @@ export class ReportsController {
     return this.reports.getContribution(
       workspaceId,
       { period: this.parsePeriod(period), sprintId, viewer },
-      { userId: user.id },
+      { userId: user.id, role: user.role },
     )
   }
 
@@ -200,7 +218,7 @@ export class ReportsController {
   @ApiOperation({ summary: 'Contribution report as a server-rendered PDF (managers/admins only, §7.14)' })
   async contributionPdf(
     @Param('workspaceId') workspaceId: string,
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; role?: string },
     @Body() body: { period?: string; sprintId?: string },
   ): Promise<StreamableFile> {
     // Role-gate to managers/admins: getViewerScope returns a 'user' scope only
@@ -211,7 +229,7 @@ export class ReportsController {
     const buffer = await this.reports.exportContributionPdf(
       workspaceId,
       { period: this.parsePeriod(body?.period), sprintId: body?.sprintId, viewer },
-      { userId: user.id },
+      { userId: user.id, role: user.role },
     )
     return new StreamableFile(buffer, {
       type: 'application/pdf',
@@ -224,9 +242,10 @@ export class ReportsController {
   @ApiOperation({ summary: 'Run an ad-hoc custom report definition' })
   runCustom(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Body() body: ReportDefinition,
   ) {
-    return this.reports.runCustomReport(workspaceId, body ?? {})
+    return this.reports.runCustomReport(workspaceId, body ?? {}, { id: user.id, role: user.role })
   }
 
   @Post('custom/export')
@@ -235,18 +254,20 @@ export class ReportsController {
   @Header('Content-Disposition', 'attachment; filename="rundesk-report.csv"')
   exportCustom(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Body() body: ReportDefinition,
   ) {
-    return this.reports.exportCustomReportCsv(workspaceId, body ?? {})
+    return this.reports.exportCustomReportCsv(workspaceId, body ?? {}, { id: user.id, role: user.role })
   }
 
   @Post('custom/export.pdf')
   @ApiOperation({ summary: 'Run a custom report and return it as a server-rendered PDF' })
   async exportCustomPdf(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Body() body: ReportDefinition,
   ): Promise<StreamableFile> {
-    const buffer = await this.reports.exportCustomReportPdf(workspaceId, body ?? {})
+    const buffer = await this.reports.exportCustomReportPdf(workspaceId, body ?? {}, { id: user.id, role: user.role })
     return new StreamableFile(buffer, {
       type: 'application/pdf',
       disposition: 'attachment; filename="rundesk-report.pdf"',
