@@ -1594,6 +1594,8 @@ export class TasksService {
       spaceVisibility: string | null
       projectId: string
       projectVisibility: string | null
+      visibility?: string | null
+      createdById?: string | null
     },
   >(rows: T[], workspaceId: string, actor: { id: string; role?: string }): Promise<T[]> {
     if (rows.length === 0) return rows
@@ -1620,6 +1622,10 @@ export class TasksService {
     const memberProjects = new Set(projectRows.map((p) => p.projectId))
 
     return rows.filter((r) => {
+      // §2 per-item privacy: a private task is hidden from a regular member who
+      // isn't its creator. (Managers/super_admins already returned above; the
+      // creator/assignee still reach it via the list + by-id paths.)
+      if (r.visibility === 'private' && r.createdById !== actor.id) return false
       // Private space → must be a space member.
       if (r.spaceVisibility === 'private' && !spaceRoleById.has(r.spaceId)) return false
       // Explicitly-private project → project member, or admin of the owning space.
@@ -1638,12 +1644,6 @@ export class TasksService {
   ) {
     const { includeAssignees = true, actorId, actorRole } = opts
     const safeLimit = Math.min(Math.max(limit, 1), 1000)
-    // §2 per-item privacy: drop private tasks the actor can't see (in addition
-    // to the container-access filter applied below).
-    const visFilter = await this.taskVisibilityFilterForWorkspace(
-      workspaceId,
-      actorId ? { id: actorId, role: actorRole } : undefined,
-    )
 
     const rawRows = await this.db
       .select({
@@ -1664,15 +1664,18 @@ export class TasksService {
         completedAt:       tasks.completedAt,
         createdAt:         tasks.createdAt,
         updatedAt:         tasks.updatedAt,
-        // Selected only to scope private containers; stripped from the response.
+        // Selected only to scope private containers + private items; stripped
+        // from the response.
         spaceVisibility:   spaces.visibility,
         projectVisibility: projects.visibility,
+        visibility:        tasks.visibility,
+        createdById:       tasks.createdById,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), visFilter))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
       .orderBy(desc(tasks.updatedAt))
       .limit(safeLimit)
 
@@ -1684,7 +1687,9 @@ export class TasksService {
       ? await this.filterTasksByContainerAccess(rawRows, workspaceId, { id: actorId, role: actorRole })
       : rawRows
     // Drop the visibility helper columns so the response shape is unchanged.
-    const rows = scopedRows.map(({ spaceVisibility: _sv, projectVisibility: _pv, ...rest }) => rest)
+    const rows = scopedRows.map(
+      ({ spaceVisibility: _sv, projectVisibility: _pv, visibility: _v, createdById: _c, ...rest }) => rest,
+    )
 
     type AssigneeRef = {
       userId: string
