@@ -6,6 +6,7 @@ import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
+import { PasswordInput } from '../components/password-input'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { encodeQr } from '../lib/qr'
 
@@ -515,15 +516,15 @@ function SecurityTab() {
         <div className="space-y-3">
           <div className="space-y-1">
             <Label>{t('profile.currentPassword')}</Label>
-            <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+            <PasswordInput value={current} onChange={(e) => setCurrent(e.target.value)} />
           </div>
           <div className="space-y-1">
             <Label>{t('profile.newPassword')}</Label>
-            <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} />
+            <PasswordInput value={next} onChange={(e) => setNext(e.target.value)} />
           </div>
           <div className="space-y-1">
             <Label>{t('profile.confirmNewPassword')}</Label>
-            <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+            <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} />
             {next && confirm && next !== confirm && (
               <p className="text-xs text-destructive">{t('profile.passwordsMismatch')}</p>
             )}

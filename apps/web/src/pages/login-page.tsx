@@ -9,6 +9,7 @@ import {
 } from '@rundesk/ui'
 import { Mail, Lock, ArrowRight, ShieldCheck, KeyRound } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { PasswordInput } from '../components/password-input'
 import { PasswordChecklist, passwordPolicyError } from '../lib/password'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -82,12 +83,13 @@ export function LoginPage() {
   const [totpRequired, setTotpRequired] = useState(false)
   const [totpCode, setTotpCode] = useState('')
   const [ssoHint, setSsoHint] = useState<SsoLookupResponse['connection']>(null)
-  // Optimistically show both social buttons; the providers probe below hides any
-  // that the backend reports as unconfigured. If the probe fails we degrade
-  // gracefully by leaving both visible (an unconfigured click just bounces back).
+  // Start with both social buttons hidden and only reveal the ones the backend
+  // reports as configured (env creds present). Failing closed like this means a
+  // deployment without Google/Microsoft OAuth never shows a button that would
+  // just bounce back with ?error=oauth_unconfigured when clicked.
   const [oauthProviders, setOauthProviders] = useState<{ google: boolean; microsoft: boolean }>({
-    google: true,
-    microsoft: true,
+    google: false,
+    microsoft: false,
   })
   const [touched, setTouched] = useState({
     email: false,
@@ -131,7 +133,7 @@ export function LoginPage() {
         if (!cancelled) setOauthProviders(res)
       })
       .catch(() => {
-        /* degrade gracefully — leave both buttons visible */
+        /* fail closed — if the probe can't be reached, keep both hidden */
       })
     return () => {
       cancelled = true
@@ -370,11 +372,16 @@ export function LoginPage() {
               )}
             </div>
 
-            <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
-              <Separator className="flex-1" />
-              {t('auth.orWithEmail')}
-              <Separator className="flex-1" />
-            </div>
+            {/* Only show the divider when at least one SSO/social option sits
+                above it — otherwise it reads as a lonely "or with email" with
+                nothing before it. */}
+            {(ssoHint || oauthProviders.google || oauthProviders.microsoft) && (
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-muted-foreground/70">
+                <Separator className="flex-1" />
+                {t('auth.orWithEmail')}
+                <Separator className="flex-1" />
+              </div>
+            )}
 
             <form
               onSubmit={
@@ -415,9 +422,8 @@ export function LoginPage() {
                       {t('auth.forgotShort')}
                     </a>
                   </div>
-                  <Input
+                  <PasswordInput
                     id="password"
-                    type="password"
                     autoComplete="current-password"
                     required
                     leadingIcon={<Lock className="h-4 w-4" />}
@@ -464,9 +470,8 @@ export function LoginPage() {
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="newPassword">{t('auth.newPassword')}</Label>
-                    <Input
+                    <PasswordInput
                       id="newPassword"
-                      type="password"
                       autoComplete="new-password"
                       required
                       leadingIcon={<Lock className="h-4 w-4" />}
@@ -480,9 +485,8 @@ export function LoginPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="confirmPassword">{t('auth.confirmPassword')}</Label>
-                    <Input
+                    <PasswordInput
                       id="confirmPassword"
-                      type="password"
                       autoComplete="new-password"
                       required
                       leadingIcon={<Lock className="h-4 w-4" />}

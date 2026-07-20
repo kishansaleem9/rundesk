@@ -15,6 +15,7 @@ import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import { LanguageSwitcher } from '../components/language-switcher'
+import { PasswordInput } from '../components/password-input'
 
 type RegisterResponse = {
   accessToken: string
@@ -92,9 +93,8 @@ export function RegisterPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">{t('auth.password')}</Label>
-                <Input
+                <PasswordInput
                   id="password"
-                  type="password"
                   autoComplete="new-password"
                   required
                   minLength={8}

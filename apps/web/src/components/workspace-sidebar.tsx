@@ -177,19 +177,28 @@ export function WorkspaceSidebar() {
   const [showDockSettings, setShowDockSettings] = useState(false)
   const [viewport, setViewport] = useState({ w: 1400, h: 900 })
   const dockRef = useRef<HTMLDivElement | null>(null)
-  const { organizations, workspaces } = useAuthStore()
+  const { organizations, workspaces, setWorkspaces } = useAuthStore()
   const qc = useQueryClient()
   const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>({})
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
-  // §2/§13.4 — the folder/project currently being renamed from the tree. One
-  // shared dialog serves the whole tree; `null` means it is closed.
+  // §2/§13.4 — the folder/project/list currently being renamed from the tree.
+  // One shared dialog serves the whole tree; `null` means it is closed.
   const [treeEdit, setTreeEdit] = useState<
     | { kind: 'folder'; spaceId: string; id: string; name: string }
     | { kind: 'project'; id: string; name: string }
+    | { kind: 'list'; id: string; name: string }
     | null
   >(null)
   const [savingEdit, setSavingEdit] = useState(false)
+  // §2.3 — create-or-rename a Space directly from the sidebar tree (parity with
+  // the folder/project affordances). `null` = closed; mode drives POST vs PUT.
+  const [spaceDialog, setSpaceDialog] = useState<{ mode: 'create' | 'rename'; id?: string; name: string } | null>(null)
+  const [savingSpace, setSavingSpace] = useState(false)
+  // §2.2 — create a new Workspace under the caller's existing org from the
+  // switcher (instead of bouncing to the full sign-up/registration flow).
+  const [wsDialogOpen, setWsDialogOpen] = useState(false)
+  const [savingWs, setSavingWs] = useState(false)
 
   const createFolder = async (spaceId: string) => {
     const name = window.prompt(t('nav.newFolderPrompt'))?.trim()
@@ -233,7 +242,7 @@ export function WorkspaceSidebar() {
     }
   }
 
-  // §2/§13.4 — rename the folder (PATCH) or project (PUT) currently in `treeEdit`.
+  // §2/§13.4 — rename the folder (PATCH), project (PUT) or list (PUT) in `treeEdit`.
   const submitTreeEdit = async (values: ContainerEditValues) => {
     if (!treeEdit) return
     setSavingEdit(true)
@@ -243,6 +252,8 @@ export function WorkspaceSidebar() {
           method: 'PATCH',
           body: { name: values.name },
         })
+      } else if (treeEdit.kind === 'list') {
+        await api(`/lists/${treeEdit.id}`, { method: 'PUT', body: { name: values.name } })
       } else {
         await api(`/projects/${treeEdit.id}`, { method: 'PUT', body: { name: values.name } })
       }
@@ -252,6 +263,91 @@ export function WorkspaceSidebar() {
       window.alert(err instanceof Error ? err.message : t('container.saveError'))
     } finally {
       setSavingEdit(false)
+    }
+  }
+
+  // §2.5 — DELETE /lists/:id removes the list from its project.
+  const deleteListFromTree = async (listId: string) => {
+    try {
+      await api(`/lists/${listId}`, { method: 'DELETE' })
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.deleteError'))
+    }
+  }
+
+  // §2.3 — create (POST) or rename (PUT) a space from the shared space dialog.
+  const submitSpaceDialog = async (values: ContainerEditValues) => {
+    if (!spaceDialog || !workspaceId) return
+    setSavingSpace(true)
+    try {
+      if (spaceDialog.mode === 'create') {
+        const created = await api<{ id: string }>(`/spaces`, {
+          method: 'POST',
+          body: { workspaceId, name: values.name },
+        })
+        await qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+        await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+        setSpaceDialog(null)
+        navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId: created.id } })
+      } else {
+        await api(`/spaces/${spaceDialog.id}`, { method: 'PUT', body: { name: values.name } })
+        await qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+        await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+        setSpaceDialog(null)
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.saveError'))
+    } finally {
+      setSavingSpace(false)
+    }
+  }
+
+  // §2.3 — DELETE /spaces/:id archives the space; if we're viewing it, fall back
+  // to the workspace home since the route no longer resolves.
+  const deleteSpaceFromTree = async (spaceId: string, name: string) => {
+    if (!workspaceId) return
+    if (!window.confirm(t('space.deleteConfirm', { name }))) return
+    try {
+      await api(`/spaces/${spaceId}`, { method: 'DELETE' })
+      await qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      if (pathname.startsWith(`/app/${workspaceId}/${spaceId}`)) {
+        navigate({ to: '/app/$workspaceId', params: { workspaceId } })
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('container.deleteError'))
+    }
+  }
+
+  // §2.2 — create a workspace under the caller's existing organization and add
+  // it to the session so the switcher shows it immediately, then navigate in.
+  const submitWorkspaceDialog = async (values: ContainerEditValues) => {
+    setSavingWs(true)
+    try {
+      const created = await api<{ id: string }>(`/workspaces`, { method: 'POST', body: { name: values.name } })
+      // Re-read the membership list (now including the new workspace) and push it
+      // into the auth store so the switcher + guards see it without a reload.
+      const rows = await api<Array<{ workspace: { id: string; name: string; slug: string; organizationId: string }; role: string }>>(
+        '/workspaces',
+      )
+      setWorkspaces(
+        rows
+          .filter((r) => r.workspace?.id)
+          .map((r) => ({
+            id: r.workspace.id,
+            name: r.workspace.name,
+            slug: r.workspace.slug,
+            organizationId: r.workspace.organizationId,
+            role: r.role,
+          })),
+      )
+      setWsDialogOpen(false)
+      navigate({ to: '/app/$workspaceId', params: { workspaceId: created.id } })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('nav.createWorkspaceError'))
+    } finally {
+      setSavingWs(false)
     }
   }
   const [recentItems, setRecentItems] = useState<Array<{ label: string; path: string }>>([])
@@ -269,7 +365,9 @@ export function WorkspaceSidebar() {
     queryKey: ['space-tree', workspaceId],
     enabled: !!workspaceId,
     queryFn: async () => {
-      const spaces = await api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`)
+      const spaces = await api<Array<{ id: string; name: string; icon?: string | null; color?: string | null }>>(
+        `/spaces/workspace/${workspaceId}`,
+      )
       const projectGroups = await Promise.all(
         spaces.map(async (space) => {
           const [projects, folders] = await Promise.all([
@@ -518,7 +616,15 @@ export function WorkspaceSidebar() {
                 </div>
               )
             })}
-            <Button size="sm" variant="outline" className="w-full mt-1" onClick={() => navigate({ to: '/sign-up' })}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full mt-1"
+              onClick={() => {
+                setOpenSwitcher(false)
+                setWsDialogOpen(true)
+              }}
+            >
               <Plus className="h-3.5 w-3.5 mr-1" />
               {t('nav.newWorkspace')}
             </Button>
@@ -835,25 +941,54 @@ export function WorkspaceSidebar() {
                         )
                         const listActive = pathsEqual(pathname, listPath)
                         return (
-                        <Link
-                          key={list.id}
-                          to="/app/$workspaceId/$spaceId/$projectId/$listId"
-                          params={{ workspaceId, spaceId: space.id, projectId: project.id, listId: list.id }}
-                          className={cn(
-                            'flex items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-accent/10',
-                            listActive
-                              ? 'text-foreground font-medium bg-accent/15'
-                              : 'text-muted-foreground hover:text-foreground',
-                          )}
-                        >
-                          <span
+                        <div key={list.id} className="group flex items-center gap-1">
+                          <Link
+                            to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                            params={{ workspaceId, spaceId: space.id, projectId: project.id, listId: list.id }}
                             className={cn(
-                              'h-1.5 w-1.5 rounded-full',
-                              listActive ? 'bg-brand-500' : 'bg-muted-foreground/50',
+                              'flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-accent/10',
+                              listActive
+                                ? 'text-foreground font-medium bg-accent/15'
+                                : 'text-muted-foreground hover:text-foreground',
                             )}
-                          />
-                          <span className="truncate">{list.name}</span>
-                        </Link>
+                          >
+                            <span
+                              className={cn(
+                                'h-1.5 w-1.5 rounded-full',
+                                listActive ? 'bg-brand-500' : 'bg-muted-foreground/50',
+                              )}
+                            />
+                            <span className="truncate">{list.name}</span>
+                          </Link>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
+                                aria-label={t('nav.actionsFor', { name: list.name })}
+                              >
+                                <MoreHorizontal className="h-3 w-3" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              <DropdownMenuItem onClick={() => setTreeEdit({ kind: 'list', id: list.id, name: list.name })}>
+                                <Pencil className="h-3.5 w-3.5" />
+                                {t('container.rename')}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => {
+                                  if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
+                                    void deleteListFromTree(list.id)
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {t('list.deleteAction')}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                         )
                       })}
                       {project.lists.length === 0 && (
@@ -866,20 +1001,50 @@ export function WorkspaceSidebar() {
               const ungrouped = space.projects.filter((p) => !p.folderId)
               return (
               <div key={space.id} className="space-y-0.5">
-                <button
-                  className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
-                  onClick={() => setExpandedSpaces((prev) => ({ ...prev, [space.id]: !prev[space.id] }))}
-                >
-                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expandedSpaces[space.id] && 'rotate-180')} />
-                  <FolderOpen className="h-4 w-4 shrink-0" />
-                  <Link
-                    to="/app/$workspaceId/$spaceId"
-                    params={{ workspaceId, spaceId: space.id }}
-                    className="truncate hover:text-foreground"
+                <div className="group flex items-center gap-1">
+                  <button
+                    className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                    onClick={() => setExpandedSpaces((prev) => ({ ...prev, [space.id]: !prev[space.id] }))}
                   >
-                    {space.name}
-                  </Link>
-                </button>
+                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expandedSpaces[space.id] && 'rotate-180')} />
+                    {space.icon ? (
+                      <span className="h-4 w-4 shrink-0 flex items-center justify-center text-sm leading-none">{space.icon}</span>
+                    ) : (
+                      <FolderOpen className="h-4 w-4 shrink-0" style={space.color ? { color: space.color } : undefined} />
+                    )}
+                    <Link
+                      to="/app/$workspaceId/$spaceId"
+                      params={{ workspaceId, spaceId: space.id }}
+                      className="truncate hover:text-foreground"
+                    >
+                      {space.name}
+                    </Link>
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
+                        aria-label={t('nav.actionsFor', { name: space.name })}
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem onClick={() => setSpaceDialog({ mode: 'rename', id: space.id, name: space.name })}>
+                        <Pencil className="h-3.5 w-3.5" />
+                        {t('container.rename')}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={() => void deleteSpaceFromTree(space.id, space.name)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t('space.deleteAction')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
                 {expandedSpaces[space.id] && (
                   <div className="ml-6 space-y-0.5">
                     {(space.folders ?? []).map((folder) => {
@@ -958,6 +1123,13 @@ export function WorkspaceSidebar() {
             {!spaceTreeQuery.isLoading && (spacesQuery.data?.length ?? 0) === 0 && (
               <p className="px-2 py-1 text-xs text-muted-foreground">{t('nav.noSpaces')}</p>
             )}
+            <button
+              className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+              onClick={() => setSpaceDialog({ mode: 'create', name: '' })}
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              {t('nav.newSpace')}
+            </button>
             </div>
           )}
         </div>
@@ -1121,6 +1293,26 @@ export function WorkspaceSidebar() {
         initial={{ name: treeEdit?.name ?? '' }}
         submitting={savingEdit}
         onSubmit={submitTreeEdit}
+      />
+
+      <ContainerEditDialog
+        open={spaceDialog !== null}
+        onOpenChange={(next) => {
+          if (!next) setSpaceDialog(null)
+        }}
+        title={spaceDialog?.mode === 'create' ? t('nav.newSpace') : t('space.editTitle')}
+        initial={{ name: spaceDialog?.name ?? '' }}
+        submitting={savingSpace}
+        onSubmit={submitSpaceDialog}
+      />
+
+      <ContainerEditDialog
+        open={wsDialogOpen}
+        onOpenChange={setWsDialogOpen}
+        title={t('nav.newWorkspace')}
+        initial={{ name: '' }}
+        submitting={savingWs}
+        onSubmit={submitWorkspaceDialog}
       />
     </aside>
   )
