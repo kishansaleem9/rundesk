@@ -2,7 +2,7 @@ import { pgTable, text, timestamp, uuid, boolean, integer, index, uniqueIndex, j
 import { relations } from 'drizzle-orm'
 import { lists } from './lists'
 import { users } from './users'
-import { taskPriorityEnum } from './enums'
+import { taskPriorityEnum, containerVisibilityEnum } from './enums'
 
 /**
  * Status workflow buckets. Every per-list custom status (in `list_statuses`)
@@ -49,6 +49,9 @@ export const tasks = pgTable('tasks', {
     } | null
   }>(),
   isArchived:    boolean('is_archived').notNull().default(false),
+  // §2 per-item privacy: a 'private' task is visible only to its creator, its
+  // assignees, and workspace managers/admins (enforced on every read path).
+  visibility:    containerVisibilityEnum('visibility').notNull().default('public'),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [

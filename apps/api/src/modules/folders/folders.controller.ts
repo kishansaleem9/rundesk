@@ -33,7 +33,7 @@ export class FoldersController {
   update(
     @Param('spaceId') spaceId: string,
     @Param('folderId') folderId: string,
-    @Body() body: { name?: string; color?: string; position?: number },
+    @Body() body: { name?: string; color?: string; position?: number; visibility?: 'public' | 'private' },
   ) {
     return this.folders.update(spaceId, folderId, body)
   }

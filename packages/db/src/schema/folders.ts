@@ -3,6 +3,7 @@ import { relations } from 'drizzle-orm'
 import { spaces } from './spaces'
 import { projects } from './projects'
 import { users } from './users'
+import { containerVisibilityEnum } from './enums'
 
 /**
  * A Folder groups multiple projects inside a Space — the plan's Level-4
@@ -20,6 +21,9 @@ export const folders = pgTable(
     position:    integer('position').notNull().default(0),
     createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     isArchived:  boolean('is_archived').notNull().default(false),
+    // §2 per-item privacy: a 'private' folder is visible only to its creator and
+    // workspace managers/admins (enforced on every read path).
+    visibility:  containerVisibilityEnum('visibility').notNull().default('public'),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

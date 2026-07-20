@@ -2024,6 +2024,7 @@ export class TasksService {
       coverColor: string | null
       isArchived: boolean
       isMilestone: boolean
+      visibility: 'public' | 'private'
     }>,
   ) {
     await this.assertTaskWriteAccess(taskId, actorId)

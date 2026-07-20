@@ -133,6 +133,7 @@ export class TasksController {
       coverColor: string | null
       isArchived: boolean
       isMilestone: boolean
+      visibility: 'public' | 'private'
     }>,
   ) {
     const toDate = (label: string, value: string | null | undefined) => {
@@ -154,6 +155,9 @@ export class TasksController {
       if (body[flag] !== undefined && typeof body[flag] !== 'boolean') {
         throw new BadRequestException(`${flag} must be a boolean`)
       }
+    }
+    if (body.visibility !== undefined && body.visibility !== 'public' && body.visibility !== 'private') {
+      throw new BadRequestException('visibility must be public or private')
     }
     const patch: Record<string, unknown> = { ...body }
     if ('startDate' in body) patch.startDate = toDate('startDate', body.startDate)

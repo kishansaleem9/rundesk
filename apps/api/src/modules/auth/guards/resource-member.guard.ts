@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { spaces, projects, lists, tasks, goals, sprints, taskViews, labels, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
@@ -14,8 +14,18 @@ import {
   checkContainerAccess,
   type ContainerAccessContext,
 } from '../../../common/permissions/container-access.guard-helper'
+import { canSeePrivateItem, isManagerRole } from '../../../common/permissions/item-visibility'
 
-type ResolvedResource = { workspaceId: string; container?: ContainerAccessContext }
+// Per-item (list/task) privacy resolved alongside the container chain so the
+// guard can block a private list, or a private/foreign task, on by-id access.
+type ResolvedItem = {
+  listVisibility?: string | null
+  listCreatedById?: string | null
+  taskVisibility?: string | null
+  taskCreatedById?: string | null
+  taskIsAssignee?: boolean
+}
+type ResolvedResource = { workspaceId: string; container?: ContainerAccessContext; item?: ResolvedItem }
 
 /**
  * Enforces workspace membership for resources nested under a space / project /
@@ -37,9 +47,9 @@ export class ResourceMemberGuard implements CanActivate {
     const user = req.user
     if (!user?.id) throw new ForbiddenException('Not authenticated')
 
-    const resolved = await this.resolveResource(req.params ?? {}, req.body ?? {})
+    const resolved = await this.resolveResource(req.params ?? {}, req.body ?? {}, user.id)
     if (!resolved) throw new NotFoundException('Resource not found')
-    const { workspaceId, container } = resolved
+    const { workspaceId, container, item } = resolved
 
     if (user.role === 'super_admin') {
       // Still populate workspace context so downstream guards/handlers that read
@@ -66,6 +76,30 @@ export class ResourceMemberGuard implements CanActivate {
       if (!ok) throw new ForbiddenException('This space or project is private')
     }
 
+    // Per-item privacy (§2): a private list, or a private/foreign task, is only
+    // reachable by its creator, a task assignee, or a workspace manager/admin.
+    if (item) {
+      const isManager = isManagerRole(member.role as string)
+      if (
+        item.listVisibility !== undefined &&
+        !canSeePrivateItem(
+          { visibility: item.listVisibility, createdById: item.listCreatedById },
+          { userId: user.id, isManager },
+        )
+      ) {
+        throw new ForbiddenException('This list is private')
+      }
+      if (
+        item.taskVisibility !== undefined &&
+        !canSeePrivateItem(
+          { visibility: item.taskVisibility, createdById: item.taskCreatedById },
+          { userId: user.id, isManager, isAssignee: item.taskIsAssignee },
+        )
+      ) {
+        throw new ForbiddenException('This task is private')
+      }
+    }
+
     req.workspaceMember = { ...member, workspaceId, userId: user.id }
     return true
   }
@@ -73,6 +107,7 @@ export class ResourceMemberGuard implements CanActivate {
   private async resolveResource(
     p: Record<string, string>,
     b: Record<string, unknown>,
+    actorId: string,
   ): Promise<ResolvedResource | null> {
     // Path params identify the *resource being acted on* and take priority over
     // body fields (which can be attacker-supplied) — e.g. POST /sprints/:id/tasks
@@ -97,7 +132,7 @@ export class ResourceMemberGuard implements CanActivate {
     ]
     for (const [id, kind] of order) {
       if (!id) continue
-      return this.resolveByKind(kind, id)
+      return this.resolveByKind(kind, id, actorId)
     }
     return null
   }
@@ -105,6 +140,7 @@ export class ResourceMemberGuard implements CanActivate {
   private async resolveByKind(
     kind: 'ws' | 'space' | 'project' | 'list' | 'task' | 'goal' | 'sprint' | 'view' | 'label',
     id: string,
+    actorId: string,
   ): Promise<ResolvedResource | null> {
     if (kind === 'ws') return { workspaceId: id }
     if (kind === 'label') {
@@ -145,19 +181,27 @@ export class ResourceMemberGuard implements CanActivate {
     }
     if (kind === 'list') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById })
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
         .where(eq(lists.id, id))
         .limit(1)
       return r
-        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        ? {
+            workspaceId: r.w,
+            container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
+            item: { listVisibility: r.lv, listCreatedById: r.lc },
+          }
         : null
     }
     if (kind === 'task') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility })
+        .select({
+          w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility,
+          lv: lists.visibility, lc: lists.createdById, tv: tasks.visibility, tc: tasks.createdById,
+          isAssignee: sql<boolean>`exists (select 1 from task_assignees ta where ta.task_id = ${tasks.id} and ta.user_id = ${actorId})`,
+        })
         .from(tasks)
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -165,12 +209,22 @@ export class ResourceMemberGuard implements CanActivate {
         .where(eq(tasks.id, id))
         .limit(1)
       return r
-        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        ? {
+            workspaceId: r.w,
+            container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
+            item: {
+              listVisibility: r.lv,
+              listCreatedById: r.lc,
+              taskVisibility: r.tv,
+              taskCreatedById: r.tc,
+              taskIsAssignee: Boolean(r.isAssignee),
+            },
+          }
         : null
     }
     if (kind === 'view') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById })
         .from(taskViews)
         .innerJoin(lists, eq(lists.id, taskViews.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -178,7 +232,11 @@ export class ResourceMemberGuard implements CanActivate {
         .where(eq(taskViews.id, id))
         .limit(1)
       return r
-        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        ? {
+            workspaceId: r.w,
+            container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
+            item: { listVisibility: r.lv, listCreatedById: r.lc },
+          }
         : null
     }
     return null

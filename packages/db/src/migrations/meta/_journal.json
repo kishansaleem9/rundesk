@@ -575,6 +575,13 @@
       "when": 1900000078000,
       "tag": "0081_user_datetime_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1900000079000,
+      "tag": "0082_item_visibility",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { and, asc, eq } from 'drizzle-orm'
 import { folders, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -36,12 +36,16 @@ export class FoldersService {
   async update(
     spaceId: string,
     folderId: string,
-    patch: { name?: string; color?: string; position?: number },
+    patch: { name?: string; color?: string; position?: number; visibility?: 'public' | 'private' },
   ) {
+    if (patch.visibility !== undefined && patch.visibility !== 'public' && patch.visibility !== 'private') {
+      throw new BadRequestException('visibility must be public or private')
+    }
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.name !== undefined) set.name = patch.name
     if (patch.color !== undefined) set.color = patch.color
     if (patch.position !== undefined) set.position = patch.position
+    if (patch.visibility !== undefined) set.visibility = patch.visibility
     const [row] = await this.db
       .update(folders)
       .set(set)

@@ -3,6 +3,7 @@ import { relations } from 'drizzle-orm'
 import { projects } from './projects'
 import { tasks } from './tasks'
 import { users } from './users'
+import { containerVisibilityEnum } from './enums'
 
 export const lists = pgTable('lists', {
   id:         uuid('id').primaryKey().defaultRandom(),
@@ -16,6 +17,9 @@ export const lists = pgTable('lists', {
   statusScope: text('status_scope').$type<'list' | 'project' | 'space'>().notNull().default('list'),
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   isArchived: boolean('is_archived').notNull().default(false),
+  // §2 per-item privacy: a 'private' list is visible only to its creator and
+  // workspace managers/admins (enforced on every read path).
+  visibility: containerVisibilityEnum('visibility').notNull().default('public'),
   createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:  timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

@@ -83,12 +83,19 @@ export class ListsService {
     return list ?? null
   }
 
-  async updateList(listId: string, data: Partial<{ name: string; description: string }>, actorId?: string) {
+  async updateList(
+    listId: string,
+    data: Partial<{ name: string; description: string; visibility: 'public' | 'private' }>,
+    actorId?: string,
+  ) {
     if (actorId) await this.assertManageable(listId, actorId)
+    if (data.visibility !== undefined && data.visibility !== 'public' && data.visibility !== 'private') {
+      throw new BadRequestException('visibility must be public or private')
+    }
     // Whitelist updatable columns rather than spreading the untyped body — a
     // stray `position: true` would otherwise hit the integer column and 500.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['name', 'description'] as const) {
+    for (const key of ['name', 'description', 'visibility'] as const) {
       if (data[key] !== undefined) set[key] = data[key]
     }
     const result = await this.db

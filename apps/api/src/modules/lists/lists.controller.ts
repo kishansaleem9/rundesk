@@ -56,7 +56,7 @@ export class ListsController {
   async updateList(
     @Param('listId') listId: string,
     @CurrentUser() user: any,
-    @Body() body: Partial<{ name: string; description: string }>,
+    @Body() body: Partial<{ name: string; description: string; visibility: 'public' | 'private' }>,
   ) {
     return this.listsService.updateList(listId, body, user.id)
   }
