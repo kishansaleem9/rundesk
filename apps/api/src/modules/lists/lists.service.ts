@@ -1,9 +1,10 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { eq, and, asc } from 'drizzle-orm'
+import { eq, and, asc, type SQL } from 'drizzle-orm'
 import { lists, listStatuses, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { resolveIsManager, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 
 /**
@@ -47,11 +48,25 @@ export class ListsService {
     return list
   }
 
-  async getListsByProject(projectId: string) {
+  async getListsByProject(projectId: string, actor?: { id: string; role?: string }) {
+    // §2 per-item privacy: hide private lists the actor may not see.
+    let visFilter: SQL | undefined
+    if (actor) {
+      const [ctx] = await this.db
+        .select({ workspaceId: spaces.workspaceId })
+        .from(projects)
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(projects.id, projectId))
+        .limit(1)
+      if (ctx) {
+        const isManager = await resolveIsManager(this.db, ctx.workspaceId, actor.id, actor.role)
+        visFilter = listVisibilityFilter(actor.id, isManager)
+      }
+    }
     return this.db
       .select()
       .from(lists)
-      .where(and(eq(lists.projectId, projectId), eq(lists.isArchived, false)))
+      .where(and(eq(lists.projectId, projectId), eq(lists.isArchived, false), visFilter))
       .orderBy(asc(lists.position), asc(lists.createdAt))
   }
 

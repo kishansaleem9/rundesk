@@ -14,8 +14,8 @@ export class FoldersController {
   constructor(private folders: FoldersService) {}
 
   @Get()
-  list(@Param('spaceId') spaceId: string) {
-    return this.folders.listBySpace(spaceId)
+  list(@Param('spaceId') spaceId: string, @CurrentUser() user: any) {
+    return this.folders.listBySpace(spaceId, { id: user.id, role: user.role })
   }
 
   @Post()

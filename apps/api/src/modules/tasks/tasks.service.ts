@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
-import { eq, and, asc, desc, inArray, isNull, sql } from 'drizzle-orm'
+import { eq, and, asc, desc, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import {
   tasks,
   taskAssignees,
@@ -38,6 +38,12 @@ import {
   type ExternalLinkRef,
 } from './external-links.util'
 import { resolveEffectiveStatuses } from '../../common/statuses/status-resolution'
+import {
+  resolveIsManager,
+  taskVisibilityFilter,
+  canSeePrivateItem,
+  isManagerRole,
+} from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
@@ -1499,8 +1505,9 @@ export class TasksService {
    */
   async getTimelineForWorkspace(
     workspaceId: string,
-    opts: { from?: Date; to?: Date; projectId?: string } = {},
+    opts: { from?: Date; to?: Date; projectId?: string; actor?: { id: string; role?: string } } = {},
   ) {
+    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, opts.actor)
     const rows = await this.db
       .select({
         id: tasks.id,
@@ -1526,6 +1533,7 @@ export class TasksService {
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, false),
           ...(opts.projectId ? [eq(lists.projectId, opts.projectId)] : []),
+          visFilter,
         ),
       )
       .orderBy(asc(tasks.startDate), asc(tasks.dueDate))
@@ -1630,6 +1638,12 @@ export class TasksService {
   ) {
     const { includeAssignees = true, actorId, actorRole } = opts
     const safeLimit = Math.min(Math.max(limit, 1), 1000)
+    // §2 per-item privacy: drop private tasks the actor can't see (in addition
+    // to the container-access filter applied below).
+    const visFilter = await this.taskVisibilityFilterForWorkspace(
+      workspaceId,
+      actorId ? { id: actorId, role: actorRole } : undefined,
+    )
 
     const rawRows = await this.db
       .select({
@@ -1658,7 +1672,7 @@ export class TasksService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), visFilter))
       .orderBy(desc(tasks.updatedAt))
       .limit(safeLimit)
 
@@ -1703,21 +1717,55 @@ export class TasksService {
     return rows.map((r) => ({ ...r, assignees: byTask.get(r.id) ?? empty }))
   }
 
+  /** §2 per-item task-visibility WHERE fragment for reads scoped to one list.
+   *  undefined = no restriction (manager, or internal/system call). */
+  private async taskVisibilityFilterForList(
+    listId: string,
+    actor?: { id: string; role?: string },
+  ): Promise<SQL | undefined> {
+    if (!actor) return undefined
+    const [ctx] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!ctx) return undefined
+    const isManager = await resolveIsManager(this.db, ctx.workspaceId, actor.id, actor.role)
+    return taskVisibilityFilter(this.db, actor.id, isManager)
+  }
+
+  /** §2 per-item task-visibility WHERE fragment for workspace-wide task reads. */
+  private async taskVisibilityFilterForWorkspace(
+    workspaceId: string,
+    actor?: { id: string; role?: string },
+  ): Promise<SQL | undefined> {
+    if (!actor) return undefined
+    const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
+    return taskVisibilityFilter(this.db, actor.id, isManager)
+  }
+
   async getTasksByList(
     listId: string,
     opts: { includeSubtasks?: boolean; includeArchived?: boolean } = {},
+    actor?: { id: string; role?: string },
   ) {
     const { includeSubtasks = false, includeArchived = false } = opts
+    // §2 per-item privacy: hide private tasks the actor may not see. Resolve the
+    // owning workspace to determine manager status, then filter in SQL.
+    const visFilter = await this.taskVisibilityFilterForList(listId, actor)
     const rows = await this.db.query.tasks.findMany({
       where: and(
         eq(tasks.listId, listId),
         includeSubtasks ? undefined : isNull(tasks.parentTaskId),
         includeArchived ? undefined : eq(tasks.isArchived, false),
+        visFilter,
       ),
       orderBy: [asc(tasks.position), asc(tasks.createdAt)],
       with: {
         assignees: { with: { user: true } },
-        subtasks:  { where: eq(tasks.isArchived, false) },
+        subtasks:  { where: and(eq(tasks.isArchived, false), visFilter) },
       },
     })
     // Attach labels (drizzle's with doesn't follow the join-table->label shape cleanly)
@@ -1817,11 +1865,18 @@ export class TasksService {
   // Direct children (subtasks) of a task, for the task detail Subtasks tab.
   // Each subtask is a full task row plus its own assignees so the panel can
   // edit assignee/due-date inline, independent of the parent (Plan §4).
-  async listSubtasks(taskId: string) {
+  async listSubtasks(taskId: string, actor?: { id: string; role?: string }) {
+    const [parent] = await this.db
+      .select({ listId: tasks.listId })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    // §2 per-item privacy: hide private subtasks the actor may not see.
+    const visFilter = parent ? await this.taskVisibilityFilterForList(parent.listId, actor) : undefined
     const rows = await this.db
       .select()
       .from(tasks)
-      .where(and(eq(tasks.parentTaskId, taskId), eq(tasks.isArchived, false)))
+      .where(and(eq(tasks.parentTaskId, taskId), eq(tasks.isArchived, false), visFilter))
       .orderBy(asc(tasks.position))
     if (rows.length === 0) return []
     const ids = rows.map((r) => r.id)

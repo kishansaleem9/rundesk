@@ -32,9 +32,13 @@ export class TasksController {
   @UseGuards(WorkspaceMemberGuard)
   async getTimeline(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Query('projectId') projectId?: string,
   ) {
-    return this.tasks.getTimelineForWorkspace(workspaceId, projectId ? { projectId } : {})
+    return this.tasks.getTimelineForWorkspace(workspaceId, {
+      ...(projectId ? { projectId } : {}),
+      actor: { id: user.id, role: user.role },
+    })
   }
 
   @Get('workspace/:workspaceId')
@@ -66,13 +70,18 @@ export class TasksController {
   @UseGuards(ResourceMemberGuard)
   async getByList(
     @Param('listId') listId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Query('includeSubtasks') includeSubtasks?: string,
     @Query('includeArchived') includeArchived?: string,
   ) {
-    return this.tasks.getTasksByList(listId, {
-      includeSubtasks: includeSubtasks === 'true',
-      includeArchived: includeArchived === 'true',
-    })
+    return this.tasks.getTasksByList(
+      listId,
+      {
+        includeSubtasks: includeSubtasks === 'true',
+        includeArchived: includeArchived === 'true',
+      },
+      { id: user.id, role: user.role },
+    )
   }
 
   @Get(':taskId')
@@ -83,8 +92,8 @@ export class TasksController {
 
   @Get(':taskId/subtasks')
   @UseGuards(ResourceMemberGuard)
-  async getSubtasks(@Param('taskId') taskId: string) {
-    return this.tasks.listSubtasks(taskId)
+  async getSubtasks(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.tasks.listSubtasks(taskId, { id: user.id, role: user.role })
   }
 
   @Get(':taskId/navigation')

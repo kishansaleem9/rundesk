@@ -2,6 +2,7 @@ import { Injectable, Inject, BadRequestException, NotFoundException } from '@nes
 import { and, eq, isNotNull } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import type { Db } from '@rundesk/db'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import {
   taskCalendarLinks,
   tasks,
@@ -295,6 +296,10 @@ export class CalendarSyncService {
    * its own cadence — usually 1-24 hours.
    */
   async buildIcalFeed(userId: string, workspaceId: string): Promise<string> {
+    // §2 per-item privacy: the token identifies one user — only surface private
+    // tasks they may see (creator/assignee/manager); exclude everyone else's.
+    const isManager = await resolveIsManager(this.db, workspaceId, userId)
+    const visFilter = taskVisibilityFilter(this.db, userId, isManager)
     const rows = await this.db
       .select({
         id: tasks.id,
@@ -316,6 +321,7 @@ export class CalendarSyncService {
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, false),
           isNotNull(tasks.dueDate),
+          visFilter,
         ),
       )
 

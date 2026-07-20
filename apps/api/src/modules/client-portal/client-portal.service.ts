@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, ne } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import {
   clientPortals,
@@ -286,7 +286,17 @@ export class ClientPortalService {
         listStatuses,
         and(eq(listStatuses.listId, tasks.listId), eq(listStatuses.key, tasks.status)),
       )
-      .where(and(eq(lists.projectId, portal.projectId), eq(tasks.isArchived, false), eq(lists.isArchived, false)))
+      .where(
+        and(
+          eq(lists.projectId, portal.projectId),
+          eq(tasks.isArchived, false),
+          eq(lists.isArchived, false),
+          // §2 per-item privacy: an anonymous client portal never exposes a
+          // private task or a task inside a private list.
+          ne(tasks.visibility, 'private'),
+          ne(lists.visibility, 'private'),
+        ),
+      )
       .orderBy(asc(tasks.position))) as ClientPortalTaskRow[]
 
     // Progress is computed over ALL non-archived tasks so the bar stays honest

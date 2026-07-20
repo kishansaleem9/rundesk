@@ -25,8 +25,8 @@ export class ListsController {
   }
 
   @Get('project/:projectId')
-  async getListsByProject(@Param('projectId') projectId: string) {
-    return this.listsService.getListsByProject(projectId)
+  async getListsByProject(@Param('projectId') projectId: string, @CurrentUser() user: any) {
+    return this.listsService.getListsByProject(projectId, { id: user.id, role: user.role })
   }
 
   @Get(':listId')

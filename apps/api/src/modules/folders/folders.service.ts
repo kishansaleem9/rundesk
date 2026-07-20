@@ -1,9 +1,10 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, type SQL } from 'drizzle-orm'
 import { folders, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { resolveIsManager, folderVisibilityFilter } from '../../common/permissions/item-visibility'
 
 @Injectable()
 export class FoldersService {
@@ -12,11 +13,24 @@ export class FoldersService {
     private security: SecurityService,
   ) {}
 
-  async listBySpace(spaceId: string) {
+  async listBySpace(spaceId: string, actor?: { id: string; role?: string }) {
+    // §2 per-item privacy: hide private folders the actor may not see.
+    let visFilter: SQL | undefined
+    if (actor) {
+      const [ctx] = await this.db
+        .select({ workspaceId: spaces.workspaceId })
+        .from(spaces)
+        .where(eq(spaces.id, spaceId))
+        .limit(1)
+      if (ctx) {
+        const isManager = await resolveIsManager(this.db, ctx.workspaceId, actor.id, actor.role)
+        visFilter = folderVisibilityFilter(actor.id, isManager)
+      }
+    }
     return this.db
       .select()
       .from(folders)
-      .where(and(eq(folders.spaceId, spaceId), eq(folders.isArchived, false)))
+      .where(and(eq(folders.spaceId, spaceId), eq(folders.isArchived, false), visFilter))
       .orderBy(asc(folders.position), asc(folders.name))
   }
 
