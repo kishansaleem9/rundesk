@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
 import { PasswordInput } from '../components/password-input'
+import { formatDateTimeWith } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { encodeQr } from '../lib/qr'
 
@@ -19,6 +20,9 @@ type Profile = {
   timezone: string
   role: string
   emailVerified: boolean
+  dateFormat?: string
+  timeFormat?: string
+  weekStart?: string
 }
 
 const TABS = [
@@ -107,6 +111,9 @@ function GeneralTab({ profile }: { profile: Profile }) {
   const [displayName, setDisplayName] = useState(profile.displayName)
   const [bio, setBio] = useState(profile.bio ?? '')
   const [timezone, setTimezone] = useState(profile.timezone)
+  const [dateFormat, setDateFormat] = useState(profile.dateFormat ?? 'system')
+  const [timeFormat, setTimeFormat] = useState(profile.timeFormat ?? 'system')
+  const [weekStart, setWeekStart] = useState(profile.weekStart ?? 'sunday')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [avatarProgress, setAvatarProgress] = useState(0)
@@ -116,6 +123,9 @@ function GeneralTab({ profile }: { profile: Profile }) {
     setDisplayName(profile.displayName)
     setBio(profile.bio ?? '')
     setTimezone(profile.timezone)
+    setDateFormat(profile.dateFormat ?? 'system')
+    setTimeFormat(profile.timeFormat ?? 'system')
+    setWeekStart(profile.weekStart ?? 'sunday')
   }, [profile])
 
   // Push a fresh profile into both the query cache and the auth store so the
@@ -135,7 +145,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
     mutationFn: () =>
       api<Profile>('/users/me', {
         method: 'PATCH',
-        body: JSON.stringify({ displayName, bio, timezone }),
+        body: JSON.stringify({ displayName, bio, timezone, dateFormat, timeFormat, weekStart }),
       }),
     onSuccess: applyProfile,
   })
@@ -193,7 +203,10 @@ function GeneralTab({ profile }: { profile: Profile }) {
   const dirty =
     displayName !== profile.displayName ||
     (bio || '') !== (profile.bio ?? '') ||
-    timezone !== profile.timezone
+    timezone !== profile.timezone ||
+    dateFormat !== (profile.dateFormat ?? 'system') ||
+    timeFormat !== (profile.timeFormat ?? 'system') ||
+    weekStart !== (profile.weekStart ?? 'sunday')
 
   return (
     <Card className="p-6 space-y-5">
@@ -271,6 +284,62 @@ function GeneralTab({ profile }: { profile: Profile }) {
         <Label htmlFor="timezone">{t('profile.timezone')}</Label>
         <Input id="timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
         <p className="text-xs text-muted-foreground">{t('profile.timezoneHelp')}</p>
+      </div>
+
+      {/* §1.2 — date / time / week-start display preferences */}
+      <div className="space-y-2 pt-1">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="space-y-1">
+            <Label htmlFor="dateFormat">{t('profile.dateFormatLabel')}</Label>
+            <select
+              id="dateFormat"
+              value={dateFormat}
+              onChange={(e) => setDateFormat(e.target.value)}
+              className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+            >
+              <option value="system">{t('profile.formatSystem')}</option>
+              <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+              <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+              <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+              <option value="DD MMM YYYY">DD MMM YYYY</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="timeFormat">{t('profile.timeFormatLabel')}</Label>
+            <select
+              id="timeFormat"
+              value={timeFormat}
+              onChange={(e) => setTimeFormat(e.target.value)}
+              className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+            >
+              <option value="system">{t('profile.formatSystem')}</option>
+              <option value="12h">{t('profile.time12h')}</option>
+              <option value="24h">{t('profile.time24h')}</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="weekStart">{t('profile.weekStartLabel')}</Label>
+            <select
+              id="weekStart"
+              value={weekStart}
+              onChange={(e) => setWeekStart(e.target.value)}
+              className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+            >
+              <option value="sunday">{t('profile.weekSunday')}</option>
+              <option value="monday">{t('profile.weekMonday')}</option>
+              <option value="saturday">{t('profile.weekSaturday')}</option>
+            </select>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {t('profile.dateTimeHelp')} · {t('profile.formatPreview')}:{' '}
+          <span className="text-foreground">
+            {formatDateTimeWith(
+              { dateFormat: dateFormat as never, timeFormat: timeFormat as never, weekStart: weekStart as never },
+              new Date(),
+            )}
+          </span>
+        </p>
       </div>
 
       <ThemeSelector />

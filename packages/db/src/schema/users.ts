@@ -56,6 +56,13 @@ export const users = pgTable('users', {
   // devices — hydrated from GET /users/me and synced by the topbar toggle +
   // profile appearance selector.
   theme:         text('theme').notNull().default('system'),
+  // Date / time / week-start display preferences (Plan §1.2). 'system' honours
+  // the browser locale; explicit values override how dates and times render
+  // across the app. dateFormat: system|MM/DD/YYYY|DD/MM/YYYY|YYYY-MM-DD|DD MMM YYYY;
+  // timeFormat: system|12h|24h; weekStart: sunday|monday|saturday.
+  dateFormat:    text('date_format').notNull().default('system'),
+  timeFormat:    text('time_format').notNull().default('system'),
+  weekStart:     text('week_start').notNull().default('sunday'),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

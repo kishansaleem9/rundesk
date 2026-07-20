@@ -50,6 +50,7 @@ import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialo
 import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { useDateFormat } from '../lib/date-format'
 
 /**
  * Stream a task/project summary from the SSE endpoint (Plan §7.5), invoking
@@ -368,6 +369,7 @@ export function TaskDetailSheet({
   workspaceId?: string
 }) {
   const { t } = useTranslation()
+  const { formatDate } = useDateFormat()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   const [expanded, setExpanded] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -575,7 +577,7 @@ export function TaskDetailSheet({
                 )}
                 {detailQuery.data.dueDate && (
                   <Badge variant="info" className="text-[10px]">
-                    {t('taskDetail.dueShort', { date: new Date(detailQuery.data.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) })}
+                    {t('taskDetail.dueShort', { date: formatDate(detailQuery.data.dueDate) })}
                   </Badge>
                 )}
               </div>

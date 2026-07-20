@@ -27,6 +27,14 @@ export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
 export const THEME_VALUES = ['system', 'light', 'dark'] as const
 export type ThemePreference = (typeof THEME_VALUES)[number]
 
+/** Date / time / week-start display preferences (Plan §1.2). 'system' follows the browser locale. */
+export const DATE_FORMAT_VALUES = ['system', 'MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD', 'DD MMM YYYY'] as const
+export type DateFormatPreference = (typeof DATE_FORMAT_VALUES)[number]
+export const TIME_FORMAT_VALUES = ['system', '12h', '24h'] as const
+export type TimeFormatPreference = (typeof TIME_FORMAT_VALUES)[number]
+export const WEEK_START_VALUES = ['sunday', 'monday', 'saturday'] as const
+export type WeekStartPreference = (typeof WEEK_START_VALUES)[number]
+
 /** Image content types accepted for avatar uploads, mapped to a file extension. */
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -62,7 +70,17 @@ export class UsersService {
 
   async updateProfile(
     userId: string,
-    patch: { displayName?: string; bio?: string | null; timezone?: string; avatarUrl?: string | null; locale?: string; theme?: string },
+    patch: {
+      displayName?: string
+      bio?: string | null
+      timezone?: string
+      avatarUrl?: string | null
+      locale?: string
+      theme?: string
+      dateFormat?: string
+      timeFormat?: string
+      weekStart?: string
+    },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
       throw new BadRequestException(`Unsupported locale: ${patch.locale}`)
@@ -70,12 +88,21 @@ export class UsersService {
     if (patch.theme !== undefined && !THEME_VALUES.includes(patch.theme as ThemePreference)) {
       throw new BadRequestException(`Unsupported theme: ${patch.theme}`)
     }
+    if (patch.dateFormat !== undefined && !DATE_FORMAT_VALUES.includes(patch.dateFormat as DateFormatPreference)) {
+      throw new BadRequestException(`Unsupported date format: ${patch.dateFormat}`)
+    }
+    if (patch.timeFormat !== undefined && !TIME_FORMAT_VALUES.includes(patch.timeFormat as TimeFormatPreference)) {
+      throw new BadRequestException(`Unsupported time format: ${patch.timeFormat}`)
+    }
+    if (patch.weekStart !== undefined && !WEEK_START_VALUES.includes(patch.weekStart as WeekStartPreference)) {
+      throw new BadRequestException(`Unsupported week start: ${patch.weekStart}`)
+    }
     // SECURITY: whitelist the self-editable profile columns. Spreading the raw
     // body let a caller mass-assign any users column — most critically `role`,
     // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
     // super-admin. Only copy the fields a user is allowed to change themselves.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db
