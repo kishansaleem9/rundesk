@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Folder, Users, CircleDot, ArchiveRestore, MoreHorizontal, Pencil, Trash2, LayoutGrid } from 'lucide-react'
+import { Folder, Users, CircleDot, ArchiveRestore, MoreHorizontal, Pencil, Trash2, LayoutGrid, Plus } from 'lucide-react'
 import {
   Button,
   DropdownMenu,
@@ -9,11 +9,12 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Input,
   toast,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
-import { WorkHubPage, WorkEmptyState, WorkEntityCard } from '../components/work/work-ui'
+import { WorkHubPage, WorkEmptyState, WorkEntityCard, WorkCreateCard } from '../components/work/work-ui'
 import { ContainerMembersSheet } from '../components/container-members-sheet'
 import { ContainerEditDialog, type ContainerEditValues } from '../components/container-edit-dialog'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
@@ -56,6 +57,8 @@ function SpaceHome() {
   const [statusesOpen, setStatusesOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [viewsOpen, setViewsOpen] = useState(false)
+  const [showCreateProject, setShowCreateProject] = useState(false)
+  const [newProjectName, setNewProjectName] = useState('')
 
   const { data: spaces = [] } = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -107,6 +110,25 @@ function SpaceHome() {
     },
   })
 
+  // §2 — create a project directly from the space (client feedback: a space
+  // needs its own "+ Add project", like a project's "+ Add list"). Refresh the
+  // project grid + sidebar tree, then open the new project.
+  const createProject = useMutation({
+    mutationFn: (name: string) =>
+      api<{ id: string }>(`/projects`, { method: 'POST', body: { spaceId, name } }),
+    onSuccess: (project) => {
+      qc.invalidateQueries({ queryKey: ['projects', spaceId] })
+      qc.invalidateQueries({ queryKey: ['space-tree'] })
+      setShowCreateProject(false)
+      setNewProjectName('')
+      navigate({
+        to: '/app/$workspaceId/$spaceId/$projectId',
+        params: { workspaceId, spaceId, projectId: project.id },
+      })
+    },
+    onError: () => toast.error(t('container.saveError')),
+  })
+
   return (
     <WorkHubPage
       breadcrumb={t('spaceShell.breadcrumb')}
@@ -125,6 +147,14 @@ function SpaceHome() {
           <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
             <Users className="h-3.5 w-3.5 mr-1.5" />
             {t('spaceShell.members')}
+          </Button>
+          <Button
+            size="sm"
+            className="bg-violet-600 hover:bg-violet-700 text-white"
+            onClick={() => setShowCreateProject((v) => !v)}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            {showCreateProject ? t('common.cancel') : t('spaceShell.addProject')}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -167,6 +197,31 @@ function SpaceHome() {
           </span>
         </div>
 
+        {showCreateProject && (
+          <WorkCreateCard onCancel={() => setShowCreateProject(false)}>
+            <Input
+              autoFocus
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newProjectName.trim() && !createProject.isPending) {
+                  createProject.mutate(newProjectName.trim())
+                }
+              }}
+              placeholder={t('spaceShell.projectNamePlaceholder')}
+              className="h-9"
+            />
+            <Button
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => createProject.mutate(newProjectName.trim())}
+              disabled={!newProjectName.trim() || createProject.isPending}
+            >
+              {createProject.isPending ? t('spaceShell.creatingProject') : t('spaceShell.createProject')}
+            </Button>
+          </WorkCreateCard>
+        )}
+
         {isLoading ? (
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
             {t('spaceShell.loadingProjects')}
@@ -176,6 +231,14 @@ function SpaceHome() {
             icon={Folder}
             title={t('spaceShell.noProjectsTitle')}
             description={t('spaceShell.noProjectsBody')}
+            action={
+              <Button
+                className="bg-violet-600 hover:bg-violet-700 text-white"
+                onClick={() => setShowCreateProject(true)}
+              >
+                <Plus className="h-4 w-4 mr-1.5" /> {t('spaceShell.addProject')}
+              </Button>
+            }
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

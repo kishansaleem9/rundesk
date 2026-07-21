@@ -35,7 +35,7 @@ type List = {
   description?: string | null
 }
 
-type Project = { id: string; name: string; description?: string | null; visibility?: string | null }
+type Project = { id: string; name: string; description?: string | null; visibility?: string | null; color?: string | null; icon?: string | null }
 
 export function ProjectShell() {
   const matches = useMatches()
@@ -386,8 +386,13 @@ function ProjectHome() {
         open={editOpen}
         onOpenChange={setEditOpen}
         title={t('project.editTitle')}
-        initial={{ name: project?.name ?? '', description: project?.description ?? '' }}
-        fields={{ description: true }}
+        initial={{
+          name: project?.name ?? '',
+          description: project?.description ?? '',
+          color: project?.color ?? '',
+          icon: project?.icon ?? '',
+        }}
+        fields={{ description: true, color: true, icon: true }}
         submitting={editProject.isPending}
         onSubmit={(values) => editProject.mutate(values)}
       />
