@@ -582,6 +582,13 @@
       "when": 1900000079000,
       "tag": "0082_item_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1900000080000,
+      "tag": "0083_space_view_config",
+      "breakpoints": true
     }
   ]
 }

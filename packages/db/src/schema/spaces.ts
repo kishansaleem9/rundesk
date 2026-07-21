@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, jsonb } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { projects } from './projects'
@@ -15,6 +15,10 @@ export const spaces = pgTable('spaces', {
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   isArchived:  boolean('is_archived').notNull().default(false),
   visibility:  containerVisibilityEnum('visibility').notNull().default('public'),
+  // §5 (ClickUp "required views") per-space view config: which of the task
+  // views this space's lists expose, and which one opens by default. null =
+  // all views enabled + 'list' default.
+  viewConfig:  jsonb('view_config').$type<{ defaultView?: string; enabledViews?: string[] }>(),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Folder, Users, CircleDot, ArchiveRestore, MoreHorizontal, Pencil, Trash2 } from 'lucide-react'
+import { Folder, Users, CircleDot, ArchiveRestore, MoreHorizontal, Pencil, Trash2, LayoutGrid } from 'lucide-react'
 import {
   Button,
   DropdownMenu,
@@ -17,6 +17,7 @@ import { WorkHubPage, WorkEmptyState, WorkEntityCard } from '../components/work/
 import { ContainerMembersSheet } from '../components/container-members-sheet'
 import { ContainerEditDialog, type ContainerEditValues } from '../components/container-edit-dialog'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
+import { SpaceViewsDialog } from '../components/space-views-dialog'
 
 type Project = {
   id: string
@@ -33,6 +34,7 @@ type Space = {
   visibility?: string | null
   color?: string | null
   icon?: string | null
+  viewConfig?: { defaultView?: string; enabledViews?: string[] } | null
 }
 
 export function SpaceShell() {
@@ -53,6 +55,7 @@ function SpaceHome() {
   const [membersOpen, setMembersOpen] = useState(false)
   const [statusesOpen, setStatusesOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [viewsOpen, setViewsOpen] = useState(false)
 
   const { data: spaces = [] } = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -114,6 +117,10 @@ function SpaceHome() {
           <Button size="sm" variant="outline" onClick={() => setStatusesOpen(true)}>
             <CircleDot className="h-3.5 w-3.5 mr-1.5" />
             {t('spaceShell.statuses')}
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setViewsOpen(true)}>
+            <LayoutGrid className="h-3.5 w-3.5 mr-1.5" />
+            {t('spaceShell.views')}
           </Button>
           <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
             <Users className="h-3.5 w-3.5 mr-1.5" />
@@ -228,6 +235,14 @@ function SpaceHome() {
         containerName={space?.name}
         open={statusesOpen}
         onOpenChange={setStatusesOpen}
+      />
+
+      <SpaceViewsDialog
+        open={viewsOpen}
+        onOpenChange={setViewsOpen}
+        spaceId={spaceId}
+        workspaceId={workspaceId}
+        initial={space?.viewConfig}
       />
 
       <ContainerEditDialog

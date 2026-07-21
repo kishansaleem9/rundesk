@@ -596,6 +596,43 @@ function ListDetail() {
   const [newTaskDueDate, setNewTaskDueDate] = useState('')
   const [newTaskStartDate, setNewTaskStartDate] = useState('')
   const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table' | 'gantt'>('list')
+  // §5 per-space view config (ClickUp "required views"): which task views this
+  // space's lists expose + the default that opens. Reuses the ['spaces', ws]
+  // cache, so it adds no fetch beyond what the sidebar/space page already do.
+  const spaceViewCfgQuery = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; viewConfig?: { defaultView?: string; enabledViews?: string[] } | null }>>(
+        `/spaces/workspace/${workspaceId}`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const spaceViewConfig = spaceViewCfgQuery.data?.find((s) => s.id === spaceId)?.viewConfig ?? null
+  const ALL_VIEWS = ['list', 'board', 'table', 'calendar', 'gantt'] as const
+  const enabledViews: Array<typeof activeView> =
+    spaceViewConfig?.enabledViews && spaceViewConfig.enabledViews.length
+      ? (spaceViewConfig.enabledViews.filter((v) => (ALL_VIEWS as readonly string[]).includes(v)) as Array<typeof activeView>)
+      : [...ALL_VIEWS]
+  // Keep a ref in sync so the keyboard 'v' cycler reads the live enabled set
+  // without re-subscribing its listener each time the config changes.
+  const enabledViewsRef = useRef(enabledViews)
+  enabledViewsRef.current = enabledViews
+  const appliedSpaceDefaultView = useRef(false)
+  useEffect(() => {
+    if (!spaceViewConfig) return
+    // Correct an active view the space no longer allows.
+    if (!enabledViews.includes(activeView)) {
+      setActiveView(enabledViews[0])
+      return
+    }
+    // Apply the space's default view once, on first load.
+    if (!appliedSpaceDefaultView.current) {
+      appliedSpaceDefaultView.current = true
+      const dv = spaceViewConfig.defaultView as typeof activeView | undefined
+      if (dv && enabledViews.includes(dv)) setActiveView(dv)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spaceViewConfig])
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
   const [sort, setSort] = useState<SortState>({ field: 'created', dir: 'desc' })
   // Per-column filters (status/priority/assignee) applied on top of the global
@@ -814,9 +851,14 @@ function ListDetail() {
       }
       if (event.key.toLowerCase() === 'v') {
         event.preventDefault()
-        const nextOrder: Array<typeof activeView> = ['list', 'board', 'table', 'calendar', 'gantt']
-        const idx = nextOrder.indexOf(activeView)
-        setActiveView(nextOrder[(idx + 1) % nextOrder.length])
+        // Cycle only through the views this space enables (§5 per-space config),
+        // so the shortcut can never land on a hidden view.
+        const order: Array<typeof activeView> = (
+          ['list', 'board', 'table', 'calendar', 'gantt'] as Array<typeof activeView>
+        ).filter((v) => enabledViewsRef.current.includes(v))
+        if (order.length === 0) return
+        const idx = order.indexOf(activeView)
+        setActiveView(order[(idx + 1) % order.length])
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -906,13 +948,15 @@ function ListDetail() {
     }
   }
 
-  const viewTabs: { id: typeof activeView; label: string }[] = [
-    { id: 'list', label: t('list.viewList') },
-    { id: 'board', label: t('list.viewBoard') },
-    { id: 'table', label: t('list.viewTable') },
-    { id: 'calendar', label: t('list.viewCalendar') },
-    { id: 'gantt', label: t('list.viewGantt') },
-  ]
+  const viewTabs: { id: typeof activeView; label: string }[] = (
+    [
+      { id: 'list', label: t('list.viewList') },
+      { id: 'board', label: t('list.viewBoard') },
+      { id: 'table', label: t('list.viewTable') },
+      { id: 'calendar', label: t('list.viewCalendar') },
+      { id: 'gantt', label: t('list.viewGantt') },
+    ] as { id: typeof activeView; label: string }[]
+  ).filter((tb) => enabledViews.includes(tb.id))
 
   const statusOptions = listStatuses.length
     ? listStatuses

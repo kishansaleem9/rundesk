@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { eq, and, or, ne, inArray } from 'drizzle-orm'
 import { spaces, spaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -6,6 +6,40 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { SecurityService } from '../security/security.service'
+
+// §5 per-space view config. The five task views a list can render.
+export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt'] as const
+type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number]
+
+/**
+ * Validate + normalise a space's view config so a bad body can never reach the
+ * jsonb column. Drops unknown view keys; guarantees the default view is one of
+ * the enabled views. `null` clears it (revert to all-views / list default).
+ */
+function normalizeViewConfig(
+  vc: { defaultView?: string; enabledViews?: string[] } | null,
+): { defaultView?: string; enabledViews?: string[] } | null {
+  if (vc === null) return null
+  if (typeof vc !== 'object' || Array.isArray(vc)) {
+    throw new BadRequestException('viewConfig must be an object or null')
+  }
+  const out: { defaultView?: string; enabledViews?: string[] } = {}
+  if (vc.enabledViews !== undefined) {
+    if (!Array.isArray(vc.enabledViews)) throw new BadRequestException('enabledViews must be an array')
+    const enabled = vc.enabledViews.filter((v): v is SpaceViewKey => SPACE_VIEW_KEYS.includes(v as SpaceViewKey))
+    // Never let a space end up with zero views — fall back to all.
+    out.enabledViews = enabled.length ? Array.from(new Set(enabled)) : [...SPACE_VIEW_KEYS]
+  }
+  if (vc.defaultView !== undefined) {
+    if (!SPACE_VIEW_KEYS.includes(vc.defaultView as SpaceViewKey)) {
+      throw new BadRequestException('invalid defaultView')
+    }
+    out.defaultView = vc.defaultView
+    // The default must be selectable, so ensure it's within the enabled set.
+    if (out.enabledViews && !out.enabledViews.includes(vc.defaultView)) out.enabledViews.push(vc.defaultView)
+  }
+  return out
+}
 
 @Injectable()
 export class SpacesService {
@@ -77,7 +111,13 @@ export class SpacesService {
 
   async updateSpace(
     spaceId: string,
-    data: Partial<{ name: string; description: string; color: string; icon: string }>,
+    data: Partial<{
+      name: string
+      description: string
+      color: string
+      icon: string
+      viewConfig: { defaultView?: string; enabledViews?: string[] } | null
+    }>,
     actorId?: string,
   ) {
     if (actorId) await this.assertManageable(spaceId, actorId)
@@ -87,6 +127,7 @@ export class SpacesService {
     for (const key of ['name', 'description', 'color', 'icon'] as const) {
       if (data[key] !== undefined) set[key] = data[key]
     }
+    if (data.viewConfig !== undefined) set.viewConfig = normalizeViewConfig(data.viewConfig)
     const result = await this.db
       .update(spaces)
       .set(set)

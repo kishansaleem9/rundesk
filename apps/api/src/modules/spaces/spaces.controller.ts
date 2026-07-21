@@ -42,7 +42,14 @@ export class SpacesController {
   async updateSpace(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: any,
-    @Body() body: Partial<{ name: string; description: string; color: string; icon: string }>,
+    @Body()
+    body: Partial<{
+      name: string
+      description: string
+      color: string
+      icon: string
+      viewConfig: { defaultView?: string; enabledViews?: string[] } | null
+    }>,
   ) {
     return this.spacesService.updateSpace(spaceId, body, user.id)
   }
