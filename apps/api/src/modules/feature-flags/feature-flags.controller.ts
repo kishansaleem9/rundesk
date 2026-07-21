@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Body, Param, UseGuards, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common'
+import { Controller, Get, Put, Body, Param, Query, UseGuards, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { FeatureFlagsService } from './feature-flags.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -14,12 +14,10 @@ export class FeatureFlagsController {
   constructor(private readonly featureFlagsService: FeatureFlagsService) {}
 
   @Get('resolved')
-  async getResolved(@CurrentUser() user: any) {
-    return this.featureFlagsService.resolveForUser({
-      userId: user.id,
-      workspaceId: user.activeWorkspaceId,
-      role: user.role,
-    })
+  async getResolved(@CurrentUser() user: any, @Query('workspaceId') workspaceId?: string) {
+    // workspaceId (optional) lets the client resolve flags for the workspace it
+    // is viewing; the service verifies the caller can see it before honouring.
+    return this.featureFlagsService.resolveForUserRequest(user, workspaceId)
   }
 
   @Get('workspace/:workspaceId')

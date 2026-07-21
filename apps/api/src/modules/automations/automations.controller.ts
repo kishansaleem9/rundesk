@@ -4,11 +4,17 @@ import { AutomationsService } from './automations.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
+import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
+// FeatureFlagGuard enforces the Automations ClickApp — a workspace that turns
+// Automations off gets 404s here. AI_AUTOMATIONS is default-enabled.
 @ApiTags('automations')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, FeatureFlagGuard)
+@FeatureFlag(FLAGS.AI_AUTOMATIONS)
 @Controller('workspaces/:workspaceId/automations')
 export class AutomationsController {
   constructor(private readonly svc: AutomationsService) {}

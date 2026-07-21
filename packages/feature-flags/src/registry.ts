@@ -155,6 +155,13 @@ export const DEFAULT_ENABLED_FLAGS: FlagKey[] = [
   FLAGS.VIEWS_GANTT,
   FLAGS.VIEWS_TABLE,
   FLAGS.VIEWS_DASHBOARD,
+  // Top-level domains that ship on for every workspace. Listed here so backend
+  // FeatureFlagGuard treats them as enabled by default (it reads `?? false`),
+  // matching the frontend gate — a workspace only loses them via an explicit
+  // "off" override in Settings → Features.
+  FLAGS.FORMS,
+  FLAGS.GOALS,
+  FLAGS.SPRINTS,
   FLAGS.CHAT,
   FLAGS.CHAT_CHANNELS,
   FLAGS.CHAT_DM,

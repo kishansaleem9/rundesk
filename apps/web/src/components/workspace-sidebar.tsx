@@ -52,6 +52,8 @@ import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { useResolvedFlags } from '../lib/use-feature-flags'
+import { FLAGS } from '@rundesk/feature-flags'
 
 function isUuidLike(value: string | undefined): value is string {
   if (!value) return false
@@ -169,6 +171,8 @@ export function WorkspaceSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : undefined
   const { isAdmin } = useWorkspaceRole(workspaceId)
+  // §5 ClickApps — hide nav entries for features a workspace admin turned off.
+  const { featureEnabled } = useResolvedFlags(workspaceId)
   const [openSwitcher, setOpenSwitcher] = useState(false)
   const [spacesExpanded, setSpacesExpanded] = useState(true)
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
@@ -850,17 +854,33 @@ export function WorkspaceSidebar() {
             </button>
             {browseExpanded && (
               <div className="space-y-1">
-                <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact />
+                {featureEnabled(FLAGS.AI) && (
+                  <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact />
+                )}
                 <NavLink to="/app/$workspaceId/whiteboards" params={{ workspaceId }} icon={Frame} label={t('nav.whiteboards')} compact />
-                <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label={t('nav.forms')} compact />
-                <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label={t('nav.automations')} compact />
-                <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label={t('nav.workload')} compact />
+                {featureEnabled(FLAGS.FORMS) && (
+                  <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label={t('nav.forms')} compact />
+                )}
+                {featureEnabled(FLAGS.AI_AUTOMATIONS) && (
+                  <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label={t('nav.automations')} compact />
+                )}
+                {featureEnabled(FLAGS.VIEWS_WORKLOAD) && (
+                  <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label={t('nav.workload')} compact />
+                )}
                 <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label={t('nav.timeline')} compact />
-                <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label={t('nav.goals')} compact />
-                <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label={t('nav.reports')} compact />
-                <NavLink to={"/app/$workspaceId/time" as any} params={{ workspaceId }} icon={Clock3} label={t('nav.time')} compact />
+                {featureEnabled(FLAGS.GOALS) && (
+                  <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label={t('nav.goals')} compact />
+                )}
+                {featureEnabled(FLAGS.REPORTING) && (
+                  <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label={t('nav.reports')} compact />
+                )}
+                {featureEnabled(FLAGS.TIME_TRACKING) && (
+                  <NavLink to={"/app/$workspaceId/time" as any} params={{ workspaceId }} icon={Clock3} label={t('nav.time')} compact />
+                )}
                 <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label={t('nav.templates')} compact />
-                <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label={t('nav.integrations')} compact />
+                {featureEnabled(FLAGS.INTEGRATIONS) && (
+                  <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label={t('nav.integrations')} compact />
+                )}
                 <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label={t('nav.mindMaps')} compact />
                 <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label={t('nav.clips')} compact />
                 {isAdmin && (
@@ -1244,10 +1264,18 @@ export function WorkspaceSidebar() {
           >
             <DockLink to="/app/$workspaceId" params={{ workspaceId: workspaceId! }} icon={Home} label={t('nav.home')} />
             <DockLink to="/app/$workspaceId/inbox" params={{ workspaceId: workspaceId! }} icon={Inbox} label={t('nav.inbox')} />
-            <DockLink to="/app/$workspaceId/chat" params={{ workspaceId: workspaceId! }} icon={MessageCircle} label={t('nav.chat')} />
-            <DockLink to="/app/$workspaceId/ai" params={{ workspaceId: workspaceId! }} icon={Bot} label={t('nav.ai')} />
-            <DockLink to="/app/$workspaceId/docs" params={{ workspaceId: workspaceId! }} icon={FileText} label={t('nav.docs')} />
-            <DockLink to="/app/$workspaceId/dashboard" params={{ workspaceId: workspaceId! }} icon={LayoutDashboard} label={t('nav.dashboards')} />
+            {featureEnabled(FLAGS.CHAT) && (
+              <DockLink to="/app/$workspaceId/chat" params={{ workspaceId: workspaceId! }} icon={MessageCircle} label={t('nav.chat')} />
+            )}
+            {featureEnabled(FLAGS.AI) && (
+              <DockLink to="/app/$workspaceId/ai" params={{ workspaceId: workspaceId! }} icon={Bot} label={t('nav.ai')} />
+            )}
+            {featureEnabled(FLAGS.DOCS) && (
+              <DockLink to="/app/$workspaceId/docs" params={{ workspaceId: workspaceId! }} icon={FileText} label={t('nav.docs')} />
+            )}
+            {featureEnabled(FLAGS.VIEWS_DASHBOARD) && (
+              <DockLink to="/app/$workspaceId/dashboard" params={{ workspaceId: workspaceId! }} icon={LayoutDashboard} label={t('nav.dashboards')} />
+            )}
             {isAdmin && (
               <DockLink to="/app/$workspaceId/settings" params={{ workspaceId: workspaceId! }} icon={Settings} label={t('nav.settings')} />
             )}

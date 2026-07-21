@@ -15,12 +15,20 @@ import { FormsService } from './forms.service'
 import { CreateFormDto, AddFormFieldDto, SubmitFormDto } from './dto/form.dto'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
+import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 // ─── Workspace-scoped routes (JWT-protected) ──────────────────────────────────
+// FeatureFlagGuard enforces the Forms ClickApp: if a workspace turns Forms off
+// in Settings → Features, these routes 404. FORMS is default-enabled, so
+// existing workspaces are unaffected. (The public submission controller below
+// stays open so already-shared forms keep working.)
 @ApiTags('forms')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, FeatureFlagGuard)
+@FeatureFlag(FLAGS.FORMS)
 @Controller('workspaces/:workspaceId/forms')
 export class WorkspaceFormsController {
   constructor(private readonly formsService: FormsService) {}

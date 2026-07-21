@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Archive, Upload, RotateCcw, CreditCard } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Archive, Upload, RotateCcw, CreditCard, ToggleRight } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
@@ -12,6 +12,10 @@ import { GroupsTab } from '../components/groups-tab'
 import { RolesTab } from '../components/roles-tab'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { LanguageSwitcher } from '../components/language-switcher'
+import { useResolvedFlags } from '../lib/use-feature-flags'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { FLAGS } from '@rundesk/feature-flags'
+import type { FlagKey } from '@rundesk/feature-flags'
 
 type Workspace = {
   id: string
@@ -56,6 +60,7 @@ const TABS = [
   { id: 'members', labelKey: 'settings.tabMembers', icon: Users },
   { id: 'groups', labelKey: 'settings.tabGroups', icon: Users2 },
   { id: 'roles', labelKey: 'settings.tabRoles', icon: ShieldCheck },
+  { id: 'features', labelKey: 'settings.tabFeatures', icon: ToggleRight },
   { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
   { id: 'security', labelKey: 'settings.tabSecurity', icon: Shield },
   { id: 'sso', labelKey: 'settings.tabSso', icon: KeyRound },
@@ -133,6 +138,7 @@ export function SettingsPage() {
             {tab === 'members' && <MembersTab workspaceId={validWorkspaceId} />}
             {tab === 'groups' && <GroupsTab workspaceId={validWorkspaceId} />}
             {tab === 'roles' && <RolesTab workspaceId={validWorkspaceId} />}
+            {tab === 'features' && <FeaturesTab workspaceId={validWorkspaceId} />}
             {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
             {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
             {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
@@ -397,6 +403,94 @@ function BillingCard({ workspaceId }: { workspaceId: string }) {
         )}
       </div>
     </Card>
+  )
+}
+
+// §5 ClickApps — top-level features a workspace admin switches on/off. Each maps
+// to a feature flag; disabling one hides its nav entry, and for the flags with
+// backend enforcement (chat, docs, reports, forms, goals, sprints, automations)
+// also 404s its API. Names reuse the localized nav catalog keys.
+const CLICKAPPS: { flag: FlagKey; nameKey: TranslationKey; descKey: TranslationKey }[] = [
+  { flag: FLAGS.CHAT, nameKey: 'nav.chat', descKey: 'settings.featDescChat' },
+  { flag: FLAGS.DOCS, nameKey: 'nav.docs', descKey: 'settings.featDescDocs' },
+  { flag: FLAGS.FORMS, nameKey: 'nav.forms', descKey: 'settings.featDescForms' },
+  { flag: FLAGS.GOALS, nameKey: 'nav.goals', descKey: 'settings.featDescGoals' },
+  { flag: FLAGS.SPRINTS, nameKey: 'settings.featSprints', descKey: 'settings.featDescSprints' },
+  { flag: FLAGS.TIME_TRACKING, nameKey: 'nav.time', descKey: 'settings.featDescTime' },
+  { flag: FLAGS.REPORTING, nameKey: 'nav.reports', descKey: 'settings.featDescReports' },
+  { flag: FLAGS.INTEGRATIONS, nameKey: 'nav.integrations', descKey: 'settings.featDescIntegrations' },
+  { flag: FLAGS.AI, nameKey: 'nav.ai', descKey: 'settings.featDescAi' },
+  { flag: FLAGS.AI_AUTOMATIONS, nameKey: 'nav.automations', descKey: 'settings.featDescAutomations' },
+  { flag: FLAGS.VIEWS_DASHBOARD, nameKey: 'nav.dashboards', descKey: 'settings.featDescDashboards' },
+  { flag: FLAGS.VIEWS_WORKLOAD, nameKey: 'nav.workload', descKey: 'settings.featDescWorkload' },
+]
+
+function FeaturesTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const { isAdmin } = useWorkspaceRole(workspaceId)
+  const { flags, isLoading } = useResolvedFlags(workspaceId)
+
+  const setFlag = useMutation({
+    mutationFn: ({ flag, enabled }: { flag: FlagKey; enabled: boolean }) =>
+      api(`/feature-flags/${encodeURIComponent(flag)}`, {
+        method: 'PUT',
+        body: { enabled, scope: 'workspace', scopeId: workspaceId, workspaceId },
+      }),
+    onSuccess: () => {
+      // Refresh every resolved-flags consumer (this tab + the sidebar nav).
+      qc.invalidateQueries({ queryKey: ['feature-flags', 'resolved'] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('settings.featureSaveError')),
+  })
+
+  // "On unless explicitly disabled" — matches the nav gate and backend defaults.
+  const isOn = (flag: FlagKey) => flags?.[flag] !== false
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">{t('settings.featuresTitle')}</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">{t('settings.featuresSubtitle')}</p>
+      </div>
+      {!isAdmin && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
+          {t('settings.featuresAdminOnly')}
+        </div>
+      )}
+      <Card className="overflow-hidden divide-y divide-border/70">
+        {CLICKAPPS.map(({ flag, nameKey, descKey }) => {
+          const on = isOn(flag)
+          return (
+            <div key={flag} className="flex items-center gap-4 px-4 py-3">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium">{t(nameKey)}</div>
+                <div className="text-xs text-muted-foreground">{t(descKey)}</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={on}
+                aria-label={t(nameKey)}
+                disabled={!isAdmin || isLoading || setFlag.isPending}
+                onClick={() => setFlag.mutate({ flag, enabled: !on })}
+                className={cn(
+                  'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+                  on ? 'bg-brand-500' : 'bg-muted-foreground/30',
+                )}
+              >
+                <span
+                  className={cn(
+                    'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all',
+                    on ? 'left-[22px]' : 'left-0.5',
+                  )}
+                />
+              </button>
+            </div>
+          )
+        })}
+      </Card>
+    </div>
   )
 }
 

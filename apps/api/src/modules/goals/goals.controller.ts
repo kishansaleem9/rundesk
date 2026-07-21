@@ -3,15 +3,21 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
+import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { GoalsService } from './goals.service'
 import type { CurrentUserPayload } from '../tasks/types'
 import type { GoalKind, GoalStatus } from '@rundesk/db'
 
+// FeatureFlagGuard enforces the Goals ClickApp — a workspace that turns Goals
+// off gets 404s here. GOALS is default-enabled, so existing workspaces keep it.
 @ApiTags('goals')
 @ApiBearerAuth()
 @Controller()
-@UseGuards(JwtAuthGuard, ResourceMemberGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard, FeatureFlagGuard)
+@FeatureFlag(FLAGS.GOALS)
 export class GoalsController {
   constructor(private goals: GoalsService) {}
 

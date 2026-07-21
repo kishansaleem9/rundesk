@@ -39,11 +39,64 @@ export class FeatureFlagsService {
     return { flags: flags as Record<FlagKey, boolean>, resolvedAt: Date.now() }
   }
 
+  /**
+   * Resolve flags for the workspace the caller is actually looking at. The
+   * frontend passes the route workspaceId so nav gating reflects the viewed
+   * workspace rather than only the token's active one. An explicit workspaceId
+   * is honoured only when the caller can see it (super_admin, or a member),
+   * so feature config can't be probed for arbitrary workspaces; otherwise we
+   * fall back to the token's active workspace.
+   */
+  async resolveForUserRequest(
+    user: { id: string; activeWorkspaceId?: string; role?: string },
+    requestedWorkspaceId?: string,
+  ): Promise<ResolvedFlags> {
+    let workspaceId = user.activeWorkspaceId
+    if (requestedWorkspaceId && requestedWorkspaceId !== user.activeWorkspaceId) {
+      if (user.role === 'super_admin') {
+        workspaceId = requestedWorkspaceId
+      } else {
+        const [member] = await this.db
+          .select({ userId: workspaceMembers.userId })
+          .from(workspaceMembers)
+          .where(and(eq(workspaceMembers.workspaceId, requestedWorkspaceId), eq(workspaceMembers.userId, user.id)))
+          .limit(1)
+        if (member) workspaceId = requestedWorkspaceId
+      }
+    }
+    return this.resolveForUser({ userId: user.id, workspaceId: workspaceId ?? '', role: user.role ?? '' })
+  }
+
   invalidateCache(userId?: string, workspaceId?: string) {
     if (userId && workspaceId) {
       this.cache.delete(`${userId}:${workspaceId}`)
     } else {
       // Invalidate all — used when global or workspace-wide flag changes
+      this.cache.clear()
+    }
+  }
+
+  /**
+   * Drop cache entries affected by a flag change. Cache keys are
+   * `${userId}:${workspaceId}`, so a workspace-scoped change must clear every
+   * user's entry for that workspace (not a single synthetic key) — otherwise a
+   * toggle wouldn't take effect until the 5-minute TTL expired.
+   */
+  private invalidateForFlagChange(
+    scope: 'global' | 'workspace' | 'role' | 'user',
+    scopeId: string | null,
+    workspaceId: string | null,
+  ) {
+    if (scope === 'workspace' && workspaceId) {
+      for (const key of [...this.cache.keys()]) {
+        if (key.endsWith(`:${workspaceId}`)) this.cache.delete(key)
+      }
+    } else if (scope === 'user' && scopeId) {
+      for (const key of [...this.cache.keys()]) {
+        if (key.startsWith(`${scopeId}:`)) this.cache.delete(key)
+      }
+    } else {
+      // global / role changes fan out across users — clear everything.
       this.cache.clear()
     }
   }
@@ -112,7 +165,7 @@ export class FeatureFlagsService {
       target: [featureFlags.flagKey, featureFlags.scope, featureFlags.scopeId, featureFlags.workspaceId],
       set: { enabled, updatedBy, updatedAt: new Date() },
     })
-    this.invalidateCache(scopeId ?? undefined, workspaceId ?? undefined)
+    this.invalidateForFlagChange(scope, scopeId, workspaceId)
     await this.security.logAuditEvent({
       workspaceId: workspaceId ?? undefined,
       actorId: updatedBy,

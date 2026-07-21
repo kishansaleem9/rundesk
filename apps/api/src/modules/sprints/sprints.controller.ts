@@ -3,16 +3,22 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
+import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
+import { FLAGS } from '@rundesk/feature-flags'
 import { SprintsService } from './sprints.service'
 import { CreateSprintDto } from './dto/sprint.dto'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import type { CurrentUserPayload } from '../tasks/types'
 import type { SprintStatus } from '@rundesk/db'
 
+// FeatureFlagGuard enforces the Sprints ClickApp — a workspace that turns
+// Sprints off gets 404s here. SPRINTS is default-enabled.
 @ApiTags('sprints')
 @ApiBearerAuth()
 @Controller()
-@UseGuards(JwtAuthGuard, ResourceMemberGuard)
+@UseGuards(JwtAuthGuard, ResourceMemberGuard, FeatureFlagGuard)
+@FeatureFlag(FLAGS.SPRINTS)
 export class SprintsController {
   constructor(private sprints: SprintsService) {}
 
