@@ -214,6 +214,22 @@ export function WorkspaceSidebar() {
     }
   }
 
+  // §2.4 — create a project directly under a space from the sidebar (the "+" on
+  // a space row), so users don't have to open the global create modal each time.
+  const createProject = async (spaceId: string) => {
+    if (!workspaceId) return
+    const name = window.prompt(t('nav.newProjectPrompt'))?.trim()
+    if (!name) return
+    try {
+      const created = await api<{ id: string }>(`/projects`, { method: 'POST', body: { spaceId, name } })
+      setExpandedSpaces((prev) => ({ ...prev, [spaceId]: true }))
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      navigate({ to: '/app/$workspaceId/$spaceId/$projectId', params: { workspaceId, spaceId, projectId: created.id } })
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : t('nav.createProjectError'))
+    }
+  }
+
   const moveProject = async (projectId: string, folderId: string | null) => {
     try {
       await api(`/projects/${projectId}`, { method: 'PUT', body: { folderId } })
@@ -1047,6 +1063,14 @@ export function WorkspaceSidebar() {
                     >
                       {space.name}
                     </Link>
+                  </button>
+                  <button
+                    className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground"
+                    aria-label={t('nav.addProjectTo', { name: space.name })}
+                    title={t('nav.newProject')}
+                    onClick={() => void createProject(space.id)}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
                   </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

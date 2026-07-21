@@ -44,6 +44,16 @@ const CONTAINER_COLORS = [
   '#64748b',
 ]
 
+// A curated set of space/project icons — clickable so users don't have to know
+// how to type an emoji (the free-text box below still accepts any single emoji
+// or letter). Kept in-app so it works offline with no external picker/CDN.
+const CONTAINER_ICONS = [
+  '🚀', '🏠', '💼', '📁', '🗂️', '🎯', '⭐', '🔥',
+  '💡', '📊', '📈', '🛠️', '⚙️', '🎨', '🧩', '📌',
+  '✅', '🧠', '💬', '📅', '🏆', '🌐', '🧪', '🐛',
+  '🔒', '💰', '👥', '🏢', '🎓', '🩺', '✈️', '📣',
+]
+
 /**
  * Shared rename / edit dialog for the container CRUD affordances (spaces,
  * folders, projects, lists). The parent owns the open state and the mutation;
@@ -135,14 +145,44 @@ export function ContainerEditDialog({
           {fields.icon && (
             <div className="space-y-1.5">
               <Label htmlFor="container-edit-icon">{t('space.iconLabel')}</Label>
-              <Input
-                id="container-edit-icon"
-                value={icon}
-                maxLength={8}
-                onChange={(e) => setIcon(e.target.value)}
-                placeholder={t('space.iconPlaceholder')}
-                className="w-24"
-              />
+              <div className="flex flex-wrap gap-1">
+                {CONTAINER_ICONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => setIcon(emoji)}
+                    aria-label={emoji}
+                    aria-pressed={icon === emoji}
+                    className={cn(
+                      'h-8 w-8 rounded-md border text-lg leading-none transition-colors',
+                      icon === emoji
+                        ? 'border-brand-500 bg-brand-500/10'
+                        : 'border-border/70 hover:bg-accent/10',
+                    )}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 pt-0.5">
+                <Input
+                  id="container-edit-icon"
+                  value={icon}
+                  maxLength={8}
+                  onChange={(e) => setIcon(e.target.value)}
+                  placeholder={t('space.iconPlaceholder')}
+                  className="w-24"
+                />
+                {icon && (
+                  <button
+                    type="button"
+                    onClick={() => setIcon('')}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    {t('space.colorClear')}
+                  </button>
+                )}
+              </div>
               <p className="text-[11px] text-muted-foreground">{t('space.iconHint')}</p>
             </div>
           )}
