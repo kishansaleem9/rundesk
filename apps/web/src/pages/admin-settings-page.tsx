@@ -5,7 +5,7 @@ import { Settings } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
-import { FLAGS } from '@rundesk/feature-flags'
+import { FLAGS, DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
 
 type WorkspaceEntry = {
@@ -105,7 +105,10 @@ export function AdminSettingsPage() {
         <ul className="divide-y divide-border">
           {WORKSPACE_SCOPED_FLAGS.map((flag) => {
             const row = latestByFlag.get(flag.value)
-            const enabled = row?.enabled ?? false
+            // With no workspace override the flag falls back to the platform
+            // default, so default-on features (Docs, Forms, Goals, Sprints…)
+            // show as enabled rather than being mislabeled "disabled".
+            const enabled = row ? row.enabled : DEFAULT_ENABLED_FLAGS.includes(flag.value)
             return (
               <li key={flag.value} className="px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
