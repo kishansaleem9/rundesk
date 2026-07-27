@@ -14,6 +14,7 @@ import { ProjectsModule } from './modules/projects/projects.module'
 import { ClientsModule } from './modules/clients/clients.module'
 import { FoldersModule } from './modules/folders/folders.module'
 import { TrashModule } from './modules/trash/trash.module'
+import { SharesModule } from './modules/shares/shares.module'
 import { ContainerMembersModule } from './modules/container-members/container-members.module'
 import { ListsModule } from './modules/lists/lists.module'
 import { TasksModule } from './modules/tasks/tasks.module'
@@ -94,6 +95,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     ClientsModule,
     FoldersModule,
     TrashModule,
+    SharesModule,
     ContainerMembersModule,
     ListsModule,
     TasksModule,

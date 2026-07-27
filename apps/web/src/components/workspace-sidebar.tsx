@@ -30,6 +30,7 @@ import {
   X,
   MoreHorizontal,
   ArrowRightLeft,
+  Share2,
   FolderPlus,
   Pencil,
   Trash2,
@@ -53,6 +54,7 @@ import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { MoveDialog, type MovableKind } from './move-dialog'
+import { SharePanel, type ShareObjectType } from './share-panel'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS } from '@rundesk/feature-flags'
 
@@ -178,6 +180,8 @@ export function WorkspaceSidebar() {
   const [moveItem, setMoveItem] = useState<
     { kind: MovableKind; id: string; name: string; spaceId: string; parentId: string | null } | null
   >(null)
+  // Whatever the user chose to share — one panel serves every object type.
+  const [shareItem, setShareItem] = useState<{ type: ShareObjectType; id: string; name: string } | null>(null)
   const [openSwitcher, setOpenSwitcher] = useState(false)
   const [spacesExpanded, setSpacesExpanded] = useState(true)
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
@@ -955,6 +959,12 @@ export function WorkspaceSidebar() {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
+                          onClick={() => setShareItem({ type: 'project', id: project.id, name: project.name })}
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                          {t('share.menuAction')}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
                           onClick={() =>
                             setMoveItem({
                               kind: 'project',
@@ -1025,6 +1035,12 @@ export function WorkspaceSidebar() {
                               >
                                 {list.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
                                 {list.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setShareItem({ type: 'list', id: list.id, name: list.name })}
+                              >
+                                <Share2 className="h-3.5 w-3.5" />
+                                {t('share.menuAction')}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() =>
@@ -1108,6 +1124,10 @@ export function WorkspaceSidebar() {
                         <Pencil className="h-3.5 w-3.5" />
                         {t('container.rename')}
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setShareItem({ type: 'space', id: space.id, name: space.name })}>
+                        <Share2 className="h-3.5 w-3.5" />
+                        {t('share.menuAction')}
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="text-destructive focus:text-destructive"
@@ -1162,6 +1182,12 @@ export function WorkspaceSidebar() {
                                 >
                                   {folder.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
                                   {folder.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => setShareItem({ type: 'folder', id: folder.id, name: folder.name })}
+                                >
+                                  <Share2 className="h-3.5 w-3.5" />
+                                  {t('share.menuAction')}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() =>
@@ -1413,6 +1439,16 @@ export function WorkspaceSidebar() {
         submitting={savingSpace}
         onSubmit={submitSpaceDialog}
       />
+
+      {shareItem && (
+        <SharePanel
+          open
+          onOpenChange={(next) => { if (!next) setShareItem(null) }}
+          objectType={shareItem.type}
+          objectId={shareItem.id}
+          objectName={shareItem.name}
+        />
+      )}
 
       {moveItem && workspaceId && (
         <MoveDialog

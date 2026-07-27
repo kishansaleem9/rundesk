@@ -596,6 +596,13 @@
       "when": 1900000081000,
       "tag": "0084_trash_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1900000082000,
+      "tag": "0085_object_shares",
+      "breakpoints": true
     }
   ]
 }

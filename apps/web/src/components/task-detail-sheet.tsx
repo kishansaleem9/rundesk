@@ -37,11 +37,12 @@ import {
   Box,
   Video,
   Lock,
-  Globe,
+  Globe, Share2,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
+import { SharePanel } from './share-panel'
 import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -374,6 +375,8 @@ export function TaskDetailSheet({
   const { t } = useTranslation()
   const { formatDate } = useDateFormat()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  // §Share — one panel, shared with every other object type.
+  const [shareOpen, setShareOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -638,6 +641,15 @@ export function TaskDetailSheet({
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
+                    title={t('share.menuAction')}
+                    aria-label={t('share.menuAction')}
+                    onClick={() => setShareOpen(true)}
+                    className="h-8 w-8 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  >
+                    <Share2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
                     title={detailQuery.data.visibility === 'private' ? t('taskDetail.makePublic') : t('taskDetail.makePrivate')}
                     aria-pressed={detailQuery.data.visibility === 'private'}
                     disabled={updateVisibility.isPending}
@@ -792,6 +804,15 @@ export function TaskDetailSheet({
           <p className="text-sm text-destructive">{t('taskDetail.notFound')}</p>
         )}
       </SheetContent>
+      {taskId && (
+        <SharePanel
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          objectType="task"
+          objectId={taskId}
+          objectName={detailQuery.data?.title}
+        />
+      )}
     </Sheet>
   )
 }
