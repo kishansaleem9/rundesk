@@ -41,8 +41,34 @@ jget() { grep -o "\"$1\":\"[^\"]*\"" | head -1 | sed "s/\"$1\":\"//;s/\"$//"; }
 say() { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+# The API container is usually still booting when this runs right after a
+# deploy. Docker binds the host port immediately, so an early probe gets
+# "connection reset by peer" rather than "refused" — that is not a failure yet.
+api_container() {
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -iE '(^|-)api$|rundesk-api' | head -1 || true
+}
+
 say "API health"
-curl -fsS --max-time 10 "$API/health" >/dev/null || die "API not answering on $API — is the stack up? (docker ps)"
+HEALTHY=no
+for _ in $(seq 1 45); do
+  if curl -fsS --max-time 5 "$API/health" >/dev/null 2>&1; then HEALTHY=yes; break; fi
+  printf '.'
+  sleep 2
+done
+if [ "$HEALTHY" != yes ]; then
+  printf '\n'
+  printf '\033[1;31m✗ API still not answering on %s after 90s.\033[0m\n' "$API" >&2
+  if command -v docker >/dev/null 2>&1; then
+    C="$(api_container)"; C="${C:-rundesk-api}"
+    printf '\n--- docker ps ---\n'
+    docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1 | head -12 || true
+    printf '\n--- last 40 lines of %s ---\n' "$C"
+    docker logs --tail 40 "$C" 2>&1 || true
+    printf '\n'
+  fi
+  die "The API is not serving — the log above says why. Restart it with:
+     docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d --force-recreate api"
+fi
 echo "  ok"
 
 say "Signing in as $EMAIL"
@@ -76,8 +102,7 @@ curl -fsS --max-time 20 "$API/shares/space/$SPACE" -H "Authorization: Bearer $TO
 
 say "What the mail layer did"
 if command -v docker >/dev/null 2>&1; then
-  # No match / no daemon must not abort the run — we still want the legend below.
-  CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE '(^|-)api$|rundesk-api' | head -1 || true)
+  CONTAINER="$(api_container)"
   CONTAINER="${CONTAINER:-rundesk-api}"
   LOGS=$(docker logs --since 5m "$CONTAINER" 2>&1 | grep -iE "EMAIL SENT|DEV EMAIL|SMTP|notification email failed" | tail -8 || true)
   if [ -n "$LOGS" ]; then printf '%s\n' "$LOGS"; else echo "  (nothing from the mail layer in the last 5 minutes of $CONTAINER)"; fi
