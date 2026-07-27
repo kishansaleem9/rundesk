@@ -184,7 +184,7 @@ type TaskPickerItem = {
   projectName?: string
 }
 
-type ChecklistItem = { id: string; content: string; isDone: boolean; dueDate?: string | null }
+type ChecklistItem = { id: string; content: string; isDone: boolean; dueDate?: string | null; assigneeId?: string | null }
 type Checklist = { id: string; title: string; items: ChecklistItem[] }
 
 type Watcher = {
@@ -766,7 +766,12 @@ export function TaskDetailSheet({
                 />
               )}
               {activeTab === 'checklists' && (
-                <ChecklistsPanel taskId={detailQuery.data.id} checklists={detailQuery.data.checklists ?? []} />
+                <ChecklistsPanel
+                  taskId={detailQuery.data.id}
+                  listId={detailQuery.data.listId}
+                  workspaceId={fallbackWorkspaceId}
+                  checklists={detailQuery.data.checklists ?? []}
+                />
               )}
               {activeTab === 'watchers' && (
                 <WatchersPanel
@@ -2144,15 +2149,26 @@ function SubtasksPanel({
 
 function ChecklistsPanel({
   taskId,
+  listId,
+  workspaceId,
   checklists,
 }: {
   taskId: string
+  listId: string
+  workspaceId?: string
   checklists: Checklist[]
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [itemText, setItemText] = useState('')
-  const [itemDueDate, setItemDueDate] = useState('')
+  const [itemAssignee, setItemAssignee] = useState('')
+
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<WorkspaceMemberLite[]>(`/workspaces/${workspaceId}/members`),
+    enabled: !!workspaceId,
+  })
+  const members = membersQuery.data ?? []
   const [editingChecklistId, setEditingChecklistId] = useState<string | null>(null)
   const [editingChecklistTitle, setEditingChecklistTitle] = useState('')
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
@@ -2174,12 +2190,12 @@ function ChecklistsPanel({
       const checklist = firstChecklist ?? (await createChecklist.mutateAsync())
       return api(`/tasks/${taskId}/checklists/${checklist.id}/items`, {
         method: 'POST',
-        body: JSON.stringify({ content: itemText, dueDate: itemDueDate || null }),
+        body: JSON.stringify({ content: itemText, assigneeId: itemAssignee || null }),
       })
     },
     onSuccess: async () => {
       setItemText('')
-      setItemDueDate('')
+      setItemAssignee('')
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
   })
@@ -2215,13 +2231,33 @@ function ChecklistsPanel({
     },
   })
   const updateItemMeta = useMutation({
-    mutationFn: ({ itemId, dueDate }: { itemId: string; dueDate: string | null }) =>
+    mutationFn: ({ itemId, ...patch }: { itemId: string; dueDate?: string | null; assigneeId?: string | null }) =>
       api(`/tasks/${taskId}/checklists/items/${itemId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ dueDate }),
+        body: JSON.stringify(patch),
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
+
+  const convertItem = useMutation({
+    mutationFn: async ({ item, asSubtask }: { item: ChecklistItem; asSubtask: boolean }) => {
+      await api('/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: item.content,
+          listId,
+          ...(asSubtask ? { parentTaskId: taskId } : {}),
+          ...(item.assigneeId ? { assigneeIds: [item.assigneeId] } : {}),
+        }),
+      })
+      // The item has become the task; leaving it would duplicate the work.
+      await api(`/tasks/${taskId}/checklists/items/${item.id}`, { method: 'DELETE' })
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      await qc.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
 
@@ -2355,15 +2391,40 @@ function ChecklistsPanel({
                         {t('taskDetail.edit')}
                       </button>
                     )}
-                    <Input
-                      type="date"
-                      value={item.dueDate ? item.dueDate.slice(0, 10) : ''}
-                      onChange={(e) => updateItemMeta.mutate({ itemId: item.id, dueDate: e.target.value || null })}
-                      className="h-7 w-[145px]"
-                    />
+                    {/* The client asked for an assignee here rather than a date:
+                        a checklist line is work someone owns, not a deadline. */}
+                    <select
+                      value={item.assigneeId ?? ''}
+                      onChange={(e) => updateItemMeta.mutate({ itemId: item.id, assigneeId: e.target.value || null })}
+                      aria-label={t('taskDetail.checklistAssignLabel', { item: item.content })}
+                      className="h-7 w-[145px] shrink-0 rounded-md border border-border bg-background px-1.5 text-[12px]"
+                    >
+                      <option value="">{t('taskDetail.checklistUnassigned')}</option>
+                      {members.map((m) => (
+                        <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+                      ))}
+                    </select>
                     <button
                       type="button"
-                      className="text-xs text-rose-500 hover:text-rose-600"
+                      className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                      title={t('taskDetail.checklistConvertTask')}
+                      disabled={convertItem.isPending}
+                      onClick={() => convertItem.mutate({ item, asSubtask: false })}
+                    >
+                      {t('taskDetail.checklistConvertTask')}
+                    </button>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
+                      title={t('taskDetail.checklistConvertSubtask')}
+                      disabled={convertItem.isPending}
+                      onClick={() => convertItem.mutate({ item, asSubtask: true })}
+                    >
+                      {t('taskDetail.checklistConvertSubtask')}
+                    </button>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs text-rose-500 hover:text-rose-600"
                       onClick={() => deleteItem.mutate(item.id)}
                     >
                       {t('common.delete')}
@@ -2388,12 +2449,17 @@ function ChecklistsPanel({
           onChange={(e) => setItemText(e.target.value)}
           placeholder={t('taskDetail.addChecklistItemPlaceholder')}
         />
-        <Input
-          type="date"
-          value={itemDueDate}
-          onChange={(e) => setItemDueDate(e.target.value)}
-          className="w-[155px]"
-        />
+        <select
+          value={itemAssignee}
+          onChange={(e) => setItemAssignee(e.target.value)}
+          aria-label={t('taskDetail.checklistAssignNewLabel')}
+          className="h-9 w-[155px] shrink-0 rounded-md border border-border bg-background px-2 text-sm"
+        >
+          <option value="">{t('taskDetail.checklistUnassigned')}</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+          ))}
+        </select>
         <Button type="submit" disabled={!itemText.trim() || addItem.isPending} size="sm">
           {t('taskDetail.add')}
         </Button>

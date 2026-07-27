@@ -529,11 +529,13 @@ function ListColumnBar({
   columnFilters,
   onColumnFilters,
   workspaceMembers,
+  groupBy,
 }: {
   sort: SortState
   onSort: (field: SortField) => void
   columnFilters: ColumnFilters
   onColumnFilters: (updater: (prev: ColumnFilters) => ColumnFilters) => void
+  groupBy: 'status' | 'priority' | 'assignee'
   workspaceMembers: WorkspaceMember[]
 }) {
   const { t } = useTranslation()
@@ -549,10 +551,13 @@ function ListColumnBar({
     ...workspaceMembers.map((m) => ({ value: m.userId, label: m.displayName || m.email })),
   ]
 
+  // Every group header already carries the value you grouped by, so repeating it
+  // as a column is noise — ClickUp drops it for exactly this reason. The status
+  // filter and sort both still live in the toolbar above.
   return (
     <div className="group mb-2 flex items-center gap-3 rounded-lg border border-border bg-card/50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
       <SortHeaderButton label={t('list.table.colTitle')} field="title" sort={sort} onSort={onSort} className="flex-1" />
-      <div className="flex items-center gap-1 w-28 shrink-0">
+      <div className={cn('items-center gap-1 w-28 shrink-0', groupBy === 'status' ? 'hidden' : 'flex')}>
         <SortHeaderButton label={t('taskDetail.fieldStatus')} field="status" sort={sort} onSort={onSort} />
         <ColumnFilterMenu
           ariaLabel={t('list.filter.ariaStatus')}
@@ -561,7 +566,7 @@ function ListColumnBar({
           onChange={(next) => onColumnFilters((f) => ({ ...f, statuses: next }))}
         />
       </div>
-      <div className="flex items-center gap-1 w-24 shrink-0">
+      <div className={cn('items-center gap-1 w-24 shrink-0', groupBy === 'priority' ? 'hidden' : 'flex')}>
         <SortHeaderButton label={t('taskDetail.fieldPriority')} field="priority" sort={sort} onSort={onSort} />
         <ColumnFilterMenu
           ariaLabel={t('list.filter.ariaPriority')}
@@ -573,7 +578,7 @@ function ListColumnBar({
       <div className="w-24 shrink-0">
         <SortHeaderButton label={t('taskDetail.fieldDueDate')} field="due" sort={sort} onSort={onSort} />
       </div>
-      <div className="flex items-center gap-1 w-24 shrink-0">
+      <div className={cn('items-center gap-1 w-24 shrink-0', groupBy === 'assignee' ? 'hidden' : 'flex')}>
         <SortHeaderButton label={t('taskDetail.fieldAssignees')} field="assignee" sort={sort} onSort={onSort} />
         <ColumnFilterMenu
           ariaLabel={t('list.filter.ariaAssignee')}
@@ -1211,6 +1216,7 @@ function ListDetail() {
             columnFilters={columnFilters}
             onColumnFilters={setColumnFilters}
             workspaceMembers={workspaceMembers}
+            groupBy={groupBy}
           />
           <GroupedListView
             tasks={visibleTasks}
