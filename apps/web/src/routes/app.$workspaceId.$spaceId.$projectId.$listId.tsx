@@ -646,6 +646,7 @@ function ListDetail() {
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
+  const [fieldSearch, setFieldSearch] = useState('')
   // The Table "Fields" popover is a native <details>; native <details> doesn't
   // close on an outside click, so wire one up to match the other toolbar popovers.
   const fieldsDetailsRef = useRef<HTMLDetailsElement | null>(null)
@@ -1067,13 +1068,24 @@ function ListDetail() {
               <option value="priority">{t('list.groupByPriority')}</option>
               <option value="assignee">{t('list.groupByAssignee')}</option>
             </WorkFilterSelect>
-            {activeView === 'table' && projectFields.length > 0 && (
+            {(activeView === 'table' || activeView === 'list') && projectFields.length > 0 && (
               <details ref={fieldsDetailsRef} className="relative">
                 <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
                   {t('list.table.fields', { shown: projectFields.length - hiddenFields.size, total: projectFields.length })}
                 </summary>
-                <div className="absolute z-20 mt-1 w-52 rounded-md border border-border bg-card p-1.5 shadow-lg">
-                  {projectFields.map((f) => (
+                <div className="absolute z-20 mt-1 w-56 rounded-md border border-border bg-card p-1.5 shadow-lg">
+                  {/* ClickUp's Fields panel leads with a search box — with more
+                      than a handful of fields, scanning a raw list is the slow part. */}
+                  <input
+                    value={fieldSearch}
+                    onChange={(e) => setFieldSearch(e.target.value)}
+                    placeholder={t('list.table.searchFields')}
+                    aria-label={t('list.table.searchFields')}
+                    className="mb-1 h-7 w-full rounded border border-border bg-background px-2 text-[12px]"
+                  />
+                  {projectFields
+                    .filter((f) => f.name.toLowerCase().includes(fieldSearch.trim().toLowerCase()))
+                    .map((f) => (
                     <label
                       key={f.id}
                       className="flex items-center gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-muted/40 cursor-pointer"
