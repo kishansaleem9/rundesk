@@ -34,6 +34,7 @@ API="http://127.0.0.1:${PORT}/api/v1"
 EMAIL="${ovr_email:-${RUNDESK_EMAIL:-admin@rundesk.internal}}"
 PASSWORD="${ovr_pass:-${RUNDESK_PASSWORD:-Admin@123!}}"
 LEVEL="${SHARE_LEVEL:-view}"
+ENVPATH="$(pwd)/.env"
 
 # Pull one value out of a JSON blob without needing jq/node on the host.
 jget() { grep -o "\"$1\":\"[^\"]*\"" | head -1 | sed "s/\"$1\":\"//;s/\"$//"; }
@@ -102,6 +103,16 @@ SHARES=$(curl -fsS --max-time 20 "$API/shares/space/$SPACE" -H "Authorization: B
 COUNT=$(printf '%s' "$SHARES" | grep -o '"invitedEmail"' | wc -l | tr -d ' ')
 if printf '%s' "$SHARES" | grep -qiF "\"invitedEmail\":\"$TO\""; then
   echo "  $TO → pending invite at level '$LEVEL' (no Rundesk account yet — the outsider path)"
+  # An outsider's email carries a "Create your account" button built from
+  # APP_URL. Unset or pointing at localhost means every invite ships a dead
+  # link, which nobody notices until an outsider clicks one.
+  BASE="${APP_URL:-http://localhost:5173}"; BASE="${BASE%/}"
+  echo "  their sign-up link: $BASE/register?email=<their address>"
+  case "$BASE" in
+    *localhost*|*127.0.0.1*)
+      printf '\033[1;31m  ⚠ APP_URL is unset or points at localhost — outsiders get a dead link.\033[0m\n'
+      printf '    Set APP_URL=https://<your-domain> in %s, then: bash deploy/deploy-prod.sh\n' "$ENVPATH" ;;
+  esac
 elif printf '%s' "$SHARES" | grep -qiF "\"email\":\"$TO\""; then
   echo "  $TO → granted at level '$LEVEL' on the existing Rundesk account with that address"
 else
@@ -120,7 +131,6 @@ else
   echo "  docker not on PATH — check your API logs for 'EmailService'"
 fi
 
-ENVPATH="$(pwd)/.env"
 cat <<EOF
 
 ────────────────────────────────────────────────────────────
