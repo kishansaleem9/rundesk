@@ -22,6 +22,9 @@ export const projects = pgTable('projects', {
   position:    integer('position').notNull().default(0),
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   isArchived:  boolean('is_archived').notNull().default(false),
+  // §13.4 Trash — when the item was deleted and by whom (null = unknown/legacy).
+  archivedAt:   timestamp('archived_at', { withTimezone: true }),
+  archivedById: uuid('archived_by_id').references(() => users.id, { onDelete: 'set null' }),
   visibility:  containerVisibilityEnum('visibility'),
   // Time logged on this project's tasks defaults to billable when true (§8.3).
   defaultBillable: boolean('default_billable').notNull().default(false),

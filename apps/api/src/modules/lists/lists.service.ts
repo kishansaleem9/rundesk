@@ -124,7 +124,10 @@ export class ListsService {
 
   async deleteList(listId: string, actorId?: string, ipAddress?: string) {
     const ctx = actorId ? await this.assertManageable(listId, actorId, 'delete') : null
-    await this.db.update(lists).set({ isArchived: true }).where(eq(lists.id, listId))
+    await this.db
+      .update(lists)
+      .set({ isArchived: true, archivedAt: new Date(), archivedById: actorId ?? null, updatedAt: new Date() })
+      .where(eq(lists.id, listId))
     if (actorId && ctx) {
       // §13.3 — audit the container deletion (list archival).
       await this.security.logAuditEvent({

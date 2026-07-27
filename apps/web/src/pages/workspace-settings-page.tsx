@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Archive, Upload, RotateCcw, CreditCard, ToggleRight } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
@@ -12,6 +12,7 @@ import { GroupsTab } from '../components/groups-tab'
 import { RolesTab } from '../components/roles-tab'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { LanguageSwitcher } from '../components/language-switcher'
+import { TrashTab } from '../components/trash-tab'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { FLAGS } from '@rundesk/feature-flags'
@@ -65,7 +66,7 @@ const TABS = [
   { id: 'security', labelKey: 'settings.tabSecurity', icon: Shield },
   { id: 'sso', labelKey: 'settings.tabSso', icon: KeyRound },
   { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
-  { id: 'archived', labelKey: 'settings.tabArchived', icon: Archive },
+  { id: 'trash', labelKey: 'settings.tabTrash', icon: Trash2 },
 ] as const
 
 function isUuidLike(value?: string): value is string {
@@ -114,7 +115,14 @@ export function SettingsPage() {
       </header>
 
       <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8">
+        {/* Trash is a 6-column table, so it gets a wider shell than the
+            form-style tabs. */}
+        <div
+          className={cn(
+            'mx-auto grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8',
+            tab === 'trash' ? 'max-w-7xl' : 'max-w-5xl',
+          )}
+        >
           <nav className="space-y-0.5">
             {TABS.map((item) => (
               <button
@@ -133,7 +141,10 @@ export function SettingsPage() {
             ))}
           </nav>
 
-          <div>
+          {/* min-w-0: a grid child defaults to min-width:auto, which would let a
+              wide child (the Trash table) stretch the column instead of
+              scrolling inside its own overflow container. */}
+          <div className="min-w-0">
             {tab === 'general' && <GeneralTab workspaceId={validWorkspaceId} />}
             {tab === 'members' && <MembersTab workspaceId={validWorkspaceId} />}
             {tab === 'groups' && <GroupsTab workspaceId={validWorkspaceId} />}
@@ -143,7 +154,7 @@ export function SettingsPage() {
             {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
             {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
             {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
-            {tab === 'archived' && <ArchivedTab workspaceId={validWorkspaceId} />}
+            {tab === 'trash' && <TrashTab workspaceId={validWorkspaceId} />}
           </div>
         </div>
       </div>
@@ -1538,122 +1549,5 @@ function CapacityInput({
 // §13.4 — Restore UI. Surfaces archived tasks (workspace-wide) and archived
 // workspaces the admin belongs to, each with a Restore action wired to the
 // existing restore endpoints.
-type ArchivedTask = {
-  id: string
-  title: string
-  listId: string
-  listName: string
-  projectName: string
-  updatedAt: string
-}
 type ArchivedWorkspaceEntry = { workspace: Workspace; role: string }
 
-function ArchivedTab({ workspaceId }: { workspaceId: string }) {
-  const qc = useQueryClient()
-  const { t } = useTranslation()
-
-  const tasksQuery = useQuery({
-    queryKey: ['archived-tasks', workspaceId],
-    queryFn: () => api<ArchivedTask[]>(`/workspaces/${workspaceId}/archived-tasks`),
-  })
-  const workspacesQuery = useQuery({
-    queryKey: ['archived-workspaces'],
-    queryFn: () => api<ArchivedWorkspaceEntry[]>(`/workspaces/archived`),
-  })
-
-  const restoreTask = useMutation({
-    mutationFn: (taskId: string) => api(`/tasks/${taskId}/restore`, { method: 'POST' }),
-    onSuccess: () => {
-      toast.success(t('settings.restoredTask'))
-      qc.invalidateQueries({ queryKey: ['archived-tasks', workspaceId] })
-    },
-    onError: () => toast.error(t('settings.restoreFailed')),
-  })
-
-  const restoreWorkspace = useMutation({
-    mutationFn: (wsId: string) => api(`/workspaces/${wsId}/restore`, { method: 'POST' }),
-    onSuccess: () => {
-      toast.success(t('settings.restoredWorkspace'))
-      qc.invalidateQueries({ queryKey: ['archived-workspaces'] })
-      qc.invalidateQueries({ queryKey: ['workspaces'] })
-    },
-    onError: () => toast.error(t('settings.restoreFailed')),
-  })
-
-  const tasks = tasksQuery.data ?? []
-  const archivedWs = workspacesQuery.data ?? []
-
-  return (
-    <div className="space-y-5">
-      <p className="text-sm text-muted-foreground">{t('settings.archivedSubtitle')}</p>
-
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-          <Archive className="h-4 w-4 text-muted-foreground" />
-          <h2 className="font-semibold text-sm">{t('settings.archivedTasks')}</h2>
-        </div>
-        <ul className="divide-y divide-border/60">
-          {tasksQuery.isLoading && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('common.loading')}</li>
-          )}
-          {!tasksQuery.isLoading && tasks.length === 0 && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.archivedTasksEmpty')}</li>
-          )}
-          {tasks.map((task) => (
-            <li key={task.id} className="flex items-center gap-3 px-4 py-2.5">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{task.title}</div>
-                <div className="text-xs text-muted-foreground truncate">
-                  {task.projectName} · {task.listName}
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 shrink-0"
-                disabled={restoreTask.isPending}
-                onClick={() => restoreTask.mutate(task.id)}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {restoreTask.isPending ? t('settings.restoring') : t('settings.restore')}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </Card>
-
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-          <Building2 className="h-4 w-4 text-muted-foreground" />
-          <h2 className="font-semibold text-sm">{t('settings.archivedWorkspaces')}</h2>
-        </div>
-        <ul className="divide-y divide-border/60">
-          {workspacesQuery.isLoading && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('common.loading')}</li>
-          )}
-          {!workspacesQuery.isLoading && archivedWs.length === 0 && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.archivedWorkspacesEmpty')}</li>
-          )}
-          {archivedWs.map((entry) => (
-            <li key={entry.workspace.id} className="flex items-center gap-3 px-4 py-2.5">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{entry.workspace.name}</div>
-                <div className="text-xs text-muted-foreground truncate font-mono">{entry.workspace.slug}</div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 shrink-0"
-                disabled={restoreWorkspace.isPending}
-                onClick={() => restoreWorkspace.mutate(entry.workspace.id)}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {restoreWorkspace.isPending ? t('settings.restoring') : t('settings.restore')}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </div>
-  )
-}

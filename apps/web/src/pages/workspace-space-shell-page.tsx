@@ -1,7 +1,20 @@
 import { useState } from 'react'
 import { Outlet, useMatches, useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Folder, Users, CircleDot, ArchiveRestore, MoreHorizontal, Pencil, Trash2, LayoutGrid, Plus } from 'lucide-react'
+import {
+  Folder,
+  FolderOpen,
+  Users,
+  CircleDot,
+  ArchiveRestore,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  LayoutGrid,
+  Plus,
+  ChevronDown,
+  Lock,
+} from 'lucide-react'
 import {
   Button,
   DropdownMenu,
@@ -10,6 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Input,
+  cn,
   toast,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
@@ -26,6 +40,15 @@ type Project = {
   description?: string | null
   color?: string | null
   icon?: string | null
+  /** Level-4 grouping — null means the project sits directly under the space. */
+  folderId?: string | null
+}
+
+type SpaceFolder = {
+  id: string
+  name: string
+  color?: string | null
+  visibility?: string | null
 }
 
 type Space = {
@@ -101,6 +124,21 @@ function SpaceHome() {
     queryKey: ['projects-archived', spaceId],
     queryFn: () => api<Project[]>(`/projects/space/${spaceId}/archived`),
   })
+  // §2 — a space's folders. The sidebar tree already showed these; the space
+  // page itself used to list projects only, so a folder was invisible here.
+  const { data: folders = [] } = useQuery({
+    queryKey: ['folders', spaceId],
+    queryFn: () => api<SpaceFolder[]>(`/spaces/${spaceId}/folders`),
+  })
+  // Projects grouped under their folder; `null` folderId = directly in the space.
+  const projectsByFolder = new Map<string, Project[]>()
+  for (const p of projects) {
+    if (!p.folderId) continue
+    const bucket = projectsByFolder.get(p.folderId)
+    if (bucket) bucket.push(p)
+    else projectsByFolder.set(p.folderId, [p])
+  }
+  const ungroupedProjects = projects.filter((p) => !p.folderId)
   const restoreProject = useMutation({
     mutationFn: (projectId: string) => api(`/projects/${projectId}/restore`, { method: 'POST' }),
     onSuccess: () => {
@@ -189,11 +227,33 @@ function SpaceHome() {
         </div>
       }
     >
+      {folders.length > 0 && (
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[15px] font-semibold text-foreground">{t('spaceShell.folders')}</h2>
+            <span className="text-[12px] text-muted-foreground">
+              {tCount('spaceShell.folderCount', folders.length)}
+            </span>
+          </div>
+          <div className="space-y-2.5">
+            {folders.map((folder) => (
+              <FolderGroup
+                key={folder.id}
+                folder={folder}
+                projects={projectsByFolder.get(folder.id) ?? []}
+                workspaceId={workspaceId}
+                spaceId={spaceId}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-[15px] font-semibold text-foreground">{t('spaceShell.projects')}</h2>
           <span className="text-[12px] text-muted-foreground">
-            {tCount('spaceShell.projectCount', projects.length)}
+            {tCount('spaceShell.projectCount', ungroupedProjects.length)}
           </span>
         </div>
 
@@ -226,7 +286,7 @@ function SpaceHome() {
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
             {t('spaceShell.loadingProjects')}
           </div>
-        ) : projects.length === 0 ? (
+        ) : projects.length === 0 && folders.length === 0 ? (
           <WorkEmptyState
             icon={Folder}
             title={t('spaceShell.noProjectsTitle')}
@@ -240,9 +300,13 @@ function SpaceHome() {
               </Button>
             }
           />
+        ) : ungroupedProjects.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border/70 p-6 text-center text-[13px] text-muted-foreground">
+            {t('spaceShell.allProjectsInFolders')}
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.map((project) => (
+            {ungroupedProjects.map((project) => (
               <ProjectCard
                 key={project.id}
                 project={project}
@@ -322,6 +386,73 @@ function SpaceHome() {
         onSubmit={(values) => editSpace.mutate(values)}
       />
     </WorkHubPage>
+  )
+}
+
+/**
+ * §2 — a folder rendered on the space page, with the projects it groups nested
+ * inside it. Collapsible so a space with many folders stays scannable; open by
+ * default so a folder's contents are visible without an extra click.
+ */
+function FolderGroup({
+  folder,
+  projects,
+  workspaceId,
+  spaceId,
+}: {
+  folder: SpaceFolder
+  projects: Project[]
+  workspaceId: string
+  spaceId: string
+}) {
+  const { t, tCount } = useTranslation()
+  const [open, setOpen] = useState(true)
+  const accent = folder.color ?? 'hsl(var(--brand-500))'
+
+  return (
+    <div className="rounded-lg border border-border/80 bg-card/40 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-accent/10 transition-colors"
+      >
+        <ChevronDown
+          className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', !open && '-rotate-90')}
+        />
+        {open ? (
+          <FolderOpen className="h-4 w-4 shrink-0" style={{ color: accent }} />
+        ) : (
+          <Folder className="h-4 w-4 shrink-0" style={{ color: accent }} />
+        )}
+        <span className="text-[14px] font-medium text-foreground truncate">{folder.name}</span>
+        {folder.visibility === 'private' && (
+          <Lock className="h-3 w-3 shrink-0 text-muted-foreground" aria-label={t('nav.makePrivate')} />
+        )}
+        <span className="ml-auto shrink-0 text-[12px] text-muted-foreground">
+          {tCount('spaceShell.projectCount', projects.length)}
+        </span>
+      </button>
+
+      {open && (
+        <div className="px-3.5 pb-3.5 pt-0.5">
+          {projects.length === 0 ? (
+            <p className="text-[12.5px] text-muted-foreground px-0.5 py-1.5">{t('spaceShell.folderEmpty')}</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {projects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  workspaceId={workspaceId}
+                  spaceId={spaceId}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

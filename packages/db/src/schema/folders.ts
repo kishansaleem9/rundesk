@@ -21,6 +21,9 @@ export const folders = pgTable(
     position:    integer('position').notNull().default(0),
     createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     isArchived:  boolean('is_archived').notNull().default(false),
+    // §13.4 Trash — when the item was deleted and by whom (null = unknown/legacy).
+    archivedAt:   timestamp('archived_at', { withTimezone: true }),
+    archivedById: uuid('archived_by_id').references(() => users.id, { onDelete: 'set null' }),
     // §2 per-item privacy: a 'private' folder is visible only to its creator and
     // workspace managers/admins (enforced on every read path).
     visibility:  containerVisibilityEnum('visibility').notNull().default('public'),

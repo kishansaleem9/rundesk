@@ -589,6 +589,13 @@
       "when": 1900000080000,
       "tag": "0083_space_view_config",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1900000081000,
+      "tag": "0084_trash_metadata",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,9 @@ export const spaces = pgTable('spaces', {
   icon:        text('icon'),
   createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
   isArchived:  boolean('is_archived').notNull().default(false),
+  // §13.4 Trash — when the item was deleted and by whom (null = unknown/legacy).
+  archivedAt:   timestamp('archived_at', { withTimezone: true }),
+  archivedById: uuid('archived_by_id').references(() => users.id, { onDelete: 'set null' }),
   visibility:  containerVisibilityEnum('visibility').notNull().default('public'),
   // §5 (ClickUp "required views") per-space view config: which of the task
   // views this space's lists expose, and which one opens by default. null =

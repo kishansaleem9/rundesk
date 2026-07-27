@@ -139,7 +139,10 @@ export class SpacesService {
 
   async deleteSpace(spaceId: string, actorId?: string, ipAddress?: string) {
     const space = actorId ? await this.assertManageable(spaceId, actorId, 'delete') : null
-    await this.db.update(spaces).set({ isArchived: true }).where(eq(spaces.id, spaceId))
+    await this.db
+      .update(spaces)
+      .set({ isArchived: true, archivedAt: new Date(), archivedById: actorId ?? null, updatedAt: new Date() })
+      .where(eq(spaces.id, spaceId))
     if (actorId && space) {
       // §13.3 — audit the container deletion (space archival).
       await this.security.logAuditEvent({

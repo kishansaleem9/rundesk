@@ -69,11 +69,17 @@ export class FoldersService {
     return row
   }
 
-  /** Deleting a folder leaves its projects intact (FK is ON DELETE SET NULL),
-   *  so they fall back to sitting directly under the space. */
+  /**
+   * §13.4 — deleting a folder ARCHIVES it (soft delete) so it can be restored
+   * from the workspace Trash. It used to be hard-deleted, which made a folder
+   * the one container that could never be recovered.
+   *
+   * The folder's projects keep their `folderId`, so restoring the folder brings
+   * its contents back grouped exactly as before; while the folder is archived
+   * every read path treats those projects as sitting directly under the space.
+   */
   async remove(spaceId: string, folderId: string, actorId?: string, ipAddress?: string) {
-    // Resolve name + owning workspace up-front so the §13.3 container-deletion
-    // audit event can be written even though the row is hard-deleted below.
+    // Resolve name + owning workspace up-front for the §13.3 audit event.
     const [ctx] = await this.db
       .select({ name: folders.name, workspaceId: spaces.workspaceId })
       .from(folders)
@@ -82,7 +88,10 @@ export class FoldersService {
       .limit(1)
     if (!ctx) throw new NotFoundException('Folder not found')
 
-    await this.db.delete(folders).where(and(eq(folders.id, folderId), eq(folders.spaceId, spaceId)))
+    await this.db
+      .update(folders)
+      .set({ isArchived: true, archivedAt: new Date(), archivedById: actorId ?? null, updatedAt: new Date() })
+      .where(and(eq(folders.id, folderId), eq(folders.spaceId, spaceId)))
 
     if (actorId) {
       // §13.3 — audit the container deletion (mirrors space/project/list).

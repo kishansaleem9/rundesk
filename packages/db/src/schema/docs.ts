@@ -19,6 +19,9 @@ export const docs = pgTable('docs', {
   plaintext:   text('plaintext').notNull().default(''), // denormalized for search
   position:    integer('position').notNull().default(0),
   isArchived:  boolean('is_archived').notNull().default(false),
+  // §13.4 Trash — when the item was deleted and by whom (null = unknown/legacy).
+  archivedAt:   timestamp('archived_at', { withTimezone: true }),
+  archivedById: uuid('archived_by_id').references(() => users.id, { onDelete: 'set null' }),
   // Public share: non-null random slug means the doc is readable anonymously
   // at /d/<slug>. Toggled via POST/DELETE /docs/:id/share.
   publicShareId:   text('public_share_id').unique(),

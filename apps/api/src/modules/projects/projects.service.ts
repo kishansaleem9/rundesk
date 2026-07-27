@@ -182,7 +182,10 @@ export class ProjectsService {
 
   async deleteProject(projectId: string, actorId?: string, ipAddress?: string) {
     const ctx = actorId ? await this.assertManageable(projectId, actorId, 'delete') : null
-    await this.db.update(projects).set({ isArchived: true }).where(eq(projects.id, projectId))
+    await this.db
+      .update(projects)
+      .set({ isArchived: true, archivedAt: new Date(), archivedById: actorId ?? null, updatedAt: new Date() })
+      .where(eq(projects.id, projectId))
     if (actorId && ctx) {
       // §13.3 — audit the container deletion (project archival).
       await this.security.logAuditEvent({

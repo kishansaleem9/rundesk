@@ -2529,7 +2529,10 @@ export class TasksService {
     await this.assertManagerDeleteScope(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
-    await this.db.update(tasks).set({ isArchived: true, updatedAt: new Date() }).where(eq(tasks.id, taskId))
+    await this.db
+      .update(tasks)
+      .set({ isArchived: true, archivedAt: new Date(), archivedById: actorId ?? null, updatedAt: new Date() })
+      .where(eq(tasks.id, taskId))
     await this.logActivity({ taskId, actorId, action: 'archived' })
     this.realtime.emitToList(before.listId, { type: 'task.deleted', listId: before.listId, taskId })
 

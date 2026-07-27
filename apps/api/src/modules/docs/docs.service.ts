@@ -325,8 +325,12 @@ export class DocsService {
     return this.update(docId, userId, { title: rev.title, content: rev.content })
   }
 
-  async delete(docId: string) {
-    const [row] = await this.db.update(docs).set({ isArchived: true, updatedAt: new Date() }).where(eq(docs.id, docId)).returning()
+  async delete(docId: string, actorId?: string) {
+    const [row] = await this.db
+      .update(docs)
+      .set({ isArchived: true, archivedAt: new Date(), archivedById: actorId ?? null, updatedAt: new Date() })
+      .where(eq(docs.id, docId))
+      .returning()
     if (!row) throw new NotFoundException('Doc not found')
     this.realtime.emitToWorkspace(row.workspaceId, { type: 'doc.updated', docId, patch: { archived: true } })
     return { ok: true }
@@ -334,7 +338,11 @@ export class DocsService {
 
   async deleteForUser(docId: string, userId: string) {
     await this.assertDocAccess(docId, userId)
-    const [row] = await this.db.update(docs).set({ isArchived: true, updatedAt: new Date() }).where(eq(docs.id, docId)).returning()
+    const [row] = await this.db
+      .update(docs)
+      .set({ isArchived: true, archivedAt: new Date(), archivedById: userId, updatedAt: new Date() })
+      .where(eq(docs.id, docId))
+      .returning()
     if (!row) throw new NotFoundException('Doc not found')
     this.realtime.emitToWorkspace(row.workspaceId, { type: 'doc.updated', docId, patch: { archived: true } })
     return { ok: true }
