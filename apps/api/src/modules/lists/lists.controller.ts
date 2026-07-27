@@ -61,6 +61,17 @@ export class ListsController {
     return this.listsService.updateList(listId, body, user.id)
   }
 
+  /** Move a list into another project (its tasks follow). */
+  @Post(':listId/move')
+  async moveList(
+    @Param('listId') listId: string,
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+    @Body() body: { projectId: string },
+  ) {
+    return this.listsService.moveList(listId, body.projectId, user.id, ip)
+  }
+
   @Delete(':listId')
   async deleteList(@Param('listId') listId: string, @CurrentUser() user: any, @Ip() ip: string) {
     await this.listsService.deleteList(listId, user.id, ip)

@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { eq, and, or, ne, inArray } from 'drizzle-orm'
-import { spaces, spaceMembers } from '@rundesk/db'
+import { spaces, spaceMembers, folders, projects } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
@@ -75,6 +75,39 @@ export class SpacesService {
         .onConflictDoNothing()
     }
     return space
+  }
+
+  /**
+   * The destination tree for the Move picker: every space the actor can see,
+   * with its folders and projects. Reuses getSpacesByWorkspace so a private
+   * space the actor isn't in never appears as a move target.
+   */
+  async moveTargets(workspaceId: string, actorId?: string) {
+    const visible = await this.getSpacesByWorkspace(workspaceId, actorId)
+    if (visible.length === 0) return []
+    const spaceIds = visible.map((s) => s.id)
+
+    const [folderRows, projectRows] = await Promise.all([
+      this.db
+        .select({ id: folders.id, name: folders.name, spaceId: folders.spaceId })
+        .from(folders)
+        .where(and(inArray(folders.spaceId, spaceIds), eq(folders.isArchived, false))),
+      this.db
+        .select({ id: projects.id, name: projects.name, spaceId: projects.spaceId, folderId: projects.folderId })
+        .from(projects)
+        .where(and(inArray(projects.spaceId, spaceIds), eq(projects.isArchived, false))),
+    ])
+
+    return visible.map((sp) => ({
+      id: sp.id,
+      name: sp.name,
+      icon: sp.icon,
+      color: sp.color,
+      folders: folderRows.filter((f) => f.spaceId === sp.id).map((f) => ({ id: f.id, name: f.name })),
+      projects: projectRows
+        .filter((pr) => pr.spaceId === sp.id)
+        .map((pr) => ({ id: pr.id, name: pr.name, folderId: pr.folderId })),
+    }))
   }
 
   async getSpacesByWorkspace(workspaceId: string, actorId?: string) {

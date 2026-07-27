@@ -38,6 +38,19 @@ export class FoldersController {
     return this.folders.update(spaceId, folderId, body)
   }
 
+  /** Move the folder (and the projects it groups) into another space. */
+  @Post(':folderId/move')
+  @RequirePermissions('space.create')
+  move(
+    @Param('spaceId') spaceId: string,
+    @Param('folderId') folderId: string,
+    @Body() body: { targetSpaceId: string },
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.folders.move(spaceId, folderId, body.targetSpaceId, user.id, ip)
+  }
+
   @Delete(':folderId')
   @RequirePermissions('space.create')
   remove(

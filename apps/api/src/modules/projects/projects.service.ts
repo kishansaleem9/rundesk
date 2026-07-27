@@ -1,6 +1,6 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { eq, and, or, inArray, sql } from 'drizzle-orm'
-import { projects, spaces, projectMembers, spaceMembers } from '@rundesk/db'
+import { projects, spaces, projectMembers, spaceMembers, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
@@ -209,6 +209,85 @@ export class ProjectsService {
       .where(eq(projects.id, projectId))
       .returning()
     if (!row) throw new NotFoundException('Project not found')
+    return row
+  }
+
+  /**
+   * Move a project to another space and/or folder. Its lists and tasks follow
+   * automatically because they hang off the project.
+   *
+   * `folderId: null` moves the project out of its folder to sit directly under
+   * the space (the client's "move back"). A folder target must belong to the
+   * destination space, and the destination must be in the same workspace.
+   */
+  async moveProject(
+    projectId: string,
+    target: { spaceId?: string; folderId?: string | null },
+    actorId?: string,
+    ipAddress?: string,
+  ) {
+    const [src] = await this.db
+      .select({ name: projects.name, spaceId: projects.spaceId, workspaceId: spaces.workspaceId })
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(projects.id, projectId))
+      .limit(1)
+    if (!src) throw new NotFoundException('Project not found')
+    if (actorId) await this.assertManageable(projectId, actorId)
+
+    const destSpaceId = target.spaceId ?? src.spaceId
+    if (destSpaceId !== src.spaceId) {
+      const [dest] = await this.db
+        .select({ workspaceId: spaces.workspaceId, isArchived: spaces.isArchived })
+        .from(spaces)
+        .where(eq(spaces.id, destSpaceId))
+        .limit(1)
+      if (!dest) throw new NotFoundException('Target space not found')
+      if (dest.workspaceId !== src.workspaceId) {
+        throw new BadRequestException('A project can only be moved within its own workspace')
+      }
+      if (dest.isArchived) throw new BadRequestException('Cannot move into a deleted space')
+    }
+
+    // A folder target must actually live in the destination space, otherwise the
+    // project would be grouped under a folder from a different space.
+    if (target.folderId) {
+      const [folder] = await this.db
+        .select({ spaceId: folders.spaceId, isArchived: folders.isArchived })
+        .from(folders)
+        .where(eq(folders.id, target.folderId))
+        .limit(1)
+      if (!folder) throw new NotFoundException('Target folder not found')
+      if (folder.isArchived) throw new BadRequestException('Cannot move into a deleted folder')
+      if (folder.spaceId !== destSpaceId) {
+        throw new BadRequestException('That folder does not belong to the destination space')
+      }
+    }
+
+    // Resolve the destination folder explicitly so it can be both persisted and
+    // audited without reading back through an untyped record.
+    let destFolderId: string | null | undefined
+    if (target.folderId !== undefined) destFolderId = target.folderId
+    // Moving to a different space must clear a stale folder reference.
+    else if (destSpaceId !== src.spaceId) destFolderId = null
+
+    const set: Record<string, unknown> = { spaceId: destSpaceId, updatedAt: new Date() }
+    if (destFolderId !== undefined) set.folderId = destFolderId
+
+    const [row] = await this.db.update(projects).set(set).where(eq(projects.id, projectId)).returning()
+
+    if (actorId) {
+      await this.security.logAuditEvent({
+        workspaceId: src.workspaceId,
+        actorId,
+        action: 'project.moved',
+        resourceType: 'project',
+        resourceId: projectId,
+        description: `Moved project "${src.name}"`,
+        ipAddress,
+        metadata: { fromSpaceId: src.spaceId, toSpaceId: destSpaceId, toFolderId: destFolderId ?? null },
+      })
+    }
     return row
   }
 

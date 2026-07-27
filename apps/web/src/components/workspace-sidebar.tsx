@@ -29,6 +29,7 @@ import {
   ArrowDown,
   X,
   MoreHorizontal,
+  ArrowRightLeft,
   FolderPlus,
   Pencil,
   Trash2,
@@ -42,7 +43,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@rundesk/ui'
@@ -52,6 +52,7 @@ import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { MoveDialog, type MovableKind } from './move-dialog'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS } from '@rundesk/feature-flags'
 
@@ -173,6 +174,10 @@ export function WorkspaceSidebar() {
   const { isAdmin } = useWorkspaceRole(workspaceId)
   // §5 ClickApps — hide nav entries for features a workspace admin turned off.
   const { featureEnabled } = useResolvedFlags(workspaceId)
+  // Whatever the user chose to move — drives the shared Move picker below.
+  const [moveItem, setMoveItem] = useState<
+    { kind: MovableKind; id: string; name: string; spaceId: string; parentId: string | null } | null
+  >(null)
   const [openSwitcher, setOpenSwitcher] = useState(false)
   const [spacesExpanded, setSpacesExpanded] = useState(true)
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
@@ -234,14 +239,6 @@ export function WorkspaceSidebar() {
     }
   }
 
-  const moveProject = async (projectId: string, folderId: string | null) => {
-    try {
-      await api(`/projects/${projectId}`, { method: 'PUT', body: { folderId } })
-      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : t('nav.moveProjectError'))
-    }
-  }
 
   // §2/§13.4 — DELETE /spaces/:spaceId/folders/:folderId removes the folder;
   // its projects fall back to the ungrouped list (they are not deleted).
@@ -957,29 +954,20 @@ export function WorkspaceSidebar() {
                           {t('project.archiveAction')}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuLabel>{t('nav.moveToFolder')}</DropdownMenuLabel>
-                        {(space.folders ?? []).map((folder) => (
-                          <DropdownMenuItem
-                            key={folder.id}
-                            disabled={project.folderId === folder.id}
-                            onClick={() => moveProject(project.id, folder.id)}
-                          >
-                            <Folder className="h-3.5 w-3.5" />
-                            <span className="truncate">{folder.name}</span>
-                          </DropdownMenuItem>
-                        ))}
-                        {(space.folders ?? []).length === 0 && (
-                          <div className="px-2 py-1.5 text-[11px] text-muted-foreground">{t('nav.noFoldersInSpace')}</div>
-                        )}
-                        {project.folderId && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => moveProject(project.id, null)}>
-                              <X className="h-3.5 w-3.5" />
-                              {t('nav.removeFromFolder')}
-                            </DropdownMenuItem>
-                          </>
-                        )}
+                        <DropdownMenuItem
+                          onClick={() =>
+                            setMoveItem({
+                              kind: 'project',
+                              id: project.id,
+                              name: project.name,
+                              spaceId: space.id,
+                              parentId: project.folderId ?? null,
+                            })
+                          }
+                        >
+                          <ArrowRightLeft className="h-3.5 w-3.5" />
+                          {t('move.action')}
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -1037,6 +1025,20 @@ export function WorkspaceSidebar() {
                               >
                                 {list.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
                                 {list.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  setMoveItem({
+                                    kind: 'list',
+                                    id: list.id,
+                                    name: list.name,
+                                    spaceId: space.id,
+                                    parentId: project.id,
+                                  })
+                                }
+                              >
+                                <ArrowRightLeft className="h-3.5 w-3.5" />
+                                {t('move.action')}
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -1160,6 +1162,20 @@ export function WorkspaceSidebar() {
                                 >
                                   {folder.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
                                   {folder.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    setMoveItem({
+                                      kind: 'folder',
+                                      id: folder.id,
+                                      name: folder.name,
+                                      spaceId: space.id,
+                                      parentId: null,
+                                    })
+                                  }
+                                >
+                                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                                  {t('move.action')}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
@@ -1397,6 +1413,20 @@ export function WorkspaceSidebar() {
         submitting={savingSpace}
         onSubmit={submitSpaceDialog}
       />
+
+      {moveItem && workspaceId && (
+        <MoveDialog
+          open
+          onOpenChange={(next) => { if (!next) setMoveItem(null) }}
+          workspaceId={workspaceId}
+          kind={moveItem.kind}
+          itemId={moveItem.id}
+          itemName={moveItem.name}
+          currentSpaceId={moveItem.spaceId}
+          currentParentId={moveItem.parentId}
+          onMoved={() => setMoveItem(null)}
+        />
+      )}
 
       <ContainerEditDialog
         open={wsDialogOpen}

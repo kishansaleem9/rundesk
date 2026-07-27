@@ -15,6 +15,12 @@ export class SpacesController {
     return this.spacesService.getSpacesByWorkspace(workspaceId, user.id)
   }
 
+  /** Destination tree for the Move picker: spaces → folders → projects. */
+  @Get('workspace/:workspaceId/move-targets')
+  async moveTargets(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any) {
+    return this.spacesService.moveTargets(workspaceId, user.id)
+  }
+
   @Get(':spaceId')
   async getSpace(@Param('spaceId') spaceId: string) {
     return this.spacesService.getSpace(spaceId)

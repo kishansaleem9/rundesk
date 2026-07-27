@@ -53,6 +53,17 @@ export class ProjectsController {
     return this.projectsService.updateProject(projectId, body, user.id)
   }
 
+  /** Move a project to another space and/or folder (folderId: null = ungroup). */
+  @Post(':projectId/move')
+  async moveProject(
+    @Param('projectId') projectId: string,
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+    @Body() body: { spaceId?: string; folderId?: string | null },
+  ) {
+    return this.projectsService.moveProject(projectId, body, user.id, ip)
+  }
+
   @Delete(':projectId')
   async deleteProject(@Param('projectId') projectId: string, @CurrentUser() user: any, @Ip() ip: string) {
     await this.projectsService.deleteProject(projectId, user.id, ip)

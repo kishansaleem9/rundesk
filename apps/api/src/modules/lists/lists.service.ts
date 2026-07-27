@@ -142,6 +142,55 @@ export class ListsService {
     }
   }
 
+  /**
+   * Move a list into another project (its tasks follow). The destination must
+   * be in the same workspace and not archived.
+   */
+  async moveList(listId: string, targetProjectId: string, actorId?: string, ipAddress?: string) {
+    const src = actorId
+      ? await this.assertManageable(listId, actorId)
+      : (await this.db
+          .select({ name: lists.name, workspaceId: spaces.workspaceId, spaceId: projects.spaceId })
+          .from(lists)
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(eq(lists.id, listId))
+          .limit(1))[0]
+    if (!src) throw new NotFoundException('List not found')
+
+    const [dest] = await this.db
+      .select({ name: projects.name, workspaceId: spaces.workspaceId, isArchived: projects.isArchived })
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(projects.id, targetProjectId))
+      .limit(1)
+    if (!dest) throw new NotFoundException('Target project not found')
+    if (dest.workspaceId !== src.workspaceId) {
+      throw new BadRequestException('A list can only be moved within its own workspace')
+    }
+    if (dest.isArchived) throw new BadRequestException('Cannot move into a deleted project')
+
+    const [row] = await this.db
+      .update(lists)
+      .set({ projectId: targetProjectId, updatedAt: new Date() })
+      .where(eq(lists.id, listId))
+      .returning()
+
+    if (actorId) {
+      await this.security.logAuditEvent({
+        workspaceId: src.workspaceId,
+        actorId,
+        action: 'list.moved',
+        resourceType: 'list',
+        resourceId: listId,
+        description: `Moved list "${src.name}" to project "${dest.name}"`,
+        ipAddress,
+        metadata: { toProjectId: targetProjectId },
+      })
+    }
+    return row
+  }
+
   private async assertManageable(listId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {
     const [row] = await this.db
       .select({
