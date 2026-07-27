@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common'
+import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   objectShares, users, workspaceMembers,
@@ -7,6 +7,8 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { EmailService } from '../email/email.service'
+import { ConfigService } from '@nestjs/config'
 
 /** Everything that can be shared. */
 export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc'] as const
@@ -20,6 +22,10 @@ export type ShareType = (typeof SHARE_TYPES)[number]
 export const SHARE_LEVELS = ['view', 'comment', 'edit', 'admin'] as const
 export type ShareLevel = (typeof SHARE_LEVELS)[number]
 const RANK: Record<ShareLevel, number> = { view: 0, comment: 1, edit: 2, admin: 3 }
+/** Human wording used in the notification email. */
+const LEVEL_LABEL: Record<ShareLevel, string> = {
+  view: 'view only', comment: 'comment', edit: 'edit', admin: 'full edit',
+}
 
 export interface ShareRow {
   id: string
@@ -32,9 +38,13 @@ export interface ShareRow {
 
 @Injectable()
 export class SharesService {
+  private readonly logger = new Logger(SharesService.name)
+
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
+    private email: EmailService,
+    private config: ConfigService,
   ) {}
 
   assertType(t: string): ShareType {
@@ -169,6 +179,12 @@ export class SharesService {
     return level === 'admin'
   }
 
+  /** The address to notify for a grant made against a known user. */
+  private async emailOf(userId: string): Promise<string | null> {
+    const [u] = await this.db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1)
+    return u?.email ?? null
+  }
+
   // ─── read / write grants ───────────────────────────────────────────────────
 
   async list(type: ShareType, id: string, actor: { id: string; role?: string }): Promise<ShareRow[]> {
@@ -254,6 +270,28 @@ export class SharesService {
       description: `Shared ${type} "${loc.name}" with ${invitedEmail ?? userId} (${level})`,
       ipAddress: ip, metadata: { level, invitedEmail, userId },
     })
+
+    // Tell the person they were given access. Never let a mail failure undo a
+    // grant that is already committed — the share stands either way.
+    const notifyAddress = invitedEmail ?? (await this.emailOf(userId!))
+    if (notifyAddress) {
+      try {
+        const [inviter] = await this.db.select({ name: users.displayName }).from(users)
+          .where(eq(users.id, actor.id)).limit(1)
+        const base = (this.config.get<string>('APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '')
+        await this.email.sendShareInviteEmail({
+          to: notifyAddress,
+          inviter: inviter?.name ?? 'A teammate',
+          objectType: type,
+          objectName: loc.name,
+          level: LEVEL_LABEL[level],
+          url: invitedEmail ? `${base}/register?email=${encodeURIComponent(invitedEmail)}` : base,
+          isOutsider: !!invitedEmail,
+        })
+      } catch (err) {
+        this.logger.warn(`Share succeeded but the notification email failed: ${(err as Error).message}`)
+      }
+    }
     return { ok: true, id: row.id }
   }
 

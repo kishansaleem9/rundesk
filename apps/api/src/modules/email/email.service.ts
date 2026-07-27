@@ -85,6 +85,42 @@ export class EmailService {
     })
   }
 
+  /**
+   * Someone was given access to a specific space / folder / project / list /
+   * task / doc. Sent to workspace members and to outsiders alike — an outsider
+   * lands on the sign-up page and their pending grant is claimed on signup.
+   */
+  async sendShareInviteEmail(opts: {
+    to: string
+    inviter: string
+    objectType: string
+    objectName: string
+    level: string
+    url: string
+    isOutsider?: boolean
+  }) {
+    const what = `${this.esc(opts.objectType)} "${this.esc(opts.objectName)}"`
+    return this.send({
+      to: opts.to,
+      subject: `[Rundesk] ${opts.inviter} shared a ${opts.objectType} with you`,
+      html: this.layout({
+        heading: 'Something was shared with you',
+        body: `
+          <p>Hi there,</p>
+          <p><strong>${this.esc(opts.inviter)}</strong> shared the ${what} with you on Rundesk,
+             with <strong>${this.esc(opts.level)}</strong> access.</p>
+          ${
+            opts.isOutsider
+              ? '<p style="font-size: 13px; color: #6b7280;">You do not have a Rundesk account yet — create one with this email address and this item will be waiting for you.</p>'
+              : ''
+          }
+        `,
+        ctaUrl: opts.url,
+        ctaLabel: opts.isOutsider ? 'Create your account' : 'Open it in Rundesk',
+      }),
+    })
+  }
+
   /** Send a plain test email for provider verification */
   async sendTestEmail(opts: { to: string; subject?: string; html?: string }) {
     return this.send({
