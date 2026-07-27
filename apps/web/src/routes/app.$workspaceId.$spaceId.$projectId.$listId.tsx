@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, PersonAvatar, cn } from '@rundesk/ui'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button, Card, Input, PersonAvatar, cn, toast } from '@rundesk/ui'
 import {
   TaskListChrome,
   WorkFilterSelect,
@@ -21,14 +21,14 @@ import {
   Archive,
   Filter,
 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { criticalPath } from '../lib/gantt'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { ListStatusesManager } from '../components/list-statuses-manager'
 import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
 import { getRealtimeSocket } from '../lib/realtime'
-import { DndContext, DragOverlay, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -83,6 +83,19 @@ type TaskItem = {
 }
 
 type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
+
+// Offered when creating a field from the picker. Deliberately the same set this
+// view knows how to render — the API accepts more (money, rating, email, phone),
+// but creating one here that the List could not draw would be a trap.
+const CUSTOM_FIELD_TYPES = ['text', 'number', 'date', 'checkbox', 'url', 'dropdown'] as const
+const CUSTOM_FIELD_TYPE_LABELS: Record<CustomFieldType, TranslationKey> = {
+  text: 'list.table.fieldTypeText',
+  number: 'list.table.fieldTypeNumber',
+  date: 'list.table.fieldTypeDate',
+  checkbox: 'list.table.fieldTypeCheckbox',
+  url: 'list.table.fieldTypeUrl',
+  dropdown: 'list.table.fieldTypeDropdown',
+}
 type CustomFieldDef = {
   id: string
   name: string
@@ -645,8 +658,12 @@ function ListDetail() {
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(EMPTY_COLUMN_FILTERS)
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
+  const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
   const [fieldSearch, setFieldSearch] = useState('')
+  const [newFieldName, setNewFieldName] = useState('')
+  const [newFieldType, setNewFieldType] = useState<CustomFieldDef['type']>('text')
+  const [newFieldOptions, setNewFieldOptions] = useState('')
   // The Table "Fields" popover is a native <details>; native <details> doesn't
   // close on an outside click, so wire one up to match the other toolbar popovers.
   const fieldsDetailsRef = useRef<HTMLDetailsElement | null>(null)
@@ -689,6 +706,34 @@ function ListDetail() {
     queryFn: () =>
       api<CustomFieldDef[]>(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`),
   })
+  const createField = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`, {
+        method: 'POST',
+        body: {
+          name: newFieldName.trim(),
+          type: newFieldType,
+          ...(newFieldType === 'dropdown'
+            ? {
+                options: newFieldOptions
+                  .split(',')
+                  .map((o) => o.trim())
+                  .filter(Boolean)
+                  .map((label) => ({ label, value: label.toLowerCase().replace(/\s+/g, '-') })),
+              }
+            : {}),
+        },
+      }),
+    onSuccess: async () => {
+      setNewFieldName('')
+      setNewFieldType('text')
+      setNewFieldOptions('')
+      await qc.invalidateQueries({ queryKey: ['project-fields', workspaceId, projectId] })
+      toast.success(t('list.table.fieldCreated'))
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('list.table.fieldCreateFailed')),
+  })
+
   const { data: savedViews = [] } = useQuery({
     queryKey: ['list-views', listId],
     queryFn: () => api<Array<{ id: string; name: string; type: 'list' | 'board' | 'calendar' | 'gantt' | 'table'; isDefault?: boolean; config?: any }>>(`/lists/${listId}/views`),
@@ -1068,7 +1113,7 @@ function ListDetail() {
               <option value="priority">{t('list.groupByPriority')}</option>
               <option value="assignee">{t('list.groupByAssignee')}</option>
             </WorkFilterSelect>
-            {(activeView === 'table' || activeView === 'list') && projectFields.length > 0 && (
+            {(activeView === 'table' || activeView === 'list') && (
               <details ref={fieldsDetailsRef} className="relative">
                 <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
                   {t('list.table.fields', { shown: projectFields.length - hiddenFields.size, total: projectFields.length })}
@@ -1105,6 +1150,59 @@ function ListDetail() {
                       <span className="truncate">{f.name}</span>
                     </label>
                   ))}
+                  {projectFields.length === 0 && (
+                    <p className="px-2 py-1.5 text-[12px] text-muted-foreground">{t('list.table.noFieldsYet')}</p>
+                  )}
+                  <form
+                    className="mt-1 space-y-1 border-t border-border/60 pt-1.5"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (newFieldName.trim()) createField.mutate()
+                    }}
+                  >
+                    <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t('list.table.createField')}
+                    </p>
+                    <input
+                      value={newFieldName}
+                      onChange={(e) => setNewFieldName(e.target.value)}
+                      placeholder={t('list.table.newFieldName')}
+                      aria-label={t('list.table.newFieldName')}
+                      className="h-7 w-full rounded border border-border bg-background px-2 text-[12px]"
+                    />
+                    <div className="flex gap-1">
+                      <select
+                        value={newFieldType}
+                        onChange={(e) => setNewFieldType(e.target.value as CustomFieldDef['type'])}
+                        aria-label={t('list.table.newFieldType')}
+                        className="h-7 flex-1 rounded border border-border bg-background px-1 text-[12px]"
+                      >
+                        {CUSTOM_FIELD_TYPES.map((ty) => (
+                          <option key={ty} value={ty}>{t(CUSTOM_FIELD_TYPE_LABELS[ty])}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="submit"
+                        disabled={
+                          !newFieldName.trim() ||
+                          createField.isPending ||
+                          (newFieldType === 'dropdown' && !newFieldOptions.trim())
+                        }
+                        className="h-7 shrink-0 rounded border border-border bg-card px-2 text-[12px] hover:bg-muted/40 disabled:opacity-50"
+                      >
+                        {t('list.table.addField')}
+                      </button>
+                    </div>
+                    {newFieldType === 'dropdown' && (
+                      <input
+                        value={newFieldOptions}
+                        onChange={(e) => setNewFieldOptions(e.target.value)}
+                        placeholder={t('list.table.dropdownOptions')}
+                        aria-label={t('list.table.dropdownOptions')}
+                        className="h-7 w-full rounded border border-border bg-background px-2 text-[12px]"
+                      />
+                    )}
+                  </form>
                   <p className="px-2 pt-1 text-[11px] text-muted-foreground">{t('list.saveToPersist')}</p>
                 </div>
               </details>
@@ -1288,7 +1386,7 @@ function ListDetail() {
           />
           </>
         ) : activeView === 'board' ? (
-          <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <DndContext sensors={boardSensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {boardStatuses.map((s) => (
                 <BoardColumn
@@ -2998,7 +3096,7 @@ function BoardColumn({
               value={addTitle}
               onChange={(e) => setAddTitle(e.target.value)}
               placeholder={t('list.board.addTaskPlaceholder')}
-              className="w-full h-8 rounded border border-transparent bg-transparent px-2 text-sm placeholder:text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
+              className="w-full h-8 rounded border border-dashed border-border/70 bg-transparent px-2 text-sm placeholder:text-muted-foreground hover:border-border hover:bg-card/60 focus:border-border focus:bg-card focus:outline-none"
             />
           </form>
         </>

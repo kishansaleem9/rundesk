@@ -368,7 +368,7 @@ function formatDuration(ms?: number | null): string {
 // ---------------------------------------------------------------------------
 
 export function TaskDetailSheet({
-  taskId,
+  taskId: taskIdProp,
   open,
   onOpenChange,
   workspaceId,
@@ -378,6 +378,13 @@ export function TaskDetailSheet({
   onOpenChange: (next: boolean) => void
   workspaceId?: string
 }) {
+  // Which task the sheet is currently showing. Starts at whatever the host
+  // opened, then follows a subtask or a dependency the user clicks into.
+  const [viewTaskId, setViewTaskId] = useState<string | null>(taskIdProp)
+  useEffect(() => { setViewTaskId(taskIdProp) }, [taskIdProp])
+  const taskId = viewTaskId
+  const goToTask = (nextId: string) => { setViewTaskId(nextId); setActiveTab('overview') }
+
   const { t } = useTranslation()
   const { formatDate } = useDateFormat()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
@@ -611,12 +618,7 @@ export function TaskDetailSheet({
                   <button
                     type="button"
                     className="truncate font-medium text-foreground hover:underline"
-                    onClick={() =>
-                      navigate({
-                        to: '.',
-                        search: (prev: Record<string, unknown>) => ({ ...prev, task: detailQuery.data!.parent!.id }),
-                      } as any)
-                    }
+                    onClick={() => goToTask(detailQuery.data!.parent!.id)}
                   >
                     {detailQuery.data.parent.title}
                   </button>
@@ -825,12 +827,7 @@ export function TaskDetailSheet({
                   parentListId={detailQuery.data.listId}
                   workspaceId={fallbackWorkspaceId}
                   inline={detailQuery.data.subtasks ?? []}
-                  onOpenTask={(subtaskId) =>
-                    navigate({
-                      to: '.',
-                      search: (prev: Record<string, unknown>) => ({ ...prev, task: subtaskId }),
-                    } as any)
-                  }
+                  onOpenTask={(subtaskId) => goToTask(subtaskId)}
                 />
               )}
               {activeTab === 'checklists' && (
@@ -846,12 +843,7 @@ export function TaskDetailSheet({
                   taskId={detailQuery.data.id}
                   workspaceId={fallbackWorkspaceId}
                   inline={detailQuery.data.dependencies ?? []}
-                  onOpenTask={(relatedTaskId) =>
-                    navigate({
-                      to: '.',
-                      search: (prev: Record<string, unknown>) => ({ ...prev, task: relatedTaskId }),
-                    } as any)
-                  }
+                  onOpenTask={(relatedTaskId) => goToTask(relatedTaskId)}
                 />
               )}
               {activeTab === 'attachments' && (
