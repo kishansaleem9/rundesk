@@ -96,9 +96,9 @@ export class IntegrationConnectionsController {
   ) {
     try {
       const result = await this.svc.handleOAuthCallback(provider, code, state, ip)
-      return reply.redirect(this.svc.getSuccessRedirect(result.workspaceId, result.provider))
+      return reply.redirect(this.svc.getSuccessRedirect(result.workspaceId, result.provider), 302)
     } catch (error: any) {
-      return reply.redirect(this.svc.getFailureRedirect(error?.message ?? 'oauth_callback_failed'))
+      return reply.redirect(this.svc.getFailureRedirect(error?.message ?? 'oauth_callback_failed'), 302)
     }
   }
 

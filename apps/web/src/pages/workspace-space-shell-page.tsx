@@ -131,14 +131,20 @@ function SpaceHome() {
     queryFn: () => api<SpaceFolder[]>(`/spaces/${spaceId}/folders`),
   })
   // Projects grouped under their folder; `null` folderId = directly in the space.
+  //
+  // A project can also point at a folder that isn't in `folders` — the folder
+  // was deleted (it keeps its folderId so restoring the folder re-groups it) or
+  // it's private and this user can't see it. Those projects must fall back to
+  // the ungrouped list, otherwise they'd render nowhere and look deleted.
+  const visibleFolderIds = new Set(folders.map((f) => f.id))
   const projectsByFolder = new Map<string, Project[]>()
   for (const p of projects) {
-    if (!p.folderId) continue
+    if (!p.folderId || !visibleFolderIds.has(p.folderId)) continue
     const bucket = projectsByFolder.get(p.folderId)
     if (bucket) bucket.push(p)
     else projectsByFolder.set(p.folderId, [p])
   }
-  const ungroupedProjects = projects.filter((p) => !p.folderId)
+  const ungroupedProjects = projects.filter((p) => !p.folderId || !visibleFolderIds.has(p.folderId))
   const restoreProject = useMutation({
     mutationFn: (projectId: string) => api(`/projects/${projectId}/restore`, { method: 'POST' }),
     onSuccess: () => {

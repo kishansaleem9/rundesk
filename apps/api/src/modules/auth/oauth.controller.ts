@@ -52,16 +52,16 @@ export class OAuthController {
   @ApiOperation({ summary: 'Start Google/Microsoft OAuth login — 302 to the provider authorize endpoint' })
   start(@Param('provider') provider: string, @Res() res: FastifyReply) {
     if (!isOAuthProvider(provider)) {
-      res.redirect(`${this.webBase}/login?error=oauth_unsupported_provider`)
+      res.redirect(`${this.webBase}/login?error=oauth_unsupported_provider`, 302)
       return
     }
     if (!this.oauth.isConfigured(provider)) {
-      res.redirect(`${this.webBase}/login?error=oauth_unconfigured`)
+      res.redirect(`${this.webBase}/login?error=oauth_unconfigured`, 302)
       return
     }
     const { url, state } = this.oauth.beginLogin(provider)
     res.setCookie(STATE_COOKIE, state, { ...this.stateCookieOptions(), maxAge: STATE_COOKIE_MAX_AGE })
-    res.redirect(url)
+    res.redirect(url, 302)
   }
 
   @Get(':provider/callback')
@@ -102,13 +102,13 @@ export class OAuthController {
       const target = new URL(`${this.webBase}/sso-complete`)
       const primaryWorkspaceId = bundle.workspaces?.[0]?.id
       if (primaryWorkspaceId) target.searchParams.set('workspaceId', primaryWorkspaceId)
-      res.redirect(target.toString())
+      res.redirect(target.toString(), 302)
     } catch (err) {
       res.clearCookie(STATE_COOKIE, this.stateCookieOptions())
       const message = err instanceof Error ? err.message : 'OAuth sign-in failed'
       const target = new URL(`${this.webBase}/login`)
       target.searchParams.set('ssoError', message)
-      res.redirect(target.toString())
+      res.redirect(target.toString(), 302)
     }
   }
 }

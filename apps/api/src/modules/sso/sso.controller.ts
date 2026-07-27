@@ -101,12 +101,12 @@ export class SsoAuthController {
     }
     if (normalized === 'oidc') {
       const { url } = await this.sso.beginOidcLogin(workspaceId, redirectTo)
-      res.redirect(url)
+      res.redirect(url, 302)
       return
     }
     if (normalized === 'saml') {
       const { url } = await this.sso.beginSamlLogin(workspaceId, redirectTo)
-      res.redirect(url)
+      res.redirect(url, 302)
       return
     }
     res.code(400).send({ error: 'provider must be oidc or saml' })
@@ -158,13 +158,13 @@ export class SsoAuthController {
     const appUrl = process.env.APP_URL ?? 'http://localhost:5173'
     const target = new URL(`${appUrl}/sso-complete`)
     if (workspaceId) target.searchParams.set('workspaceId', workspaceId)
-    res.redirect(target.toString())
+    res.redirect(target.toString(), 302)
   }
 
   private redirectWithError(res: any, message: string) {
     const appUrl = process.env.APP_URL ?? 'http://localhost:5173'
     const target = new URL(`${appUrl}/login`)
     target.searchParams.set('ssoError', message)
-    res.redirect(target.toString())
+    res.redirect(target.toString(), 302)
   }
 }

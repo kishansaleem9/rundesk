@@ -9,7 +9,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  cn,
   toast,
 } from '@rundesk/ui'
 import {
@@ -18,7 +17,6 @@ import {
   Search,
   Filter,
   MoreHorizontal,
-  Building2,
   Layers,
   Folder,
   FolderKanban,
@@ -44,7 +42,6 @@ type TrashItem = {
 
 type TrashResponse = { items: TrashItem[]; retentionDays: number; types: TrashType[] }
 type Deleter = { id: string; name: string; avatarUrl: string | null }
-type ArchivedWorkspaceEntry = { workspace: { id: string; name: string; slug: string } }
 
 // Every type the workspace Trash can hold, with the icon + label used in the
 // Type column and the Type filter. Order mirrors the container hierarchy.
@@ -80,12 +77,6 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
   const deletersQuery = useQuery({
     queryKey: ['trash-deleters', workspaceId],
     queryFn: () => api<Deleter[]>(`/workspaces/${workspaceId}/trash/deleters`),
-  })
-  // Archived workspaces live outside a workspace's own trash (you restore them
-  // from the workspace list), so they keep their own small section below.
-  const archivedWsQuery = useQuery({
-    queryKey: ['archived-workspaces'],
-    queryFn: () => api<ArchivedWorkspaceEntry[]>('/workspaces/archived'),
   })
 
   const refresh = () => {
@@ -128,15 +119,6 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
     onError: (e) => failed(e, 'trash.deleteFailed'),
   })
 
-  const restoreWorkspace = useMutation({
-    mutationFn: (wsId: string) => api(`/workspaces/${wsId}/restore`, { method: 'POST' }),
-    onSuccess: () => {
-      toast.success(t('settings.restoredWorkspace'))
-      qc.invalidateQueries({ queryKey: ['archived-workspaces'] })
-      qc.invalidateQueries({ queryKey: ['workspaces'] })
-    },
-    onError: (e) => failed(e, 'settings.restoreFailed'),
-  })
 
   const retentionDays = trashQuery.data?.retentionDays ?? 30
   const allItems = useMemo(() => trashQuery.data?.items ?? [], [trashQuery.data])
@@ -153,7 +135,6 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
   const toggle = <T,>(list: T[], value: T): T[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
   const activeFilters = types.length + deletedBy.length
-  const archivedWs = archivedWsQuery.data ?? []
 
   return (
     <div className="space-y-5">
@@ -382,41 +363,6 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
         </div>
       </Card>
 
-      {/* Archived workspaces — separate scope, kept restorable here. */}
-      <Card className="overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-          <Building2 className="h-4 w-4 text-muted-foreground" />
-          <h2 className="font-semibold text-sm">{t('settings.archivedWorkspaces')}</h2>
-        </div>
-        <ul className="divide-y divide-border/60">
-          {archivedWsQuery.isLoading && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('common.loading')}</li>
-          )}
-          {!archivedWsQuery.isLoading && archivedWs.length === 0 && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">
-              {t('settings.archivedWorkspacesEmpty')}
-            </li>
-          )}
-          {archivedWs.map((entry) => (
-            <li key={entry.workspace.id} className="flex items-center gap-3 px-4 py-2.5">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{entry.workspace.name}</div>
-                <div className="text-xs text-muted-foreground truncate font-mono">{entry.workspace.slug}</div>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className={cn('gap-1.5 shrink-0')}
-                disabled={restoreWorkspace.isPending}
-                onClick={() => restoreWorkspace.mutate(entry.workspace.id)}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {restoreWorkspace.isPending ? t('settings.restoring') : t('settings.restore')}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </Card>
     </div>
   )
 }
