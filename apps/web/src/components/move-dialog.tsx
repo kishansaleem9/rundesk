@@ -15,7 +15,7 @@ import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 
 /** What can be moved, and therefore what the picker offers as destinations. */
-export type MovableKind = 'folder' | 'project' | 'list'
+export type MovableKind = 'folder' | 'project' | 'list' | 'task'
 
 type TargetSpace = {
   id: string
@@ -24,6 +24,7 @@ type TargetSpace = {
   color?: string | null
   folders: { id: string; name: string }[]
   projects: { id: string; name: string; folderId: string | null }[]
+  lists?: { id: string; name: string; projectId: string }[]
 }
 
 /** One selectable destination row, flattened from the space → folder/project tree. */
@@ -31,6 +32,8 @@ type Destination =
   | { kind: 'space'; id: string; label: string; spaceId: string; depth: 0 }
   | { kind: 'folder'; id: string; label: string; spaceId: string; depth: 1 }
   | { kind: 'project'; id: string; label: string; spaceId: string; depth: 1 }
+  // Only reachable when moving a task, which nests one level deeper.
+  | { kind: 'list'; id: string; label: string; spaceId: string; depth: 2 }
 
 export function MoveDialog({
   open,
@@ -82,7 +85,17 @@ export function MoveDialog({
       if (kind === 'list') {
         for (const pr of sp.projects) out.push({ kind: 'project', id: pr.id, label: pr.name, spaceId: sp.id, depth: 1 })
       }
+      // A task lands in a list, so show projects as headers and their lists under them.
+      if (kind === 'task') {
+        for (const pr of sp.projects) {
+          out.push({ kind: 'project', id: pr.id, label: pr.name, spaceId: sp.id, depth: 1 })
+          for (const li of (sp.lists ?? []).filter((l) => l.projectId === pr.id)) {
+            out.push({ kind: 'list', id: li.id, label: li.name, spaceId: sp.id, depth: 2 })
+          }
+        }
+      }
     }
+    if (kind === 'task') return out
     // A list can only land in a project, so bare spaces are not selectable there.
     return kind === 'list' ? out.filter((r) => r.kind === 'project' || sp2HasProjects(spaces, r)) : out
   }, [targetsQuery.data, kind])
@@ -118,6 +131,9 @@ export function MoveDialog({
           method: 'POST',
           body: dest.kind === 'folder' ? { spaceId: dest.spaceId, folderId: dest.id } : { spaceId: dest.id, folderId: null },
         })
+      }
+      if (kind === 'task') {
+        return api(`/tasks/${itemId}/move`, { method: 'POST', body: { listId: dest.id } })
       }
       return api(`/lists/${itemId}/move`, { method: 'POST', body: { projectId: dest.id } })
     },
@@ -191,7 +207,8 @@ export function MoveDialog({
               {filtered.map((r) => {
                 const current = isCurrent(r)
                 // A space row is only a destination for folders/projects.
-                const selectable = kind === 'list' ? r.kind === 'project' : true
+                const selectable =
+                  kind === 'task' ? r.kind === 'list' : kind === 'list' ? r.kind === 'project' : true
                 const Icon = r.kind === 'space' ? Layers : r.kind === 'folder' ? Folder : FolderKanban
                 return (
                   <li key={`${r.kind}:${r.id}`}>

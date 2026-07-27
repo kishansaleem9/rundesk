@@ -43,6 +43,7 @@ import {
   Lock,
   Globe, Share2,
   Bell,
+  FolderInput,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
@@ -55,6 +56,7 @@ import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker } from './cover-image-picker'
 import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
+import { MoveDialog } from './move-dialog'
 import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -391,6 +393,7 @@ export function TaskDetailSheet({
   // §Share — one panel, shared with every other object type.
   const [shareOpen, setShareOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
+  const [moveOpen, setMoveOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -691,6 +694,15 @@ export function TaskDetailSheet({
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
+                    title={t('taskDetail.moveTask')}
+                    aria-label={t('taskDetail.moveTask')}
+                    onClick={() => setMoveOpen(true)}
+                    className="h-8 w-8 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  >
+                    <FolderInput className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
                     title={t('taskDetail.tab.watchers')}
                     aria-label={t('taskDetail.tab.watchers')}
                     onClick={() => setWatchersOpen(true)}
@@ -860,6 +872,17 @@ export function TaskDetailSheet({
           </>
         ) : (
           <p className="text-sm text-destructive">{t('taskDetail.notFound')}</p>
+        )}
+        {detailQuery.data && workspaceId && (
+          <MoveDialog
+            open={moveOpen}
+            onOpenChange={setMoveOpen}
+            workspaceId={workspaceId}
+            kind="task"
+            itemId={detailQuery.data.id}
+            itemName={detailQuery.data.title}
+            onMoved={() => { void qc.invalidateQueries({ queryKey: ['task', taskId] }); void qc.invalidateQueries({ queryKey: ['tasks'] }) }}
+          />
         )}
         <Dialog open={watchersOpen} onOpenChange={setWatchersOpen}>
           <DialogContent className="sm:max-w-md">

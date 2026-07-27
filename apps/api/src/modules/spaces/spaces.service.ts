@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { eq, and, or, ne, inArray } from 'drizzle-orm'
-import { spaces, spaceMembers, folders, projects } from '@rundesk/db'
+import { spaces, spaceMembers, folders, projects, lists } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
@@ -98,16 +98,30 @@ export class SpacesService {
         .where(and(inArray(projects.spaceId, spaceIds), eq(projects.isArchived, false))),
     ])
 
-    return visible.map((sp) => ({
-      id: sp.id,
-      name: sp.name,
-      icon: sp.icon,
-      color: sp.color,
-      folders: folderRows.filter((f) => f.spaceId === sp.id).map((f) => ({ id: f.id, name: f.name })),
-      projects: projectRows
-        .filter((pr) => pr.spaceId === sp.id)
-        .map((pr) => ({ id: pr.id, name: pr.name, folderId: pr.folderId })),
-    }))
+    // Lists too, so a task can be moved — a task lands in a list, not a project.
+    const projectIds = projectRows.map((pr) => pr.id)
+    const listRows = projectIds.length
+      ? await this.db
+          .select({ id: lists.id, name: lists.name, projectId: lists.projectId })
+          .from(lists)
+          .where(and(inArray(lists.projectId, projectIds), eq(lists.isArchived, false)))
+      : []
+
+    return visible.map((sp) => {
+      const spProjects = projectRows.filter((pr) => pr.spaceId === sp.id)
+      const spProjectIds = new Set(spProjects.map((pr) => pr.id))
+      return {
+        id: sp.id,
+        name: sp.name,
+        icon: sp.icon,
+        color: sp.color,
+        folders: folderRows.filter((f) => f.spaceId === sp.id).map((f) => ({ id: f.id, name: f.name })),
+        projects: spProjects.map((pr) => ({ id: pr.id, name: pr.name, folderId: pr.folderId })),
+        lists: listRows
+          .filter((l) => spProjectIds.has(l.projectId))
+          .map((l) => ({ id: l.id, name: l.name, projectId: l.projectId })),
+      }
+    })
   }
 
   async getSpacesByWorkspace(workspaceId: string, actorId?: string) {
