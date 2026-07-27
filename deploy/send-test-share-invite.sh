@@ -97,8 +97,18 @@ echo "  response: $RESP"
 printf '%s' "$RESP" | grep -q '"ok":true' || die "the share call failed — see the response above"
 
 say "Reading the share back"
-curl -fsS --max-time 20 "$API/shares/space/$SPACE" -H "Authorization: Bearer $TOKEN" \
-  | tr ',' '\n' | grep -iE "invitedEmail|\"level\"" | head -6 || true
+SHARES=$(curl -fsS --max-time 20 "$API/shares/space/$SPACE" -H "Authorization: Bearer $TOKEN")
+# Every item carries exactly one invitedEmail key, so counting them counts people.
+COUNT=$(printf '%s' "$SHARES" | grep -o '"invitedEmail"' | wc -l | tr -d ' ')
+if printf '%s' "$SHARES" | grep -qiF "\"invitedEmail\":\"$TO\""; then
+  echo "  $TO → pending invite at level '$LEVEL' (no Rundesk account yet — the outsider path)"
+elif printf '%s' "$SHARES" | grep -qiF "\"email\":\"$TO\""; then
+  echo "  $TO → granted at level '$LEVEL' on the existing Rundesk account with that address"
+else
+  echo "  ⚠ could not find $TO in the share list. Raw response:"
+  printf '%s\n' "$SHARES" | head -c 600
+fi
+echo "  this space is now shared with $COUNT person(s)"
 
 say "What the mail layer did"
 if command -v docker >/dev/null 2>&1; then
