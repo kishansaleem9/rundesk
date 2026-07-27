@@ -283,7 +283,6 @@ const TABS: Array<{ key: TabKey; labelKey: TranslationKey }> = [
   { key: 'subtasks', labelKey: 'taskDetail.tab.subtasks' },
   { key: 'checklists', labelKey: 'taskDetail.tab.checklists' },
   { key: 'watchers', labelKey: 'taskDetail.tab.watchers' },
-  { key: 'dependencies', labelKey: 'taskDetail.tab.dependencies' },
   { key: 'attachments', labelKey: 'taskDetail.tab.attachments' },
   { key: 'comments', labelKey: 'taskDetail.tab.comments' },
   { key: 'activity', labelKey: 'taskDetail.tab.activity' },
