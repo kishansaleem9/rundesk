@@ -143,6 +143,7 @@ export class TasksController {
       isArchived: boolean
       isMilestone: boolean
       visibility: 'public' | 'private'
+      parentTaskId: string | null
     }>,
   ) {
     const toDate = (label: string, value: string | null | undefined) => {

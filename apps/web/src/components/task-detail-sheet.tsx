@@ -232,6 +232,8 @@ type TaskDetail = {
   dependencies?: Dependency[]
   attachments?: Attachment[]
   recurrence?: { cadenceDays?: number | null; rule?: RecurrenceRule | null } | null
+  parentTaskId?: string | null
+  parent?: { id: string; title: string } | null
 }
 
 type TaskComment = {
@@ -396,6 +398,20 @@ export function TaskDetailSheet({
     enabled,
     queryKey: ['task', taskId],
     queryFn: () => api<TaskDetail>(`/tasks/${taskId}`),
+  })
+
+  // "Yeh task mein main main-task bana sakti hoon" — a subtask must be able to
+  // become a top-level task without being recreated by hand.
+  const promoteToTask = useMutation({
+    mutationFn: () => api(`/tasks/${taskId}`, { method: 'PATCH', body: { parentTaskId: null } }),
+    onSuccess: async () => {
+      toast.success(t('taskDetail.promotedToTask'))
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      await qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUpdateTitle'))
+    },
   })
 
   const updateTitle = useMutation({
@@ -581,6 +597,33 @@ export function TaskDetailSheet({
             />
 
             <SheetHeader className="pb-3">
+              {/* A subtask opens in this same sheet, so say what it hangs off —
+                  and let it be promoted out from here (ClickUp's "Subtask of"). */}
+              {detailQuery.data.parent && (
+                <div className="mb-1 flex items-center gap-2 text-[12px] text-muted-foreground">
+                  <span>{t('taskDetail.subtaskOf')}</span>
+                  <button
+                    type="button"
+                    className="truncate font-medium text-foreground hover:underline"
+                    onClick={() =>
+                      navigate({
+                        to: '.',
+                        search: (prev: Record<string, unknown>) => ({ ...prev, task: detailQuery.data!.parent!.id }),
+                      } as any)
+                    }
+                  >
+                    {detailQuery.data.parent.title}
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-muted/40"
+                    disabled={promoteToTask.isPending}
+                    onClick={() => promoteToTask.mutate()}
+                  >
+                    {t('taskDetail.promoteToTask')}
+                  </button>
+                </div>
+              )}
               <div className="flex items-center gap-2 mb-1">
                 <Badge variant="soft" className="font-mono text-[10px] tracking-wider uppercase">
                   RD-{shortId(detailQuery.data.id)}

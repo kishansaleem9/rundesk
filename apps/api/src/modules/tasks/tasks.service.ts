@@ -1937,8 +1937,18 @@ export class TasksService {
       this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId)),
     ])
 
+    // "Subtask of <parent>" needs a name to show, and getTask only carries the id.
+    const [parent] = row.parentTaskId
+      ? await this.db
+          .select({ id: tasks.id, title: tasks.title })
+          .from(tasks)
+          .where(eq(tasks.id, row.parentTaskId))
+          .limit(1)
+      : []
+
     return {
       ...row,
+      parent: parent ?? null,
       defaultBillable: await this.projectDefaultBillable(taskId),
       labels: labelRows.map((l) => l.label),
       watchers: watcherRows.map((w) => ({ ...w.watcher, user: w.user })),
@@ -2085,11 +2095,40 @@ export class TasksService {
       isArchived: boolean
       isMilestone: boolean
       visibility: 'public' | 'private'
+      parentTaskId: string | null
     }>,
   ) {
     await this.assertTaskWriteAccess(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
+
+    // Re-parenting: null promotes a subtask to a task of its own. Anything else
+    // has to keep the one-level rule that createTask enforces, and must not
+    // make the task its own ancestor.
+    if (patch.parentTaskId !== undefined && patch.parentTaskId !== null) {
+      if (patch.parentTaskId === taskId) {
+        throw new BadRequestException('A task cannot be its own parent')
+      }
+      const [parent] = await this.db
+        .select({ id: tasks.id, parentTaskId: tasks.parentTaskId })
+        .from(tasks)
+        .where(eq(tasks.id, patch.parentTaskId))
+        .limit(1)
+      if (!parent) throw new NotFoundException('Parent task not found')
+      if (parent.parentTaskId) {
+        throw new BadRequestException('Subtasks can only be nested one level deep')
+      }
+      // Moving a task that already has children under a parent would create a
+      // second level, so refuse it rather than silently orphaning them.
+      const [child] = await this.db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(eq(tasks.parentTaskId, taskId))
+        .limit(1)
+      if (child) {
+        throw new BadRequestException('A task with subtasks cannot become a subtask itself')
+      }
+    }
 
     // Resolve the requested status to its canonical key + category bucket
     // so we can drive completion / blocker semantics off `category` rather
