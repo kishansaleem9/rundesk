@@ -763,6 +763,12 @@ export function TaskDetailSheet({
                   parentListId={detailQuery.data.listId}
                   workspaceId={fallbackWorkspaceId}
                   inline={detailQuery.data.subtasks ?? []}
+                  onOpenTask={(subtaskId) =>
+                    navigate({
+                      to: '.',
+                      search: (prev: Record<string, unknown>) => ({ ...prev, task: subtaskId }),
+                    } as any)
+                  }
                 />
               )}
               {activeTab === 'checklists' && (
@@ -1909,11 +1915,13 @@ function SubtasksPanel({
   parentListId,
   workspaceId,
   inline,
+  onOpenTask,
 }: {
   taskId: string
   parentListId: string
   workspaceId?: string
   inline: Subtask[]
+  onOpenTask: (subtaskId: string) => void
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -2058,14 +2066,17 @@ function SubtasksPanel({
                   </Button>
                 </div>
               ) : (
-                <span
+                <button
+                  type="button"
+                  onClick={() => onOpenTask(s.id)}
+                  title={t('taskDetail.openSubtask')}
                   className={cn(
-                    'flex-1 text-sm truncate',
+                    'flex-1 truncate text-left text-sm hover:underline',
                     s.status === 'done' && 'line-through text-muted-foreground',
                   )}
                 >
                   {s.title}
-                </span>
+                </button>
               )}
               <Badge variant="outline" className={cn('capitalize text-xs', priorityColor(s.priority))}>
                 {t(PRIORITY_LABEL_KEYS[s.priority])}
