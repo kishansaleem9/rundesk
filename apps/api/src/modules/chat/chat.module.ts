@@ -9,9 +9,10 @@ import { RemindersModule } from '../reminders/reminders.module'
 import { PresenceModule } from '../presence/presence.module'
 import { AiModule } from '../ai/ai.module'
 import { StorageModule } from '../../common/storage/storage.module'
+import { SharesModule } from '../shares/shares.module'
 
 @Module({
-  imports: [RealtimeModule, NotificationsModule, TasksModule, RemindersModule, PresenceModule, AiModule, StorageModule],
+  imports: [RealtimeModule, NotificationsModule, TasksModule, RemindersModule, PresenceModule, AiModule, StorageModule, SharesModule],
   providers: [ChatService, WorkspaceMemberGuard],
   controllers: [ChatController],
   exports: [ChatService],

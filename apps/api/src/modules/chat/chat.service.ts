@@ -15,6 +15,7 @@ import {
   projects,
   lists,
   users,
+  objectShares,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -25,6 +26,7 @@ import { TasksService } from '../tasks/tasks.service'
 import { TaskRemindersService } from '../reminders/task-reminders.service'
 import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
+import { SharesService, type ShareLevel } from '../shares/shares.service'
 import { fetchLinkPreview, type UnfurlResult } from './link-unfurl'
 
 const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
@@ -86,6 +88,7 @@ export class ChatService {
     private r2: R2Service,
     private reminders: TaskRemindersService,
     private presence: PresenceService,
+    private shares: SharesService,
   ) {}
 
   private sanitizeFileName(input: string): string {
@@ -118,7 +121,7 @@ export class ChatService {
     userId: string,
     body: { fileName: string; contentType: string; sizeBytes?: number },
   ) {
-    await this.assertChannelAccess(channelId, userId)
+    this.assertCanPost(await this.assertChannelAccess(channelId, userId))
     if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
     this.assertAttachmentSize(body.sizeBytes)
     const fileName = this.sanitizeFileName(body.fileName)
@@ -139,7 +142,7 @@ export class ChatService {
     userId: string,
     data: { fileName: string; contentType: string; sizeBytes: number; storageKey: string },
   ) {
-    await this.assertChannelAccess(channelId, userId)
+    this.assertCanPost(await this.assertChannelAccess(channelId, userId))
     this.assertAttachmentSize(data.sizeBytes)
     if (!data.storageKey) throw new BadRequestException('storageKey is required')
     const [row] = await this.db
@@ -306,16 +309,49 @@ export class ChatService {
       }
     }
 
+    // Share & Permissions can also let someone into a private channel. Only a
+    // grant on the CHANNEL counts — inheriting a space grant here would open
+    // every private channel in that space to anyone who can see the space.
+    // A DM is never shareable, so a grant can never stand in for membership.
+    const sharedLevel: ShareLevel | null = channel.isDm
+      ? null
+      : await this.shares.directLevel('channel', channelId, userId)
+
+    let isMember = true
     if (channel.isPrivate || channel.isDm) {
       const [channelMembership] = await this.db
         .select({ userId: chatChannelMembers.userId })
         .from(chatChannelMembers)
         .where(and(eq(chatChannelMembers.channelId, channelId), eq(chatChannelMembers.userId, userId)))
         .limit(1)
-      if (!channelMembership) throw new ForbiddenException('Channel membership required')
+      if (!channelMembership && !sharedLevel) throw new ForbiddenException('Channel membership required')
+      isMember = !!channelMembership
     }
 
-    return channel
+    // The grant wins over membership, deliberately. Opening a channel upserts a
+    // member row (markChannelRead), so letting membership win would quietly
+    // promote a view-only visitor to full posting rights on their second
+    // request. Most-specific-wins keeps the granted level authoritative.
+    return { ...channel, accessLevel: sharedLevel ?? ('admin' as ShareLevel), isMember }
+  }
+
+  /** Read-only visitors (view level) may not write into a channel. */
+  private assertCanPost(access: { accessLevel: ShareLevel }) {
+    if (access.accessLevel === 'view') {
+      throw new ForbiddenException('You have view-only access to this channel')
+    }
+  }
+
+  /**
+   * Someone inside a private channel purely because it was shared with them.
+   *
+   * They must never acquire a chat_channel_members row: membership outlives the
+   * grant, so revoking the share would leave them with access anyway. Their
+   * read/delivery markers go untracked, which is a fair trade for revocation
+   * that actually revokes.
+   */
+  private isShareOnlyVisitor(access: { isPrivate: boolean; isMember: boolean }) {
+    return access.isPrivate && !access.isMember
   }
 
   async listChannels(workspaceId: string, userId: string) {
@@ -344,6 +380,19 @@ export class ChatService {
     const lastReadMap = new Map(memberships.map((m) => [m.channelId, m.lastReadAt]))
     const levelMap = new Map(memberships.map((m) => [m.channelId, m.notificationLevel]))
 
+    // Channels shared with this user directly. Without this a private channel
+    // granted through Share & Permissions would stay invisible in the sidebar,
+    // leaving the grant unreachable.
+    const grants = await this.db
+      .select({ channelId: objectShares.objectId, level: objectShares.level })
+      .from(objectShares)
+      .where(and(
+        eq(objectShares.objectType, 'channel'),
+        eq(objectShares.userId, userId),
+        eq(objectShares.workspaceId, workspaceId),
+      ))
+    const grantMap = new Map(grants.map((g) => [g.channelId, g.level as ShareLevel]))
+
     // Unread = top-level messages the user didn't author, newer than their
     // last-read marker, across the channels they're a member of.
     const unreadRows = await this.db
@@ -364,13 +413,15 @@ export class ChatService {
     const unreadMap = new Map(unreadRows.map((r) => [r.channelId, r.count]))
 
     const visible = rows
-      .filter((c) => !c.isPrivate || memberSet.has(c.id))
+      .filter((c) => !c.isPrivate || memberSet.has(c.id) || grantMap.has(c.id))
       .map((c) => ({
         ...c,
         joined: memberSet.has(c.id),
         unreadCount: unreadMap.get(c.id) ?? 0,
         lastReadAt: lastReadMap.get(c.id) ?? null,
         notificationLevel: levelMap.get(c.id) ?? 'all',
+        // Lets the composer go read-only for a view-only visitor.
+        accessLevel: grantMap.get(c.id) ?? 'admin',
       }))
 
     const dmChannels = visible.filter((c) => c.isDm)
@@ -409,8 +460,9 @@ export class ChatService {
 
   /** Mark a channel read up to now for the user (upserts their member row). */
   async markChannelRead(channelId: string, userId: string) {
-    await this.assertChannelAccess(channelId, userId)
+    const access = await this.assertChannelAccess(channelId, userId)
     const now = new Date()
+    if (this.isShareOnlyVisitor(access)) return { ok: true, lastReadAt: now }
     await this.db
       .insert(chatChannelMembers)
       .values({ channelId, userId, lastReadAt: now })
@@ -426,8 +478,9 @@ export class ChatService {
    *  this when it receives/opens a channel's messages, so senders can see
    *  "Delivered" before the recipient actually reads. */
   async markChannelDelivered(channelId: string, userId: string) {
-    await this.assertChannelAccess(channelId, userId)
+    const access = await this.assertChannelAccess(channelId, userId)
     const now = new Date()
+    if (this.isShareOnlyVisitor(access)) return { ok: true, lastDeliveredAt: now }
     await this.db
       .insert(chatChannelMembers)
       .values({ channelId, userId, lastDeliveredAt: now })
@@ -443,7 +496,8 @@ export class ChatService {
     if (!['all', 'mentions', 'none'].includes(level)) {
       throw new ForbiddenException("level must be 'all', 'mentions', or 'none'")
     }
-    await this.assertChannelAccess(channelId, userId)
+    const access = await this.assertChannelAccess(channelId, userId)
+    if (this.isShareOnlyVisitor(access)) return { ok: true, notificationLevel: level }
     await this.db
       .insert(chatChannelMembers)
       .values({ channelId, userId, notificationLevel: level as 'all' | 'mentions' | 'none' })
@@ -771,7 +825,12 @@ export class ChatService {
   }
 
   async joinChannel(channelId: string, userId: string) {
-    await this.assertChannelAccess(channelId, userId)
+    const access = await this.assertChannelAccess(channelId, userId)
+    // A share is permission to look, not an invitation to join. Letting a
+    // share-only visitor become a member would survive the share being revoked.
+    if (this.isShareOnlyVisitor(access)) {
+      throw new ForbiddenException('This channel was shared with you; ask a member to add you to join it')
+    }
     await this.db
       .insert(chatChannelMembers)
       .values({ channelId, userId })
@@ -1195,7 +1254,7 @@ export class ChatService {
     mentions?: Array<{ userId: string; offset?: number; length?: number }>
     attachmentIds?: string[]
   }) {
-    await this.assertChannelAccess(data.channelId, data.authorId)
+    this.assertCanPost(await this.assertChannelAccess(data.channelId, data.authorId))
     const body = data.body.trim()
     const attachmentIds = (data.attachmentIds ?? []).filter(Boolean)
     // A message must carry either text or at least one attachment (Plan §6.8).

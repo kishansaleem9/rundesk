@@ -15,6 +15,8 @@ export type ChatChannel = {
   unreadCount?: number
   lastReadAt?: string | null
   notificationLevel?: 'all' | 'mentions' | 'none'
+  /** Share & Permissions level when reached through a grant; 'view' is read-only. */
+  accessLevel?: 'view' | 'comment' | 'edit' | 'admin'
   dmPeerId?: string
   dmPeerName?: string | null
   dmPeerAvatarUrl?: string | null

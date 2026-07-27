@@ -15,7 +15,7 @@ import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 /** Every object a share can be attached to. */
-export type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc'
+export type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel'
 type ShareLevel = 'view' | 'comment' | 'edit' | 'admin'
 
 type ShareRow = {
@@ -43,6 +43,7 @@ const TITLE_KEY: Record<ShareObjectType, TranslationKey> = {
   list: 'share.titleList',
   task: 'share.titleTask',
   doc: 'share.titleDoc',
+  channel: 'share.titleChannel',
 }
 
 export function SharePanel({

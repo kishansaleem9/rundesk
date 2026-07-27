@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundEx
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import {
   objectShares, users, workspaceMembers,
-  spaces, folders, projects, lists, tasks, docs,
+  spaces, folders, projects, lists, tasks, docs, chatChannels,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -11,7 +11,7 @@ import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 
 /** Everything that can be shared. */
-export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc'] as const
+export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc', 'channel'] as const
 export type ShareType = (typeof SHARE_TYPES)[number]
 
 /**
@@ -112,12 +112,42 @@ export class SharesService {
       chain.push({ type: 'space', id: r.spaceId })
       return { workspaceId: r.ws, createdById: r.by, name: r.name, chain }
     }
+    if (type === 'channel') {
+      const [r] = await this.db.select({
+        ws: chatChannels.workspaceId, by: chatChannels.createdById,
+        name: chatChannels.name, spaceId: chatChannels.spaceId, isDm: chatChannels.isDm,
+      }).from(chatChannels).where(eq(chatChannels.id, id)).limit(1)
+      if (!r) throw new NotFoundException('Channel not found')
+      // A DM is between its participants — there is no one to share it with.
+      if (r.isDm) throw new BadRequestException('Direct messages cannot be shared')
+      const chain: Array<{ type: ShareType; id: string }> = [{ type: 'channel', id }]
+      if (r.spaceId) chain.push({ type: 'space', id: r.spaceId })
+      return { workspaceId: r.ws, createdById: r.by, name: r.name, chain }
+    }
     const [r] = await this.db.select({ ws: docs.workspaceId, by: docs.createdById, name: docs.title, spaceId: docs.spaceId })
       .from(docs).where(eq(docs.id, id)).limit(1)
     if (!r) throw new NotFoundException('Doc not found')
     const chain: Array<{ type: ShareType; id: string }> = [{ type: 'doc', id }]
     if (r.spaceId) chain.push({ type: 'space', id: r.spaceId })
     return { workspaceId: r.ws, createdById: r.by, name: r.name, chain }
+  }
+
+  /**
+   * The grant on EXACTLY this object, ignoring ancestors.
+   *
+   * `resolveLevel` deliberately inherits down the chain, which is right for
+   * containers but wrong for a private chat channel: a space-level grant must
+   * not quietly open every private channel inside that space. Callers guarding
+   * private things ask for the direct grant instead.
+   */
+  async directLevel(type: ShareType, id: string, userId: string): Promise<ShareLevel | null> {
+    const [row] = await this.db.select({ level: objectShares.level }).from(objectShares)
+      .where(and(
+        eq(objectShares.objectType, type),
+        eq(objectShares.objectId, id),
+        eq(objectShares.userId, userId),
+      )).limit(1)
+    return (row?.level as ShareLevel | undefined) ?? null
   }
 
   // ─── who may share ─────────────────────────────────────────────────────────

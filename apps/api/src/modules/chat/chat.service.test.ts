@@ -51,7 +51,7 @@ function makeDb(selectResults: any[][], updateResults: any[][] = []) {
   return { db, inserted, deleted, updated }
 }
 
-function buildSvc(db: any) {
+function buildSvc(db: any, grantedLevel: string | null = null) {
   const realtime = { emitToWorkspace: mock.fn() } as any
   const notifications = { create: mock.fn(async () => null) } as any
   const tasks = {} as any
@@ -59,7 +59,9 @@ function buildSvc(db: any) {
   const r2 = { configured: false, getObjectUrl: async (k: string) => k } as any
   const reminders = { create: mock.fn() } as any
   const presence = { statusFor: mock.fn(async () => ({})) } as any
-  return new ChatService(db, realtime, notifications, tasks, ai, r2, reminders, presence)
+  // No share grants by default: plain membership decides access, as before.
+  const shares = { directLevel: mock.fn(async () => grantedLevel) } as any
+  return new ChatService(db, realtime, notifications, tasks, ai, r2, reminders, presence, shares)
 }
 
 describe('ChatService.setSaved', () => {
@@ -377,5 +379,86 @@ describe('ChatService.getMessageEdits (Plan §6.3)', () => {
     assert.equal(res.current.body, 'current')
     assert.equal(res.edits.length, 2)
     assert.equal(res.edits[0].previousBody, 'v1')
+  })
+})
+
+/**
+ * Share & Permissions on a chat conversation. A grant is the only way into a
+ * private channel besides membership, and the level it carries decides whether
+ * the visitor can actually write.
+ */
+describe('ChatService channel sharing', () => {
+  // assertChannelAccess order: channel → workspace membership → [channel membership]
+  const privateChannel = (membership: any[]) => [
+    [{ id: 'c1', workspaceId: 'w1', isPrivate: true, isDm: false, spaceId: null }],
+    [{ userId: 'u1' }],
+    membership,
+  ]
+  const publicChannel = () => [
+    [{ id: 'c1', workspaceId: 'w1', isPrivate: false, isDm: false, spaceId: null }],
+    [{ userId: 'u1' }],
+  ]
+
+  it('lets a granted outsider into a private channel they are not a member of', async () => {
+    const { db } = makeDb(privateChannel([]))
+    const svc = buildSvc(db, 'view')
+    const res = await svc.markChannelRead('c1', 'u1')
+    assert.equal(res.ok, true)
+  })
+
+  it('still refuses a private channel when there is no membership and no grant', async () => {
+    const { db } = makeDb(privateChannel([]))
+    const svc = buildSvc(db, null)
+    await assert.rejects(() => svc.markChannelRead('c1', 'u1'), /Channel membership required/)
+  })
+
+  it('blocks posting at view level', async () => {
+    const { db } = makeDb(publicChannel())
+    const svc = buildSvc(db, 'view')
+    await assert.rejects(
+      () => svc.postMessage({ channelId: 'c1', authorId: 'u1', body: 'hi' }),
+      /view-only access/,
+    )
+  })
+
+  it('allows posting at comment level and above', async () => {
+    const { db } = makeDb(publicChannel())
+    const svc = buildSvc(db, 'comment')
+    // Past the permission gate it fails later on unmocked plumbing; what matters
+    // is that it is no longer the view-only refusal.
+    await assert.rejects(
+      () => svc.postMessage({ channelId: 'c1', authorId: 'u1', body: 'hi' }),
+      (e: Error) => !/view-only access/.test(e.message),
+    )
+  })
+
+  it('never writes a member row for a share-only visitor', async () => {
+    // A member row outlives the grant, so creating one here would leave the
+    // visitor with access after the share is revoked.
+    const { db, inserted } = makeDb(privateChannel([]))
+    const svc = buildSvc(db, 'view')
+    await svc.markChannelRead('c1', 'u1')
+    assert.equal(inserted.length, 0, 'expected no chat_channel_members insert')
+  })
+
+  it('refuses to let a share-only visitor join the channel', async () => {
+    const { db } = makeDb(privateChannel([]))
+    const svc = buildSvc(db, 'view')
+    await assert.rejects(() => svc.joinChannel('c1', 'u1'), /ask a member to add you/)
+  })
+
+  it('keeps a view grant authoritative over a member row', async () => {
+    // Opening a channel upserts a member row, so membership must not silently
+    // promote a view-only visitor to full posting rights.
+    const { db } = makeDb([
+      [{ id: 'c1', workspaceId: 'w1', isPrivate: true, isDm: false, spaceId: null }],
+      [{ userId: 'u1' }],
+      [{ userId: 'u1' }], // they ARE a member now
+    ])
+    const svc = buildSvc(db, 'view')
+    await assert.rejects(
+      () => svc.postMessage({ channelId: 'c1', authorId: 'u1', body: 'hi' }),
+      /view-only access/,
+    )
   })
 })

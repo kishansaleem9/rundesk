@@ -17,7 +17,7 @@ export const objectShares = pgTable(
   {
     id:           uuid('id').primaryKey().defaultRandom(),
     workspaceId:  uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-    objectType:   text('object_type').$type<'space' | 'folder' | 'project' | 'list' | 'task' | 'doc'>().notNull(),
+    objectType:   text('object_type').$type<'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel'>().notNull(),
     objectId:     uuid('object_id').notNull(),
     userId:       uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
     invitedEmail: text('invited_email'),

@@ -55,6 +55,23 @@ client's ask #2.
 
 ## Implementation notes for Rundesk
 
+### Chat conversations
+
+Channels have their own membership table, so a grant has to interact with it
+carefully:
+
+- A grant on the **channel itself** is the only kind that opens a private
+  channel. A space-level grant must NOT inherit down to channels, or every
+  private channel in a space becomes visible to anyone who can see the space.
+- The **grant wins over membership**. Opening a channel upserts a member row
+  (read/delivery markers), so letting membership win would silently promote a
+  view-only visitor to full posting rights on their second request.
+- A share-only visitor **never gets a member row**, and cannot `join`. Membership
+  outlives the grant, so either would survive revocation. The cost is that their
+  read/delivery markers go untracked — a fair trade for revocation that revokes.
+- `view` is genuinely read-only: posting and attachment upload are refused.
+- **DMs cannot be shared** at all.
+
 - **Generic grants table** (`object_shares`): `(objectType, objectId, userId |
   invitedEmail, level, createdById, createdAt)` with a unique index per
   (objectType, objectId, principal). `objectType` covers

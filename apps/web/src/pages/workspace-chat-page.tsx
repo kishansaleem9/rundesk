@@ -5,6 +5,7 @@ import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
 import { AddPeopleDialog } from '../components/chat/add-people-dialog'
+import { SharePanel } from '../components/share-panel'
 import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
 import {
   formatDateDivider,
@@ -37,6 +38,7 @@ import {
   Check,
   CheckCheck,
   Tag,
+  Lock,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -63,6 +65,8 @@ type Channel = {
   dmIsGroup?: boolean
   dmPeers?: Array<{ userId: string; displayName: string | null; avatarUrl: string | null }>
   dmLabel?: string | null
+  /** Share & Permissions level when reached through a grant; 'view' is read-only. */
+  accessLevel?: 'view' | 'comment' | 'edit' | 'admin'
 }
 
 type WorkspaceMember = {
@@ -181,6 +185,7 @@ export function ChatPage() {
   const [showArchived, setShowArchived] = useState(false)
   // Edit-channel dialog (§6.1): name / description / icon.
   const [editChannelOpen, setEditChannelOpen] = useState(false)
+  const [shareChannelOpen, setShareChannelOpen] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editIcon, setEditIcon] = useState('')
@@ -975,7 +980,20 @@ export function ChatPage() {
               ? () => setChannelArchivedMutation.mutate({ channelId: selectedChannel.id, archived: true })
               : undefined
           }
+          onShareChannel={
+            selectedChannel && !selectedChannel.isDm ? () => setShareChannelOpen(true) : undefined
+          }
         />
+
+        {selectedChannel && !selectedChannel.isDm && (
+          <SharePanel
+            open={shareChannelOpen}
+            onOpenChange={setShareChannelOpen}
+            objectType="channel"
+            objectId={selectedChannel.id}
+            objectName={selectedChannel.name}
+          />
+        )}
 
         {selectedChannel && !selectedChannel.isDm && (
           <AddPeopleDialog
@@ -1678,12 +1696,21 @@ export function ChatPage() {
           </div>
         )}
 
+        {/* A view-only visitor can read the conversation but not write into it,
+            so say why the box is dead rather than leaving it mysteriously inert. */}
+        {selectedChannel?.accessLevel === 'view' && (
+          <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
+            <Lock className="h-3.5 w-3.5 shrink-0" />
+            <span>{t('share.viewOnlyChannel')}</span>
+          </div>
+        )}
+
         <ChatComposer
           channelLabel={channelLabel}
           value={input}
           onChange={setInput}
           onSend={handleSend}
-          disabled={!selectedId}
+          disabled={!selectedId || selectedChannel?.accessLevel === 'view'}
           sending={sendMutation.isPending}
           replyTo={replyTo}
           replyNamesById={namesById}

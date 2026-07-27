@@ -1,4 +1,4 @@
-import { Archive, Bookmark, Check, FileText, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pencil, Pin, Search, Star, UserPlus, Users, X } from 'lucide-react'
+import { Archive, Bookmark, Check, FileText, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pencil, Pin, Search, Share2, Star, UserPlus, Users, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +37,7 @@ export function ChatHeader({
   onRemoveMember,
   onEditChannel,
   onArchiveChannel,
+  onShareChannel,
 }: {
   channel: ChatChannel | null
   workspaceId?: string
@@ -58,6 +59,7 @@ export function ChatHeader({
   onRemoveMember?: (userId: string) => void
   onEditChannel?: () => void
   onArchiveChannel?: () => void
+  onShareChannel?: () => void
 }) {
   // The channel creator may remove other members / edit / archive (backend also
   // allows workspace admins; these controls are shown to the creator).
@@ -283,6 +285,15 @@ export function ChatHeader({
                     {t('chat.archiveChannel')}
                   </DropdownMenuItem>
                 )}
+              </>
+            )}
+            {!channel?.isDm && onShareChannel && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onShareChannel}>
+                  <Share2 className="h-4 w-4" />
+                  {t('share.menuAction')}
+                </DropdownMenuItem>
               </>
             )}
             {!channel?.isDm && (
