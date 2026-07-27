@@ -3,6 +3,10 @@ import { useNavigate } from '@tanstack/react-router'
 import {
   Badge,
   Button,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
   Input,
   Sheet,
   SheetContent,
@@ -38,6 +42,7 @@ import {
   Video,
   Lock,
   Globe, Share2,
+  Bell,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
@@ -284,7 +289,6 @@ const TABS: Array<{ key: TabKey; labelKey: TranslationKey }> = [
   { key: 'fields', labelKey: 'taskDetail.tab.fields' },
   { key: 'subtasks', labelKey: 'taskDetail.tab.subtasks' },
   { key: 'checklists', labelKey: 'taskDetail.tab.checklists' },
-  { key: 'watchers', labelKey: 'taskDetail.tab.watchers' },
   { key: 'attachments', labelKey: 'taskDetail.tab.attachments' },
   { key: 'comments', labelKey: 'taskDetail.tab.comments' },
   { key: 'activity', labelKey: 'taskDetail.tab.activity' },
@@ -378,6 +382,7 @@ export function TaskDetailSheet({
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   // §Share — one panel, shared with every other object type.
   const [shareOpen, setShareOpen] = useState(false)
+  const [watchersOpen, setWatchersOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -683,6 +688,20 @@ export function TaskDetailSheet({
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
+                    title={t('taskDetail.tab.watchers')}
+                    aria-label={t('taskDetail.tab.watchers')}
+                    onClick={() => setWatchersOpen(true)}
+                    className="relative h-8 w-8 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  >
+                    <Bell className="h-4 w-4" />
+                    {(detailQuery.data.watchers?.length ?? 0) > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 min-w-[14px] rounded-full bg-brand-500 px-1 text-[9px] font-semibold leading-[14px] text-white">
+                        {detailQuery.data.watchers!.length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
                     title={t('share.menuAction')}
                     aria-label={t('share.menuAction')}
                     onClick={() => setShareOpen(true)}
@@ -821,13 +840,6 @@ export function TaskDetailSheet({
                   checklists={detailQuery.data.checklists ?? []}
                 />
               )}
-              {activeTab === 'watchers' && (
-                <WatchersPanel
-                  taskId={detailQuery.data.id}
-                  workspaceId={fallbackWorkspaceId}
-                  inline={detailQuery.data.watchers ?? []}
-                />
-              )}
               {activeTab === 'dependencies' && (
                 <DependenciesPanel
                   taskId={detailQuery.data.id}
@@ -856,6 +868,20 @@ export function TaskDetailSheet({
         ) : (
           <p className="text-sm text-destructive">{t('taskDetail.notFound')}</p>
         )}
+        <Dialog open={watchersOpen} onOpenChange={setWatchersOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('taskDetail.tab.watchers')}</DialogTitle>
+            </DialogHeader>
+            {detailQuery.data && (
+              <WatchersPanel
+                taskId={detailQuery.data.id}
+                workspaceId={fallbackWorkspaceId}
+                inline={detailQuery.data.watchers ?? []}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </SheetContent>
       {taskId && (
         <SharePanel
