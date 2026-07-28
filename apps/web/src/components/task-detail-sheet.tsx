@@ -193,6 +193,7 @@ type TaskPickerItem = {
 
 type ChecklistItem = { id: string; content: string; isDone: boolean; dueDate?: string | null; assigneeId?: string | null }
 type Checklist = { id: string; title: string; items: ChecklistItem[] }
+type ChecklistTemplate = { id: string; name: string; items: Array<{ id: string; content: string }> }
 
 type Watcher = {
   userId: string
@@ -2257,6 +2258,36 @@ function ChecklistsPanel({
   const qc = useQueryClient()
   const [itemText, setItemText] = useState('')
   const [itemAssignee, setItemAssignee] = useState('')
+  const [templateId, setTemplateId] = useState('')
+
+  // Reusable checklists — "main template se bhi checklist kar sakti hoon".
+  const templatesQuery = useQuery({
+    queryKey: ['checklist-templates', workspaceId],
+    queryFn: () => api<ChecklistTemplate[]>(`/workspaces/${workspaceId}/checklist-templates`),
+    enabled: !!workspaceId,
+  })
+  const templates = templatesQuery.data ?? []
+
+  const applyTemplate = useMutation({
+    mutationFn: (id: string) =>
+      api(`/tasks/${taskId}/checklists/from-template/${id}`, { method: 'POST' }),
+    onSuccess: async () => {
+      setTemplateId('')
+      toast.success(t('taskDetail.checklistTemplateApplied'))
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('taskDetail.checklistTemplateFailed')),
+  })
+
+  const saveAsTemplate = useMutation({
+    mutationFn: (checklistId: string) =>
+      api(`/checklists/${checklistId}/save-as-template`, { method: 'POST', body: {} }),
+    onSuccess: async () => {
+      toast.success(t('taskDetail.checklistTemplateSaved'))
+      await qc.invalidateQueries({ queryKey: ['checklist-templates', workspaceId] })
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('taskDetail.checklistTemplateFailed')),
+  })
 
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
@@ -2378,6 +2409,29 @@ function ChecklistsPanel({
 
   return (
     <div className="space-y-3">
+      {templates.length > 0 && (
+        <div className="flex items-center gap-2 rounded-md border border-border/70 bg-card/40 px-3 py-2">
+          <span className="text-[12px] text-muted-foreground shrink-0">{t('taskDetail.checklistFromTemplate')}</span>
+          <select
+            value={templateId}
+            onChange={(e) => {
+              const next = e.target.value
+              setTemplateId(next)
+              if (next) applyTemplate.mutate(next)
+            }}
+            aria-label={t('taskDetail.checklistFromTemplate')}
+            disabled={applyTemplate.isPending}
+            className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-[13px]"
+          >
+            <option value="">{t('taskDetail.checklistPickTemplate')}</option>
+            {templates.map((tpl) => (
+              <option key={tpl.id} value={tpl.id}>
+                {tpl.name} ({tpl.items.length})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {checklists.length === 0 ? (
         <EmptyState title={t('taskDetail.noChecklists')} hint={t('taskDetail.noChecklistsHint')} />
       ) : (
@@ -2414,6 +2468,16 @@ function ChecklistsPanel({
                     }}
                   >
                     {t('taskDetail.rename')}
+                  </button>
+                  {/* Turn a list someone built by hand into something reusable,
+                      rather than making them retype it on the next task. */}
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    disabled={saveAsTemplate.isPending}
+                    onClick={() => saveAsTemplate.mutate(cl.id)}
+                  >
+                    {t('taskDetail.checklistSaveTemplate')}
                   </button>
                   <button
                     type="button"

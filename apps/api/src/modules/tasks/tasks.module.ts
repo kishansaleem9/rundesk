@@ -3,6 +3,8 @@ import { TasksService } from './tasks.service'
 import { TasksController } from './tasks.controller'
 import { TaskCommentsController } from './comments.controller'
 import { TaskChecklistsController } from './checklists.controller'
+import { ChecklistTemplatesController } from './checklist-templates.controller'
+import { ChecklistTemplatesService } from './checklist-templates.service'
 import { TaskActivityController, ProjectActivityController } from './activity.controller'
 import { TaskDependenciesController } from './dependencies.controller'
 import { TaskExternalLinksController } from './external-links.controller'
@@ -27,11 +29,12 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     CalendarSyncModule,
     SecurityModule,
   ],
-  providers: [TasksService, WorkspaceMemberGuard],
+  providers: [TasksService, ChecklistTemplatesService, WorkspaceMemberGuard],
   controllers: [
     TasksController,
     TaskCommentsController,
     TaskChecklistsController,
+    ChecklistTemplatesController,
     TaskActivityController,
     ProjectActivityController,
     TaskDependenciesController,
