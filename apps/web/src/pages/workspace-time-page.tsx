@@ -72,7 +72,11 @@ export function TimePage() {
   const [tab, setTab] = useState<'timer' | 'timesheet' | 'monthly' | 'reports'>('timesheet')
   const [elapsedSec, setElapsedSec] = useState(0)
 
-  const weekStart = useMemo(() => startOfWeek(new Date(), { weekStartsOn: 1 }), [])
+  const [weekOffset, setWeekOffset] = useState(0)
+  const weekStart = useMemo(
+    () => addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), weekOffset * 7),
+    [weekOffset],
+  )
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
   const weekStartIso = useMemo(() => format(weekStart, 'yyyy-MM-dd'), [weekStart])
 
@@ -314,8 +318,36 @@ export function TimePage() {
           <>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
             <div className="flex items-center gap-2 text-sm">
+              <button
+                type="button"
+                aria-label={t('time.previousWeek')}
+                title={t('time.previousWeek')}
+                onClick={() => setWeekOffset((w) => w - 1)}
+                className="h-7 w-7 rounded-md border border-border text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                ‹
+              </button>
               <span className="text-muted-foreground">{t('time.weekOf')}</span>
               <span className="font-medium text-foreground">{format(weekStart, 'MMM d')} – {format(addDays(weekStart, 6), 'MMM d, yyyy')}</span>
+              <button
+                type="button"
+                aria-label={t('time.nextWeek')}
+                title={t('time.nextWeek')}
+                disabled={weekOffset >= 0}
+                onClick={() => setWeekOffset((w) => Math.min(0, w + 1))}
+                className="h-7 w-7 rounded-md border border-border text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
+              >
+                ›
+              </button>
+              {weekOffset !== 0 && (
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(0)}
+                  className="text-[12px] text-muted-foreground underline hover:text-foreground"
+                >
+                  {t('time.thisWeek')}
+                </button>
+              )}
               {myWeekStatus === 'submitted' && <Badge variant="warning" className="text-[10px] uppercase">{t('time.status.submitted')}</Badge>}
               {myWeekStatus === 'approved' && <Badge variant="success" className="text-[10px] uppercase">{t('time.status.approved')}</Badge>}
               {myWeekStatus === 'rejected' && <Badge variant="destructive" className="text-[10px] uppercase">{t('time.status.rejectedResubmit')}</Badge>}

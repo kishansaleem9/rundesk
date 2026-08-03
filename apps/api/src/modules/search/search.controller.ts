@@ -8,7 +8,7 @@ import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SearchService, type SearchEntityType, type SearchFilters } from './search.service'
 
-const ENTITY_TYPES: SearchEntityType[] = ['task', 'doc', 'file']
+const ENTITY_TYPES: SearchEntityType[] = ['task', 'doc', 'file', 'user', 'comment', 'channel', 'message']
 const STATUS_CATEGORIES = new Set(['open', 'in_progress', 'closed'])
 const PRIORITIES = new Set(['urgent', 'high', 'normal', 'low'])
 

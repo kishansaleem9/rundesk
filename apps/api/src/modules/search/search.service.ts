@@ -12,7 +12,10 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 
-export type SearchEntityType = 'task' | 'doc' | 'file'
+// Every entity the search can return. The Postgres-only ones (user, comment,
+// channel, message) belong here too — leaving them out meant a filter naming
+// one was discarded as invalid and the search silently ran unfiltered.
+export type SearchEntityType = 'task' | 'doc' | 'file' | 'user' | 'comment' | 'channel' | 'message'
 export type SearchFilters = {
   types?: SearchEntityType[]
   statusCategory?: 'open' | 'in_progress' | 'closed'
@@ -265,7 +268,7 @@ export class SearchService implements OnModuleInit {
       // (users, comments, channels, messages) for a general search.
       // Meili has no visibility field — drop private task hits the caller can't see.
       const safeMeili = await this.dropHiddenTaskHits(meiliHits, userId, isManager)
-      const extras = filters.types ? [] : await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager)
+      const extras = await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
       return [...safeMeili, ...extras, ...clipHits]
@@ -347,7 +350,7 @@ export class SearchService implements OnModuleInit {
     const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
 
     // Extras only for a general text search (no type/task-specific filter).
-    const extras = like && !filters.types ? await this.searchExtras(workspaceId, userId, like, limit, isManager) : []
+    const extras = like ? await this.searchExtras(workspaceId, userId, like, limit, isManager, filters.types) : []
 
     return [
       ...taskHits.map((t) => ({
@@ -391,7 +394,22 @@ export class SearchService implements OnModuleInit {
   }
 
   /** Search users, comments, channels, and messages (Plan §11.1). */
-  private async searchExtras(workspaceId: string, userId: string, like: string, limit: number, isManager = false) {
+  /**
+   * Users, comments, channels and messages — the entity types Meilisearch does
+   * not index. `types` narrows which of them to run; passing a filter that
+   * names none of them short-circuits to nothing, which is why the caller can
+   * hand its type chips straight through instead of skipping this entirely.
+   */
+  private async searchExtras(
+    workspaceId: string,
+    userId: string,
+    like: string,
+    limit: number,
+    isManager = false,
+    types?: string[],
+  ) {
+    const wants = (t: string) => !types || types.includes(t)
+    if (!wants('user') && !wants('comment') && !wants('channel') && !wants('message')) return []
     // Chat search must respect channel access (Plan §6): a user may only see
     // hits from public channels or channels they belong to — never from private
     // channels or DMs they're not a member of. Compute their channels once and
@@ -436,19 +454,19 @@ export class SearchService implements OnModuleInit {
         .limit(limit),
     ])
     return [
-      ...userHits.map((u) => ({
+      ...(wants('user') ? userHits : []).map((u) => ({
         id: `user-${u.id}`, entityType: 'user', title: u.displayName || u.email, content: u.email,
         url: `/app/${workspaceId}/settings`,
       })),
-      ...commentHits.map((c) => ({
+      ...(wants('comment') ? commentHits : []).map((c) => ({
         id: `comment-${c.id}`, entityType: 'comment', title: `Comment on “${c.taskTitle}”`, content: c.body.slice(0, 200),
         url: `/app/${workspaceId}/${c.spaceId}/${c.projectId}/${c.listId}?task=${c.taskId}`,
       })),
-      ...channelHits.map((c) => ({
+      ...(wants('channel') ? channelHits : []).map((c) => ({
         id: `channel-${c.id}`, entityType: 'channel', title: `#${c.name}`, content: '',
         url: `/app/${workspaceId}/chat?channel=${c.id}`,
       })),
-      ...messageHits.map((m) => ({
+      ...(wants('message') ? messageHits : []).map((m) => ({
         id: `message-${m.id}`, entityType: 'message', title: 'Chat message', content: m.body.slice(0, 200),
         url: `/app/${workspaceId}/chat?channel=${m.channelId}&message=${m.id}`,
       })),
