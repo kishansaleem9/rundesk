@@ -48,6 +48,10 @@ export const users = pgTable('users', {
   // Presence heartbeat (Plan §6.2): refreshed while a realtime socket is open;
   // "online/away/offline" is derived from how recently this was touched.
   lastSeenAt:    timestamp('last_seen_at', { withTimezone: true }),
+  // §A4.8 manual presence override. NULL = derive from lastSeenAt; a value is
+  // the user's stated intent ('online' | 'away' | 'busy' | 'offline') and wins
+  // over the derived status everywhere presence is read.
+  presenceStatus: text('presence_status').$type<'online' | 'away' | 'busy' | 'offline'>(),
   // UI language (Plan §13 i18n). BCP-47 short code; the web app localizes +
   // sets text direction (RTL for ar/he/fa) from this.
   locale:        text('locale').notNull().default('en'),

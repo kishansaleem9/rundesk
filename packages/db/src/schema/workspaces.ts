@@ -58,6 +58,12 @@ export const workspaces = pgTable('workspaces', {
     maxProjects?: number | null
     features?: Record<string, boolean>
   }>(),
+  // §A4.2 sharing policy. `defaultSpacePrivate` makes a newly created space
+  // members-only unless the creator opts out; `blockPublicSharing` withdraws the
+  // right to mint anonymous public links at all. Both default to the permissive
+  // behaviour every existing workspace already has.
+  defaultSpacePrivate: boolean('default_space_private').notNull().default(false),
+  blockPublicSharing:  boolean('block_public_sharing').notNull().default(false),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

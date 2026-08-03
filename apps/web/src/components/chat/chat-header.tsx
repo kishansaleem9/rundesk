@@ -1,4 +1,4 @@
-import { Archive, Bookmark, Check, FileText, Hash, LogOut, Link as LinkIcon, MoreHorizontal, Pencil, Pin, Search, Share2, Star, UserPlus, Users, X } from 'lucide-react'
+import { Archive, Bookmark, Check, FileText, Hash, Info, LogOut, Link as LinkIcon, MailOpen, MoreHorizontal, Pencil, Pin, Search, Share2, Star, UserPlus, Users, X } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +30,9 @@ export function ChatHeader({
   onToggleFiles,
   showSearchPanel,
   onToggleSearch,
+  showInfoPanel,
+  onToggleInfo,
+  onMarkUnread,
   onLeaveChannel,
   onAddPeople,
   onSetNotificationLevel,
@@ -52,6 +55,10 @@ export function ChatHeader({
   onToggleFiles: () => void
   showSearchPanel: boolean
   onToggleSearch: () => void
+  // Channel info panel (§A3.7) + mark-as-unread (§A3.3).
+  showInfoPanel: boolean
+  onToggleInfo: () => void
+  onMarkUnread?: () => void
   onLeaveChannel: () => void
   onAddPeople?: () => void
   onSetNotificationLevel?: (level: 'all' | 'mentions' | 'none') => void
@@ -115,8 +122,8 @@ export function ChatHeader({
             <span className={cn('h-1.5 w-1.5 rounded-full', presenceDotClass(dmPeerStatus))} />
             {dmPeerStatus === 'online' ? t('chat.activeNow') : dmPeerStatus === 'away' ? t('chat.away') : t('chat.offline')}
           </p>
-        ) : channel?.description ? (
-          <p className="text-[12px] text-muted-foreground truncate">{channel.description}</p>
+        ) : channel?.topic || channel?.description ? (
+          <p className="text-[12px] text-muted-foreground truncate">{channel.topic ?? channel.description}</p>
         ) : null}
       </div>
 
@@ -195,6 +202,13 @@ export function ChatHeader({
           </Popover>
         )}
         <IconBtn
+          icon={Info}
+          title={t('chat.channelInfo')}
+          active={showInfoPanel}
+          disabled={!channel}
+          onClick={onToggleInfo}
+        />
+        <IconBtn
           icon={Search}
           title={t('chat.search')}
           active={showSearchPanel}
@@ -245,6 +259,12 @@ export function ChatHeader({
               <LinkIcon className="h-4 w-4" />
               {t('chat.copyLink')}
             </DropdownMenuItem>
+            {onMarkUnread && (
+              <DropdownMenuItem onClick={onMarkUnread}>
+                <MailOpen className="h-4 w-4" />
+                {t('chat.markUnread')}
+              </DropdownMenuItem>
+            )}
             {canFavorite && (
               <DropdownMenuItem onClick={toggleStar}>
                 {starred ? <Check className="h-4 w-4" /> : <Star className="h-4 w-4" />}

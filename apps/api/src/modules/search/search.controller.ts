@@ -32,6 +32,8 @@ export class SearchController {
     @Query('statusCategory') statusCategory?: string,
     @Query('priority') priority?: string,
     @Query('assigneeId') assigneeId?: string,
+    @Query('creatorId') creatorId?: string,
+    @Query('includeArchived') includeArchived?: string,
     @Query('labelId') labelId?: string,
     @Query('dueAfter') dueAfter?: string,
     @Query('dueBefore') dueBefore?: string,
@@ -53,6 +55,8 @@ export class SearchController {
       filters.priority = priority as SearchFilters['priority']
     }
     if (assigneeId) filters.assigneeId = assigneeId
+    if (creatorId) filters.creatorId = creatorId
+    if (includeArchived === 'true') filters.includeArchived = true
     if (labelId) filters.labelId = labelId
     const parseDate = (s?: string) => {
       if (!s) return undefined

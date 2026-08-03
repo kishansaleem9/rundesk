@@ -6,7 +6,7 @@ import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
 import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { DocsService } from './docs.service'
+import { DocsService, DOC_SCOPES, type DocScope } from './docs.service'
 import type { CurrentUserPayload } from '../tasks/types'
 
 /**
@@ -41,13 +41,24 @@ export class DocsController {
   @UseGuards(WorkspaceMemberGuard)
   list(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Query('spaceId') spaceId?: string,
     @Query('parentDocId') parentDocId?: string,
+    @Query('scope') scope?: string,
   ) {
     return this.docs.list(workspaceId, {
       spaceId: spaceId === 'null' ? null : spaceId,
       parentDocId: parentDocId === 'null' ? null : parentDocId,
+      scope: (DOC_SCOPES as readonly string[]).includes(scope ?? '') ? (scope as DocScope) : 'all',
+      userId: user.id,
     })
+  }
+
+  // Bucket totals for the docs hub rail (A5.6).
+  @Get('workspaces/:workspaceId/docs/scope-counts')
+  @UseGuards(WorkspaceMemberGuard)
+  scopeCounts(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.scopeCounts(workspaceId, user.id)
   }
 
   @Post('workspaces/:workspaceId/docs')

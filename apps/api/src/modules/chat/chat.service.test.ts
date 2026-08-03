@@ -462,3 +462,58 @@ describe('ChatService channel sharing', () => {
     )
   })
 })
+
+describe('ChatService.markChannelUnread (§A3.3)', () => {
+  // assertChannelAccess: channel + workspace membership.
+  const access = () => [
+    [{ id: 'c1', workspaceId: 'w1', isPrivate: false, isDm: false, spaceId: null }],
+    [{ userId: 'u1' }],
+  ]
+
+  it('rewinds the cursor to just before the named message', async () => {
+    const at = new Date('2026-07-16T12:00:00.000Z')
+    const { db, inserted } = makeDb([...access(), [{ createdAt: at, channelId: 'c1' }]])
+    const svc = buildSvc(db)
+    const res = await svc.markChannelUnread('c1', 'u1', 'm9')
+    assert.equal(res.lastReadAt?.getTime(), at.getTime() - 1)
+    assert.equal(inserted[0].lastReadAt.getTime(), at.getTime() - 1)
+  })
+
+  it('rewinds to the newest message from someone else when no message is named', async () => {
+    const at = new Date('2026-07-16T09:30:00.000Z')
+    const { db, inserted } = makeDb([...access(), [{ createdAt: at }]])
+    const svc = buildSvc(db)
+    const res = await svc.markChannelUnread('c1', 'u1')
+    assert.equal(res.lastReadAt?.getTime(), at.getTime() - 1)
+    assert.equal(inserted.length, 1)
+  })
+
+  it('clears the cursor when there is nothing to go back to', async () => {
+    const { db, inserted } = makeDb([...access(), []])
+    const svc = buildSvc(db)
+    const res = await svc.markChannelUnread('c1', 'u1')
+    assert.equal(res.lastReadAt, null)
+    assert.equal(inserted[0].lastReadAt, null)
+  })
+
+  it('refuses a message from another channel', async () => {
+    const { db } = makeDb([...access(), [{ createdAt: new Date(), channelId: 'other' }]])
+    const svc = buildSvc(db)
+    await assert.rejects(() => svc.markChannelUnread('c1', 'u1', 'm9'), /Message not found/)
+  })
+})
+
+describe('ChatService.listWorkspaceFiles channel scope (§A3.7)', () => {
+  it('narrows to one channel without widening access', async () => {
+    const { db } = makeDb([
+      [
+        { id: 'c1', spaceId: null, isPrivate: false, isDm: false },
+        { id: 'c2', spaceId: null, isPrivate: true, isDm: false },
+      ],
+      [], // no channel memberships → c2 stays out of reach
+    ])
+    const svc = buildSvc(db)
+    // Asking for the private channel's files yields nothing and skips the query.
+    assert.deepEqual(await svc.listWorkspaceFiles('w1', 'u1', { channelId: 'c2' }), [])
+  })
+})

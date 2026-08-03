@@ -1,6 +1,7 @@
 import { Controller, Get, Ip, Param, Res, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ExportService } from './export.service'
+import { WorkspacesService } from '../workspaces/workspaces.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -10,7 +11,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 @UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
 @Controller('workspaces/:workspaceId/export')
 export class ExportController {
-  constructor(private readonly svc: ExportService) {}
+  constructor(
+    private readonly svc: ExportService,
+    private readonly workspaces: WorkspacesService,
+  ) {}
 
   @Get('json')
   @ApiOperation({ summary: 'Export all workspace data as JSON' })
@@ -63,6 +67,22 @@ export class ExportController {
       },
       ip,
     )
+    res.send(csv)
+  }
+
+  @Get('csv/members')
+  @ApiOperation({ summary: 'Export the People roster as CSV (§A4.1)' })
+  async exportMembersCsv(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+    @Res() res: any,
+  ) {
+    const members = await this.workspaces.listMembers(workspaceId)
+    const csv = this.svc.membersToCsv(members)
+    res.header('Content-Type', 'text/csv')
+    res.header('Content-Disposition', `attachment; filename="rundesk-members-${workspaceId}.csv"`)
+    await this.svc.logExport(workspaceId, user.id, 'csv', 'members', { members: members.length }, ip)
     res.send(csv)
   }
 }

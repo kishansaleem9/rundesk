@@ -21,9 +21,16 @@ export type SearchFilters = {
   statusCategory?: 'open' | 'in_progress' | 'closed'
   priority?: 'urgent' | 'high' | 'normal' | 'low'
   assigneeId?: string
+  /** §A2.4 — narrow to tasks a given member created. */
+  creatorId?: string
   labelId?: string
   dueAfter?: Date
   dueBefore?: Date
+  /**
+   * §A2.4 — search hard-excluded archived rows, which is right by default and
+   * wrong when you are hunting for something you archived last month.
+   */
+  includeArchived?: boolean
   // Custom-field value filter (Plan §11.2): narrows tasks to those whose value
   // for a given custom-field definition matches. `customFieldId` identifies the
   // per-project definition; `customFieldValue` is the stored value to match
@@ -234,6 +241,7 @@ export class SearchService implements OnModuleInit {
       filters.statusCategory ||
         filters.priority ||
         filters.assigneeId ||
+        filters.creatorId ||
         filters.labelId ||
         filters.dueAfter ||
         filters.dueBefore ||
@@ -250,8 +258,9 @@ export class SearchService implements OnModuleInit {
     if (!trimmed && !hasTaskFilter && !filters.types) return []
 
     // Meilisearch can only satisfy the text + entity-type filters — it doesn't
-    // index status/priority/assignee. Fall back to Postgres for those.
-    if (this.enabled && this.index && trimmed && !hasTaskFilter) {
+    // index status/priority/assignee, nor the archived flag. Fall back to
+    // Postgres for those.
+    if (this.enabled && this.index && trimmed && !hasTaskFilter && !filters.includeArchived) {
       const filterExpr = [`workspaceId = "${workspaceId}"`]
       if (filters.types && filters.types.length === 1) {
         filterExpr.push(`entityType = "${filters.types[0]}"`)
@@ -281,12 +290,13 @@ export class SearchService implements OnModuleInit {
       ? await (async () => {
           const conds: Array<SQL | undefined> = [
             eq(spaces.workspaceId, workspaceId),
-            eq(tasks.isArchived, false),
+            filters.includeArchived ? undefined : eq(tasks.isArchived, false),
             taskVisibilityFilter(this.db, userId, isManager),
           ]
           if (like) conds.push(or(ilike(tasks.title, like), ilike(tasks.description, like)))
           if (filters.statusCategory) conds.push(eq(tasks.statusCategory, filters.statusCategory))
           if (filters.priority) conds.push(eq(tasks.priority, filters.priority))
+          if (filters.creatorId) conds.push(eq(tasks.createdById, filters.creatorId))
           if (filters.assigneeId) {
             conds.push(
               inArray(
@@ -338,7 +348,7 @@ export class SearchService implements OnModuleInit {
           .from(docs)
           .where(and(
             eq(docs.workspaceId, workspaceId),
-            eq(docs.isArchived, false),
+            filters.includeArchived ? undefined : eq(docs.isArchived, false),
             ...(like ? [or(ilike(docs.title, like), ilike(docs.plaintext, like))] : []),
           ))
           .orderBy(desc(docs.updatedAt))

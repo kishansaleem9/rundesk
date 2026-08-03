@@ -37,6 +37,7 @@ import {
   Archive,
   Lock,
   Globe,
+  Users,
 } from 'lucide-react'
 import {
   Button,
@@ -97,6 +98,7 @@ function isNavPathActive(pathname: string, targetPath: string, exact = false) {
 function navIconForLabel(label: string) {
   const key = label.toLowerCase()
   if (key.includes('inbox')) return Inbox
+  if (key.includes('shared')) return Users
   if (key.includes('team') || key.includes('chat')) return MessageCircle
   if (key.includes('doc')) return FileText
   if (key.includes('dashboard')) return LayoutDashboard
@@ -120,6 +122,7 @@ function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: 
     { label: 'Teams', path: `${base}/chat` },
     { label: 'Docs', path: `${base}/docs` },
     { label: 'Dashboards', path: `${base}/dashboard` },
+    { label: 'Shared with me', path: `${base}/shared` },
     { label: 'AI', path: `${base}/ai` },
     { label: 'Whiteboards', path: `${base}/whiteboards` },
     { label: 'Forms', path: `${base}/forms` },
@@ -397,6 +400,21 @@ export function WorkspaceSidebar() {
   const currentWorkspace = workspaceId ? workspaces.find((w) => w.id === workspaceId) : undefined
   const currentOrg = currentWorkspace ? organizations.find((o) => o.id === currentWorkspace.organizationId) : undefined
 
+  // §A4.5 — the switcher showed a name and an org and nothing else, so it said
+  // nothing about which workspace you are standing in. Both reads are already
+  // served: branding for the avatar, the plan endpoint for tier + member count.
+  const workspaceBrandQuery = useQuery({
+    queryKey: ['workspace', workspaceId],
+    queryFn: () => api<{ id: string; name: string; logoUrl?: string | null }>(`/workspaces/${workspaceId}`),
+    enabled: !!workspaceId,
+  })
+  const workspacePlanQuery = useQuery({
+    queryKey: ['workspace-plan', workspaceId],
+    queryFn: () =>
+      api<{ label: string; usage: { members: number } }>(`/workspaces/${workspaceId}/plan`),
+    enabled: !!workspaceId,
+  })
+
   const spacesQuery = useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
@@ -453,6 +471,7 @@ export function WorkspaceSidebar() {
       case 'Docs': return t('nav.docs')
       case 'Dashboards': return t('nav.dashboards')
       case 'AI': return t('nav.ai')
+      case 'Shared with me': return t('nav.sharedWithMe')
       case 'Whiteboards': return t('nav.whiteboards')
       case 'Forms': return t('nav.forms')
       case 'Automations': return t('nav.automations')
@@ -623,14 +642,61 @@ export function WorkspaceSidebar() {
           className="w-full rounded-lg border border-border/60 bg-card px-3 py-2 text-left hover:bg-accent/10 transition-colors"
           onClick={() => setOpenSwitcher((v) => !v)}
         >
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
+          <div className="flex items-center gap-2.5">
+            {workspaceBrandQuery.data?.logoUrl ? (
+              <img
+                src={workspaceBrandQuery.data.logoUrl}
+                alt=""
+                className="h-8 w-8 shrink-0 rounded-md object-cover"
+              />
+            ) : (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-brand-gradient-soft text-sm font-semibold text-white">
+                {(currentWorkspace?.name ?? '?').charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{currentWorkspace?.name ?? t('common.workspace')}</p>
               <p className="truncate text-xs text-muted-foreground">{currentOrg?.name ?? t('nav.selectWorkspace')}</p>
+              {workspacePlanQuery.data && (
+                <p className="truncate text-[10px] text-muted-foreground/80">
+                  {t('nav.workspacePlanLine', {
+                    plan: workspacePlanQuery.data.label,
+                    members: workspacePlanQuery.data.usage.members,
+                  })}
+                </p>
+              )}
             </div>
-            <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', openSwitcher && 'rotate-180')} />
+            <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', openSwitcher && 'rotate-180')} />
           </div>
         </button>
+        {workspaceId && isAdmin && (
+          <div className="mt-2 flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 text-xs"
+              onClick={() => navigate({ to: '/app/$workspaceId/settings', params: { workspaceId } })}
+            >
+              <Settings className="h-3.5 w-3.5 mr-1" />
+              {t('nav.workspaceSettingsShortcut')}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 text-xs"
+              onClick={() =>
+                navigate({
+                  to: '/app/$workspaceId/settings',
+                  params: { workspaceId },
+                  search: { tab: 'members' },
+                })
+              }
+            >
+              <Users className="h-3.5 w-3.5 mr-1" />
+              {t('nav.workspacePeopleShortcut')}
+            </Button>
+          </div>
+        )}
         {openSwitcher && (
           <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-border/60 bg-card p-1">
             {organizations.map((org) => {
@@ -858,6 +924,9 @@ export function WorkspaceSidebar() {
                 {featureEnabled(FLAGS.AI) && (
                   <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact />
                 )}
+                {/* A1.7 — without this row a privately shared list is only
+                    reachable by link, since it is hidden from the tree below. */}
+                <NavLink to={"/app/$workspaceId/shared" as any} params={{ workspaceId }} icon={Users} label={t('nav.sharedWithMe')} compact />
                 <NavLink to="/app/$workspaceId/whiteboards" params={{ workspaceId }} icon={Frame} label={t('nav.whiteboards')} compact />
                 {featureEnabled(FLAGS.FORMS) && (
                   <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label={t('nav.forms')} compact />

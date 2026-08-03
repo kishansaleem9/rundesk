@@ -113,3 +113,40 @@ describe('BriefingService.dispatch — due-user selection + delivery (§7.11)', 
     assert.deepEqual(res, { candidates: 1, due: 0, sent: 0 })
   })
 })
+
+describe('BriefingService.generateNow — run-now (§A6.5)', () => {
+  it('returns the generated briefing without writing a notification', async () => {
+    const notifications: any = {
+      listBriefingRecipients: async () => assert.fail('run-now must not touch the cron path'),
+      create: async () => assert.fail('run-now must not consume the scheduled delivery'),
+    }
+    let seenName: string | undefined
+    const ai: any = {
+      generateBriefing: async (data: any) => {
+        seenName = data.displayName
+        return 'Two tasks are overdue.'
+      },
+    }
+    // Queue: user lookup, then the assigned-task and blocking reads.
+    const db = makeDb([
+      [{ displayName: 'Ada', email: 'ada@x.com' }],
+      [{ title: 'Ship the API', dueDate: '2000-01-01T00:00:00Z' }],
+      [],
+    ])
+    const svc = new BriefingService(db, ai, notifications)
+
+    const res = await svc.generateNow('u1')
+    assert.equal(res.body, 'Two tasks are overdue.')
+    assert.equal(seenName, 'Ada')
+    assert.deepEqual(res.data.overdue, ['Ship the API'])
+  })
+
+  it('falls back to the email when the user has no display name', async () => {
+    const ai: any = { generateBriefing: async () => 'body' }
+    const db = makeDb([[{ displayName: '', email: 'ada@x.com' }], [], []])
+    const svc = new BriefingService(db, ai, {} as any)
+
+    const res = await svc.generateNow('u1')
+    assert.equal(res.data.displayName, 'ada@x.com')
+  })
+})

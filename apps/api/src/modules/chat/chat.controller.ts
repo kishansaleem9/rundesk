@@ -57,9 +57,57 @@ export class ChatController {
   updateChannel(
     @Param('channelId') channelId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { name?: string; description?: string | null; icon?: string | null },
+    @Body() body: { name?: string; topic?: string | null; description?: string | null; icon?: string | null },
   ) {
     return this.chat.updateChannel(channelId, user.id, body)
+  }
+
+  @Get('workspaces/:workspaceId/chat/channel-groups')
+  @UseGuards(WorkspaceMemberGuard)
+  listChannelGroups(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.listChannelGroups(workspaceId, user.id)
+  }
+
+  @Post('workspaces/:workspaceId/chat/channel-groups')
+  @UseGuards(WorkspaceMemberGuard)
+  createChannelGroup(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { name: string },
+  ) {
+    return this.chat.createChannelGroup(workspaceId, user.id, body.name)
+  }
+
+  @Patch('chat/channel-groups/:groupId')
+  updateChannelGroup(
+    @Param('groupId') groupId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { name?: string; isCollapsed?: boolean; position?: number },
+  ) {
+    return this.chat.updateChannelGroup(groupId, user.id, body)
+  }
+
+  @Delete('chat/channel-groups/:groupId')
+  deleteChannelGroup(@Param('groupId') groupId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.deleteChannelGroup(groupId, user.id)
+  }
+
+  @Post('chat/channel-groups/:groupId/channels')
+  addChannelToGroup(
+    @Param('groupId') groupId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { channelId: string },
+  ) {
+    return this.chat.addChannelToGroup(groupId, user.id, body.channelId)
+  }
+
+  @Delete('chat/channel-groups/:groupId/channels/:channelId')
+  removeChannelFromGroup(
+    @Param('groupId') groupId: string,
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.chat.removeChannelFromGroup(groupId, user.id, channelId)
   }
 
   @Post('chat/channels/:channelId/archive')
@@ -124,6 +172,15 @@ export class ChatController {
     return this.chat.markChannelRead(channelId, user.id)
   }
 
+  @Post('chat/channels/:channelId/unread')
+  markUnread(
+    @Param('channelId') channelId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { messageId?: string } = {},
+  ) {
+    return this.chat.markChannelUnread(channelId, user.id, body.messageId)
+  }
+
   @Post('chat/channels/:channelId/delivered')
   markDelivered(@Param('channelId') channelId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.chat.markChannelDelivered(channelId, user.id)
@@ -160,13 +217,22 @@ export class ChatController {
     return this.chat.listCustomEmoji(workspaceId, user.id)
   }
 
+  @Post('chat/workspaces/:workspaceId/custom-emoji/presign')
+  presignCustomEmoji(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { fileName: string; contentType: string; sizeBytes?: number },
+  ) {
+    return this.chat.createCustomEmojiUploadUrl(workspaceId, user.id, body)
+  }
+
   @Post('chat/workspaces/:workspaceId/custom-emoji')
   addCustomEmoji(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { shortcode: string; imageUrl: string },
+    @Body() body: { shortcode: string; imageUrl?: string; storageKey?: string },
   ) {
-    return this.chat.addCustomEmoji(workspaceId, user.id, body.shortcode, body.imageUrl)
+    return this.chat.addCustomEmoji(workspaceId, user.id, body.shortcode, body.imageUrl ?? '', body.storageKey)
   }
 
   @Delete('chat/custom-emoji/:emojiId')
@@ -178,9 +244,12 @@ export class ChatController {
   createTaskFromMessage(
     @Param('messageId') messageId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { listId: string; title?: string },
+    @Body() body: { listId: string; title?: string; assigneeId?: string | null; dueAt?: string | null },
   ) {
-    return this.chat.createTaskFromMessage(messageId, user.id, body.listId, body.title)
+    return this.chat.createTaskFromMessage(messageId, user.id, body.listId, body.title, {
+      assigneeId: body.assigneeId,
+      dueAt: body.dueAt,
+    })
   }
 
   @Post('chat/channels/:channelId/members')
@@ -335,8 +404,9 @@ export class ChatController {
     @CurrentUser() user: CurrentUserPayload,
     @Query('q') q?: string,
     @Query('type') type?: string,
+    @Query('channelId') channelId?: string,
   ) {
-    return this.chat.listWorkspaceFiles(workspaceId, user.id, { q, type })
+    return this.chat.listWorkspaceFiles(workspaceId, user.id, { q, type, channelId })
   }
 
   @Get('workspaces/:workspaceId/chat/search')

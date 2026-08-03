@@ -221,6 +221,7 @@ const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 type TaskDetail = {
   id: string
   listId: string
+  createdById?: string | null
   title: string
   description: string | null
   coverColor?: string | null
@@ -264,6 +265,10 @@ type ActivityEntry = {
   action: string
   createdAt: string
   actor?: UserLite | null
+  // §A2.8 — the transition payload the API has always written
+  // ({ from, to } for status/priority/due date). Dropping it here is what left
+  // the feed rendering a bare "Status changed".
+  meta?: Record<string, unknown> | null
 }
 
 type TimeEntry = {
@@ -865,7 +870,9 @@ export function TaskDetailSheet({
               {activeTab === 'comments' && (
                 <CommentsPanel taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
               )}
-              {activeTab === 'activity' && <ActivityPanel taskId={detailQuery.data.id} />}
+              {activeTab === 'activity' && (
+                <ActivityPanel taskId={detailQuery.data.id} listId={detailQuery.data.listId} />
+              )}
               {activeTab === 'time' && (
                 <TimePanel taskId={detailQuery.data.id} estimate={detailQuery.data.timeEstimate} defaultBillable={detailQuery.data.defaultBillable} />
               )}
@@ -895,6 +902,8 @@ export function TaskDetailSheet({
                 taskId={detailQuery.data.id}
                 workspaceId={fallbackWorkspaceId}
                 inline={detailQuery.data.watchers ?? []}
+                createdById={detailQuery.data.createdById ?? null}
+                assigneeIds={(detailQuery.data.assignees ?? []).map((a) => a.user.id)}
               />
             )}
           </DialogContent>
@@ -2635,10 +2644,14 @@ function WatchersPanel({
   taskId,
   workspaceId,
   inline,
+  createdById,
+  assigneeIds,
 }: {
   taskId: string
   workspaceId?: string
   inline: Watcher[]
+  createdById: string | null
+  assigneeIds: string[]
 }) {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
@@ -2654,6 +2667,15 @@ function WatchersPanel({
     [inline, currentUser],
   )
   const watcherIds = useMemo(() => new Set(inline.map((w) => w.userId)), [inline])
+  // §A4.7 — auto-follow is derived from what you did to the task, so the reason
+  // is derivable too. Saying it out loud is the difference between "why am I
+  // getting this?" and knowing which button stops it.
+  const followReason = useMemo(() => {
+    if (!currentUser || !isWatching) return null
+    if (createdById && createdById === currentUser.id) return t('taskDetail.followBecauseCreated')
+    if (assigneeIds.includes(currentUser.id)) return t('taskDetail.followBecauseAssigned')
+    return t('taskDetail.followBecauseWatching')
+  }, [currentUser, isWatching, createdById, assigneeIds, t])
   const addableMembers = useMemo(
     () => (membersQuery.data ?? []).filter((m) => !watcherIds.has(m.userId)),
     [membersQuery.data, watcherIds],
@@ -2695,9 +2717,12 @@ function WatchersPanel({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {tCount('taskDetail.watchersCount', inline.length)}
-        </p>
+        <div className="min-w-0">
+          <p className="text-sm text-muted-foreground">
+            {tCount('taskDetail.watchersCount', inline.length)}
+          </p>
+          {followReason && <p className="text-xs text-muted-foreground/80 mt-0.5">{followReason}</p>}
+        </div>
         <Button
           size="sm"
           variant={isWatching ? 'outline' : 'default'}
@@ -3919,7 +3944,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
 // Activity
 // ---------------------------------------------------------------------------
 
-function ActivityPanel({ taskId }: { taskId: string }) {
+function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | null }) {
   const { t } = useTranslation()
   const activityQuery = useQuery({
     queryKey: ['task', taskId, 'activity'],
@@ -3932,6 +3957,17 @@ function ActivityPanel({ taskId }: { taskId: string }) {
       }
     },
   })
+  // Shares its cache entry with the overview panel's status dropdown, so
+  // opening the tab costs no extra request in practice.
+  const statusesQuery = useQuery({
+    enabled: Boolean(listId),
+    queryKey: ['list-statuses', listId],
+    queryFn: () => api<Array<{ key: string; name: string; color: string }>>(`/lists/${listId}/statuses`),
+  })
+  const statusByKey = useMemo(
+    () => new Map((statusesQuery.data ?? []).map((s) => [s.key, s] as const)),
+    [statusesQuery.data],
+  )
 
   if (activityQuery.data === null) {
     return <NotWiredNote>{t('taskDetail.activityUnavailable')}</NotWiredNote>
@@ -3961,23 +3997,70 @@ function ActivityPanel({ taskId }: { taskId: string }) {
     return <EmptyState title={t('taskDetail.noActivity')} hint={t('taskDetail.noActivityHint')} />
   }
 
+  // §A2.8 — render the transition the log already recorded. Status values get
+  // their list colour so the change reads at a glance; priority and due date
+  // fall back to plain text.
+  const transitionOf = (a: ActivityEntry): { from: React.ReactNode; to: React.ReactNode } | null => {
+    const meta = a.meta
+    if (!meta || !('from' in meta || 'to' in meta)) return null
+    const statusChip = (raw: unknown) => {
+      const key = typeof raw === 'string' ? raw : null
+      if (!key) return <span className="text-muted-foreground">{t('taskDetail.activity.none')}</span>
+      const status = statusByKey.get(key)
+      return (
+        <span className="inline-flex items-center gap-1">
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{ backgroundColor: status?.color ?? 'var(--muted-foreground, #94a3b8)' }}
+          />
+          {status?.name ?? (STATUS_LABEL_KEYS[key] ? t(STATUS_LABEL_KEYS[key]) : key.replace(/_/g, ' '))}
+        </span>
+      )
+    }
+    const plain = (raw: unknown) => {
+      if (raw === null || raw === undefined || raw === '') {
+        return <span className="text-muted-foreground">{t('taskDetail.activity.none')}</span>
+      }
+      const text = String(raw)
+      if (a.action === 'due_date_changed') {
+        const d = new Date(text)
+        return <span>{Number.isNaN(d.getTime()) ? text : d.toLocaleDateString()}</span>
+      }
+      const key = PRIORITY_LABEL_KEYS[text]
+      return <span>{key ? t(key) : text.replace(/_/g, ' ')}</span>
+    }
+    const render = a.action === 'status_changed' ? statusChip : plain
+    return { from: render(meta.from), to: render(meta.to) }
+  }
+
   return (
     <ol className="relative border-l border-border pl-4 space-y-3">
-      {entries.map((a) => (
-        <li key={a.id} className="relative">
-          <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-brand-700" />
-          <div className="text-sm">
-            <span className="mr-1">{iconForAction(a.action)}</span>
-            <span className="font-medium">
-              {a.actor?.displayName ?? a.actor?.email ?? t('taskDetail.system')}
-            </span>{' '}
-            <span className="text-muted-foreground">{actionLabel(a.action)}</span>
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {new Date(a.createdAt).toLocaleString()}
-          </div>
-        </li>
-      ))}
+      {entries.map((a) => {
+        const transition = transitionOf(a)
+        return (
+          <li key={a.id} className="relative">
+            <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-brand-700" />
+            <div className="text-sm">
+              <span className="mr-1">{iconForAction(a.action)}</span>
+              <span className="font-medium">
+                {a.actor?.displayName ?? a.actor?.email ?? t('taskDetail.system')}
+              </span>{' '}
+              <span className="text-muted-foreground">{actionLabel(a.action)}</span>
+              {transition && (
+                <span className="inline-flex items-center gap-1.5 ml-1.5 align-middle">
+                  <span className="text-muted-foreground">{t('taskDetail.activity.from')}</span>
+                  {transition.from}
+                  <span className="text-muted-foreground">{t('taskDetail.activity.to')}</span>
+                  {transition.to}
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {new Date(a.createdAt).toLocaleString()}
+            </div>
+          </li>
+        )
+      })}
     </ol>
   )
 }

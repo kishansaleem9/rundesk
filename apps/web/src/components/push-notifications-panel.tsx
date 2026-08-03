@@ -9,7 +9,7 @@ import {
   cn,
   toast,
 } from '@rundesk/ui'
-import { Bell, Smartphone, Globe, Mail, Volume2, Moon, Check } from 'lucide-react'
+import { Bell, Smartphone, Globe, Mail, Volume2, Moon, Check, Send, Eye } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
@@ -47,6 +47,38 @@ const CHANNELS: Array<{ key: Channel; labelKey: TranslationKey; icon: React.Elem
   { key: 'email', labelKey: 'pushNotifications.channel.email', icon: Mail },
 ]
 
+/** Per-channel verdict of a test send (§A4.7). */
+type TestSendResult = {
+  ok: boolean
+  delivered: boolean
+  inApp: boolean
+  email: boolean
+  quietHours: boolean
+  push:
+    | { status: 'not_configured' }
+    | { status: 'no_subscriptions' }
+    | { status: 'channel_off' }
+    | { status: 'quiet_hours' }
+    | { status: 'sent'; sent: number; failed: number }
+}
+
+function describePush(push: TestSendResult['push'], t: (key: TranslationKey, vars?: Record<string, string | number>) => string): string {
+  switch (push.status) {
+    case 'not_configured':
+      return t('pushNotifications.pushNotConfigured')
+    case 'no_subscriptions':
+      return t('pushNotifications.pushNoDevices')
+    case 'channel_off':
+      return t('pushNotifications.pushChannelOff')
+    case 'quiet_hours':
+      return t('pushNotifications.pushQuietHours')
+    case 'sent':
+      return push.failed > 0
+        ? t('pushNotifications.pushPartial', { sent: push.sent, failed: push.failed })
+        : t('pushNotifications.pushSent', { sent: push.sent })
+  }
+}
+
 export function PushNotificationsPanel() {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -63,6 +95,7 @@ export function PushNotificationsPanel() {
       }
       events: Record<EventKey, Record<Channel, boolean>>
       digest?: { enabled: boolean; frequency: 'daily' | 'weekly'; hour: number }
+      autoFollow?: boolean
     }>('/notifications/preferences'),
   })
 
@@ -79,6 +112,7 @@ export function PushNotificationsPanel() {
         },
         events: DEFAULTS,
         digest: { enabled: false, frequency: 'daily' as const, hour: 8 },
+        autoFollow: true,
       },
     [prefsQuery.data],
   )
@@ -92,6 +126,7 @@ export function PushNotificationsPanel() {
   const [digestEnabled, setDigestEnabled] = useState(prefs.digest?.enabled ?? false)
   const [digestFrequency, setDigestFrequency] = useState<'daily' | 'weekly'>(prefs.digest?.frequency ?? 'daily')
   const [digestHour, setDigestHour] = useState(prefs.digest?.hour ?? 8)
+  const [autoFollow, setAutoFollow] = useState(prefs.autoFollow ?? true)
 
   useEffect(() => {
     setMatrix(prefs.events)
@@ -104,6 +139,7 @@ export function PushNotificationsPanel() {
     setDigestEnabled(prefs.digest?.enabled ?? false)
     setDigestFrequency(prefs.digest?.frequency ?? 'daily')
     setDigestHour(prefs.digest?.hour ?? 8)
+    setAutoFollow(prefs.autoFollow ?? true)
   }, [prefs])
 
   function toggle(event: EventKey, channel: Channel) {
@@ -128,6 +164,7 @@ export function PushNotificationsPanel() {
           },
           events: matrix,
           digest: { enabled: digestEnabled, frequency: digestFrequency, hour: digestHour },
+          autoFollow,
         },
       }),
     onSuccess: async () => {
@@ -136,6 +173,24 @@ export function PushNotificationsPanel() {
     },
     onError: (err: Error) => {
       toast.error(t('pushNotifications.saveFailedToast'), { description: err.message })
+    },
+  })
+
+  const sendTest = useMutation({
+    mutationFn: () => api<TestSendResult>('/notifications/test', { method: 'POST', body: {} }),
+    onSuccess: async (res) => {
+      // §A4.7 — report each channel separately. "Delivered" used to mean only
+      // that the in-app row was written, which is exactly the case where push
+      // quietly went nowhere.
+      const pushLine = describePush(res.push, t)
+      if (res.delivered) toast.success(t('pushNotifications.testSentToast'), { description: pushLine })
+      else toast.error(t('pushNotifications.testMutedToast'), { description: pushLine })
+      await qc.invalidateQueries({ queryKey: ['notifications'] })
+      await qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
+      await qc.invalidateQueries({ queryKey: ['notification-counts'] })
+    },
+    onError: (err: Error) => {
+      toast.error(t('pushNotifications.testFailedToast'), { description: err.message })
     },
   })
 
@@ -357,6 +412,21 @@ export function PushNotificationsPanel() {
         </div>
       </Card>
 
+      {/* §A4.7 — auto-follow always worked; it was simply invisible, so people
+          could not tell why a notification reached them, let alone stop it. */}
+      <Card variant="glass" className="p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-gradient-soft text-white">
+            <Eye className="h-4 w-4" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-display text-lg font-semibold">{t('pushNotifications.autoFollowTitle')}</h3>
+            <p className="text-sm text-muted-foreground">{t('pushNotifications.autoFollowSubtitle')}</p>
+          </div>
+          <Switch checked={autoFollow} onCheckedChange={setAutoFollow} />
+        </div>
+      </Card>
+
       <div className="flex justify-end gap-2">
         <Button
           variant="ghost"
@@ -368,9 +438,20 @@ export function PushNotificationsPanel() {
             setDndStart('21:00')
             setDndEnd('08:00')
             setMuteSounds(false)
+            setAutoFollow(true)
           }}
         >
           {t('pushNotifications.resetDefaults')}
+        </Button>
+        {/* §A2.11 — a matrix of toggles is only trustworthy if you can prove it
+            fires. Delivery runs the real dispatch path, so a muted channel
+            reports itself as muted rather than silently doing nothing. */}
+        <Button
+          variant="outline"
+          onClick={() => sendTest.mutate()}
+          disabled={sendTest.isPending}
+        >
+          <Send className="h-3.5 w-3.5" /> {t('pushNotifications.sendTest')}
         </Button>
         <Button variant="gradient" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
           <Check className="h-3.5 w-3.5" /> {t('pushNotifications.savePreferences')}

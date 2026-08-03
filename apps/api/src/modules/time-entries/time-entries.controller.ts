@@ -66,6 +66,20 @@ export class WorkspaceTimeEntriesController {
     return canModerate ? rows : rows.filter((r) => r.userId === actor.id)
   }
 
+  // A5.14 — the team timesheet grid: one row per person, seven weekday columns.
+  @Get('workspaces/:workspaceId/time-team-week')
+  @UseGuards(WorkspaceMemberGuard)
+  async teamWeek(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() actor: CurrentUserPayload,
+    @Query('weekStart') weekStart?: string,
+  ) {
+    const rows = await this.time.getTeamWeek(workspaceId, this.time.parseWeekStart(weekStart))
+    const canModerate = await this.time.canModerateApprovals(workspaceId, actor.id)
+    // Same rule as the monthly rollup: members see only their own row.
+    return canModerate ? rows : rows.filter((r) => r.userId === actor.id)
+  }
+
   @Get('workspaces/:workspaceId/time-approvals')
   @UseGuards(WorkspaceMemberGuard)
   listApprovals(

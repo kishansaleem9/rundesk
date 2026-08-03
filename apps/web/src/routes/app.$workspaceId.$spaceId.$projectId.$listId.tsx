@@ -1,10 +1,22 @@
-import { createFileRoute, useNavigate, useRouterState } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, PersonAvatar, cn, toast } from '@rundesk/ui'
+import {
+  Button,
+  Card,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  PersonAvatar,
+  cn,
+  toast,
+} from '@rundesk/ui'
 import {
   TaskListChrome,
   WorkFilterSelect,
   WorkViewTabs,
+  type WorkViewTab,
 } from '../components/work/work-ui'
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -20,6 +32,10 @@ import {
   X as XIcon,
   Archive,
   Filter,
+  Search,
+  Share2,
+  MoreHorizontal,
+  ClipboardList,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -27,6 +43,7 @@ import { criticalPath } from '../lib/gantt'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { ListStatusesManager } from '../components/list-statuses-manager'
 import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
+import { SharePanel } from '../components/share-panel'
 import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
@@ -75,6 +92,10 @@ type TaskItem = {
   startDate?: string | null
   dueDate?: string | null
   createdAt?: string | null
+  // Both come back on every row already; the filter builder (A1.4) is the
+  // first thing in this view to read them.
+  createdById?: string | null
+  recurrence?: Record<string, unknown> | null
   assignees?: TaskAssignee[]
   subtasks?: Subtask[]
   openBlockerCount?: number
@@ -234,16 +255,132 @@ function columnFiltersActive(f: ColumnFilters): boolean {
   return f.statuses.length > 0 || f.priorities.length > 0 || f.assignees.length > 0
 }
 
+// ---------------------------------------------------------------------------
+// Filter builder (A1.4). The column menus above only reach status / priority /
+// assignee, which are the three attributes that happen to have a column. These
+// rules cover everything else the row already carries — dates, creator,
+// recurrence — plus the project's custom fields, so "show me everything Sara
+// filed that is due this week" stops needing a report.
+// ---------------------------------------------------------------------------
+type FilterOp = 'is' | 'isNot' | 'before' | 'after' | 'between' | 'contains' | 'gt' | 'lt' | 'isSet' | 'isNotSet'
+type FilterFieldKind = 'date' | 'user' | 'flag' | 'text' | 'number' | 'choice'
+type FilterRule = { id: string; field: string; op: FilterOp; value: string; value2?: string }
+
+const OPS_BY_KIND: Record<FilterFieldKind, FilterOp[]> = {
+  date: ['before', 'after', 'between', 'isSet', 'isNotSet'],
+  user: ['is', 'isNot'],
+  flag: ['isSet', 'isNotSet'],
+  text: ['contains', 'isSet', 'isNotSet'],
+  number: ['gt', 'lt', 'isSet', 'isNotSet'],
+  choice: ['is', 'isNot', 'isSet', 'isNotSet'],
+}
+/** Operators that ask only about presence, so the value input is hidden. */
+const VALUELESS_OPS: FilterOp[] = ['isSet', 'isNotSet']
+
+const BUILTIN_FILTER_FIELDS: Array<{ id: string; kind: FilterFieldKind; labelKey: TranslationKey }> = [
+  { id: 'due', kind: 'date', labelKey: 'taskDetail.fieldDueDate' },
+  { id: 'start', kind: 'date', labelKey: 'list.filter.fieldStart' },
+  { id: 'created', kind: 'date', labelKey: 'list.sortCreated' },
+  { id: 'creator', kind: 'user', labelKey: 'list.filter.fieldCreator' },
+  { id: 'recurring', kind: 'flag', labelKey: 'list.filter.fieldRecurring' },
+]
+
+/** Custom-field type → the operator set that makes sense for it. */
+const CUSTOM_FIELD_KIND: Record<CustomFieldType, FilterFieldKind> = {
+  text: 'text',
+  url: 'text',
+  number: 'number',
+  date: 'date',
+  checkbox: 'choice',
+  dropdown: 'choice',
+}
+
+/** Everything the rule evaluator needs beyond the task row itself. */
+type FilterContext = {
+  customFields: CustomFieldDef[]
+  /** taskId → fieldId → value. Empty until a custom rule (or Table) loads it. */
+  customValues: Record<string, Record<string, unknown>>
+}
+
+function filterFieldKind(field: string, customFields: CustomFieldDef[]): FilterFieldKind | null {
+  const builtin = BUILTIN_FILTER_FIELDS.find((f) => f.id === field)
+  if (builtin) return builtin.kind
+  if (!field.startsWith('custom:')) return null
+  const def = customFields.find((f) => f.id === field.slice('custom:'.length))
+  return def ? CUSTOM_FIELD_KIND[def.type] : null
+}
+
+/** Local calendar day of an ISO timestamp, so date rules compare like the
+ *  Calendar view groups — lexical order on `yyyy-MM-dd` is chronological. */
+function dayKey(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : format(d, 'yyyy-MM-dd')
+}
+
+/** The raw value a rule's field holds on one task, or null when unset. */
+function ruleFieldValue(task: TaskItem, field: string, ctx: FilterContext): unknown {
+  switch (field) {
+    case 'due': return task.dueDate ?? null
+    case 'start': return task.startDate ?? null
+    case 'created': return task.createdAt ?? null
+    case 'creator': return task.createdById ?? null
+    case 'recurring': return task.recurrence ?? null
+    default: {
+      if (!field.startsWith('custom:')) return null
+      const raw = ctx.customValues[task.id]?.[field.slice('custom:'.length)]
+      // A false checkbox is a real answer, not an empty one.
+      return raw === undefined || raw === '' ? null : raw
+    }
+  }
+}
+
+function matchesRule(task: TaskItem, rule: FilterRule, ctx: FilterContext): boolean {
+  const kind = filterFieldKind(rule.field, ctx.customFields)
+  if (!kind) return true // the field was deleted underneath the view — don't hide rows
+  const value = ruleFieldValue(task, rule.field, ctx)
+  if (rule.op === 'isSet') return value !== null && value !== false
+  if (rule.op === 'isNotSet') return value === null || value === false
+  if (value === null) return false
+  if (!rule.value.trim()) return true // half-built rule filters nothing
+
+  if (kind === 'date') {
+    const key = dayKey(String(value))
+    if (!key) return false
+    if (rule.op === 'before') return key < rule.value
+    if (rule.op === 'after') return key > rule.value
+    if (rule.op === 'between') return key >= rule.value && key <= (rule.value2 || rule.value)
+    return true
+  }
+  if (kind === 'number') {
+    const num = Number(value)
+    const target = Number(rule.value)
+    if (Number.isNaN(num) || Number.isNaN(target)) return false
+    return rule.op === 'gt' ? num > target : num < target
+  }
+  const text = String(value).toLowerCase()
+  if (rule.op === 'contains') return text.includes(rule.value.trim().toLowerCase())
+  if (rule.op === 'is') return text === rule.value.toLowerCase()
+  if (rule.op === 'isNot') return text !== rule.value.toLowerCase()
+  return true
+}
+
 function filterTasks(
   tasks: TaskItem[],
   statusFilter: 'all' | TaskStatus,
   filters: ColumnFilters,
+  search = '',
+  rules: FilterRule[] = [],
+  ctx: FilterContext = { customFields: [], customValues: {} },
 ): TaskItem[] {
-  if (statusFilter === 'all' && !columnFiltersActive(filters)) return tasks
+  const needle = search.trim().toLowerCase()
+  if (statusFilter === 'all' && !columnFiltersActive(filters) && !needle && rules.length === 0) return tasks
   return tasks.filter((task) => {
+    if (needle && !task.title.toLowerCase().includes(needle)) return false
     if (statusFilter !== 'all' && task.status !== statusFilter) return false
     if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) return false
     if (filters.priorities.length > 0 && !filters.priorities.includes(task.priority)) return false
+    if (rules.some((rule) => !matchesRule(task, rule, ctx))) return false
     if (filters.assignees.length > 0) {
       const ids = (task.assignees ?? []).map((a) => a.userId)
       const matchesUnassigned = filters.assignees.includes(UNASSIGNED_FILTER) && ids.length === 0
@@ -534,6 +671,231 @@ function ColumnFilterMenu({
   )
 }
 
+const FILTER_OP_LABEL_KEYS: Record<FilterOp, TranslationKey> = {
+  is: 'list.filter.opIs',
+  isNot: 'list.filter.opIsNot',
+  before: 'list.filter.opBefore',
+  after: 'list.filter.opAfter',
+  between: 'list.filter.opBetween',
+  contains: 'list.filter.opContains',
+  gt: 'list.filter.opGreaterThan',
+  lt: 'list.filter.opLessThan',
+  isSet: 'list.filter.opIsSet',
+  isNotSet: 'list.filter.opIsNotSet',
+}
+
+/**
+ * A1.4 — the filter builder: stacked field/operator/value rows, ANDed together
+ * and saved with the view like every other toolbar control. It sits beside the
+ * column funnels rather than replacing them; those stay the one-click path for
+ * the three attributes that have a column.
+ */
+function FilterBuilderMenu({
+  rules,
+  onChange,
+  customFields,
+  workspaceMembers,
+}: {
+  rules: FilterRule[]
+  onChange: (next: FilterRule[]) => void
+  customFields: CustomFieldDef[]
+  workspaceMembers: WorkspaceMember[]
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const fieldOptions = [
+    ...BUILTIN_FILTER_FIELDS.map((f) => ({ value: f.id, label: t(f.labelKey) })),
+    ...customFields.map((f) => ({ value: `custom:${f.id}`, label: f.name })),
+  ]
+
+  const patch = (id: string, next: Partial<FilterRule>) =>
+    onChange(rules.map((r) => (r.id === id ? { ...r, ...next } : r)))
+
+  const addRule = () => {
+    const field = fieldOptions[0]?.value ?? 'due'
+    const kind = filterFieldKind(field, customFields) ?? 'date'
+    onChange([
+      ...rules,
+      { id: `${Date.now()}-${rules.length}`, field, op: OPS_BY_KIND[kind][0], value: '' },
+    ])
+  }
+
+  // Changing the field can invalidate the operator (a date "before" makes no
+  // sense on a creator), so re-seed both operator and value from the new kind.
+  const changeField = (rule: FilterRule, field: string) => {
+    const kind = filterFieldKind(field, customFields) ?? 'text'
+    patch(rule.id, { field, op: OPS_BY_KIND[kind][0], value: '', value2: undefined })
+  }
+
+  const valueInput = (rule: FilterRule) => {
+    if (VALUELESS_OPS.includes(rule.op)) return null
+    const kind = filterFieldKind(rule.field, customFields)
+    const cls = 'h-7 min-w-0 flex-1 rounded border border-border bg-background px-1.5 text-[12px]'
+    if (kind === 'date') {
+      return (
+        <>
+          <input
+            type="date"
+            value={rule.value}
+            onChange={(e) => patch(rule.id, { value: e.target.value })}
+            aria-label={t('list.filter.value')}
+            className={cls}
+          />
+          {rule.op === 'between' && (
+            <input
+              type="date"
+              value={rule.value2 ?? ''}
+              onChange={(e) => patch(rule.id, { value2: e.target.value })}
+              aria-label={t('list.filter.valueTo')}
+              className={cls}
+            />
+          )}
+        </>
+      )
+    }
+    if (kind === 'user') {
+      return (
+        <select
+          value={rule.value}
+          onChange={(e) => patch(rule.id, { value: e.target.value })}
+          aria-label={t('list.filter.value')}
+          className={cls}
+        >
+          <option value="">{t('list.filter.pickValue')}</option>
+          {workspaceMembers.map((m) => (
+            <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+          ))}
+        </select>
+      )
+    }
+    if (kind === 'choice') {
+      const def = customFields.find((f) => `custom:${f.id}` === rule.field)
+      const options =
+        def?.type === 'checkbox'
+          ? [
+              { value: 'true', label: t('list.filter.checked') },
+              { value: 'false', label: t('list.filter.unchecked') },
+            ]
+          : (def?.options ?? []).map((o) => ({ value: o.value, label: o.label }))
+      return (
+        <select
+          value={rule.value}
+          onChange={(e) => patch(rule.id, { value: e.target.value })}
+          aria-label={t('list.filter.value')}
+          className={cls}
+        >
+          <option value="">{t('list.filter.pickValue')}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      )
+    }
+    return (
+      <input
+        type={kind === 'number' ? 'number' : 'text'}
+        value={rule.value}
+        onChange={(e) => patch(rule.id, { value: e.target.value })}
+        placeholder={t('list.filter.value')}
+        aria-label={t('list.filter.value')}
+        className={cls}
+      />
+    )
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          'h-8 shrink-0 rounded-md border border-border/80 bg-card px-2.5 text-[12px] inline-flex items-center gap-1.5 hover:bg-muted/40',
+          rules.length > 0 && 'text-violet-600 dark:text-violet-400',
+        )}
+        title={t('list.filter.builder')}
+      >
+        <Filter className={cn('h-3.5 w-3.5', rules.length > 0 && 'fill-current')} />
+        {rules.length > 0 ? t('list.filter.builderCount', { count: rules.length }) : t('list.filter.builder')}
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 right-0 w-[26rem] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card p-2 shadow-lg space-y-1.5">
+          {rules.length === 0 && (
+            <p className="px-1 py-1 text-[12px] text-muted-foreground">{t('list.filter.builderEmpty')}</p>
+          )}
+          {rules.map((rule, idx) => {
+            const kind = filterFieldKind(rule.field, customFields) ?? 'text'
+            return (
+              <div key={rule.id} className="flex items-center gap-1">
+                <span className="w-8 shrink-0 text-[11px] uppercase text-muted-foreground">
+                  {idx === 0 ? t('list.filter.where') : t('list.filter.and')}
+                </span>
+                <select
+                  value={rule.field}
+                  onChange={(e) => changeField(rule, e.target.value)}
+                  aria-label={t('list.filter.field')}
+                  className="h-7 w-28 shrink-0 rounded border border-border bg-background px-1 text-[12px]"
+                >
+                  {fieldOptions.map((f) => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={rule.op}
+                  onChange={(e) => patch(rule.id, { op: e.target.value as FilterOp })}
+                  aria-label={t('list.filter.operator')}
+                  className="h-7 w-24 shrink-0 rounded border border-border bg-background px-1 text-[12px]"
+                >
+                  {OPS_BY_KIND[kind].map((op) => (
+                    <option key={op} value={op}>{t(FILTER_OP_LABEL_KEYS[op])}</option>
+                  ))}
+                </select>
+                {valueInput(rule)}
+                <button
+                  type="button"
+                  onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
+                  aria-label={t('list.filter.removeRule')}
+                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                >
+                  <XIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )
+          })}
+          <div className="flex items-center justify-between pt-1">
+            <button
+              type="button"
+              onClick={addRule}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t('list.filter.addRule')}
+            </button>
+            {rules.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="rounded px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                {t('list.filter.clearAll')}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // A compact sort/filter header for the List view — the "column headers" for a
 // grouped list, wired to the same shared sort/columnFilters state (Plan §5.1).
 function ListColumnBar({
@@ -652,10 +1014,16 @@ function ListDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spaceViewConfig])
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all')
+  // §A2.5 — find a task without leaving the list. Feeds filterTasks, so every
+  // view (List / Board / Table / Calendar / Gantt) narrows to the same set.
+  const [taskSearch, setTaskSearch] = useState('')
   const [sort, setSort] = useState<SortState>({ field: 'created', dir: 'desc' })
   // Per-column filters (status/priority/assignee) applied on top of the global
   // status filter, shared by the List bar + Table headers (Plan §5.1/§5.5).
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(EMPTY_COLUMN_FILTERS)
+  // A1.4 filter builder — date / creator / recurrence / custom-field rules,
+  // ANDed on top of the column filters and saved with the view.
+  const [filterRules, setFilterRules] = useState<FilterRule[]>([])
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
@@ -681,6 +1049,7 @@ function ListDetail() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [statusManagerOpen, setStatusManagerOpen] = useState(false)
+  const [sharePanelOpen, setSharePanelOpen] = useState(false)
   const [emailAliasOpen, setEmailAliasOpen] = useState(false)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
@@ -691,7 +1060,6 @@ function ListDetail() {
   const [calendarDragTaskId, setCalendarDragTaskId] = useState<string | null>(null)
   const [calendarQuickAddDay, setCalendarQuickAddDay] = useState<string | null>(null)
   const [calendarQuickAddTitle, setCalendarQuickAddTitle] = useState('')
-  const [saveAsName, setSaveAsName] = useState('')
   const [selectedSavedViewId, setSelectedSavedViewId] = useState<string>('')
   const [appliedInitialView, setAppliedInitialView] = useState(false)
   const quickAddRef = useRef<HTMLInputElement | null>(null)
@@ -749,6 +1117,14 @@ function ListDetail() {
   const { data: listMeta } = useQuery({
     queryKey: ['list-meta', listId],
     queryFn: () => api<{ id: string; name: string; description?: string | null }>(`/lists/${listId}`),
+  })
+  // A1.10 / A5.4 — the forms filing into this list. ClickUp makes a form a
+  // sixth view tab; the cheaper cut A5.4 recommends is simply to say who is
+  // writing into the list, since a form was previously invisible from here.
+  const { data: listForms = [] } = useQuery({
+    queryKey: ['list-forms', workspaceId, listId],
+    queryFn: () =>
+      api<Array<{ id: string; title: string }>>(`/workspaces/${workspaceId}/forms?listId=${listId}`).catch(() => []),
   })
   // Sibling lists in this project, for the bulk "Move to list" picker (Plan §5.1).
   const { data: projectLists = [] } = useQuery({
@@ -812,12 +1188,37 @@ function ListDetail() {
     [listStatuses],
   )
 
+  // Custom-field values cost one request per task, so they are fetched only
+  // when something needs them: the Table (which draws them as columns) or a
+  // filter rule that names one. Same query key either way, so it is fetched once.
+  const needsCustomValues =
+    projectFields.length > 0 &&
+    (activeView === 'table' || filterRules.some((r) => r.field.startsWith('custom:')))
+  const { data: customFieldByTask = {} } = useQuery({
+    queryKey: ['task-custom-fields-batch', workspaceId, projectId, tasks.map((task) => task.id).join(',')],
+    enabled: tasks.length > 0 && needsCustomValues,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        tasks.map(async (task) => {
+          const rows = await api<CustomFieldValue[]>(
+            `/workspaces/${workspaceId}/tasks/${task.id}/custom-fields`,
+          )
+          return [task.id, Object.fromEntries(rows.map((r) => [r.definition.id, r.value]))] as const
+        }),
+      )
+      return Object.fromEntries(entries) as Record<string, Record<string, unknown>>
+    },
+  })
+
   const visibleTasks = useMemo(() => {
-    const filtered = filterTasks(tasks, statusFilter, columnFilters)
+    const filtered = filterTasks(tasks, statusFilter, columnFilters, taskSearch, filterRules, {
+      customFields: projectFields,
+      customValues: customFieldByTask,
+    })
     // Custom-field sort is resolved inside TableView (it owns the values); for
     // every other view a custom sort is a stable no-op here.
     return sortTasks(filtered, sort, statusOrder)
-  }, [tasks, statusFilter, columnFilters, sort, statusOrder])
+  }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder])
 
   // Toggle direction when re-clicking the active column, else adopt the
   // field's natural default direction.
@@ -880,9 +1281,61 @@ function ListDetail() {
           }
         : EMPTY_COLUMN_FILTERS,
     )
+    // Views saved before the filter builder simply carry no rules.
+    setFilterRules(Array.isArray(cfg.filterRules) ? (cfg.filterRules as FilterRule[]) : [])
     setGroupBy((cfg.groupBy as 'status' | 'priority' | 'assignee') ?? 'status')
     setHiddenFields(new Set(Array.isArray(cfg.hiddenFields) ? (cfg.hiddenFields as string[]) : []))
     setWipLimits(cfg.wipLimits && typeof cfg.wipLimits === 'object' ? (cfg.wipLimits as Record<string, number>) : {})
+  }
+
+  // Everything a named view remembers. One place, so "save as" and "update"
+  // can never drift apart.
+  const currentViewConfig = () => ({
+    activeView,
+    statusFilter,
+    sort,
+    columnFilters,
+    filterRules,
+    groupBy,
+    hiddenFields: Array.from(hiddenFields),
+    wipLimits,
+  })
+
+  const refreshSavedViews = () => qc.invalidateQueries({ queryKey: ['list-views', listId] })
+
+  const createSavedView = async () => {
+    const name = window.prompt(t('list.viewNamePrompt'))?.trim()
+    if (!name) return
+    const created = await api<{ id: string }>(`/lists/${listId}/views`, {
+      method: 'POST',
+      body: JSON.stringify({ name, type: activeView, config: currentViewConfig() }),
+    })
+    await refreshSavedViews()
+    setSelectedSavedViewId(created.id)
+  }
+
+  const renameSavedView = async (viewId: string, currentName: string) => {
+    const name = window.prompt(t('list.viewRenamePrompt'), currentName)?.trim()
+    if (!name || name === currentName) return
+    await api(`/views/${viewId}`, { method: 'PATCH', body: { name } })
+    await refreshSavedViews()
+  }
+
+  const updateSavedView = async (viewId: string) => {
+    await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
+    await refreshSavedViews()
+    toast.success(t('list.viewUpdated'))
+  }
+
+  const makeSavedViewDefault = async (viewId: string) => {
+    await api(`/views/${viewId}`, { method: 'PATCH', body: { isDefault: true } })
+    await refreshSavedViews()
+  }
+
+  const deleteSavedView = async (viewId: string) => {
+    await api(`/views/${viewId}`, { method: 'DELETE' })
+    if (selectedSavedViewId === viewId) setSelectedSavedViewId('')
+    await refreshSavedViews()
   }
 
   useEffect(() => {
@@ -999,15 +1452,70 @@ function ListDetail() {
     }
   }
 
-  const viewTabs: { id: typeof activeView; label: string }[] = (
-    [
-      { id: 'list', label: t('list.viewList') },
-      { id: 'board', label: t('list.viewBoard') },
-      { id: 'table', label: t('list.viewTable') },
-      { id: 'calendar', label: t('list.viewCalendar') },
-      { id: 'gantt', label: t('list.viewGantt') },
-    ] as { id: typeof activeView; label: string }[]
-  ).filter((tb) => enabledViews.includes(tb.id))
+  // A1.2 — the named views the user saved sit in the same strip as the built-in
+  // types, which is where ClickUp puts them ("Team View" *is* a tab). Selecting
+  // a type tab drops out of the named view, so the ⋯ actions can never write
+  // back to a view you have already navigated away from.
+  const viewTabs: WorkViewTab[] = [
+    ...(
+      [
+        { id: 'list', label: t('list.viewList') },
+        { id: 'board', label: t('list.viewBoard') },
+        { id: 'table', label: t('list.viewTable') },
+        { id: 'calendar', label: t('list.viewCalendar') },
+        { id: 'gantt', label: t('list.viewGantt') },
+      ] as { id: typeof activeView; label: string }[]
+    )
+      .filter((tb) => enabledViews.includes(tb.id))
+      .map((tb) => ({
+        key: `type:${tb.id}`,
+        label: tb.label,
+        active: !selectedSavedViewId && activeView === tb.id,
+        onSelect: () => {
+          setActiveView(tb.id)
+          setSelectedSavedViewId('')
+        },
+      })),
+    ...savedViews.map((view) => ({
+      key: `view:${view.id}`,
+      label: view.isDefault ? `★ ${view.name}` : view.name,
+      active: selectedSavedViewId === view.id,
+      onSelect: () => applyView(view.id),
+      action: (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="mr-1 rounded p-0.5 text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground"
+              aria-label={t('list.viewActions', { name: view.name })}
+              title={t('list.viewActions', { name: view.name })}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuItem onClick={() => void updateSavedView(view.id)}>
+              {t('list.viewUpdate')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void renameSavedView(view.id, view.name)}>
+              {t('list.viewRename')}
+            </DropdownMenuItem>
+            {!view.isDefault && (
+              <DropdownMenuItem onClick={() => void makeSavedViewDefault(view.id)}>
+                {t('list.viewDefault')}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              className="text-rose-600 dark:text-rose-400"
+              onClick={() => void deleteSavedView(view.id)}
+            >
+              {t('common.delete')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+    })),
+  ]
 
   const statusOptions = listStatuses.length
     ? listStatuses
@@ -1038,6 +1546,37 @@ function ListDetail() {
       <TaskListChrome
         listName={listMeta?.name ?? t('list.defaultListName')}
         taskCount={visibleTasks.length}
+        headerAction={
+          // A1.8 — sharing a list was already implemented; it was only
+          // reachable from the sidebar row menu, never from the list itself.
+          <button
+            type="button"
+            onClick={() => setSharePanelOpen(true)}
+            className="inline-flex h-6 items-center gap-1 rounded-md border border-border/80 bg-card px-2 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+            title={t('list.shareButton')}
+          >
+            <Share2 className="h-3.5 w-3.5" />
+            {t('list.shareButton')}
+          </button>
+        }
+        secondaryAction={
+          listForms.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">{t('list.fedByForms')}</span>
+              {listForms.map((form) => (
+                <Link
+                  key={form.id}
+                  to="/app/$workspaceId/forms/$formId"
+                  params={{ workspaceId, formId: form.id }}
+                  className="inline-flex h-6 items-center gap-1 rounded-md border border-border/80 bg-card px-2 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  <span className="max-w-[10rem] truncate">{form.title}</span>
+                </Link>
+              ))}
+            </div>
+          ) : null
+        }
         quickAdd={
           <>
             <Input
@@ -1073,10 +1612,42 @@ function ListDetail() {
           </>
         }
         viewTabs={
-          <WorkViewTabs tabs={viewTabs} active={activeView} onChange={setActiveView} />
+          <WorkViewTabs
+            tabs={viewTabs}
+            trailing={
+              <button
+                type="button"
+                onClick={() => void createSavedView()}
+                className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t('list.addView')}
+              </button>
+            }
+          />
         }
         toolbar={
           <>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={taskSearch}
+                onChange={(e) => setTaskSearch(e.target.value)}
+                placeholder={t('list.searchTasks')}
+                aria-label={t('list.searchTasks')}
+                className="h-8 w-40 rounded-md border border-border/80 bg-card pl-7 pr-6 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/25"
+              />
+              {taskSearch && (
+                <button
+                  type="button"
+                  onClick={() => setTaskSearch('')}
+                  aria-label={t('list.clearSearch')}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-1 text-[12px] text-muted-foreground hover:text-foreground"
+                >
+                  ×
+                </button>
+              )}
+            </div>
             <WorkFilterSelect
               value={statusFilter}
               onChange={(v) => setStatusFilter(v as 'all' | TaskStatus)}
@@ -1088,6 +1659,12 @@ function ListDetail() {
                 </option>
               ))}
             </WorkFilterSelect>
+            <FilterBuilderMenu
+              rules={filterRules}
+              onChange={setFilterRules}
+              customFields={projectFields}
+              workspaceMembers={workspaceMembers}
+            />
             <WorkFilterSelect
               value={sort.field.startsWith('custom:') ? 'created' : sort.field}
               onChange={(v) => setSort((s) => ({ field: v as SortField, dir: s.field === v ? s.dir : defaultSortDir(v as SortField) }))}
@@ -1207,79 +1784,6 @@ function ListDetail() {
                 </div>
               </details>
             )}
-            <WorkFilterSelect
-              value={selectedSavedViewId}
-              onChange={(v) => {
-                if (!v) return
-                applyView(v)
-              }}
-            >
-              <option value="">{t('list.savedViews')}</option>
-              {savedViews.map((view) => (
-                <option key={view.id} value={view.id}>
-                  {view.name}
-                </option>
-              ))}
-            </WorkFilterSelect>
-            <Input
-              value={saveAsName}
-              onChange={(e) => setSaveAsName(e.target.value)}
-              placeholder={t('list.viewName')}
-              className="h-8 w-28 text-[12px] border-border/80"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-[12px]"
-              onClick={async () => {
-                const name = saveAsName.trim()
-                if (!name) return
-                await api(`/lists/${listId}/views`, {
-                  method: 'POST',
-                  body: JSON.stringify({
-                    name,
-                    type: activeView,
-                    config: { activeView, statusFilter, sort, columnFilters, groupBy, hiddenFields: Array.from(hiddenFields), wipLimits },
-                  }),
-                })
-                setSaveAsName('')
-                await qc.invalidateQueries({ queryKey: ['list-views', listId] })
-              }}
-            >
-              {t('common.save')}
-            </Button>
-            {selectedSavedViewId ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-[12px]"
-                  onClick={async () => {
-                    await api(`/views/${selectedSavedViewId}`, {
-                      method: 'PATCH',
-                      body: { config: { activeView, statusFilter, sort, columnFilters, groupBy, hiddenFields: Array.from(hiddenFields), wipLimits } },
-                    })
-                    await qc.invalidateQueries({ queryKey: ['list-views', listId] })
-                  }}
-                >
-                  {t('list.viewUpdate')}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-[12px]"
-                  onClick={async () => {
-                    await api(`/views/${selectedSavedViewId}`, {
-                      method: 'PATCH',
-                      body: { isDefault: true },
-                    })
-                    await qc.invalidateQueries({ queryKey: ['list-views', listId] })
-                  }}
-                >
-                  {t('list.viewDefault')}
-                </Button>
-              </>
-            ) : null}
             <Button
               size="sm"
               variant="outline"
@@ -1437,6 +1941,7 @@ function ListDetail() {
             workspaceId={workspaceId}
             projectId={projectId}
             projectFields={projectFields.filter((f) => !hiddenFields.has(f.id))}
+            customFieldByTask={customFieldByTask}
             workspaceMembers={workspaceMembers}
             sort={sort}
             onSort={handleSort}
@@ -1630,6 +2135,13 @@ function ListDetail() {
       <TaskDetailSheet taskId={selectedTaskId} open={Boolean(selectedTaskId)} onOpenChange={(next) => !next && setSelectedTaskId(null)} workspaceId={workspaceId} />
       <ListStatusesManager listId={listId} open={statusManagerOpen} onOpenChange={setStatusManagerOpen} />
       <ListEmailAliasPanel listId={listId} open={emailAliasOpen} onOpenChange={setEmailAliasOpen} />
+      <SharePanel
+        open={sharePanelOpen}
+        onOpenChange={setSharePanelOpen}
+        objectType="list"
+        objectId={listId}
+        objectName={listMeta?.name}
+      />
     </div>
     </ListStatusesContext.Provider>
   )
@@ -2271,6 +2783,7 @@ function TableView({
   workspaceId,
   projectId,
   projectFields,
+  customFieldByTask,
   workspaceMembers,
   sort,
   onSort,
@@ -2285,6 +2798,8 @@ function TableView({
   workspaceId: string
   projectId: string
   projectFields: CustomFieldDef[]
+  /** Fetched by the parent, which also needs them for custom-field filters. */
+  customFieldByTask: Record<string, Record<string, unknown>>
   workspaceMembers: WorkspaceMember[]
   sort: SortState
   onSort: (field: SortField) => void
@@ -2313,23 +2828,6 @@ function TableView({
   const [addDraft, setAddDraft] = useState('')
   const tableParentRef = useRef<HTMLDivElement | null>(null)
   const qc = useQueryClient()
-
-  const { data: customFieldByTask = {} } = useQuery({
-    queryKey: ['task-custom-fields-batch', workspaceId, projectId, tasks.map((task) => task.id).join(',')],
-    enabled: tasks.length > 0 && projectFields.length > 0,
-    queryFn: async () => {
-      const entries = await Promise.all(
-        tasks.map(async (task) => {
-          const rows = await api<CustomFieldValue[]>(
-            `/workspaces/${workspaceId}/tasks/${task.id}/custom-fields`,
-          )
-          const rowMap = Object.fromEntries(rows.map((r) => [r.definition.id, r.value]))
-          return [task.id, rowMap] as const
-        }),
-      )
-      return Object.fromEntries(entries)
-    },
-  })
 
   const listStatusList = useListStatuses()
   const listStatusByKey = useMemo(

@@ -35,6 +35,7 @@ import {
   Minimize2,
   ChevronUp,
   ChevronDown,
+  Sun,
 } from 'lucide-react'
 
 type WidgetType =
@@ -50,6 +51,7 @@ type WidgetType =
   | 'bar-priority'
   | 'project-health'
   | 'task-list'
+  | 'ai-briefing'
 
 const WIDGET_CATALOG: Array<{
   type: WidgetType
@@ -70,6 +72,9 @@ const WIDGET_CATALOG: Array<{
   { type: 'bar-priority', labelKey: 'dashboardWidget.name.barPriority', descKey: 'dashboardWidget.desc.barPriority', icon: BarChart3, category: 'charts' },
   { type: 'project-health', labelKey: 'dashboardWidget.name.projectHealth', descKey: 'dashboardWidget.desc.projectHealth', icon: Gauge, category: 'charts' },
   { type: 'task-list', labelKey: 'dashboardWidget.name.taskList', descKey: 'dashboardWidget.desc.taskList', icon: ListFilter, category: 'lists' },
+  // §A5.15 / §A6.5 — the briefing already generates on a schedule; on a
+  // dashboard it also needs to run on demand.
+  { type: 'ai-briefing', labelKey: 'dashboardWidget.name.aiBriefing', descKey: 'dashboardWidget.desc.aiBriefing', icon: Sun, category: 'lists' },
 ]
 
 type Widget = { id: string; type: WidgetType; w: 1 | 2 | 3; h: 1 | 2 }
@@ -418,6 +423,7 @@ function WidgetPreview({
   if (widget.type === 'bar-priority') return <BarPriorityWidget workspaceId={workspaceId} />
   if (widget.type === 'project-health') return <ProjectHealthWidget workspaceId={workspaceId} />
   if (widget.type === 'task-list') return <TaskListWidget workspaceId={workspaceId} />
+  if (widget.type === 'ai-briefing') return <AiBriefingWidget />
   return null
 }
 
@@ -890,6 +896,47 @@ const ACTIVITY_VERB: Record<string, TranslationKey> = {
 
 // Workspace-wide team activity (§9.1): recent task_activity across the whole
 // workspace, not the viewer's own notifications.
+/**
+ * §A5.15 / §A6.5 — the daily briefing on the dashboard. The text is generated
+ * by the same service the hourly cron uses; nothing is persisted here, so a
+ * refresh never eats the user's scheduled delivery for the day.
+ */
+function AiBriefingWidget() {
+  const { t } = useTranslation()
+  const q = useQuery({
+    queryKey: ['ai-briefing-now'],
+    queryFn: () => api<{ body: string }>('/ai/briefing', { method: 'POST' }),
+    // A model call per dashboard render would be wasteful — the briefing only
+    // changes as the day's work does.
+    staleTime: 15 * 60_000,
+    retry: false,
+  })
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground">
+          {t('dashboardWidget.name.aiBriefing')}
+        </div>
+        <button
+          type="button"
+          onClick={() => void q.refetch()}
+          disabled={q.isFetching}
+          aria-label={t('dashboardWidget.briefingRunNow')}
+          title={t('dashboardWidget.briefingRunNow')}
+          className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          <Loader2 className={cn('h-3.5 w-3.5', q.isFetching && 'animate-spin')} />
+        </button>
+      </div>
+      <p className="flex-1 text-[11px] leading-relaxed overflow-hidden whitespace-pre-wrap">
+        {q.isError
+          ? t('dashboardWidget.briefingUnavailable')
+          : q.data?.body || t('dashboardWidget.briefingLoading')}
+      </p>
+    </div>
+  )
+}
+
 function ActivityWidget({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const q = useQuery({

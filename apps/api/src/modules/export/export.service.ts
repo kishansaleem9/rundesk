@@ -129,6 +129,55 @@ export class ExportService {
     })
   }
 
+  /**
+   * §A4.1 roster export. Takes the same rows the People screen renders, so the
+   * spreadsheet an admin hands to finance or an auditor can never disagree with
+   * what is on screen.
+   */
+  membersToCsv(
+    members: Array<{
+      displayName: string
+      email: string
+      role: string
+      weeklyCapacityHours?: number | null
+      teams?: string[]
+      joinedAt?: Date | string | null
+      invitedAt?: Date | string | null
+      invitedByName?: string | null
+      lastSeenAt?: Date | string | null
+    }>,
+  ): string {
+    const headers = [
+      'Name',
+      'Email',
+      'Role',
+      'Weekly capacity (h)',
+      'Teams',
+      'Joined',
+      'Invited on',
+      'Invited by',
+      'Last active',
+    ]
+    const iso = (value: Date | string | null | undefined) =>
+      value ? new Date(value).toISOString() : ''
+    const rows = members.map((m) => [
+      m.displayName ?? '',
+      m.email ?? '',
+      m.role ?? '',
+      m.weeklyCapacityHours ?? '',
+      (m.teams ?? []).join('; '),
+      iso(m.joinedAt),
+      iso(m.invitedAt),
+      m.invitedByName ?? '',
+      iso(m.lastSeenAt),
+    ])
+    const escape = (value: string | number) => {
+      const s = String(value ?? '')
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    return [headers, ...rows].map((row) => row.map(escape).join(',')).join('\n')
+  }
+
   exportToCsv(tasks: any[]): string {
     const headers = ['ID', 'Title', 'Status', 'Priority', 'Due Date', 'Created At', 'List ID']
     const rows = tasks.map((t: any) => {

@@ -15,9 +15,15 @@ export const notifications = pgTable('notifications', {
   // Deep-link target: { entityType: 'task', entityId: '...', url: '/app/...' }
   target:      jsonb('target').$type<{ entityType: string; entityId: string; url?: string }>(),
   readAt:      timestamp('read_at', { withTimezone: true }),
+  // Inbox triage (§A2.6). Read-state alone can't express "cleared" or "later":
+  // dismissedAt moves a row to Cleared, snoozedUntil parks it in Later until
+  // that moment passes, at which point it returns to the Inbox on its own.
+  dismissedAt:  timestamp('dismissed_at', { withTimezone: true }),
+  snoozedUntil: timestamp('snoozed_until', { withTimezone: true }),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('idx_notifications_user_unread').on(t.userId, t.readAt),
+  index('idx_notifications_user_triage').on(t.userId, t.dismissedAt, t.snoozedUntil),
 ])
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({

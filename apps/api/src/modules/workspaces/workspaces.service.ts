@@ -1,9 +1,10 @@
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
 import * as dns from 'dns'
-import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage } from '@rundesk/db'
+import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
@@ -279,10 +280,22 @@ export class WorkspacesService {
 
   async update(
     workspaceId: string,
-    patch: { name?: string; logoUrl?: string | null; primaryColor?: string | null; accentColor?: string | null; customDomain?: string | null },
+    patch: {
+      name?: string
+      logoUrl?: string | null
+      primaryColor?: string | null
+      accentColor?: string | null
+      customDomain?: string | null
+      defaultSpacePrivate?: boolean
+      blockPublicSharing?: boolean
+    },
     actor?: AuditActor,
   ) {
     const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
+    // §A4.2 — a policy switch decides who can see client work, so a truthy-ish
+    // body value ("false", 0) must never be read as "on".
+    if (patch.defaultSpacePrivate !== undefined) set.defaultSpacePrivate = patch.defaultSpacePrivate === true
+    if (patch.blockPublicSharing !== undefined) set.blockPublicSharing = patch.blockPublicSharing === true
     // Changing the custom domain (re)mints a verification token and resets the
     // verified flag (Plan §13).
     if ('customDomain' in patch) {
@@ -435,8 +448,16 @@ export class WorkspacesService {
     return (await this.resolveByCustomDomain(host)) !== null
   }
 
+  /**
+   * The People roster (§A4.1). Beyond the membership row it carries the three
+   * columns an admin actually audits by — who invited this person, when, and how
+   * recently they were here — plus the teams they belong to. Invites are
+   * org-scoped, so provenance is joined through the accepted invitation for this
+   * workspace's organization; a founding member or one added by hand simply has
+   * no invitation and reports null.
+   */
   async listMembers(workspaceId: string) {
-    return this.db
+    const rows = await this.db
       .select({
         userId: users.id,
         workspaceMemberId: workspaceMembers.id,
@@ -446,10 +467,57 @@ export class WorkspacesService {
         role: workspaceMembers.role,
         weeklyCapacityHours: workspaceMembers.weeklyCapacityHours,
         joinedAt: workspaceMembers.joinedAt,
+        lastSeenAt: users.lastSeenAt,
+        organizationId: workspaces.organizationId,
       })
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
       .where(eq(workspaceMembers.workspaceId, workspaceId))
+
+    // Provenance is a separate read rather than a join: someone re-invited after
+    // a removal has more than one accepted invitation, and joining would fan the
+    // roster out into duplicate rows. Ordering ascending and letting later rows
+    // overwrite leaves the most recent invite per person.
+    const organizationId = rows[0]?.organizationId
+    const inviter = alias(users, 'inviter')
+    const inviteRows = organizationId
+      ? await this.db
+          .select({
+            userId: invitations.acceptedByUserId,
+            invitedAt: invitations.createdAt,
+            invitedByName: inviter.displayName,
+            invitedByEmail: inviter.email,
+          })
+          .from(invitations)
+          .leftJoin(inviter, eq(inviter.id, invitations.invitedByUserId))
+          .where(and(eq(invitations.organizationId, organizationId), isNotNull(invitations.acceptedByUserId)))
+          .orderBy(asc(invitations.createdAt))
+      : []
+    const inviteByUser = new Map(inviteRows.map((row) => [row.userId as string, row]))
+
+    const teamRows = await this.db
+      .select({ userId: workspaceGroupMembers.userId, name: workspaceGroups.name })
+      .from(workspaceGroupMembers)
+      .innerJoin(workspaceGroups, eq(workspaceGroups.id, workspaceGroupMembers.groupId))
+      .where(eq(workspaceGroups.workspaceId, workspaceId))
+    const teamsByUser = new Map<string, string[]>()
+    for (const row of teamRows) {
+      const list = teamsByUser.get(row.userId) ?? []
+      list.push(row.name)
+      teamsByUser.set(row.userId, list)
+    }
+
+    return rows.map(({ organizationId: _organizationId, ...row }) => {
+      const invite = inviteByUser.get(row.userId)
+      return {
+        ...row,
+        invitedAt: invite?.invitedAt ?? null,
+        invitedByName: invite?.invitedByName ?? null,
+        invitedByEmail: invite?.invitedByEmail ?? null,
+        teams: teamsByUser.get(row.userId) ?? [],
+      }
+    })
   }
 
   async addMember(

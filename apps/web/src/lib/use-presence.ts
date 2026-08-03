@@ -2,7 +2,9 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
 
-export type PresenceStatus = 'online' | 'away' | 'offline'
+// 'busy' only ever arrives from a user's own §A4.8 override — activity alone
+// can never produce it.
+export type PresenceStatus = 'online' | 'away' | 'busy' | 'offline'
 
 type PresenceRow = { userId: string; lastSeenAt: string | null; status: PresenceStatus }
 
@@ -38,6 +40,7 @@ export function presenceDotClass(status: PresenceStatus): string {
   switch (status) {
     case 'online': return 'bg-emerald-500'
     case 'away': return 'bg-amber-400'
+    case 'busy': return 'bg-rose-500'
     default: return 'bg-muted-foreground/40'
   }
 }

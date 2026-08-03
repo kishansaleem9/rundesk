@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common'
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
-import { WorkspaceGroupsService } from './workspace-groups.service'
+import { WorkspaceGroupsService, normalizeGroupAlias } from './workspace-groups.service'
 
 function buildDb(opts: {
   selectGroups?: any[]
@@ -65,5 +65,26 @@ describe('WorkspaceGroupsService', () => {
       (e: unknown) =>
         e instanceof BadRequestException && /not workspace members/i.test(e.message),
     )
+  })
+})
+
+describe('normalizeGroupAlias (§A4.3)', () => {
+  it('strips a leading @ and lowercases, so @Design and design are one handle', () => {
+    assert.equal(normalizeGroupAlias('@Design'), 'design')
+    assert.equal(normalizeGroupAlias('design'), 'design')
+  })
+
+  it('folds accents and spaces into a typeable handle', () => {
+    assert.equal(normalizeGroupAlias('Diseño Gráfico'), 'diseno-grafico')
+  })
+
+  it('returns null when nothing usable survives, leaving the team un-mentionable', () => {
+    assert.equal(normalizeGroupAlias('!!!'), null)
+    assert.equal(normalizeGroupAlias('a'), null)
+    assert.equal(normalizeGroupAlias(null), null)
+  })
+
+  it('caps the handle so a pathological name cannot mint a 500-character mention', () => {
+    assert.equal(normalizeGroupAlias('x'.repeat(200)), 'x'.repeat(32))
   })
 })

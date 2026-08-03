@@ -8,14 +8,20 @@ import {
   ArrowLeft,
   CheckCircle2,
   Clock,
+  RefreshCw,
+  Send,
+  Share2,
   Star,
   TrendingUp,
+  Users,
 } from 'lucide-react'
 import { format, formatDistanceToNowStrict, isAfter, isBefore, isToday, startOfWeek } from 'date-fns'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
+import { DashboardTemplateCards } from '../components/dashboard-templates'
+import { SharePanel } from '../components/share-panel'
 import { useTranslation } from '../lib/i18n'
 import { DemoDataEmptyState } from '../components/demo-data-empty-state'
 
@@ -57,6 +63,28 @@ type Task = {
 
 type Workspace = { id: string; name: string }
 
+/** A5.11 — a preset as the hub renders it: owner and sharing state included. */
+type Preset = {
+  id: string
+  userId: string
+  name: string
+  layout: unknown
+  isDefault: boolean
+  isWorkspaceDefault: boolean
+  ownerName?: string | null
+  ownerEmail?: string | null
+  shareCount: number
+  isOwner: boolean
+  isSharedWithMe: boolean
+}
+
+/**
+ * A5.13 — how often the dashboard's own reads refetch. Dashboards are left open
+ * on a second monitor, so a static snapshot is misleading rather than merely
+ * stale; the shortest interval that isn't wasteful wins.
+ */
+const REFRESH_INTERVALS = [0, 60_000, 300_000, 900_000] as const
+
 export const Route = createFileRoute('/app/$workspaceId/dashboard')({
   component: Dashboard,
 })
@@ -75,6 +103,8 @@ function Dashboard() {
   const [activePresetId, setActivePresetId] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [newPresetName, setNewPresetName] = useState('')
+  const [refreshMs, setRefreshMs] = useState<number>(REFRESH_INTERVALS[0])
+  const [sharing, setSharing] = useState<{ id: string; name: string } | null>(null)
   const user = useAuthStore((s) => s.user)
   const displayName = user?.displayName ?? 'there'
   const userId = user?.id
@@ -108,15 +138,16 @@ function Dashboard() {
 
   const { data: presets = [] } = useQuery({
     queryKey: ['dashboard-presets', workspaceId],
-    queryFn: () => api<any[]>(`/dashboards/workspace/${workspaceId}`),
+    queryFn: () => api<Preset[]>(`/dashboards/workspace/${workspaceId}`),
   })
 
   const activePreset = presets.find((p) => p.id === activePresetId) || presets.find((p) => p.isDefault) || presets[0]
 
   // Single denormalised query — see Task type comment above.
-  const { data: tasks = [], isLoading } = useQuery({
+  const { data: tasks = [], isLoading, dataUpdatedAt, refetch } = useQuery({
     queryKey: ['dashboard-tasks', workspaceId],
     queryFn: () => api<Task[]>(`/tasks/workspace/${workspaceId}?limit=500`),
+    refetchInterval: refreshMs === 0 ? false : refreshMs,
   })
 
   const now = new Date()
@@ -190,19 +221,6 @@ function Dashboard() {
           </div>
           {viewMode === 'custom' && (
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                className="h-9 px-3 rounded-md border border-border bg-card text-sm"
-                value={activePresetId || ''}
-                onChange={(e) => setActivePresetId(e.target.value)}
-              >
-                <option value="">{t('dashboard.defaultLayout')}</option>
-                {presets.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                    {p.isWorkspaceDefault ? ' ★' : ''}
-                  </option>
-                ))}
-              </select>
               {/* §5.7 — badge marks whichever preset is the workspace default. */}
               {activePreset?.isWorkspaceDefault && (
                 <Badge variant="secondary" className="gap-1 whitespace-nowrap">
@@ -238,7 +256,43 @@ function Dashboard() {
               <Button size="sm" onClick={() => setIsSaving(true)}>{t('dashboard.savePreset')}</Button>
             </div>
           )}
+          {/* A5.13 — freshness and delivery. The scheduler already exists in
+              the report builder; this is the missing way in from a dashboard. */}
+          {viewMode === 'overview' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="h-9 px-3 rounded-md border border-border bg-card text-sm"
+                value={refreshMs}
+                onChange={(e) => setRefreshMs(Number(e.target.value))}
+                title={t('dashboard.refreshHint')}
+              >
+                {REFRESH_INTERVALS.map((ms) => (
+                  <option key={ms} value={ms}>
+                    {ms === 0 ? t('dashboard.refreshOff') : t('dashboard.refreshEvery', { minutes: ms / 60_000 })}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" variant="outline" onClick={() => void refetch()} title={t('dashboard.refreshNow')}>
+                <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+              </Button>
+              {/* The scheduler lives in the report builder; this is the way in,
+                  not a second scheduler. */}
+              <Button size="sm" variant="outline" asChild>
+                <a href={`/app/${workspaceId}/reports?tab=custom`}>
+                  <Send className="h-3.5 w-3.5 mr-1.5" />
+                  {t('dashboard.scheduleDelivery')}
+                </a>
+              </Button>
+            </div>
+          )}
         </div>
+        {viewMode === 'overview' && dataUpdatedAt > 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t('dashboard.lastUpdated', {
+              when: formatDistanceToNowStrict(new Date(dataUpdatedAt), { addSuffix: true }),
+            })}
+          </p>
+        )}
         <div className="mt-4 inline-flex rounded-lg border border-border/60 bg-card/30 p-1">
           <button
             onClick={() => setViewMode('overview')}
@@ -281,6 +335,20 @@ function Dashboard() {
               </div>
             </div>
           </Card>
+
+          {/* A5.11 — a browsable index in place of the old bare <select>: who
+              owns each dashboard, whether it is shared, and a way to share it. */}
+          <DashboardsIndex
+            presets={presets}
+            activePresetId={activePreset?.id ?? null}
+            onSelect={setActivePresetId}
+            onShare={(preset) => setSharing({ id: preset.id, name: preset.name })}
+          />
+
+          {presets.length === 0 && (
+            <DashboardTemplateCards workspaceId={workspaceId} onCreated={setActivePresetId} />
+          )}
+
           <DashboardWidgetBuilder preset={activePreset} workspaceId={workspaceId} />
 
           {isSaving && (
@@ -311,6 +379,16 @@ function Dashboard() {
                 </div>
               </Card>
             </div>
+          )}
+
+          {sharing && (
+            <SharePanel
+              open
+              onOpenChange={(next) => { if (!next) setSharing(null) }}
+              objectType="dashboard"
+              objectId={sharing.id}
+              objectName={sharing.name}
+            />
           )}
         </div>
       ) : (
@@ -429,6 +507,95 @@ function Dashboard() {
       )}
     </div>
     </DemoDataEmptyState>
+  )
+}
+
+/**
+ * A5.11 — the dashboards hub. "My" is the presets you own, "Shared with me" is
+ * a grant in `object_shares`, and the workspace default is the one an admin
+ * pinned — all three already existed in the data; only the index did not.
+ */
+function DashboardsIndex({
+  presets,
+  activePresetId,
+  onSelect,
+  onShare,
+}: {
+  presets: Preset[]
+  activePresetId: string | null
+  onSelect: (id: string) => void
+  onShare: (preset: Preset) => void
+}) {
+  const { t } = useTranslation()
+  if (presets.length === 0) return null
+
+  return (
+    <Card className="p-0 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-xs uppercase tracking-wider text-muted-foreground">
+              <th className="text-start font-semibold px-4 py-2.5">{t('dashboard.colName')}</th>
+              <th className="text-start font-semibold px-4 py-2.5">{t('dashboard.colOwner')}</th>
+              <th className="text-start font-semibold px-4 py-2.5">{t('dashboard.colSharing')}</th>
+              <th className="px-4 py-2.5" />
+            </tr>
+          </thead>
+          <tbody>
+            {presets.map((preset) => (
+              <tr
+                key={preset.id}
+                className={cn(
+                  'border-b border-border/50 last:border-0 hover:bg-muted/30 group',
+                  preset.id === activePresetId && 'bg-accent/10',
+                )}
+              >
+                <td className="px-4 py-2.5">
+                  <button className="font-medium hover:text-accent" onClick={() => onSelect(preset.id)}>
+                    {preset.name}
+                  </button>
+                  {preset.isWorkspaceDefault && (
+                    <Badge variant="secondary" className="ms-2 gap-1">
+                      <Star className="h-3 w-3" />
+                      {t('dashboard.workspaceDefaultBadge')}
+                    </Badge>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-muted-foreground">
+                  {preset.isOwner
+                    ? t('dashboard.ownerYou')
+                    : preset.ownerName ?? preset.ownerEmail ?? t('dashboard.ownerUnknown')}
+                </td>
+                <td className="px-4 py-2.5 text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 text-xs">
+                    {preset.isSharedWithMe ? (
+                      <><Users className="h-3 w-3" /> {t('dashboard.sharingWithMe')}</>
+                    ) : preset.shareCount > 0 ? (
+                      <><Share2 className="h-3 w-3" /> {t('dashboard.sharingCount', { count: preset.shareCount })}</>
+                    ) : (
+                      t('dashboard.sharingPrivate')
+                    )}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-end">
+                  {preset.isOwner && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                      onClick={() => onShare(preset)}
+                      title={t('dashboard.shareDashboard')}
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   )
 }
 

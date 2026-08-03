@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common'
-import { eq, and, asc, isNull, desc, inArray, isNotNull } from 'drizzle-orm'
+import { eq, and, asc, isNull, desc, inArray, isNotNull, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { docs, docComments, docRevisions, docTemplates, users } from '@rundesk/db'
+import { docs, docComments, docRevisions, docTemplates, users, objectShares, spaces, workspaces } from '@rundesk/db'
 import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -12,6 +12,10 @@ import { tiptapToMarkdown, tiptapToPlainLines } from './tiptap-markdown'
 import { renderReportPdf } from '../reports/pdf'
 
 type TiptapNode = { type: string; content?: TiptapNode[]; text?: string; attrs?: Record<string, unknown> }
+
+/** Docs-hub buckets (A5.6). `all` excludes archived, matching the old default. */
+export const DOC_SCOPES = ['all', 'mine', 'shared', 'archived'] as const
+export type DocScope = (typeof DOC_SCOPES)[number]
 
 // Extract plaintext for denormalized search.
 function extractPlaintext(content: unknown): string {
@@ -50,14 +54,117 @@ export class DocsService {
     }
   }
 
-  list(workspaceId: string, opts: { spaceId?: string | null; parentDocId?: string | null } = {}) {
+  /**
+   * A5.6 / A5.7 — the hub buckets are filters over columns that already exist,
+   * not a new model: `mine` reads `createdById`, `archived` flips the
+   * `isArchived` predicate the tree relies on, and `shared` is the reverse
+   * `object_shares` lookup. Every row also carries what an index table needs
+   * (creator, location, subpage count, sharing state) so the table and the tree
+   * are the same read.
+   */
+  async list(
+    workspaceId: string,
+    opts: {
+      spaceId?: string | null
+      parentDocId?: string | null
+      scope?: DocScope
+      userId?: string
+    } = {},
+  ) {
+    const scope = opts.scope ?? 'all'
+    const sharedIds = scope === 'shared' ? await this.docIdsSharedWith(workspaceId, opts.userId) : null
+    // A share grant on a doc nobody has shared means an empty bucket, not the
+    // whole workspace — bail before the `inArray` would degenerate.
+    if (sharedIds && sharedIds.length === 0) return []
+
     const where = and(
       eq(docs.workspaceId, workspaceId),
-      eq(docs.isArchived, false),
+      eq(docs.isArchived, scope === 'archived'),
+      scope === 'mine' && opts.userId ? eq(docs.createdById, opts.userId) : undefined,
+      sharedIds ? inArray(docs.id, sharedIds) : undefined,
       opts.spaceId === null ? isNull(docs.spaceId) : opts.spaceId ? eq(docs.spaceId, opts.spaceId) : undefined,
       opts.parentDocId === null ? isNull(docs.parentDocId) : opts.parentDocId ? eq(docs.parentDocId, opts.parentDocId) : undefined,
     )
-    return this.db.select().from(docs).where(where).orderBy(asc(docs.position), asc(docs.createdAt))
+    return this.db
+      .select({
+        id: docs.id,
+        workspaceId: docs.workspaceId,
+        spaceId: docs.spaceId,
+        parentDocId: docs.parentDocId,
+        createdById: docs.createdById,
+        title: docs.title,
+        icon: docs.icon,
+        coverImageUrl: docs.coverImageUrl,
+        content: docs.content,
+        plaintext: docs.plaintext,
+        position: docs.position,
+        isArchived: docs.isArchived,
+        publicShareId: docs.publicShareId,
+        publicShareEnabledAt: docs.publicShareEnabledAt,
+        createdAt: docs.createdAt,
+        updatedAt: docs.updatedAt,
+        createdByName: users.displayName,
+        createdByEmail: users.email,
+        spaceName: spaces.name,
+        // Correlate on the outer row in SQL text — a bound `${docs.id}` would
+        // collapse to one parameter and give every row the same count.
+        subpageCount: sql<number>`(
+          select count(*)::int from docs child
+          where child.parent_doc_id = docs.id and child.is_archived = false
+        )`,
+        shareCount: sql<number>`(
+          select count(*)::int from object_shares os
+          where os.object_type = 'doc' and os.object_id = docs.id
+        )`,
+      })
+      .from(docs)
+      // Left: the creator may have been removed (createdById is set null), and
+      // a workspace-level doc has no space.
+      .leftJoin(users, eq(users.id, docs.createdById))
+      .leftJoin(spaces, eq(spaces.id, docs.spaceId))
+      .where(where)
+      .orderBy(asc(docs.position), asc(docs.createdAt))
+  }
+
+  /**
+   * Per-bucket totals for the docs hub rail (A5.6). Counted directly rather
+   * than by length of `list()` — that would fetch every doc's jsonb body four
+   * times to produce four integers.
+   */
+  async scopeCounts(workspaceId: string, userId: string) {
+    const sharedIds = await this.docIdsSharedWith(workspaceId, userId)
+    const count = async (extra?: ReturnType<typeof and>) => {
+      const [row] = await this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(docs)
+        .where(and(eq(docs.workspaceId, workspaceId), extra))
+      return row?.n ?? 0
+    }
+    const [all, mine, shared, archived] = await Promise.all([
+      count(eq(docs.isArchived, false)),
+      count(and(eq(docs.isArchived, false), eq(docs.createdById, userId))),
+      sharedIds.length === 0
+        ? Promise.resolve(0)
+        : count(and(eq(docs.isArchived, false), inArray(docs.id, sharedIds))),
+      count(eq(docs.isArchived, true)),
+    ])
+    return { all, mine, shared, archived }
+  }
+
+  /** Doc ids in this workspace explicitly granted to `userId` (A1.7's table). */
+  private async docIdsSharedWith(workspaceId: string, userId?: string): Promise<string[]> {
+    if (!userId) return []
+    const rows = await this.db
+      .select({ objectId: objectShares.objectId })
+      .from(objectShares)
+      .where(
+        and(
+          eq(objectShares.workspaceId, workspaceId),
+          eq(objectShares.objectType, 'doc'),
+          eq(objectShares.userId, userId),
+        ),
+      )
+    return rows.map((r) => r.objectId)
   }
 
   async get(docId: string) {
@@ -358,6 +465,18 @@ export class DocsService {
     const doc = await this.assertDocAccess(docId, userId)
     if (doc.publicShareId) {
       return { publicShareId: doc.publicShareId, publicShareEnabledAt: doc.publicShareEnabledAt }
+    }
+    // §A4.2 — the workspace can withdraw the right to mint anonymous links at
+    // all. Checked here rather than in the controller so no other caller can
+    // reach the slug generator around it. Revoking an existing link stays
+    // possible, which is why disablePublicShare is not gated.
+    const [workspace] = await this.db
+      .select({ blockPublicSharing: workspaces.blockPublicSharing })
+      .from(workspaces)
+      .where(eq(workspaces.id, doc.workspaceId))
+      .limit(1)
+    if (workspace?.blockPublicSharing) {
+      throw new ForbiddenException('Public sharing is disabled for this workspace')
     }
     const slug = randomBytes(12).toString('base64url')
     const [row] = await this.db

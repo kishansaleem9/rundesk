@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { eq, and, desc, isNull, gte, inArray, sql } from 'drizzle-orm'
+import { eq, and, desc, isNull, gte, lt, inArray, sql } from 'drizzle-orm'
 import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -68,6 +68,61 @@ export class TimeEntriesService {
         billableHours: Math.round((r.billableSeconds / 3600) * 10) / 10,
       }))
       .sort((a, b) => (a.month < b.month ? 1 : a.month > b.month ? -1 : a.displayName.localeCompare(b.displayName)))
+  }
+
+  /**
+   * A5.14 — one row per person per weekday for a single week, which is what a
+   * team timesheet is. The per-entry list can't answer "what did the team book
+   * on Tuesday?" because it is scoped to one member and unpivoted by day.
+   * `weekStart` is a Monday (normalized by the caller).
+   */
+  /** Monday (UTC) of the week containing `weekStart`; today's week when absent. */
+  parseWeekStart(weekStart?: string): Date {
+    const iso = weekStart ?? new Date().toISOString().slice(0, 10)
+    return new Date(`${this.normalizeWeekStart(iso)}T00:00:00.000Z`)
+  }
+
+  async getTeamWeek(workspaceId: string, weekStart: Date) {
+    const weekEnd = new Date(weekStart)
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 7)
+    // Monday-indexed day-of-week, so column 0 is always the week start.
+    const dayExpr = sql<number>`(extract(isodow from ${timeEntries.startedAt} at time zone 'UTC')::int - 1)`
+    const rows = await this.db
+      .select({
+        userId: users.id,
+        displayName: users.displayName,
+        dayIndex: dayExpr,
+        totalSeconds: sql<number>`coalesce(sum(${timeEntries.durationSec}), 0)::int`,
+        billableSeconds: sql<number>`coalesce(sum(case when ${timeEntries.isBillable} then ${timeEntries.durationSec} else 0 end), 0)::int`,
+      })
+      .from(users)
+      .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
+      .innerJoin(
+        timeEntries,
+        and(
+          eq(timeEntries.userId, users.id),
+          gte(timeEntries.startedAt, weekStart),
+          lt(timeEntries.startedAt, weekEnd),
+        ),
+      )
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .groupBy(users.id, users.displayName, dayExpr)
+
+    const byUser = new Map<string, { userId: string; displayName: string; daySeconds: number[]; totalSeconds: number; billableSeconds: number }>()
+    for (const row of rows) {
+      const entry = byUser.get(row.userId) ?? {
+        userId: row.userId,
+        displayName: row.displayName ?? '',
+        daySeconds: Array.from({ length: 7 }, () => 0),
+        totalSeconds: 0,
+        billableSeconds: 0,
+      }
+      if (row.dayIndex >= 0 && row.dayIndex < 7) entry.daySeconds[row.dayIndex] += row.totalSeconds
+      entry.totalSeconds += row.totalSeconds
+      entry.billableSeconds += row.billableSeconds
+      byUser.set(row.userId, entry)
+    }
+    return [...byUser.values()].sort((a, b) => b.totalSeconds - a.totalSeconds)
   }
 
   /** The owning project's billable default for a task (§8.3). */

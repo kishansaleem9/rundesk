@@ -20,6 +20,12 @@ export const workspaceGroups = pgTable(
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
     name:        text('name').notNull(),
     description: text('description'),
+    /**
+     * §A4.3 @-mention handle, unique per workspace (case-insensitively, via the
+     * partial index in 0090). Kept separate from `name` so renaming a team never
+     * invalidates the handle every past message addressed it by.
+     */
+    alias:       text('alias'),
     /** SCIM external ID (provided by the IdP for re-identification) */
     externalId:  text('external_id'),
     createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),

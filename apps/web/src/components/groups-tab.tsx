@@ -34,6 +34,8 @@ type WorkspaceGroup = {
   name: string
   description: string | null
   externalId: string | null
+  /** §A4.3 @-handle the team answers to in chat. */
+  alias: string | null
   memberCount: number
   members: GroupMember[]
   createdAt: string
@@ -49,6 +51,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
   const [editingMeta, setEditingMeta] = useState(false)
   const [draftName, setDraftName] = useState('')
   const [draftDescription, setDraftDescription] = useState('')
+  const [draftAlias, setDraftAlias] = useState('')
 
   const groupsQuery = useQuery({
     queryKey: ['workspace-groups', workspaceId, search],
@@ -90,7 +93,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
       patch,
     }: {
       groupId: string
-      patch: { name?: string; description?: string | null }
+      patch: { name?: string; description?: string | null; alias?: string | null }
     }) =>
       api<WorkspaceGroup>(`/workspaces/${workspaceId}/groups/${groupId}`, {
         method: 'PATCH',
@@ -138,6 +141,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
   const enterEditMode = (g: WorkspaceGroup) => {
     setDraftName(g.name)
     setDraftDescription(g.description ?? '')
+    setDraftAlias(g.alias ?? '')
     setEditingMeta(true)
   }
 
@@ -218,6 +222,9 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
                     {g.memberCount}
                   </Badge>
                 </div>
+                {g.alias && (
+                  <div className="text-[10px] font-mono text-accent mt-0.5 truncate">@{g.alias}</div>
+                )}
                 {g.externalId && (
                   <div className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">
                     SCIM · {g.externalId}
@@ -251,10 +258,24 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
                         onChange={(e) => setDraftDescription(e.target.value)}
                       />
                     </div>
+                    <div>
+                      <Label className="text-xs">{t('groupsTab.mentionHandle')}</Label>
+                      <Input
+                        value={draftAlias}
+                        onChange={(e) => setDraftAlias(e.target.value)}
+                        placeholder={t('groupsTab.mentionHandlePlaceholder')}
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {t('groupsTab.mentionHandleHint')}
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex-1">
                     <h4 className="font-display text-xl font-semibold">{activeGroup.name}</h4>
+                    {activeGroup.alias && (
+                      <p className="text-xs font-mono text-accent mt-1">@{activeGroup.alias}</p>
+                    )}
                     {activeGroup.description && (
                       <p className="text-sm text-muted-foreground mt-1">{activeGroup.description}</p>
                     )}
@@ -275,6 +296,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
                           patch: {
                             name: draftName,
                             description: draftDescription || null,
+                            alias: draftAlias.trim() || null,
                           },
                         })
                       }

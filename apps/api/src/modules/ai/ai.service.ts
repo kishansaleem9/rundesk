@@ -837,7 +837,25 @@ export class AiService {
   }
 
   /** Aggregate AI usage + estimated cost, per user and per model (Plan §7.15). */
-  async usageSummary(opts: { workspaceId?: string; from?: Date; to?: Date } = {}) {
+  async usageSummary(opts: { workspaceId?: string; from?: Date; to?: Date; actor?: { id: string; role?: string } } = {}) {
+    // §A4.4 — this became a rendered screen, so the scope check has to be real:
+    // spend and per-person usage is workspace-confidential. No workspaceId means
+    // the platform-wide roll-up, which is a super-admin view.
+    if (opts.actor && opts.actor.role !== 'super_admin') {
+      if (!opts.workspaceId) throw new ForbiddenException('Workspace context required')
+      const [member] = await this.db
+        .select({ userId: workspaceMembers.userId })
+        .from(workspaceMembers)
+        .where(
+          and(
+            eq(workspaceMembers.workspaceId, opts.workspaceId),
+            eq(workspaceMembers.userId, opts.actor.id),
+          ),
+        )
+        .limit(1)
+      if (!member) throw new ForbiddenException('Workspace membership required')
+    }
+
     const filters = []
     if (opts.workspaceId) filters.push(eq(aiUsage.workspaceId, opts.workspaceId))
     if (opts.from) filters.push(gte(aiUsage.createdAt, opts.from))

@@ -4,7 +4,9 @@ import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { TableKit } from '@tiptap/extension-table'
 import { useEffect } from 'react'
+import { Callout, ListEmbedStatic } from '../lib/tiptap-doc-blocks'
 
 export const Route = createFileRoute('/d/$slug')({
   component: PublicDocViewer,
@@ -37,7 +39,16 @@ function PublicDocViewer() {
 
   const editor = useEditor(
     {
-      extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true })],
+      // A5.8 — a shared doc must keep the blocks it was written with; an
+      // unregistered node type is silently stripped on parse.
+      extensions: [
+        StarterKit,
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        TableKit,
+        Callout,
+        ListEmbedStatic,
+      ],
       content: docQuery.data?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
       editable: false,
     },

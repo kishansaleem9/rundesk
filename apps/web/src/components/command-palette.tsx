@@ -13,6 +13,7 @@ import {
 } from '@rundesk/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ArrowLeft,
   ArrowRight,
   CheckCircle2,
   FileText,
@@ -20,11 +21,14 @@ import {
   GanttChart,
   Inbox,
   LayoutDashboard,
+  Link as LinkIcon,
   List as ListIcon,
+  MessageCircleReply,
   MessageSquare,
   Paperclip,
   Plus,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   Target,
   Users,
@@ -73,10 +77,14 @@ export function CommandPalette({
   open: openProp,
   onOpenChange,
   initialQuery = '',
+  onAskAi,
 }: {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   initialQuery?: string
+  /** §A2.3 / §A6.4 — hands the typed query to the docked assistant. Omitted
+   * outside a workspace, where there is nothing to ground an answer on. */
+  onAskAi?: (question: string) => void
 } = {}) {
   const { t } = useTranslation()
   const [internalOpen, setInternalOpen] = useState(false)
@@ -91,10 +99,17 @@ export function CommandPalette({
   const [priorityFilter, setPriorityFilter] = useState<'' | 'urgent' | 'high' | 'normal' | 'low'>('')
   const [labelFilter, setLabelFilter] = useState<string>('')
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')
+  const [creatorFilter, setCreatorFilter] = useState<string>('')
+  const [includeArchived, setIncludeArchived] = useState(false)
   const [dueAfter, setDueAfter] = useState<string>('')
   const [dueBefore, setDueBefore] = useState<string>('')
   const [customFieldId, setCustomFieldId] = useState<string>('')
   const [customFieldValue, setCustomFieldValue] = useState<string>('')
+  // §A2.4 — the strip used to sit open above every result; in a modal that is
+  // most of the vertical space, spent on controls nobody is using yet.
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  // §A2.1 — Tab on the highlighted row opens its extra actions.
+  const [actionsForId, setActionsForId] = useState<string | null>(null)
 
   // When the palette is opened with a query forwarded from the header search
   // input, seed the command query so results show immediately.
@@ -143,6 +158,8 @@ export function CommandPalette({
     setPriorityFilter((f.priority as any) ?? '')
     setLabelFilter((f.labelId as string) ?? '')
     setAssigneeFilter((f.assigneeId as string) ?? '')
+    setCreatorFilter((f.creatorId as string) ?? '')
+    setIncludeArchived(f.includeArchived === true)
     setDueAfter((f.dueAfter as string) ?? '')
     setDueBefore((f.dueBefore as string) ?? '')
     setCustomFieldId((f.customFieldId as string) ?? '')
@@ -156,6 +173,8 @@ export function CommandPalette({
       if (priorityFilter) filters.priority = priorityFilter
       if (labelFilter) filters.labelId = labelFilter
       if (assigneeFilter) filters.assigneeId = assigneeFilter
+      if (creatorFilter) filters.creatorId = creatorFilter
+      if (includeArchived) filters.includeArchived = true
       if (dueAfter) filters.dueAfter = dueAfter
       if (dueBefore) filters.dueBefore = dueBefore
       if (customFieldId && customFieldValue) {
@@ -178,12 +197,27 @@ export function CommandPalette({
   })
 
   const hasCustomField = customFieldId !== '' && customFieldValue !== ''
-  const hasFilter =
-    typeFilter !== 'all' || statusFilter !== '' || priorityFilter !== '' || labelFilter !== '' ||
-    assigneeFilter !== '' || dueAfter !== '' || dueBefore !== '' || hasCustomField
+  // §A2.4 — the tally on the Filters button. Each active control counts once.
+  const activeFilterCount =
+    (typeFilter !== 'all' ? 1 : 0) +
+    (statusFilter ? 1 : 0) +
+    (priorityFilter ? 1 : 0) +
+    (labelFilter ? 1 : 0) +
+    (assigneeFilter ? 1 : 0) +
+    (creatorFilter ? 1 : 0) +
+    (includeArchived ? 1 : 0) +
+    (dueAfter ? 1 : 0) +
+    (dueBefore ? 1 : 0) +
+    (hasCustomField ? 1 : 0)
+  const hasFilter = activeFilterCount > 0
+
+  // §A2.1 — a query that opens with `/` is a command lookup, not a search.
+  const commandMode = query.startsWith('/')
+  const commandNeedle = commandMode ? query.slice(1).trim().toLowerCase() : ''
+
   const searchQuery = useQuery({
-    enabled: open && Boolean(workspaceId) && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter, assigneeFilter, dueAfter, dueBefore, customFieldId, customFieldValue],
+    enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
+    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeFilter !== 'all') params.set('types', typeFilter)
@@ -191,6 +225,8 @@ export function CommandPalette({
       if (priorityFilter) params.set('priority', priorityFilter)
       if (labelFilter) params.set('labelId', labelFilter)
       if (assigneeFilter) params.set('assigneeId', assigneeFilter)
+      if (creatorFilter) params.set('creatorId', creatorFilter)
+      if (includeArchived) params.set('includeArchived', 'true')
       if (dueAfter) params.set('dueAfter', dueAfter)
       if (dueBefore) params.set('dueBefore', dueBefore)
       if (hasCustomField) {
@@ -241,6 +277,7 @@ export function CommandPalette({
         { icon: LayoutDashboard, label: t('nav.dashboards'), to: `/app/${workspaceId}/dashboard` },
         { icon: GanttChart, label: t('nav.timeline'), to: `/app/${workspaceId}/timeline` },
         { icon: Inbox, label: t('nav.inbox'), to: `/app/${workspaceId}/inbox` },
+        { icon: MessageCircleReply, label: t('replies.title'), to: `/app/${workspaceId}/replies` },
         { icon: MessageSquare, label: t('nav.chat'), to: `/app/${workspaceId}/chat` },
         { icon: FileText, label: t('nav.docs'), to: `/app/${workspaceId}/docs` },
         { icon: Target, label: t('nav.goals'), to: `/app/${workspaceId}/goals` },
@@ -250,14 +287,98 @@ export function CommandPalette({
       ]
     : []
 
+  const visibleCommands = navTargets.filter(
+    (c) => !commandNeedle || c.label.toLowerCase().includes(commandNeedle),
+  )
+
+  const actionHit = searchQuery.data?.find((h) => h.id === actionsForId) ?? null
+
+  // §A2.1 — Tab hands the highlighted row to its action menu. cmdk keeps focus
+  // in the input and marks the active row with aria-selected, so that is where
+  // the selection is read from.
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Tab') return
+    e.preventDefault()
+    if (actionsForId) {
+      setActionsForId(null)
+      return
+    }
+    const selected = document.querySelector('[cmdk-item][aria-selected="true"]')
+    const value = selected?.getAttribute('data-value') ?? ''
+    const hit = searchQuery.data?.find((h) => value.startsWith(`${h.entityType}-${h.id}-`))
+    if (hit) setActionsForId(hit.id)
+  }
+
+  const copyLink = async (hit: SearchHit) => {
+    const url = `${window.location.origin}${hit.url}`
+    try {
+      await navigator.clipboard.writeText(url)
+    } catch {
+      /* Clipboard blocked (insecure context or denied) — nothing else to do. */
+    }
+    setActionsForId(null)
+    setOpen(false)
+  }
+
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
+    <CommandDialog
+      open={open}
+      onOpenChange={setOpen}
+      // In command mode the leading `/` would score every item to zero, so the
+      // filtering is ours; everywhere else cmdk's fuzzy match still runs.
+      commandProps={{ shouldFilter: !commandMode }}
+    >
       <CommandInput
         placeholder={t('palette.searchPlaceholder')}
         value={query}
-        onValueChange={setQuery}
+        onValueChange={(next) => {
+          setQuery(next)
+          setActionsForId(null)
+        }}
+        onKeyDown={handleInputKeyDown}
       />
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border/60">
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          className={cn(
+            'inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] transition-colors',
+            activeFilterCount > 0
+              ? 'border-brand-500 bg-brand-500/10 text-foreground'
+              : 'border-border/70 text-muted-foreground hover:text-foreground hover:bg-accent/10',
+          )}
+        >
+          <SlidersHorizontal className="h-3 w-3" />
+          {activeFilterCount > 0 ? t('palette.filtersCount', { count: activeFilterCount }) : t('palette.filters')}
+        </button>
+        {activeFilterCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setTypeFilter('all')
+              setStatusFilter('')
+              setPriorityFilter('')
+              setLabelFilter('')
+              setAssigneeFilter('')
+              setCreatorFilter('')
+              setIncludeArchived(false)
+              setDueAfter('')
+              setDueBefore('')
+              setCustomFieldId('')
+              setCustomFieldValue('')
+            }}
+            className="text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            {t('palette.clearFilters')}
+          </button>
+        )}
+      </div>
+      <div
+        className={cn(
+          'flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60',
+          filtersOpen ? 'flex' : 'hidden',
+        )}
+      >
         <FilterGroup label={t('palette.filterType')}>
           {(['all', 'task', 'doc'] as const).map((v) => (
             <FilterChip key={v} active={typeFilter === v} onClick={() => setTypeFilter(v)}>
@@ -319,6 +440,27 @@ export function CommandPalette({
             </select>
           </FilterGroup>
         )}
+        {(membersQuery.data?.length ?? 0) > 0 && (
+          <FilterGroup label={t('palette.filterCreator')}>
+            <select
+              value={creatorFilter}
+              onChange={(e) => setCreatorFilter(e.target.value)}
+              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+            >
+              <option value="">{t('palette.filterAnyone')}</option>
+              {membersQuery.data!.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.displayName || m.email}
+                </option>
+              ))}
+            </select>
+          </FilterGroup>
+        )}
+        <FilterGroup label={t('palette.filterArchived')}>
+          <FilterChip active={includeArchived} onClick={() => setIncludeArchived((v) => !v)}>
+            {t('palette.includeArchived')}
+          </FilterChip>
+        </FilterGroup>
         <FilterGroup label={t('palette.filterDue')}>
           <input
             type="date"
@@ -420,7 +562,9 @@ export function CommandPalette({
       )}
       <CommandList>
         <CommandEmpty>
-          {query.trim() ? (
+          {commandMode ? (
+            <span>{t('palette.noCommandMatch')}</span>
+          ) : query.trim() ? (
             <span>
               {t('palette.noMatchesBefore')}<CommandShortcut>↵</CommandShortcut>{t('palette.noMatchesAfter')}
             </span>
@@ -431,9 +575,57 @@ export function CommandPalette({
           )}
         </CommandEmpty>
 
+        {/* §A2.1 — `/` lists the whole command set instead of leaving the user
+            to guess which words happen to match a command. */}
+        {commandMode && (
+          <CommandGroup heading={t('palette.commands')}>
+            {visibleCommands.map(({ icon: Icon, label, to }) => (
+              <CommandItem key={to} value={`command-${label}`} onSelect={() => go(to)}>
+                <Icon className="text-muted-foreground" />
+                {label}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {/* §A2.1 — extra actions for the row Tab was pressed on. */}
+        {!commandMode && actionHit && (
+          <CommandGroup heading={t('palette.actionsOn', { title: actionHit.title })}>
+            <CommandItem value={`__action_open__${query}`} onSelect={() => go(actionHit.url)}>
+              <ArrowRight className="text-muted-foreground" />
+              {t('palette.actionOpen')}
+            </CommandItem>
+            <CommandItem value={`__action_copy__${query}`} onSelect={() => void copyLink(actionHit)}>
+              <LinkIcon className="text-muted-foreground" />
+              {t('palette.actionCopyLink')}
+            </CommandItem>
+            <CommandItem value={`__action_back__${query}`} onSelect={() => setActionsForId(null)}>
+              <ArrowLeft className="text-muted-foreground" />
+              {t('palette.actionBack')}
+            </CommandItem>
+          </CommandGroup>
+        )}
+
         {/* Quick action — create task from query */}
-        {query.trim() && workspaceId && (
+        {!commandMode && query.trim() && workspaceId && (
           <CommandGroup heading={t('palette.quickActions')}>
+            {/* §A2.3 — the typed question used to be dropped on the way to the
+                AI page; it now goes straight to the assistant. */}
+            {onAskAi && (
+              <CommandItem
+                value={`__ask_ai__${query}`}
+                onSelect={() => {
+                  const question = query.trim()
+                  setOpen(false)
+                  setQuery('')
+                  onAskAi(question)
+                }}
+              >
+                <Sparkles className="text-accent" />
+                {t('palette.askAi')}{' '}
+                <span className="font-medium text-foreground">&quot;{query.trim()}&quot;</span>
+              </CommandItem>
+            )}
             <CommandItem onSelect={() => createTask.mutate()} value={`__create__${query}`}>
               <Plus className="text-accent" />
               {t('palette.createTask')} <span className="font-medium text-foreground">&quot;{query.trim()}&quot;</span>
@@ -443,7 +635,7 @@ export function CommandPalette({
         )}
 
         {/* Search results */}
-        {searchQuery.data && searchQuery.data.length > 0 && (
+        {!commandMode && searchQuery.data && searchQuery.data.length > 0 && (
           <>
             <CommandSeparator />
             {/* Results grouped by entity type (§11.1) */}
@@ -476,7 +668,7 @@ export function CommandPalette({
         )}
 
         {/* Navigation shortcuts */}
-        {!query.trim() && navTargets.length > 0 && (
+        {!commandMode && !query.trim() && navTargets.length > 0 && (
           <CommandGroup heading={t('palette.jumpTo')}>
             {navTargets.map(({ icon: Icon, label, to }) => (
               <CommandItem key={to} value={`nav-${label}`} onSelect={() => go(to)}>
@@ -487,6 +679,14 @@ export function CommandPalette({
           </CommandGroup>
         )}
       </CommandList>
+      {/* §A2.1 — the keys are only discoverable if the modal names them. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <span>{t('palette.hintNavigate')}</span>
+        <span>{t('palette.hintOpen')}</span>
+        <span>{t('palette.hintActions')}</span>
+        <span>{t('palette.hintCommands')}</span>
+        <span>{t('palette.hintClose')}</span>
+      </div>
     </CommandDialog>
   )
 }

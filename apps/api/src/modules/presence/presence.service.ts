@@ -1,10 +1,18 @@
-import { Injectable, Inject, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { and, eq, inArray } from 'drizzle-orm'
 import { users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 
-export type PresenceStatus = 'online' | 'away' | 'offline'
+export type PresenceStatus = 'online' | 'away' | 'busy' | 'offline'
+
+/**
+ * §A4.8 — the statuses a user may set for themselves. Derived presence reports
+ * activity; an override reports intent, which is the only thing a teammate can
+ * act on ("don't interrupt" cannot be inferred from a heartbeat).
+ */
+export const MANUAL_PRESENCE_STATUSES = ['online', 'away', 'busy', 'offline'] as const
+export type ManualPresenceStatus = (typeof MANUAL_PRESENCE_STATUSES)[number]
 
 // Online while a socket pings (every ~60s) plus slack; away for a while after;
 // offline once cold. Tuned so a briefly-flaky connection doesn't flip to away.
@@ -26,6 +34,40 @@ export class PresenceService {
     return 'offline'
   }
 
+  /**
+   * The status a teammate should see: the user's own override when they set
+   * one, otherwise the heartbeat-derived value.
+   */
+  static resolveStatus(
+    presenceStatus: string | null | undefined,
+    lastSeenAt: Date | string | null | undefined,
+    now: Date = new Date(),
+  ): PresenceStatus {
+    if (presenceStatus && (MANUAL_PRESENCE_STATUSES as readonly string[]).includes(presenceStatus)) {
+      return presenceStatus as PresenceStatus
+    }
+    return PresenceService.deriveStatus(lastSeenAt, now)
+  }
+
+  /**
+   * Set or clear the caller's own presence override. `null` hands presence back
+   * to the heartbeat.
+   */
+  async setManualStatus(userId: string, status: ManualPresenceStatus | null) {
+    if (status !== null && !(MANUAL_PRESENCE_STATUSES as readonly string[]).includes(status)) {
+      throw new BadRequestException(`status must be one of ${MANUAL_PRESENCE_STATUSES.join(', ')} or null`)
+    }
+    const [row] = await this.db
+      .update(users)
+      .set({ presenceStatus: status })
+      .where(eq(users.id, userId))
+      .returning({ presenceStatus: users.presenceStatus, lastSeenAt: users.lastSeenAt })
+    return {
+      presenceStatus: row?.presenceStatus ?? null,
+      status: PresenceService.resolveStatus(row?.presenceStatus, row?.lastSeenAt),
+    }
+  }
+
   /** Refresh a user's presence heartbeat. Called on socket connect + ping. */
   async recordHeartbeat(userId: string, now: Date = new Date()): Promise<void> {
     if (!userId) return
@@ -45,7 +87,7 @@ export class PresenceService {
     if (!membership) throw new ForbiddenException('Workspace membership required')
 
     const rows = await this.db
-      .select({ userId: users.id, lastSeenAt: users.lastSeenAt })
+      .select({ userId: users.id, lastSeenAt: users.lastSeenAt, presenceStatus: users.presenceStatus })
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .where(eq(workspaceMembers.workspaceId, workspaceId))
@@ -53,7 +95,8 @@ export class PresenceService {
     return rows.map((r) => ({
       userId: r.userId,
       lastSeenAt: r.lastSeenAt,
-      status: PresenceService.deriveStatus(r.lastSeenAt, now),
+      manual: r.presenceStatus ?? null,
+      status: PresenceService.resolveStatus(r.presenceStatus, r.lastSeenAt, now),
     }))
   }
 
@@ -62,11 +105,11 @@ export class PresenceService {
     const ids = [...new Set(userIds.filter(Boolean))]
     if (ids.length === 0) return {} as Record<string, PresenceStatus>
     const rows = await this.db
-      .select({ userId: users.id, lastSeenAt: users.lastSeenAt })
+      .select({ userId: users.id, lastSeenAt: users.lastSeenAt, presenceStatus: users.presenceStatus })
       .from(users)
       .where(inArray(users.id, ids))
     const out: Record<string, PresenceStatus> = {}
-    for (const r of rows) out[r.userId] = PresenceService.deriveStatus(r.lastSeenAt, now)
+    for (const r of rows) out[r.userId] = PresenceService.resolveStatus(r.presenceStatus, r.lastSeenAt, now)
     return out
   }
 }

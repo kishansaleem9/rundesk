@@ -14,6 +14,9 @@ export const chatChannels = pgTable('chat_channels', {
   spaceId:     uuid('space_id').references(() => spaces.id, { onDelete: 'set null' }),
   name:        text('name').notNull(),
   description: text('description'),
+  // One-line topic shown under the channel name (§A3.7). Kept apart from
+  // `description`, which is the longer blurb in the info panel.
+  topic:       text('topic'),
   // Optional channel icon (Plan §6.1) — an emoji or short token shown in the UI.
   icon:        text('icon'),
   isPrivate:   boolean('is_private').notNull().default(false),
@@ -118,6 +121,9 @@ export const chatCustomEmoji = pgTable(
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
     shortcode:   text('shortcode').notNull(),
     imageUrl:    text('image_url').notNull(),
+    // Set when the emoji was uploaded rather than linked (§A3.8): the R2 object
+    // key, from which a fresh signed URL is minted on every read.
+    storageKey:  text('storage_key'),
     createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -151,6 +157,54 @@ export const chatMessageSaves = pgTable(
 export const chatMessageSavesRelations = relations(chatMessageSaves, ({ one }) => ({
   message: one(chatMessages, { fields: [chatMessageSaves.messageId], references: [chatMessages.id] }),
   user:    one(users,        { fields: [chatMessageSaves.userId], references: [users.id] }),
+}))
+
+// User-named channel groups for the chat rail (§A3.4). Per-user: the same
+// shared channels get a personal arrangement, so renaming or reordering a
+// bucket never touches anyone else's sidebar.
+export const chatChannelGroups = pgTable(
+  'chat_channel_groups',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name:        text('name').notNull(),
+    position:    integer('position').notNull().default(0),
+    isCollapsed: boolean('is_collapsed').notNull().default(false),
+    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byOwner: index('chat_channel_groups_owner_idx').on(t.workspaceId, t.userId),
+  }),
+)
+
+// A channel's place in one of its owner's groups. Unique per (group, channel);
+// the service also keeps a channel in at most one group per user, so the rail
+// never renders it twice.
+export const chatChannelGroupItems = pgTable(
+  'chat_channel_group_items',
+  {
+    id:        uuid('id').primaryKey().defaultRandom(),
+    groupId:   uuid('group_id').notNull().references(() => chatChannelGroups.id, { onDelete: 'cascade' }),
+    channelId: uuid('channel_id').notNull().references(() => chatChannels.id, { onDelete: 'cascade' }),
+    position:  integer('position').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqItem:  uniqueIndex('chat_channel_group_items_unique').on(t.groupId, t.channelId),
+    byChannel: index('chat_channel_group_items_channel_idx').on(t.channelId),
+  }),
+)
+
+export const chatChannelGroupsRelations = relations(chatChannelGroups, ({ one, many }) => ({
+  workspace: one(workspaces, { fields: [chatChannelGroups.workspaceId], references: [workspaces.id] }),
+  owner:     one(users,      { fields: [chatChannelGroups.userId], references: [users.id] }),
+  items:     many(chatChannelGroupItems),
+}))
+
+export const chatChannelGroupItemsRelations = relations(chatChannelGroupItems, ({ one }) => ({
+  group:   one(chatChannelGroups, { fields: [chatChannelGroupItems.groupId], references: [chatChannelGroups.id] }),
+  channel: one(chatChannels,      { fields: [chatChannelGroupItems.channelId], references: [chatChannels.id] }),
 }))
 
 export const chatChannelsRelations = relations(chatChannels, ({ one, many }) => ({

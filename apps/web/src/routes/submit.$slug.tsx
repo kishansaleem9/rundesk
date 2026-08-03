@@ -32,7 +32,7 @@ type PublicForm = {
 
 type SubmitResult = {
   ok: boolean
-  submissionId: string
+  submissionId: string | null
   confirmationMsg?: string | null
 }
 
@@ -44,6 +44,9 @@ function PublicFormPage() {
   const [submitterName, setSubmitterName] = useState('')
   const [submitted, setSubmitted] = useState<SubmitResult | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  // A5.5 honeypot — off-screen and unlabelled, so only a form-filling bot ever
+  // populates it. The server drops those submissions silently.
+  const [hp, setHp] = useState('')
 
   const formQuery = useQuery({
     queryKey: ['public-form', slug],
@@ -52,7 +55,7 @@ function PublicFormPage() {
   })
 
   const submitMutation = useMutation({
-    mutationFn: (body: { data: typeof formData; submitterEmail: string; submitterName: string }) =>
+    mutationFn: (body: { data: typeof formData; submitterEmail: string; submitterName: string; hp: string }) =>
       api<SubmitResult>(`/forms/${slug}/submit`, {
         method: 'POST',
         body,
@@ -93,7 +96,7 @@ function PublicFormPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!validate()) return
-    submitMutation.mutate({ data: formData, submitterEmail, submitterName })
+    submitMutation.mutate({ data: formData, submitterEmail, submitterName, hp })
   }
 
   function setFieldValue(fieldId: string, value: string | string[]) {
@@ -157,6 +160,18 @@ function PublicFormPage() {
         </div>
 
         <form onSubmit={handleSubmit}>
+          {/* A5.5 honeypot: hidden from people and from assistive tech, but
+              present in the DOM for a bot that fills every input it finds. */}
+          <input
+            type="text"
+            name="website"
+            value={hp}
+            onChange={(e) => setHp(e.target.value)}
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden="true"
+            className="absolute h-0 w-0 opacity-0 pointer-events-none -z-10"
+          />
           <Card className="p-6 space-y-5">
             {/* Submitter info */}
             <div className="grid grid-cols-2 gap-3">

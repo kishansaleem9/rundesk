@@ -3,6 +3,8 @@ import { eq, and, desc, asc, isNull, isNotNull, or, ne, gt, lt, sql, inArray, il
 import {
   chatChannels,
   chatChannelMembers,
+  chatChannelGroups,
+  chatChannelGroupItems,
   chatMessages,
   chatMessageAttachments,
   chatMessageReactions,
@@ -16,6 +18,8 @@ import {
   lists,
   users,
   objectShares,
+  workspaceGroups,
+  workspaceGroupMembers,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -38,6 +42,9 @@ const UNFURL_CACHE_MAX_ENTRIES = 500
 
 /** Hard cap on a single chat attachment (Plan §6.8) — mirrors task attachments. */
 export const MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
+
+/** Hard cap on an uploaded custom-emoji image (§A3.8) — emoji render at ~20px. */
+export const MAX_CUSTOM_EMOJI_BYTES = 512 * 1024 // 512 KB
 
 /** Max members in a group DM incl. the creator (Plan §6.2). */
 export const MAX_GROUP_DM_MEMBERS = 8
@@ -247,6 +254,46 @@ export class ChatService {
   }
 
   /**
+   * §A4.3 — pull out candidate team handles. Deliberately loose: anything that
+   * looks like a handle is collected here and only becomes a mention if a team
+   * in this workspace actually answers to it, so `@here` or a stray `@word`
+   * costs one lookup and notifies nobody.
+   */
+  private extractAliasCandidates(body: string): string[] {
+    const out = new Set<string>()
+    // `<` is excluded so the `<@uuid>` user-mention token is not re-read as a
+    // handle, and `/` so an email or URL fragment never is.
+    const pattern = /(^|[^\w@/<[])@([a-z0-9][a-z0-9_-]{1,31})\b(?!\.)/gi
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(body)) !== null) out.add(match[2].toLowerCase())
+    return [...out]
+  }
+
+  /**
+   * Expand @team handles into the member ids they stand for. A team mention is
+   * a shorthand for its people: everyone in the group gets the same mention
+   * ping they would have got had they been named individually.
+   */
+  private async resolveTeamMentionTargets(workspaceId: string, body: string): Promise<Set<string>> {
+    const targets = new Set<string>()
+    const candidates = this.extractAliasCandidates(body)
+    if (candidates.length === 0) return targets
+    const rows = await this.db
+      .select({ userId: workspaceGroupMembers.userId })
+      .from(workspaceGroups)
+      .innerJoin(workspaceGroupMembers, eq(workspaceGroupMembers.groupId, workspaceGroups.id))
+      .where(
+        and(
+          eq(workspaceGroups.workspaceId, workspaceId),
+          isNotNull(workspaceGroups.alias),
+          inArray(sql`lower(${workspaceGroups.alias})`, candidates),
+        ),
+      )
+    for (const row of rows) targets.add(row.userId)
+    return targets
+  }
+
+  /**
    * Resolve the member ids a @here / @channel broadcast should notify. @channel
    * is every member; @here narrows to members the presence service reports as
    * online, falling back to all members if presence is unavailable or nobody
@@ -360,6 +407,7 @@ export class ChatService {
         id: chatChannels.id,
         name: chatChannels.name,
         description: chatChannels.description,
+        topic: chatChannels.topic,
         icon: chatChannels.icon,
         spaceId: chatChannels.spaceId,
         isPrivate: chatChannels.isPrivate,
@@ -489,6 +537,53 @@ export class ChatService {
         set: { lastDeliveredAt: now },
       })
     return { ok: true, lastDeliveredAt: now }
+  }
+
+  /**
+   * Rewind the caller's read cursor so a channel comes back unread (§A3.3).
+   * With a messageId the cursor lands 1ms before that message, so the stream's
+   * unread divider sits exactly above it; without one it lands before the most
+   * recent message someone else wrote, which is what "mark this channel unread"
+   * means from the sidebar.
+   */
+  async markChannelUnread(channelId: string, userId: string, messageId?: string) {
+    const access = await this.assertChannelAccess(channelId, userId)
+    let anchor: Date | null = null
+    if (messageId) {
+      const [message] = await this.db
+        .select({ createdAt: chatMessages.createdAt, channelId: chatMessages.channelId })
+        .from(chatMessages)
+        .where(eq(chatMessages.id, messageId))
+        .limit(1)
+      if (!message || message.channelId !== channelId) throw new NotFoundException('Message not found')
+      anchor = message.createdAt
+    } else {
+      const [latest] = await this.db
+        .select({ createdAt: chatMessages.createdAt })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.channelId, channelId),
+            isNull(chatMessages.parentMessageId),
+            ne(chatMessages.authorId, userId),
+          ),
+        )
+        .orderBy(desc(chatMessages.createdAt))
+        .limit(1)
+      anchor = latest?.createdAt ?? null
+    }
+    // Nothing to go back to (an empty channel, or only the caller's own
+    // messages) — clearing the cursor is the honest answer.
+    const lastReadAt = anchor ? new Date(anchor.getTime() - 1) : null
+    if (this.isShareOnlyVisitor(access)) return { ok: true, lastReadAt }
+    await this.db
+      .insert(chatChannelMembers)
+      .values({ channelId, userId, lastReadAt })
+      .onConflictDoUpdate({
+        target: [chatChannelMembers.channelId, chatChannelMembers.userId],
+        set: { lastReadAt },
+      })
+    return { ok: true, lastReadAt }
   }
 
   /** Set the caller's notification level for a channel ('all' | 'mentions' | 'none'). */
@@ -717,26 +812,27 @@ export class ChatService {
   }
 
   /**
-   * Edit a channel's name / description / icon (Plan §6.1). Moderator-gated
-   * (channel creator or workspace admin) via canModerateChannel. DMs aren't
-   * editable this way. Only provided fields are changed.
+   * Edit a channel's name / topic / description / icon (Plan §6.1, §A3.7).
+   * Moderator-gated (channel creator or workspace admin) via canModerateChannel.
+   * DMs aren't editable this way. Only provided fields are changed.
    */
   async updateChannel(
     channelId: string,
     userId: string,
-    patch: { name?: string; description?: string | null; icon?: string | null },
+    patch: { name?: string; topic?: string | null; description?: string | null; icon?: string | null },
   ) {
     const channel = await this.assertChannelAccess(channelId, userId)
     if (channel.isDm) throw new BadRequestException('Direct messages cannot be edited')
     if (!(await this.canModerateChannel(channel, userId))) {
       throw new ForbiddenException('Only the channel creator or a workspace admin can edit this channel')
     }
-    const set: Partial<{ name: string; description: string | null; icon: string | null }> = {}
+    const set: Partial<{ name: string; topic: string | null; description: string | null; icon: string | null }> = {}
     if (patch.name !== undefined) {
       const name = patch.name.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-')
       if (!name) throw new BadRequestException('Channel name required')
       set.name = name
     }
+    if (patch.topic !== undefined) set.topic = patch.topic?.trim().slice(0, 250) || null
     if (patch.description !== undefined) set.description = patch.description?.trim() || null
     if (patch.icon !== undefined) set.icon = patch.icon?.trim() || null
     if (Object.keys(set).length === 0) return channel
@@ -822,6 +918,139 @@ export class ChatService {
     return rows
       .filter((c) => !c.isPrivate || memberSet.has(c.id))
       .map((c) => ({ ...c, joined: memberSet.has(c.id) }))
+  }
+
+  /**
+   * The caller's channel groups for a workspace (§A3.4), each with the channels
+   * they've filed into it. Space-derived grouping stays as the fallback in the
+   * sidebar for anything that isn't in a group.
+   */
+  async listChannelGroups(workspaceId: string, userId: string) {
+    const groups = await this.db
+      .select({
+        id: chatChannelGroups.id,
+        name: chatChannelGroups.name,
+        position: chatChannelGroups.position,
+        isCollapsed: chatChannelGroups.isCollapsed,
+      })
+      .from(chatChannelGroups)
+      .where(and(eq(chatChannelGroups.workspaceId, workspaceId), eq(chatChannelGroups.userId, userId)))
+      .orderBy(asc(chatChannelGroups.position), asc(chatChannelGroups.createdAt))
+    if (groups.length === 0) return []
+
+    const items = await this.db
+      .select({ groupId: chatChannelGroupItems.groupId, channelId: chatChannelGroupItems.channelId })
+      .from(chatChannelGroupItems)
+      .where(inArray(chatChannelGroupItems.groupId, groups.map((g) => g.id)))
+      .orderBy(asc(chatChannelGroupItems.position), asc(chatChannelGroupItems.createdAt))
+
+    const byGroup = new Map<string, string[]>()
+    for (const item of items) {
+      const list = byGroup.get(item.groupId) ?? []
+      list.push(item.channelId)
+      byGroup.set(item.groupId, list)
+    }
+    return groups.map((g) => ({ ...g, channelIds: byGroup.get(g.id) ?? [] }))
+  }
+
+  private normalizeGroupName(name: string): string {
+    const trimmed = (name ?? '').trim().slice(0, 60)
+    if (!trimmed) throw new BadRequestException('Group name required')
+    return trimmed
+  }
+
+  /** The caller's own group, or 404. Groups are private to their owner. */
+  private async assertOwnGroup(groupId: string, userId: string) {
+    const [group] = await this.db
+      .select()
+      .from(chatChannelGroups)
+      .where(and(eq(chatChannelGroups.id, groupId), eq(chatChannelGroups.userId, userId)))
+      .limit(1)
+    if (!group) throw new NotFoundException('Channel group not found')
+    return group
+  }
+
+  async createChannelGroup(workspaceId: string, userId: string, name: string) {
+    const [membership] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    if (!membership) throw new ForbiddenException('Workspace membership required')
+    const [{ next } = { next: 0 }] = await this.db
+      .select({ next: sql<number>`coalesce(max(${chatChannelGroups.position}), -1) + 1` })
+      .from(chatChannelGroups)
+      .where(and(eq(chatChannelGroups.workspaceId, workspaceId), eq(chatChannelGroups.userId, userId)))
+    const [row] = await this.db
+      .insert(chatChannelGroups)
+      .values({ workspaceId, userId, name: this.normalizeGroupName(name), position: next })
+      .returning()
+    return { ...row, channelIds: [] as string[] }
+  }
+
+  async updateChannelGroup(
+    groupId: string,
+    userId: string,
+    patch: { name?: string; isCollapsed?: boolean; position?: number },
+  ) {
+    await this.assertOwnGroup(groupId, userId)
+    const set: Partial<{ name: string; isCollapsed: boolean; position: number }> = {}
+    if (patch.name !== undefined) set.name = this.normalizeGroupName(patch.name)
+    if (patch.isCollapsed !== undefined) set.isCollapsed = !!patch.isCollapsed
+    if (patch.position !== undefined) set.position = Math.max(0, Math.floor(patch.position))
+    if (Object.keys(set).length === 0) return this.assertOwnGroup(groupId, userId)
+    const [row] = await this.db
+      .update(chatChannelGroups)
+      .set(set)
+      .where(eq(chatChannelGroups.id, groupId))
+      .returning()
+    return row
+  }
+
+  /** Delete a group. Its channels fall back to space-derived grouping. */
+  async deleteChannelGroup(groupId: string, userId: string) {
+    await this.assertOwnGroup(groupId, userId)
+    await this.db.delete(chatChannelGroups).where(eq(chatChannelGroups.id, groupId))
+    return { ok: true }
+  }
+
+  /**
+   * File a channel into one of the caller's groups (§A3.4). A channel lives in
+   * at most one group per user, so this clears any previous placement first —
+   * otherwise the rail would render the channel under two headings.
+   */
+  async addChannelToGroup(groupId: string, userId: string, channelId: string) {
+    const group = await this.assertOwnGroup(groupId, userId)
+    const channel = await this.assertChannelAccess(channelId, userId)
+    if (channel.workspaceId !== group.workspaceId) {
+      throw new BadRequestException('Channel belongs to another workspace')
+    }
+    const mine = await this.db
+      .select({ id: chatChannelGroups.id })
+      .from(chatChannelGroups)
+      .where(and(eq(chatChannelGroups.workspaceId, group.workspaceId), eq(chatChannelGroups.userId, userId)))
+    await this.db
+      .delete(chatChannelGroupItems)
+      .where(
+        and(
+          eq(chatChannelGroupItems.channelId, channelId),
+          inArray(chatChannelGroupItems.groupId, mine.map((g) => g.id)),
+        ),
+      )
+    const [{ next } = { next: 0 }] = await this.db
+      .select({ next: sql<number>`coalesce(max(${chatChannelGroupItems.position}), -1) + 1` })
+      .from(chatChannelGroupItems)
+      .where(eq(chatChannelGroupItems.groupId, groupId))
+    await this.db.insert(chatChannelGroupItems).values({ groupId, channelId, position: next })
+    return { ok: true }
+  }
+
+  async removeChannelFromGroup(groupId: string, userId: string, channelId: string) {
+    await this.assertOwnGroup(groupId, userId)
+    await this.db
+      .delete(chatChannelGroupItems)
+      .where(and(eq(chatChannelGroupItems.groupId, groupId), eq(chatChannelGroupItems.channelId, channelId)))
+    return { ok: true }
   }
 
   async joinChannel(channelId: string, userId: string) {
@@ -921,34 +1150,80 @@ export class ChatService {
 
   async listCustomEmoji(workspaceId: string, userId: string) {
     await this.assertWorkspaceRole(workspaceId, userId)
-    return this.db
+    const rows = await this.db
       .select({
         id: chatCustomEmoji.id,
         shortcode: chatCustomEmoji.shortcode,
         imageUrl: chatCustomEmoji.imageUrl,
+        storageKey: chatCustomEmoji.storageKey,
         createdById: chatCustomEmoji.createdById,
       })
       .from(chatCustomEmoji)
       .where(eq(chatCustomEmoji.workspaceId, workspaceId))
       .orderBy(asc(chatCustomEmoji.shortcode))
+    // Uploaded emoji (§A3.8) are stored by object key, so their URL is signed
+    // fresh on every read; emoji added by URL pass through untouched.
+    return Promise.all(
+      rows.map(async ({ storageKey, ...emoji }) => ({
+        ...emoji,
+        imageUrl: storageKey && this.r2.configured ? await this.r2.getObjectUrl(storageKey) : emoji.imageUrl,
+      })),
+    )
   }
 
-  async addCustomEmoji(workspaceId: string, userId: string, shortcode: string, imageUrl: string) {
+  /**
+   * Presign a direct-to-R2 upload for a custom emoji image (§A3.8). Mirrors the
+   * attachment presign path so emoji can be uploaded instead of only linked.
+   */
+  async createCustomEmojiUploadUrl(
+    workspaceId: string,
+    userId: string,
+    body: { fileName: string; contentType: string; sizeBytes?: number },
+  ) {
+    await this.assertWorkspaceRole(workspaceId, userId)
+    if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
+    const contentType = body.contentType || ''
+    if (!contentType.startsWith('image/')) throw new BadRequestException('Emoji must be an image')
+    if (body.sizeBytes != null && body.sizeBytes > MAX_CUSTOM_EMOJI_BYTES) {
+      throw new BadRequestException(`Emoji image exceeds the ${Math.round(MAX_CUSTOM_EMOJI_BYTES / 1024)} KB limit`)
+    }
+    const fileName = this.sanitizeFileName(body.fileName)
+    const key = `chat/${workspaceId}/emoji/${Date.now()}-${fileName}`
+    const uploadUrl = await this.r2.presignPutObject(key, contentType, { uploadedby: userId })
+    return { uploadUrl, storageKey: key }
+  }
+
+  async addCustomEmoji(
+    workspaceId: string,
+    userId: string,
+    shortcode: string,
+    imageUrl: string,
+    storageKey?: string,
+  ) {
     await this.assertWorkspaceRole(workspaceId, userId)
     const code = (shortcode ?? '').trim().toLowerCase().replace(/:/g, '')
     if (!/^[a-z0-9_]{2,32}$/.test(code)) {
       throw new BadRequestException('Shortcode must be 2–32 lowercase letters, numbers, or underscores')
     }
-    if (!/^https?:\/\/\S+$/.test(imageUrl ?? '')) {
+    // An uploaded emoji is identified by its object key; imageUrl then only
+    // holds the signature that was current at upload time, so it is never
+    // trusted on read.
+    const key = storageKey?.trim()
+    if (key) {
+      if (!key.startsWith(`chat/${workspaceId}/emoji/`)) throw new BadRequestException('Invalid storageKey')
+    } else if (!/^https?:\/\/\S+$/.test(imageUrl ?? '')) {
       throw new BadRequestException('imageUrl must be an http(s) URL')
     }
     const [row] = await this.db
       .insert(chatCustomEmoji)
-      .values({ workspaceId, shortcode: code, imageUrl, createdById: userId })
+      .values({ workspaceId, shortcode: code, imageUrl: imageUrl ?? '', storageKey: key ?? null, createdById: userId })
       .onConflictDoNothing()
       .returning()
     if (!row) throw new BadRequestException(`:${code}: already exists in this workspace`)
-    return row
+    return {
+      ...row,
+      imageUrl: key && this.r2.configured ? await this.r2.getObjectUrl(key) : row.imageUrl,
+    }
   }
 
   async deleteCustomEmoji(emojiId: string, userId: string) {
@@ -1352,15 +1627,16 @@ export class ChatService {
     )
 
     // Everyone who should get a *mention* ping: explicit @uuid mentions (verified
-    // as workspace members) plus @here/@channel broadcast targets.
+    // as workspace members), @team handles, plus @here/@channel broadcast targets.
     const mentionTargets = new Set<string>(broadcastTargets)
-    if (mentionIds.size > 0) {
+    const teamTargets = await this.resolveTeamMentionTargets(channel.workspaceId, body)
+    if (mentionIds.size > 0 || teamTargets.size > 0) {
       const memberRows = await this.db
         .select({ userId: workspaceMembers.userId })
         .from(workspaceMembers)
         .where(eq(workspaceMembers.workspaceId, channel.workspaceId))
       const workspaceMemberIds = new Set(memberRows.map((m) => m.userId))
-      for (const userId of mentionIds) {
+      for (const userId of [...mentionIds, ...teamTargets]) {
         if (userId === data.authorId) continue
         if (!workspaceMemberIds.has(userId)) continue
         mentionTargets.add(userId)
@@ -1416,10 +1692,18 @@ export class ChatService {
   }
 
   /**
-   * Create a task from a chat message (Plan §6.10). Title defaults to the
-   * message's first line; the full message becomes the description.
+   * Create a task from a chat message (Plan §6.10, §A3.5). Title defaults to the
+   * message's first line; the full message becomes the description. An optional
+   * assignee and due date turn it into a real action item rather than an
+   * unowned, undated task nobody picks up.
    */
-  async createTaskFromMessage(messageId: string, userId: string, listId: string, title?: string) {
+  async createTaskFromMessage(
+    messageId: string,
+    userId: string,
+    listId: string,
+    title?: string,
+    opts: { assigneeId?: string | null; dueAt?: string | null } = {},
+  ) {
     const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!message) throw new NotFoundException('Message not found')
     await this.assertChannelAccess(message.channelId, userId)
@@ -1427,11 +1711,19 @@ export class ChatService {
 
     const firstLine = message.body.split('\n')[0].trim()
     const resolvedTitle = (title?.trim() || firstLine || 'Task from chat').slice(0, 200)
+    let dueDate: Date | undefined
+    if (opts.dueAt) {
+      const parsed = new Date(opts.dueAt)
+      if (Number.isNaN(parsed.getTime())) throw new BadRequestException('dueAt must be a valid date')
+      dueDate = parsed
+    }
     const task = await this.tasks.createTask({
       listId,
       title: resolvedTitle,
       description: message.body,
       createdById: userId,
+      assigneeIds: opts.assigneeId ? [opts.assigneeId] : undefined,
+      dueDate,
     })
     return task
   }
@@ -1809,11 +2101,18 @@ export class ChatService {
   /**
    * Workspace file library (Plan §6.8): every attachment posted in a channel the
    * user can read, newest first, with a fresh signed download URL. Optional
-   * filename search (`q`) and coarse content-type filter (`type`). Attachments on
-   * unsent drafts (message_id null) or deleted messages are excluded.
+   * filename search (`q`), coarse content-type filter (`type`) and channel scope
+   * (`channelId`, §A3.7 — the panel opens on the channel you're reading).
+   * Attachments on unsent drafts (message_id null) or deleted messages are
+   * excluded.
    */
-  async listWorkspaceFiles(workspaceId: string, userId: string, opts: { q?: string; type?: string } = {}) {
-    const channelIds = await this.accessibleChannelIds(workspaceId, userId)
+  async listWorkspaceFiles(
+    workspaceId: string,
+    userId: string,
+    opts: { q?: string; type?: string; channelId?: string } = {},
+  ) {
+    let channelIds = await this.accessibleChannelIds(workspaceId, userId)
+    if (opts.channelId) channelIds = channelIds.filter((id) => id === opts.channelId)
     if (channelIds.length === 0) return []
 
     const conds = [

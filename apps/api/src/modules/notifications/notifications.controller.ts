@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Headers, Post, Param, Query, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Get, Headers, Post, Param, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { NotificationsService } from './notifications.service'
+import { NotificationsService, INBOX_VIEWS, type InboxView } from './notifications.service'
 import type { CurrentUserPayload } from '../tasks/types'
+
+/** Longest a notification may be parked in Later — a year of snoozes is a bug, not a wish. */
+const MAX_SNOOZE_MS = 365 * 24 * 3600_000
 
 @ApiTags('notifications')
 @ApiBearerAuth()
@@ -13,13 +16,25 @@ export class NotificationsController {
   constructor(private notifications: NotificationsService) {}
 
   @Get()
-  list(@CurrentUser() user: CurrentUserPayload, @Query('unreadOnly') unreadOnly?: string) {
-    return this.notifications.list(user.id, { unreadOnly: unreadOnly === 'true' })
+  list(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('unreadOnly') unreadOnly?: string,
+    @Query('view') view?: string,
+  ) {
+    return this.notifications.list(user.id, {
+      unreadOnly: unreadOnly === 'true',
+      view: (INBOX_VIEWS as string[]).includes(view ?? '') ? (view as InboxView) : undefined,
+    })
   }
 
   @Get('unread-count')
   unreadCount(@CurrentUser() user: CurrentUserPayload) {
     return this.notifications.unreadCount(user.id)
+  }
+
+  @Get('counts')
+  triageCounts(@CurrentUser() user: CurrentUserPayload) {
+    return this.notifications.triageCounts(user.id)
   }
 
   @Get('digest/preview')
@@ -96,4 +111,65 @@ export class NotificationsController {
   markAllRead(@CurrentUser() user: CurrentUserPayload) {
     return this.notifications.markAllRead(user.id)
   }
+
+  @Post(':notificationId/clear')
+  clear(
+    @Param('notificationId') notificationId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.notifications.clear(user.id, notificationId)
+  }
+
+  @Post(':notificationId/unclear')
+  unclear(
+    @Param('notificationId') notificationId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.notifications.unclear(user.id, notificationId)
+  }
+
+  @Post(':notificationId/snooze')
+  snooze(
+    @Param('notificationId') notificationId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { until?: string; hours?: number },
+  ) {
+    const until = resolveSnoozeUntil(body)
+    if (!until) throw new BadRequestException('until must be a future timestamp within a year')
+    return this.notifications.snooze(user.id, notificationId, until)
+  }
+
+  @Post(':notificationId/unsnooze')
+  unsnooze(
+    @Param('notificationId') notificationId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.notifications.unsnooze(user.id, notificationId)
+  }
+
+  @Post('test')
+  sendTest(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { workspaceId?: string },
+  ) {
+    return this.notifications.sendTest(user.id, body?.workspaceId ?? null)
+  }
+}
+
+/**
+ * Accept either an explicit timestamp or a relative hour offset, and reject
+ * anything in the past or absurdly far out — a bad `until` would otherwise park
+ * a notification in Later with no way back except un-snoozing it by hand.
+ */
+function resolveSnoozeUntil(body: { until?: string; hours?: number }): Date | null {
+  const now = Date.now()
+  let ms: number | null = null
+  if (typeof body?.hours === 'number' && Number.isFinite(body.hours)) {
+    ms = now + body.hours * 3600_000
+  } else if (typeof body?.until === 'string') {
+    const parsed = new Date(body.until).getTime()
+    if (Number.isFinite(parsed)) ms = parsed
+  }
+  if (ms === null || ms <= now || ms > now + MAX_SNOOZE_MS) return null
+  return new Date(ms)
 }

@@ -19,6 +19,7 @@ import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
 import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 
 // ─── Workspace-scoped routes (JWT-protected) ──────────────────────────────────
 // FeatureFlagGuard enforces the Forms ClickApp: if a workspace turns Forms off
@@ -38,8 +39,9 @@ export class WorkspaceFormsController {
   list(
     @Param('workspaceId') workspaceId: string,
     @Query('archived') archived?: string,
+    @Query('listId') listId?: string,
   ) {
-    return this.formsService.listForms(workspaceId, archived === 'true')
+    return this.formsService.listForms(workspaceId, archived === 'true', listId)
   }
 
   @Post()
@@ -153,28 +155,36 @@ export class WorkspaceFormsController {
 }
 
 // ─── Public routes (no JWT) ───────────────────────────────────────────────────
+// A5.5 — these are the only unauthenticated write paths into a task list, so
+// they carry per-IP rate limits. `isPublic = false` already refuses anonymous
+// access entirely (FormsService.getFormBySlug); the limits below bound abuse of
+// the forms that are deliberately open.
 @ApiTags('forms-public')
+@UseGuards(RateLimitGuard)
 @Controller('forms')
 export class PublicFormsController {
   constructor(private readonly formsService: FormsService) {}
 
   @Get(':slug')
   @ApiOperation({ summary: 'Get a public form by slug (no auth required)' })
+  @RateLimit({ limit: 120, windowMs: 60_000 })
   getBySlug(@Param('slug') slug: string) {
     return this.formsService.getFormBySlug(slug)
   }
 
   @Post(':slug/submit')
   @ApiOperation({ summary: 'Submit a form response (no auth required)' })
+  @RateLimit({ limit: 10, windowMs: 60_000 })
   submit(
     @Param('slug') slug: string,
     @Body() body: SubmitFormDto,
   ) {
-    return this.formsService.submitForm(slug, body.data ?? {}, body.submitterEmail, body.submitterName)
+    return this.formsService.submitForm(slug, body.data ?? {}, body.submitterEmail, body.submitterName, body.hp)
   }
 
   @Post(':slug/attachments/presign')
   @ApiOperation({ summary: 'Presign a file upload for a public form field (no auth required)' })
+  @RateLimit({ limit: 20, windowMs: 60_000 })
   presignUpload(
     @Param('slug') slug: string,
     @Body() body: { fileName: string; contentType: string; sizeBytes?: number },

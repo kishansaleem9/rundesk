@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { eq, and, or, ne } from 'drizzle-orm'
-import { dashboardPresets, userDockConfigs, workspaceMembers } from '@rundesk/db'
+import { eq, and, or, ne, inArray, sql } from 'drizzle-orm'
+import { dashboardPresets, userDockConfigs, workspaceMembers, objectShares, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { CreateDashboardPresetDto, UpdateDashboardPresetDto } from './dto/dashboard-preset.dto'
@@ -13,21 +13,66 @@ export class DashboardsService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
   // --- Dashboard Presets ---------------------------------------------------
+  /**
+   * A member sees their own presets plus the admin-set workspace-default preset
+   * (which another user may own), so the UI can show and manage it. §5.7
+   *
+   * A5.11 — plus anything shared with them via `object_shares`, and every row
+   * carries the owner and its share count so the hub can render an index with
+   * Owner / Sharing columns instead of a bare name dropdown.
+   */
   async listPresets(userId: string, workspaceId: string) {
-    // A member sees their own presets plus the admin-set workspace-default
-    // preset (which another user may own), so the UI can show and manage it. §5.7
-    return this.db
-      .select()
+    const sharedIds = await this.presetIdsSharedWith(workspaceId, userId)
+    const rows = await this.db
+      .select({
+        id: dashboardPresets.id,
+        userId: dashboardPresets.userId,
+        workspaceId: dashboardPresets.workspaceId,
+        name: dashboardPresets.name,
+        layout: dashboardPresets.layout,
+        isDefault: dashboardPresets.isDefault,
+        isWorkspaceDefault: dashboardPresets.isWorkspaceDefault,
+        createdAt: dashboardPresets.createdAt,
+        updatedAt: dashboardPresets.updatedAt,
+        ownerName: users.displayName,
+        ownerEmail: users.email,
+        shareCount: sql<number>`(
+          select count(*)::int from object_shares os
+          where os.object_type = 'dashboard' and os.object_id = dashboard_presets.id
+        )`,
+      })
       .from(dashboardPresets)
+      .leftJoin(users, eq(users.id, dashboardPresets.userId))
       .where(
         and(
           eq(dashboardPresets.workspaceId, workspaceId),
           or(
             eq(dashboardPresets.userId, userId),
-            eq(dashboardPresets.isWorkspaceDefault, true)
+            eq(dashboardPresets.isWorkspaceDefault, true),
+            sharedIds.length > 0 ? inArray(dashboardPresets.id, sharedIds) : undefined,
           )
         )
       )
+    return rows.map((row) => ({
+      ...row,
+      isOwner: row.userId === userId,
+      isSharedWithMe: row.userId !== userId && sharedIds.includes(row.id),
+    }))
+  }
+
+  /** Preset ids in this workspace explicitly granted to `userId` (A5.11). */
+  private async presetIdsSharedWith(workspaceId: string, userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ objectId: objectShares.objectId })
+      .from(objectShares)
+      .where(
+        and(
+          eq(objectShares.workspaceId, workspaceId),
+          eq(objectShares.objectType, 'dashboard'),
+          eq(objectShares.userId, userId),
+        ),
+      )
+    return rows.map((r) => r.objectId)
   }
 
   /**

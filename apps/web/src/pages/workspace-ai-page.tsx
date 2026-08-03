@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import {
@@ -116,7 +116,17 @@ function writingModeLabelKey(mode: string): TranslationKey {
 export function AiPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
+  const { prompt } = useSearch({ from: '/app/$workspaceId/ai' })
   const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing'>('chat')
+
+  // §A2.3 — `?prompt=` is a question handed over from another surface; the chat
+  // tab asks it on arrival, then the param is dropped so switching tabs or
+  // reloading does not spend another model call on the same question.
+  const handedOverAsk = useMemo(
+    () => (prompt?.trim() ? { text: prompt.trim(), id: 0 } : undefined),
+    [prompt],
+  )
+  const navigate = useNavigate({ from: '/app/$workspaceId/ai' })
 
   return (
     <div className="h-full flex flex-col">
@@ -164,7 +174,12 @@ export function AiPage() {
 
       <div className="flex-1 overflow-hidden">
         {activeTab === 'chat' && (
-          <AiPanel workspaceId={workspaceId} className="h-full" />
+          <AiPanel
+            workspaceId={workspaceId}
+            ask={handedOverAsk}
+            onAskHandled={() => navigate({ search: {}, replace: true })}
+            className="h-full"
+          />
         )}
         {activeTab === 'knowledge' && <KnowledgeTab workspaceId={workspaceId} />}
         {activeTab === 'commands' && <CommandsTab workspaceId={workspaceId} />}

@@ -309,7 +309,16 @@ export class FormsService {
   }
 
   // ─── List forms in a workspace ────────────────────────────────────────────
-  async listForms(workspaceId: string, includeArchived = false) {
+  /**
+   * A1.10 / A5.4 — every row carries where its submissions land. A form that
+   * feeds a list was invisible from both ends: the card didn't name the list,
+   * and the list had no idea a form was filling it. `targetListId` narrows to
+   * the forms feeding one list, which is what the list header asks for.
+   *
+   * A5.2 — the hub also needs the owner, so "My forms" is a filter rather than
+   * a guess and the index can name who to ask about a form.
+   */
+  async listForms(workspaceId: string, includeArchived = false, targetListId?: string) {
     const rows = await this.db
       .select({
         id: forms.id,
@@ -320,6 +329,14 @@ export class FormsService {
         isEnabled: forms.isEnabled,
         isArchived: forms.isArchived,
         createdAt: forms.createdAt,
+        updatedAt: forms.updatedAt,
+        createdById: forms.createdById,
+        createdByName: users.displayName,
+        createdByEmail: users.email,
+        targetListId: forms.targetListId,
+        targetListName: lists.name,
+        targetProjectId: projects.id,
+        targetSpaceId: spaces.id,
         // Correlate on outer `forms.id` in SQL text — `${forms.id}` here binds as a single
         // parameter and breaks per-row counts in PostgreSQL.
         submissionCount: sql<number>`(
@@ -327,10 +344,17 @@ export class FormsService {
         )`,
       })
       .from(forms)
+      // Left joins: a form without a destination list is legal and still lists.
+      .leftJoin(lists, eq(lists.id, forms.targetListId))
+      .leftJoin(projects, eq(projects.id, lists.projectId))
+      .leftJoin(spaces, eq(spaces.id, projects.spaceId))
+      // Also left: the creator may have been removed (createdById is set null).
+      .leftJoin(users, eq(users.id, forms.createdById))
       .where(
         and(
           eq(forms.workspaceId, workspaceId),
           includeArchived ? undefined : eq(forms.isArchived, false),
+          targetListId ? eq(forms.targetListId, targetListId) : undefined,
         ),
       )
       .orderBy(desc(forms.createdAt))
@@ -663,13 +687,30 @@ export class FormsService {
   }
 
   // ─── Submit a form ────────────────────────────────────────────────────────
+  /**
+   * A5.5 — `honeypot` is a field no human ever sees (the public renderer hides
+   * it and never focuses it); a bot that fills every input trips it. The reply
+   * is the ordinary confirmation so the scraper learns nothing, but nothing is
+   * written and no task is routed. Volume abuse is handled separately by the
+   * per-IP rate limit on the public controller.
+   */
   async submitForm(
     slug: string,
     data: Record<string, string | string[]>,
     submitterEmail?: string,
     submitterName?: string,
+    honeypot?: string,
   ) {
     const formWithFields = await this.getFormBySlug(slug)
+
+    if (typeof honeypot === 'string' && honeypot.trim() !== '') {
+      return {
+        ok: true,
+        submissionId: null as string | null,
+        createdTaskId: null as string | null,
+        confirmationMsg: formWithFields.confirmationMsg,
+      }
+    }
 
     // Guard the (public, unauthenticated) payload so malformed input yields a
     // clean 400 from the validation below rather than a 500 on `data[...]`.

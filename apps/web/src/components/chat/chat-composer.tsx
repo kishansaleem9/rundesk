@@ -48,6 +48,7 @@ function ComposerBox({
   uploading,
   enableSlashCommands,
   customEmoji,
+  leadingTools,
 }: {
   value: string
   onChange: (value: string) => void
@@ -71,6 +72,9 @@ function ComposerBox({
   // Shown below the standard grid; clicking inserts the `:shortcode:` token that
   // the message body renderer substitutes back into the emoji image.
   customEmoji?: ComposerCustomEmoji[]
+  // Insert row (§A3.5) — task / doc / action-item controls supplied by the page,
+  // which owns the workspace queries those pickers need.
+  leadingTools?: ReactNode
 }) {
   const { t } = useTranslation()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -290,6 +294,7 @@ function ComposerBox({
       )}
       <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-t border-border/60 bg-muted/20">
         <div className="flex items-center gap-0.5">
+          {leadingTools}
           <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
             <PopoverTrigger asChild>
               <button
@@ -382,6 +387,7 @@ export function ChatComposer({
   onRemoveAttachment,
   uploading,
   customEmoji,
+  leadingTools,
 }: {
   channelLabel: string
   value: string
@@ -398,6 +404,7 @@ export function ChatComposer({
   onRemoveAttachment?: (id: string) => void
   uploading?: boolean
   customEmoji?: ComposerCustomEmoji[]
+  leadingTools?: ReactNode
 }) {
   const { t } = useTranslation()
   return (
@@ -432,6 +439,7 @@ export function ChatComposer({
         onRemoveAttachment={onRemoveAttachment}
         uploading={uploading}
         customEmoji={customEmoji}
+        leadingTools={leadingTools}
         enableSlashCommands
       />
 
@@ -474,6 +482,9 @@ export function ThreadReplyComposer({
       placeholder={t('chat.replyInThread')}
       sendLabel={t('chat.reply')}
       customEmoji={customEmoji}
+      // §A3.2 — replies run the same /task and /remind commands as the channel
+      // composer, so the thread isn't a second-class place to work.
+      enableSlashCommands
     />
   )
 }

@@ -76,7 +76,15 @@ export class WorkspacesController {
   @UseGuards(WorkspaceAdminGuard)
   async update(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
-    @Body() body: { name?: string; logoUrl?: string | null; primaryColor?: string | null; accentColor?: string | null; customDomain?: string | null },
+    @Body() body: {
+      name?: string
+      logoUrl?: string | null
+      primaryColor?: string | null
+      accentColor?: string | null
+      customDomain?: string | null
+      defaultSpacePrivate?: boolean
+      blockPublicSharing?: boolean
+    },
     @CurrentUser() user: any,
     @Ip() ip: string,
   ) {

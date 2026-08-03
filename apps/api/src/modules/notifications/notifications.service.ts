@@ -1,5 +1,5 @@
-import { Injectable, Inject } from '@nestjs/common'
-import { eq, and, isNull, desc, sql, inArray, gte } from 'drizzle-orm'
+import { Injectable, Inject, Logger } from '@nestjs/common'
+import { eq, and, isNull, isNotNull, or, desc, sql, inArray, gte, gt, lte } from 'drizzle-orm'
 import { notifications, users, webPushSubscriptions } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -113,6 +113,32 @@ export function resolveNotificationUrl(row: {
   }
 }
 
+/**
+ * §A4.7 — the verdict of one push attempt. Push is the channel that fails
+ * quietly: an unset VAPID key, a browser that never subscribed, or an endpoint
+ * the vendor has retired all look identical from the app. Naming each outcome is
+ * what makes the test send worth pressing.
+ */
+export type PushDelivery =
+  | { status: 'not_configured' }
+  | { status: 'no_subscriptions' }
+  | { status: 'channel_off' }
+  | { status: 'quiet_hours' }
+  | { status: 'sent'; sent: number; failed: number }
+
+/**
+ * §A2.6 — the three inbox buckets. They partition the same table on two
+ * timestamps rather than a status column, so a snooze that lapses returns the
+ * row to `inbox` with no sweeper job: `later` is defined as "snoozed until a
+ * moment still in the future".
+ */
+export type InboxView = 'inbox' | 'later' | 'cleared' | 'all'
+
+export const INBOX_VIEWS: InboxView[] = ['inbox', 'later', 'cleared', 'all']
+
+/** Snooze presets the inbox offers, in hours from now. */
+export const SNOOZE_PRESET_HOURS = [1, 4, 24, 24 * 7] as const
+
 type NotificationType =
   | 'task_assigned'
   | 'task_mentioned'
@@ -128,6 +154,7 @@ type NotificationType =
   | 'task_blocked'
   | 'ai_briefing'
   | 'workload_alert'
+  | 'test_notification'
 
 type NotificationEventKey =
   | 'mention'
@@ -168,6 +195,12 @@ type NotificationPreferences = {
   /** §10.4 — lead days for due-date reminders (subset of {1,2,7}). */
   reminderLeadDays: number[]
   /**
+   * §A4.7 — whether creating, being assigned to, or commenting on a task
+   * subscribes you to it. The behaviour has always been on and invisible; this
+   * makes it a choice. Off means only an explicit Watch adds you.
+   */
+  autoFollow: boolean
+  /**
    * §14.3 — guided-onboarding widget state. Written by WorkspacesService via a
    * JSONB concat merge; preserved here so a notification-prefs write never drops
    * the dismissed flag.
@@ -181,6 +214,7 @@ type NotificationPreferencesPatch = {
   digest?: Partial<NotificationPreferences['digest']>
   briefing?: Partial<NotificationPreferences['briefing']>
   reminderLeadDays?: number[]
+  autoFollow?: boolean
 }
 
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
@@ -212,10 +246,12 @@ const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
     hour: 8,
   },
   reminderLeadDays: [...DEFAULT_REMINDER_LEAD_DAYS],
+  autoFollow: true,
 }
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name)
   private readonly appUrl: string
   private readonly webPushPublicKey: string | null
   private readonly webPushEnabled: boolean
@@ -254,6 +290,11 @@ export class NotificationsService {
       /** When set, task_commented emails use the "resolved" template instead of "new comment". */
       commentVariant?: 'created' | 'resolved'
     }
+    /**
+     * §A4.7 — the test send awaits push itself so it can report the outcome;
+     * everything else keeps the fire-and-forget dispatch below.
+     */
+    deferPush?: boolean
   }) {
     const { prefs, timezone } = await this.getUserNotificationContext(data.userId)
     const eventKey = this.mapTypeToEventKey(data.type)
@@ -309,8 +350,8 @@ export class NotificationsService {
     // enabled — and because sendWebPush fans out to each of the user's
     // subscriptions exactly once, a user with BOTH `web` and `mobile` toggled on
     // is never double-delivered to the same subscription (dedupe by design).
-    if ((matrix.web || matrix.mobile) && !inQuietHours) {
-      this.sendWebPush(data.userId, {
+    if ((matrix.web || matrix.mobile) && !inQuietHours && !data.deferPush) {
+      void this.sendWebPush(data.userId, {
         title: data.title,
         body: formattedBody,
         url: data.target?.url ? (data.target.url.startsWith('http') ? data.target.url : `${this.appUrl}${data.target.url}`) : this.appUrl,
@@ -364,6 +405,16 @@ export class NotificationsService {
     return this.getUserPreferences(userId)
   }
 
+  /**
+   * §A4.7 — does this user want to be auto-subscribed to what they touch?
+   * Consulted by the task write paths before they add a watcher, so turning the
+   * toggle off actually stops the subscription rather than only hiding it.
+   */
+  async autoFollowEnabled(userId: string): Promise<boolean> {
+    const prefs = await this.getUserPreferences(userId)
+    return prefs.autoFollow !== false
+  }
+
   async updatePreferences(userId: string, patch: NotificationPreferencesPatch) {
     // Merge onto the user's *current* preferences (defaults filled in) so a
     // partial patch — e.g. only `reminderLeadDays` from the profile page — never
@@ -378,10 +429,35 @@ export class NotificationsService {
     return (row?.notificationPreferences as NotificationPreferences | undefined) ?? merged
   }
 
-  async list(userId: string, opts: { unreadOnly?: boolean; limit?: number } = {}) {
-    const where = opts.unreadOnly
-      ? and(eq(notifications.userId, userId), isNull(notifications.readAt))
-      : eq(notifications.userId, userId)
+  /**
+   * Predicate for one inbox bucket (§A2.6). `now` is threaded in so a caller
+   * computing several buckets at once partitions them against a single instant.
+   */
+  private viewCondition(view: InboxView, now: Date) {
+    switch (view) {
+      case 'later':
+        return and(isNull(notifications.dismissedAt), gt(notifications.snoozedUntil, now))
+      case 'cleared':
+        return isNotNull(notifications.dismissedAt)
+      case 'all':
+        return undefined
+      case 'inbox':
+      default:
+        return and(
+          isNull(notifications.dismissedAt),
+          or(isNull(notifications.snoozedUntil), lte(notifications.snoozedUntil, now)),
+        )
+    }
+  }
+
+  async list(userId: string, opts: { unreadOnly?: boolean; limit?: number; view?: InboxView } = {}) {
+    const where = and(
+      eq(notifications.userId, userId),
+      opts.unreadOnly ? isNull(notifications.readAt) : undefined,
+      // Default to the Inbox bucket: the bell and the workspace home both call
+      // this bare, and a cleared notification must not resurface there.
+      this.viewCondition(opts.view ?? 'inbox', new Date()),
+    )
     const rows = await this.db
       .select()
       .from(notifications)
@@ -446,10 +522,19 @@ export class NotificationsService {
   }
 
   async markAllRead(userId: string) {
+    const now = new Date()
+    // Scoped to the Inbox bucket so a snoozed row comes back unread when its
+    // Later window lapses — that is the whole point of saving it for later.
     await this.db
       .update(notifications)
-      .set({ readAt: new Date() })
-      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
+      .set({ readAt: now })
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          isNull(notifications.readAt),
+          this.viewCondition('inbox', now),
+        ),
+      )
     return { ok: true }
   }
 
@@ -457,8 +542,124 @@ export class NotificationsService {
     const [row] = await this.db
       .select({ count: sql<number>`count(*)::int` })
       .from(notifications)
-      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          isNull(notifications.readAt),
+          this.viewCondition('inbox', new Date()),
+        ),
+      )
     return { count: row?.count ?? 0 }
+  }
+
+  /**
+   * Per-tab tallies for the inbox tab strip (§A2.6). One scan, four filtered
+   * counts; `now()` rather than a bound timestamp so all four agree on the same
+   * instant without a parameter round-trip.
+   */
+  async triageCounts(userId: string) {
+    const [row] = await this.db
+      .select({
+        inbox: sql<number>`count(*) filter (where ${notifications.dismissedAt} is null and (${notifications.snoozedUntil} is null or ${notifications.snoozedUntil} <= now()))::int`,
+        later: sql<number>`count(*) filter (where ${notifications.dismissedAt} is null and ${notifications.snoozedUntil} > now())::int`,
+        cleared: sql<number>`count(*) filter (where ${notifications.dismissedAt} is not null)::int`,
+        unread: sql<number>`count(*) filter (where ${notifications.readAt} is null and ${notifications.dismissedAt} is null and (${notifications.snoozedUntil} is null or ${notifications.snoozedUntil} <= now()))::int`,
+      })
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+    return {
+      inbox: row?.inbox ?? 0,
+      later: row?.later ?? 0,
+      cleared: row?.cleared ?? 0,
+      unread: row?.unread ?? 0,
+    }
+  }
+
+  /**
+   * §A2.6 — Clear moves a row to the Cleared tab. `readAt` is deliberately left
+   * alone so Unclear restores exactly what the user cleared, unread tint included.
+   */
+  async clear(userId: string, notificationId: string) {
+    await this.db
+      .update(notifications)
+      .set({ dismissedAt: new Date(), snoozedUntil: null })
+      .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    return { ok: true }
+  }
+
+  /** The Unclear undo — puts a cleared row back in the Inbox. */
+  async unclear(userId: string, notificationId: string) {
+    await this.db
+      .update(notifications)
+      .set({ dismissedAt: null })
+      .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    return { ok: true }
+  }
+
+  /**
+   * §A2.6c — save-for-later. Parks the row in the Later tab until `until`;
+   * clearing `dismissedAt` at the same time means snoozing something you had
+   * already cleared brings it back rather than leaving it in two buckets.
+   */
+  async snooze(userId: string, notificationId: string, until: Date) {
+    await this.db
+      .update(notifications)
+      .set({ snoozedUntil: until, dismissedAt: null })
+      .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    return { ok: true, snoozedUntil: until.toISOString() }
+  }
+
+  async unsnooze(userId: string, notificationId: string) {
+    await this.db
+      .update(notifications)
+      .set({ snoozedUntil: null })
+      .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    return { ok: true }
+  }
+
+  /**
+   * §A2.11 — deliver a notification to the caller through their own preferences,
+   * so "why am I not getting these?" is answerable without waiting for real
+   * activity. Runs the normal create() path: a muted channel stays muted, and
+   * quiet hours still suppress push/email.
+   */
+  async sendTest(userId: string, workspaceId?: string | null) {
+    const { prefs, timezone } = await this.getUserNotificationContext(userId)
+    const matrix = prefs.events[this.mapTypeToEventKey('test_notification')]
+    const inQuietHours = this.isInQuietHours(prefs, timezone)
+
+    const row = await this.create({
+      userId,
+      workspaceId: workspaceId ?? null,
+      type: 'test_notification',
+      title: 'Test notification',
+      body: 'If you can see this, in-app delivery is working. Push and email follow the same preferences.',
+      target: workspaceId ? { entityType: 'insights', entityId: workspaceId, url: `/app/${workspaceId}/inbox` } : undefined,
+      deferPush: true,
+    })
+
+    // §A4.7 — push is sent here rather than inside create() so its verdict can
+    // be returned. Without this the button reported "sent" whenever the in-app
+    // row was written, which is precisely the case where push silently isn't.
+    let push: PushDelivery
+    if (!matrix.web && !matrix.mobile) push = { status: 'channel_off' }
+    else if (inQuietHours) push = { status: 'quiet_hours' }
+    else {
+      push = await this.sendWebPush(userId, {
+        title: 'Test notification',
+        body: 'Push delivery is working.',
+        url: workspaceId ? `${this.appUrl}/app/${workspaceId}/inbox` : this.appUrl,
+      }).catch((): PushDelivery => ({ status: 'sent', sent: 0, failed: 1 }))
+    }
+
+    return {
+      ok: true,
+      delivered: Boolean(row),
+      inApp: matrix.inApp,
+      email: matrix.email && !inQuietHours,
+      quietHours: inQuietHours,
+      push,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -749,9 +950,12 @@ export class NotificationsService {
       // §7.11 — the daily AI briefing rides the general activity channel so a
       // user who mutes activity also mutes their briefing.
       // §7.12 — proactive workload alerts ride the general activity channel too.
+      // §A2.11 — so does the test send, which is the point: it proves the
+      // channels the user has actually left on.
       case 'task_updated':
       case 'ai_briefing':
       case 'workload_alert':
+      case 'test_notification':
       default:
         return 'activity'
     }
@@ -783,6 +987,7 @@ export class NotificationsService {
       },
       briefing: normalizeBriefingPrefs({ ...base.briefing, ...(patch.briefing ?? {}) }),
       reminderLeadDays: normalizeReminderLeadDays(patch.reminderLeadDays ?? base.reminderLeadDays),
+      autoFollow: patch.autoFollow ?? base.autoFollow,
       // §14.3 — carry through the onboarding-dismissed flag untouched (set out of
       // band by WorkspacesService) so editing notification prefs never resets it.
       ...((patch as Partial<NotificationPreferences>).onboarding
@@ -857,13 +1062,16 @@ export class NotificationsService {
     }
   }
 
-  private async sendWebPush(userId: string, payload: { title: string; body?: string; url?: string }) {
-    if (!this.webPushEnabled) return
+  private async sendWebPush(
+    userId: string,
+    payload: { title: string; body?: string; url?: string },
+  ): Promise<PushDelivery> {
+    if (!this.webPushEnabled) return { status: 'not_configured' }
     const rows = await this.db
       .select()
       .from(webPushSubscriptions)
       .where(eq(webPushSubscriptions.userId, userId))
-    if (rows.length === 0) return
+    if (rows.length === 0) return { status: 'no_subscriptions' }
 
     const message = JSON.stringify({
       title: payload.title,
@@ -874,7 +1082,7 @@ export class NotificationsService {
       tag: `rundesk-${Date.now()}`,
     })
 
-    await Promise.all(rows.map(async (row) => {
+    const results = await Promise.all(rows.map(async (row) => {
       try {
         await webpush.sendNotification(
           {
@@ -883,12 +1091,23 @@ export class NotificationsService {
           },
           message,
         )
+        return true
       } catch (err: any) {
         const status = Number(err?.statusCode ?? 0)
         if (status === 404 || status === 410) {
+          // The vendor has retired this endpoint — dropping it is the fix, not a
+          // failure worth reporting.
           await this.db.delete(webPushSubscriptions).where(eq(webPushSubscriptions.id, row.id))
+        } else {
+          // §A4.7 — a rejected push used to vanish here, which is exactly why
+          // "I never get notifications" was unanswerable.
+          this.logger.warn(`Web push to ${userId} failed (${status || 'unknown'}): ${err?.message ?? err}`)
         }
+        return false
       }
     }))
+
+    const sent = results.filter(Boolean).length
+    return { status: 'sent', sent, failed: results.length - sent }
   }
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
+import { Popover, PopoverContent, PopoverTrigger } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
 import { AddPeopleDialog } from '../components/chat/add-people-dialog'
@@ -14,7 +15,7 @@ import {
   shouldShowDateDivider,
   shouldShowMessageHeader,
 } from '../components/chat/chat-utils'
-import type { ChatSpace, ChatMessageEditHistory } from '../components/chat/chat-types'
+import type { ChatSpace, ChatChannelGroup, ChatMessageEditHistory } from '../components/chat/chat-types'
 import {
   Hash,
   Users,
@@ -39,6 +40,11 @@ import {
   CheckCheck,
   Tag,
   Lock,
+  Plus,
+  MailOpen,
+  ArrowDown,
+  Info,
+  Upload,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -51,11 +57,13 @@ type Channel = {
   id: string
   name: string
   description?: string | null
+  topic?: string | null
   icon?: string | null
   spaceId?: string | null
   archivedAt?: string | null
   isPrivate: boolean
   isDm: boolean
+  createdById?: string | null
   joined: boolean
   unreadCount?: number
   lastReadAt?: string | null
@@ -118,6 +126,23 @@ type Message = {
     url: string
   }>
 }
+
+/** A task the mention picker can reference (§A3.6) — carries the ids the chat
+ *  body renderer needs to unfurl it into a task card. */
+type MentionTask = {
+  id: string
+  title: string
+  listId: string
+  projectId: string
+  spaceId: string
+  listName?: string
+  projectName?: string
+}
+
+type MentionDoc = { id: string; title: string; updatedAt?: string }
+
+/** A team the mention picker can address by handle (§A4.3). */
+type MentionTeam = { id: string; name: string; alias: string | null; memberCount: number }
 
 type PendingChatAttachment = {
   id: string
@@ -212,6 +237,21 @@ export function ChatPage() {
   const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [channelSearch, setChannelSearch] = useState('')
+  // Channel info panel + its topic field (§A3.7).
+  const [showInfoPanel, setShowInfoPanel] = useState(false)
+  const [editTopic, setEditTopic] = useState('')
+  // Where the unread divider sits in the open channel (§A3.3). Frozen when the
+  // channel is opened: opening also marks it read, so reading the live cursor
+  // would erase the divider before it ever rendered.
+  const [unreadAnchor, setUnreadAnchor] = useState<{ channelId: string; at: string | null } | null>(null)
+  // Create-task-from-message draft (§A3.5): the message, plus assignee + due
+  // date, so a chat line becomes an owned action item rather than a stray task.
+  const [taskDraft, setTaskDraft] = useState<{ message: Message; assigneeId: string; dueAt: string } | null>(null)
+  // Action item attached to the next sent message (§A3.5).
+  const [actionItem, setActionItem] = useState<{ assigneeId: string; dueAt: string } | null>(null)
+  // Mention picker tab (§A3.6). '#' jumps straight to channels.
+  const [mentionTab, setMentionTab] = useState<'people' | 'tasks' | 'docs' | 'channels'>('people')
+  const [emojiUploading, setEmojiUploading] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
@@ -240,6 +280,14 @@ export function ChatPage() {
   })
   const archivedChannels = archivedChannelsQuery.data ?? []
 
+  // User-named channel groups (§A3.4) — the caller's own arrangement of the rail.
+  const channelGroupsQuery = useQuery({
+    queryKey: ['chat-channel-groups', workspaceId],
+    queryFn: () => api<ChatChannelGroup[]>(`/workspaces/${workspaceId}/chat/channel-groups`),
+    enabled: !!workspaceId,
+  })
+  const channelGroups = channelGroupsQuery.data ?? []
+
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`),
@@ -250,10 +298,59 @@ export function ChatPage() {
   })
   const dmCandidates = (membersQuery.data ?? []).filter((m) => m.userId !== me?.id)
   const pendingInvites = pendingInvitesQuery.data ?? []
+  // The token under the caret (§A3.6): '@' opens the picker on People, '#'
+  // opens it on Channels. Anchoring on the caret (not the last '@' anywhere in
+  // the draft) is what lets the picker replace exactly what was typed.
+  const mentionTrigger = useMemo(() => {
+    const match = /(?:^|\s)([@#])([^\s@#]*)$/.exec(input)
+    if (!match) return null
+    return { symbol: match[1] as '@' | '#', query: match[2].toLowerCase(), start: input.length - match[2].length - 1 }
+  }, [input])
+  const mentionQuery = mentionTrigger?.query ?? ''
   const mentionCandidates = (membersQuery.data ?? []).filter((m) =>
-    (m.displayName || m.email).toLowerCase().includes(input.slice(input.lastIndexOf('@') + 1).toLowerCase()),
+    (m.displayName || m.email).toLowerCase().includes(mentionQuery),
   )
-  const showMentions = input.includes('@') && input[input.length - 1] !== ' '
+  const mentionTasksQuery = useQuery({
+    queryKey: ['chat-mention-tasks', workspaceId],
+    queryFn: () => api<MentionTask[]>(`/tasks/workspace/${workspaceId}?limit=200`),
+    enabled: !!workspaceId && !!mentionTrigger && mentionTab === 'tasks',
+  })
+  const mentionDocsQuery = useQuery({
+    queryKey: ['chat-mention-docs', workspaceId],
+    queryFn: () => api<MentionDoc[]>(`/workspaces/${workspaceId}/docs`),
+    enabled: !!workspaceId && !!mentionTrigger && mentionTab === 'docs',
+  })
+  const taskMentionCandidates = (mentionTasksQuery.data ?? []).filter((task) =>
+    `${task.title} ${task.projectName ?? ''} ${task.listName ?? ''}`.toLowerCase().includes(mentionQuery),
+  )
+  const docMentionCandidates = (mentionDocsQuery.data ?? []).filter((d) =>
+    d.title.toLowerCase().includes(mentionQuery),
+  )
+  // §A4.3 — teams are mentionable by handle. Offered on the People tab because
+  // "who do I address" is one question, not two, and only teams that actually
+  // have a handle can be inserted.
+  const mentionTeamsQuery = useQuery({
+    queryKey: ['chat-mention-teams', workspaceId],
+    queryFn: () => api<MentionTeam[]>(`/workspaces/${workspaceId}/groups`),
+    enabled: !!workspaceId && !!mentionTrigger,
+  })
+  const teamMentionCandidates = (mentionTeamsQuery.data ?? []).filter(
+    (g) => g.alias && `${g.alias} ${g.name}`.toLowerCase().includes(mentionQuery),
+  )
+
+  useEffect(() => {
+    // Typing '#' is a request for a channel link, not a person. Switching back
+    // to '@' reopens on People; picking another tab afterwards sticks, because
+    // this only fires when the trigger character itself changes.
+    if (mentionTrigger?.symbol === '#') setMentionTab('channels')
+    else if (mentionTrigger?.symbol === '@') setMentionTab('people')
+  }, [mentionTrigger?.symbol])
+
+  /** Replace the token being typed with the picked reference (§A3.6). */
+  const insertMentionToken = (token: string) => {
+    if (!mentionTrigger) return
+    setInput(`${input.slice(0, mentionTrigger.start)}${token} `)
+  }
 
   useEffect(() => {
     if (channels.length === 0) return
@@ -365,6 +462,18 @@ export function ChatPage() {
   const savedMessages = savedQuery.data ?? []
   const savedIds = useMemo(() => new Set(savedMessages.map((m) => m.id)), [savedMessages])
   const rootMessages = useMemo(() => messages.filter((m) => !m.parentMessageId), [messages])
+  // First message the user hasn't read in the open channel (§A3.3) — the divider
+  // anchors above it and the jump pill scrolls to it.
+  const firstUnreadId = useMemo(() => {
+    if (!selectedId || unreadAnchor?.channelId !== selectedId) return null
+    const at = unreadAnchor.at ? new Date(unreadAnchor.at).getTime() : 0
+    return rootMessages.find((m) => m.authorId !== me?.id && new Date(m.createdAt).getTime() > at)?.id ?? null
+  }, [rootMessages, unreadAnchor, selectedId, me?.id])
+  const unreadCount = useMemo(() => {
+    if (!firstUnreadId) return 0
+    const from = rootMessages.findIndex((m) => m.id === firstUnreadId)
+    return from < 0 ? 0 : rootMessages.length - from
+  }, [rootMessages, firstUnreadId])
   const repliesByParent = useMemo(() => {
     const map = new Map<string, Message[]>()
     for (const message of messages) {
@@ -375,12 +484,50 @@ export function ChatPage() {
     }
     return map
   }, [messages])
-  const threadParent = threadParentId ? messages.find((m) => m.id === threadParentId) ?? null : null
-  const threadReplies = threadParentId ? repliesByParent.get(threadParentId) ?? [] : []
+  // The thread's replies are NOT in the channel query (that one returns root
+  // messages only), so the panel has to fetch them (§A3.2). Live replies that
+  // arrive over the socket are merged on top.
+  const threadQuery = useQuery({
+    queryKey: ['chat-thread', threadParentId],
+    queryFn: () => api<{ parent: Message; replies: Message[] }>(`/chat/messages/${threadParentId}/thread`),
+    enabled: !!threadParentId,
+  })
+  const threadParent = threadParentId
+    ? messages.find((m) => m.id === threadParentId) ?? threadQuery.data?.parent ?? null
+    : null
+  const threadReplies = useMemo(() => {
+    if (!threadParentId) return [] as Message[]
+    const byId = new Map<string, Message>()
+    for (const reply of threadQuery.data?.replies ?? []) byId.set(reply.id, reply)
+    for (const reply of repliesByParent.get(threadParentId) ?? []) byId.set(reply.id, reply)
+    return [...byId.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  }, [threadParentId, threadQuery.data, repliesByParent])
   const namesById = useMemo(
     () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
     [membersQuery.data],
   )
+  // Mentioning someone who isn't in the channel is a dead end unless we say so
+  // (§A3.6) — offer to add them instead of silently notifying nobody.
+  const mentionedNonMembers = useMemo(() => {
+    if (!selectedChannel || selectedChannel.isDm) return [] as Array<{ userId: string; name: string }>
+    const memberIds = new Set((channelMembersQuery.data ?? []).map((m) => m.userId))
+    if (memberIds.size === 0) return []
+    const ids = [...new Set([...input.matchAll(/<@([0-9a-fA-F-]{36})>/g)].map((m) => m[1]))]
+    return ids
+      .filter((id) => !memberIds.has(id))
+      .map((id) => ({ userId: id, name: namesById[id] ?? t('chat.unknownUser') }))
+  }, [input, selectedChannel, channelMembersQuery.data, namesById, t])
+
+  const addChannelMembersMutation = useMutation({
+    mutationFn: ({ channelId, userIds }: { channelId: string; userIds: string[] }) =>
+      api(`/chat/channels/${channelId}/members`, { method: 'POST', body: JSON.stringify({ userIds }) }),
+    onSuccess: async (_, { channelId }) => {
+      await qc.invalidateQueries({ queryKey: ['chat-channel-members', channelId] })
+      toast.success(t('chat.memberAdded'))
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotAddMember')),
+  })
+
   const selectedProfile = useMemo(
     () => (membersQuery.data ?? []).find((m) => m.userId === profileUserId) ?? null,
     [membersQuery.data, profileUserId],
@@ -459,6 +606,8 @@ export function ChatPage() {
       }
       if (event.type === 'chat.reaction.toggled' && event.channelId) {
         qc.invalidateQueries({ queryKey: ['chat-messages', event.channelId] })
+        // The thread panel holds its own copy of the replies (§A3.2).
+        qc.invalidateQueries({ queryKey: ['chat-thread'] })
       }
     }
     socket.on('event', onEvent)
@@ -471,6 +620,15 @@ export function ChatPage() {
     if (!scrollRef.current) return
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [messages.length, selectedId])
+
+  // Freeze the read cursor the moment a channel is opened (§A3.3) so the divider
+  // has something to sit on after the mark-read below moves the real cursor.
+  useEffect(() => {
+    if (!selectedId) return
+    setUnreadAnchor((prev) =>
+      prev?.channelId === selectedId ? prev : { channelId: selectedId, at: selectedChannel?.lastReadAt ?? null },
+    )
+  }, [selectedId, selectedChannel?.lastReadAt])
 
   // Mark the open channel read once its messages load (and whenever new ones
   // arrive while it's open), then refresh the channel list to clear its badge.
@@ -512,6 +670,20 @@ export function ChatPage() {
       qc.setQueryData<Message[] | undefined>(['chat-messages', msg.channelId], (prev) =>
         prev && !prev.some((m) => m.id === msg.id) ? [...prev, msg] : prev,
       )
+      if (msg.parentMessageId) {
+        void qc.invalidateQueries({ queryKey: ['chat-thread', msg.parentMessageId] })
+        void qc.invalidateQueries({ queryKey: ['chat-messages', msg.channelId] })
+      }
+      // The composer's action item (§A3.5) applies to the message it was armed
+      // for, so it is spent here and cleared whatever the task call does.
+      if (actionItem && !msg.parentMessageId) {
+        createTaskFromMessage.mutate({
+          messageId: msg.id,
+          assigneeId: actionItem.assigneeId || undefined,
+          dueAt: actionItem.dueAt || undefined,
+        })
+        setActionItem(null)
+      }
       setInput('')
       setReplyTo(null)
       setPendingAttachments([])
@@ -556,6 +728,36 @@ export function ChatPage() {
     }
   }
 
+  // Upload a custom emoji image (§A3.8) through the same presign → PUT → record
+  // shape as chat attachments, so emoji no longer have to live on someone
+  // else's CDN.
+  const uploadEmojiImage = async (file: File) => {
+    const code = newEmojiCode.trim().toLowerCase().replace(/:/g, '')
+    if (!code) {
+      toast.error(t('chat.emojiNeedsShortcode'))
+      return
+    }
+    setEmojiUploading(true)
+    try {
+      const contentType = file.type || 'image/png'
+      const presign = await api<{ uploadUrl: string; storageKey: string }>(
+        `/chat/workspaces/${workspaceId}/custom-emoji/presign`,
+        { method: 'POST', body: { fileName: file.name, contentType, sizeBytes: file.size } },
+      )
+      const putRes = await fetch(presign.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType },
+        body: file,
+      })
+      if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`)
+      addCustomEmojiMutation.mutate({ shortcode: code, storageKey: presign.storageKey })
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUploadFile', { name: file.name }))
+    } finally {
+      setEmojiUploading(false)
+    }
+  }
+
   const createChannelMutation = useMutation({
     mutationFn: (data: { name: string; isPrivate: boolean; spaceId?: string | null }) =>
       api<Channel>(`/workspaces/${workspaceId}/chat/channels`, {
@@ -574,7 +776,13 @@ export function ChatPage() {
 
   // Edit a channel's name / description / icon (§6.1). Moderator-gated server-side.
   const updateChannelMutation = useMutation({
-    mutationFn: ({ channelId, patch }: { channelId: string; patch: { name?: string; description?: string | null; icon?: string | null } }) =>
+    mutationFn: ({
+      channelId,
+      patch,
+    }: {
+      channelId: string
+      patch: { name?: string; topic?: string | null; description?: string | null; icon?: string | null }
+    }) =>
       api<Channel>(`/chat/channels/${channelId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
@@ -644,12 +852,16 @@ export function ChatPage() {
       if (selectedId) {
         qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
       }
+      if (threadParentId) qc.invalidateQueries({ queryKey: ['chat-thread', threadParentId] })
     },
   })
 
   const addCustomEmojiMutation = useMutation({
-    mutationFn: ({ shortcode, imageUrl }: { shortcode: string; imageUrl: string }) =>
-      api(`/chat/workspaces/${workspaceId}/custom-emoji`, { method: 'POST', body: JSON.stringify({ shortcode, imageUrl }) }),
+    mutationFn: ({ shortcode, imageUrl, storageKey }: { shortcode: string; imageUrl?: string; storageKey?: string }) =>
+      api(`/chat/workspaces/${workspaceId}/custom-emoji`, {
+        method: 'POST',
+        body: JSON.stringify({ shortcode, imageUrl, storageKey }),
+      }),
     onSuccess: () => {
       setNewEmojiCode('')
       setNewEmojiUrl('')
@@ -678,7 +890,11 @@ export function ChatPage() {
   })
 
   const createTaskFromMessage = useMutation({
-    mutationFn: async (messageId: string) => {
+    mutationFn: async ({
+      messageId,
+      assigneeId,
+      dueAt,
+    }: { messageId: string; assigneeId?: string; dueAt?: string }) => {
       // Resolve a target list (first space → first project → first list).
       const spaces = await api<Array<{ id: string }>>(`/spaces/workspace/${workspaceId}`)
       if (!spaces[0]) throw new Error(t('chat.needSpaceAndList'))
@@ -686,10 +902,65 @@ export function ChatPage() {
       if (!projects[0]) throw new Error(t('chat.needProjectAndList'))
       const lists = await api<Array<{ id: string }>>(`/lists/project/${projects[0].id}`)
       if (!lists[0]) throw new Error(t('chat.needList'))
-      return api(`/chat/messages/${messageId}/create-task`, { method: 'POST', body: { listId: lists[0].id } })
+      return api(`/chat/messages/${messageId}/create-task`, {
+        method: 'POST',
+        body: { listId: lists[0].id, assigneeId: assigneeId || undefined, dueAt: dueAt || undefined },
+      })
     },
-    onSuccess: () => toast.success(t('chat.taskCreatedFromMessage')),
+    onSuccess: () => {
+      setTaskDraft(null)
+      toast.success(t('chat.taskCreatedFromMessage'))
+    },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  // Mark a channel (or one message) unread again (§A3.3). The response carries
+  // the rewound cursor, which re-arms the divider without a refetch race.
+  const markUnreadMutation = useMutation({
+    mutationFn: ({ channelId, messageId }: { channelId: string; messageId?: string }) =>
+      api<{ lastReadAt: string | null }>(`/chat/channels/${channelId}/unread`, {
+        method: 'POST',
+        body: JSON.stringify({ messageId }),
+      }),
+    onSuccess: (res, { channelId }) => {
+      setUnreadAnchor({ channelId, at: res?.lastReadAt ?? null })
+      void qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      void qc.invalidateQueries({ queryKey: ['chat-unread', workspaceId] })
+      toast.success(t('chat.markedUnread'))
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotMarkUnread')),
+  })
+
+  // Channel groups (§A3.4). Every mutation just refetches the group list — it is
+  // one small row set and the sidebar renders straight off it.
+  const invalidateGroups = () => qc.invalidateQueries({ queryKey: ['chat-channel-groups', workspaceId] })
+  const createGroupMutation = useMutation({
+    mutationFn: (name: string) =>
+      api<ChatChannelGroup>(`/workspaces/${workspaceId}/chat/channel-groups`, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => void invalidateGroups(),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateGroup')),
+  })
+  const updateGroupMutation = useMutation({
+    mutationFn: ({ groupId, patch }: { groupId: string; patch: { name?: string; isCollapsed?: boolean } }) =>
+      api(`/chat/channel-groups/${groupId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    onSuccess: () => void invalidateGroups(),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateGroup')),
+  })
+  const deleteGroupMutation = useMutation({
+    mutationFn: (groupId: string) => api(`/chat/channel-groups/${groupId}`, { method: 'DELETE' }),
+    onSuccess: () => void invalidateGroups(),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateGroup')),
+  })
+  const groupChannelMutation = useMutation({
+    mutationFn: ({ groupId, channelId, remove }: { groupId: string; channelId: string; remove?: boolean }) =>
+      remove
+        ? api(`/chat/channel-groups/${groupId}/channels/${channelId}`, { method: 'DELETE' })
+        : api(`/chat/channel-groups/${groupId}/channels`, { method: 'POST', body: JSON.stringify({ channelId }) }),
+    onSuccess: () => void invalidateGroups(),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateGroup')),
   })
 
   // Dismiss the right-click message menu (Plan §6.10) on Escape.
@@ -848,10 +1119,19 @@ export function ChatPage() {
     })
   }
 
-  const handleThreadReply = (body: string) => {
+  const handleThreadReply = (body: string, alsoSendToChannel: boolean) => {
     const trimmed = body.trim()
     if (!trimmed || !threadParentId) return
+    // Slash commands work in a thread too (§A3.2); the command runs against the
+    // channel, so its confirmation lands in the stream rather than the thread.
+    const slash = /^\/(task|remind)\b\s*([\s\S]*)$/i.exec(trimmed)
+    if (slash) {
+      if (runCommandMutation.isPending) return
+      runCommandMutation.mutate({ command: slash[1].toLowerCase() as 'task' | 'remind', text: slash[2] ?? '' })
+      return
+    }
     sendMutation.mutate({ body: trimmed, parentMessageId: threadParentId })
+    if (alsoSendToChannel) sendMutation.mutate({ body: trimmed })
   }
 
   const openThreadFromActivity = async (entry: Message) => {
@@ -917,6 +1197,15 @@ export function ChatPage() {
         startDmPending={createDmMutation.isPending || createGroupDmMutation.isPending}
         pendingInvites={pendingInvites}
         channelsLoading={channelsQuery.isLoading}
+        channelGroups={channelGroups}
+        onCreateGroup={(name) => createGroupMutation.mutate(name)}
+        onRenameGroup={(groupId, name) => updateGroupMutation.mutate({ groupId, patch: { name } })}
+        onDeleteGroup={(groupId) => deleteGroupMutation.mutate(groupId)}
+        onToggleGroupCollapsed={(groupId, isCollapsed) => updateGroupMutation.mutate({ groupId, patch: { isCollapsed } })}
+        onAssignChannelToGroup={(groupId, channelId) => groupChannelMutation.mutate({ groupId, channelId })}
+        onRemoveChannelFromGroup={(groupId, channelId) =>
+          groupChannelMutation.mutate({ groupId, channelId, remove: true })
+        }
       />
 
       <div className="flex-1 flex bg-white dark:bg-[#0f1114] min-w-0">
@@ -934,6 +1223,7 @@ export function ChatPage() {
             setShowSavedPanel(false)
             setShowFilesPanel(false)
             setShowSearchPanel(false)
+            setShowInfoPanel(false)
           }}
           showSavedPanel={showSavedPanel}
           onToggleSaved={() => {
@@ -941,6 +1231,7 @@ export function ChatPage() {
             setShowPinnedPanel(false)
             setShowFilesPanel(false)
             setShowSearchPanel(false)
+            setShowInfoPanel(false)
           }}
           showFilesPanel={showFilesPanel}
           onToggleFiles={() => {
@@ -948,6 +1239,7 @@ export function ChatPage() {
             setShowPinnedPanel(false)
             setShowSavedPanel(false)
             setShowSearchPanel(false)
+            setShowInfoPanel(false)
           }}
           showSearchPanel={showSearchPanel}
           onToggleSearch={() => {
@@ -955,7 +1247,17 @@ export function ChatPage() {
             setShowPinnedPanel(false)
             setShowSavedPanel(false)
             setShowFilesPanel(false)
+            setShowInfoPanel(false)
           }}
+          showInfoPanel={showInfoPanel}
+          onToggleInfo={() => {
+            setShowInfoPanel((v) => !v)
+            setShowPinnedPanel(false)
+            setShowSavedPanel(false)
+            setShowFilesPanel(false)
+            setShowSearchPanel(false)
+          }}
+          onMarkUnread={selectedId ? () => markUnreadMutation.mutate({ channelId: selectedId }) : undefined}
           onLeaveChannel={() => {
             if (selectedId) leaveChannelMutation.mutate(selectedId)
           }}
@@ -969,6 +1271,7 @@ export function ChatPage() {
             selectedChannel && !selectedChannel.isDm
               ? () => {
                   setEditName(selectedChannel.name)
+                  setEditTopic(selectedChannel.topic ?? '')
                   setEditDescription(selectedChannel.description ?? '')
                   setEditIcon(selectedChannel.icon ?? '')
                   setEditChannelOpen(true)
@@ -1027,6 +1330,16 @@ export function ChatPage() {
                   />
                 </label>
                 <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.channelTopic')}
+                  <input
+                    value={editTopic}
+                    onChange={(e) => setEditTopic(e.target.value)}
+                    maxLength={250}
+                    placeholder={t('chat.channelTopicPlaceholder')}
+                    className="mt-0.5 w-full h-8 rounded border border-border bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <label className="block text-[12px] text-muted-foreground">
                   {t('chat.channelIcon')}
                   <input
                     value={editIcon}
@@ -1057,7 +1370,12 @@ export function ChatPage() {
                   onClick={() =>
                     updateChannelMutation.mutate({
                       channelId: selectedChannel.id,
-                      patch: { name: editName.trim(), description: editDescription.trim(), icon: editIcon.trim() },
+                      patch: {
+                        name: editName.trim(),
+                        topic: editTopic.trim(),
+                        description: editDescription.trim(),
+                        icon: editIcon.trim(),
+                      },
                     })
                   }
                 >
@@ -1107,6 +1425,23 @@ export function ChatPage() {
                   {t('chat.add')}
                 </Button>
               </div>
+              {/* Upload path (§A3.8) — same presign flow as chat attachments, so
+                  an emoji no longer has to be hosted somewhere else first. */}
+              <label className="mt-2 flex w-fit cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground">
+                <Upload className="h-3.5 w-3.5" />
+                {emojiUploading ? t('chat.uploading') : t('chat.uploadEmojiImage')}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={emojiUploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (file) void uploadEmojiImage(file)
+                  }}
+                />
+              </label>
               <div className="mt-4 max-h-64 overflow-y-auto space-y-1">
                 {customEmoji.length === 0 ? (
                   <div className="text-xs text-muted-foreground py-3 text-center">
@@ -1154,15 +1489,28 @@ export function ChatPage() {
             >
               <button
                 type="button"
-                disabled={createTaskFromMessage.isPending}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-50"
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
                 onClick={() => {
-                  createTaskFromMessage.mutate(messageMenu.message.id)
+                  setTaskDraft({ message: messageMenu.message, assigneeId: '', dueAt: '' })
                   setMessageMenu(null)
                 }}
               >
                 <ListTodo className="h-3.5 w-3.5 text-muted-foreground" />
                 {t('chat.createTaskFromMessage')}
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
+                onClick={() => {
+                  markUnreadMutation.mutate({
+                    channelId: messageMenu.message.channelId,
+                    messageId: messageMenu.message.id,
+                  })
+                  setMessageMenu(null)
+                }}
+              >
+                <MailOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                {t('chat.markUnreadFromHere')}
               </button>
               <button
                 type="button"
@@ -1177,6 +1525,69 @@ export function ChatPage() {
                 {t('chat.reply')}
               </button>
             </div>
+          </div>
+        )}
+
+        {taskDraft && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setTaskDraft(null)}
+          >
+            <Card className="w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">{t('chat.createTaskFromMessage')}</h3>
+                <button className="text-muted-foreground hover:text-foreground" onClick={() => setTaskDraft(null)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="mb-3 line-clamp-3 rounded border border-border/70 bg-muted/30 px-2 py-1.5 text-[12px] text-muted-foreground">
+                {taskDraft.message.body}
+              </p>
+              <div className="space-y-3">
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.assignee')}
+                  <select
+                    value={taskDraft.assigneeId}
+                    onChange={(e) => setTaskDraft((prev) => (prev ? { ...prev, assigneeId: e.target.value } : prev))}
+                    className="mt-0.5 h-8 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
+                  >
+                    <option value="">{t('chat.unassigned')}</option>
+                    {(membersQuery.data ?? []).map((m) => (
+                      <option key={m.userId} value={m.userId}>
+                        {m.displayName || m.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.dueDate')}
+                  <input
+                    type="date"
+                    value={taskDraft.dueAt}
+                    onChange={(e) => setTaskDraft((prev) => (prev ? { ...prev, dueAt: e.target.value } : prev))}
+                    className="mt-0.5 h-8 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setTaskDraft(null)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={createTaskFromMessage.isPending}
+                  onClick={() =>
+                    createTaskFromMessage.mutate({
+                      messageId: taskDraft.message.id,
+                      assigneeId: taskDraft.assigneeId || undefined,
+                      dueAt: taskDraft.dueAt || undefined,
+                    })
+                  }
+                >
+                  {createTaskFromMessage.isPending ? t('common.saving') : t('chat.createTask')}
+                </Button>
+              </div>
+            </Card>
           </div>
         )}
 
@@ -1249,6 +1660,16 @@ export function ChatPage() {
             if (files.length > 0) void uploadFiles(files)
           }}
         >
+          {firstUnreadId && (
+            <button
+              type="button"
+              onClick={() => messageRefs.current[firstUnreadId]?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+              className="sticky top-1 z-20 mx-auto flex items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-[12px] font-medium text-rose-600 shadow-sm backdrop-blur-[1px] dark:text-rose-300"
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+              {t('chat.jumpToUnread', { count: unreadCount })}
+            </button>
+          )}
           {paneDragging && (
             <div className="pointer-events-none sticky top-1 z-20 mx-auto flex max-w-3xl items-center justify-center gap-2 rounded-xl border-2 border-dashed border-violet-500/60 bg-violet-500/10 py-3 text-[13px] font-medium text-violet-700 backdrop-blur-[1px] dark:text-violet-200">
               <Paperclip className="h-4 w-4" /> {t('chat.dropToShare')}
@@ -1290,6 +1711,16 @@ export function ChatPage() {
                 const lastReplyMs = Math.max(localLastReplyMs, serverLastReplyMs)
                 return (
                   <div key={m.id} className="contents">
+                    {/* Where you left off (§A3.3). */}
+                    {firstUnreadId === m.id && (
+                      <div className="flex items-center gap-3 py-2">
+                        <div className="h-px flex-1 bg-rose-500/50" />
+                        <span className="px-2 text-[11px] font-semibold uppercase tracking-wide text-rose-500">
+                          {t('chat.unreadMessages')}
+                        </span>
+                        <div className="h-px flex-1 bg-rose-500/50" />
+                      </div>
+                    )}
                     {showDate && (
                       <div className="flex items-center gap-3 py-4">
                         <div className="h-px flex-1 bg-border/80" />
@@ -1481,11 +1912,18 @@ export function ChatPage() {
                           <button
                             type="button"
                             title={t('chat.createTaskFromMessage')}
-                            disabled={createTaskFromMessage.isPending}
-                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center disabled:opacity-50"
-                            onClick={() => createTaskFromMessage.mutate(m.id)}
+                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
+                            onClick={() => setTaskDraft({ message: m, assigneeId: '', dueAt: '' })}
                           >
                             <ListTodo className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            title={t('chat.markUnreadFromHere')}
+                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
+                            onClick={() => markUnreadMutation.mutate({ channelId: m.channelId, messageId: m.id })}
+                          >
+                            <MailOpen className="h-3 w-3" />
                           </button>
                           <button
                             type="button"
@@ -1705,6 +2143,43 @@ export function ChatPage() {
           </div>
         )}
 
+        {mentionedNonMembers.length > 0 && selectedChannel && (
+          <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
+            <UserPlus className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">
+              {t('chat.mentionNoAccess', { names: mentionedNonMembers.map((m) => m.name).join(', ') })}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 font-medium hover:underline"
+              disabled={addChannelMembersMutation.isPending}
+              onClick={() =>
+                addChannelMembersMutation.mutate({
+                  channelId: selectedChannel.id,
+                  userIds: mentionedNonMembers.map((m) => m.userId),
+                })
+              }
+            >
+              {t('chat.addToChannel')}
+            </button>
+          </div>
+        )}
+
+        {actionItem && (
+          <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-violet-500/30 bg-violet-500/5 px-3 py-1.5 text-[12px] text-violet-700 dark:text-violet-300">
+            <ListTodo className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">
+              {t('chat.actionItemArmed', {
+                name: actionItem.assigneeId ? namesById[actionItem.assigneeId] ?? t('chat.unknownUser') : t('chat.unassigned'),
+              })}
+              {actionItem.dueAt ? ` · ${t('chat.taskDue', { date: new Date(actionItem.dueAt).toLocaleDateString() })}` : ''}
+            </span>
+            <button type="button" className="shrink-0 hover:underline" onClick={() => setActionItem(null)}>
+              {t('common.cancel')}
+            </button>
+          </div>
+        )}
+
         <ChatComposer
           channelLabel={channelLabel}
           value={input}
@@ -1720,50 +2195,221 @@ export function ChatPage() {
           onRemoveAttachment={(id) => setPendingAttachments((prev) => prev.filter((a) => a.id !== id))}
           uploading={uploadingFiles}
           customEmoji={customEmoji}
+          leadingTools={
+            <>
+              {/* Insert row (§A3.5): drop a task or doc reference into the draft.
+                  A task URL is unfurled into a card by the message renderer. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    title={t('chat.insertReference')}
+                    disabled={!selectedId}
+                    className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] disabled:opacity-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80 p-0">
+                  <InsertReferencePicker
+                    workspaceId={workspaceId}
+                    onInsertTask={(task) =>
+                      setInput((prev) =>
+                        `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}/app/${workspaceId}/${task.spaceId}/${task.projectId}/${task.listId}?task=${task.id} `,
+                      )
+                    }
+                    onInsertDoc={(doc) =>
+                      setInput((prev) => `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}${t('chat.docPrefix')}${doc.title} `)
+                    }
+                  />
+                </PopoverContent>
+              </Popover>
+              {/* Assign-as-action-item (§A3.5): the next message also becomes a
+                  task with this owner and date. */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    title={t('chat.assignActionItem')}
+                    disabled={!selectedId}
+                    className={cn(
+                      'h-8 w-8 rounded-md flex items-center justify-center hover:bg-black/[0.05] dark:hover:bg-white/[0.06] disabled:opacity-50',
+                      actionItem ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <ListTodo className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-64 p-3 space-y-2">
+                  <div className="text-[12px] font-semibold text-foreground">{t('chat.assignActionItem')}</div>
+                  <select
+                    value={actionItem?.assigneeId ?? ''}
+                    onChange={(e) =>
+                      setActionItem((prev) => ({ assigneeId: e.target.value, dueAt: prev?.dueAt ?? '' }))
+                    }
+                    className="h-8 w-full rounded border border-border bg-background px-1.5 text-[12px] text-foreground"
+                  >
+                    <option value="">{t('chat.unassigned')}</option>
+                    {(membersQuery.data ?? []).map((m) => (
+                      <option key={m.userId} value={m.userId}>
+                        {m.displayName || m.email}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="date"
+                    value={actionItem?.dueAt ?? ''}
+                    onChange={(e) => setActionItem((prev) => ({ assigneeId: prev?.assigneeId ?? '', dueAt: e.target.value }))}
+                    className="h-8 w-full rounded border border-border bg-background px-1.5 text-[12px] text-foreground"
+                  />
+                  <p className="text-[11px] text-muted-foreground">{t('chat.actionItemHint')}</p>
+                  {actionItem && (
+                    <button
+                      type="button"
+                      className="text-[11px] text-muted-foreground hover:text-foreground"
+                      onClick={() => setActionItem(null)}
+                    >
+                      {t('chat.clearActionItem')}
+                    </button>
+                  )}
+                </PopoverContent>
+              </Popover>
+            </>
+          }
           mentionMenu={(() => {
-            if (!showMentions) return undefined
-            const mentionQuery = input.slice(input.lastIndexOf('@') + 1).toLowerCase()
+            if (!mentionTrigger) return undefined
             // @here / @channel broadcast mentions (§6.9) — offered in real
             // (non-DM) channels; insert the literal token the server parses.
             const specials =
-              selectedChannel && !selectedChannel.isDm
+              mentionTrigger.symbol === '@' && selectedChannel && !selectedChannel.isDm
                 ? (['here', 'channel'] as const).filter((s) => s.startsWith(mentionQuery))
                 : []
-            if (mentionCandidates.length === 0 && specials.length === 0) return undefined
+            const channelMatches = publicChannels.filter((c) => c.name.toLowerCase().includes(mentionQuery))
+            const rowClass = 'w-full px-3 py-2 text-left text-[13px] hover:bg-violet-500/8'
             return (
-              <div className="mb-2 max-h-36 overflow-auto rounded-lg border border-border/80 bg-background shadow-sm">
-                {specials.map((s) => (
-                  <button
-                    key={`special-${s}`}
-                    type="button"
-                    className="w-full px-3 py-2 text-left text-[13px] hover:bg-violet-500/8"
-                    onClick={() => {
-                      const at = input.lastIndexOf('@')
-                      const prefix = at >= 0 ? input.slice(0, at) : input
-                      setInput(`${prefix}@${s} `)
-                    }}
-                  >
-                    <span className="font-medium text-accent">@{s}</span>
-                    <span className="ml-2 text-muted-foreground">
-                      {s === 'here' ? t('chat.mentionHereDesc') : t('chat.mentionChannelDesc')}
-                    </span>
-                  </button>
-                ))}
-                {mentionCandidates.slice(0, 6).map((member) => (
-                  <button
-                    key={member.userId}
-                    type="button"
-                    className="w-full px-3 py-2 text-left text-[13px] hover:bg-violet-500/8"
-                    onClick={() => {
-                      const at = input.lastIndexOf('@')
-                      const prefix = at >= 0 ? input.slice(0, at) : input
-                      setInput(`${prefix}<@${member.userId}> `)
-                    }}
-                  >
-                    <span className="font-medium text-foreground">{member.displayName || member.email}</span>
-                    <span className="ml-2 text-muted-foreground">{member.email}</span>
-                  </button>
-                ))}
+              <div className="mb-2 rounded-lg border border-border/80 bg-background shadow-sm">
+                <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1">
+                  {([
+                    ['people', t('chat.mentionPeople')],
+                    ['tasks', t('chat.mentionTasks')],
+                    ['docs', t('chat.mentionDocs')],
+                    ['channels', t('chat.mentionChannels')],
+                  ] as const).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setMentionTab(id)}
+                      className={cn(
+                        'rounded px-2 py-1 text-[11px]',
+                        mentionTab === id ? 'bg-accent/15 font-medium text-foreground' : 'text-muted-foreground hover:bg-muted',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="max-h-44 overflow-auto">
+                  {mentionTab === 'people' && (
+                    <>
+                      {specials.map((s) => (
+                        <button
+                          key={`special-${s}`}
+                          type="button"
+                          className={rowClass}
+                          onClick={() => insertMentionToken(`@${s}`)}
+                        >
+                          <span className="font-medium text-accent">@{s}</span>
+                          <span className="ml-2 text-muted-foreground">
+                            {s === 'here' ? t('chat.mentionHereDesc') : t('chat.mentionChannelDesc')}
+                          </span>
+                        </button>
+                      ))}
+                      {teamMentionCandidates.slice(0, 4).map((team) => (
+                        <button
+                          key={`team-${team.id}`}
+                          type="button"
+                          className={rowClass}
+                          onClick={() => insertMentionToken(`@${team.alias}`)}
+                        >
+                          <span className="font-medium text-accent">@{team.alias}</span>
+                          <span className="ml-2 text-muted-foreground">
+                            {t('chat.mentionTeamDesc', { name: team.name, count: team.memberCount })}
+                          </span>
+                        </button>
+                      ))}
+                      {mentionCandidates.length === 0 &&
+                      specials.length === 0 &&
+                      teamMentionCandidates.length === 0 ? (
+                        <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingPeople')}</div>
+                      ) : (
+                        mentionCandidates.slice(0, 6).map((member) => (
+                          <button
+                            key={member.userId}
+                            type="button"
+                            className={rowClass}
+                            onClick={() => insertMentionToken(`<@${member.userId}>`)}
+                          >
+                            <span className="font-medium text-foreground">{member.displayName || member.email}</span>
+                            <span className="ml-2 text-muted-foreground">{member.email}</span>
+                          </button>
+                        ))
+                      )}
+                    </>
+                  )}
+                  {mentionTab === 'tasks' &&
+                    (taskMentionCandidates.length === 0 ? (
+                      <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingTasks')}</div>
+                    ) : (
+                      taskMentionCandidates.slice(0, 6).map((task) => (
+                        <button
+                          key={task.id}
+                          type="button"
+                          className={rowClass}
+                          onClick={() =>
+                            insertMentionToken(
+                              `/app/${workspaceId}/${task.spaceId}/${task.projectId}/${task.listId}?task=${task.id}`,
+                            )
+                          }
+                        >
+                          <div className="truncate font-medium text-foreground">{task.title}</div>
+                          <div className="truncate text-[11px] text-muted-foreground">
+                            {task.projectName ?? task.listName ?? ''}
+                          </div>
+                        </button>
+                      ))
+                    ))}
+                  {mentionTab === 'docs' &&
+                    (docMentionCandidates.length === 0 ? (
+                      <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingDocs')}</div>
+                    ) : (
+                      docMentionCandidates.slice(0, 6).map((doc) => (
+                        <button
+                          key={doc.id}
+                          type="button"
+                          className={rowClass}
+                          onClick={() => insertMentionToken(`${t('chat.docPrefix')}${doc.title}`)}
+                        >
+                          <div className="truncate font-medium text-foreground">{doc.title}</div>
+                        </button>
+                      ))
+                    ))}
+                  {mentionTab === 'channels' &&
+                    (channelMatches.length === 0 ? (
+                      <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingChannels')}</div>
+                    ) : (
+                      channelMatches.slice(0, 6).map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className={rowClass}
+                          onClick={() => insertMentionToken(`[#${c.name}](/app/${workspaceId}/chat?channel=${c.id})`)}
+                        >
+                          <span className="font-medium text-foreground">#{c.name}</span>
+                          {c.isPrivate && <Lock className="ml-2 inline h-3 w-3 text-muted-foreground" />}
+                        </button>
+                      ))
+                    ))}
+                </div>
               </div>
             )
           })()}
@@ -1773,8 +2419,15 @@ export function ChatPage() {
           <ThreadPanel
             parent={threadParent}
             replies={threadReplies}
+            loading={threadQuery.isLoading}
+            channelLabel={channelLabel}
+            currentUserId={me?.id}
             onClose={() => setThreadParentId(null)}
             onReply={handleThreadReply}
+            onToggleReaction={(messageId, emoji) => toggleReactionMutation.mutate({ messageId, emoji })}
+            onMarkUnread={(messageId) =>
+              markUnreadMutation.mutate({ channelId: threadParent.channelId, messageId })
+            }
             pending={sendMutation.isPending}
             namesById={namesById}
             customEmoji={customEmoji}
@@ -1833,14 +2486,41 @@ export function ChatPage() {
             onUpdateTags={(messageId, tags) => updateSavedTagsMutation.mutate({ messageId, tags })}
           />
         )}
+        {showInfoPanel && selectedChannel && !selectedChannel.isDm && (
+          <ChannelInfoPanel
+            channel={selectedChannel}
+            members={channelMembersQuery.data ?? []}
+            spaceName={spaceOptions.find((sp) => sp.id === selectedChannel.spaceId)?.name ?? null}
+            canEdit={selectedChannel.createdById === me?.id}
+            onEdit={() => {
+              setEditName(selectedChannel.name)
+              setEditTopic(selectedChannel.topic ?? '')
+              setEditDescription(selectedChannel.description ?? '')
+              setEditIcon(selectedChannel.icon ?? '')
+              setEditChannelOpen(true)
+            }}
+            onAddPeople={() => setAddPeopleOpen(true)}
+            onOpenFiles={() => {
+              setShowInfoPanel(false)
+              setShowFilesPanel(true)
+            }}
+            onClose={() => setShowInfoPanel(false)}
+          />
+        )}
         {showFilesPanel && (
-          <FilesPanel workspaceId={workspaceId} onClose={() => setShowFilesPanel(false)} />
+          <FilesPanel
+            workspaceId={workspaceId}
+            channelId={selectedChannel?.id}
+            channelLabel={channelLabel}
+            onClose={() => setShowFilesPanel(false)}
+          />
         )}
         {showSearchPanel && (
           <SearchPanel
             workspaceId={workspaceId}
             channels={channels}
             members={membersQuery.data ?? []}
+            defaultChannelId={selectedChannel && !selectedChannel.isDm ? selectedChannel.id : undefined}
             onClose={() => setShowSearchPanel(false)}
             onSelectResult={(r) => {
               // Reuse the app's existing ?channel=&message= deep-link so the
@@ -2138,16 +2818,31 @@ type ChatSearchResult = {
  * can read, with filename search + a coarse content-type filter. Mirrors the
  * Pinned / Saved side panels. Files carry fresh signed download URLs.
  */
-function FilesPanel({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+function FilesPanel({
+  workspaceId,
+  channelId,
+  channelLabel,
+  onClose,
+}: {
+  workspaceId: string
+  channelId?: string
+  channelLabel: string
+  onClose: () => void
+}) {
   const { t } = useTranslation()
   const [q, setQ] = useState('')
   const [type, setType] = useState('')
+  // Opens on the channel you're reading (§A3.7); the whole workspace library is
+  // one click away.
+  const [thisChannelOnly, setThisChannelOnly] = useState(true)
+  const scopedChannelId = thisChannelOnly ? channelId : undefined
   const filesQuery = useQuery({
-    queryKey: ['chat-files', workspaceId, q, type],
+    queryKey: ['chat-files', workspaceId, q, type, scopedChannelId ?? ''],
     queryFn: () => {
       const params = new URLSearchParams()
       if (q.trim()) params.set('q', q.trim())
       if (type) params.set('type', type)
+      if (scopedChannelId) params.set('channelId', scopedChannelId)
       return api<ChatFile[]>(`/workspaces/${workspaceId}/chat/files?${params.toString()}`)
     },
     enabled: !!workspaceId,
@@ -2181,6 +2876,28 @@ function FilesPanel({ workspaceId, onClose }: { workspaceId: string; onClose: ()
           <option value="video">{t('chat.fileTypeVideos')}</option>
           <option value="audio">{t('chat.fileTypeAudio')}</option>
         </select>
+        {channelId && (
+          <div className="flex items-center gap-1">
+            {([
+              [true, channelLabel || t('chat.thisChannel')],
+              [false, t('chat.allChannels')],
+            ] as const).map(([scoped, label]) => (
+              <button
+                key={String(scoped)}
+                type="button"
+                onClick={() => setThisChannelOnly(scoped)}
+                className={cn(
+                  'truncate rounded-full border px-2 py-0.5 text-[10px] transition-colors',
+                  thisChannelOnly === scoped
+                    ? 'border-violet-500/40 bg-violet-500/15 text-violet-600 dark:text-violet-300'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
         {filesQuery.isLoading ? (
@@ -2224,18 +2941,21 @@ function SearchPanel({
   workspaceId,
   channels,
   members,
+  defaultChannelId,
   onClose,
   onSelectResult,
 }: {
   workspaceId: string
   channels: Channel[]
   members: WorkspaceMember[]
+  /** Search opens scoped to the channel being read (§A3.7). */
+  defaultChannelId?: string
   onClose: () => void
   onSelectResult: (r: ChatSearchResult) => void
 }) {
   const { t } = useTranslation()
   const [q, setQ] = useState('')
-  const [channelId, setChannelId] = useState('')
+  const [channelId, setChannelId] = useState(defaultChannelId ?? '')
   const [senderId, setSenderId] = useState('')
   const [after, setAfter] = useState('')
   const [before, setBefore] = useState('')
@@ -2370,8 +3090,13 @@ function SearchPanel({
 function ThreadPanel({
   parent,
   replies,
+  loading,
+  channelLabel,
+  currentUserId,
   onClose,
   onReply,
+  onToggleReaction,
+  onMarkUnread,
   pending,
   namesById,
   customEmoji,
@@ -2379,19 +3104,91 @@ function ThreadPanel({
 }: {
   parent: Message
   replies: Message[]
+  loading: boolean
+  channelLabel: string
+  currentUserId?: string
   onClose: () => void
-  onReply: (body: string) => void
+  onReply: (body: string, alsoSendToChannel: boolean) => void
+  onToggleReaction: (messageId: string, emoji: string) => void
+  onMarkUnread: (messageId: string) => void
   pending: boolean
   namesById: Record<string, string>
   customEmoji?: CustomEmoji[]
   emojiByCode: Map<string, string>
 }) {
   const [draft, setDraft] = useState('')
-  const { t } = useTranslation()
+  // "Also send to #channel" resets after each reply so a one-off broadcast
+  // doesn't quietly repeat on the next one.
+  const [alsoSend, setAlsoSend] = useState(false)
+  const { t, tCount } = useTranslation()
+
+  // Followers are the people already in the conversation — the author and
+  // everyone who replied (§A3.2).
+  const followers = useMemo(() => {
+    const byId = new Map<string, string>()
+    for (const message of [parent, ...replies]) {
+      byId.set(message.authorId, message.authorName ?? namesById[message.authorId] ?? t('chat.unknownUser'))
+    }
+    return [...byId.entries()].map(([userId, name]) => ({ userId, name }))
+  }, [parent, replies, namesById, t])
+
+  const reactionRow = (message: Message) =>
+    !!message.reactions?.length && (
+      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        {message.reactions.map((r) => {
+          const code = /^:([a-z0-9_]+):$/.exec(r.emoji)?.[1]
+          const customUrl = code ? emojiByCode.get(code) : undefined
+          return (
+            <button
+              key={`${message.id}-${r.emoji}`}
+              type="button"
+              onClick={() => onToggleReaction(message.id, r.emoji)}
+              className={cn(
+                'flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] transition-colors',
+                r.reacted ? 'border-accent/60 bg-accent/10 text-accent' : 'border-border/70',
+              )}
+            >
+              {customUrl ? <img src={customUrl} alt={code} className="h-3.5 w-3.5 object-contain" /> : <span>{r.emoji}</span>}
+              {r.count}
+            </button>
+          )
+        })}
+      </div>
+    )
+
+  const quickReact = (message: Message) => (
+    <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100">
+      {['👍', '🎉', '❤️'].map((emoji) => (
+        <button
+          key={`${message.id}-quick-${emoji}`}
+          type="button"
+          title={t('chat.react')}
+          className="h-5 w-5 rounded text-[11px] hover:bg-muted"
+          onClick={() => onToggleReaction(message.id, emoji)}
+        >
+          {emoji}
+        </button>
+      ))}
+      <button
+        type="button"
+        title={t('chat.markUnreadFromHere')}
+        className="h-5 w-5 rounded text-muted-foreground hover:bg-muted hover:text-foreground flex items-center justify-center"
+        onClick={() => onMarkUnread(message.id)}
+      >
+        <MailOpen className="h-3 w-3" />
+      </button>
+    </div>
+  )
+
   return (
     <aside className="relative z-50 hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col">
       <div className="h-[52px] shrink-0 border-b border-border/80 px-4 flex items-center justify-between bg-background">
-        <div className="text-[14px] font-semibold text-foreground">{t('chat.thread')}</div>
+        <div className="min-w-0">
+          <div className="text-[14px] font-semibold text-foreground">{t('chat.thread')}</div>
+          <div className="truncate text-[11px] text-muted-foreground" title={followers.map((f) => f.name).join(', ')}>
+            {tCount('chat.threadFollowers', followers.length)}
+          </div>
+        </div>
         <button
           type="button"
           className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
@@ -2401,39 +3198,64 @@ function ThreadPanel({
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white dark:bg-[#0f1114]">
-        <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
-          <div className="text-[12px] font-semibold text-foreground mb-1">{parent.authorName ?? t('chat.unknownUser')}</div>
+        <div className="group/msg rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
+          <div className="mb-1 flex items-baseline gap-1.5">
+            <span className="text-[12px] font-semibold text-foreground">{parent.authorName ?? t('chat.unknownUser')}</span>
+            <span className="text-[10px] tabular-nums text-muted-foreground">{formatMessageTime(parent.createdAt)}</span>
+          </div>
           <ChatMessageBody text={parent.body} namesById={namesById} customEmoji={emojiByCode} className="text-[14px] leading-relaxed" />
+          {reactionRow(parent)}
+          {quickReact(parent)}
         </div>
         {replies.map((reply) => (
-          <div key={reply.id} className="rounded-lg border border-border/70 bg-background p-3">
-            <div className="text-[12px] font-semibold text-foreground mb-1">{reply.authorName ?? t('chat.unknownUser')}</div>
+          <div key={reply.id} className="group/msg rounded-lg border border-border/70 bg-background p-3">
+            <div className="mb-1 flex items-baseline gap-1.5">
+              <span className="text-[12px] font-semibold text-foreground">
+                {reply.authorName ?? namesById[reply.authorId] ?? t('chat.unknownUser')}
+              </span>
+              <span className="text-[10px] tabular-nums text-muted-foreground">{formatMessageTime(reply.createdAt)}</span>
+              {reply.authorId === currentUserId && <span className="text-[10px] text-muted-foreground">· {t('chat.you')}</span>}
+            </div>
             <ChatMessageBody text={reply.body} namesById={namesById} customEmoji={emojiByCode} className="text-[14px] leading-relaxed" />
+            {reactionRow(reply)}
+            {quickReact(reply)}
           </div>
         ))}
-        {replies.length === 0 && (
-          <p className="text-[12px] text-muted-foreground text-center py-6">{t('chat.noRepliesYet')}</p>
+        {loading && replies.length === 0 && (
+          <p className="py-6 text-center text-[12px] text-muted-foreground">{t('common.loading')}</p>
+        )}
+        {!loading && replies.length === 0 && (
+          <p className="py-6 text-center text-[12px] text-muted-foreground">{t('chat.noRepliesYet')}</p>
         )}
       </div>
-      <div className="shrink-0 border-t border-border/80 p-3 bg-[#fbfbfc] dark:bg-[#16181d]">
+      <div className="shrink-0 border-t border-border/80 p-3 bg-[#fbfbfc] dark:bg-[#16181d] space-y-2">
         <ThreadReplyComposer
           value={draft}
           onChange={setDraft}
           onSend={() => {
             const body = draft.trim()
             if (!body) return
-            onReply(body)
+            onReply(body, alsoSend)
             setDraft('')
+            setAlsoSend(false)
           }}
           disabled={false}
           sending={pending}
           customEmoji={customEmoji}
         />
+        <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={alsoSend}
+            onChange={(e) => setAlsoSend(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-border"
+          />
+          {t('chat.alsoSendToChannel', { channel: channelLabel })}
+        </label>
       </div>
     </aside>
   )
 }
-
 
 function ProfilePanel({
   member,
@@ -2575,6 +3397,201 @@ function ProfilePanel({
               </div>
             )}
           </div>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+/**
+ * Insert row picker (§A3.5): search the workspace's tasks and docs and drop a
+ * reference into the draft. A task is inserted as its in-app URL because the
+ * message renderer already unfurls that into a task card.
+ */
+function InsertReferencePicker({
+  workspaceId,
+  onInsertTask,
+  onInsertDoc,
+}: {
+  workspaceId: string
+  onInsertTask: (task: MentionTask) => void
+  onInsertDoc: (doc: MentionDoc) => void
+}) {
+  const { t } = useTranslation()
+  const [tab, setTab] = useState<'tasks' | 'docs'>('tasks')
+  const [q, setQ] = useState('')
+  const tasksQuery = useQuery({
+    queryKey: ['chat-insert-tasks', workspaceId],
+    queryFn: () => api<MentionTask[]>(`/tasks/workspace/${workspaceId}?limit=200`),
+    enabled: !!workspaceId && tab === 'tasks',
+  })
+  const docsQuery = useQuery({
+    queryKey: ['chat-insert-docs', workspaceId],
+    queryFn: () => api<MentionDoc[]>(`/workspaces/${workspaceId}/docs`),
+    enabled: !!workspaceId && tab === 'docs',
+  })
+  const needle = q.trim().toLowerCase()
+  const tasks = (tasksQuery.data ?? []).filter((task) =>
+    `${task.title} ${task.projectName ?? ''} ${task.listName ?? ''}`.toLowerCase().includes(needle),
+  )
+  const docs = (docsQuery.data ?? []).filter((doc) => doc.title.toLowerCase().includes(needle))
+  const rowClass = 'w-full px-3 py-2 text-left text-[13px] hover:bg-violet-500/8'
+  return (
+    <div>
+      <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1.5">
+        {([
+          ['tasks', t('chat.insertTask')],
+          ['docs', t('chat.insertDoc')],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={cn(
+              'rounded px-2 py-1 text-[11px]',
+              tab === id ? 'bg-accent/15 font-medium text-foreground' : 'text-muted-foreground hover:bg-muted',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="p-2">
+        <input
+          autoFocus
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={t('chat.insertSearchPlaceholder')}
+          className="h-8 w-full rounded border border-border bg-background px-2 text-[13px] text-foreground"
+        />
+      </div>
+      <div className="max-h-56 overflow-y-auto pb-1">
+        {tab === 'tasks' &&
+          (tasksQuery.isLoading ? (
+            <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('common.loading')}</div>
+          ) : tasks.length === 0 ? (
+            <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingTasks')}</div>
+          ) : (
+            tasks.slice(0, 20).map((task) => (
+              <button key={task.id} type="button" className={rowClass} onClick={() => onInsertTask(task)}>
+                <div className="truncate font-medium text-foreground">{task.title}</div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {task.projectName ?? task.listName ?? ''}
+                </div>
+              </button>
+            ))
+          ))}
+        {tab === 'docs' &&
+          (docsQuery.isLoading ? (
+            <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('common.loading')}</div>
+          ) : docs.length === 0 ? (
+            <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingDocs')}</div>
+          ) : (
+            docs.slice(0, 20).map((doc) => (
+              <button key={doc.id} type="button" className={rowClass} onClick={() => onInsertDoc(doc)}>
+                <div className="truncate font-medium text-foreground">{doc.title}</div>
+              </button>
+            ))
+          ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Channel info panel (§A3.7): topic, description, access and the people in the
+ * channel, in one place. The edit modal used to be the only home for any of
+ * this, which meant you had to open a form to read a description.
+ */
+function ChannelInfoPanel({
+  channel,
+  members,
+  spaceName,
+  canEdit,
+  onEdit,
+  onAddPeople,
+  onOpenFiles,
+  onClose,
+}: {
+  channel: Channel
+  members: WorkspaceMember[]
+  spaceName?: string | null
+  canEdit: boolean
+  onEdit?: () => void
+  onAddPeople?: () => void
+  onOpenFiles: () => void
+  onClose: () => void
+}) {
+  const { t, tCount } = useTranslation()
+  return (
+    <aside className="hidden xl:flex w-80 border-l border-border flex-col">
+      <div className="h-12 border-b border-border px-3 flex items-center justify-between">
+        <div className="text-sm font-semibold flex items-center gap-1.5">
+          <Info className="h-3.5 w-3.5" /> {t('chat.channelInfo')}
+        </div>
+        <button className="text-xs text-muted-foreground hover:text-foreground" onClick={onClose}>
+          {t('common.close')}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600 dark:text-violet-300">
+            {channel.icon ? <span className="text-[17px] leading-none">{channel.icon}</span> : <Hash className="h-4 w-4" />}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-semibold text-foreground">#{channel.name}</div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              {channel.isPrivate ? t('chat.privateChannel') : t('chat.publicChannel')}
+              {spaceName ? ` · ${spaceName}` : ''}
+            </div>
+          </div>
+        </div>
+
+        <section className="rounded-lg border border-border/70 bg-background p-3">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.channelTopic')}</div>
+          <p className="mt-1 text-[13px] text-foreground/90">{channel.topic || t('chat.noTopicYet')}</p>
+        </section>
+
+        <section className="rounded-lg border border-border/70 bg-background p-3">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.channelDescription')}</div>
+          <p className="mt-1 whitespace-pre-wrap text-[13px] text-foreground/90">
+            {channel.description || t('chat.noDescriptionYet')}
+          </p>
+        </section>
+
+        <section className="rounded-lg border border-border/70 bg-background p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.members')}</div>
+            <span className="text-[11px] text-muted-foreground">{tCount('chat.memberCount', members.length)}</span>
+          </div>
+          <div className="mt-1.5 space-y-1">
+            {members.slice(0, 8).map((member) => (
+              <div key={member.userId} className="truncate text-[12px] text-foreground/90">
+                {member.displayName || member.email}
+              </div>
+            ))}
+            {members.length > 8 && (
+              <div className="text-[11px] text-muted-foreground">
+                {t('chat.andMore', { count: members.length - 8 })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <div className="flex flex-wrap gap-2">
+          {canEdit && onEdit && (
+            <Button size="sm" variant="secondary" onClick={onEdit}>
+              {t('chat.editChannel')}
+            </Button>
+          )}
+          {onAddPeople && (
+            <Button size="sm" variant="secondary" onClick={onAddPeople}>
+              {t('chat.addPeople')}
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={onOpenFiles}>
+            {t('chat.files')}
+          </Button>
         </div>
       </div>
     </aside>

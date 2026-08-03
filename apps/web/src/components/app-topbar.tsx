@@ -18,6 +18,7 @@ import {
   Check,
   Inbox as InboxIcon,
   Square,
+  BellOff,
 } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import {
@@ -51,6 +52,8 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { MentionText } from './mention-text'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useMentionNames } from '../hooks/use-mention-names'
+import { useResolvedFlags } from '../lib/use-feature-flags'
+import { FLAGS } from '@rundesk/feature-flags'
 
 type Workspace = { id: string; name: string; slug: string }
 type WorkspaceEntry = { workspace: Workspace; role: string }
@@ -66,9 +69,14 @@ function isUuidLike(value?: string): value is string {
 export function AppTopbar({
   onCommandOpen,
   onMenuOpen,
+  onAiToggle,
+  aiOpen,
 }: {
   onCommandOpen?: (query?: string) => void
   onMenuOpen?: () => void
+  /** §A6.4 — omitted outside a workspace, where the assistant has nothing to ground on. */
+  onAiToggle?: () => void
+  aiOpen?: boolean
 }) {
   const { t } = useTranslation()
   const params = useParams({ strict: false }) as {
@@ -94,6 +102,9 @@ export function AppTopbar({
       <div className="flex-1" />
       <TimerIndicator />
       <SearchBar onCommandOpen={onCommandOpen} />
+      {onAiToggle && isUuidLike(params.workspaceId) && (
+        <AiDockToggle workspaceId={params.workspaceId} onToggle={onAiToggle} open={!!aiOpen} />
+      )}
       <QuickCreateButton />
       <LanguageSwitcher withIcon={false} className="hidden sm:inline-flex" />
       <ThemeToggle />
@@ -408,6 +419,43 @@ function QuickCreateButton() {
 // ---------------------------------------------------------------------------
 // Theme toggle
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// §A6.4 — the assistant's app-wide handle. The panel itself is docked by the
+// app shell; this only flips it open and closed.
+// ---------------------------------------------------------------------------
+function AiDockToggle({
+  workspaceId,
+  onToggle,
+  open,
+}: {
+  workspaceId: string
+  onToggle: () => void
+  open: boolean
+}) {
+  const { t } = useTranslation()
+  const { featureEnabled } = useResolvedFlags(workspaceId)
+  // A workspace that switched AI off should not be offered the handle.
+  if (!featureEnabled(FLAGS.AI)) return null
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onToggle}
+          aria-pressed={open}
+          aria-label={t('topbar.askAi')}
+          className={cn(
+            'h-9 w-9 rounded-lg flex items-center justify-center transition-colors',
+            open ? 'bg-accent/15 text-accent' : 'hover:bg-card/60 text-muted-foreground',
+          )}
+        >
+          <Sparkles className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{t('topbar.askAi')}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 function ThemeToggle() {
   const theme = useThemeStore((s) => s.theme)
   const toggle = useThemeStore((s) => s.toggle)
@@ -717,12 +765,56 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
 // ---------------------------------------------------------------------------
 // User menu
 // ---------------------------------------------------------------------------
+/** §A4.8 — the statuses a person can put on themselves, in menu order. */
+const PRESENCE_CHOICES = [
+  { value: null, labelKey: 'topbar.presenceAuto', dot: 'bg-emerald-500' },
+  { value: 'away', labelKey: 'topbar.presenceAway', dot: 'bg-amber-400' },
+  { value: 'busy', labelKey: 'topbar.presenceBusy', dot: 'bg-rose-500' },
+  { value: 'offline', labelKey: 'topbar.presenceInvisible', dot: 'bg-muted-foreground/40' },
+] as const
+
 function UserMenu({ workspaceId }: { workspaceId?: string }) {
   const user = useAuthStore((s) => s.user)
   const refreshToken = useAuthStore((s) => s.refreshToken)
   const clear = useAuthStore((s) => s.clear)
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const { t } = useTranslation()
+
+  // Presence and quiet hours are both "am I reachable right now" answers, so the
+  // avatar menu — where you already go to signal you are leaving — is where they
+  // belong, rather than two levels deep in personal settings.
+  const meQuery = useQuery({
+    queryKey: ['users', 'me'],
+    queryFn: () => api<{ presenceStatus?: 'online' | 'away' | 'busy' | 'offline' | null }>('/users/me'),
+    staleTime: 60_000,
+  })
+  const prefsQuery = useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: () => api<NotificationPreferences>('/notifications/preferences'),
+    staleTime: 30_000,
+  })
+
+  const setPresence = useMutation({
+    mutationFn: (status: 'away' | 'busy' | 'offline' | null) =>
+      api('/presence/me', { method: 'PUT', body: { status } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users', 'me'] })
+      qc.invalidateQueries({ queryKey: ['presence'] })
+    },
+  })
+
+  const toggleMute = useMutation({
+    mutationFn: (dndOn: boolean) =>
+      api('/notifications/preferences', { method: 'POST', body: { channels: { dndOn } } }),
+    onSuccess: (_data, dndOn) => {
+      toast.success(dndOn ? t('topbar.notificationsMuted') : t('topbar.notificationsUnmuted'))
+      qc.invalidateQueries({ queryKey: ['notification-preferences'] })
+    },
+  })
+
+  const presence = meQuery.data?.presenceStatus ?? null
+  const muted = prefsQuery.data?.channels?.dndOn ?? false
 
   async function handleSignOut() {
     try {
@@ -764,6 +856,35 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
             )}
           </div>
         </div>
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1.5">
+          <div className="px-1 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+            {t('topbar.presenceHeading')}
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {PRESENCE_CHOICES.map((choice) => (
+              <button
+                key={choice.labelKey}
+                type="button"
+                onClick={() => setPresence.mutate(choice.value)}
+                disabled={setPresence.isPending}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+                  presence === choice.value
+                    ? 'bg-accent/15 text-foreground font-medium'
+                    : 'text-muted-foreground hover:bg-accent/10',
+                )}
+              >
+                <span className={cn('h-2 w-2 rounded-full', choice.dot)} />
+                {t(choice.labelKey)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); toggleMute.mutate(!muted) }}>
+          {muted ? <BellOff className="h-4 w-4 text-muted-foreground" /> : <Bell className="h-4 w-4 text-muted-foreground" />}
+          {muted ? t('topbar.unmuteNotifications') : t('topbar.muteNotifications')}
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate({ to: '/app/profile' })}>
           <UserIcon className="h-4 w-4 text-muted-foreground" />

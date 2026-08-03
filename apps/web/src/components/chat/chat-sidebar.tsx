@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
-import { Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, Hash, Lock, MessageSquarePlus, Plus, Search, Users } from 'lucide-react'
-import { Button, Input, cn } from '@rundesk/ui'
-import type { ChatChannel, ChatMember, ChatSpace } from './chat-types'
+import { Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, FolderPlus, Hash, Lock, MessageSquarePlus, MoreHorizontal, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react'
+import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Input, cn } from '@rundesk/ui'
+import type { ChatChannel, ChatChannelGroup, ChatMember, ChatSpace } from './chat-types'
 import { initials } from './chat-utils'
 import { usePresence, presenceDotClass, type PresenceStatus } from '../../lib/use-presence'
 import { useTranslation } from '../../lib/i18n'
@@ -38,6 +38,13 @@ export function ChatSidebar({
   startDmPending,
   pendingInvites,
   channelsLoading,
+  channelGroups,
+  onCreateGroup,
+  onRenameGroup,
+  onDeleteGroup,
+  onToggleGroupCollapsed,
+  onAssignChannelToGroup,
+  onRemoveChannelFromGroup,
 }: {
   channels: ChatChannel[]
   dmChannels: ChatChannel[]
@@ -68,6 +75,14 @@ export function ChatSidebar({
   startDmPending: boolean
   pendingInvites: PendingInvite[]
   channelsLoading: boolean
+  // User-named channel groups (§A3.4).
+  channelGroups: ChatChannelGroup[]
+  onCreateGroup: (name: string) => void
+  onRenameGroup: (groupId: string, name: string) => void
+  onDeleteGroup: (groupId: string) => void
+  onToggleGroupCollapsed: (groupId: string, isCollapsed: boolean) => void
+  onAssignChannelToGroup: (groupId: string, channelId: string) => void
+  onRemoveChannelFromGroup: (groupId: string, channelId: string) => void
 }) {
   const { statusOf } = usePresence(workspaceId)
   const { t, tCount } = useTranslation()
@@ -87,6 +102,14 @@ export function ChatSidebar({
     })
   const atPeerLimit = selectedPeers.length >= MAX_DM_PEERS
 
+  // Channel groups (§A3.4): inline create + rename, and a drag target per group
+  // so filing a channel is a drag rather than a trip through a menu.
+  const [creatingGroup, setCreatingGroup] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null)
+
   const q = channelSearch.trim().toLowerCase()
   const filteredChannels = q
     ? channels.filter((c) => c.name.toLowerCase().includes(q))
@@ -97,12 +120,21 @@ export function ChatSidebar({
     ? archivedChannels.filter((c) => c.name.toLowerCase().includes(q))
     : archivedChannels
 
+  // User-named groups (§A3.4) win over space-derived grouping: a channel filed
+  // into a bucket renders there and nowhere else, so the rail never doubles up.
+  const groupIdByChannel = new Map<string, string>()
+  for (const group of channelGroups) {
+    for (const channelId of group.channelIds) groupIdByChannel.set(channelId, group.id)
+  }
+  const channelById = new Map(channels.map((c) => [c.id, c]))
+  const ungroupedChannels = filteredChannels.filter((c) => !groupIdByChannel.has(c.id))
+
   // Group space-scoped channels under their space (Plan §6.1); workspace-level
   // channels (no spaceId) stay in the top list.
   const spaceById = new Map(spaces.map((s) => [s.id, s]))
-  const workspaceChannels = filteredChannels.filter((c) => !c.spaceId)
+  const workspaceChannels = ungroupedChannels.filter((c) => !c.spaceId)
   const channelsBySpace = new Map<string, ChatChannel[]>()
-  for (const c of filteredChannels) {
+  for (const c of ungroupedChannels) {
     if (!c.spaceId) continue
     const arr = channelsBySpace.get(c.spaceId) ?? []
     arr.push(c)
@@ -144,14 +176,24 @@ export function ChatSidebar({
             <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
               {t('chat.channels')}
             </span>
-            <button
-              type="button"
-              className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-              onClick={onToggleCreate}
-              title={t('chat.createChannel')}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                onClick={() => setCreatingGroup((v) => !v)}
+                title={t('chat.newGroup')}
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                className="h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                onClick={onToggleCreate}
+                title={t('chat.createChannel')}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
 
           {creating && (
@@ -205,6 +247,162 @@ export function ChatSidebar({
             </div>
           )}
 
+          {creatingGroup && (
+            <div className="mb-2 px-1">
+              <Input
+                autoFocus
+                placeholder={t('chat.groupNamePlaceholder')}
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                className="h-8 text-[13px] rounded-md"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newGroupName.trim()) {
+                    onCreateGroup(newGroupName.trim())
+                    setNewGroupName('')
+                    setCreatingGroup(false)
+                  }
+                  if (e.key === 'Escape') {
+                    setNewGroupName('')
+                    setCreatingGroup(false)
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          {/* User-named groups (§A3.4) — collapsible, renameable, drop targets. */}
+          {channelGroups.map((group) => {
+            const groupChannels = group.channelIds
+              .map((id) => channelById.get(id))
+              .filter((c): c is ChatChannel => !!c && (!q || c.name.toLowerCase().includes(q)))
+            return (
+              <div
+                key={group.id}
+                className={cn('mb-1 rounded-md', dragOverGroupId === group.id && 'bg-violet-500/10 ring-1 ring-violet-500/40')}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDragOverGroupId(group.id)
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                  setDragOverGroupId(null)
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  setDragOverGroupId(null)
+                  const channelId = e.dataTransfer.getData('text/rundesk-channel')
+                  if (channelId) onAssignChannelToGroup(group.id, channelId)
+                }}
+              >
+                <div className="group/hdr flex items-center gap-1 px-1.5 py-1">
+                  <button
+                    type="button"
+                    onClick={() => onToggleGroupCollapsed(group.id, !group.isCollapsed)}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    {group.isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
+                  {/* The rename field lives outside the collapse button so a
+                      click lands in the input instead of folding the group. */}
+                  {renamingGroupId === group.id ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => setRenamingGroupId(null)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && renameValue.trim()) {
+                          onRenameGroup(group.id, renameValue.trim())
+                          setRenamingGroupId(null)
+                        }
+                        if (e.key === 'Escape') setRenamingGroupId(null)
+                      }}
+                      className="h-6 min-w-0 flex-1 rounded border border-border bg-background px-1.5 text-[12px] text-foreground"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onToggleGroupCollapsed(group.id, !group.isCollapsed)}
+                      className="min-w-0 flex-1 truncate text-left text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground hover:text-foreground"
+                    >
+                      {group.name}
+                    </button>
+                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        title={t('chat.groupActions')}
+                        className="h-5 w-5 shrink-0 rounded text-muted-foreground opacity-0 group-hover/hdr:opacity-100 hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] flex items-center justify-center"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-44">
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setRenamingGroupId(group.id)
+                          setRenameValue(group.name)
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                        {t('chat.renameGroup')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem destructive onClick={() => onDeleteGroup(group.id)}>
+                        <Trash2 className="h-4 w-4" />
+                        {t('chat.deleteGroup')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        title={t('chat.addChannelToGroup')}
+                        className="h-5 w-5 shrink-0 rounded text-muted-foreground opacity-0 group-hover/hdr:opacity-100 hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] flex items-center justify-center"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="max-h-64 w-52 overflow-y-auto">
+                      {ungroupedChannels.length === 0 ? (
+                        <DropdownMenuItem disabled>{t('chat.everyChannelGrouped')}</DropdownMenuItem>
+                      ) : (
+                        ungroupedChannels.map((c) => (
+                          <DropdownMenuItem key={`add-${group.id}-${c.id}`} onClick={() => onAssignChannelToGroup(group.id, c.id)}>
+                            <Hash className="h-4 w-4" />
+                            {c.name}
+                          </DropdownMenuItem>
+                        ))
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                {!group.isCollapsed && (
+                  <div className="space-y-0.5">
+                    {groupChannels.length === 0 ? (
+                      <p className="px-2 py-1.5 text-[11px] text-muted-foreground">{t('chat.dropChannelHere')}</p>
+                    ) : (
+                      groupChannels.map((c) => (
+                        <ChannelRow
+                          key={c.id}
+                          active={selectedId === c.id}
+                          onClick={() => onSelectChannel(c.id)}
+                          icon={channelIcon(c)}
+                          label={c.name}
+                          unread={c.unreadCount ?? 0}
+                          channelId={c.id}
+                          onRemove={() => onRemoveChannelFromGroup(group.id, c.id)}
+                          removeTitle={t('chat.removeFromGroup')}
+                        />
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
           <div className="space-y-0.5">
             {workspaceChannels.map((c) => (
               <ChannelRow
@@ -214,6 +412,7 @@ export function ChatSidebar({
                 icon={channelIcon(c)}
                 label={c.name}
                 unread={c.unreadCount ?? 0}
+                channelId={c.id}
               />
             ))}
             {filteredChannels.length === 0 && !channelsLoading && (
@@ -239,6 +438,7 @@ export function ChatSidebar({
                     icon={channelIcon(c)}
                     label={c.name}
                     unread={c.unreadCount ?? 0}
+                    channelId={c.id}
                   />
                 ))}
               </div>
@@ -408,35 +608,67 @@ function ChannelRow({
   icon,
   label,
   unread = 0,
+  channelId,
+  onRemove,
+  removeTitle,
 }: {
   active: boolean
   onClick: () => void
   icon: ReactNode
   label: string
   unread?: number
+  /** Set on channel rows so they can be dragged into a group (§A3.4). */
+  channelId?: string
+  onRemove?: () => void
+  removeTitle?: string
 }) {
   const hasUnread = unread > 0 && !active
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
-        'w-full flex items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px] transition-colors',
+        'group/row flex items-center gap-1 rounded-md pr-1 transition-colors',
         active
-          ? 'bg-violet-500/12 text-violet-700 dark:text-violet-200 font-medium'
-          : hasUnread
-            ? 'text-foreground font-semibold hover:bg-black/[0.04] dark:hover:bg-white/[0.05]'
-            : 'text-foreground/85 hover:bg-black/[0.04] dark:hover:bg-white/[0.05]',
+          ? 'bg-violet-500/12'
+          : 'hover:bg-black/[0.04] dark:hover:bg-white/[0.05]',
       )}
+      draggable={!!channelId}
+      onDragStart={(e) => {
+        if (!channelId) return
+        e.dataTransfer.setData('text/rundesk-channel', channelId)
+        e.dataTransfer.effectAllowed = 'move'
+      }}
     >
-      {icon}
-      <span className="truncate flex-1">{label}</span>
-      {hasUnread && (
-        <span className="ml-auto shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-violet-600 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
-          {unread > 99 ? '99+' : unread}
-        </span>
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px]',
+          active
+            ? 'text-violet-700 dark:text-violet-200 font-medium'
+            : hasUnread
+              ? 'text-foreground font-semibold'
+              : 'text-foreground/85',
+        )}
+      >
+        {icon}
+        <span className="truncate flex-1">{label}</span>
+        {hasUnread && (
+          <span className="ml-auto shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full bg-violet-600 text-white text-[11px] font-semibold flex items-center justify-center tabular-nums">
+            {unread > 99 ? '99+' : unread}
+          </span>
+        )}
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          title={removeTitle}
+          onClick={onRemove}
+          className="h-5 w-5 shrink-0 rounded text-muted-foreground opacity-0 group-hover/row:opacity-100 hover:text-foreground hover:bg-black/[0.06] dark:hover:bg-white/[0.08] flex items-center justify-center"
+        >
+          <X className="h-3 w-3" />
+        </button>
       )}
-    </button>
+    </div>
   )
 }
 

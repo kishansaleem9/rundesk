@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { eq, and, or, ne, inArray } from 'drizzle-orm'
-import { spaces, spaceMembers, folders, projects, lists } from '@rundesk/db'
+import { spaces, spaceMembers, folders, projects, lists, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
@@ -50,9 +50,19 @@ export class SpacesService {
 
   async createSpace(
     workspaceId: string,
-    data: { name: string; description?: string; color?: string; icon?: string },
+    data: { name: string; description?: string; color?: string; icon?: string; visibility?: 'public' | 'private' },
     actorId?: string,
   ) {
+    // §A4.2 — an agency holding several clients' work wants new spaces closed by
+    // default. An explicit `visibility` on the request still wins, so the policy
+    // sets the default rather than removing the choice.
+    const [workspace] = await this.db
+      .select({ defaultSpacePrivate: workspaces.defaultSpacePrivate })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    const visibility = data.visibility ?? (workspace?.defaultSpacePrivate ? 'private' : 'public')
+
     const result = await this.db
       .insert(spaces)
       .values({
@@ -61,6 +71,7 @@ export class SpacesService {
         description: data.description,
         color: data.color || '#354fb0',
         icon: data.icon,
+        visibility,
         createdById: actorId ?? null,
       })
       .returning()

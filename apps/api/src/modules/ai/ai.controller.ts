@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService } from './ai.service'
+import { BriefingService } from './briefing.service'
 import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { NotGuestGuard } from '../../common/guards/not-guest.guard'
@@ -18,7 +19,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 @UseGuards(JwtAuthGuard, NotGuestGuard, PlanFeatureGuard)
 @Controller('ai')
 export class AiController {
-  constructor(private readonly ai: AiService) {}
+  constructor(
+    private readonly ai: AiService,
+    private readonly briefings: BriefingService,
+  ) {}
 
   @Get('status')
   @ApiOperation({ summary: 'Check if AI features are available' })
@@ -29,6 +33,7 @@ export class AiController {
   @Get('usage')
   @ApiOperation({ summary: 'AI usage + estimated cost per user / per model' })
   usage(
+    @CurrentUser() user: any,
     @Query('workspaceId') workspaceId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
@@ -38,7 +43,20 @@ export class AiController {
       const d = new Date(s)
       return Number.isNaN(d.getTime()) ? undefined : d
     }
-    return this.ai.usageSummary({ workspaceId, from: parse(from), to: parse(to) })
+    return this.ai.usageSummary({
+      workspaceId,
+      from: parse(from),
+      to: parse(to),
+      actor: { id: user.id, role: user.role },
+    })
+  }
+
+  @Post('briefing')
+  @ApiOperation({ summary: "Generate the caller's daily briefing now (§7.11 on demand)" })
+  briefing(@CurrentUser() user: any) {
+    // Always answers: generateBriefing falls back to the deterministic template
+    // when no model is configured, so a run-now never dead-ends on a 503.
+    return this.briefings.generateNow(user.id)
   }
 
   @Post('task/generate')

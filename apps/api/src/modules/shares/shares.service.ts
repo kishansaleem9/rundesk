@@ -1,8 +1,8 @@
 import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import {
   objectShares, users, workspaceMembers,
-  spaces, folders, projects, lists, tasks, docs, chatChannels,
+  spaces, folders, projects, lists, tasks, docs, chatChannels, dashboardPresets,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -11,7 +11,7 @@ import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 
 /** Everything that can be shared. */
-export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc', 'channel'] as const
+export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc', 'channel', 'dashboard'] as const
 export type ShareType = (typeof SHARE_TYPES)[number]
 
 /**
@@ -35,6 +35,24 @@ export interface ShareRow {
   invitedEmail: string | null
   createdAt: string
 }
+
+/** One hit of the reverse "everything shared with me" lookup (A1.7). */
+export interface SharedWithMeItem {
+  id: string
+  objectType: ShareType
+  objectId: string
+  level: ShareLevel
+  name: string
+  /** In-app deep link. */
+  url: string
+  /** Where it lives, for telling two same-named lists apart. */
+  context: string | null
+  sharedAt: string
+  sharedBy: { id: string; name: string; avatarUrl: string | null } | null
+}
+
+/** Display metadata resolved for a shared object, keyed by object id. */
+type SharedObjectMeta = { name: string; url: string; context: string | null }
 
 @Injectable()
 export class SharesService {
@@ -111,6 +129,15 @@ export class SharesService {
       if (r.folderId) chain.push({ type: 'folder', id: r.folderId })
       chain.push({ type: 'space', id: r.spaceId })
       return { workspaceId: r.ws, createdById: r.by, name: r.name, chain }
+    }
+    if (type === 'dashboard') {
+      // A5.11 — a preset's owner IS its creator (`dashboard_presets.userId`), so
+      // sharing reuses this table rather than a second model. Presets are flat:
+      // nothing to inherit from, hence a single-step chain.
+      const [r] = await this.db.select({ ws: dashboardPresets.workspaceId, by: dashboardPresets.userId, name: dashboardPresets.name })
+        .from(dashboardPresets).where(eq(dashboardPresets.id, id)).limit(1)
+      if (!r) throw new NotFoundException('Dashboard not found')
+      return { workspaceId: r.ws, createdById: r.by, name: r.name, chain: [{ type: 'dashboard', id }] }
     }
     if (type === 'channel') {
       const [r] = await this.db.select({
@@ -239,6 +266,156 @@ export class SharesService {
       invitedEmail: r.invitedEmail,
       createdAt: new Date(r.createdAt).toISOString(),
     }))
+  }
+
+  // ─── reverse lookup: everything shared with me ─────────────────────────────
+
+  /**
+   * Names + deep links for one batch of same-typed shared objects.
+   *
+   * Deliberately does NOT apply the per-item visibility filters
+   * (`item-visibility.ts`): those hide private rows from everyone but the
+   * creator and managers, and an explicit share grant is precisely the
+   * exception they don't know about. Reaching this code already means the
+   * caller holds a row in `object_shares` naming them.
+   */
+  private async resolveSharedBatch(
+    workspaceId: string,
+    type: ShareType,
+    ids: string[],
+  ): Promise<Map<string, SharedObjectMeta>> {
+    const out = new Map<string, SharedObjectMeta>()
+    if (ids.length === 0) return out
+    const base = `/app/${workspaceId}`
+
+    if (type === 'space') {
+      const rows = await this.db.select({ id: spaces.id, name: spaces.name })
+        .from(spaces).where(and(eq(spaces.workspaceId, workspaceId), inArray(spaces.id, ids)))
+      for (const r of rows) out.set(r.id, { name: r.name, url: `${base}/${r.id}`, context: null })
+      return out
+    }
+    if (type === 'folder') {
+      // Folders have no route of their own — they render on their space page.
+      const rows = await this.db
+        .select({ id: folders.id, name: folders.name, spaceId: spaces.id, spaceName: spaces.name })
+        .from(folders).innerJoin(spaces, eq(spaces.id, folders.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(folders.id, ids)))
+      for (const r of rows) out.set(r.id, { name: r.name, url: `${base}/${r.spaceId}`, context: r.spaceName })
+      return out
+    }
+    if (type === 'project') {
+      const rows = await this.db
+        .select({ id: projects.id, name: projects.name, spaceId: spaces.id, spaceName: spaces.name })
+        .from(projects).innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(projects.id, ids)))
+      for (const r of rows) out.set(r.id, { name: r.name, url: `${base}/${r.spaceId}/${r.id}`, context: r.spaceName })
+      return out
+    }
+    if (type === 'list') {
+      const rows = await this.db
+        .select({ id: lists.id, name: lists.name, projectId: projects.id, projectName: projects.name, spaceId: spaces.id })
+        .from(lists).innerJoin(projects, eq(projects.id, lists.projectId)).innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(lists.id, ids)))
+      for (const r of rows) {
+        out.set(r.id, { name: r.name, url: `${base}/${r.spaceId}/${r.projectId}/${r.id}`, context: r.projectName })
+      }
+      return out
+    }
+    if (type === 'task') {
+      const rows = await this.db
+        .select({ id: tasks.id, title: tasks.title, listId: lists.id, listName: lists.name, projectId: projects.id, spaceId: spaces.id })
+        .from(tasks).innerJoin(lists, eq(lists.id, tasks.listId)).innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, ids)))
+      for (const r of rows) {
+        out.set(r.id, {
+          name: r.title,
+          url: `${base}/${r.spaceId}/${r.projectId}/${r.listId}?task=${r.id}`,
+          context: r.listName,
+        })
+      }
+      return out
+    }
+    if (type === 'channel') {
+      const rows = await this.db.select({ id: chatChannels.id, name: chatChannels.name })
+        .from(chatChannels).where(and(eq(chatChannels.workspaceId, workspaceId), inArray(chatChannels.id, ids)))
+      for (const r of rows) out.set(r.id, { name: `#${r.name}`, url: `${base}/chat?channel=${r.id}`, context: null })
+      return out
+    }
+    if (type === 'dashboard') {
+      const rows = await this.db
+        .select({ id: dashboardPresets.id, name: dashboardPresets.name, ownerName: users.displayName })
+        .from(dashboardPresets)
+        .leftJoin(users, eq(users.id, dashboardPresets.userId))
+        .where(and(eq(dashboardPresets.workspaceId, workspaceId), inArray(dashboardPresets.id, ids)))
+      for (const r of rows) {
+        out.set(r.id, { name: r.name, url: `${base}/dashboard?preset=${r.id}`, context: r.ownerName })
+      }
+      return out
+    }
+    const rows = await this.db.select({ id: docs.id, title: docs.title })
+      .from(docs).where(and(eq(docs.workspaceId, workspaceId), inArray(docs.id, ids)))
+    for (const r of rows) out.set(r.id, { name: r.title, url: `${base}/docs?doc=${r.id}`, context: null })
+    return out
+  }
+
+  /**
+   * Everything in a workspace someone has shared *with* the caller — the
+   * reverse of the object-keyed routes, and the only way to find a privately
+   * shared item without being sent a link. Newest grant first.
+   *
+   * Grants whose object has since been deleted are skipped rather than
+   * reported: `object_shares.object_id` is polymorphic, so no foreign key
+   * cleans them up.
+   */
+  async listSharedWithMe(workspaceId: string, userId: string): Promise<SharedWithMeItem[]> {
+    const rows = await this.db
+      .select({
+        id: objectShares.id, objectType: objectShares.objectType, objectId: objectShares.objectId,
+        level: objectShares.level, createdAt: objectShares.createdAt, createdById: objectShares.createdById,
+      })
+      .from(objectShares)
+      .where(and(eq(objectShares.workspaceId, workspaceId), eq(objectShares.userId, userId)))
+      .orderBy(desc(objectShares.createdAt))
+    if (rows.length === 0) return []
+
+    const byType = new Map<ShareType, string[]>()
+    for (const r of rows) {
+      const ids = byType.get(r.objectType) ?? []
+      ids.push(r.objectId)
+      byType.set(r.objectType, ids)
+    }
+    const meta = new Map<string, SharedObjectMeta>() // key: `${type}:${id}`
+    for (const [type, ids] of byType) {
+      const resolved = await this.resolveSharedBatch(workspaceId, type, ids)
+      for (const [id, m] of resolved) meta.set(`${type}:${id}`, m)
+    }
+
+    const sharerIds = [...new Set(rows.map((r) => r.createdById).filter((id): id is string => !!id))]
+    const sharers = sharerIds.length
+      ? await this.db.select({ id: users.id, name: users.displayName, avatarUrl: users.avatarUrl })
+          .from(users).where(inArray(users.id, sharerIds))
+      : []
+    const sharerById = new Map(sharers.map((u) => [u.id, u]))
+
+    const out: SharedWithMeItem[] = []
+    for (const r of rows) {
+      const m = meta.get(`${r.objectType}:${r.objectId}`)
+      if (!m) continue
+      const sharer = r.createdById ? sharerById.get(r.createdById) : undefined
+      out.push({
+        id: r.id,
+        objectType: r.objectType,
+        objectId: r.objectId,
+        level: r.level as ShareLevel,
+        name: m.name,
+        url: m.url,
+        context: m.context,
+        sharedAt: new Date(r.createdAt).toISOString(),
+        sharedBy: sharer ? { id: sharer.id, name: sharer.name ?? '', avatarUrl: sharer.avatarUrl } : null,
+      })
+    }
+    return out
   }
 
   /**

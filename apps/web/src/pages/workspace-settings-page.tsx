@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, Label, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight } from 'lucide-react'
+import { Button, Card, Input, Label, Switch, cn, toast } from '@rundesk/ui'
+import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
@@ -29,6 +29,9 @@ type Workspace = {
   customDomainToken?: string | null
   customDomainVerified?: boolean | null
   isArchived?: boolean | null
+  // §A4.2 sharing policy.
+  defaultSpacePrivate?: boolean | null
+  blockPublicSharing?: boolean | null
 }
 
 type Member = {
@@ -39,6 +42,12 @@ type Member = {
   role: string
   weeklyCapacityHours?: number
   joinedAt: string
+  // §A4.1 roster columns — all already stored, none previously rendered here.
+  lastSeenAt?: string | null
+  invitedAt?: string | null
+  invitedByName?: string | null
+  invitedByEmail?: string | null
+  teams?: string[]
 }
 
 const ROLES = [
@@ -66,19 +75,50 @@ type ArchivedTask = {
 }
 type ArchivedWorkspaceEntry = { workspace: Workspace; role: string }
 
-const TABS = [
-  { id: 'general', labelKey: 'settings.tabGeneral', icon: Building2 },
-  { id: 'members', labelKey: 'settings.tabMembers', icon: Users },
-  { id: 'groups', labelKey: 'settings.tabGroups', icon: Users2 },
-  { id: 'roles', labelKey: 'settings.tabRoles', icon: ShieldCheck },
-  { id: 'features', labelKey: 'settings.tabFeatures', icon: ToggleRight },
-  { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
-  { id: 'security', labelKey: 'settings.tabSecurity', icon: Shield },
-  { id: 'sso', labelKey: 'settings.tabSso', icon: KeyRound },
-  { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
-  { id: 'archived', labelKey: 'settings.tabArchived', icon: Archive },
-  { id: 'trash', labelKey: 'settings.tabTrash', icon: Trash2 },
+/**
+ * §A4.4 — one console instead of three. The rail keeps the same destinations but
+ * groups them, so an admin scanning for "where do I change who can see what"
+ * has four short lists to read instead of eleven flat rows. The last group is
+ * the bridge to personal settings, which used to be reachable only from the
+ * avatar menu.
+ */
+const TAB_GROUPS = [
+  {
+    headingKey: 'settings.groupAdmin',
+    tabs: [
+      { id: 'general', labelKey: 'settings.tabGeneral', icon: Building2 },
+      { id: 'members', labelKey: 'settings.tabMembers', icon: Users },
+      { id: 'groups', labelKey: 'settings.tabGroups', icon: Users2 },
+      { id: 'roles', labelKey: 'settings.tabRoles', icon: ShieldCheck },
+      { id: 'spaces', labelKey: 'settings.tabSpaces', icon: Layers },
+    ],
+  },
+  {
+    headingKey: 'settings.groupSecurity',
+    tabs: [
+      { id: 'security', labelKey: 'settings.tabSecurity', icon: Shield },
+      { id: 'sso', labelKey: 'settings.tabSso', icon: KeyRound },
+    ],
+  },
+  {
+    headingKey: 'settings.groupFeatures',
+    tabs: [
+      { id: 'features', labelKey: 'settings.tabFeatures', icon: ToggleRight },
+      { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
+      { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
+      { id: 'aiUsage', labelKey: 'settings.tabAiUsage', icon: Sparkles },
+    ],
+  },
+  {
+    headingKey: 'settings.groupData',
+    tabs: [
+      { id: 'archived', labelKey: 'settings.tabArchived', icon: Archive },
+      { id: 'trash', labelKey: 'settings.tabTrash', icon: Trash2 },
+    ],
+  },
 ] as const
+
+type SettingsTabId = (typeof TAB_GROUPS)[number]['tabs'][number]['id']
 
 function isUuidLike(value?: string): value is string {
   if (!value) return false
@@ -88,8 +128,9 @@ function isUuidLike(value?: string): value is string {
 export function SettingsPage() {
   const navigate = useNavigate()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/settings' })
+  const { tab: tabFromUrl } = useSearch({ from: '/app/$workspaceId/settings' })
   const validWorkspaceId = isUuidLike(workspaceId) ? workspaceId : null
-  const [tab, setTab] = useState<(typeof TABS)[number]['id']>('general')
+  const [tab, setTab] = useState<SettingsTabId>(tabFromUrl ?? 'general')
   const { t } = useTranslation()
 
   useEffect(() => {
@@ -134,22 +175,41 @@ export function SettingsPage() {
             tab === 'trash' ? 'max-w-7xl' : 'max-w-5xl',
           )}
         >
-          <nav className="space-y-0.5">
-            {TABS.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setTab(item.id)}
-                className={cn(
-                  'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all',
-                  tab === item.id
-                    ? 'bg-accent/15 text-foreground font-medium [&>svg]:text-accent'
-                    : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
-                )}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {t(item.labelKey)}
-              </button>
+          <nav className="space-y-4">
+            {TAB_GROUPS.map((group) => (
+              <div key={group.headingKey} className="space-y-0.5">
+                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+                  {t(group.headingKey)}
+                </div>
+                {group.tabs.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => setTab(item.id)}
+                    className={cn(
+                      'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all',
+                      tab === item.id
+                        ? 'bg-accent/15 text-foreground font-medium [&>svg]:text-accent'
+                        : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    {t(item.labelKey)}
+                  </button>
+                ))}
+              </div>
             ))}
+            <div className="space-y-0.5 border-t border-border/40 pt-3">
+              <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+                {t('settings.groupMySettings')}
+              </div>
+              <button
+                onClick={() => navigate({ to: '/app/profile' })}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-muted-foreground transition-all hover:bg-card/60 hover:text-foreground"
+              >
+                <UserCog className="h-4 w-4 shrink-0" />
+                {t('settings.personalSettings')}
+              </button>
+            </div>
           </nav>
 
           {/* min-w-0: a grid child defaults to min-width:auto, which would let a
@@ -166,6 +226,8 @@ export function SettingsPage() {
             {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
             {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
             {tab === 'archived' && <ArchivedTab workspaceId={validWorkspaceId} />}
+            {tab === 'spaces' && <SpacesTab workspaceId={validWorkspaceId} />}
+            {tab === 'aiUsage' && <AiUsageTab workspaceId={validWorkspaceId} />}
             {tab === 'trash' && <TrashTab workspaceId={validWorkspaceId} />}
           </div>
         </div>
@@ -965,8 +1027,23 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
       )}
 
       <Card className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
           <h2 className="font-semibold text-sm">{tCount('settings.activeMembers', membersQuery.data?.length ?? 0)}</h2>
+          {/* §A4.1 — the roster is the one list an admin is asked to hand over. */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs"
+            onClick={() =>
+              downloadFile(
+                `/workspaces/${workspaceId}/export/csv/members`,
+                `rundesk-${workspaceId}-members.csv`,
+              ).catch((e) => toast.error(e instanceof Error ? e.message : t('settings.exportFailed')))
+            }
+          >
+            <Upload className="h-3.5 w-3.5 mr-1" />
+            {t('settings.exportMembersCsv')}
+          </Button>
         </div>
         <ul className="divide-y divide-border">
           {(membersQuery.data ?? []).map((m) => (
@@ -977,6 +1054,33 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate">{m.displayName}</div>
                 <div className="text-xs text-muted-foreground truncate">{m.email}</div>
+                {(m.teams?.length ?? 0) > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {m.teams!.map((team) => (
+                      <span
+                        key={team}
+                        className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      >
+                        {team}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="hidden xl:block w-44 shrink-0 text-[11px] leading-tight text-muted-foreground">
+                <div>
+                  {m.lastSeenAt
+                    ? t('settings.lastActive', { when: new Date(m.lastSeenAt).toLocaleDateString() })
+                    : t('settings.lastActiveNever')}
+                </div>
+                <div className="truncate">
+                  {m.invitedAt
+                    ? t('settings.invitedOn', {
+                        when: new Date(m.invitedAt).toLocaleDateString(),
+                        who: m.invitedByName ?? m.invitedByEmail ?? t('settings.invitedByUnknown'),
+                      })
+                    : t('settings.invitedNoRecord')}
+                </div>
               </div>
               <CapacityInput
                 value={m.weeklyCapacityHours ?? 40}
@@ -1010,6 +1114,266 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
           )}
         </ul>
       </Card>
+    </div>
+  )
+}
+
+type SpaceRow = {
+  id: string
+  name: string
+  icon?: string | null
+  color?: string | null
+  visibility: 'public' | 'private'
+  createdById?: string | null
+  createdAt: string
+}
+
+/**
+ * §A4.9 — every ingredient of Space administration already existed, but only
+ * one Space at a time and behind a different dialog each. This is the missing
+ * index: which Spaces are live, who owns them, and which are closed. The
+ * archived half is already served by Trash, so it is not duplicated here.
+ */
+function SpacesTab({ workspaceId }: { workspaceId: string }) {
+  const { t, tCount } = useTranslation()
+
+  const spacesQuery = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<SpaceRow[]>(`/spaces/workspace/${workspaceId}`),
+  })
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<Member[]>(`/workspaces/${workspaceId}/members`),
+  })
+
+  const ownerById = new Map((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email]))
+  const spaces = spacesQuery.data ?? []
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="font-semibold text-sm">{tCount('settings.spacesCount', spaces.length)}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{t('settings.spacesDesc')}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
+              <th className="px-4 py-2 font-medium">{t('settings.spaceColumnName')}</th>
+              <th className="px-4 py-2 font-medium">{t('settings.spaceColumnOwner')}</th>
+              <th className="px-4 py-2 font-medium">{t('settings.spaceColumnAccess')}</th>
+              <th className="px-4 py-2 font-medium">{t('settings.spaceColumnCreated')}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {spaces.map((space) => (
+              <tr key={space.id}>
+                <td className="px-4 py-2.5">
+                  <span className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: space.color ?? 'var(--accent)' }}
+                    />
+                    <span className="font-medium truncate">{space.name}</span>
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-muted-foreground">
+                  {(space.createdById && ownerById.get(space.createdById)) || t('settings.spaceOwnerUnknown')}
+                </td>
+                <td className="px-4 py-2.5">
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px]',
+                      space.visibility === 'private'
+                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {space.visibility === 'private' ? <Lock className="h-3 w-3" /> : <Globe className="h-3 w-3" />}
+                    {space.visibility === 'private' ? t('settings.spacePrivate') : t('settings.spacePublic')}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-muted-foreground tabular-nums">
+                  {new Date(space.createdAt).toLocaleDateString()}
+                </td>
+              </tr>
+            ))}
+            {spacesQuery.isSuccess && spaces.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  {t('settings.noSpaces')}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
+type AiUsageResponse = {
+  totals: { calls: number; inputTokens: number; outputTokens: number; costUsd: number }
+  byUser: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }>
+  byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }>
+}
+
+const AI_USAGE_RANGES = [
+  { days: 7, labelKey: 'settings.aiRange7' },
+  { days: 30, labelKey: 'settings.aiRange30' },
+  { days: 90, labelKey: 'settings.aiRange90' },
+] as const
+
+/**
+ * §A4.4 / §A6.8 — GET /ai/usage already returned per-user and per-model spend;
+ * nothing rendered it. For an agency billing AI back to clients, "who spent
+ * what" is the whole point, so per-user is the first table.
+ */
+function AiUsageTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const [days, setDays] = useState<number>(30)
+
+  const from = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - days)
+    return d.toISOString()
+  }, [days])
+
+  const usageQuery = useQuery({
+    queryKey: ['ai-usage', workspaceId, days],
+    queryFn: () =>
+      api<AiUsageResponse>(`/ai/usage?workspaceId=${workspaceId}&from=${encodeURIComponent(from)}`),
+  })
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<Member[]>(`/workspaces/${workspaceId}/members`),
+  })
+  const nameById = new Map((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email]))
+
+  const money = (value: number) => `$${value.toFixed(2)}`
+  const totals = usageQuery.data?.totals
+  const byUser = Object.entries(usageQuery.data?.byUser ?? {}).sort((a, b) => b[1].costUsd - a[1].costUsd)
+  const byModel = Object.entries(usageQuery.data?.byModel ?? {}).sort((a, b) => b[1].costUsd - a[1].costUsd)
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="font-semibold text-sm mb-1">{t('settings.aiUsageTitle')}</h3>
+            <p className="text-xs text-muted-foreground">{t('settings.aiUsageDesc')}</p>
+          </div>
+          <div className="flex gap-1 shrink-0">
+            {AI_USAGE_RANGES.map((range) => (
+              <Button
+                key={range.days}
+                size="sm"
+                variant={days === range.days ? 'default' : 'outline'}
+                className="text-xs"
+                onClick={() => setDays(range.days)}
+              >
+                {t(range.labelKey)}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+          <UsageStat label={t('settings.aiCost')} value={money(totals?.costUsd ?? 0)} />
+          <UsageStat label={t('settings.aiCalls')} value={String(totals?.calls ?? 0)} />
+          <UsageStat label={t('settings.aiInputTokens')} value={(totals?.inputTokens ?? 0).toLocaleString()} />
+          <UsageStat label={t('settings.aiOutputTokens')} value={(totals?.outputTokens ?? 0).toLocaleString()} />
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="px-4 py-3 border-b border-border">
+          <h3 className="font-semibold text-sm">{t('settings.aiByUser')}</h3>
+        </div>
+        <UsageTable
+          rows={byUser.map(([userId, row]) => ({
+            key: userId,
+            label: nameById.get(userId) ?? t('settings.aiUnknownUser'),
+            ...row,
+          }))}
+          emptyLabel={t('settings.aiNoUsage')}
+          money={money}
+          t={t}
+        />
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="px-4 py-3 border-b border-border">
+          <h3 className="font-semibold text-sm">{t('settings.aiByModel')}</h3>
+        </div>
+        <UsageTable
+          rows={byModel.map(([model, row]) => ({ key: model, label: model, ...row }))}
+          emptyLabel={t('settings.aiNoUsage')}
+          money={money}
+          t={t}
+        />
+      </Card>
+    </div>
+  )
+}
+
+function UsageStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border/40 bg-card/30 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-lg font-semibold tabular-nums mt-0.5">{value}</div>
+    </div>
+  )
+}
+
+function UsageTable({
+  rows,
+  emptyLabel,
+  money,
+  t,
+}: {
+  rows: Array<{ key: string; label: string; calls: number; inputTokens: number; outputTokens: number; costUsd: number }>
+  emptyLabel: string
+  money: (value: number) => string
+  t: (key: TranslationKey) => string
+}) {
+  if (rows.length === 0) {
+    return <div className="px-4 py-6 text-center text-sm text-muted-foreground">{emptyLabel}</div>
+  }
+  const topCost = Math.max(...rows.map((r) => r.costUsd), 0)
+  const share = (cost: number) => (topCost > 0 ? Math.max(2, (cost / topCost) * 100) : 0)
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground border-b border-border/60">
+            <th className="px-4 py-2 font-medium">{t('settings.aiColumnName')}</th>
+            <th className="px-4 py-2 font-medium text-right">{t('settings.aiCalls')}</th>
+            <th className="px-4 py-2 font-medium text-right">{t('settings.aiInputTokens')}</th>
+            <th className="px-4 py-2 font-medium text-right">{t('settings.aiOutputTokens')}</th>
+            <th className="px-4 py-2 font-medium text-right">{t('settings.aiCost')}</th>
+            <th className="px-4 py-2 font-medium w-32">{t('settings.aiShare')}</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((row) => (
+            <tr key={row.key}>
+              <td className="px-4 py-2.5 truncate">{row.label}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums">{row.calls}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums">{row.inputTokens.toLocaleString()}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums">{row.outputTokens.toLocaleString()}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums font-medium">{money(row.costUsd)}</td>
+              <td className="px-4 py-2.5">
+                {/* Who the money went to reads faster as a bar than as a column
+                    of dollars, and the spend is already sorted descending. */}
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden" title={`${Math.round(share(row.costUsd))}%`}>
+                  <div className="h-full bg-brand-gradient" style={{ width: `${share(row.costUsd)}%` }} />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -1398,7 +1762,81 @@ function SecurityTab({ workspaceId }: { workspaceId: string }) {
         )}
       </Card>
 
+      <SharingPolicyCard workspaceId={workspaceId} />
+
       <AdvancedSecurityPanel workspaceId={workspaceId} />
+    </div>
+  )
+}
+
+/**
+ * §A4.2 — the two sharing policies an agency holding client data actually needs.
+ * Both are workspace columns, so they live beside the session/IP controls rather
+ * than in the security-settings table the panel below owns.
+ */
+function SharingPolicyCard({ workspaceId }: { workspaceId: string }) {
+  const qc = useQueryClient()
+  const { t } = useTranslation()
+
+  const wsQuery = useQuery({
+    queryKey: ['workspace', workspaceId],
+    queryFn: () => api<Workspace>(`/workspaces/${workspaceId}`),
+  })
+
+  const save = useMutation({
+    mutationFn: (patch: { defaultSpacePrivate?: boolean; blockPublicSharing?: boolean }) =>
+      api(`/workspaces/${workspaceId}`, { method: 'PATCH', body: patch }),
+    onSuccess: () => {
+      toast.success(t('settings.sharingPolicySaved'))
+      qc.invalidateQueries({ queryKey: ['workspace', workspaceId] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  return (
+    <Card className="p-4">
+      <h3 className="font-semibold text-sm mb-1">{t('settings.sharingPolicy')}</h3>
+      <p className="text-xs text-muted-foreground mb-3">{t('settings.sharingPolicyDesc')}</p>
+      <div className="space-y-3">
+        <PolicyRow
+          title={t('settings.defaultSpacePrivate')}
+          description={t('settings.defaultSpacePrivateDesc')}
+          checked={wsQuery.data?.defaultSpacePrivate ?? false}
+          disabled={!wsQuery.data || save.isPending}
+          onChange={(value) => save.mutate({ defaultSpacePrivate: value })}
+        />
+        <PolicyRow
+          title={t('settings.blockPublicSharing')}
+          description={t('settings.blockPublicSharingDesc')}
+          checked={wsQuery.data?.blockPublicSharing ?? false}
+          disabled={!wsQuery.data || save.isPending}
+          onChange={(value) => save.mutate({ blockPublicSharing: value })}
+        />
+      </div>
+    </Card>
+  )
+}
+
+function PolicyRow({
+  title,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  title: string
+  description: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (value: boolean) => void
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg border border-border/40 bg-card/30 p-3">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{title}</div>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      </div>
+      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} />
     </div>
   )
 }

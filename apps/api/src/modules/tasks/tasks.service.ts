@@ -63,6 +63,17 @@ type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 type TaskStatus = string
 type StatusCategory = 'open' | 'in_progress' | 'closed'
 
+/**
+ * §A2.8 — render a status/priority key for a notification body. Status keys are
+ * per-list slugs (`in_review`), so there is no catalogue to look them up in;
+ * de-slugging is what the rest of the product does with them too.
+ */
+export function humanizeFieldValue(value: string): string {
+  const spaced = value.replace(/[_-]+/g, ' ').trim()
+  if (!spaced) return value
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
 type ActivityAction =
   | 'created'
   | 'updated'
@@ -245,8 +256,15 @@ export class TasksService {
     if (watcherIds.length === 0) return
 
     const changedBits: string[] = []
-    if (params.patch.status && params.patch.status !== params.before.status) changedBits.push(`status to ${params.patch.status}`)
-    if (params.patch.priority && params.patch.priority !== params.before.priority) changedBits.push(`priority to ${params.patch.priority}`)
+    // §A2.8 — name both ends of a transition. The activity log already records
+    // { from, to }; a watcher reading "Updated status to In review" still has to
+    // open the task to learn what it moved off.
+    if (params.patch.status && params.patch.status !== params.before.status) {
+      changedBits.push(`status from ${humanizeFieldValue(params.before.status)} to ${humanizeFieldValue(params.patch.status)}`)
+    }
+    if (params.patch.priority && params.patch.priority !== params.before.priority) {
+      changedBits.push(`priority from ${humanizeFieldValue(params.before.priority)} to ${humanizeFieldValue(params.patch.priority)}`)
+    }
     if ('dueDate' in params.patch && (params.patch.dueDate?.getTime() ?? null) !== (params.before.dueDate?.getTime() ?? null)) {
       changedBits.push(params.patch.dueDate ? 'due date' : 'due date cleared')
     }
@@ -1464,8 +1482,11 @@ export class TasksService {
         .values(data.labelIds.map((labelId) => ({ taskId: task.id, labelId })))
         .onConflictDoNothing()
     }
-    // Creator is auto-subscribed as a watcher so they hear about replies/activity.
-    await this.db.insert(taskWatchers).values({ taskId: task.id, userId: data.createdById }).onConflictDoNothing()
+    // Creator is auto-subscribed as a watcher so they hear about replies/activity
+    // — unless they turned auto-follow off (§A4.7).
+    if (await this.notifications.autoFollowEnabled(data.createdById)) {
+      await this.db.insert(taskWatchers).values({ taskId: task.id, userId: data.createdById }).onConflictDoNothing()
+    }
 
     await this.logActivity({ taskId: task.id, actorId: data.createdById, action: 'created' })
 
@@ -2648,7 +2669,9 @@ export class TasksService {
   async addAssignee(taskId: string, userId: string, actorId: string) {
     await this.assertTaskWriteAccess(taskId, actorId)
     await this.db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
-    await this.db.insert(taskWatchers).values({ taskId, userId }).onConflictDoNothing()
+    if (await this.notifications.autoFollowEnabled(userId)) {
+      await this.db.insert(taskWatchers).values({ taskId, userId }).onConflictDoNothing()
+    }
     await this.logActivity({ taskId, actorId, action: 'assigned', meta: { userId } })
 
     const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
@@ -2777,8 +2800,10 @@ export class TasksService {
         .set({ commentId: comment.id })
         .where(and(eq(taskAttachments.taskId, taskId), inArray(taskAttachments.id, attachmentIds)))
     }
-    // Auto-subscribe the author as a watcher
-    await this.db.insert(taskWatchers).values({ taskId, userId: authorId }).onConflictDoNothing()
+    // Auto-subscribe the author as a watcher (§A4.7 — opt-out).
+    if (await this.notifications.autoFollowEnabled(authorId)) {
+      await this.db.insert(taskWatchers).values({ taskId, userId: authorId }).onConflictDoNothing()
+    }
 
     await this.logActivity({ taskId, actorId: authorId, action: 'commented', meta: { commentId: comment.id } })
     const hydrated = await this.db.query.taskComments.findFirst({

@@ -20,7 +20,8 @@ import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { ReportBuilder } from '../components/report-builder'
 
-type Tab = 'overview' | 'productivity' | 'completion' | 'time' | 'sprints' | 'goals' | 'custom'
+const TABS = ['overview', 'productivity', 'completion', 'time', 'sprints', 'goals', 'custom'] as const
+type Tab = (typeof TABS)[number]
 
 type CsvExport = { filename: string; rows: (string | number)[][] } | null
 
@@ -89,7 +90,13 @@ function printReport(
 export function ReportsPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/reports' })
-  const [activeTab, setActiveTab] = useState<Tab>('overview')
+  // A5.13 — honor a ?tab=<id> deep link so the dashboard's "Schedule delivery"
+  // lands on the builder that owns scheduling, not on the overview.
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') return 'overview'
+    const requested = new URLSearchParams(window.location.search).get('tab')
+    return TABS.includes(requested as Tab) ? (requested as Tab) : 'overview'
+  })
   const [days, setDays] = useState(30)
   const [exportPayload, setExportPayload] = useState<CsvExport>(null)
 

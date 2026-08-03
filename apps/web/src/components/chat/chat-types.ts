@@ -2,6 +2,8 @@ export type ChatChannel = {
   id: string
   name: string
   description?: string | null
+  // One-line topic shown under the channel name (§A3.7).
+  topic?: string | null
   // Optional channel icon (emoji / short token) — Plan §6.1.
   icon?: string | null
   // Space scoping (Plan §6.1): null = workspace-level channel.
@@ -70,6 +72,16 @@ export type ChatMember = {
   userId: string
   displayName: string
   email: string
+}
+
+// A user-named sidebar bucket (§A3.4). Personal to its owner; channels not
+// filed into one fall back to space-derived grouping.
+export type ChatChannelGroup = {
+  id: string
+  name: string
+  position: number
+  isCollapsed: boolean
+  channelIds: string[]
 }
 
 // A workspace space, used to scope new channels and group space channels in the

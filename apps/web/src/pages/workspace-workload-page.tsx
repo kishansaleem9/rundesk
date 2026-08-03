@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Card,
@@ -13,11 +13,14 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  toast,
   cn,
 } from '@rundesk/ui'
 import { Users, Calendar, AlertTriangle, Download } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { useAuthStore } from '../store/auth'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 export function WorkloadPage() {
   const { t } = useTranslation()
@@ -36,6 +39,15 @@ export function WorkloadPage() {
           capacity: number
           weeklyCapacityHours?: number
           dailyLoads: number[]
+          // §A4.10 — per-day capacity, zero on a day off.
+          dailyCapacities?: number[]
+          daysOff?: string[]
+          // A5.14 — actuals, so the view can show over/under-delivery instead
+          // of comparing the plan against itself.
+          estimatedHours?: number
+          trackedHours?: number
+          windowCapacityHours?: number
+          trackedWindowDays?: number
         }>
       >(`/workspaces/${workspaceId}/reports/workload?days=${days}`),
   })
@@ -60,9 +72,19 @@ export function WorkloadPage() {
       capacity: p.capacity || 8,
       weeklyCapacityHours: p.weeklyCapacityHours ?? Math.round((p.capacity || 8) * 5),
       dailyLoads: p.dailyLoads,
+      dailyCapacities: p.dailyCapacities ?? p.dailyLoads.map(() => p.capacity || 8),
+      daysOff: new Set(p.daysOff ?? []),
+      estimatedHours: p.estimatedHours ?? p.dailyLoads.reduce((sum, load) => sum + load, 0),
+      trackedHours: p.trackedHours ?? 0,
+      windowCapacityHours: p.windowCapacityHours ?? 0,
     }))
   }, [workloadQuery.data, t])
-  const overloadedCount = people.filter((p) => p.dailyLoads.some((load) => load > p.capacity)).length
+  const trackedWindowDays = workloadQuery.data?.[0]?.trackedWindowDays ?? days
+  // A day off has zero capacity, so any load on it would read as overload; the
+  // person is away, which is a scheduling problem, not a capacity one.
+  const overloadedCount = people.filter((p) =>
+    p.dailyLoads.some((load, i) => (p.dailyCapacities[i] ?? p.capacity) > 0 && load > (p.dailyCapacities[i] ?? p.capacity)),
+  ).length
 
   const exportCsv = () => {
     if (people.length === 0) return
@@ -159,6 +181,64 @@ export function WorkloadPage() {
         </span>
       </Card>
 
+      <TimeAwayCard
+        workspaceId={workspaceId}
+        people={people.filter((p): p is typeof p & { userId: string } => Boolean(p.userId))}
+      />
+
+      {/* A5.14 — capacity vs estimated vs tracked. The heat map plans forward;
+          tracked time is necessarily behind, so its window is named explicitly
+          rather than blended into the same numbers. */}
+      {people.length > 0 && (
+        <Card variant="glass" className="p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-border/60">
+            <h2 className="text-sm font-semibold">{t('workload.timeReportingTitle')}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {t('workload.timeReportingDesc', { days: trackedWindowDays })}
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border/60 text-[10px] uppercase tracking-widest text-muted-foreground">
+                  <th className="text-start font-semibold px-4 py-2">{t('workload.teammate')}</th>
+                  <th className="text-end font-semibold px-4 py-2">{t('workload.colCapacity')}</th>
+                  <th className="text-end font-semibold px-4 py-2">{t('workload.colEstimated')}</th>
+                  <th className="text-end font-semibold px-4 py-2">{t('workload.colTracked')}</th>
+                  <th className="text-end font-semibold px-4 py-2">{t('workload.colDelta')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {people.map((p) => {
+                  const delta = Math.round((p.trackedHours - p.windowCapacityHours) * 10) / 10
+                  return (
+                    <tr key={p.userId ?? p.name} className="border-b border-border/40 last:border-0">
+                      <td className="px-4 py-2 truncate">{p.name}</td>
+                      <td className="px-4 py-2 text-end tabular-nums text-muted-foreground">
+                        {p.windowCapacityHours.toFixed(1)}h
+                      </td>
+                      <td className="px-4 py-2 text-end tabular-nums text-muted-foreground">
+                        {p.estimatedHours.toFixed(1)}h
+                      </td>
+                      <td className="px-4 py-2 text-end tabular-nums">{p.trackedHours.toFixed(1)}h</td>
+                      <td
+                        className={cn(
+                          'px-4 py-2 text-end tabular-nums font-medium',
+                          delta > 0 ? 'text-destructive' : delta < 0 ? 'text-muted-foreground' : '',
+                        )}
+                      >
+                        {delta > 0 ? '+' : ''}
+                        {delta.toFixed(1)}h
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
       {/* Heat map */}
       <Card variant="glass" className="overflow-hidden p-0">
         <div className="overflow-x-auto">
@@ -217,6 +297,7 @@ export function WorkloadPage() {
                     date={d}
                     index={i}
                     days={days}
+                    away={p.daysOff.has(toDateStr(d))}
                   />
                 ))}
               </div>
@@ -233,6 +314,160 @@ export function WorkloadPage() {
         />
       )}
     </div>
+  )
+}
+
+type TimeOffEntry = {
+  id: string
+  userId: string
+  startsOn: string
+  endsOn: string
+  note: string | null
+  displayName: string
+}
+
+/**
+ * §A4.10 — the workload view is where absence changes a decision, so leave is
+ * recorded here rather than in a settings screen nobody opens while planning.
+ * Anyone may record their own; managers may record anyone's (enforced server
+ * side — the picker just stops offering what would be rejected).
+ */
+function TimeAwayCard({
+  workspaceId,
+  people,
+}: {
+  workspaceId: string
+  people: Array<{ userId: string; name: string }>
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const currentUser = useAuthStore((s) => s.user)
+  const { isManagerOrAbove: isManager } = useWorkspaceRole(workspaceId)
+  const [expanded, setExpanded] = useState(false)
+  const [userId, setUserId] = useState('')
+  const [startsOn, setStartsOn] = useState('')
+  const [endsOn, setEndsOn] = useState('')
+
+  const from = toDateStr(new Date())
+  const entriesQuery = useQuery({
+    queryKey: ['time-off', workspaceId, from],
+    queryFn: () => api<TimeOffEntry[]>(`/workspaces/${workspaceId}/time-off?from=${from}`),
+    enabled: !!workspaceId,
+  })
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['time-off', workspaceId] })
+    qc.invalidateQueries({ queryKey: ['workload-report', workspaceId] })
+  }
+
+  const add = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/time-off`, {
+        method: 'POST',
+        body: { userId: userId || undefined, startsOn, endsOn: endsOn || startsOn },
+      }),
+    onSuccess: () => {
+      setStartsOn('')
+      setEndsOn('')
+      toast.success(t('workload.timeAwayAdded'))
+      invalidate()
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/time-off/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const entries = entriesQuery.data ?? []
+  const assignable = isManager ? people : people.filter((p) => p.userId === currentUser?.id)
+
+  return (
+    <Card variant="glass" className="p-0 overflow-hidden">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-start hover:bg-accent/5"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div>
+          <h2 className="text-sm font-semibold">{t('workload.timeAwayTitle')}</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{t('workload.timeAwayDesc')}</p>
+        </div>
+        <Badge variant="soft" className="text-[10px] tabular-nums shrink-0">
+          {entries.length}
+        </Badge>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border/60 p-4 space-y-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <select
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              className="h-9 rounded-md border border-border bg-card px-2 text-sm"
+            >
+              <option value="">{t('workload.timeAwayMe')}</option>
+              {assignable
+                .filter((p) => p.userId !== currentUser?.id)
+                .map((p) => (
+                  <option key={p.userId} value={p.userId}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
+            <input
+              type="date"
+              value={startsOn}
+              onChange={(e) => setStartsOn(e.target.value)}
+              className="h-9 rounded-md border border-border bg-card px-2 text-sm"
+              aria-label={t('workload.timeAwayFrom')}
+            />
+            <input
+              type="date"
+              value={endsOn}
+              onChange={(e) => setEndsOn(e.target.value)}
+              className="h-9 rounded-md border border-border bg-card px-2 text-sm"
+              aria-label={t('workload.timeAwayTo')}
+            />
+            <Button size="sm" disabled={!startsOn || add.isPending} onClick={() => add.mutate()}>
+              {t('workload.timeAwayAdd')}
+            </Button>
+          </div>
+
+          {entries.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('workload.timeAwayEmpty')}</p>
+          ) : (
+            <ul className="divide-y divide-border/40">
+              {entries.map((entry) => (
+                <li key={entry.id} className="flex items-center gap-3 py-2 text-sm">
+                  <span className="flex-1 min-w-0 truncate">
+                    <span className="font-medium">{entry.displayName}</span>
+                    <span className="ml-2 text-muted-foreground tabular-nums">
+                      {entry.startsOn === entry.endsOn
+                        ? entry.startsOn
+                        : `${entry.startsOn} → ${entry.endsOn}`}
+                    </span>
+                  </span>
+                  {(isManager || entry.userId === currentUser?.id) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => remove.mutate(entry.id)}
+                      disabled={remove.isPending}
+                    >
+                      {t('common.remove')}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }
 
@@ -289,12 +524,15 @@ function WorkloadCell({
   date,
   index,
   days,
+  away,
 }: {
   workspaceId: string
   person: { userId?: string; name: string; capacity: number; dailyLoads: number[] }
   date: Date
   index: number
   days: number
+  /** §A4.10 — the person is on leave this day, so their capacity is zero. */
+  away?: boolean
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -324,10 +562,13 @@ function WorkloadCell({
       <div
         className={cn(
           'h-8 w-8 rounded-md flex items-center justify-center text-[10px] font-semibold tabular-nums transition-transform group-hover:scale-95',
-          loadColor(ratio),
+          away
+            ? 'bg-[repeating-linear-gradient(45deg,hsl(var(--muted)),hsl(var(--muted))4px,transparent_4px,transparent_8px)] text-muted-foreground'
+            : loadColor(ratio),
         )}
+        title={away ? t('workload.awayCell') : undefined}
       >
-        {load > 0 ? load.toFixed(1) : ''}
+        {away ? t('workload.awayShort') : load > 0 ? load.toFixed(1) : ''}
       </div>
     </div>
   )

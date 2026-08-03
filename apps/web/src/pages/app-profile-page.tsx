@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
 import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check } from 'lucide-react'
@@ -33,7 +34,9 @@ const TABS = [
 
 export function ProfilePage() {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<(typeof TABS)[number]['id']>('general')
+  // §A2.11 — honour ?tab= so the inbox gear lands on delivery preferences.
+  const { tab: tabFromUrl } = useSearch({ from: '/app/profile' })
+  const [tab, setTab] = useState<(typeof TABS)[number]['id']>(tabFromUrl ?? 'general')
   const profileQuery = useQuery({
     queryKey: ['users', 'me'],
     queryFn: () => api<Profile>('/users/me'),

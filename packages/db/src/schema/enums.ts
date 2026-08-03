@@ -91,6 +91,8 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // §14.1 — Stripe dunning: a failed payment left the subscription past_due.
   // Written to workspace admins by the billing webhook handler.
   'billing_past_due',
+  // §A2.11 — self-served "send me a test" from the delivery-preferences panel.
+  'test_notification',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

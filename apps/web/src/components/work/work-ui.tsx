@@ -248,35 +248,46 @@ export function WorkFilterSelect({
   )
 }
 
-export function WorkViewTabs<T extends string>({
-  tabs,
-  active,
-  onChange,
-}: {
-  tabs: Array<{ id: T; label: string }>
-  active: T
-  onChange: (id: T) => void
-}) {
+export type WorkViewTab = {
+  key: string
+  label: string
+  active: boolean
+  onSelect: () => void
+  /** Per-tab affordance (a ⋯ menu) that must not trigger the tab itself. */
+  action?: ReactNode
+}
+
+/**
+ * The view tab strip. Tabs carry their own `active` flag rather than being
+ * compared against one id, because a list mixes two kinds of tab: the built-in
+ * view types and the user's named saved views (A1.2), and exactly one of the
+ * whole set is current.
+ */
+export function WorkViewTabs({ tabs, trailing }: { tabs: WorkViewTab[]; trailing?: ReactNode }) {
   return (
-    <div className="flex items-center gap-0.5 border-b border-border/80">
+    <div className="flex items-center gap-0.5 border-b border-border/80 overflow-x-auto">
       {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          onClick={() => onChange(tab.id)}
-          className={cn(
-            'relative px-3 py-2 text-[13px] font-medium transition-colors whitespace-nowrap',
-            active === tab.id
-              ? 'text-violet-700 dark:text-violet-200'
-              : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          {tab.label}
-          {active === tab.id && (
+        <div key={tab.key} className="relative flex items-center shrink-0">
+          <button
+            type="button"
+            onClick={tab.onSelect}
+            className={cn(
+              'px-3 py-2 text-[13px] font-medium transition-colors whitespace-nowrap',
+              tab.action && 'pr-1',
+              tab.active
+                ? 'text-violet-700 dark:text-violet-200'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {tab.label}
+          </button>
+          {tab.action}
+          {tab.active && (
             <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-violet-600 dark:bg-violet-400" />
           )}
-        </button>
+        </div>
       ))}
+      {trailing}
     </div>
   )
 }
@@ -287,12 +298,18 @@ export function TaskListChrome({
   quickAdd,
   viewTabs,
   toolbar,
+  headerAction,
+  secondaryAction,
 }: {
   listName: string
   taskCount: number
   quickAdd: ReactNode
   viewTabs: ReactNode
   toolbar: ReactNode
+  /** Sits beside the list title — A1.8 puts Share here. */
+  headerAction?: ReactNode
+  /** A line under the title, for context rather than commands (A1.10 forms). */
+  secondaryAction?: ReactNode
 }) {
   return (
     <div className="shrink-0 border-b border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]">
@@ -306,7 +323,9 @@ export function TaskListChrome({
             <span className="text-[12px] text-muted-foreground tabular-nums">
               {taskCount} task{taskCount !== 1 ? 's' : ''}
             </span>
+            {headerAction}
           </div>
+          {secondaryAction && <div className="mt-1.5">{secondaryAction}</div>}
         </div>
         <div className="flex items-center gap-2 w-full lg:w-auto shrink-0">{quickAdd}</div>
       </div>

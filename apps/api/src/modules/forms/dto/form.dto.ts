@@ -92,4 +92,9 @@ export class SubmitFormDto {
   @IsOptional()
   @IsString()
   submitterName?: string
+
+  /** A5.5 honeypot — only a bot ever fills this. See FormsService.submitForm. */
+  @IsOptional()
+  @IsString()
+  hp?: string
 }

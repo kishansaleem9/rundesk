@@ -21,6 +21,7 @@ import {
   spaces,
   clients,
   customReports,
+  timeOff,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -895,6 +896,35 @@ export class ReportsService {
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .where(eq(workspaceMembers.workspaceId, workspaceId))
 
+    // §A4.10 — someone on leave should not absorb planned load. Leave that
+    // straddles the window still counts, so the query is an overlap test.
+    // Local calendar day, not toISOString(): the horizon starts at local
+    // midnight, and a UTC render would shift a day off by one for anyone west
+    // of Greenwich.
+    const isoDay = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const timeOffRows = await this.db
+      .select({ userId: timeOff.userId, startsOn: timeOff.startsOn, endsOn: timeOff.endsOn })
+      .from(timeOff)
+      .where(
+        and(
+          eq(timeOff.workspaceId, workspaceId),
+          gte(timeOff.endsOn, isoDay(start)),
+          lte(timeOff.startsOn, isoDay(end)),
+        ),
+      )
+    const daysOffByUser = new Map<string, Set<string>>()
+    for (const entry of timeOffRows) {
+      const set = daysOffByUser.get(entry.userId) ?? new Set<string>()
+      for (let offset = 0; offset < horizon; offset++) {
+        const day = new Date(start)
+        day.setDate(day.getDate() + offset)
+        const iso = isoDay(day)
+        if (iso >= entry.startsOn && iso <= entry.endsOn) set.add(iso)
+      }
+      daysOffByUser.set(entry.userId, set)
+    }
+
     const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
     const assignments = await this.db
       .select({
@@ -943,18 +973,63 @@ export class ReportsService {
       }
     }
 
+    // A5.14 — without actual hours the view compares plan against plan, so it
+    // can never show over- or under-delivery. Tracked time is inherently
+    // backward-looking while the heat-map is forward-looking, so it is summed
+    // over the TRAILING window of the same length and reported separately
+    // (`trackedWindowDays`) rather than blended into the daily loads.
+    const trackedFrom = new Date(start)
+    trackedFrom.setDate(trackedFrom.getDate() - (horizon - 1))
+    const trackedRows = await this.db
+      .select({
+        userId: timeEntries.userId,
+        seconds: sql<number>`coalesce(sum(${timeEntries.durationSec}), 0)::int`,
+      })
+      .from(timeEntries)
+      .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), gte(timeEntries.startedAt, trackedFrom), visFilter))
+      .groupBy(timeEntries.userId)
+    const trackedByUser = new Map(trackedRows.map((row) => [row.userId, row.seconds]))
+
+    // Capacity for the trailing window counts weekdays only, matching the
+    // 5-day week the daily figure is derived from.
+    let trackedWorkdays = 0
+    for (let offset = 0; offset < horizon; offset++) {
+      const day = new Date(trackedFrom)
+      day.setDate(day.getDate() + offset)
+      if (day.getDay() !== 0 && day.getDay() !== 6) trackedWorkdays++
+    }
+
     return members.map((member) => {
       const weekly = member.weeklyCapacityHours ?? 40
       // Daily capacity (5-day work week)
       const dailyCapacity = Math.max(1, Math.round((weekly / 5) * 10) / 10)
+      const dailyLoads = (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10)
+      // Capacity is reported per day rather than as one number so a day off can
+      // be zero without pretending the person's whole week shrank.
+      const daysOff = daysOffByUser.get(member.userId) ?? new Set<string>()
+      const dailyCapacities = Array.from({ length: horizon }, (_, offset) => {
+        const day = new Date(start)
+        day.setDate(day.getDate() + offset)
+        return daysOff.has(isoDay(day)) ? 0 : dailyCapacity
+      })
       return {
+        daysOff: [...daysOff].sort(),
+        dailyCapacities,
         userId: member.userId,
         name: member.name ?? 'Unknown',
         email: member.email ?? null,
         role: humanizeRole(member.role),
         capacity: dailyCapacity,
         weeklyCapacityHours: weekly,
-        dailyLoads: (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10),
+        dailyLoads,
+        estimatedHours: Math.round(dailyLoads.reduce((sum, load) => sum + load, 0) * 10) / 10,
+        trackedHours: Math.round(((trackedByUser.get(member.userId) ?? 0) / 3600) * 10) / 10,
+        windowCapacityHours: Math.round(dailyCapacity * trackedWorkdays * 10) / 10,
+        trackedWindowDays: horizon,
       }
     })
   }

@@ -1,6 +1,7 @@
 import { createFileRoute, Link, Outlet, useMatches, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState as EmptyStateCard, Button, Badge } from '@rundesk/ui'
+import { FLAGS } from '@rundesk/feature-flags'
 import {
   Bell,
   MessageCircleReply,
@@ -10,6 +11,8 @@ import {
   ListChecks,
   MoreHorizontal,
   Plus,
+  RefreshCw,
+  Sun,
   Trash2,
   Circle,
 } from 'lucide-react'
@@ -21,6 +24,7 @@ import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
 import { OnboardingChecklist } from '../components/onboarding-checklist'
 import { useTranslation } from '../lib/i18n'
+import { useResolvedFlags } from '../lib/use-feature-flags'
 
 type Notification = {
   id: string
@@ -157,6 +161,10 @@ function WorkspaceHome() {
   })
   const personalTasks = personalTasksQuery.data ?? []
   const visibleAnnouncement = (announcementsQuery.data ?? [])[0]
+  // §A6.5 — the scheduled briefing arrives as a notification; Home is where the
+  // user starts their day, so the most recent one is shown here rather than
+  // being left to be discovered on the Insights page.
+  const latestBriefing = notifications.find((n) => n.type === 'ai_briefing') ?? null
 
   const selectedItems = useMemo(() => {
     switch (section) {
@@ -243,6 +251,7 @@ function WorkspaceHome() {
           </div>
         </Card>
       )}
+      <DailyBriefingCard workspaceId={workspaceId} latest={latestBriefing} />
       <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-4">
         <Card variant="glass" className="p-3 h-fit">
           <h1 className="text-3xl font-display font-semibold mb-3">{t('appWorkspace.home')}</h1>
@@ -261,6 +270,20 @@ function WorkspaceHome() {
         <Card variant="glass" className="p-4 min-h-[420px]">
           {(section === 'inbox' || section === 'replies' || section === 'assigned-comments') && (
             <div className="space-y-2">
+              {/* §A2.9 — this panel only ever shows the live slice; the route
+                  behind it is where read replies stay browsable. */}
+              {section === 'replies' && (
+                <div className="flex justify-end">
+                  <Link
+                    to="/app/$workspaceId/replies"
+                    params={{ workspaceId }}
+                    search={{ filter: 'all' as const }}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {t('appWorkspace.viewAllReplies')} →
+                  </Link>
+                </div>
+              )}
               {selectedItems.length === 0 ? (
                 <EmptyStateCard
                   icon={<Bell className="h-6 w-6" />}
@@ -405,6 +428,91 @@ function WorkspaceHome() {
         </Card>
       </div>
     </div>
+  )
+}
+
+type BriefingRun = {
+  body: string
+  data: { overdue: string[]; dueToday: string[]; atRisk: string[]; blocking: string[] }
+}
+
+/**
+ * §A6.5 — the briefing generator already ran on a schedule and delivered a
+ * notification nobody looked for. This puts the latest one on Home and adds the
+ * missing action: run it again right now, without waiting for tomorrow.
+ */
+function DailyBriefingCard({
+  workspaceId,
+  latest,
+}: {
+  workspaceId: string
+  latest: Notification | null
+}) {
+  const { t } = useTranslation()
+  const { featureEnabled } = useResolvedFlags(workspaceId)
+  const [run, setRun] = useState<BriefingRun | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  const generate = useMutation({
+    mutationFn: () => api<BriefingRun>('/ai/briefing', { method: 'POST' }),
+    onMutate: () => setFailed(false),
+    onSuccess: (result) => setRun(result),
+    onError: () => setFailed(true),
+  })
+
+  if (!featureEnabled(FLAGS.AI_DAILY_BRIEFINGS)) return null
+
+  const body = run?.body ?? latest?.body ?? null
+  const counts = run
+    ? [
+        { labelKey: 'appWorkspace.briefingOverdue' as const, value: run.data.overdue.length },
+        { labelKey: 'appWorkspace.briefingDueToday' as const, value: run.data.dueToday.length },
+        { labelKey: 'appWorkspace.briefingAtRisk' as const, value: run.data.atRisk.length },
+        { labelKey: 'appWorkspace.briefingBlocking' as const, value: run.data.blocking.length },
+      ]
+    : []
+
+  return (
+    <Card variant="glass" className="mb-4 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Sun className="h-3.5 w-3.5 text-amber-500" />
+            {t('appWorkspace.briefingTitle')}
+            {latest && !run && (
+              <span>· {formatDistanceToNowStrict(new Date(latest.createdAt), { addSuffix: true })}</span>
+            )}
+          </div>
+          <p className="text-sm mt-1.5 whitespace-pre-wrap">
+            {body ?? t('appWorkspace.briefingEmpty')}
+          </p>
+          {counts.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {counts.map((c) => (
+                <Badge key={c.labelKey} variant="soft" className="text-[10px]">
+                  {t(c.labelKey)}: {c.value}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {failed && <p className="text-xs text-destructive mt-2">{t('appWorkspace.briefingFailed')}</p>}
+        </div>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={generate.isPending}
+            onClick={() => generate.mutate()}
+          >
+            <RefreshCw className={generate.isPending ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+            {generate.isPending ? t('appWorkspace.briefingGenerating') : t('appWorkspace.briefingGenerate')}
+          </Button>
+          <Link to="/app/profile" className="text-[11px] text-muted-foreground hover:text-foreground">
+            {t('appWorkspace.briefingDeliveryTime')}
+          </Link>
+        </div>
+      </div>
+    </Card>
   )
 }
 

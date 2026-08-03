@@ -47,6 +47,15 @@ type MonthlyRow = {
   billableHours: number
 }
 
+/** A5.14 — one row per person, seven weekday columns. */
+type TeamWeekRow = {
+  userId: string
+  displayName: string
+  daySeconds: number[]
+  totalSeconds: number
+  billableSeconds: number
+}
+
 function formatHours(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -70,6 +79,7 @@ export function TimePage() {
   const qc = useQueryClient()
   const currentUserId = useAuthStore((s) => s.user?.id)
   const [tab, setTab] = useState<'timer' | 'timesheet' | 'monthly' | 'reports'>('timesheet')
+  const [sheetMode, setSheetMode] = useState<'mine' | 'team'>('mine')
   const [elapsedSec, setElapsedSec] = useState(0)
 
   const [weekOffset, setWeekOffset] = useState(0)
@@ -124,6 +134,21 @@ export function TimePage() {
       }
     },
     enabled: tab === 'monthly',
+  })
+  // A5.14 — the team grid. Non-moderators get their own row back, so the
+  // toggle is honest for everyone rather than admin-only.
+  const teamWeekQuery = useQuery({
+    queryKey: ['time-team-week', workspaceId, weekStartIso],
+    queryFn: async () => {
+      try {
+        return await api<TeamWeekRow[]>(
+          `/workspaces/${workspaceId}/time-team-week?weekStart=${weekStartIso}`,
+        )
+      } catch {
+        return [] as TeamWeekRow[]
+      }
+    },
+    enabled: tab === 'timesheet' && sheetMode === 'team',
   })
   const approvalStatusQuery = useQuery({
     queryKey: ['time-approvals', workspaceId, 'self'],
@@ -199,14 +224,22 @@ export function TimePage() {
   const totalBySeconds = entries.reduce((sum, e) => sum + e.durationSeconds, 0)
   const billableSeconds = entries.filter((e) => e.billable).reduce((sum, e) => sum + e.durationSeconds, 0)
 
+  // A5.14 — the week stepper has to actually select a week: the grid and the
+  // log below it are the displayed week's entries, not every entry ever.
+  const weekDayKeys = useMemo(() => new Set(days.map((d) => format(d, 'yyyy-MM-dd'))), [days])
+  const weekEntries = useMemo(
+    () => entries.filter((e) => weekDayKeys.has(format(new Date(e.loggedAt), 'yyyy-MM-dd'))),
+    [entries, weekDayKeys],
+  )
+
   const byDay = useMemo(() => {
     const map = new Map<string, number>()
-    for (const e of entries) {
+    for (const e of weekEntries) {
       const key = format(new Date(e.loggedAt), 'yyyy-MM-dd')
       map.set(key, (map.get(key) ?? 0) + e.durationSeconds)
     }
     return map
-  }, [entries])
+  }, [weekEntries])
   const quickStartTasks = useMemo(() => {
     const byTask = new Map<string, TimeEntry>()
     for (const entry of entries) {
@@ -353,6 +386,21 @@ export function TimePage() {
               {myWeekStatus === 'rejected' && <Badge variant="destructive" className="text-[10px] uppercase">{t('time.status.rejectedResubmit')}</Badge>}
             </div>
             <div className="flex items-center gap-2">
+              {/* A5.14 — per-person rows with a team total, beside the personal grid. */}
+              <div className="inline-flex rounded-md border border-border p-0.5">
+                {(['mine', 'team'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setSheetMode(mode)}
+                    className={cn(
+                      'px-2 py-1 text-xs rounded',
+                      sheetMode === mode ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {t(mode === 'mine' ? 'time.sheetMine' : 'time.sheetTeam')}
+                  </button>
+                ))}
+              </div>
               {canModerate && (
                 <Button variant="outline" size="sm" asChild>
                   <Link to="/app/$workspaceId/time/approvals" params={{ workspaceId }} search={{ tab: 'pending', historyFilter: 'all' }}>
@@ -363,7 +411,7 @@ export function TimePage() {
               <Button
                 size="sm"
                 onClick={() => submitTimesheet.mutate()}
-                disabled={submitTimesheet.isPending || entries.length === 0 || myWeekStatus === 'submitted' || myWeekStatus === 'approved'}
+                disabled={submitTimesheet.isPending || weekEntries.length === 0 || myWeekStatus === 'submitted' || myWeekStatus === 'approved'}
               >
                 <Send className="h-3.5 w-3.5 mr-1.5" />
                 {myWeekStatus === 'submitted'
@@ -379,23 +427,44 @@ export function TimePage() {
             </div>
           </div>
           <Card className="p-4">
-            <div className="grid grid-cols-8 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              <div className="col-span-1">{t('time.col.task')}</div>
+            <div className="grid grid-cols-9 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <div className="col-span-1">{sheetMode === 'team' ? t('time.member') : t('time.col.task')}</div>
               {days.map((d) => (
                 <div key={d.toISOString()} className="text-center">
                   {format(d, 'EEE')}
                   <div className="text-[10px] font-normal normal-case">{format(d, 'MMM d')}</div>
                 </div>
               ))}
+              <div className="text-center">{t('time.total')}</div>
             </div>
-            {entries.length === 0 ? (
+            {sheetMode === 'team' ? (
+              teamWeekQuery.isLoading ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
+              ) : (teamWeekQuery.data ?? []).length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">{t('time.noTimeThisWeek')}</div>
+              ) : (
+                <div className="space-y-1">
+                  {(teamWeekQuery.data ?? []).map((row) => (
+                    <div key={row.userId} className="grid grid-cols-9 gap-2 items-center py-1.5 text-sm border-b border-border/40">
+                      <div className="col-span-1 truncate">{row.displayName || t('time.member')}</div>
+                      {days.map((d, i) => (
+                        <div key={d.toISOString()} className="text-center tabular-nums text-muted-foreground">
+                          {row.daySeconds[i] > 0 ? formatHours(row.daySeconds[i]) : '—'}
+                        </div>
+                      ))}
+                      <div className="text-center tabular-nums font-medium">{formatHours(row.totalSeconds)}</div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : weekEntries.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
                 {t('time.noTimeThisWeek')}
               </div>
             ) : (
               <div className="space-y-1">
-                {entries.slice(0, 10).map((e) => (
-                  <div key={e.id} className="grid grid-cols-8 gap-2 items-center py-1.5 text-sm border-b border-border/40">
+                {weekEntries.slice(0, 10).map((e) => (
+                  <div key={e.id} className="grid grid-cols-9 gap-2 items-center py-1.5 text-sm border-b border-border/40">
                     <div className="col-span-1 truncate">{e.taskTitle ?? t('time.taskFallback')}</div>
                     {days.map((d) => {
                       const key = format(d, 'yyyy-MM-dd')
@@ -407,46 +476,59 @@ export function TimePage() {
                         </div>
                       )
                     })}
+                    <div className="text-center tabular-nums">{formatHours(e.durationSeconds)}</div>
                   </div>
                 ))}
               </div>
             )}
-            <div className="mt-3 pt-3 border-t border-border grid grid-cols-8 gap-2 text-sm font-semibold text-foreground">
+            <div className="mt-3 pt-3 border-t border-border grid grid-cols-9 gap-2 text-sm font-semibold text-foreground">
               <div className="col-span-1">{t('time.total')}</div>
-              {days.map((d) => {
+              {days.map((d, i) => {
                 const key = format(d, 'yyyy-MM-dd')
-                const sec = byDay.get(key) ?? 0
+                const sec =
+                  sheetMode === 'team'
+                    ? (teamWeekQuery.data ?? []).reduce((sum, row) => sum + (row.daySeconds[i] ?? 0), 0)
+                    : byDay.get(key) ?? 0
                 return (
                   <div key={key} className="text-center tabular-nums">
                     {sec > 0 ? formatHours(sec) : '—'}
                   </div>
                 )
               })}
+              <div className="text-center tabular-nums">
+                {formatHours(
+                  sheetMode === 'team'
+                    ? (teamWeekQuery.data ?? []).reduce((sum, row) => sum + row.totalSeconds, 0)
+                    : weekEntries.reduce((sum, e) => sum + e.durationSeconds, 0),
+                )}
+              </div>
             </div>
           </Card>
 
-          <Card className="p-4 mt-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-foreground">{t('time.entries')}</h3>
-              <span className="text-xs text-muted-foreground">{t('time.entriesTotal', { count: entries.length })}</span>
-            </div>
-            {entries.length === 0 ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">
-                {t('time.noEntries')}
+          {sheetMode === 'mine' && (
+            <Card className="p-4 mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-foreground">{t('time.entries')}</h3>
+                <span className="text-xs text-muted-foreground">{t('time.entriesTotal', { count: weekEntries.length })}</span>
               </div>
-            ) : (
-              <div className="divide-y divide-border/40">
-                {entries.map((e) => (
-                  <EntryRow
-                    key={e.id}
-                    entry={e}
-                    workspaceId={workspaceId}
-                    editable={e.userId === currentUserId}
-                  />
-                ))}
-              </div>
-            )}
-          </Card>
+              {weekEntries.length === 0 ? (
+                <div className="py-6 text-center text-sm text-muted-foreground">
+                  {t('time.noEntries')}
+                </div>
+              ) : (
+                <div className="divide-y divide-border/40">
+                  {weekEntries.map((e) => (
+                    <EntryRow
+                      key={e.id}
+                      entry={e}
+                      workspaceId={workspaceId}
+                      editable={e.userId === currentUserId}
+                    />
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
           </>
         )}
 

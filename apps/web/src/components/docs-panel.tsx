@@ -11,6 +11,7 @@ import {
   CheckSquare,
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   Download,
   FileText,
   Globe,
@@ -18,19 +19,25 @@ import {
   Heading1,
   Heading3,
   History,
+  Info,
   Layers,
   Link,
   Link2,
   ListOrdered,
   MessageCircle,
   MessagesSquare,
+  Minus,
+  Network,
   Palette,
   Pilcrow,
   Plus,
   RotateCcw,
+  Rows3,
   Slash,
   Sparkles,
+  Star,
   Strikethrough,
+  Table as TableIcon,
   Trash2,
   Underline,
 } from 'lucide-react'
@@ -42,25 +49,49 @@ import TaskItem from '@tiptap/extension-task-item'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import TextAlign from '@tiptap/extension-text-align'
+import { TableKit } from '@tiptap/extension-table'
 import { api, ApiError, downloadFile } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { getRealtimeSocket } from '../lib/realtime'
 import { createMentionExtension, type MentionMember } from '../lib/tiptap-mention'
+import { useFavorites, useToggleFavorite } from '../lib/use-favorites'
+import { Callout, ListEmbed } from '../lib/tiptap-doc-blocks'
 import { MentionText } from './mention-text'
-import { DocTemplatesDialog, type DocTemplate } from './doc-templates'
+import { DocTemplatesDialog, DOC_TEMPLATES, type DocTemplate } from './doc-templates'
 import { useMentionNames } from '../hooks/use-mention-names'
 
 type Doc = {
   id: string
   title: string
   content: Record<string, unknown>
+  createdAt: string
   updatedAt: string
   parentDocId?: string | null
   icon?: string | null
   position?: number
   publicShareId?: string | null
   publicShareEnabledAt?: string | null
+  // A5.7 — the index-table columns; all denormalised by the list endpoint.
+  createdById?: string | null
+  createdByName?: string | null
+  createdByEmail?: string | null
+  spaceId?: string | null
+  spaceName?: string | null
+  subpageCount?: number
+  shareCount?: number
 }
+
+/** A5.6 — the docs-hub buckets. Mirrors DOC_SCOPES on the API. */
+const DOC_SCOPES = ['all', 'mine', 'shared', 'archived'] as const
+type DocScope = (typeof DOC_SCOPES)[number]
+
+const SCOPE_LABEL: Record<DocScope, TranslationKey> = {
+  all: 'docs.scopeAll',
+  mine: 'docs.scopeMine',
+  shared: 'docs.scopeShared',
+  archived: 'docs.scopeArchived',
+}
+
 
 type DocComment = {
   id: string
@@ -103,12 +134,30 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const [aiMenuOpen, setAiMenuOpen] = useState(false)
   const [insertOpen, setInsertOpen] = useState(false)
   const [createTask, setCreateTask] = useState<{ open: boolean; title: string }>({ open: false, title: '' })
+  const [scope, setScope] = useState<DocScope>('all')
+  const [pane, setPane] = useState<'editor' | 'index'>('editor')
+  const [pickerMode, setPickerMode] = useState<'listEmbed' | 'linkTask' | null>(null)
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
 
   const docsQuery = useQuery({
-    queryKey: ['docs', workspaceId],
-    queryFn: () => api<Doc[]>(`/workspaces/${workspaceId}/docs`),
+    queryKey: ['docs', workspaceId, scope],
+    queryFn: () => api<Doc[]>(`/workspaces/${workspaceId}/docs?scope=${scope}`),
   })
+
+  // A5.6 — bucket totals sit on the rail itself, so switching scope is an
+  // informed choice rather than a probe.
+  const scopeCountsQuery = useQuery({
+    queryKey: ['doc-scope-counts', workspaceId],
+    queryFn: () => api<Record<DocScope, number>>(`/workspaces/${workspaceId}/docs/scope-counts`),
+  })
+
+  const favoritesQuery = useFavorites(workspaceId)
+  const favoriteDocs = useMemo(
+    () => (favoritesQuery.data ?? []).filter((f) => f.entityType === 'doc'),
+    [favoritesQuery.data],
+  )
+  const favoriteDocIds = useMemo(() => new Set(favoriteDocs.map((f) => f.entityId)), [favoriteDocs])
+  const toggleFavorite = useToggleFavorite(workspaceId)
 
   useEffect(() => {
     if (!selectedDocId && docsQuery.data?.length) {
@@ -188,6 +237,10 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       TextStyle,
       Color,
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      // A5.8 — table + the two blocks that don't exist upstream.
+      TableKit.configure({ table: { resizable: true } }),
+      Callout,
+      ListEmbed,
       mentionExtension,
     ],
     content: activeDoc?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
@@ -308,7 +361,9 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     },
   })
 
-  const runSlashCommand = (id: 'h2' | 'todo' | 'bullet' | 'code' | 'quote') => {
+  type SlashCommand = 'h2' | 'todo' | 'bullet' | 'code' | 'quote' | 'divider' | 'callout' | 'table' | 'listEmbed'
+
+  const runSlashCommand = (id: SlashCommand) => {
     if (!editor) return
     const chain = editor.chain().focus()
     if (id === 'h2') chain.toggleHeading({ level: 2 }).run()
@@ -316,7 +371,34 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     if (id === 'bullet') chain.toggleBulletList().run()
     if (id === 'code') chain.toggleCodeBlock().run()
     if (id === 'quote') chain.toggleBlockquote().run()
+    if (id === 'divider') chain.setHorizontalRule().run()
+    if (id === 'callout') chain.toggleCallout().run()
+    if (id === 'table') chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+    // The embed needs a target, so the command opens the list picker instead
+    // of inserting a block that points at nothing.
+    if (id === 'listEmbed') setPickerMode('listEmbed')
     setSlashOpen(false)
+  }
+
+  const insertListEmbed = (list: { id: string; name: string }) => {
+    editor?.chain().focus().insertListEmbed({ listId: list.id, listName: list.name }).run()
+    setPickerMode(null)
+    setInsertOpen(false)
+  }
+
+  // A5.8 — linking a task from the doc side; the task detail already links the
+  // other way (task-linked-docs.tsx).
+  const linkExistingTask = (task: { id: string; title: string }, taskPath: string) => {
+    editor
+      ?.chain()
+      .focus()
+      .insertContent([
+        { type: 'text', marks: [{ type: 'link', attrs: { href: taskPath } }], text: `↗ ${task.title}` },
+        { type: 'text', text: ' ' },
+      ])
+      .run()
+    setPickerMode(null)
+    setInsertOpen(false)
   }
 
   const exportDoc = (format: 'html' | 'txt' | 'md') => {
@@ -409,13 +491,20 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     setCreateTask({ open: true, title: sel })
   }
 
-  const slashItems = [
-    { id: 'h2' as const, label: t('docs.heading2') },
-    { id: 'todo' as const, label: t('docs.todoList') },
-    { id: 'bullet' as const, label: t('docs.bulletList') },
-    { id: 'quote' as const, label: t('docs.quoteBlock') },
-    { id: 'code' as const, label: t('docs.codeBlock') },
-  ].filter((item) => item.label.toLowerCase().includes(slashFilter.toLowerCase()))
+  const slashCommands: Array<{ id: SlashCommand; label: string }> = [
+    { id: 'h2', label: t('docs.heading2') },
+    { id: 'todo', label: t('docs.todoList') },
+    { id: 'bullet', label: t('docs.bulletList') },
+    { id: 'quote', label: t('docs.quoteBlock') },
+    { id: 'code', label: t('docs.codeBlock') },
+    { id: 'table', label: t('docs.tableBlock') },
+    { id: 'divider', label: t('docs.dividerBlock') },
+    { id: 'callout', label: t('docs.calloutBlock') },
+    { id: 'listEmbed', label: t('docs.listEmbedBlock') },
+  ]
+  const slashItems = slashCommands.filter((item) =>
+    item.label.toLowerCase().includes(slashFilter.toLowerCase()),
+  )
 
   const renderDocNodes = (parentId: string | null, depth: number): React.ReactNode =>
     (docsByParent.get(parentId) ?? []).map((node) => {
@@ -482,11 +571,58 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
             {t('docs.pages')}
           </span>
+          <button
+            type="button"
+            onClick={() => setPane((p) => (p === 'index' ? 'editor' : 'index'))}
+            title={pane === 'index' ? t('docs.backToEditor') : t('docs.openIndex')}
+            className={`p-1 rounded ${pane === 'index' ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <Rows3 className="h-3.5 w-3.5" />
+          </button>
         </div>
+
+        {/* A5.6 — All / My / Shared with me / Archived, with counts. */}
+        <div className="px-2 pt-2 grid grid-cols-2 gap-1">
+          {DOC_SCOPES.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setScope(id)}
+              className={`flex items-center justify-between gap-1 rounded-md px-2 py-1 text-[11px] transition-colors ${
+                scope === id
+                  ? 'bg-accent/15 text-foreground font-medium'
+                  : 'text-muted-foreground hover:bg-card/60 hover:text-foreground'
+              }`}
+            >
+              <span className="truncate">{t(SCOPE_LABEL[id])}</span>
+              <span className="tabular-nums opacity-70">{scopeCountsQuery.data?.[id] ?? 0}</span>
+            </button>
+          ))}
+        </div>
+
+        {favoriteDocs.length > 0 && (
+          <div className="px-2 pt-2">
+            <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              {t('docs.favorites')}
+            </div>
+            {favoriteDocs.map((fav) => (
+              <button
+                key={fav.entityId}
+                type="button"
+                onClick={() => setSelectedDocId(fav.entityId)}
+                className="w-full flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-card/60 hover:text-foreground"
+              >
+                <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />
+                <span className="truncate">{fav.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto px-2 py-2 space-y-0.5">
           {docsQuery.data?.length === 0 && (
             <p className="px-2 py-3 text-xs text-muted-foreground">
-              {t('docs.noDocsYet')}
+              {scope === 'all' ? t('docs.noDocsYet') : t('docs.noDocsInScope')}
             </p>
           )}
           {renderDocNodes(null, 0)}
@@ -546,7 +682,29 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
         />
       )}
 
-      {/* Editor pane */}
+      {pickerMode && (
+        <EmbedListPickerDialog
+          workspaceId={workspaceId}
+          mode={pickerMode}
+          onClose={() => setPickerMode(null)}
+          onPickList={insertListEmbed}
+          onPickTask={linkExistingTask}
+        />
+      )}
+
+      {/* Editor pane — or, in index mode, the A5.7 table over the same read. */}
+      {pane === 'index' ? (
+        <DocsIndexPane
+          docs={docsQuery.data ?? []}
+          isLoading={docsQuery.isLoading}
+          favoriteDocIds={favoriteDocIds}
+          onOpenDoc={(id) => {
+            setSelectedDocId(id)
+            setPane('editor')
+          }}
+          onToggleFavorite={(id) => toggleFavorite.mutate({ entityType: 'doc', entityId: id })}
+        />
+      ) : (
       <div className="flex flex-col min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-border/60">
           <h3 className="font-display text-base font-semibold truncate">
@@ -554,6 +712,16 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           </h3>
           {activeDoc && (
             <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                title={favoriteDocIds.has(activeDoc.id) ? t('docs.unfavorite') : t('docs.favorite')}
+                onClick={() => toggleFavorite.mutate({ entityType: 'doc', entityId: activeDoc.id })}
+              >
+                <Star
+                  className={`h-3.5 w-3.5 ${favoriteDocIds.has(activeDoc.id) ? 'fill-amber-400 text-amber-400' : ''}`}
+                />
+              </Button>
               <ShareDocButton doc={activeDoc} onShareChange={() => docsQuery.refetch()} />
               <Button
                 size="sm"
@@ -781,6 +949,22 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                     <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); editor?.chain().focus().toggleTaskList().run() }}>
                       <CheckSquare className="h-3.5 w-3.5" /> {t('docs.checklist')}
                     </button>
+                    {/* A5.8 blocks */}
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); runSlashCommand('table') }}>
+                      <TableIcon className="h-3.5 w-3.5" /> {t('docs.tableBlock')}
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); runSlashCommand('divider') }}>
+                      <Minus className="h-3.5 w-3.5" /> {t('docs.dividerBlock')}
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); runSlashCommand('callout') }}>
+                      <Info className="h-3.5 w-3.5" /> {t('docs.calloutBlock')}
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); setPickerMode('listEmbed') }}>
+                      <ClipboardList className="h-3.5 w-3.5" /> {t('docs.listEmbedBlock')}
+                    </button>
+                    <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={() => { setInsertOpen(false); setPickerMode('linkTask') }}>
+                      <CheckSquare className="h-3.5 w-3.5" /> {t('docs.linkTask')}
+                    </button>
                     <button className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 flex items-center gap-2" onClick={openCreateTaskFromSelection}>
                       <Plus className="h-3.5 w-3.5" /> {t('docs.createTaskFromSelection')}
                     </button>
@@ -868,7 +1052,13 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           {activeDoc ? (
             <EditorContent editor={editor} />
           ) : (
-            <p className="text-sm text-muted-foreground">{t('docs.pickAPage')}</p>
+            /* A5.9 — the starter templates belong where a new user actually
+               lands, not behind an icon in the sidebar. */
+            <DocsEmptyState
+              hasDocs={(docsQuery.data ?? []).length > 0}
+              onPickTemplate={(tpl) => createDoc.mutate({ title: tpl.title, content: tpl.content })}
+              onBlank={() => createDoc.mutate({})}
+            />
           )}
           {slashOpen && activeDoc && (
             <div className="absolute top-4 right-4 z-30 w-52 rounded-md border border-border bg-card shadow-lg overflow-hidden">
@@ -891,6 +1081,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           )}
         </div>
       </div>
+      )}
 
       {commentsOpen && activeDoc && (
         <DocCommentsPane docId={activeDoc.id} workspaceId={workspaceId} />
@@ -907,6 +1098,304 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
         />
       )}
     </Card>
+  )
+}
+
+/**
+ * A5.7 — the sortable index ClickUp shows beside the tree: Name (with subpage
+ * count and a padlock for a doc nobody else can reach), Location, Created by,
+ * Date updated, Sharing. Every column is already on the list response; "Date
+ * viewed" is dropped because nothing in the product records it.
+ */
+function DocsIndexPane({
+  docs,
+  isLoading,
+  favoriteDocIds,
+  onOpenDoc,
+  onToggleFavorite,
+}: {
+  docs: Doc[]
+  isLoading: boolean
+  favoriteDocIds: Set<string>
+  onOpenDoc: (id: string) => void
+  onToggleFavorite: (id: string) => void
+}) {
+  const { t } = useTranslation()
+  const [sortBy, setSortBy] = useState<'title' | 'updatedAt' | 'createdByName'>('updatedAt')
+  const [asc, setAsc] = useState(false)
+
+  const byId = useMemo(() => new Map(docs.map((d) => [d.id, d])), [docs])
+  const rows = useMemo(() => {
+    const sorted = [...docs]
+    sorted.sort((a, b) => {
+      const av = (sortBy === 'updatedAt' ? a.updatedAt : (a[sortBy] ?? '')) as string
+      const bv = (sortBy === 'updatedAt' ? b.updatedAt : (b[sortBy] ?? '')) as string
+      const cmp = sortBy === 'updatedAt' ? av.localeCompare(bv) : av.localeCompare(bv, undefined, { sensitivity: 'base' })
+      return asc ? cmp : -cmp
+    })
+    return sorted
+  }, [docs, sortBy, asc])
+
+  const toggleSort = (column: typeof sortBy) => {
+    if (column === sortBy) setAsc((v) => !v)
+    else {
+      setSortBy(column)
+      setAsc(column !== 'updatedAt')
+    }
+  }
+
+  const headerCls = 'text-start font-semibold px-3 py-2 cursor-pointer select-none hover:text-foreground'
+
+  return (
+    <div className="flex flex-col min-w-0 overflow-auto">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-card/95 backdrop-blur">
+          <tr className="border-b border-border/60 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <th className={headerCls} onClick={() => toggleSort('title')}>{t('docs.colName')}</th>
+            <th className="text-start font-semibold px-3 py-2">{t('docs.colLocation')}</th>
+            <th className={headerCls} onClick={() => toggleSort('createdByName')}>{t('docs.colCreatedBy')}</th>
+            <th className={headerCls} onClick={() => toggleSort('updatedAt')}>{t('docs.colUpdated')}</th>
+            <th className="text-start font-semibold px-3 py-2">{t('docs.colSharing')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {isLoading && (
+            <tr><td colSpan={5} className="px-3 py-4 text-xs text-muted-foreground">{t('common.loading')}</td></tr>
+          )}
+          {!isLoading && rows.length === 0 && (
+            <tr><td colSpan={5} className="px-3 py-4 text-xs text-muted-foreground">{t('docs.noDocsInScope')}</td></tr>
+          )}
+          {rows.map((doc) => {
+            const parent = doc.parentDocId ? byId.get(doc.parentDocId) : undefined
+            const location = parent?.title ?? doc.spaceName ?? t('common.workspace')
+            return (
+              <tr key={doc.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30 group">
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => onToggleFavorite(doc.id)}
+                      title={favoriteDocIds.has(doc.id) ? t('docs.unfavorite') : t('docs.favorite')}
+                      className="shrink-0 text-muted-foreground hover:text-amber-400"
+                    >
+                      <Star className={`h-3 w-3 ${favoriteDocIds.has(doc.id) ? 'fill-amber-400 text-amber-400' : ''}`} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenDoc(doc.id)}
+                      className="truncate text-start hover:text-accent"
+                    >
+                      {doc.icon ? <span className="me-1">{doc.icon}</span> : null}
+                      {doc.title}
+                    </button>
+                    {(doc.subpageCount ?? 0) > 0 && (
+                      <span className="shrink-0 inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                        <Network className="h-3 w-3" />
+                        {doc.subpageCount}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-muted-foreground truncate">{location}</td>
+                <td className="px-3 py-2 text-muted-foreground truncate">
+                  {doc.createdByName ?? doc.createdByEmail ?? t('docs.unknown')}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{relativeTime(doc.updatedAt)}</td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 text-xs">
+                    {doc.publicShareId ? (
+                      <><Globe className="h-3 w-3" /> {t('docs.sharingPublic')}</>
+                    ) : (doc.shareCount ?? 0) > 0 ? (
+                      <><Link2 className="h-3 w-3" /> {t('docs.sharingShared', { count: doc.shareCount ?? 0 })}</>
+                    ) : (
+                      <><GlobeLock className="h-3 w-3" /> {t('docs.sharingPrivate')}</>
+                    )}
+                  </span>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/** A5.9 — starter cards on the surface a new user actually lands on. */
+function DocsEmptyState({
+  hasDocs,
+  onPickTemplate,
+  onBlank,
+}: {
+  hasDocs: boolean
+  onPickTemplate: (template: DocTemplate) => void
+  onBlank: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="max-w-2xl">
+      <h4 className="font-display text-lg font-semibold">{hasDocs ? t('docs.pickAPage') : t('docs.startHere')}</h4>
+      <p className="text-sm text-muted-foreground mt-1">{t('docs.startHereDesc')}</p>
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {DOC_TEMPLATES.slice(0, 3).map((tpl) => (
+          <button
+            key={tpl.id}
+            onClick={() => onPickTemplate(tpl)}
+            className="text-left rounded-lg border border-border/60 bg-card/40 p-3 hover:border-accent/50 hover:bg-card/70 transition-all"
+          >
+            <div className="text-xl">{tpl.emoji}</div>
+            <div className="text-sm font-medium mt-1.5">{t(tpl.nameKey)}</div>
+            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{t(tpl.descKey)}</p>
+          </button>
+        ))}
+      </div>
+      <Button size="sm" variant="outline" className="mt-3" onClick={onBlank}>
+        <Plus className="h-3.5 w-3.5" /> {t('docs.blankDoc')}
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Space → project → list picker, shared by the two A5.8 features that need a
+ * target: the live-List embed block, and linking an existing task from the doc
+ * side (task→doc linking previously only worked from the task).
+ */
+function EmbedListPickerDialog({
+  workspaceId,
+  mode,
+  onClose,
+  onPickList,
+  onPickTask,
+}: {
+  workspaceId: string
+  mode: 'listEmbed' | 'linkTask'
+  onClose: () => void
+  onPickList: (list: { id: string; name: string }) => void
+  onPickTask: (task: { id: string; title: string }, taskPath: string) => void
+}) {
+  const { t } = useTranslation()
+  const [spaceId, setSpaceId] = useState('')
+  const [projectId, setProjectId] = useState('')
+  const [listId, setListId] = useState('')
+
+  const spaces = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
+  })
+  const projects = useQuery({
+    enabled: !!spaceId,
+    queryKey: ['projects', spaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/projects/space/${spaceId}`),
+  })
+  const lists = useQuery({
+    enabled: !!projectId,
+    queryKey: ['lists', projectId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/lists/project/${projectId}`),
+  })
+  const tasks = useQuery({
+    enabled: mode === 'linkTask' && !!listId,
+    queryKey: ['doc-link-tasks', listId],
+    queryFn: () => api<Array<{ id: string; title: string }>>(`/tasks/list/${listId}`),
+  })
+
+  const selectCls =
+    'w-full h-9 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-card p-5 space-y-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-base font-semibold">
+            {mode === 'linkTask' ? t('docs.linkTask') : t('docs.listEmbedBlock')}
+          </h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" title={t('common.close')}>
+            ✕
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {mode === 'linkTask' ? t('docs.linkTaskHint') : t('docs.listEmbedHint')}
+        </p>
+        <select
+          className={selectCls}
+          value={spaceId}
+          onChange={(e) => {
+            setSpaceId(e.target.value)
+            setProjectId('')
+            setListId('')
+          }}
+        >
+          <option value="">{t('docs.selectSpace')}</option>
+          {(spaces.data ?? []).map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        <select
+          className={selectCls}
+          value={projectId}
+          disabled={!spaceId}
+          onChange={(e) => {
+            setProjectId(e.target.value)
+            setListId('')
+          }}
+        >
+          <option value="">{t('docs.selectProject')}</option>
+          {(projects.data ?? []).map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        {mode === 'linkTask' && (
+          <select className={selectCls} value={listId} disabled={!projectId} onChange={(e) => setListId(e.target.value)}>
+            <option value="">{t('docs.selectList')}</option>
+            {(lists.data ?? []).map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        )}
+        <div className="max-h-48 overflow-auto rounded-md border border-border/60 divide-y divide-border/40">
+          {mode === 'listEmbed' ? (
+            <>
+              {!projectId && <p className="px-3 py-2 text-xs text-muted-foreground">{t('docs.selectList')}</p>}
+              {projectId && (lists.data ?? []).length === 0 && (
+                <p className="px-3 py-2 text-xs text-muted-foreground">{t('docs.noListsInProject')}</p>
+              )}
+              {projectId &&
+                (lists.data ?? []).map((l) => (
+                  <button
+                    key={l.id}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50"
+                    onClick={() => onPickList({ id: l.id, name: l.name })}
+                  >
+                    {l.name}
+                  </button>
+                ))}
+            </>
+          ) : (
+            <>
+              {!listId && <p className="px-3 py-2 text-xs text-muted-foreground">{t('docs.selectList')}</p>}
+              {listId && (tasks.data ?? []).length === 0 && (
+                <p className="px-3 py-2 text-xs text-muted-foreground">{t('docs.noTasksInList')}</p>
+              )}
+              {listId &&
+                (tasks.data ?? []).map((task) => (
+                  <button
+                    key={task.id}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-surface-50 truncate"
+                    onClick={() =>
+                      onPickTask(task, `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${task.id}`)
+                    }
+                  >
+                    {task.title}
+                  </button>
+                ))}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

@@ -47,8 +47,10 @@ import { Route as AppWorkspaceIdTimelineRouteImport } from './routes/app.$worksp
 import { Route as AppWorkspaceIdTimeRouteImport } from './routes/app.$workspaceId.time'
 import { Route as AppWorkspaceIdTemplatesRouteImport } from './routes/app.$workspaceId.templates'
 import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspaceId.sprints'
+import { Route as AppWorkspaceIdSharedRouteImport } from './routes/app.$workspaceId.shared'
 import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$workspaceId.settings'
 import { Route as AppWorkspaceIdReportsRouteImport } from './routes/app.$workspaceId.reports'
+import { Route as AppWorkspaceIdRepliesRouteImport } from './routes/app.$workspaceId.replies'
 import { Route as AppWorkspaceIdMindmapsRouteImport } from './routes/app.$workspaceId.mindmaps'
 import { Route as AppWorkspaceIdIntegrationsRouteImport } from './routes/app.$workspaceId.integrations'
 import { Route as AppWorkspaceIdInsightsRouteImport } from './routes/app.$workspaceId.insights'
@@ -294,6 +296,13 @@ const AppWorkspaceIdSprintsRoute = AppWorkspaceIdSprintsRouteImport.update({
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.sprints.lazy').then((d) => d.Route),
 )
+const AppWorkspaceIdSharedRoute = AppWorkspaceIdSharedRouteImport.update({
+  id: '/shared',
+  path: '/shared',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.shared.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdSettingsRoute = AppWorkspaceIdSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -307,6 +316,13 @@ const AppWorkspaceIdReportsRoute = AppWorkspaceIdReportsRouteImport.update({
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.reports.lazy').then((d) => d.Route),
+)
+const AppWorkspaceIdRepliesRoute = AppWorkspaceIdRepliesRouteImport.update({
+  id: '/replies',
+  path: '/replies',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.replies.lazy').then((d) => d.Route),
 )
 const AppWorkspaceIdMindmapsRoute = AppWorkspaceIdMindmapsRouteImport.update({
   id: '/mindmaps',
@@ -527,8 +543,10 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
   '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
   '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
+  '/app/$workspaceId/replies': typeof AppWorkspaceIdRepliesRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
+  '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
@@ -588,8 +606,10 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
   '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
   '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
+  '/app/$workspaceId/replies': typeof AppWorkspaceIdRepliesRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
+  '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
   '/app/$workspaceId/whiteboards': typeof AppWorkspaceIdWhiteboardsRoute
@@ -651,8 +671,10 @@ export interface FileRoutesById {
   '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
   '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
   '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
+  '/app/$workspaceId/replies': typeof AppWorkspaceIdRepliesRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
+  '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
@@ -717,8 +739,10 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/insights'
     | '/app/$workspaceId/integrations'
     | '/app/$workspaceId/mindmaps'
+    | '/app/$workspaceId/replies'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
+    | '/app/$workspaceId/shared'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
@@ -778,8 +802,10 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/insights'
     | '/app/$workspaceId/integrations'
     | '/app/$workspaceId/mindmaps'
+    | '/app/$workspaceId/replies'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
+    | '/app/$workspaceId/shared'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/timeline'
     | '/app/$workspaceId/whiteboards'
@@ -840,8 +866,10 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/insights'
     | '/app/$workspaceId/integrations'
     | '/app/$workspaceId/mindmaps'
+    | '/app/$workspaceId/replies'
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
+    | '/app/$workspaceId/shared'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
@@ -1142,6 +1170,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdSprintsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/shared': {
+      id: '/app/$workspaceId/shared'
+      path: '/shared'
+      fullPath: '/app/$workspaceId/shared'
+      preLoaderRoute: typeof AppWorkspaceIdSharedRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/settings': {
       id: '/app/$workspaceId/settings'
       path: '/settings'
@@ -1154,6 +1189,13 @@ declare module '@tanstack/react-router' {
       path: '/reports'
       fullPath: '/app/$workspaceId/reports'
       preLoaderRoute: typeof AppWorkspaceIdReportsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/replies': {
+      id: '/app/$workspaceId/replies'
+      path: '/replies'
+      fullPath: '/app/$workspaceId/replies'
+      preLoaderRoute: typeof AppWorkspaceIdRepliesRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
     '/app/$workspaceId/mindmaps': {
@@ -1425,8 +1467,10 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdInsightsRoute: typeof AppWorkspaceIdInsightsRoute
   AppWorkspaceIdIntegrationsRoute: typeof AppWorkspaceIdIntegrationsRoute
   AppWorkspaceIdMindmapsRoute: typeof AppWorkspaceIdMindmapsRoute
+  AppWorkspaceIdRepliesRoute: typeof AppWorkspaceIdRepliesRoute
   AppWorkspaceIdReportsRoute: typeof AppWorkspaceIdReportsRoute
   AppWorkspaceIdSettingsRoute: typeof AppWorkspaceIdSettingsRoute
+  AppWorkspaceIdSharedRoute: typeof AppWorkspaceIdSharedRoute
   AppWorkspaceIdSprintsRoute: typeof AppWorkspaceIdSprintsRouteWithChildren
   AppWorkspaceIdTemplatesRoute: typeof AppWorkspaceIdTemplatesRoute
   AppWorkspaceIdTimeRoute: typeof AppWorkspaceIdTimeRouteWithChildren
@@ -1450,8 +1494,10 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdInsightsRoute: AppWorkspaceIdInsightsRoute,
   AppWorkspaceIdIntegrationsRoute: AppWorkspaceIdIntegrationsRoute,
   AppWorkspaceIdMindmapsRoute: AppWorkspaceIdMindmapsRoute,
+  AppWorkspaceIdRepliesRoute: AppWorkspaceIdRepliesRoute,
   AppWorkspaceIdReportsRoute: AppWorkspaceIdReportsRoute,
   AppWorkspaceIdSettingsRoute: AppWorkspaceIdSettingsRoute,
+  AppWorkspaceIdSharedRoute: AppWorkspaceIdSharedRoute,
   AppWorkspaceIdSprintsRoute: AppWorkspaceIdSprintsRouteWithChildren,
   AppWorkspaceIdTemplatesRoute: AppWorkspaceIdTemplatesRoute,
   AppWorkspaceIdTimeRoute: AppWorkspaceIdTimeRouteWithChildren,

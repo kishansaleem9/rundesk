@@ -104,10 +104,44 @@ function renderBlock(node: Node, depth = 0): string {
     }
     case 'horizontalRule':
       return `---\n\n`
+    // A5.8 blocks. A callout is a plain wrapper, so the default descend below
+    // already handles it; these two would otherwise export as loose paragraphs
+    // (table) or vanish entirely (the atom list embed).
+    case 'table':
+      return renderTable(node)
+    case 'listEmbed': {
+      const name = typeof node.attrs?.listName === 'string' ? node.attrs.listName : ''
+      return `> **Embedded list:** ${name || 'Untitled list'}\n\n`
+    }
     default:
       // Unknown block: descend if it has children, else drop.
       return node.content ? node.content.map((c) => renderBlock(c, depth)).join('') : ''
   }
+}
+
+/** GFM table. The first row is the header when it holds tableHeader cells. */
+function renderTable(node: Node): string {
+  const rows = (node.content ?? []).map((row) =>
+    (row.content ?? []).map((cell) =>
+      (cell.content ?? [])
+        .map((block) => renderInline(block.content))
+        .join(' ')
+        .replace(/\|/g, '\\|')
+        .trim(),
+    ),
+  )
+  if (rows.length === 0) return ''
+  const width = Math.max(...rows.map((r) => r.length))
+  const pad = (cells: string[]) => Array.from({ length: width }, (_, i) => cells[i] ?? '')
+  const firstIsHeader = (node.content?.[0]?.content ?? []).some((c) => c.type === 'tableHeader')
+  const header = firstIsHeader ? pad(rows[0]) : Array.from({ length: width }, () => '')
+  const body = firstIsHeader ? rows.slice(1) : rows
+  const lines = [
+    `| ${header.join(' | ')} |`,
+    `| ${Array.from({ length: width }, () => '---').join(' | ')} |`,
+    ...body.map((r) => `| ${pad(r).join(' | ')} |`),
+  ]
+  return lines.join('\n') + '\n\n'
 }
 
 /** Plain text of an inline run (marks stripped), hard breaks as newlines. */
@@ -179,6 +213,19 @@ function linesForBlock(node: Node, out: string[]): void {
     case 'horizontalRule':
       out.push('─'.repeat(40)); out.push('')
       break
+    case 'table':
+      // The PDF writer is line-based, so a table becomes tab-joined rows.
+      for (const row of node.content ?? []) {
+        out.push((row.content ?? []).map((cell) => plainInline(cell.content).trim()).join('\t'))
+      }
+      out.push('')
+      break
+    case 'listEmbed': {
+      const name = typeof node.attrs?.listName === 'string' ? node.attrs.listName : ''
+      out.push(`[Embedded list: ${name || 'Untitled list'}]`)
+      out.push('')
+      break
+    }
     default:
       if (node.content) for (const c of node.content) linesForBlock(c, out)
   }

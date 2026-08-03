@@ -26,9 +26,12 @@ function buildDb(opts: { selectQueue?: any[][]; updateReturning?: any[] } = {}) 
 
   const db = {
     select: mock.fn(() => ({
-      from: mock.fn(() => ({
-        where: mock.fn(() => chainable(selectQueue.shift() ?? [])),
-      })),
+      from: mock.fn(() => {
+        const where = mock.fn(() => chainable(selectQueue.shift() ?? []))
+        // listPresets joins the owner in, so `from(...)` must also accept a
+        // leftJoin before the where.
+        return { where, leftJoin: mock.fn(() => ({ where })) }
+      }),
     })),
     update: mock.fn(() => ({
       set: mock.fn((arg: any) => {
@@ -164,13 +167,34 @@ describe('DashboardsService.listPresets', () => {
       { id: 'mine', userId: 'u', isWorkspaceDefault: false },
       { id: 'ws-default', userId: 'admin', isWorkspaceDefault: true },
     ]
-    const { db } = buildDb({ selectQueue: [rows] })
+    // First select resolves the object_shares grants, second the presets.
+    const { db } = buildDb({ selectQueue: [[], rows] })
     const svc = new DashboardsService(db)
 
     const result = await svc.listPresets('u', WS)
 
     assert.equal(result.length, 2)
     assert.ok(result.some((p: any) => p.isWorkspaceDefault === true))
+  })
+
+  // A5.11 — a grant in object_shares is the only thing behind "Shared with me".
+  it('flags ownership and shared-with-me from the share grants', async () => {
+    const rows = [
+      { id: 'mine', userId: 'u', isWorkspaceDefault: false },
+      { id: 'theirs', userId: 'other', isWorkspaceDefault: false },
+    ]
+    const { db } = buildDb({ selectQueue: [[{ objectId: 'theirs' }], rows] })
+    const svc = new DashboardsService(db)
+
+    const result = await svc.listPresets('u', WS)
+
+    assert.deepEqual(
+      result.map((p: any) => [p.id, p.isOwner, p.isSharedWithMe]),
+      [
+        ['mine', true, false],
+        ['theirs', false, true],
+      ],
+    )
   })
 })
 

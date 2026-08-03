@@ -40,7 +40,7 @@ export class WorkspaceGroupsController {
   @UseGuards(WorkspaceAdminGuard)
   create(
     @Param('workspaceId') workspaceId: string,
-    @Body() body: { name: string; description?: string; memberIds?: string[] },
+    @Body() body: { name: string; description?: string; alias?: string | null; memberIds?: string[] },
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.groups.create(workspaceId, user.id, body)
@@ -51,7 +51,7 @@ export class WorkspaceGroupsController {
   update(
     @Param('workspaceId') workspaceId: string,
     @Param('groupId') groupId: string,
-    @Body() body: { name?: string; description?: string | null },
+    @Body() body: { name?: string; description?: string | null; alias?: string | null },
     @CurrentUser() user: CurrentUserPayload,
   ) {
     return this.groups.update(workspaceId, groupId, user.id, body)

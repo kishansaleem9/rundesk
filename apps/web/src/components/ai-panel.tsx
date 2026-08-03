@@ -28,6 +28,13 @@ type AiPanelProps = {
   /** Optional hint about where the user is (e.g. "list Backlog", "dashboard"),
    * forwarded so the server grounds answers to the current view (Plan §7.15). */
   currentView?: string
+  /** §A6.4 — a question handed in from elsewhere (the palette's Ask AI row, an
+   * `/ai?prompt=` link). `id` separates two identical asks so the second one is
+   * still sent instead of being read as a re-render of the first. */
+  ask?: { text: string; id: number }
+  /** Fired once the `ask` has been sent, so the caller can drop it and a later
+   * re-mount of the panel does not replay a stale question. */
+  onAskHandled?: () => void
   onClose?: () => void
   className?: string
 }
@@ -42,7 +49,14 @@ const SUGGESTED_PROMPT_KEYS = [
   'aiPanel.suggestion.whatsBlocking',
 ] as const
 
-export function AiPanel({ workspaceId, currentView, onClose, className }: AiPanelProps) {
+export function AiPanel({
+  workspaceId,
+  currentView,
+  ask,
+  onAskHandled,
+  onClose,
+  className,
+}: AiPanelProps) {
   const { t, locale } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -153,6 +167,19 @@ export function AiPanel({ workspaceId, currentView, onClose, className }: AiPane
       abortRef.current = null
     }
   }
+
+  // §A6.4 — a handed-in question is sent as if the user had typed it. The ref
+  // holds the ask already dispatched, so re-renders (or a panel that stays
+  // mounted while the user navigates) never replay it.
+  const sentAskRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!ask || sentAskRef.current === ask.id || !ask.text.trim()) return
+    sentAskRef.current = ask.id
+    void sendMessage(ask.text)
+    onAskHandled?.()
+    // sendMessage is re-created every render; the ref above is the guard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask?.id, ask?.text])
 
   function stopStreaming() {
     abortRef.current?.abort()

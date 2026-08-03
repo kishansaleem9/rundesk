@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { and, eq, gte, inArray, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
-import { tasks, taskAssignees, taskDependencies, notifications, workspaceMembers } from '@rundesk/db'
+import { tasks, taskAssignees, taskDependencies, notifications, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { AiService, type BriefingData, briefingHasContent } from './ai.service'
@@ -74,6 +74,23 @@ export class BriefingService {
     }
     if (sent > 0) this.logger.log(`Delivered ${sent} daily briefing(s) for hour ${now.getUTCHours()}`)
     return { candidates: recipients.length, due: due.length, sent }
+  }
+
+  /**
+   * §A6.5 — the same briefing the cron writes, on demand. Deliberately writes
+   * nothing: a run-now must not consume the user's scheduled delivery for the
+   * day, so the cron's once-per-day dedupe is left alone and the caller renders
+   * the returned text itself.
+   */
+  async generateNow(userId: string): Promise<{ body: string; data: BriefingData }> {
+    const [user] = await this.db
+      .select({ displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+    const data = await this.buildBriefingData(userId, user?.displayName || user?.email || '')
+    const body = await this.ai.generateBriefing(data, { userId })
+    return { body, data }
   }
 
   /** UserIds among `userIds` that already received an ai_briefing on `now`'s UTC day. */

@@ -9,6 +9,7 @@ export type GroupCreateInput = {
   name: string
   description?: string | null
   externalId?: string | null
+  alias?: string | null
   memberIds?: string[]
 }
 
@@ -16,6 +17,27 @@ export type GroupUpdateInput = {
   name?: string
   description?: string | null
   externalId?: string | null
+  alias?: string | null
+}
+
+/**
+ * §A4.3 — an @-handle has to survive being typed by a human mid-sentence, so it
+ * is reduced to the character set a mention parser can bound: lowercase
+ * alphanumerics plus `-`/`_`. Returns null when nothing usable survives, which
+ * leaves the team un-mentionable rather than reachable under a mangled handle.
+ */
+export function normalizeGroupAlias(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null
+  const cleaned = raw
+    .trim()
+    .replace(/^@+/, '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 32)
+  return cleaned.length >= 2 ? cleaned : null
 }
 
 @Injectable()
@@ -103,6 +125,10 @@ export class WorkspaceGroupsService {
     const memberIds = Array.isArray(input.memberIds) ? input.memberIds : []
     if (memberIds.length > 0) await this.assertMembersOfWorkspace(workspaceId, memberIds)
 
+    // §A4.3 — every team gets a handle, derived from its name when the caller
+    // does not supply one, so a group created by SCIM is mentionable too.
+    const alias = await this.resolveAlias(workspaceId, normalizeGroupAlias(input.alias) ?? input.name)
+
     try {
       const [created] = await this.db
         .insert(workspaceGroups)
@@ -111,6 +137,7 @@ export class WorkspaceGroupsService {
           name: input.name.trim(),
           description: input.description ?? null,
           externalId: input.externalId ?? null,
+          alias,
           createdById: actorId,
         })
         .returning()
@@ -149,6 +176,12 @@ export class WorkspaceGroupsService {
     }
     if (input.description !== undefined) patch.description = input.description
     if (input.externalId !== undefined) patch.externalId = input.externalId
+    if (input.alias !== undefined) {
+      const desired = normalizeGroupAlias(input.alias)
+      // An explicitly blank alias removes the handle; anything else is claimed,
+      // suffixed if a sibling team already answers to it.
+      patch.alias = desired ? await this.resolveAlias(workspaceId, desired, groupId) : null
+    }
 
     if (Object.keys(patch).length > 1) {
       await this.db.update(workspaceGroups).set(patch).where(eq(workspaceGroups.id, groupId))
@@ -245,6 +278,33 @@ export class WorkspaceGroupsService {
       metadata: { count: userIds.length },
     })
     return this.get(workspaceId, groupId)
+  }
+
+  /**
+   * Claim a free handle in this workspace, suffixing `-2`, `-3`… on collision.
+   * The unique index is still the authority; this only keeps the common case
+   * from surfacing as a 409 the admin has to resolve by hand.
+   */
+  private async resolveAlias(
+    workspaceId: string,
+    desired: string | null | undefined,
+    excludeGroupId?: string,
+  ): Promise<string | null> {
+    const base = normalizeGroupAlias(desired)
+    if (!base) return null
+    const taken = await this.db
+      .select({ alias: workspaceGroups.alias, id: workspaceGroups.id })
+      .from(workspaceGroups)
+      .where(eq(workspaceGroups.workspaceId, workspaceId))
+    const used = new Set(
+      taken.filter((r) => r.id !== excludeGroupId && r.alias).map((r) => r.alias!.toLowerCase()),
+    )
+    if (!used.has(base)) return base
+    for (let n = 2; n < 100; n++) {
+      const candidate = `${base.slice(0, 29)}-${n}`
+      if (!used.has(candidate)) return candidate
+    }
+    return null
   }
 
   private async assertMembersOfWorkspace(workspaceId: string, userIds: string[]) {
