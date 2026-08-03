@@ -67,6 +67,14 @@ type FormDetail = {
   fields: FormField[]
 }
 
+/** Shape of /spaces/workspace/:id/move-targets — reused for the destination picker. */
+type MoveTargetSpace = {
+  id: string
+  name: string
+  projects: Array<{ id: string; name: string }>
+  lists?: Array<{ id: string; name: string; projectId: string }>
+}
+
 type Submission = {
   id: string
   submitterEmail?: string | null
@@ -380,7 +388,7 @@ export function FormBuilderPage() {
 
         {/* ── Settings tab ─────────────────────────────────────────────── */}
         {activeTab === 'settings' && (
-          <FormSettings form={form} onUpdate={(patch) => updateForm.mutate(patch)} />
+          <FormSettings form={form} onUpdate={(patch) => updateForm.mutate(patch)} workspaceId={workspaceId} />
         )}
 
         {/* ── Submissions tab ───────────────────────────────────────────── */}
@@ -824,14 +832,56 @@ function FieldCard({
 
 // ─── FormSettings ────────────────────────────────────────────────────────────
 
-function FormSettings({ form, onUpdate }: { form: FormDetail; onUpdate: (patch: any) => void }) {
+function FormSettings({
+  form,
+  onUpdate,
+  workspaceId,
+}: {
+  form: FormDetail
+  onUpdate: (patch: any) => void
+  workspaceId: string
+}) {
   const { t } = useTranslation()
   const [title, setTitle] = useState(form.title)
   const [desc, setDesc] = useState(form.description ?? '')
   const [confirmMsg, setConfirmMsg] = useState(form.confirmationMsg ?? '')
 
+  // Where submissions land. Without this the API has no destination and quietly
+  // creates no task at all, so a form collects answers that go nowhere.
+  const targetsQuery = useQuery({
+    queryKey: ['move-targets', workspaceId],
+    queryFn: () => api<MoveTargetSpace[]>(`/spaces/workspace/${workspaceId}/move-targets`),
+  })
+  const listChoices = (targetsQuery.data ?? []).flatMap((sp) =>
+    (sp.lists ?? []).map((l) => ({
+      id: l.id,
+      label: `${sp.name} › ${(sp.projects.find((p) => p.id === l.projectId) || {}).name ?? ''} › ${l.name}`,
+    })),
+  )
+
   return (
     <div className="max-w-xl space-y-5">
+      <Card className="p-4 space-y-3">
+        <h3 className="font-medium text-sm">{t('formBuilder.destination')}</h3>
+        <p className="text-xs text-muted-foreground">{t('formBuilder.destinationHint')}</p>
+        <select
+          value={form.targetListId ?? ''}
+          onChange={(e) => onUpdate({ targetListId: e.target.value || null })}
+          aria-label={t('formBuilder.destination')}
+          className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+        >
+          <option value="">{t('formBuilder.destinationNone')}</option>
+          {listChoices.map((l) => (
+            <option key={l.id} value={l.id}>{l.label}</option>
+          ))}
+        </select>
+        {!form.targetListId && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[12px] text-amber-700 dark:text-amber-300">
+            {t('formBuilder.destinationWarning')}
+          </p>
+        )}
+      </Card>
+
       <Card className="p-4 space-y-3">
         <h3 className="font-medium text-sm">{t('formBuilder.general')}</h3>
         <div>
