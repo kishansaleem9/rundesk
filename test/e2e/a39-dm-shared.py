@@ -31,6 +31,22 @@ _ps, _pb = call('POST','/auth/login',{'email':'colleague7983@rundesk.internal','
 ptok = ((_pb or {}).get('data') or {}).get('accessToken')
 print(f'  peer login {_ps} token={"yes" if ptok else "no"}')
 
+print('\n▶ seeding meetings')
+# Both halves are seeded here rather than assumed. An earlier version leaned on
+# rows someone had made by hand, and started failing the moment another suite's
+# teardown swept them — which looked exactly like the feature breaking.
+_, both = call('POST', f'/workspaces/{WS}/meetings', {
+    'title': 'A39 Sprint sync with colleague',
+    'startsAt': '2026-08-03T10:00:00.000Z',
+    'provider': 'zoom',
+    'notes': 'Agreed: colleague ships the export, verify reviews it Friday.',
+    'attendeeIds': [PEER],
+}, tok)
+# The creator is an attendee automatically, so a meeting with no attendeeIds is
+# the one-sided case — the control this whole endpoint has to get right.
+_, solo = call('POST', f'/workspaces/{WS}/meetings', {'title': 'A39 Solo planning (should not be shared)'}, tok)
+print(f"  both={(both.get('data') or {}).get('id','?')[:8]} solo={(solo.get('data') or {}).get('id','?')[:8]}")
+
 print('\n▶ seeding tasks')
 so, open_t = call('POST', '/tasks', {'listId':LIST,'title':'A39 open task for the pair','assigneeIds':[PEER]}, tok)
 sd, done_t = call('POST', '/tasks', {'listId':LIST,'title':'A39 finished task (must be hidden)','assigneeIds':[PEER]}, tok)
@@ -77,7 +93,10 @@ if ptok:
     back = [m['title'] for m in (res.get('data') or {}).get('meetings', [])]
     chk(sorted(back) == sorted(mt), 'the shared list is symmetric', f'{back} != {mt}')
 else:
-    print('  \033[33mSKIP\033[0m peer login unavailable (password unknown)')
+    # Name the actual status. "password unknown" sent someone looking at
+    # credentials when the real answer was a 429 from the login rate limiter.
+    why = {401: 'wrong password', 429: 'login rate-limited — rerun in a minute'}.get(_ps, f'status {_ps}')
+    print(f'  \033[33mSKIP\033[0m the other side not checked: {why}')
 
 f = R.count(0)
 print(f'\n{R.count(1)} passed, {f} failed')

@@ -105,11 +105,22 @@ try {
     for (const v of ['List', 'Board', 'Table', 'Calendar', 'Gantt']) {
       chk(new RegExp(`\\b${v}\\b`).test(listPage), `the ${v} view is offered`, `no ${v} view`)
     }
-    const savedTabs = await page.locator('button[title^="Actions for the"]').count()
-    chk(savedTabs > 0, `saved views sit in the tab strip (${savedTabs})`, 'no saved views in the tab strip')
     const addView = page.locator('button').filter({ hasText: /^View$/ }).last()
-    chk(await addView.count() > 0, 'and there is a control to add another',
+    chk(await addView.count() > 0, 'there is a control to save the current view',
       'no add-a-view control beside the tabs')
+    if (await addView.count()) {
+      // Make one rather than assume one is there. Naming is a window.prompt, so
+      // it has to be answered before the click resolves.
+      const viewName = `Team View ${Math.random().toString(36).slice(2, 8)}`
+      page.once('dialog', (d) => d.accept(viewName))
+      await addView.click()
+      await page.waitForTimeout(3000)
+      const savedTabs = await page.locator('button[title^="Actions for the"]').count()
+      chk(savedTabs > 0, `and a saved view then sits in the tab strip (${savedTabs})`,
+        'the saved view did not appear as a tab')
+      chk((await seen()).includes(viewName), 'under the name it was given',
+        `"${viewName}" is not in the tab strip`)
+    }
 
     ref('A1.4', 'A filter builder, not three fixed fields')
     const filterBtn = page.getByRole('button', { name: /^Filter/i }).first()
