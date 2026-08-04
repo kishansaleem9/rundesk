@@ -10,9 +10,13 @@ so the audit reads what was on screen at that moment rather than what a summary 
 about it. Every "built" verdict below was checked in the code, not recalled — four
 verdicts changed as a result (§5).
 
-**Headline.** The spec recorded 41 gaps. **29 are now closed**, 6 remain genuinely open,
-and 6 are deliberate skips the client's own "to-the-point features" constraint argues
-against building.
+**Headline.** The spec recorded 41 gaps. **35 are now closed**, none remain open, and 6
+are deliberate skips the client's own "to-the-point features" constraint argues against
+building. One half-item is out by choice: automatic transcription needs a speech-to-text
+provider, and the UI says so rather than implying otherwise.
+
+**Update.** The six that were open when this audit was written have since been built and
+live-verified. §3 records how each was closed and what proves it.
 
 ---
 
@@ -20,13 +24,13 @@ against building.
 
 | Area | Entries | Closed since spec | Still open | Deliberate skip |
 |---|---|---|---|---|
-| A1 Hierarchy & views | 11 | 5 | 1 (polish) | 1 |
+| A1 Hierarchy & views | 11 | 6 | 0 | 1 |
 | A2 Search & inbox | 11 | 8 | 0 | 0 |
-| A3 Chat | 11 | 4 | 3 | 3 |
+| A3 Chat | 11 | 7 | 0 | 3 |
 | A4 Admin | 12 | 7 | 0 | 0 |
 | A5 Forms / docs / dashboards | 15 | 1 | 0 | 0 |
-| A6 AI & meetings | 9 | 4 | 2 | 2 |
-| **Total** | **69** | **29** | **6** | **6** |
+| A6 AI & meetings | 9 | 6 | 0 | 2 |
+| **Total** | **69** | **35** | **0** | **6** |
 
 The remaining 28 entries were already complete when the spec was written and were
 re-confirmed, not re-built.
@@ -99,21 +103,35 @@ and the **Primary/Other** inbox split (03:59).
 
 ---
 
-## 3. Genuinely open (6)
+## 3. Was open, now closed (6)
 
-Ordered by how much they cost her.
+Ordered by how much they cost her. Each row names the check that proves it, so the
+verdict is re-runnable rather than remembered.
 
-| Ref | Timestamp | Gap | Size |
-|---|---|---|---|
-| **A6.1** | 06:19 | Meeting notes → action items works, but nothing is persisted: no meeting row, no attendees, no link back to the call. The loop runs and forgets. | medium |
-| **A6.2** | 06:22 | Meeting records, recordings, AI Notetaker. Depends on A6.1's entity existing first. | large |
-| **A3.9** | — | DM tabs (Chat / Calendar / Tasks). The cost is the two views behind the tab strip — no shared calendar or task view exists for a person pair. | large |
-| **A3.6** | 25:22 | Mention picker has no Tasks / Docs / Channels tabs. The task-comment picker already does this and could be ported. | small |
-| **A3.5** | 25:20 | Composer's sparkle rewrites the draft instead of opening a prompt. | small |
-| **A1.3** | 12:42 | Board polish: inline column rename, label pill on cards, `+ Add group`. Frame at 12:37 shows all three in ClickUp. | small |
+| Ref | Timestamp | Gap as written | How it was closed | Proof |
+|---|---|---|---|---|
+| **A6.1** | 06:19 | Meeting notes → action items works, but nothing is persisted: no meeting row, no attendees, no link back to the call. The loop runs and forgets. | A `meetings` table (0092) with attendees, notes, transcript and recording, surfaced as a Meeting record panel on the AI page. Reopen a saved meeting and the notes, attendees and recording all come back. | `a61-meeting-record.mjs`, `a61-meeting-loop.py` |
+| **A6.2** | 06:22 | Meeting records, recordings, AI Notetaker. Depends on A6.1's entity existing first. | Records and recordings built on A6.1. Action items extracted from a meeting become real tasks that name the call they came from. **Automatic transcription is not built** — it needs a speech-to-text provider, and the panel says so rather than leaving someone waiting. | `a61-meeting-loop.py` |
+| **A3.9** | — | DM tabs (Chat / Calendar / Tasks). The cost is the two views behind the tab strip — no shared calendar or task view exists for a person pair. | One endpoint answers both halves: meetings you both attended, and open tasks either of you is assigned. The stream and composer are hidden rather than unmounted, so an unsent draft survives the trip. | `a39-dm-shared.py`, `a39-dm-tabs.mjs` |
+| **A3.6** | 25:22 | Mention picker has no Tasks / Docs / Channels tabs. | Link picker with all three tabs and a live search behind each. | `video-regression.mjs` A3.6 |
+| **A3.5** | 25:20 | Composer's sparkle rewrites the draft instead of opening a prompt. | Opens a prompt with four modes; the result is staged with Use this / Discard, and the draft is untouched until you pick. | `video-regression.mjs` A3.5 |
+| **A1.3** | 12:42 | Board polish: inline column rename, label pill on cards, `+ Add group`. | All three. Rename is guarded off when the board is showing fallback statuses, whose ids are keys rather than rows. | `video-regression.mjs` A1.3 |
 
-Three of these are an afternoon each. The two meeting items are one piece of work —
-A6.2 is unbuildable until A6.1 has an entity to hang off.
+### What building them turned up
+
+Closing these surfaced three defects that had nothing to do with the features:
+
+- **`passwordHash` rode along on embedded user rows.** `GET /tasks/:id` returned it
+  through assignees, watchers and comment authors. Now behind `PUBLIC_USER_COLUMNS`,
+  with a test that fails if a secret column is ever added back to the set.
+- **Search sorted by reordering a different result set.** `sort=updated` and
+  `sort=created` skipped Meilisearch entirely, so changing the sort changed *which*
+  results came back. Only reproducible with a real Meilisearch running, which is why
+  every prior local run missed it.
+- **`setWorkDays` discarded out-of-range days instead of refusing them.** `[1,2,8]`
+  returned 200 and a schedule of `[1,2]`. JavaScript's `getDay()` numbers Sunday 0,
+  which is exactly the mistake an integration will make, and the schedule drives
+  Workload's capacity — so the day reappears much later as numbers nobody can explain.
 
 ---
 
@@ -158,3 +176,27 @@ Four claims from the earlier pass were wrong and are fixed here.
 The lesson is the same one that produced two search bugs this week: a grep that finds
 nothing is evidence about the grep, not about the product. Every verdict above was
 confirmed by reading the code it points at.
+
+---
+
+## 6. Re-running this
+
+Two suites are organised by the refs in this document, so a failure points at a row
+above rather than at a route:
+
+```
+python3 test/e2e/video-regression.py    # 88 checks — what an endpoint can answer for
+node    test/e2e/video-regression.mjs   # 68 checks — what she pointed at on screen
+```
+
+The split is not arbitrary. "The endpoint answers 200" proves nothing about whether a
+tab strip, a padlock or a filter builder is reachable, and a browser check proves
+nothing about what a request refuses. The five deliberate skips print as SKIP with the
+reason attached; a sweep that quietly omits what it does not cover reads as coverage it
+does not have.
+
+Most red in these files, on first run, was the harness guessing a route or a field name
+rather than the product being wrong — a form field named `title` and not `name`, a
+public submit body keyed `data` and not `values`, a reporting line on its own
+`/manager` route. Check the shape against `/api/docs-json` and the DTO before recording
+a defect. Three real bugs did come out of it, and they are listed in §3.
