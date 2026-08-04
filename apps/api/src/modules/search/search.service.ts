@@ -262,8 +262,13 @@ export class SearchService implements OnModuleInit {
     // Postgres for those.
     if (this.enabled && this.index && trimmed && !hasTaskFilter && !filters.includeArchived) {
       const filterExpr = [`workspaceId = "${workspaceId}"`]
-      if (filters.types && filters.types.length === 1) {
-        filterExpr.push(`entityType = "${filters.types[0]}"`)
+      // Narrow to every requested type, not just a lone one. With two or more
+      // selected this used to push no filter at all, so Meili happily returned
+      // the types the caller had just excluded. Types Meili does not index
+      // (user, comment, channel, message) simply match nothing here and are
+      // supplied by searchExtras instead.
+      if (filters.types?.length) {
+        filterExpr.push(`(${filters.types.map((t) => `entityType = "${t}"`).join(' OR ')})`)
       }
       const res = await this.index.search(trimmed, { filter: filterExpr, limit })
       const meiliHits = res.hits.map((h) => ({
