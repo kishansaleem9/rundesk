@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Post-deploy verification for the task-types / reporting-line / work-schedule
-# release. Run on the VPS after deploy/deploy-prod.sh:
+# release, and for the meetings release that follows it (migration 0092).
+# Run on the VPS after deploy/deploy-prod.sh:
 #
 #   bash deploy/verify-release.sh
 #
@@ -171,16 +172,36 @@ say "Reporting line"
 MEMBERS=$(curl -fsS --max-time 20 "$API/workspaces/$WS/members" -H "$AUTH" 2>/dev/null || true)
 printf '%s' "$MEMBERS" | grep -q 'managerId' \
   && ok "the roster exposes managerId" || bad "no managerId on the roster"
-U1=$(printf '%s' "$MEMBERS" | grep -o '"userId":"[^"]*"' | sed -n '1s/.*://p' | tr -d '"' || true)
-U2=$(printf '%s' "$MEMBERS" | grep -o '"userId":"[^"]*"' | sed -n '2s/.*://p' | tr -d '"' || true)
-if [ -n "$U1" ] && [ -n "$U2" ]; then
-  curl -fsS --max-time 20 -X PATCH "$API/workspaces/$WS/members/$U1/manager" -H "$AUTH" \
-    -H 'Content-Type: application/json' -d "{\"managerId\":\"$U2\"}" >/dev/null 2>&1 || true
-  LOOP=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/workspaces/$WS/members/$U2/manager" \
-    -H "$AUTH" -H 'Content-Type: application/json' -d "{\"managerId\":\"$U1\"}" || true)
+
+# Which row is this account, by email rather than by position. The roster is
+# not ordered by who is asking, and an earlier version assumed the first row
+# was the caller — which made the self-checks below test the wrong person.
+ME=$(printf '%s' "$MEMBERS" | tr '}' '\n' | grep -F "$EMAIL" | grep -o '"userId":"[^"]*"' \
+     | head -1 | sed 's/.*://;s/"//g' || true)
+PEER=$(printf '%s' "$MEMBERS" | tr '}' '\n' | grep -v -F "$EMAIL" | grep -o '"userId":"[^"]*"' \
+     | head -1 | sed 's/.*://;s/"//g' || true)
+
+if [ -n "$ME" ] && [ -n "$PEER" ]; then
+  # Start from nobody-reports-to-anybody. Left as it was, a manager set by an
+  # earlier run makes the *first* call the cycle, and the check then passes or
+  # fails for a reason that has nothing to do with this deploy.
+  for U in "$ME" "$PEER"; do
+    curl -fsS --max-time 20 -X PATCH "$API/workspaces/$WS/members/$U/manager" -H "$AUTH" \
+      -H 'Content-Type: application/json' -d '{"managerId":null}' >/dev/null 2>&1 || true
+  done
+  SET=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/workspaces/$WS/members/$ME/manager" \
+    -H "$AUTH" -H 'Content-Type: application/json' -d "{\"managerId\":\"$PEER\"}" || true)
+  [ "$SET" = "200" ] && ok "a manager can be assigned" || bad "assigning a manager answered $SET"
+  LOOP=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/workspaces/$WS/members/$PEER/manager" \
+    -H "$AUTH" -H 'Content-Type: application/json' -d "{\"managerId\":\"$ME\"}" || true)
   [ "$LOOP" = "400" ] && ok "a reporting loop is refused (400)" || bad "a cycle was allowed: $LOOP"
-  curl -fsS --max-time 20 -X PATCH "$API/workspaces/$WS/members/$U1/manager" -H "$AUTH" \
-    -H 'Content-Type: application/json' -d '{"managerId":null}' >/dev/null 2>&1 || true
+  SELFR=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/workspaces/$WS/members/$ME/manager" \
+    -H "$AUTH" -H 'Content-Type: application/json' -d "{\"managerId\":\"$ME\"}" || true)
+  [ "$SELFR" = "400" ] && ok "reporting to yourself is refused (400)" || bad "self-report answered $SELFR"
+  for U in "$ME" "$PEER"; do
+    curl -fsS --max-time 20 -X PATCH "$API/workspaces/$WS/members/$U/manager" -H "$AUTH" \
+      -H 'Content-Type: application/json' -d '{"managerId":null}' >/dev/null 2>&1 || true
+  done
   ok "reporting line set and cleared again"
 else
   echo "  (only one member — reporting line not exercised)"
@@ -203,6 +224,77 @@ esac
 say "Inbox split"
 CNT=$(curl -fsS --max-time 20 "$API/notifications/counts" -H "$AUTH" 2>/dev/null || true)
 printf '%s' "$CNT" | grep -q 'inbox' && ok "triage counts resolve: $CNT" || bad "counts -> $CNT"
+
+# ─────────────────────────────── the meetings release (0092) ──────────────
+say "Migration 0092 was applied"
+check_sql "meetings table exists"          "SELECT to_regclass('public.meetings') IS NOT NULL;" "t"
+check_sql "meeting_attendees table exists" "SELECT to_regclass('public.meeting_attendees') IS NOT NULL;" "t"
+check_sql "the one-row-per-attendee index exists" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_meeting_attendee_user');" "t"
+
+say "A meeting is a record, not a link"
+MT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Deploy check meeting","notes":"Someone must ship the thing by Friday.","recordingUrl":"https://example.invalid/rec.mp4"}' 2>/dev/null || true)
+MID=$(printf '%s' "$MT" | jget id)
+if [ -n "$MID" ]; then ok "a meeting can be recorded"; else bad "create -> $MT"; fi
+if [ -n "$MID" ]; then
+  printf '%s' "$MT" | grep -q 'example.invalid' \
+    && ok "the recording link is kept" || bad "recordingUrl was dropped on create"
+  BACK=$(curl -fsS --max-time 20 "$API/workspaces/$WS/meetings/$MID" -H "$AUTH" 2>/dev/null || true)
+  printf '%s' "$BACK" | grep -q 'by Friday' \
+    && ok "the notes survive being read back" || bad "notes lost -> $BACK"
+  printf '%s' "$BACK" | grep -q '"attendees"' \
+    && ok "it carries an attendee list" || bad "no attendees on the record"
+  # Refusal: a meeting with nothing written down must say so rather than
+  # answering "no action items", which reads as a working extraction.
+  EMPTY=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{"title":"Deploy check empty"}' 2>/dev/null || true)
+  EID=$(printf '%s' "$EMPTY" | jget id)
+  if [ -n "$EID" ]; then
+    CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -X POST \
+      "$API/workspaces/$WS/meetings/$EID/action-items" -H "$AUTH" \
+      -H 'Content-Type: application/json' -d '{}' || true)
+    [ "$CODE" = "400" ] && ok "a meeting with no notes is refused (400)" \
+      || bad "an empty meeting answered $CODE instead of refusing"
+    curl -sS -o /dev/null --max-time 20 -X DELETE "$API/workspaces/$WS/meetings/$EID" -H "$AUTH" || true
+  fi
+  curl -sS -o /dev/null --max-time 20 -X DELETE "$API/workspaces/$WS/meetings/$MID" -H "$AUTH" || true
+  ok "and deleted again"
+fi
+
+say "The DM Calendar and Tasks tabs have a source"
+if [ -n "$PEER" ]; then
+  SH=$(curl -fsS --max-time 20 "$API/workspaces/$WS/people/$PEER/shared" -H "$AUTH" 2>/dev/null || true)
+  printf '%s' "$SH" | grep -q '"meetings"' && printf '%s' "$SH" | grep -q '"tasks"' \
+    && ok "shared-with answers with both halves" || bad "shared -> $SH"
+  SELF=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    "$API/workspaces/$WS/people/$ME/shared" -H "$AUTH" || true)
+  [ "$SELF" = "400" ] && ok "asking what you share with yourself is refused (400)" \
+    || bad "self-share answered $SELF"
+  STRANGER=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    "$API/workspaces/$WS/people/00000000-0000-0000-0000-000000000000/shared" -H "$AUTH" || true)
+  [ "$STRANGER" = "404" ] && ok "someone outside the workspace is 404, not an empty answer" \
+    || bad "a stranger answered $STRANGER"
+else
+  echo "  (only one member — the shared view not exercised)"
+fi
+
+say "A work day outside 1–7 is refused, not silently dropped"
+# JavaScript's getDay() calls Sunday 0. Accepting it and discarding it returns a
+# 200 and a schedule the caller did not ask for, which surfaces much later as
+# Workload capacity nobody can explain.
+BEFORE=$(curl -fsS --max-time 20 "$API/workspaces/$WS/work-schedule" -H "$AUTH" 2>/dev/null || true)
+for BAD_DAYS in '[1,2,0]' '[1,2,8]'; do
+  CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH \
+    "$API/workspaces/$WS/work-schedule" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d "{\"workDays\":$BAD_DAYS}" || true)
+  [ "$CODE" = "400" ] && ok "workDays=$BAD_DAYS refused (400)" \
+    || bad "workDays=$BAD_DAYS answered $CODE — the day was discarded silently"
+done
+AFTER=$(curl -fsS --max-time 20 "$API/workspaces/$WS/work-schedule" -H "$AUTH" 2>/dev/null || true)
+[ "$BEFORE" = "$AFTER" ] && ok "and the schedule is unchanged by the rejected calls" \
+  || bad "a rejected call still modified the schedule"
 
 echo
 printf '\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
