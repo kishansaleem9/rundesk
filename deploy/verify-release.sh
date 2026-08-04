@@ -203,8 +203,21 @@ if [ -n "$ME" ] && [ -n "$PEER" ]; then
       -H 'Content-Type: application/json' -d '{"managerId":null}' >/dev/null 2>&1 || true
   done
   ok "reporting line set and cleared again"
+elif [ -n "$ME" ]; then
+  # A workspace of one still has to refuse the nonsense. Only the two-person
+  # cases need a second person; gating these behind one meant a single-member
+  # production learned nothing about the half that matters most.
+  echo "  (one member — the two-person cases are skipped, the refusals are not)"
+  SELFR=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/workspaces/$WS/members/$ME/manager" \
+    -H "$AUTH" -H 'Content-Type: application/json' -d "{\"managerId\":\"$ME\"}" || true)
+  [ "$SELFR" = "400" ] && ok "reporting to yourself is refused (400)" || bad "self-report answered $SELFR"
+  OUTSIDER=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/workspaces/$WS/members/$ME/manager" \
+    -H "$AUTH" -H 'Content-Type: application/json' \
+    -d '{"managerId":"00000000-0000-0000-0000-000000000000"}' || true)
+  [ "$OUTSIDER" = "404" ] && ok "a manager from outside the workspace is refused (404)" \
+    || bad "an outsider was accepted as a manager: $OUTSIDER"
 else
-  echo "  (only one member — reporting line not exercised)"
+  bad "could not find this account on the roster — checked for $EMAIL"
 fi
 
 say "Search sort still works alongside the type filter"
@@ -276,8 +289,23 @@ if [ -n "$PEER" ]; then
     "$API/workspaces/$WS/people/00000000-0000-0000-0000-000000000000/shared" -H "$AUTH" || true)
   [ "$STRANGER" = "404" ] && ok "someone outside the workspace is 404, not an empty answer" \
     || bad "a stranger answered $STRANGER"
+elif [ -n "$ME" ]; then
+  echo "  (one member — no pair to share with, but the refusals still apply)"
+  SELF=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    "$API/workspaces/$WS/people/$ME/shared" -H "$AUTH" || true)
+  [ "$SELF" = "400" ] && ok "asking what you share with yourself is refused (400)" \
+    || bad "self-share answered $SELF"
+  STRANGER=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    "$API/workspaces/$WS/people/00000000-0000-0000-0000-000000000000/shared" -H "$AUTH" || true)
+  [ "$STRANGER" = "404" ] && ok "someone outside the workspace is 404, not an empty answer" \
+    || bad "a stranger answered $STRANGER"
+  # The route itself has to be mounted even with nobody to pair with. A 404
+  # here would mean the whole endpoint is missing, which reads identically to
+  # "no second member" unless it is checked separately.
+  [ "$SELF" != "404" ] && ok "the shared route is mounted (not 404)" \
+    || bad "the shared route appears to be missing entirely"
 else
-  echo "  (only one member — the shared view not exercised)"
+  bad "could not find this account on the roster — checked for $EMAIL"
 fi
 
 say "A work day outside 1–7 is refused, not silently dropped"
