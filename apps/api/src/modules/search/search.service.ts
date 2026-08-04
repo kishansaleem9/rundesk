@@ -309,7 +309,7 @@ export class SearchService implements OnModuleInit {
       const extras = await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
-      return [...safeMeili, ...extras, ...clipHits]
+      return this.merge(filters.sort, limit, [...safeMeili, ...extras, ...clipHits])
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
@@ -391,7 +391,7 @@ export class SearchService implements OnModuleInit {
     // Extras only for a general text search (no type/task-specific filter).
     const extras = like ? await this.searchExtras(workspaceId, userId, like, limit, isManager, filters.types) : []
 
-    return this.applySort(filters.sort, [
+    return this.merge(filters.sort, limit, [
       ...taskHits.map((t) => ({
         id: `task-${t.id}`,
         entityType: 'task',
@@ -412,6 +412,23 @@ export class SearchService implements OnModuleInit {
       ...clipHits,
       ...extras,
     ])
+  }
+
+  /**
+   * Order the merged hits, then cut the list to the size the caller asked for.
+   *
+   * Both branches build their result by concatenating several independently
+   * limited queries, so `limit` was silently behaving as "per source" rather
+   * than a total: the same query returned 5 hits sorted by relevance and 16
+   * sorted by date, because the date path fans out over five Postgres queries
+   * and the relevance path mostly hits Meili. Changing the order of a list
+   * must not change what is in it.
+   *
+   * The cut happens after the sort, never before — truncating first would keep
+   * an arbitrary subset and then order that, which is not the top N.
+   */
+  private merge(sort: SearchFilters['sort'], limit: number, hits: SearchHit[]): SearchHit[] {
+    return this.applySort(sort, hits).slice(0, limit)
   }
 
   /**

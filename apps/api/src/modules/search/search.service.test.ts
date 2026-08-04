@@ -153,3 +153,60 @@ describe('SearchService file search (§11.1 uploaded files)', () => {
     assert.ok(!fromTables.includes('chat_channel_members'), 'chat extras not queried')
   })
 })
+
+describe('SearchService.merge', () => {
+  // Reaches the private helper directly: it is pure, and the alternative is
+  // standing up Meilisearch plus five Postgres branches to assert one slice.
+  const merge = (svc: any, sort: any, limit: number, hits: any[]) =>
+    (svc as any).merge(sort, limit, hits)
+  const svc = Object.create(SearchService.prototype)
+
+  const hit = (id: string, at: string | null) => ({
+    id, entityType: 'task', title: id, content: '', url: '', sortedAt: at,
+  })
+
+  it('cuts the merged set to the caller\'s limit', () => {
+    // Each branch of the search limits its own query, so the concatenation can
+    // exceed what was asked for. In production the same query returned 5 hits
+    // by relevance and 16 by date for exactly this reason.
+    const many = Array.from({ length: 16 }, (_, i) => hit(`t${i}`, null))
+    assert.equal(merge(svc, 'relevance', 10, many).length, 10)
+    assert.equal(merge(svc, 'updated', 10, many).length, 10)
+    assert.equal(merge(svc, 'created', 10, many).length, 10)
+  })
+
+  it('returns the same number of hits whatever the sort is', () => {
+    const mixed = [
+      hit('a', '2026-01-03T00:00:00Z'),
+      hit('b', null),
+      hit('c', '2026-01-01T00:00:00Z'),
+      hit('d', '2026-01-02T00:00:00Z'),
+    ]
+    const counts = (['relevance', 'updated', 'created'] as const)
+      .map((s) => merge(svc, s, 3, mixed).length)
+    assert.deepEqual(counts, [3, 3, 3], 'changing the order changed what was in the list')
+  })
+
+  it('cuts after sorting, so a limited result is the real top N', () => {
+    const hits = [
+      hit('oldest', '2026-01-01T00:00:00Z'),
+      hit('newest', '2026-03-01T00:00:00Z'),
+      hit('middle', '2026-02-01T00:00:00Z'),
+    ]
+    // Slicing first would keep [oldest, newest] and call it the top 2.
+    assert.deepEqual(
+      merge(svc, 'updated', 2, hits).map((h: any) => h.id),
+      ['newest', 'middle'],
+    )
+  })
+
+  it('leaves undated hits at the end rather than treating them as oldest', () => {
+    const hits = [hit('undated', null), hit('dated', '2026-01-01T00:00:00Z')]
+    assert.deepEqual(merge(svc, 'updated', 2, hits).map((h: any) => h.id), ['dated', 'undated'])
+  })
+
+  it('does not reorder a relevance search', () => {
+    const hits = [hit('first', null), hit('second', '2026-05-05T00:00:00Z')]
+    assert.deepEqual(merge(svc, 'relevance', 5, hits).map((h: any) => h.id), ['first', 'second'])
+  })
+})
