@@ -12,9 +12,14 @@ Ground rules this suite holds itself to:
 """
 import json, urllib.request, urllib.error, uuid, sys, datetime, os
 
-API = 'http://127.0.0.1:3001/api/v1'
-ADMIN = ('org-admin@rundesk.internal', 'OrgAdmin@123!')
-WS = '076d6b60-6cc7-428f-b27d-b6bec49e92db'
+# Overridable, because a suite pinned to one seeded account stops running the
+# moment that fixture is rebuilt — which is not the same as passing.
+API = os.environ.get('API', 'http://127.0.0.1:3001/api/v1')
+ADMIN = (
+    os.environ.get('E2E_EMAIL', 'org-admin@rundesk.internal'),
+    os.environ.get('E2E_PASSWORD', 'OrgAdmin@123!'),
+)
+WS = os.environ.get('E2E_WS', '076d6b60-6cc7-428f-b27d-b6bec49e92db')
 
 TOKEN = None
 PASS, FAIL, SKIP = [], [], []

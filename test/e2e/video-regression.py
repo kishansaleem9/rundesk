@@ -145,6 +145,110 @@ TAG = uuid.uuid4().hex[:8]
 made_tasks = []
 
 
+# Everything any suite in this directory names its fixtures. Kept in one place
+# so the teardown and the check that follows it cannot drift apart — and so a
+# crashed sibling script's debris gets swept here rather than surviving to
+# break a later run.
+FIXTURE_PREFIXES = ('regr', 'zregr', 'Campaign-', 'fprobe', 'trashprobe', 'A39 ', 'A61 ')
+
+
+def purge_fixtures(label):
+    """Remove anything a run of this suite left behind.
+
+    Runs before *and* after. A leftover row is exactly how a later run passes
+    for the wrong reason — and an earlier version of this file left a saved
+    view starred as the list's default, which quietly broke `ui-sweep.mjs`
+    three runs later.
+    """
+    removed = {}
+
+    def note(kind, n):
+        if n:
+            removed[kind] = removed.get(kind, 0) + n
+
+    # Views first: one of them may be the list's default, and a starred board
+    # view changes what every other suite sees when it opens the list.
+    n = 0
+    for v in call('GET', f'/lists/{LIST}/views') or []:
+        if v.get('name', '').startswith(('Team View', 'Filtered')):
+            if status('DELETE', f'/views/{v["id"]}') in (200, 204):
+                n += 1
+    note('views', n)
+
+    n = 0
+    for t in call('GET', f'/tasks/list/{LIST}?includeSubtasks=true') or []:
+        title = t.get('title', '')
+        if title.startswith(FIXTURE_PREFIXES) \
+                or 'From meeting: regr' in (t.get('description') or '') \
+                or title.startswith('Form submission: regr'):
+            if status('DELETE', f'/tasks/{t["id"]}') in (200, 204):
+                n += 1
+    note('tasks', n)
+
+    n = 0
+    for st in call('GET', f'/lists/{LIST}/statuses') or []:
+        if st.get('name', '').startswith(('Regr Group', 'Regr Renamed')):
+            if status('DELETE', f'/lists/{LIST}/statuses/{st["id"]}') in (200, 204):
+                n += 1
+    note('statuses', n)
+
+    n = 0
+    for f in call('GET', f'/spaces/{SPACE}/folders') or []:
+        if f.get('name', '').startswith('regr-folder'):
+            if status('DELETE', f'/spaces/{SPACE}/folders/{f["id"]}') in (200, 204):
+                n += 1
+    note('folders', n)
+
+    # The delete route is not always the list route plus an id — docs and goals
+    # hang off their own top-level path, and an earlier version of this purge
+    # 404'd silently on both and then reported the workspace clean.
+    for kind, list_path, del_path, key in (
+        ('task types', f'/workspaces/{WS}/task-types', f'/workspaces/{WS}/task-types', 'name'),
+        ('forms', f'/workspaces/{WS}/forms', f'/workspaces/{WS}/forms', 'title'),
+        ('meetings', f'/workspaces/{WS}/meetings', f'/workspaces/{WS}/meetings', 'title'),
+        ('docs', f'/workspaces/{WS}/docs', '/docs', 'title'),
+        ('goals', f'/workspaces/{WS}/goals', '/goals', 'title'),
+    ):
+        n = 0
+        rows = call('GET', list_path) or []
+        rows = rows if isinstance(rows, list) else rows.get('items', [])
+        for row in rows:
+            name = (row.get(key) or row.get('name') or '')
+            if name.startswith(FIXTURE_PREFIXES):
+                if status('DELETE', f'{del_path}/{row["id"]}') in (200, 204):
+                    n += 1
+        note(kind, n)
+
+    n = 0
+    sched = call('GET', f'/workspaces/{WS}/work-schedule') or {}
+    for h in sched.get('holidays', []):
+        if (h.get('name') or '').startswith(('regr-holiday', 'probe')):
+            if status('DELETE', f'/workspaces/{WS}/holidays/{h["id"]}') in (200, 204):
+                n += 1
+    note('holidays', n)
+
+    n = 0
+    for g in call('GET', f'/workspaces/{WS}/chat/channel-groups') or []:
+        if (g.get('name') or '').startswith('regr-grp'):
+            if status('DELETE', f'/chat/channel-groups/{g["id"]}') in (200, 204):
+                n += 1
+    note('channel groups', n)
+
+    n = 0
+    for g in call('GET', f'/workspaces/{WS}/groups') or []:
+        if (g.get('name') or '').startswith('regr-team'):
+            if status('DELETE', f'/workspaces/{WS}/groups/{g["id"]}') in (200, 204):
+                n += 1
+    note('teams', n)
+
+    print(f'{label}: {removed if removed else "nothing to remove"}')
+    return removed
+
+
+purge_fixtures('pre-flight cleanup')
+
+
+
 def mk_task(title, **kw):
     t = call('POST', '/tasks', {'listId': LIST, 'title': title, **kw})
     if t and t.get('id'):
@@ -601,6 +705,48 @@ if probe:
     check('passwordHash' not in blob and 'password_hash' not in blob,
           'no password hash rides along on an embedded user',
           'a password hash leaked through the task payload')
+
+ref('CLEANUP', 'And prove the workspace is back where it started')
+purge_fixtures('teardown')
+
+
+def survivors():
+    """What is still there, read back rather than inferred from delete counts.
+
+    A delete that 404s and a delete that worked both leave the counter at zero,
+    so counting removals cannot tell you the workspace is clean. Only listing
+    can."""
+    left = {}
+
+    def look(kind, path, key='title'):
+        rows = call('GET', path) or []
+        rows = rows if isinstance(rows, list) else rows.get('items', [])
+        names = [(r.get(key) or r.get('name') or '') for r in rows]
+        hits = [n for n in names if n.startswith(FIXTURE_PREFIXES)]
+        if hits:
+            left[kind] = hits[:5]
+
+    look('tasks', f'/lists/{LIST}/../../tasks/list/{LIST}'.replace('/../..', ''), 'title')
+    look('docs', f'/workspaces/{WS}/docs')
+    look('goals', f'/workspaces/{WS}/goals')
+    look('forms', f'/workspaces/{WS}/forms')
+    look('meetings', f'/workspaces/{WS}/meetings')
+    look('task types', f'/workspaces/{WS}/task-types', 'name')
+    look('folders', f'/spaces/{SPACE}/folders', 'name')
+    views = [v.get('name', '') for v in (call('GET', f'/lists/{LIST}/views') or [])]
+    stale = [v for v in views if v.startswith(('Team View', 'Filtered'))]
+    if stale:
+        left['views'] = stale[:5]
+    sched = call('GET', f'/workspaces/{WS}/work-schedule') or {}
+    hol = [h.get('name') for h in sched.get('holidays', []) if (h.get('name') or '').startswith('regr')]
+    if hol:
+        left['holidays'] = hol
+    return left
+
+
+still_there = survivors()
+check(not still_there, 'nothing this suite made is still in the workspace',
+      f'the teardown missed: {json.dumps(still_there)[:300]}')
 
 # ═══════════════════════════════════════════════════════════ report ════
 print('\n' + '═' * 66)

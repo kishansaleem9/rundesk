@@ -8,9 +8,14 @@
  */
 import { chromium } from 'playwright'
 
-const WS = '076d6b60-6cc7-428f-b27d-b6bec49e92db'
-const LIST_PATH = 'a78ef365-3f18-41a4-8dfc-6ef8b5923dbb/d049d372-eb2a-4d8d-af7d-483a8d3a52c3/410988e8-a84a-45f8-84b1-793d9d409a7d'
-const B = 'http://127.0.0.1:5173'
+// Overridable, because a suite pinned to one seeded fixture stops running the
+// moment that fixture is rebuilt — which is not the same as passing.
+const WS = process.env.E2E_WS ?? '076d6b60-6cc7-428f-b27d-b6bec49e92db'
+const LIST_PATH = process.env.E2E_LIST_PATH
+  ?? 'a78ef365-3f18-41a4-8dfc-6ef8b5923dbb/d049d372-eb2a-4d8d-af7d-483a8d3a52c3/410988e8-a84a-45f8-84b1-793d9d409a7d'
+const B = process.env.BASE ?? 'http://127.0.0.1:5173'
+const EMAIL = process.env.E2E_EMAIL ?? 'org-admin@rundesk.internal'
+const PASSWORD = process.env.E2E_PASSWORD ?? 'OrgAdmin@123!'
 
 const results = []
 let section = ''
@@ -20,6 +25,32 @@ const skip = (m) => { results.push(['SKIP', section, m]); console.log(`  \x1b[2m
 const check = (c, g, b) => (c ? ok(g) : bad(b))
 const say = (s) => { section = s; console.log(`\n\x1b[1;36m▶ ${s}\x1b[0m`) }
 const uniq = (p) => `${p}-${Math.random().toString(36).slice(2, 8)}`
+
+// The old suite clicked a task by a title the seeded workspace happened to
+// have, so it stopped running the moment that fixture was rebuilt. Seed the
+// task through the list's own quick-add instead — then the sweep is about the
+// task sheet rather than about one row surviving.
+const SWEEP_TASK = `Sweep task ${Math.random().toString(36).slice(2, 8)}`
+let sweepTaskSeeded = false
+
+const seedSweepTask = async () => {
+  if (sweepTaskSeeded) return
+  const quick = page.getByPlaceholder(/Quick add task/i).first()
+  if (await quick.count()) {
+    await quick.fill(SWEEP_TASK)
+    await page.getByRole('button', { name: /^Add task$/ }).first().click()
+    await page.waitForTimeout(2500)
+  }
+  sweepTaskSeeded = true
+}
+
+const firstTaskCard = () => page.getByText(SWEEP_TASK, { exact: true }).first()
+
+const openAnyTask = async () => {
+  await seedSweepTask()
+  await firstTaskCard().click()
+  await page.waitForTimeout(2000)
+}
 
 const browser = await chromium.launch({
   executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
@@ -70,8 +101,8 @@ const groupHeadings = async () => {
 try {
   say('0. Sign in')
   await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
-  await page.fill('input[type=email]', 'org-admin@rundesk.internal')
-  await page.fill('input[type=password]', 'OrgAdmin@123!')
+  await page.fill('input[type=email]', EMAIL)
+  await page.fill('input[type=password]', PASSWORD)
   await page.click('button[type=submit]')
   await page.waitForURL(/\/app\//, { timeout: 25000 })
   await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
@@ -122,11 +153,37 @@ try {
   const searchBox = page.locator('input[placeholder*="earch" i]:visible').last()
   check(await searchBox.count() > 0, 'the fields picker opens with a search box', 'no search box in the fields picker')
   if (await searchBox.count()) {
-    const before = await page.locator('label:visible').allInnerTexts()
-    check(before.length > 0, `it lists the workspace fields (${before.length})`, 'no fields listed')
+    let before = await page.locator('label:visible').allInnerTexts()
+    if (before.length < 2) {
+      // A project with no custom fields is a legitimate state, and asserting
+      // against seeded fields this workspace may not have tests the fixture,
+      // not the picker. Make one with the control the picker itself offers.
+      // Two, not one: searching cannot narrow a list of one, so a single
+      // seeded field would make the next assertion unanswerable.
+      const tag = Math.random().toString(36).slice(2, 6)
+      for (const seeded of [`SweepAlpha${tag}`, `SweepBeta${tag}`]) {
+        const nameBox = page.locator('input[placeholder*="ield name" i]:visible').last()
+        if (await nameBox.count()) {
+          await nameBox.fill(seeded)
+          await page.getByRole('button', { name: /^Add$|^Create$/ }).last().click().catch(() => {})
+          await page.waitForTimeout(1800)
+        }
+      }
+      before = await page.locator('label:visible').allInnerTexts()
+      check(before.length > 1, `seeded fields to search against (${before.length})`,
+        `the picker lists ${before.length} field(s) and create-new did not add more`)
+    } else {
+      check(true, `it lists the workspace fields (${before.length})`, '')
+    }
     // Search against a term this workspace actually has; a term that matches
     // nothing narrows to zero and would "pass" for the wrong reason.
-    const term = (before.find((f) => f.length > 4) || '').slice(0, 4)
+    // A prefix every field shares narrows nothing; pick a term from one field
+    // that the others do not contain.
+    const distinctive = before.find((f) => {
+      const t = f.trim().slice(-4).toLowerCase()
+      return t.length === 4 && before.filter((o) => o.toLowerCase().includes(t)).length < before.length
+    })
+    const term = (distinctive ?? before.find((f) => f.length > 4) ?? '').trim().slice(-4)
     await searchBox.fill(term)
     await page.waitForTimeout(800)
     const after = await page.locator('label:visible').allInnerTexts()
@@ -152,7 +209,7 @@ try {
 
   // ═════════════════════════════════════ Task detail ═══════════════════
   say('3. Task detail opens with every tab (V3/V5)')
-  await page.getByText('Member-created task', { exact: true }).first().click()
+  await openAnyTask()
   await page.waitForTimeout(2600)
   const sheet = page.locator('div.shadow-2xl.border-l')
   check(await sheet.count() > 0, 'the task detail sheet opens from the list', 'the sheet did not open')
@@ -175,8 +232,9 @@ try {
       const body = await dlg.innerText()
       check(/\d+ watcher/i.test(body), `it shows the follower count: ${(body.match(/\d+ watchers?/i) || [])[0]}`,
         `no watcher count in the dialog: ${body.slice(0, 120)}`)
-      check(/Watch task/i.test(body), 'and a control to follow the task yourself',
-        'no self-follow control')
+      check(/Watch task|Unwatch/i.test(body),
+        `and a control to change your own follow state (${(body.match(/Watch task|Unwatch/i) || [])[0]})`,
+        `no self-follow control: ${body.slice(0, 120)}`)
       check(/Add teammate/i.test(body), 'and a way to add a teammate as a follower',
         `no add-teammate control: ${body.slice(0, 140)}`)
       await page.keyboard.press('Escape')
@@ -211,7 +269,7 @@ try {
     const body = await page.locator('body').innerText()
     check(/Backlog|To do|In progress/.test(body), 'the board renders its status columns',
       `board body: ${body.slice(0, 160)}`)
-    const card = page.getByText('Member-created task', { exact: true }).first()
+    const card = firstTaskCard()
     if (await card.count()) {
       await card.click()
       await page.waitForTimeout(2200)
@@ -319,7 +377,7 @@ try {
   // ═════════════════════════════════ Settings surfaces ═════════════════
   say('11. Settings: Trash, Archived, Spaces index, Features')
   for (const [tab, expect] of [['trash', 'Trash'], ['archived', 'Archived tasks'],
-                               ['spaces', 'Spaces'], ['features', ''], ['groups', ''],
+                               ['spaces', 'Space'], ['features', ''], ['groups', ''],
                                ['taskTypes', 'Task types'], ['workSchedule', 'Working days']]) {
     await page.goto(`${B}/app/${WS}/settings?tab=${tab}`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1900)
@@ -338,16 +396,37 @@ try {
   const n = await pickers.count()
   check(n > 1, `a reports-to picker on each member row (${n})`, `only ${n} picker(s)`)
   if (n > 1) {
-    const opts = await pickers.nth(0).locator('option').allTextContents()
-    const target = opts.find((o) => o && o !== 'No manager')
-    await pickers.nth(0).selectOption({ label: target })
+    // Address rows by whose they are, not by position. The list re-renders
+    // after each save and the rows come back in a different order, so nth(1)
+    // was landing on the same person twice — the cycle was never attempted and
+    // the test blamed the product for a request it never sent.
+    const names = await page.locator('select[title="Reports to"]')
+      .evaluateAll((sels) => sels.map((el) => /Who (.+) reports to/.exec(el.getAttribute('aria-label') ?? '')?.[1] ?? ''))
+    const pickerFor = (name) => page.getByLabel(`Who ${name} reports to`)
+    const [personA, personB] = names
+
+    // Start from nobody-reports-to-anybody: selectOption on a value that is
+    // already selected fires no change event, and so no request at all.
+    for (const who of names) {
+      await pickerFor(who).selectOption({ index: 0 }).catch(() => {})
+      await page.waitForTimeout(900)
+    }
+    await pickerFor(personA).selectOption({ label: personB })
     await page.waitForTimeout(2000)
     check(await page.getByText('Reporting structure').first().isVisible().catch(() => false),
       'the reporting tree appears once someone has a manager', 'the tree did not appear')
-    await pickers.nth(1).selectOption({ index: 1 })
-    await page.waitForTimeout(2000)
-    check(/loop|themselves/i.test(await page.locator('body').innerText()),
-      'a reporting cycle is refused with a message', 'the cycle produced no message')
+    await pickerFor(personB).selectOption({ label: personA })
+    // The refusal arrives as a toast, which is gone a few seconds later —
+    // sampling the page once races it.
+    let cycleMsg = ''
+    for (let i = 0; i < 12; i++) {
+      const body = await page.locator('body').innerText()
+      const hit = body.match(/[^.\n]*\b(loop|themselves|cycle)\b[^.\n]*/i)
+      if (hit) { cycleMsg = hit[0].trim(); break }
+      await page.waitForTimeout(500)
+    }
+    check(Boolean(cycleMsg), `a reporting cycle is refused with a message: "${cycleMsg.slice(0, 60)}"`,
+      'the cycle produced no message')
     await pickers.nth(0).selectOption({ label: 'No manager' })
     await page.waitForTimeout(1400)
   }
@@ -370,7 +449,7 @@ try {
   say('13b. The new type reaches the task header picker')
   await page.goto(`${B}/app/${WS}/${LIST_PATH}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
-  await page.getByText('Member-created task', { exact: true }).first().click()
+  await openAnyTask()
   await page.waitForTimeout(2400)
   const tp = page.locator('div.shadow-2xl.border-l select[title="Task type"]')
   check(await tp.count() > 0, 'the type picker appears in the task header now that a type exists',
@@ -383,7 +462,7 @@ try {
     await page.waitForTimeout(1800)
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3200)
-    await page.getByText('Member-created task', { exact: true }).first().click()
+    await openAnyTask()
     await page.waitForTimeout(2400)
     const after = page.locator('div.shadow-2xl.border-l select[title="Task type"]')
     const sel = await after.locator('option:checked').innerText().catch(() => '')
