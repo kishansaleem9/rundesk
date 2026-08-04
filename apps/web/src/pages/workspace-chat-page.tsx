@@ -48,6 +48,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import type { TranslationKey } from '../lib/i18n/catalogs'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
@@ -217,6 +218,9 @@ export function ChatPage() {
   const [startingDm, setStartingDm] = useState(false)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [threadParentId, setThreadParentId] = useState<string | null>(null)
+  // Which face of a DM is showing. Reset when the conversation changes, or you
+  // land on someone else's shared work while thinking you switched to a chat.
+  const [dmTab, setDmTab] = useState<'chat' | 'calendar' | 'tasks'>('chat')
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editingBody, setEditingBody] = useState('')
   // Edit history (§6.3): the message whose prior versions are being viewed.
@@ -373,6 +377,10 @@ export function ChatPage() {
     () => channels.find((c) => c.id === selectedId) ?? null,
     [channels, selectedId],
   )
+  // Calendar and Tasks take over the pane. The stream and composer are hidden
+  // rather than unmounted, so stepping over to "what are we both on?" and back
+  // does not throw away an unsent draft or the scroll position in a long DM.
+  const dmSharedOpen = Boolean(selectedChannel?.isDm && selectedChannel.dmPeerId && dmTab !== 'chat')
   const channelMembersQuery = useQuery({
     queryKey: ['chat-channel-members', selectedId],
     queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/chat/channels/${selectedId}/members`),
@@ -1156,6 +1164,8 @@ export function ChatPage() {
     setThreadParentId(parentId)
   }
 
+  useEffect(() => { setDmTab('chat') }, [selectedId])
+
   const channelLabel = selectedChannel?.isDm
     ? selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? t('chat.dm')
     : selectedChannel
@@ -1287,6 +1297,39 @@ export function ChatPage() {
             selectedChannel && !selectedChannel.isDm ? () => setShareChannelOpen(true) : undefined
           }
         />
+
+        {/* §A3.9 — a DM is the one place "what are we both on?" is the real
+            question, so it gets Chat / Calendar / Tasks rather than only a
+            stream. Channels keep the stream alone; the question does not apply. */}
+        {selectedChannel?.isDm && selectedChannel.dmPeerId && (
+          <div className="flex items-center gap-1 border-b border-border px-4 py-1.5">
+            {(['chat', 'calendar', 'tasks'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                aria-pressed={dmTab === tab}
+                onClick={() => setDmTab(tab)}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-[13px] transition-colors',
+                  dmTab === tab
+                    ? 'bg-accent/15 font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                )}
+              >
+                {t(DM_TAB_KEY[tab])}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {dmSharedOpen && selectedChannel?.dmPeerId && dmTab !== 'chat' && (
+          <DmSharedPanel
+            workspaceId={workspaceId}
+            peerId={selectedChannel.dmPeerId}
+            peerName={selectedChannel.dmLabel ?? selectedChannel.dmPeerName ?? t('chat.teammate')}
+            mode={dmTab}
+          />
+        )}
 
         {selectedChannel && !selectedChannel.isDm && (
           <SharePanel
@@ -1642,7 +1685,7 @@ export function ChatPage() {
 
         <div
           ref={scrollRef}
-          className="flex-1 overflow-y-auto px-5 py-4"
+          className={cn('flex-1 overflow-y-auto px-5 py-4', dmSharedOpen && 'hidden')}
           onDragOver={(e) => {
             if (!selectedId || !Array.from(e.dataTransfer.types).includes('Files')) return
             e.preventDefault()
@@ -2125,7 +2168,7 @@ export function ChatPage() {
           )}
         </div>
 
-        {seenByNames.length > 0 && (
+        {seenByNames.length > 0 && !dmSharedOpen && (
           <div className="px-5 pb-1 text-right text-[10px] text-muted-foreground">
             {t('chat.seenBy')}{' '}
             {seenByNames.length <= 3
@@ -2136,14 +2179,14 @@ export function ChatPage() {
 
         {/* A view-only visitor can read the conversation but not write into it,
             so say why the box is dead rather than leaving it mysteriously inert. */}
-        {selectedChannel?.accessLevel === 'view' && (
+        {selectedChannel?.accessLevel === 'view' && !dmSharedOpen && (
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
             <Lock className="h-3.5 w-3.5 shrink-0" />
             <span>{t('share.viewOnlyChannel')}</span>
           </div>
         )}
 
-        {mentionedNonMembers.length > 0 && selectedChannel && (
+        {mentionedNonMembers.length > 0 && selectedChannel && !dmSharedOpen && (
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
             <UserPlus className="h-3.5 w-3.5 shrink-0" />
             <span className="flex-1">
@@ -2165,7 +2208,7 @@ export function ChatPage() {
           </div>
         )}
 
-        {actionItem && (
+        {actionItem && !dmSharedOpen && (
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-md border border-violet-500/30 bg-violet-500/5 px-3 py-1.5 text-[12px] text-violet-700 dark:text-violet-300">
             <ListTodo className="h-3.5 w-3.5 shrink-0" />
             <span className="flex-1">
@@ -2180,6 +2223,7 @@ export function ChatPage() {
           </div>
         )}
 
+        <div className={cn(dmSharedOpen && 'hidden')}>
         <ChatComposer
             workspaceId={workspaceId}
           channelLabel={channelLabel}
@@ -2415,6 +2459,7 @@ export function ChatPage() {
             )
           })()}
         />
+        </div>
         </div>
         {threadParent && (
           <ThreadPanel
@@ -3086,6 +3131,79 @@ function SearchPanel({
         )}
       </div>
     </aside>
+  )
+}
+
+const DM_TAB_KEY: Record<'chat' | 'calendar' | 'tasks', TranslationKey> = {
+  chat: 'chat.dmTabChat',
+  calendar: 'chat.dmTabCalendar',
+  tasks: 'chat.dmTabTasks',
+}
+
+/**
+ * The Calendar and Tasks faces of a DM: what these two people share.
+ *
+ * Both come from one endpoint because they answer the same question from one
+ * pair of joins — meetings they both attended, and open tasks either is
+ * assigned to. Splitting them into two requests would double the round trips
+ * to render two halves of a single answer.
+ */
+function DmSharedPanel({
+  workspaceId,
+  peerId,
+  peerName,
+  mode,
+}: {
+  workspaceId: string
+  peerId: string
+  peerName: string
+  mode: 'calendar' | 'tasks'
+}) {
+  const { t } = useTranslation()
+  const { data, isLoading } = useQuery({
+    queryKey: ['dm-shared', workspaceId, peerId],
+    queryFn: () =>
+      api<{
+        meetings: Array<{ id: string; title: string; startsAt: string | null; provider: string }>
+        tasks: Array<{ id: string; title: string; status: string; dueDate: string | null; priority: string }>
+      }>(`/workspaces/${workspaceId}/people/${peerId}/shared`),
+    enabled: Boolean(workspaceId && peerId),
+  })
+
+  const rows = mode === 'calendar' ? data?.meetings ?? [] : data?.tasks ?? []
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {t(mode === 'calendar' ? 'chat.dmSharedMeetings' : 'chat.dmSharedTasks', { name: peerName })}
+      </p>
+      {isLoading ? (
+        <p className="text-[13px] text-muted-foreground">{t('common.loading')}</p>
+      ) : rows.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">
+          {t(mode === 'calendar' ? 'chat.dmNoMeetings' : 'chat.dmNoTasks', { name: peerName })}
+        </p>
+      ) : (
+        <ul className="divide-y divide-border/60 rounded-md border border-border">
+          {rows.map((row) => (
+            <li key={row.id} className="flex items-center gap-3 px-3 py-2">
+              <span className="flex-1 truncate text-[13px]">{row.title}</span>
+              {mode === 'calendar' ? (
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                  {'startsAt' in row && row.startsAt
+                    ? new Date(row.startsAt).toLocaleDateString()
+                    : t('chat.dmNoDate')}
+                </span>
+              ) : (
+                <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {'status' in row ? row.status : ''}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 

@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, ne } from 'drizzle-orm'
 import { meetings, meetingAttendees, workspaceMembers, users, tasks, taskAssignees, lists, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -307,6 +307,9 @@ export class MeetingsService {
         and(
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, false),
+          // Still open — the tab answers "what are we both on?", and everything
+          // we ever finished together is a different, much longer question.
+          ne(tasks.statusCategory, 'closed'),
           inArray(taskAssignees.userId, [userId, otherUserId]),
           visible,
         ),
