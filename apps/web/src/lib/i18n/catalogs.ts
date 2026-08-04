@@ -68,6 +68,7 @@ export const en = {
 
   // Command palette
   'palette.searchPlaceholder': 'Search, type / for a command, or type to create',
+  'palette.title': 'Search Rundesk',
   'palette.quickActions': 'Quick actions',
   'palette.createTask': 'Create task',
   'palette.askAi': 'Ask AI ·',
@@ -5064,6 +5065,7 @@ export const es: Record<TranslationKey, string> = {
   'inbox.earlier': 'Anteriores',
 
   'palette.searchPlaceholder': 'Busca, escribe / para un comando o escribe para crear',
+  'palette.title': 'Buscar en Rundesk',
   'palette.quickActions': 'Acciones rápidas',
   'palette.createTask': 'Crear tarea',
   'palette.askAi': 'Preguntar a la IA ·',
@@ -10024,6 +10026,7 @@ export const ar: Record<TranslationKey, string> = {
   'inbox.earlier': 'سابقة',
 
   'palette.searchPlaceholder': 'ابحث، أو اكتب / لأمر، أو اكتب للإنشاء',
+  'palette.title': 'البحث في Rundesk',
   'palette.quickActions': 'إجراءات سريعة',
   'palette.createTask': 'إنشاء مهمة',
   'palette.askAi': 'اسأل الذكاء الاصطناعي ·',
@@ -14980,6 +14983,7 @@ export const ur: Record<TranslationKey, string> = {
   'inbox.unread': 'غیر پڑھی',
   'inbox.earlier': 'پہلے',
   'palette.searchPlaceholder': 'تلاش کریں، کمانڈ کے لیے / لکھیں، یا بنانے کے لیے ٹائپ کریں',
+  'palette.title': 'Rundesk میں تلاش کریں',
   'palette.quickActions': 'فوری اقدامات',
   'palette.createTask': 'ٹاسک بنائیں',
   'palette.askAi': 'اے آئی سے پوچھیں ·',

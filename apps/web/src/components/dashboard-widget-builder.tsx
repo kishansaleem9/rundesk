@@ -629,14 +629,16 @@ function TeamLoadWidget({ workspaceId }: { workspaceId: string }) {
   const q = useQuery({
     queryKey: ['workload-report', workspaceId, 7],
     queryFn: () =>
-      api<Array<{ name: string; capacity: number; dailyLoads: number[] }>>(
+      api<Array<{ userId: string; name: string; capacity: number; dailyLoads: number[] }>>(
         `/workspaces/${workspaceId}/reports/workload?days=7`,
       ),
   })
   const team = (q.data ?? []).slice(0, 6).map((p) => {
     const avgLoad = p.dailyLoads.reduce((s, v) => s + v, 0) / Math.max(1, p.dailyLoads.length)
     const ratio = Math.round((avgLoad / Math.max(1, p.capacity)) * 100)
-    return { name: p.name || t('dashboardWidget.unknown'), load: ratio }
+    // userId comes along so the row can be keyed by identity: two teammates may
+    // share a display name, and React drops rows that share a key.
+    return { userId: p.userId, name: p.name || t('dashboardWidget.unknown'), load: ratio }
   })
   return (
     <div className="flex flex-col h-full">
@@ -646,7 +648,7 @@ function TeamLoadWidget({ workspaceId }: { workspaceId: string }) {
           <li className="text-[11px] text-muted-foreground">{t('dashboardWidget.noAssignments')}</li>
         )}
         {team.map((member) => (
-          <li key={member.name} className="flex items-center gap-2 text-[11px]">
+          <li key={member.userId} className="flex items-center gap-2 text-[11px]">
             <span className="w-16 truncate">{member.name.split(' ')[0]}</span>
             <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
               <div

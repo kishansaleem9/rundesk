@@ -343,6 +343,9 @@ export function CommandPalette({
       // In command mode the leading `/` would score every item to zero, so the
       // filtering is ours; everywhere else cmdk's fuzzy match still runs.
       commandProps={{ shouldFilter: !commandMode }}
+      // Screen-reader name for the dialog. Sighted users identify the palette
+      // by its input; Radix requires a title regardless.
+      title={t('palette.title')}
     >
       <CommandInput
         placeholder={t('palette.searchPlaceholder')}

@@ -902,6 +902,9 @@ function DemoModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-3xl gap-0 overflow-y-auto p-0">
+        {/* Screen-reader name. The tour carries its own visual heading, so this
+            is hidden — but a dialog without an accessible name is unannounced. */}
+        <DialogTitle className="sr-only">{t('landing.demoTitle')}</DialogTitle>
         <ProductTour t={t} dir={dir} open={open} />
       </DialogContent>
     </Dialog>

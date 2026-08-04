@@ -212,7 +212,7 @@ export function WorkloadPage() {
                 {people.map((p) => {
                   const delta = Math.round((p.trackedHours - p.windowCapacityHours) * 10) / 10
                   return (
-                    <tr key={p.userId ?? p.name} className="border-b border-border/40 last:border-0">
+                    <tr key={p.userId} className="border-b border-border/40 last:border-0">
                       <td className="px-4 py-2 truncate">{p.name}</td>
                       <td className="px-4 py-2 text-end tabular-nums text-muted-foreground">
                         {p.windowCapacityHours.toFixed(1)}h
@@ -277,8 +277,10 @@ export function WorkloadPage() {
             </div>
 
             {/* Person rows */}
+            {/* Keyed by userId, not name: two people can share a display name,
+                and React silently drops or duplicates rows with the same key. */}
             {people.map((p) => (
-              <div key={p.name} className="flex border-b border-border/30 last:border-b-0 group">
+              <div key={p.userId} className="flex border-b border-border/30 last:border-b-0 group">
                 <div className="w-[200px] shrink-0 flex items-center gap-2.5 px-4 py-2.5 border-r border-border/60 bg-card/50">
                   <PersonAvatar name={p.name} size="sm" />
                   <div className="min-w-0 flex-1">

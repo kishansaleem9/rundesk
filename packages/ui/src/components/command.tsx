@@ -2,7 +2,7 @@ import * as React from 'react'
 import { Command as CommandPrimitive } from 'cmdk'
 import { Search } from 'lucide-react'
 import { cn } from '../lib/cn'
-import { Dialog, DialogContent } from './dialog'
+import { Dialog, DialogContent, DialogTitle } from './dialog'
 
 export const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -26,12 +26,19 @@ export interface CommandDialogProps extends React.ComponentProps<typeof Dialog> 
    * every item to zero) need `shouldFilter={false}`.
    */
   commandProps?: Omit<React.ComponentPropsWithoutRef<typeof CommandPrimitive>, 'className'>
+  /**
+   * Accessible name for the dialog. Rendered for screen readers only — the
+   * palette is identified visually by its search input, so a visible heading
+   * would be noise. Radix requires a title on every dialog regardless.
+   */
+  title?: string
 }
 
-export function CommandDialog({ children, commandProps, ...props }: CommandDialogProps) {
+export function CommandDialog({ children, commandProps, title = 'Search', ...props }: CommandDialogProps) {
   return (
     <Dialog {...props}>
       <DialogContent className="overflow-hidden p-0 sm:max-w-2xl" hideClose>
+        <DialogTitle className="sr-only">{title}</DialogTitle>
         <Command
           {...commandProps}
           className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-input-wrapper]_svg]:h-4 [&_[cmdk-input-wrapper]_svg]:w-4 [&_[cmdk-item]]:px-3 [&_[cmdk-item]]:py-2 [&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4"
