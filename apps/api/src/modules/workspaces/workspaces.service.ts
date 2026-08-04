@@ -480,9 +480,19 @@ export class WorkspacesService {
 
   async setWorkDays(workspaceId: string, days: unknown, actor?: AuditActor) {
     if (!Array.isArray(days)) throw new BadRequestException('workDays must be an array')
-    // ISO weekdays only, de-duplicated and ordered, so downstream code can treat
-    // the column as a canonical set rather than whatever arrived over the wire.
-    const clean = [...new Set(days.map((d) => Number(d)))].filter((d) => Number.isInteger(d) && d >= 1 && d <= 7).sort()
+    // ISO weekdays: Monday is 1 and Sunday is 7. Say so, because JavaScript's
+    // own getDay() puts Sunday at 0 and silently dropping it would hand back a
+    // 200 and a schedule missing the day the caller asked for.
+    const numbers = days.map((d) => Number(d))
+    const invalid = numbers.filter((d) => !Number.isInteger(d) || d < 1 || d > 7)
+    if (invalid.length) {
+      throw new BadRequestException(
+        `workDays must be ISO weekdays 1–7 (Monday–Sunday); got ${[...new Set(invalid)].join(', ')}`,
+      )
+    }
+    // De-duplicated and ordered, so downstream code can treat the column as a
+    // canonical set rather than whatever arrived over the wire.
+    const clean = [...new Set(numbers)].sort()
     if (clean.length === 0) throw new BadRequestException('Pick at least one working day')
     await this.db
       .update(workspaces)

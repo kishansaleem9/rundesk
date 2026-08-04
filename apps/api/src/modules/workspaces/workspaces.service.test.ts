@@ -382,3 +382,44 @@ describe('WorkspacesPublicController.authorizeTls (§13.5 on-demand TLS ask)', (
     await assert.rejects(() => controllerWithRows([verified]).authorizeTls(), ForbiddenException)
   })
 })
+
+// §A4.10 — the schedule drives Workload's capacity, so a day that quietly
+// vanishes shows up much later as numbers nobody can explain. These reject
+// before touching the database, so a bare service instance is enough.
+describe('WorkspacesService.setWorkDays validation', () => {
+  const svc = () => new WorkspacesService({} as any, {} as any, {} as any, {} as any, {} as any)
+
+  it('refuses a non-array', async () => {
+    await assert.rejects(() => svc().setWorkDays('ws', 'mon,tue' as any), /must be an array/)
+  })
+
+  it('refuses day 0 — JavaScript calls Sunday 0, ISO calls it 7', async () => {
+    await assert.rejects(() => svc().setWorkDays('ws', [0, 1, 2]), /ISO weekdays 1–7/)
+  })
+
+  it('refuses a day past Sunday', async () => {
+    await assert.rejects(() => svc().setWorkDays('ws', [1, 2, 8]), /ISO weekdays 1–7/)
+  })
+
+  it('refuses a non-numeric day rather than coercing it to NaN and dropping it', async () => {
+    await assert.rejects(() => svc().setWorkDays('ws', ['x'] as any), /ISO weekdays 1–7/)
+  })
+
+  it('names the offending days, so the caller can see which one it was', async () => {
+    await assert.rejects(() => svc().setWorkDays('ws', [1, 9, 0]), /9, 0/)
+  })
+
+  it('refuses a week with no working days at all', async () => {
+    await assert.rejects(() => svc().setWorkDays('ws', []), /at least one working day/)
+  })
+
+  // A repeat is the same set, so it is normalised rather than rejected. The
+  // update itself needs a db, so getting past validation is the assertion.
+  it('accepts a repeated day and does not reject it as malformed', async () => {
+    await assert.rejects(
+      () => svc().setWorkDays('ws', [5, 1, 2, 3, 4, 1]),
+      (err: Error) => !/ISO weekdays|at least one/.test(err.message),
+      'a repeated day should normalise, not fail validation',
+    )
+  })
+})
