@@ -56,7 +56,9 @@ const ENTITY_ICON: Record<string, React.ElementType> = {
   comment: MessageSquare,
   user: Users,
 }
-const ENTITY_ORDER = ['task', 'doc', 'file', 'comment', 'channel', 'message', 'user']
+const ENTITY_ORDER = ['task', 'doc', 'file', 'comment', 'channel', 'message', 'user'] as const
+/** The entity types the search API accepts in its `types` filter. */
+type SearchEntityType = (typeof ENTITY_ORDER)[number]
 const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
   task: 'palette.entityTasks',
   doc: 'palette.entityDocs',
@@ -94,7 +96,15 @@ export function CommandPalette({
     else setInternalOpen(next)
   }
   const [query, setQuery] = useState(initialQuery)
-  const [typeFilter, setTypeFilter] = useState<'all' | 'task' | 'doc'>('all')
+  const [typeFilter, setTypeFilter] = useState<Set<SearchEntityType>>(() => new Set())
+  const typeParam = [...typeFilter].join(',')
+  const toggleType = (v: SearchEntityType) =>
+    setTypeFilter((cur) => {
+      const next = new Set(cur)
+      if (next.has(v)) next.delete(v)
+      else next.add(v)
+      return next
+    })
   const [statusFilter, setStatusFilter] = useState<'' | 'open' | 'in_progress' | 'closed'>('')
   const [priorityFilter, setPriorityFilter] = useState<'' | 'urgent' | 'high' | 'normal' | 'low'>('')
   const [labelFilter, setLabelFilter] = useState<string>('')
@@ -153,7 +163,7 @@ export function CommandPalette({
   const applyPreset = (s: SavedSearch) => {
     const f = s.filters ?? {}
     setQuery(s.query ?? '')
-    setTypeFilter((f.types as string[])?.length === 1 ? ((f.types as string[])[0] as 'task' | 'doc') : 'all')
+    setTypeFilter(new Set(((f.types as SearchEntityType[]) ?? []).filter((x) => ENTITY_ORDER.includes(x))))
     setStatusFilter((f.statusCategory as any) ?? '')
     setPriorityFilter((f.priority as any) ?? '')
     setLabelFilter((f.labelId as string) ?? '')
@@ -168,7 +178,7 @@ export function CommandPalette({
   const saveCurrent = useMutation({
     mutationFn: (name: string) => {
       const filters: Record<string, unknown> = {}
-      if (typeFilter !== 'all') filters.types = [typeFilter]
+      if (typeFilter.size) filters.types = [...typeFilter]
       if (statusFilter) filters.statusCategory = statusFilter
       if (priorityFilter) filters.priority = priorityFilter
       if (labelFilter) filters.labelId = labelFilter
@@ -199,7 +209,7 @@ export function CommandPalette({
   const hasCustomField = customFieldId !== '' && customFieldValue !== ''
   // §A2.4 — the tally on the Filters button. Each active control counts once.
   const activeFilterCount =
-    (typeFilter !== 'all' ? 1 : 0) +
+    typeFilter.size +
     (statusFilter ? 1 : 0) +
     (priorityFilter ? 1 : 0) +
     (labelFilter ? 1 : 0) +
@@ -217,10 +227,10 @@ export function CommandPalette({
 
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeFilter, statusFilter, priorityFilter, labelFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
+    queryKey: ['search', workspaceId, query, typeParam, statusFilter, priorityFilter, labelFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
-      if (typeFilter !== 'all') params.set('types', typeFilter)
+      if (typeParam) params.set('types', typeParam)
       if (statusFilter) params.set('statusCategory', statusFilter)
       if (priorityFilter) params.set('priority', priorityFilter)
       if (labelFilter) params.set('labelId', labelFilter)
@@ -355,7 +365,7 @@ export function CommandPalette({
           <button
             type="button"
             onClick={() => {
-              setTypeFilter('all')
+              setTypeFilter(new Set())
               setStatusFilter('')
               setPriorityFilter('')
               setLabelFilter('')
@@ -380,9 +390,12 @@ export function CommandPalette({
         )}
       >
         <FilterGroup label={t('palette.filterType')}>
-          {(['all', 'task', 'doc'] as const).map((v) => (
-            <FilterChip key={v} active={typeFilter === v} onClick={() => setTypeFilter(v)}>
-              {v === 'all' ? t('palette.all') : v === 'task' ? t('palette.entityTasks') : t('palette.entityDocs')}
+          <FilterChip active={typeFilter.size === 0} onClick={() => setTypeFilter(new Set())}>
+            {t('palette.all')}
+          </FilterChip>
+          {ENTITY_ORDER.map((v) => (
+            <FilterChip key={v} active={typeFilter.has(v)} onClick={() => toggleType(v)}>
+              {t(ENTITY_LABEL_KEY[v])}
             </FilterChip>
           ))}
         </FilterGroup>
