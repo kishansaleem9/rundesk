@@ -16,6 +16,20 @@ import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions
 // channel, message) belong here too — leaving them out meant a filter naming
 // one was discarded as invalid and the search silently ran unfiltered.
 export type SearchEntityType = 'task' | 'doc' | 'file' | 'user' | 'comment' | 'channel' | 'message'
+/**
+ * One search result. `sortedAt` is only present on the branches that carry a
+ * timestamp (tasks, docs); files, people and messages leave it unset and sort
+ * to the end under a timestamp sort.
+ */
+export type SearchHit = {
+  id: string
+  entityType: string
+  title: string
+  content: string
+  url: string
+  sortedAt?: Date | string | null
+}
+
 export type SearchFilters = {
   types?: SearchEntityType[]
   statusCategory?: 'open' | 'in_progress' | 'closed'
@@ -31,6 +45,12 @@ export type SearchFilters = {
    * wrong when you are hunting for something you archived last month.
    */
   includeArchived?: boolean
+  /**
+   * §A2.4 — "main sort bhi kar sakti hoon: last update, last created". Relevance
+   * is the default; the other two order the merged result set by a timestamp
+   * each branch now carries.
+   */
+  sort?: 'relevance' | 'updated' | 'created'
   // Custom-field value filter (Plan §11.2): narrows tasks to those whose value
   // for a given custom-field definition matches. `customFieldId` identifies the
   // per-project definition; `customFieldValue` is the stored value to match
@@ -260,7 +280,11 @@ export class SearchService implements OnModuleInit {
     // Meilisearch can only satisfy the text + entity-type filters — it doesn't
     // index status/priority/assignee, nor the archived flag. Fall back to
     // Postgres for those.
-    if (this.enabled && this.index && trimmed && !hasTaskFilter && !filters.includeArchived) {
+    // A timestamp sort needs updatedAt/createdAt, which the Meili documents do
+    // not carry — so take the Postgres path rather than return an order that
+    // silently ignores the request.
+    const wantsTimeSort = filters.sort === 'updated' || filters.sort === 'created'
+    if (this.enabled && this.index && trimmed && !hasTaskFilter && !filters.includeArchived && !wantsTimeSort) {
       const filterExpr = [`workspaceId = "${workspaceId}"`]
       // Narrow to every requested type, not just a lone one. With two or more
       // selected this used to push no filter at all, so Meili happily returned
@@ -336,7 +360,7 @@ export class SearchService implements OnModuleInit {
             )
           }
           return this.db
-            .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id })
+            .select({ id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId, projectId: projects.id, spaceId: spaces.id, updatedAt: tasks.updatedAt, createdAt: tasks.createdAt })
             .from(tasks)
             .innerJoin(lists, eq(lists.id, tasks.listId))
             .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -367,13 +391,14 @@ export class SearchService implements OnModuleInit {
     // Extras only for a general text search (no type/task-specific filter).
     const extras = like ? await this.searchExtras(workspaceId, userId, like, limit, isManager, filters.types) : []
 
-    return [
+    return this.applySort(filters.sort, [
       ...taskHits.map((t) => ({
         id: `task-${t.id}`,
         entityType: 'task',
         title: t.title,
         content: (t.description ?? '').slice(0, 200),
         url: `/app/${workspaceId}/${t.spaceId}/${t.projectId}/${t.listId}?task=${t.id}`,
+        sortedAt: (filters.sort === 'created' ? t.createdAt : t.updatedAt) ?? null,
       })),
       ...docHits.map((d) => ({
         id: `doc-${d.id}`,
@@ -381,11 +406,30 @@ export class SearchService implements OnModuleInit {
         title: d.title,
         content: d.plaintext.slice(0, 200),
         url: `/app/${workspaceId}/docs?doc=${d.id}`,
+        sortedAt: (filters.sort === 'created' ? d.createdAt : d.updatedAt) ?? null,
       })),
       ...fileHits,
       ...clipHits,
       ...extras,
-    ]
+    ])
+  }
+
+  /**
+   * Order the merged result set. Relevance is whatever each branch's own query
+   * returned, so we leave it alone; the timestamp modes sort across branches,
+   * putting hits with no timestamp (files, people, messages) last rather than
+   * letting an absent date read as "oldest".
+   */
+  private applySort(sort: SearchFilters['sort'], hits: SearchHit[]): SearchHit[] {
+    if (!sort || sort === 'relevance') return hits
+    const at = (h: SearchHit) => (h.sortedAt ? new Date(h.sortedAt).getTime() : null)
+    return [...hits].sort((a, b) => {
+      const x = at(a), y = at(b)
+      if (x === null && y === null) return 0
+      if (x === null) return 1
+      if (y === null) return -1
+      return y - x
+    })
   }
 
   /**

@@ -4568,6 +4568,10 @@ export const en = {
 
   // Search & Inbox (§A2) — command palette chrome, inbox triage, replies
   'palette.filters': 'Filters',
+  'palette.filterSort': 'Sort',
+  'palette.sortRelevance': 'Relevance',
+  'palette.sortUpdated': 'Last updated',
+  'palette.sortCreated': 'Last created',
   'palette.filtersCount': '{{count}} filters',
   'palette.clearFilters': 'Clear filters',
   'palette.filterCreator': 'Creator',
@@ -9467,6 +9471,10 @@ export const es: Record<TranslationKey, string> = {
   'chat.unread_other': '{{count}} mensajes sin leer',
 
   'palette.filters': 'Filtros',
+  'palette.filterSort': 'Orden',
+  'palette.sortRelevance': 'Relevancia',
+  'palette.sortUpdated': 'Última actualización',
+  'palette.sortCreated': 'Última creación',
   'palette.filtersCount': '{{count}} filtros',
   'palette.clearFilters': 'Borrar filtros',
   'palette.filterCreator': 'Creador',
@@ -14364,6 +14372,10 @@ export const ar: Record<TranslationKey, string> = {
   'chat.unread_other': '{{count}} رسائل غير مقروءة',
 
   'palette.filters': 'عوامل التصفية',
+  'palette.filterSort': 'الترتيب',
+  'palette.sortRelevance': 'الصلة',
+  'palette.sortUpdated': 'آخر تحديث',
+  'palette.sortCreated': 'آخر إنشاء',
   'palette.filtersCount': '{{count}} عوامل تصفية',
   'palette.clearFilters': 'مسح عوامل التصفية',
   'palette.filterCreator': 'المُنشئ',
@@ -19106,6 +19118,10 @@ export const ur: Record<TranslationKey, string> = {
   'chat.unread_other': '{{count}} غیر پڑھے پیغامات',
 
   'palette.filters': 'فلٹرز',
+  'palette.filterSort': 'ترتیب',
+  'palette.sortRelevance': 'مطابقت',
+  'palette.sortUpdated': 'حالیہ اپ ڈیٹ',
+  'palette.sortCreated': 'حالیہ تخلیق',
   'palette.filtersCount': '{{count}} فلٹرز',
   'palette.clearFilters': 'فلٹرز صاف کریں',
   'palette.filterCreator': 'بنانے والا',

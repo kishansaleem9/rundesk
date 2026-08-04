@@ -39,6 +39,7 @@ export class SearchController {
     @Query('dueBefore') dueBefore?: string,
     @Query('customFieldId') customFieldId?: string,
     @Query('customFieldValue') customFieldValue?: string,
+    @Query('sort') sort?: string,
   ) {
     const filters: SearchFilters = {}
     if (types) {
@@ -58,6 +59,7 @@ export class SearchController {
     if (creatorId) filters.creatorId = creatorId
     if (includeArchived === 'true') filters.includeArchived = true
     if (labelId) filters.labelId = labelId
+    if (sort === 'updated' || sort === 'created') filters.sort = sort
     const parseDate = (s?: string) => {
       if (!s) return undefined
       const d = new Date(s)

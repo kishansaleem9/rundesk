@@ -96,6 +96,9 @@ export function CommandPalette({
     else setInternalOpen(next)
   }
   const [query, setQuery] = useState(initialQuery)
+  // "main sort bhi kar sakti hoon: last update, last created" — relevance stays
+  // the default because it is what a text query is for.
+  const [sortBy, setSortBy] = useState<'relevance' | 'updated' | 'created'>('relevance')
   const [typeFilter, setTypeFilter] = useState<Set<SearchEntityType>>(() => new Set())
   const typeParam = [...typeFilter].join(',')
   const toggleType = (v: SearchEntityType) =>
@@ -164,6 +167,7 @@ export function CommandPalette({
     const f = s.filters ?? {}
     setQuery(s.query ?? '')
     setTypeFilter(new Set(((f.types as SearchEntityType[]) ?? []).filter((x) => ENTITY_ORDER.includes(x))))
+    setSortBy((f.sort as 'updated' | 'created') ?? 'relevance')
     setStatusFilter((f.statusCategory as any) ?? '')
     setPriorityFilter((f.priority as any) ?? '')
     setLabelFilter((f.labelId as string) ?? '')
@@ -179,6 +183,7 @@ export function CommandPalette({
     mutationFn: (name: string) => {
       const filters: Record<string, unknown> = {}
       if (typeFilter.size) filters.types = [...typeFilter]
+      if (sortBy !== 'relevance') filters.sort = sortBy
       if (statusFilter) filters.statusCategory = statusFilter
       if (priorityFilter) filters.priority = priorityFilter
       if (labelFilter) filters.labelId = labelFilter
@@ -209,7 +214,7 @@ export function CommandPalette({
   const hasCustomField = customFieldId !== '' && customFieldValue !== ''
   // §A2.4 — the tally on the Filters button. Each active control counts once.
   const activeFilterCount =
-    typeFilter.size +
+    typeFilter.size + (sortBy !== 'relevance' ? 1 : 0) +
     (statusFilter ? 1 : 0) +
     (priorityFilter ? 1 : 0) +
     (labelFilter ? 1 : 0) +
@@ -227,10 +232,11 @@ export function CommandPalette({
 
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeParam, statusFilter, priorityFilter, labelFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
+    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeParam) params.set('types', typeParam)
+      if (sortBy !== 'relevance') params.set('sort', sortBy)
       if (statusFilter) params.set('statusCategory', statusFilter)
       if (priorityFilter) params.set('priority', priorityFilter)
       if (labelFilter) params.set('labelId', labelFilter)
@@ -366,6 +372,7 @@ export function CommandPalette({
             type="button"
             onClick={() => {
               setTypeFilter(new Set())
+              setSortBy('relevance')
               setStatusFilter('')
               setPriorityFilter('')
               setLabelFilter('')
@@ -396,6 +403,17 @@ export function CommandPalette({
           {ENTITY_ORDER.map((v) => (
             <FilterChip key={v} active={typeFilter.has(v)} onClick={() => toggleType(v)}>
               {t(ENTITY_LABEL_KEY[v])}
+            </FilterChip>
+          ))}
+        </FilterGroup>
+        <FilterGroup label={t('palette.filterSort')}>
+          {([
+            ['relevance', 'palette.sortRelevance'],
+            ['updated', 'palette.sortUpdated'],
+            ['created', 'palette.sortCreated'],
+          ] as const).map(([v, key]) => (
+            <FilterChip key={v} active={sortBy === v} onClick={() => setSortBy(v)}>
+              {t(key)}
             </FilterChip>
           ))}
         </FilterGroup>
