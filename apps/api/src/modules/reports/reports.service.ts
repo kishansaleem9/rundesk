@@ -22,6 +22,8 @@ import {
   clients,
   customReports,
   timeOff,
+  workspaces,
+  workspaceHolidays,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -275,6 +277,19 @@ export type ViewerScope =
   | { kind: 'all' }
   | { kind: 'user'; userId: string }
   | { kind: 'containers'; spaceIds: string[]; projectIds: string[]; userId: string }
+
+/**
+ * Is `d` one of the workspace's working days?
+ *
+ * Extracted and exported because of the off-by-one waiting in it: JavaScript's
+ * `getDay()` is 0=Sunday..6=Saturday, while `workspaces.work_days` stores ISO
+ * weekdays, 1=Monday..7=Sunday. Getting that backwards silently shifts every
+ * capacity figure by a day, which no integration test would obviously catch.
+ */
+export function isWorkingWeekday(d: Date, workDays: ReadonlySet<number>): boolean {
+  const js = d.getDay()
+  return workDays.has(js === 0 ? 7 : js)
+}
 
 @Injectable()
 export class ReportsService {
@@ -896,6 +911,21 @@ export class ReportsService {
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .where(eq(workspaceMembers.workspaceId, workspaceId))
 
+    // The workspace's own week, rather than an assumed Mon–Fri. A Sun–Thu team
+    // used to read as two days of overtime and two days idle.
+    const [wsRow] = await this.db
+      .select({ workDays: workspaces.workDays })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    const workDays = new Set(wsRow?.workDays?.length ? wsRow.workDays : [1, 2, 3, 4, 5])
+    const holidayRows = await this.db
+      .select({ day: workspaceHolidays.day })
+      .from(workspaceHolidays)
+      .where(eq(workspaceHolidays.workspaceId, workspaceId))
+    const holidays = new Set(holidayRows.map((h) => h.day))
+    const isWorkDay = (d: Date) => isWorkingWeekday(d, workDays)
+
     // §A4.10 — someone on leave should not absorb planned load. Leave that
     // straddles the window still counts, so the query is an overlap test.
     // Local calendar day, not toISOString(): the horizon starts at local
@@ -994,19 +1024,20 @@ export class ReportsService {
       .groupBy(timeEntries.userId)
     const trackedByUser = new Map(trackedRows.map((row) => [row.userId, row.seconds]))
 
-    // Capacity for the trailing window counts weekdays only, matching the
-    // 5-day week the daily figure is derived from.
+    // Capacity for the trailing window counts the workspace's own working days,
+    // matching the week the daily figure below is derived from.
     let trackedWorkdays = 0
     for (let offset = 0; offset < horizon; offset++) {
       const day = new Date(trackedFrom)
       day.setDate(day.getDate() + offset)
-      if (day.getDay() !== 0 && day.getDay() !== 6) trackedWorkdays++
+      if (isWorkDay(day) && !holidays.has(isoDay(day))) trackedWorkdays++
     }
 
     return members.map((member) => {
       const weekly = member.weeklyCapacityHours ?? 40
-      // Daily capacity (5-day work week)
-      const dailyCapacity = Math.max(1, Math.round((weekly / 5) * 10) / 10)
+      // Spread the week's hours over the days the workspace actually works, so
+      // a four-day week reads as longer days rather than a smaller week.
+      const dailyCapacity = Math.max(1, Math.round((weekly / workDays.size) * 10) / 10)
       const dailyLoads = (perUser.get(member.userId) ?? []).map((load) => Math.round(load * 10) / 10)
       // Capacity is reported per day rather than as one number so a day off can
       // be zero without pretending the person's whole week shrank.
@@ -1014,7 +1045,11 @@ export class ReportsService {
       const dailyCapacities = Array.from({ length: horizon }, (_, offset) => {
         const day = new Date(start)
         day.setDate(day.getDate() + offset)
-        return daysOff.has(isoDay(day)) ? 0 : dailyCapacity
+        const iso = isoDay(day)
+        // Three ways a day has no capacity: it is not a working day, it is a
+        // company holiday, or this person is away.
+        if (!isWorkDay(day) || holidays.has(iso) || daysOff.has(iso)) return 0
+        return dailyCapacity
       })
       return {
         daysOff: [...daysOff].sort(),

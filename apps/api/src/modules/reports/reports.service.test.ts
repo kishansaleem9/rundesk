@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { ReportsService } from './reports.service'
+import { ReportsService, isWorkingWeekday } from './reports.service'
 
 /**
  * The custom-report engine runs a few queries then aggregates in memory.
@@ -96,5 +96,42 @@ describe('ReportsService.exportCustomReportCsv', () => {
     assert.equal(lines.length, 3) // header + Alice + Bob
     assert.ok(lines.some((l) => l.startsWith('Alice,2,1')))
     assert.ok(lines.some((l) => l.startsWith('Bob,1,1')))
+  })
+})
+
+describe('isWorkingWeekday', () => {
+  // The column stores ISO weekdays (1=Mon..7=Sun); Date.getDay() is 0=Sun..6=Sat.
+  // These dates are pinned so the mapping is checked, not assumed.
+  const MON = new Date('2026-08-03T12:00:00')
+  const FRI = new Date('2026-08-07T12:00:00')
+  const SAT = new Date('2026-08-08T12:00:00')
+  const SUN = new Date('2026-08-09T12:00:00')
+
+  it('treats a Mon–Fri week the way every existing workspace expects', () => {
+    const w = new Set([1, 2, 3, 4, 5])
+    assert.equal(isWorkingWeekday(MON, w), true)
+    assert.equal(isWorkingWeekday(FRI, w), true)
+    assert.equal(isWorkingWeekday(SAT, w), false)
+    assert.equal(isWorkingWeekday(SUN, w), false)
+  })
+
+  it('maps Sunday to 7, not 0 — the off-by-one this helper exists to pin', () => {
+    // A set containing 0 must match nothing: 0 is not a valid ISO weekday, and
+    // reading getDay() straight through would have made it mean Sunday.
+    assert.equal(isWorkingWeekday(SUN, new Set([0])), false)
+    assert.equal(isWorkingWeekday(SUN, new Set([7])), true)
+  })
+
+  it('handles a Sun–Thu week, which is the case the feature was added for', () => {
+    const w = new Set([7, 1, 2, 3, 4])
+    assert.equal(isWorkingWeekday(SUN, w), true)
+    assert.equal(isWorkingWeekday(MON, w), true)
+    assert.equal(isWorkingWeekday(FRI, w), false)
+    assert.equal(isWorkingWeekday(SAT, w), false)
+  })
+
+  it('an empty set makes every day a non-working day', () => {
+    const none = new Set<number>()
+    for (const d of [MON, FRI, SAT, SUN]) assert.equal(isWorkingWeekday(d, none), false)
   })
 })
