@@ -72,8 +72,11 @@ echo "  ok"
 
 # Print the distinct entityTypes a search returns, one per line.
 types_for() {
-  curl -fsS --max-time 20 "$API/search/$WS?q=$Q${1:+&types=$1}" -H "Authorization: Bearer $TOKEN" \
-    | tr ',' '\n' | grep -o '"entityType":"[^"]*"' | sed 's/.*://;s/"//g' | sort -u | tr '\n' ' '
+  # A type with no matches makes grep exit 1, and under `set -euo pipefail` that
+  # kills the whole script mid-run. An empty result is a legitimate answer here,
+  # so swallow it and let the caller decide what it means.
+  curl -fsS --max-time 20 "$API/search/$WS?q=$Q${1:+&types=$1}" -H "Authorization: Bearer $TOKEN" 2>/dev/null \
+    | tr ',' '\n' | grep -o '"entityType":"[^"]*"' | sed 's/.*://;s/"//g' | sort -u | tr '\n' ' ' || true
 }
 
 say "Searching for \"$Q\""
