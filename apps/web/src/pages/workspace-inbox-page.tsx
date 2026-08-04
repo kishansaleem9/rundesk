@@ -182,6 +182,34 @@ const HUMAN_TYPES = new Set([
   'chat_message',
 ])
 
+/**
+ * ClickUp's Important / Other split, over the same predicate.
+ *
+ * Primary is what a person sent you — a mention, a comment, an assignment, a
+ * message. Other is what the system sent you: due-date reminders, status
+ * transitions, briefings, billing. The distinction that matters at 200
+ * notifications is not what kind of object it was about, it is whether someone
+ * is waiting on you.
+ */
+export type InboxFilter = 'all' | 'primary' | 'other'
+
+export function matchesInboxFilter(type: string, filter: InboxFilter): boolean {
+  if (filter === 'all') return true
+  const human = HUMAN_TYPES.has(type)
+  return filter === 'primary' ? human : !human
+}
+
+const FILTER_LABEL_KEY: Record<InboxFilter, TranslationKey> = {
+  all: 'inbox.filterAll',
+  primary: 'inbox.filterPrimary',
+  other: 'inbox.filterOther',
+}
+const FILTER_HINT_KEY: Record<InboxFilter, TranslationKey> = {
+  all: 'inbox.filterAllHint',
+  primary: 'inbox.filterPrimaryHint',
+  other: 'inbox.filterOtherHint',
+}
+
 /** A run of notifications about the same thing, rendered as one row (§A2.7). */
 type NotificationGroup = {
   key: string
@@ -250,8 +278,16 @@ export function InboxPage() {
   const { namesById } = useMentionNames(workspaceId)
   const counts = countsQuery.data ?? { inbox: 0, later: 0, cleared: 0, unread: 0 }
   const all = notifsQuery.data ?? []
-  const notifs = filter === 'mentions' ? all.filter((n) => HUMAN_TYPES.has(n.type)) : all
+  const notifs = all.filter((n) => matchesInboxFilter(n.type, filter))
   const unread = notifs.filter((n) => !n.readAt)
+  // Counts per chip, so the split tells you where the traffic is before you
+  // click into it. Derived from the list already loaded — no extra request.
+  const primaryCount = all.filter((n) => matchesInboxFilter(n.type, 'primary')).length
+  const filterCounts: Record<InboxFilter, number> = {
+    all: all.length,
+    primary: primaryCount,
+    other: all.length - primaryCount,
+  }
 
   // Every triage verb moves rows between buckets, so the tab counts and the
   // bell badge have to be refetched alongside the list itself.
@@ -294,7 +330,7 @@ export function InboxPage() {
   // deep-links like /app/:ws/chat?channel=..&message=.. actually carry params.
   const go = (dest: string) => goToDestination(navigate, dest)
 
-  const setSearch = (next: { view?: InboxView; filter?: 'all' | 'mentions' }) =>
+  const setSearch = (next: { view?: InboxView; filter?: InboxFilter }) =>
     navigate({ to: '/app/$workspaceId/inbox', params: { workspaceId }, search: { view, filter, ...next } })
 
   const groups = groupNotifications(notifs)
@@ -372,21 +408,25 @@ export function InboxPage() {
               </button>
             ))}
           </div>
-          {/* §A2.6b — a two-state derived filter, not a fifth tab. */}
+          {/* §A2.6b — a derived filter, not extra tabs: Primary is what a person
+              sent you, Other is what the system did. */}
           <div className="flex items-center gap-1 border-l border-border/50 pl-3">
-            {(['all', 'mentions'] as const).map((f) => (
+            {(['all', 'primary', 'other'] as const).map((f) => (
               <button
                 key={f}
                 type="button"
                 onClick={() => setSearch({ filter: f })}
+                title={t(FILTER_HINT_KEY[f])}
+                aria-pressed={filter === f}
                 className={cn(
-                  'inline-flex h-7 items-center rounded-full border px-2.5 text-[11px] transition-colors',
+                  'inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] transition-colors',
                   filter === f
                     ? 'border-brand-500 bg-brand-500/10 text-foreground'
                     : 'border-border/70 text-muted-foreground hover:bg-accent/10 hover:text-foreground',
                 )}
               >
-                {f === 'all' ? t('inbox.filterAll') : t('inbox.filterMentions')}
+                {t(FILTER_LABEL_KEY[f])}
+                <span className="tabular-nums text-[10px] text-muted-foreground">{filterCounts[f]}</span>
               </button>
             ))}
           </div>
