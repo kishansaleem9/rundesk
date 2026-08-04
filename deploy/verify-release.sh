@@ -100,9 +100,16 @@ check_sql "the one-default-per-workspace index exists" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_task_types_one_default');" "t"
 
 say "Signing in as $EMAIL"
-TOKEN=$(curl -fsS --max-time 20 -X POST "$API/auth/login" \
+LOGIN=$(curl -fsS --max-time 20 -X POST "$API/auth/login" \
   -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" | jget accessToken)
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" || true)
+TOKEN=$(printf '%s' "$LOGIN" | jget accessToken)
+# Who this token belongs to, straight from the response that issued it. An
+# earlier version matched $EMAIL against the roster with grep -F, which is a
+# substring match: on a seeded install "admin@rundesk.internal" also matches
+# "org-admin@rundesk.internal", so the checks below ran against the wrong
+# person and a legitimate 200 was reported as a failure.
+ME=$(printf '%s' "$LOGIN" | awk -F'"user":\\{' '{print $2}' | jget id)
 [ -n "$TOKEN" ] || die "login rejected — set RUNDESK_EMAIL / RUNDESK_PASSWORD if the admin password was rotated"
 AUTH="Authorization: Bearer $TOKEN"
 WS=$(curl -fsS --max-time 20 "$API/workspaces" -H "$AUTH" | grep -o '"id":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
@@ -173,13 +180,16 @@ MEMBERS=$(curl -fsS --max-time 20 "$API/workspaces/$WS/members" -H "$AUTH" 2>/de
 printf '%s' "$MEMBERS" | grep -q 'managerId' \
   && ok "the roster exposes managerId" || bad "no managerId on the roster"
 
-# Which row is this account, by email rather than by position. The roster is
-# not ordered by who is asking, and an earlier version assumed the first row
-# was the caller — which made the self-checks below test the wrong person.
-ME=$(printf '%s' "$MEMBERS" | tr '}' '\n' | grep -F "$EMAIL" | grep -o '"userId":"[^"]*"' \
-     | head -1 | sed 's/.*://;s/"//g' || true)
-PEER=$(printf '%s' "$MEMBERS" | tr '}' '\n' | grep -v -F "$EMAIL" | grep -o '"userId":"[^"]*"' \
-     | head -1 | sed 's/.*://;s/"//g' || true)
+# Anyone on the roster who is not this account. Compared by id, exactly —
+# never by matching an email, which is how the caller got mistaken for
+# someone whose address merely contains theirs.
+PEER=$(printf '%s' "$MEMBERS" | grep -o '"userId":"[^"]*"' | sed 's/.*://;s/"//g' \
+     | grep -v -x -F "$ME" | head -1 || true)
+if [ -n "$ME" ] && printf '%s' "$MEMBERS" | grep -qF "$ME"; then
+  ok "this account is on the roster of $WS"
+else
+  bad "signed in fine, but this account is not a member of $WS"
+fi
 
 if [ -n "$ME" ] && [ -n "$PEER" ]; then
   # Start from nobody-reports-to-anybody. Left as it was, a manager set by an
