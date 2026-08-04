@@ -4,7 +4,7 @@ import { alias } from 'drizzle-orm/pg-core'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
 import * as dns from 'dns'
-import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers } from '@rundesk/db'
+import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers, workspaceHolidays } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
@@ -456,6 +456,102 @@ export class WorkspacesService {
    * workspace's organization; a founding member or one added by hand simply has
    * no invitation and reports null.
    */
+  /**
+   * Which days the workspace actually works, plus the dates it does not.
+   *
+   * Capacity was already stored per member; what nothing knew was how those
+   * hours are spread. A Sun–Thu week read as two days of overtime and two days
+   * idle before this existed.
+   */
+  async getWorkSchedule(workspaceId: string) {
+    const [ws] = await this.db
+      .select({ workDays: workspaces.workDays })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+    if (!ws) throw new NotFoundException('Workspace not found')
+    const holidays = await this.db
+      .select({ id: workspaceHolidays.id, day: workspaceHolidays.day, name: workspaceHolidays.name })
+      .from(workspaceHolidays)
+      .where(eq(workspaceHolidays.workspaceId, workspaceId))
+      .orderBy(asc(workspaceHolidays.day))
+    return { workDays: ws.workDays ?? [1, 2, 3, 4, 5], holidays }
+  }
+
+  async setWorkDays(workspaceId: string, days: unknown, actor?: AuditActor) {
+    if (!Array.isArray(days)) throw new BadRequestException('workDays must be an array')
+    // ISO weekdays only, de-duplicated and ordered, so downstream code can treat
+    // the column as a canonical set rather than whatever arrived over the wire.
+    const clean = [...new Set(days.map((d) => Number(d)))].filter((d) => Number.isInteger(d) && d >= 1 && d <= 7).sort()
+    if (clean.length === 0) throw new BadRequestException('Pick at least one working day')
+    await this.db
+      .update(workspaces)
+      .set({ workDays: clean, updatedAt: new Date() })
+      .where(eq(workspaces.id, workspaceId))
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      ipAddress: actor?.ip,
+      action: 'workspace.work_days_updated',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      description: `Working days set to ${clean.join(', ')}`,
+      // Audit metadata is scalar-valued, so the set is stored as a stable string.
+      metadata: { workDays: clean.join(',') },
+    })
+    return { ok: true, workDays: clean }
+  }
+
+  async addHoliday(workspaceId: string, day: string, name: string, actor?: AuditActor) {
+    const clean = (day ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) throw new BadRequestException('day must be YYYY-MM-DD')
+    const label = (name ?? '').trim()
+    if (!label) throw new BadRequestException('name is required')
+    const [existing] = await this.db
+      .select({ id: workspaceHolidays.id })
+      .from(workspaceHolidays)
+      .where(and(eq(workspaceHolidays.workspaceId, workspaceId), eq(workspaceHolidays.day, clean)))
+      .limit(1)
+    if (existing) throw new ConflictException('That date is already a holiday')
+    const [row] = await this.db
+      .insert(workspaceHolidays)
+      .values({ workspaceId, day: clean, name: label })
+      .returning()
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      ipAddress: actor?.ip,
+      action: 'workspace.holiday_added',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      description: `Holiday added: ${label} (${clean})`,
+      metadata: { day: clean, name: label },
+    })
+    return row
+  }
+
+  async removeHoliday(workspaceId: string, holidayId: string, actor?: AuditActor) {
+    const [row] = await this.db
+      .delete(workspaceHolidays)
+      .where(and(eq(workspaceHolidays.workspaceId, workspaceId), eq(workspaceHolidays.id, holidayId)))
+      .returning()
+    if (!row) throw new NotFoundException('Holiday not found')
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      ipAddress: actor?.ip,
+      action: 'workspace.holiday_removed',
+      resourceType: 'workspace',
+      resourceId: workspaceId,
+      description: `Holiday removed: ${row.name} (${row.day})`,
+      metadata: { day: row.day, name: row.name },
+    })
+    return { ok: true }
+  }
+
   async listMembers(workspaceId: string) {
     const rows = await this.db
       .select({
@@ -466,6 +562,7 @@ export class WorkspacesService {
         avatarUrl: users.avatarUrl,
         role: workspaceMembers.role,
         weeklyCapacityHours: workspaceMembers.weeklyCapacityHours,
+        managerId: workspaceMembers.managerId,
         joinedAt: workspaceMembers.joinedAt,
         lastSeenAt: users.lastSeenAt,
         organizationId: workspaces.organizationId,
@@ -508,16 +605,77 @@ export class WorkspacesService {
       teamsByUser.set(row.userId, list)
     }
 
+    // The manager is always another member of this same workspace, so the name
+    // comes from the rows we already have rather than a second join.
+    const nameByUser = new Map(rows.map((row) => [row.userId, row.displayName || row.email]))
+
     return rows.map(({ organizationId: _organizationId, ...row }) => {
       const invite = inviteByUser.get(row.userId)
       return {
         ...row,
+        managerName: row.managerId ? nameByUser.get(row.managerId) ?? null : null,
         invitedAt: invite?.invitedAt ?? null,
         invitedByName: invite?.invitedByName ?? null,
         invitedByEmail: invite?.invitedByEmail ?? null,
         teams: teamsByUser.get(row.userId) ?? [],
       }
     })
+  }
+
+  /**
+   * Set (or clear) who a member reports to.
+   *
+   * Two things must not happen: a person reporting to themselves, and a cycle —
+   * A→B→A leaves the roster tree with a set of people who have a manager but no
+   * root, so they vanish from the chart entirely. Both are rejected here rather
+   * than papered over when rendering.
+   */
+  async updateMemberManager(
+    workspaceId: string,
+    userId: string,
+    managerId: string | null,
+    actor?: AuditActor,
+  ) {
+    const member = await this.getMembership(workspaceId, userId)
+    if (!member) throw new NotFoundException('Member not found')
+
+    if (managerId) {
+      if (managerId === userId) throw new BadRequestException('A member cannot report to themselves')
+      const manager = await this.getMembership(workspaceId, managerId)
+      if (!manager) throw new NotFoundException('Manager is not a member of this workspace')
+
+      // Walk up from the proposed manager; if we reach this user, the edge closes
+      // a loop. The visited set stops us spinning on a cycle that predates us.
+      const rows = await this.db
+        .select({ userId: workspaceMembers.userId, managerId: workspaceMembers.managerId })
+        .from(workspaceMembers)
+        .where(eq(workspaceMembers.workspaceId, workspaceId))
+      const parentOf = new Map(rows.map((r) => [r.userId, r.managerId]))
+      const seen = new Set<string>([userId])
+      let cursor: string | null = managerId
+      while (cursor) {
+        if (seen.has(cursor)) throw new BadRequestException('That would create a reporting loop')
+        seen.add(cursor)
+        cursor = parentOf.get(cursor) ?? null
+      }
+    }
+
+    await this.db
+      .update(workspaceMembers)
+      .set({ managerId })
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+    await this.security.logAuditEvent({
+      workspaceId,
+      actorId: actor?.id,
+      actorEmail: actor?.email,
+      ipAddress: actor?.ip,
+      action: 'member.manager_updated',
+      resourceType: 'user',
+      resourceId: userId,
+      description: managerId ? 'Reporting line updated' : 'Reporting line cleared',
+      metadata: { from: member.managerId ?? null, to: managerId },
+    })
+    return { ok: true, managerId }
   }
 
   async addMember(
@@ -656,6 +814,12 @@ export class WorkspacesService {
         throw new BadRequestException('Cannot remove the last workspace admin')
       }
     }
+    // Their reports would otherwise point at someone no longer on the roster,
+    // which hides that whole subtree. Orphan them to the root instead.
+    await this.db
+      .update(workspaceMembers)
+      .set({ managerId: null })
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.managerId, userId)))
     await this.db
       .delete(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))

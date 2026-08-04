@@ -3,6 +3,7 @@ import { relations } from 'drizzle-orm'
 import { lists } from './lists'
 import { users } from './users'
 import { taskPriorityEnum, containerVisibilityEnum } from './enums'
+import { taskTypes } from './task-types'
 
 /**
  * Status workflow buckets. Every per-list custom status (in `list_statuses`)
@@ -36,6 +37,9 @@ export const tasks = pgTable('tasks', {
   // Milestone marker (Plan §5 timeline): a key deliverable, rendered as a
   // diamond on the timeline and badged in lists.
   isMilestone:   boolean('is_milestone').notNull().default(false),
+  // What this task *is* (Task / Campaign / Invoice …). Nullable: untyped is a
+  // valid state, and deleting a type SET NULLs this rather than the task.
+  taskTypeId:    uuid('task_type_id').references(() => taskTypes.id, { onDelete: 'set null' }),
   // Persisted recurrence config. When set and the task is completed, the next
   // occurrence is auto-created and the config moves forward to it (0038).
   recurrence:    jsonb('recurrence').$type<{
@@ -59,6 +63,7 @@ export const tasks = pgTable('tasks', {
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('idx_tasks_list_status').on(t.listId, t.status),
+  index('tasks_task_type_idx').on(t.taskTypeId),
 ])
 
 export const taskAssignees = pgTable('task_assignees', {

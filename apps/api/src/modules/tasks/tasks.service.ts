@@ -2,6 +2,7 @@ import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenEx
 import { randomUUID } from 'node:crypto'
 import { eq, and, asc, desc, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import {
+  taskTypes,
   tasks,
   taskAssignees,
   taskWatchers,
@@ -1370,6 +1371,23 @@ export class TasksService {
    * none are marked open. Throws BadRequest if the caller passed a key
    * that isn't defined for the list.
    */
+  /**
+   * The workspace's nominated default task type, if it has one. Returns null
+   * when types are not in use, which is the state every existing workspace
+   * starts in — so this stays a no-op until someone opts in.
+   */
+  private async defaultTaskTypeForList(listId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: taskTypes.id })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .innerJoin(taskTypes, and(eq(taskTypes.workspaceId, spaces.workspaceId), eq(taskTypes.isDefault, true)))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    return row?.id ?? null
+  }
+
   private async resolveStatusForList(
     listId: string,
     requestedKey: string | undefined,
@@ -1434,6 +1452,7 @@ export class TasksService {
     assigneeIds?: string[]
     labelIds?: string[]
     isMilestone?: boolean
+    taskTypeId?: string | null
     createdById: string
   }) {
     await this.assertNotGuestInList(data.listId, data.createdById)
@@ -1451,12 +1470,17 @@ export class TasksService {
       }
     }
     const resolved = await this.resolveStatusForList(data.listId, data.status)
+    // A workspace that has nominated a default type gets it applied here, so
+    // every task created through any surface — quick-add, board, import — is
+    // typed without each of them having to know types exist.
+    const taskTypeId = data.taskTypeId ?? (await this.defaultTaskTypeForList(data.listId))
 
     const [task] = await this.db
       .insert(tasks)
       .values({
         listId: data.listId,
         parentTaskId: data.parentTaskId,
+        taskTypeId,
         createdById: data.createdById,
         title: data.title,
         description: data.description,
@@ -1967,9 +1991,20 @@ export class TasksService {
           .limit(1)
       : []
 
+    // The type's label and icon, not just its id — the header renders it inline
+    // and should not need a second round trip to know what it says.
+    const [taskType] = row.taskTypeId
+      ? await this.db
+          .select({ id: taskTypes.id, name: taskTypes.name, icon: taskTypes.icon, color: taskTypes.color })
+          .from(taskTypes)
+          .where(eq(taskTypes.id, row.taskTypeId))
+          .limit(1)
+      : []
+
     return {
       ...row,
       parent: parent ?? null,
+      taskType: taskType ?? null,
       defaultBillable: await this.projectDefaultBillable(taskId),
       labels: labelRows.map((l) => l.label),
       watchers: watcherRows.map((w) => ({ ...w.watcher, user: w.user })),

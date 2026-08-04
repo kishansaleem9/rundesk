@@ -208,6 +208,75 @@ export class WorkspacesController {
     })
   }
 
+  // Reporting line. Admin-only: who reports to whom drives the org tree and
+  // (in time) approval routing, so it is not a self-service field.
+  @Patch(':workspaceId/members/:userId/manager')
+  @UseGuards(WorkspaceAdminGuard)
+  async updateMemberManager(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body() body: { managerId: string | null },
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.updateMemberManager(workspaceId, userId, body.managerId ?? null, {
+      id: user.id,
+      email: user.email,
+      ip,
+    })
+  }
+
+  @Get(':workspaceId/work-schedule')
+  @UseGuards(WorkspaceMemberGuard)
+  async getWorkSchedule(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
+    return this.workspacesService.getWorkSchedule(workspaceId)
+  }
+
+  @Patch(':workspaceId/work-schedule')
+  @UseGuards(WorkspaceAdminGuard)
+  async setWorkDays(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Body() body: { workDays: number[] },
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.setWorkDays(workspaceId, body.workDays, {
+      id: user.id,
+      email: user.email,
+      ip,
+    })
+  }
+
+  @Post(':workspaceId/holidays')
+  @UseGuards(WorkspaceAdminGuard)
+  async addHoliday(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Body() body: { day: string; name: string },
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.addHoliday(workspaceId, body.day, body.name, {
+      id: user.id,
+      email: user.email,
+      ip,
+    })
+  }
+
+  @Delete(':workspaceId/holidays/:holidayId')
+  @UseGuards(WorkspaceAdminGuard)
+  async removeHoliday(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Param('holidayId', new ParseUUIDPipe()) holidayId: string,
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.removeHoliday(workspaceId, holidayId, {
+      id: user.id,
+      email: user.email,
+      ip,
+    })
+  }
+
   @Delete(':workspaceId/members/:userId')
   @UseGuards(WorkspaceAdminGuard)
   async removeMember(

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid, unique, integer, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, boolean, uuid, unique, uniqueIndex, index, integer, jsonb, date } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { userRoleEnum, orgRoleEnum } from './enums'
 import { users } from './users'
@@ -64,9 +64,26 @@ export const workspaces = pgTable('workspaces', {
   // behaviour every existing workspace already has.
   defaultSpacePrivate: boolean('default_space_private').notNull().default(false),
   blockPublicSharing:  boolean('block_public_sharing').notNull().default(false),
+  // ISO weekday numbers that count as working days: 1 = Monday … 7 = Sunday.
+  // Capacity was already per member; this is what told Workload which days that
+  // capacity is spread across, so a Sat/Sun team is no longer counted as idle.
+  workDays:       integer('work_days').array().notNull().default([1, 2, 3, 4, 5]),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/** Company-wide days off. Excluded from working days everywhere workDays is. */
+export const workspaceHolidays = pgTable(
+  'workspace_holidays',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    day:         date('day').notNull(),
+    name:        text('name').notNull(),
+    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('uq_workspace_holidays_day').on(t.workspaceId, t.day)],
+)
 
 export const workspaceMembers = pgTable(
   'workspace_members',
@@ -77,10 +94,15 @@ export const workspaceMembers = pgTable(
     role:                 userRoleEnum('role').notNull().default('member'),
     // Weekly capacity in hours, used by Workload report.
     weeklyCapacityHours:  integer('weekly_capacity_hours').notNull().default(40),
+    // Who this person reports to, per workspace — the same person can report to
+    // different people in different workspaces. SET NULL on the manager leaving,
+    // which surfaces them as unassigned in the tree rather than dropping them.
+    managerId:            uuid('manager_id').references(() => users.id, { onDelete: 'set null' }),
     joinedAt:             timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     uniqueWorkspaceUser: unique('uq_workspace_members_workspace_user').on(t.workspaceId, t.userId),
+    byManager:           index('workspace_members_manager_idx').on(t.managerId),
   }),
 )
 
