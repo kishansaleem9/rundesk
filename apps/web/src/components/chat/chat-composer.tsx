@@ -1,8 +1,8 @@
 import { useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from 'react'
-import { AtSign, Bold, Code, FileText, Italic, Loader2, Paperclip, Send, Smile, Sparkles, X } from 'lucide-react'
+import { AtSign, Bold, Code, FileText, Italic, Link2, Loader2, Paperclip, Send, Smile, Sparkles, X } from 'lucide-react'
 import { Button, Popover, PopoverContent, PopoverTrigger, Textarea, cn, toast } from '@rundesk/ui'
 import { api, ApiError } from '../../lib/api'
-import { useTranslation } from '../../lib/i18n'
+import { useTranslation, type TranslationKey } from '../../lib/i18n'
 import { formatMentionsPlain } from '../../lib/mentions'
 import type { ChatAttachment, ChatMessage } from './chat-types'
 
@@ -17,6 +17,19 @@ function formatBytes(bytes: number): string {
     unit++
   }
   return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`
+}
+
+/** Tab labels for the link picker, and the AI actions offered on the draft. */
+const PICKER_TAB_KEY: Record<'task' | 'doc' | 'channel', TranslationKey> = {
+  task: 'chat.linkTabTasks',
+  doc: 'chat.linkTabDocs',
+  channel: 'chat.linkTabChannels',
+}
+const AI_MODE_KEY: Record<'improve' | 'shorten' | 'expand' | 'professional', TranslationKey> = {
+  improve: 'chat.aiImprove',
+  shorten: 'chat.aiShorten',
+  expand: 'chat.aiExpand',
+  professional: 'chat.aiProfessional',
 }
 
 const COMMON_EMOJIS = ['😀', '👍', '🎉', '❤️', '🙏', '🔥', '✅', '👀', '🚀', '😂', '🙌', '💯']
@@ -46,6 +59,7 @@ function ComposerBox({
   onFilesSelected,
   onRemoveAttachment,
   uploading,
+  workspaceId,
   enableSlashCommands,
   customEmoji,
   leadingTools,
@@ -65,6 +79,8 @@ function ComposerBox({
   onFilesSelected?: (files: File[]) => void
   onRemoveAttachment?: (id: string) => void
   uploading?: boolean
+  /** Enables the link picker; omitted where no workspace is in scope. */
+  workspaceId?: string
   // Slash commands (Plan §6.3): show the /task //remind hint while the composer
   // input is a bare leading command token. Only the main composer opts in.
   enableSlashCommands?: boolean
@@ -91,6 +107,15 @@ function ComposerBox({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [improving, setImproving] = useState(false)
+  // The AI result waits here until it is accepted, so the draft is never
+  // overwritten by a suggestion the writer has not seen.
+  const [aiDraft, setAiDraft] = useState<string | null>(null)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerTab, setPickerTab] = useState<'task' | 'doc' | 'channel'>('task')
+  const [pickerQuery, setPickerQuery] = useState('')
+  const [pickerHits, setPickerHits] = useState<Array<{ id: string; title: string }>>([])
+  const [pickerLoading, setPickerLoading] = useState(false)
   // Drag-and-drop upload (Plan §6.8): dropping files onto the composer funnels
   // them into the same presign→PUT→record flow as the paperclip button.
   const [dragging, setDragging] = useState(false)
@@ -117,8 +142,36 @@ function ComposerBox({
     })
   }
 
+  /**
+   * Insert a reference to a task, doc or channel.
+   *
+   * The `@` trigger only ever offered people. Linking the thing you are talking
+   * about — the task, the doc — is the reason to reach for a picker at all, so
+   * they live behind the same button on their own tabs.
+   */
   const handleMention = () => {
     insertAtCursor('@')
+  }
+
+  const runPickerSearch = async (kind: 'task' | 'doc' | 'channel', q: string) => {
+    if (!workspaceId) return
+    setPickerLoading(true)
+    try {
+      const res = await api<Array<{ id: string; entityType: string; title: string }>>(
+        `/search/${workspaceId}?q=${encodeURIComponent(q || 'a')}&types=${kind}&limit=8`,
+      )
+      setPickerHits((Array.isArray(res) ? res : []).map((h) => ({ id: h.id, title: h.title })))
+    } catch {
+      setPickerHits([])
+    } finally {
+      setPickerLoading(false)
+    }
+  }
+
+  const insertRef = (kind: 'task' | 'doc' | 'channel', title: string) => {
+    const token = kind === 'channel' ? `#${title}` : `[${title}]`
+    insertAtCursor(token)
+    setPickerOpen(false)
   }
 
   // Wrap the current selection (or a placeholder) in a markdown marker.
@@ -182,7 +235,14 @@ function ComposerBox({
     if (files.length > 0) onFilesSelected?.(files)
   }
 
-  const handleAskAi = async () => {
+  /**
+   * Run one AI action over the draft.
+   *
+   * The sparkle used to rewrite the draft the moment it was pressed, which
+   * threw away what you had written with no way to say what you wanted. It now
+   * opens a prompt: pick a mode, see the result, keep or discard it.
+   */
+  const handleAskAi = async (mode: 'improve' | 'shorten' | 'expand' | 'professional') => {
     const text = value.trim()
     if (!text) {
       toast(t('chat.askAiEmpty'))
@@ -192,10 +252,9 @@ function ComposerBox({
     try {
       const result = await api<{ improved: string }>('/ai/writing/improve', {
         method: 'POST',
-        body: { text, mode: 'improve' },
+        body: { text, mode },
       })
-      onChange(result.improved)
-      textareaRef.current?.focus()
+      setAiDraft(result.improved)
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : t('chat.couldNotImproveWriting'))
     } finally {
@@ -348,13 +407,125 @@ function ComposerBox({
             <ToolBtn icon={Paperclip} title={t('chat.attachFile')} disabled={disabled || uploading} loading={uploading} onClick={handleAttachClick} />
           )}
           <ToolBtn icon={AtSign} title={t('chat.mention')} disabled={disabled} onClick={handleMention} />
-          <ToolBtn
-            icon={Sparkles}
-            title={t('chat.askAi')}
-            disabled={disabled || improving}
-            loading={improving}
-            onClick={() => void handleAskAi()}
-          />
+          {workspaceId && (
+            <Popover
+              open={pickerOpen}
+              onOpenChange={(o) => {
+                setPickerOpen(o)
+                if (o) void runPickerSearch(pickerTab, pickerQuery)
+              }}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  title={t('chat.linkThing')}
+                  aria-label={t('chat.linkThing')}
+                  disabled={disabled}
+                  className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                >
+                  <Link2 className="h-4 w-4" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0" align="start">
+                <div className="flex border-b border-border">
+                  {(['task', 'doc', 'channel'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      aria-pressed={pickerTab === k}
+                      onClick={() => { setPickerTab(k); void runPickerSearch(k, pickerQuery) }}
+                      className={cn(
+                        'flex-1 px-2 py-1.5 text-[12px] capitalize',
+                        pickerTab === k
+                          ? 'border-b-2 border-violet-500 font-medium text-foreground'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {t(PICKER_TAB_KEY[k])}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  autoFocus
+                  value={pickerQuery}
+                  onChange={(e) => { setPickerQuery(e.target.value); void runPickerSearch(pickerTab, e.target.value) }}
+                  placeholder={t('chat.linkSearchPlaceholder')}
+                  aria-label={t('chat.linkSearchPlaceholder')}
+                  className="w-full border-b border-border bg-transparent px-2.5 py-1.5 text-[13px] outline-none"
+                />
+                <div className="max-h-56 overflow-y-auto py-1">
+                  {pickerLoading && <p className="px-2.5 py-2 text-[12px] text-muted-foreground">{t('common.loading')}</p>}
+                  {!pickerLoading && pickerHits.length === 0 && (
+                    <p className="px-2.5 py-2 text-[12px] text-muted-foreground">{t('chat.linkNoResults')}</p>
+                  )}
+                  {pickerHits.map((h) => (
+                    <button
+                      key={h.id}
+                      type="button"
+                      onClick={() => insertRef(pickerTab, h.title)}
+                      className="block w-full truncate px-2.5 py-1.5 text-left text-[13px] hover:bg-muted"
+                    >
+                      {h.title}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+          <Popover open={aiOpen} onOpenChange={(o) => { setAiOpen(o); if (!o) setAiDraft(null) }}>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                title={t('chat.askAi')}
+                aria-label={t('chat.askAi')}
+                disabled={disabled || improving}
+                className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+              >
+                {improving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-2 space-y-2" align="start">
+              <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('chat.aiPromptTitle')}
+              </p>
+              <div className="grid grid-cols-2 gap-1">
+                {(['improve', 'shorten', 'expand', 'professional'] as const).map((m) => (
+                  <Button
+                    key={m}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={improving}
+                    onClick={() => void handleAskAi(m)}
+                    className="h-7 text-[12px]"
+                  >
+                    {t(AI_MODE_KEY[m])}
+                  </Button>
+                ))}
+              </div>
+              {aiDraft != null && (
+                <div className="space-y-2">
+                  <div className="max-h-40 overflow-y-auto rounded border border-border bg-muted/40 p-2 text-[13px] whitespace-pre-wrap">
+                    {aiDraft}
+                  </div>
+                  {/* Accept is explicit: the draft is only replaced when asked. */}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="flex-1 h-7 text-[12px]"
+                      onClick={() => { onChange(aiDraft); setAiDraft(null); setAiOpen(false); textareaRef.current?.focus() }}
+                    >
+                      {t('chat.aiUseThis')}
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" className="h-7 text-[12px]" onClick={() => setAiDraft(null)}>
+                      {t('chat.aiDiscard')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
         </div>
         <Button
           size="sm"
@@ -372,6 +543,7 @@ function ComposerBox({
 }
 
 export function ChatComposer({
+  workspaceId,
   channelLabel,
   value,
   onChange,
@@ -403,6 +575,7 @@ export function ChatComposer({
   onFilesSelected?: (files: File[]) => void
   onRemoveAttachment?: (id: string) => void
   uploading?: boolean
+  workspaceId?: string
   customEmoji?: ComposerCustomEmoji[]
   leadingTools?: ReactNode
 }) {
@@ -428,6 +601,7 @@ export function ChatComposer({
       {mentionMenu}
 
       <ComposerBox
+        workspaceId={workspaceId}
         value={value}
         onChange={onChange}
         onSend={onSend}
@@ -457,6 +631,7 @@ export function ChatComposer({
  * textarea + button.
  */
 export function ThreadReplyComposer({
+  workspaceId,
   value,
   onChange,
   onSend,
@@ -470,10 +645,12 @@ export function ThreadReplyComposer({
   disabled: boolean
   sending: boolean
   customEmoji?: ComposerCustomEmoji[]
+  workspaceId?: string
 }) {
   const { t } = useTranslation()
   return (
     <ComposerBox
+      workspaceId={workspaceId}
       value={value}
       onChange={onChange}
       onSend={onSend}

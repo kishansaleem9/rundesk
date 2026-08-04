@@ -2181,6 +2181,7 @@ export function ChatPage() {
         )}
 
         <ChatComposer
+            workspaceId={workspaceId}
           channelLabel={channelLabel}
           value={input}
           onChange={setInput}
@@ -2417,6 +2418,7 @@ export function ChatPage() {
         </div>
         {threadParent && (
           <ThreadPanel
+            workspaceId={workspaceId}
             parent={threadParent}
             replies={threadReplies}
             loading={threadQuery.isLoading}
@@ -3088,6 +3090,7 @@ function SearchPanel({
 }
 
 function ThreadPanel({
+  workspaceId,
   parent,
   replies,
   loading,
@@ -3102,6 +3105,7 @@ function ThreadPanel({
   customEmoji,
   emojiByCode,
 }: {
+  workspaceId: string
   parent: Message
   replies: Message[]
   loading: boolean
@@ -3230,6 +3234,7 @@ function ThreadPanel({
       </div>
       <div className="shrink-0 border-t border-border/80 p-3 bg-[#fbfbfc] dark:bg-[#16181d] space-y-2">
         <ThreadReplyComposer
+          workspaceId={workspaceId}
           value={draft}
           onChange={setDraft}
           onSend={() => {
