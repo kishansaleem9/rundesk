@@ -105,6 +105,16 @@ export class MeetingsController {
     return this.meetings.removeAttendee(workspaceId, meetingId, attendeeId, user.id)
   }
 
+  @Get('workspaces/:workspaceId/people/:userId/shared')
+  @ApiOperation({ summary: 'Meetings and open tasks two people share — the DM Calendar and Tasks tabs' })
+  shared(
+    @Param('workspaceId') workspaceId: string,
+    @Param('userId') otherUserId: string,
+    @CurrentUser() user: { id: string },
+  ) {
+    return this.meetings.sharedWith(workspaceId, otherUserId, user.id)
+  }
+
   @Post('workspaces/:workspaceId/meetings/:meetingId/action-items')
   @ApiOperation({ summary: "Extract action items from this meeting's notes, optionally creating them as tasks" })
   actionItems(

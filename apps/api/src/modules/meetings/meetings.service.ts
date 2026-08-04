@@ -1,9 +1,10 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, desc, eq, inArray } from 'drizzle-orm'
-import { meetings, meetingAttendees, workspaceMembers, users, tasks, lists, projects, spaces } from '@rundesk/db'
+import { meetings, meetingAttendees, workspaceMembers, users, tasks, taskAssignees, lists, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PUBLIC_USER_COLUMNS } from '../../common/permissions/public-user'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { AiService } from '../ai/ai.service'
 import { TasksService } from '../tasks/tasks.service'
 
@@ -231,6 +232,88 @@ export class MeetingsService {
       .returning()
     if (!row) throw new NotFoundException('Attendee not found')
     return { ok: true }
+  }
+
+  /**
+   * What two people share: the meetings they both attended, and the open tasks
+   * either of them is assigned to.
+   *
+   * This is what sits behind a DM's Calendar and Tasks tabs. A DM is the one
+   * place where "what are we both on?" is the actual question, and answering it
+   * needed no new storage — meetings know their attendees and tasks know their
+   * assignees, so it is two joins rather than a new concept.
+   */
+  async sharedWith(workspaceId: string, otherUserId: string, userId: string) {
+    await this.assertMember(workspaceId, userId)
+    if (otherUserId === userId) throw new BadRequestException('Pick someone other than yourself')
+    const other = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, otherUserId)))
+      .limit(1)
+    if (!other.length) throw new NotFoundException('That person is not in this workspace')
+
+    // Meetings both of us attended: two passes over the attendee table rather
+    // than a self-join, which keeps the "both" condition obvious.
+    const mine = await this.db
+      .select({ meetingId: meetingAttendees.meetingId })
+      .from(meetingAttendees)
+      .innerJoin(meetings, eq(meetings.id, meetingAttendees.meetingId))
+      .where(and(eq(meetings.workspaceId, workspaceId), eq(meetingAttendees.userId, userId)))
+    const theirs = await this.db
+      .select({ meetingId: meetingAttendees.meetingId })
+      .from(meetingAttendees)
+      .where(eq(meetingAttendees.userId, otherUserId))
+    const theirSet = new Set(theirs.map((r) => r.meetingId))
+    const bothIds = [...new Set(mine.map((r) => r.meetingId))].filter((id) => theirSet.has(id))
+
+    const sharedMeetings = bothIds.length
+      ? await this.db
+          .select({
+            id: meetings.id,
+            title: meetings.title,
+            startsAt: meetings.startsAt,
+            endsAt: meetings.endsAt,
+            provider: meetings.provider,
+            recordingUrl: meetings.recordingUrl,
+          })
+          .from(meetings)
+          .where(inArray(meetings.id, bothIds))
+          .orderBy(desc(meetings.startsAt), desc(meetings.createdAt))
+          .limit(100)
+      : []
+
+    // Open tasks either of us is assigned to, scoped to this workspace and to
+    // what the caller is allowed to see.
+    const isManager = await resolveIsManager(this.db, workspaceId, userId)
+    const visible = await taskVisibilityFilter(this.db, userId, isManager)
+    const sharedTasks = await this.db
+      .selectDistinctOn([tasks.id], {
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+        listId: tasks.listId,
+        assigneeId: taskAssignees.userId,
+      })
+      .from(tasks)
+      .innerJoin(taskAssignees, eq(taskAssignees.taskId, tasks.id))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, false),
+          inArray(taskAssignees.userId, [userId, otherUserId]),
+          visible,
+        ),
+      )
+      .limit(100)
+
+    return { meetings: sharedMeetings, tasks: sharedTasks }
   }
 
   /**
