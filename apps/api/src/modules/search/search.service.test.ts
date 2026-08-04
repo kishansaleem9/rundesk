@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { getTableName } from 'drizzle-orm'
-import { SearchService } from './search.service'
+import { SearchService, meiliSort } from './search.service'
 
 /**
  * Guards the §11.2 "filter by custom-field value" path. Meilisearch is disabled
@@ -208,5 +208,20 @@ describe('SearchService.merge', () => {
   it('does not reorder a relevance search', () => {
     const hits = [hit('first', null), hit('second', '2026-05-05T00:00:00Z')]
     assert.deepEqual(merge(svc, 'relevance', 5, hits).map((h: any) => h.id), ['first', 'second'])
+  })
+})
+
+describe('meiliSort', () => {
+  // Exported indirectly through the module so the mapping is pinned: getting a
+  // field name wrong here means Meili silently ignores the sort and returns
+  // relevance order under a "last updated" label.
+  it('maps each timestamp mode to the indexed attribute', () => {
+    assert.deepEqual(meiliSort('updated'), ['updatedAt:desc'])
+    assert.deepEqual(meiliSort('created'), ['createdAt:desc'])
+  })
+
+  it('asks for no sort on a relevance search, so Meili ranks by score', () => {
+    assert.equal(meiliSort('relevance'), undefined)
+    assert.equal(meiliSort(undefined), undefined)
   })
 })

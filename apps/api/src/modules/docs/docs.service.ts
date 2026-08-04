@@ -48,6 +48,8 @@ export class DocsService {
         workspaceId: row.workspaceId,
         spaceId: row.spaceId,
         createdAt: row.createdAt,
+        // See indexTask: an edited doc must move under a "last updated" sort.
+        updatedAt: row.updatedAt,
       })
     } catch {
       // best-effort

@@ -64,6 +64,11 @@ export type SearchFilters = {
 const TEXT_LIKE_FIELD_TYPES = new Set(['text', 'url', 'email', 'phone'])
 
 // The Meilisearch index schema is intentionally light-weight.
+//
+// Both timestamps are indexed so Meili can order by either. Without updatedAt,
+// a "last updated" sort had to fall back to Postgres, and the two engines match
+// differently — Meili tokenises, Postgres does substring ILIKE — so the same
+// query returned a different *set* depending only on how it was sorted.
 type SearchDoc = {
   id: string
   entityType: 'task' | 'doc' | 'file'
@@ -74,6 +79,14 @@ type SearchDoc = {
   spaceId?: string
   url: string
   createdAt: number
+  updatedAt: number
+}
+
+/** Meili sort expression for a timestamp mode; undefined when relevance is wanted. */
+export function meiliSort(sort: SearchFilters['sort']): string[] | undefined {
+  if (sort === 'updated') return ['updatedAt:desc']
+  if (sort === 'created') return ['createdAt:desc']
+  return undefined
 }
 
 @Injectable()
@@ -107,7 +120,7 @@ export class SearchService implements OnModuleInit {
       await this.index.updateSettings({
         searchableAttributes: ['title', 'content'],
         filterableAttributes: ['entityType', 'workspaceId', 'listId', 'spaceId'],
-        sortableAttributes: ['createdAt'],
+        sortableAttributes: ['createdAt', 'updatedAt'],
       })
       this.enabled = true
       this.logger.log(`Meilisearch connected at ${host}`)
@@ -116,7 +129,7 @@ export class SearchService implements OnModuleInit {
     }
   }
 
-  async indexTask(task: { id: string; title: string; description: string | null; listId: string; createdAt: Date }, workspaceId: string, spaceId: string, projectId: string) {
+  async indexTask(task: { id: string; title: string; description: string | null; listId: string; createdAt: Date; updatedAt?: Date | null }, workspaceId: string, spaceId: string, projectId: string) {
     if (!this.enabled || !this.index) return
     await this.index.addDocuments([{
       id: `task-${task.id}`,
@@ -128,10 +141,13 @@ export class SearchService implements OnModuleInit {
       content: task.description ?? '',
       url: `/app/${workspaceId}/${spaceId}/${projectId}/${task.listId}?task=${task.id}`,
       createdAt: new Date(task.createdAt).getTime(),
+      // Fall back to createdAt rather than 0 — a document that sorts to the
+      // epoch would look like the oldest thing in the workspace.
+      updatedAt: new Date(task.updatedAt ?? task.createdAt).getTime(),
     }])
   }
 
-  async indexDoc(doc: { id: string; title: string; plaintext: string; workspaceId: string; spaceId: string | null; createdAt: Date }) {
+  async indexDoc(doc: { id: string; title: string; plaintext: string; workspaceId: string; spaceId: string | null; createdAt: Date; updatedAt?: Date | null }) {
     if (!this.enabled || !this.index) return
     await this.index.addDocuments([{
       id: `doc-${doc.id}`,
@@ -142,6 +158,7 @@ export class SearchService implements OnModuleInit {
       content: doc.plaintext,
       url: `/app/${doc.workspaceId}/docs?doc=${doc.id}`,
       createdAt: new Date(doc.createdAt).getTime(),
+      updatedAt: new Date(doc.updatedAt ?? doc.createdAt).getTime(),
     }])
   }
 
@@ -169,6 +186,9 @@ export class SearchService implements OnModuleInit {
       content: attachment.contentType,
       url: `/app/${workspaceId}/${spaceId}/${projectId}/${task.listId}?task=${task.id}`,
       createdAt: new Date(attachment.createdAt).getTime(),
+      // An uploaded file is never edited in place, so it was last "updated"
+      // when it was uploaded.
+      updatedAt: new Date(attachment.createdAt).getTime(),
     }])
   }
 
@@ -216,6 +236,7 @@ export class SearchService implements OnModuleInit {
         content: task.description ?? '',
         url: `/app/${workspaceId}/${spaceId}/${projectId}/${task.listId}?task=${task.id}`,
         createdAt: new Date(task.createdAt).getTime(),
+        updatedAt: new Date(task.updatedAt ?? task.createdAt).getTime(),
       })),
       ...docRows.map((d) => ({
         id: `doc-${d.id}`,
@@ -226,6 +247,7 @@ export class SearchService implements OnModuleInit {
         content: d.plaintext,
         url: `/app/${workspaceId}/docs?doc=${d.id}`,
         createdAt: new Date(d.createdAt).getTime(),
+        updatedAt: new Date(d.updatedAt ?? d.createdAt).getTime(),
       })),
       ...attachmentRows.map(({ attachment, taskId, listId, spaceId, projectId }) => ({
         id: `file-${attachment.id}`,
@@ -237,6 +259,7 @@ export class SearchService implements OnModuleInit {
         content: attachment.contentType,
         url: `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`,
         createdAt: new Date(attachment.createdAt).getTime(),
+        updatedAt: new Date(attachment.createdAt).getTime(),
       })),
     ]
     if (payload.length) await this.index.addDocuments(payload)
@@ -280,11 +303,13 @@ export class SearchService implements OnModuleInit {
     // Meilisearch can only satisfy the text + entity-type filters — it doesn't
     // index status/priority/assignee, nor the archived flag. Fall back to
     // Postgres for those.
-    // A timestamp sort needs updatedAt/createdAt, which the Meili documents do
-    // not carry — so take the Postgres path rather than return an order that
-    // silently ignores the request.
-    const wantsTimeSort = filters.sort === 'updated' || filters.sort === 'created'
-    if (this.enabled && this.index && trimmed && !hasTaskFilter && !filters.includeArchived && !wantsTimeSort) {
+    //
+    // Sorting no longer forces that fallback. Both timestamps are indexed now,
+    // so Meili orders every mode itself. Previously a date sort dropped to the
+    // Postgres path, and because the two engines match differently — Meili
+    // tokenises, Postgres does substring ILIKE — reordering a result list also
+    // changed which rows were in it.
+    if (this.enabled && this.index && trimmed && !hasTaskFilter && !filters.includeArchived) {
       const filterExpr = [`workspaceId = "${workspaceId}"`]
       // Narrow to every requested type, not just a lone one. With two or more
       // selected this used to push no filter at all, so Meili happily returned
@@ -294,13 +319,25 @@ export class SearchService implements OnModuleInit {
       if (filters.types?.length) {
         filterExpr.push(`(${filters.types.map((t) => `entityType = "${t}"`).join(' OR ')})`)
       }
-      const res = await this.index.search(trimmed, { filter: filterExpr, limit })
+      const res = await this.index.search(trimmed, {
+        filter: filterExpr,
+        limit,
+        sort: meiliSort(filters.sort),
+      })
       const meiliHits = res.hits.map((h) => ({
         id: h.id,
         entityType: h.entityType,
         title: h.title,
         content: (h.content ?? '').slice(0, 200),
         url: h.url,
+        // Carried through so the merge orders Meili hits and Postgres extras as
+        // one list. Without it every Meili hit would look undated and sort to
+        // the bottom, silently undoing the order Meili just applied.
+        sortedAt: filters.sort === 'created'
+          ? new Date(h.createdAt)
+          : filters.sort === 'updated'
+            ? new Date(h.updatedAt)
+            : null,
       }))
       // Meili indexes tasks/docs/files — add the Postgres-only entity types
       // (users, comments, channels, messages) for a general search.

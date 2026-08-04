@@ -371,6 +371,9 @@ export class TasksService {
           description: ctx.task.description,
           listId: ctx.task.listId,
           createdAt: ctx.task.createdAt,
+          // Without this the index keeps the creation time forever, and an
+          // edited task never moves under a "last updated" sort.
+          updatedAt: ctx.task.updatedAt,
         },
         ctx.space.workspaceId,
         ctx.space.id,
