@@ -104,6 +104,7 @@ export class MeetingsService {
       endsAt?: string | null
       provider?: 'zoom' | 'google_meet' | 'manual'
       joinUrl?: string | null
+      recordingUrl?: string | null
       notes?: string | null
       taskId?: string | null
       attendeeIds?: string[]
@@ -125,6 +126,7 @@ export class MeetingsService {
         endsAt: body.endsAt ? new Date(body.endsAt) : null,
         provider: body.provider ?? 'manual',
         joinUrl: body.joinUrl ?? null,
+        recordingUrl: body.recordingUrl ?? null,
         notes: body.notes ?? null,
         taskId: body.taskId ?? null,
         createdById: userId,
@@ -347,14 +349,19 @@ export class MeetingsService {
     if (!opts.createIn) return { items, created: [] as Array<{ id: string; title: string }> }
 
     // Creating them is what turns a summary into work someone will see.
+    // Every one carries where it came from — appended rather than used as a
+    // fallback, or an item the AI described loses the link to the call and
+    // "which meeting was this from?" stops having an answer.
+    const origin = `From meeting: ${meeting.title}`
     const created: Array<{ id: string; title: string }> = []
     for (const item of items) {
       const title = (item?.title ?? '').trim()
       if (!title) continue
+      const described = (item.description ?? '').trim()
       const task = await this.tasksService.createTask({
         listId: opts.createIn,
         title,
-        description: item.description ?? `From meeting: ${meeting.title}`,
+        description: described ? `${described}\n\n${origin}` : origin,
         createdById: userId,
       })
       // createTask can return null when the list rejects the write; skip

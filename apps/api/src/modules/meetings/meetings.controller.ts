@@ -37,6 +37,7 @@ export class MeetingsController {
       endsAt?: string | null
       provider?: 'zoom' | 'google_meet' | 'manual'
       joinUrl?: string | null
+      recordingUrl?: string | null
       notes?: string | null
       taskId?: string | null
       attendeeIds?: string[]

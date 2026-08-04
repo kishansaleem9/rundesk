@@ -1000,6 +1000,246 @@ function GenFieldInput({
 
 // ─── Meeting Notes ────────────────────────────────────────────────────────────
 
+type MeetingAttendee = { id: string; name: string | null; email: string | null; user: { id: string } | null }
+type MeetingRecord = {
+  id: string
+  title: string
+  startsAt: string | null
+  notes: string | null
+  recordingUrl: string | null
+  provider: string
+  attendees: MeetingAttendee[]
+}
+
+/**
+ * The meeting the notes belong to (§A6.1).
+ *
+ * Extraction worked before this, but nothing survived it — no record of the
+ * call, no attendee list, nowhere the recording lived. The same notes had to be
+ * pasted in again next time anyone asked what was decided. Saving is optional:
+ * paste-and-extract still works untouched for a conversation nobody needs to
+ * keep.
+ */
+function MeetingRecordPanel({
+  workspaceId,
+  notes,
+  onLoadNotes,
+  members,
+  onMeetingChange,
+}: {
+  workspaceId: string
+  notes: string
+  onLoadNotes: (notes: string) => void
+  members: Array<{ userId: string; displayName: string; email: string }>
+  /** Lifted so tasks saved from the extracted list can name where they came from. */
+  onMeetingChange: (meeting: { id: string; title: string } | null) => void
+}) {
+  const { t } = useTranslation()
+  const [meetingId, setMeetingId] = useState<string | null>(null)
+  const [title, setTitle] = useState('')
+  const [startsAt, setStartsAt] = useState('')
+  const [recordingUrl, setRecordingUrl] = useState('')
+  const [attendeeIds, setAttendeeIds] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
+
+  const meetingsQuery = useQuery({
+    queryKey: ['meetings', workspaceId],
+    queryFn: () => api<MeetingRecord[]>(`/workspaces/${workspaceId}/meetings`),
+  })
+  const saved = meetingsQuery.data ?? []
+  const current = saved.find((m) => m.id === meetingId) ?? null
+
+  function loadMeeting(m: MeetingRecord | null) {
+    setError(null)
+    setMeetingId(m?.id ?? null)
+    onMeetingChange(m ? { id: m.id, title: m.title } : null)
+    setTitle(m?.title ?? '')
+    // datetime-local wants a local wall-clock string, not an ISO instant.
+    setStartsAt(m?.startsAt ? new Date(m.startsAt).toISOString().slice(0, 16) : '')
+    setRecordingUrl(m?.recordingUrl ?? '')
+    setAttendeeIds((m?.attendees ?? []).map((a) => a.user?.id).filter((x): x is string => Boolean(x)))
+    if (m) onLoadNotes(m.notes ?? '')
+  }
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const body = {
+        title: title.trim(),
+        startsAt: startsAt ? new Date(startsAt).toISOString() : null,
+        notes,
+      }
+      if (!meetingId) {
+        return api<MeetingRecord>(`/workspaces/${workspaceId}/meetings`, {
+          method: 'POST',
+          body: { ...body, recordingUrl: recordingUrl.trim() || null, attendeeIds },
+        })
+      }
+      const updated = await api<MeetingRecord>(`/workspaces/${workspaceId}/meetings/${meetingId}`, {
+        method: 'PATCH',
+        body: { ...body, recordingUrl: recordingUrl.trim() || null },
+      })
+      // Attendees are their own rows, so an edit is a diff rather than a
+      // rewrite — removing someone must not also drop what they said.
+      const before = new Map(
+        (current?.attendees ?? [])
+          .filter((a) => a.user?.id)
+          .map((a) => [a.user!.id, a.id] as const),
+      )
+      for (const uid of attendeeIds) {
+        if (!before.has(uid)) {
+          await api(`/workspaces/${workspaceId}/meetings/${meetingId}/attendees`, {
+            method: 'POST',
+            body: { userId: uid },
+          })
+        }
+      }
+      for (const [uid, rowId] of before) {
+        if (!attendeeIds.includes(uid)) {
+          await api(`/workspaces/${workspaceId}/meetings/${meetingId}/attendees/${rowId}`, { method: 'DELETE' })
+        }
+      }
+      return updated
+    },
+    onError: (e) => setError(e instanceof Error ? e.message : t('ai.actionFailed')),
+    onSuccess: async (m) => {
+      setError(null)
+      setMeetingId(m.id)
+      onMeetingChange({ id: m.id, title: m.title })
+      await meetingsQuery.refetch()
+      toast.success(t('ai.meetingSaved'))
+    },
+  })
+
+  return (
+    <Card className="p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {t('ai.meetingRecord')}
+        </p>
+        {meetingId && (
+          <button
+            type="button"
+            className="text-[12px] text-muted-foreground hover:text-foreground"
+            onClick={() => loadMeeting(null)}
+          >
+            {t('ai.meetingNew')}
+          </button>
+        )}
+      </div>
+
+      {saved.length > 0 && (
+        <label className="block text-[12px] text-muted-foreground">
+          {t('ai.meetingOpenSaved')}
+          <select
+            value={meetingId ?? ''}
+            onChange={(e) => loadMeeting(saved.find((m) => m.id === e.target.value) ?? null)}
+            className="mt-0.5 w-full h-8 rounded border border-border bg-background px-2 text-sm text-foreground"
+          >
+            <option value="">{t('ai.meetingUnsaved')}</option>
+            {saved.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.startsAt ? `${new Date(m.startsAt).toLocaleDateString()} · ` : ''}
+                {m.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block text-[12px] text-muted-foreground">
+          {t('ai.meetingTitle')}
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={t('ai.meetingTitlePlaceholder')}
+            className="mt-0.5 h-8 text-sm"
+          />
+        </label>
+        <label className="block text-[12px] text-muted-foreground">
+          {t('ai.meetingWhen')}
+          <input
+            type="datetime-local"
+            value={startsAt}
+            onChange={(e) => setStartsAt(e.target.value)}
+            className="mt-0.5 w-full h-8 rounded border border-border bg-background px-2 text-sm text-foreground"
+          />
+        </label>
+      </div>
+
+      <label className="block text-[12px] text-muted-foreground">
+        {t('ai.meetingRecording')}
+        <Input
+          value={recordingUrl}
+          onChange={(e) => setRecordingUrl(e.target.value)}
+          placeholder="https://…"
+          className="mt-0.5 h-8 text-sm"
+        />
+      </label>
+
+      <div>
+        <p className="text-[12px] text-muted-foreground mb-1">{t('ai.meetingAttendees')}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {members.map((m) => {
+            const on = attendeeIds.includes(m.userId)
+            return (
+              <button
+                key={m.userId}
+                type="button"
+                aria-pressed={on}
+                onClick={() =>
+                  setAttendeeIds((prev) =>
+                    prev.includes(m.userId) ? prev.filter((x) => x !== m.userId) : [...prev, m.userId],
+                  )
+                }
+                className={cn(
+                  'rounded-full border px-2 py-0.5 text-[12px] transition-colors',
+                  on
+                    ? 'border-accent bg-accent/15 text-foreground'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {m.displayName || m.email}
+              </button>
+            )
+          })}
+          {members.length === 0 && (
+            <span className="text-[12px] text-muted-foreground">{t('ai.meetingNoMembers')}</span>
+          )}
+        </div>
+      </div>
+
+      {error && <p className="text-[12px] text-destructive">{error}</p>}
+
+      <div className="flex items-center gap-2">
+        <Button size="sm" disabled={!title.trim() || save.isPending} onClick={() => save.mutate()}>
+          {save.isPending ? (
+            <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> {t('common.saving')}</>
+          ) : meetingId ? (
+            t('ai.meetingUpdate')
+          ) : (
+            t('ai.meetingSave')
+          )}
+        </Button>
+        {current?.recordingUrl && (
+          <a
+            href={current.recordingUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[12px] text-accent hover:underline inline-flex items-center gap-1"
+          >
+            <ExternalLink className="h-3 w-3" /> {t('ai.meetingOpenRecording')}
+          </a>
+        )}
+      </div>
+
+      {/* Said plainly, because the alternative is a user waiting for a
+          transcript that is never coming. */}
+      <p className="text-[11px] text-muted-foreground">{t('ai.meetingNoTranscription')}</p>
+    </Card>
+  )
+}
+
 function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
   const { t, tCount } = useTranslation()
   const [notes, setNotes] = useState('')
@@ -1010,6 +1250,9 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
   const [targetListId, setTargetListId] = useState('')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [failedItems, setFailedItems] = useState<Array<{ title: string; reason: string }>>([])
+  // Set once the notes belong to a saved meeting, so every task made from them
+  // says which call it came out of.
+  const [meetingOrigin, setMeetingOrigin] = useState<{ id: string; title: string } | null>(null)
   const [assigneeOverrides, setAssigneeOverrides] = useState<Record<number, string>>({})
   const [bulkAssigneeOverride, setBulkAssigneeOverride] = useState('')
   const [dueDateOverrides, setDueDateOverrides] = useState<Record<number, string>>({})
@@ -1149,12 +1392,16 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
           const assigneeId = assigneeOverrides[idx] || resolveAssignee(task.assigneeName)?.userId
           const dueDate = dueDateOverrides[idx] || task.dueDate || null
           const priority = priorityOverrides[idx] ?? (task.priority as TaskPriority)
+          // Appended, not substituted: an item the AI described would otherwise
+          // lose the only pointer back to the meeting it came out of.
+          const origin = meetingOrigin ? t('ai.meetingFrom', { title: meetingOrigin.title }) : ''
+          const description = [task.description?.trim() || '', origin].filter(Boolean).join('\n\n') || null
           await api('/tasks', {
             method: 'POST',
             body: {
               listId: targetListId,
               title: task.title,
-              description: task.description || null,
+              description,
               priority,
               dueDate,
               assigneeIds: assigneeId ? [assigneeId] : undefined,
@@ -1212,6 +1459,21 @@ function MeetingNotesTab({ workspaceId }: { workspaceId: string }) {
           {t('ai.notesDesc')}
         </p>
       </div>
+
+      <MeetingRecordPanel
+        workspaceId={workspaceId}
+        notes={notes}
+        onLoadNotes={(loaded) => {
+          setNotes(loaded)
+          // The extracted list belonged to the previous meeting; leaving it on
+          // screen under a new title is how the wrong tasks get created.
+          setTasks(null)
+          setSelected(new Set())
+          setSavedCount(0)
+        }}
+        members={membersQuery.data ?? []}
+        onMeetingChange={setMeetingOrigin}
+      />
 
       <textarea
         value={notes}
