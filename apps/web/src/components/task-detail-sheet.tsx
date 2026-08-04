@@ -226,6 +226,9 @@ type TaskDetail = {
   description: string | null
   coverColor?: string | null
   isMilestone?: boolean
+  taskTypeId?: string | null
+  // Resolved server-side so the header can render the label without a second fetch.
+  taskType?: { id: string; name: string; icon: string | null; color: string | null } | null
   visibility?: string | null
   status: TaskStatus
   priority: TaskPriority
@@ -374,6 +377,63 @@ function formatDuration(ms?: number | null): string {
 // ---------------------------------------------------------------------------
 // Root component
 // ---------------------------------------------------------------------------
+
+/**
+ * What this task *is* — Task, Campaign, Invoice — beside the task id.
+ *
+ * Renders nothing at all until the workspace has defined at least one type, so
+ * a team that never opts in never sees an empty control.
+ */
+function TaskTypePicker({
+  workspaceId,
+  taskId,
+  current,
+}: {
+  workspaceId?: string
+  taskId: string
+  current: { id: string; name: string; icon: string | null; color: string | null } | null
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const typesQuery = useQuery({
+    queryKey: ['task-types', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string; icon: string | null; color: string | null }>>(
+        `/workspaces/${workspaceId}/task-types`,
+      ),
+    enabled: Boolean(workspaceId),
+    staleTime: 60_000,
+  })
+
+  const apply = useMutation({
+    mutationFn: (taskTypeId: string | null) =>
+      api(`/tasks/${taskId}/task-type`, { method: 'PATCH', body: { taskTypeId } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['task', taskId] }),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('taskTypes.failed')),
+  })
+
+  const types = typesQuery.data ?? []
+  if (types.length === 0) return null
+
+  return (
+    <select
+      value={current?.id ?? ''}
+      onChange={(e) => apply.mutate(e.target.value || null)}
+      disabled={apply.isPending}
+      aria-label={t('taskTypes.pickerLabel')}
+      title={t('taskTypes.pickerLabel')}
+      className="h-[22px] rounded border border-border bg-card px-1.5 text-[10px] uppercase tracking-wider disabled:opacity-50"
+      style={current?.color ? { color: current.color, borderColor: current.color + '55' } : undefined}
+    >
+      <option value="">{t('taskTypes.noType')}</option>
+      {types.map((tt) => (
+        <option key={tt.id} value={tt.id}>
+          {tt.icon ? `${tt.icon} ${tt.name}` : tt.name}
+        </option>
+      ))}
+    </select>
+  )
+}
 
 export function TaskDetailSheet({
   taskId: taskIdProp,
@@ -645,6 +705,11 @@ export function TaskDetailSheet({
                 <Badge variant="soft" className="font-mono text-[10px] tracking-wider uppercase">
                   RD-{shortId(detailQuery.data.id)}
                 </Badge>
+                <TaskTypePicker
+                  workspaceId={fallbackWorkspaceId}
+                  taskId={detailQuery.data.id}
+                  current={detailQuery.data.taskType ?? null}
+                />
                 {detailQuery.data.isMilestone && (
                   <Badge variant="soft" className="text-[10px] gap-1 text-amber-600 dark:text-amber-400">
                     <Diamond className="h-3 w-3 fill-amber-400" />

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, Switch, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
@@ -48,6 +48,10 @@ type Member = {
   invitedByName?: string | null
   invitedByEmail?: string | null
   teams?: string[]
+  // Reporting line. managerName is resolved server-side from the same roster,
+  // so the tree can be drawn without a second lookup per row.
+  managerId?: string | null
+  managerName?: string | null
 }
 
 const ROLES = [
@@ -91,6 +95,7 @@ const TAB_GROUPS = [
       { id: 'groups', labelKey: 'settings.tabGroups', icon: Users2 },
       { id: 'roles', labelKey: 'settings.tabRoles', icon: ShieldCheck },
       { id: 'spaces', labelKey: 'settings.tabSpaces', icon: Layers },
+      { id: 'workSchedule', labelKey: 'settings.tabWorkSchedule', icon: CalendarDays },
     ],
   },
   {
@@ -106,6 +111,7 @@ const TAB_GROUPS = [
       { id: 'features', labelKey: 'settings.tabFeatures', icon: ToggleRight },
       { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
       { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
+      { id: 'taskTypes', labelKey: 'settings.tabTaskTypes', icon: Shapes },
       { id: 'aiUsage', labelKey: 'settings.tabAiUsage', icon: Sparkles },
     ],
   },
@@ -225,6 +231,8 @@ export function SettingsPage() {
             {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
             {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
             {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
+            {tab === 'taskTypes' && <TaskTypesTab workspaceId={validWorkspaceId} />}
+            {tab === 'workSchedule' && <WorkScheduleTab workspaceId={validWorkspaceId} />}
             {tab === 'archived' && <ArchivedTab workspaceId={validWorkspaceId} />}
             {tab === 'spaces' && <SpacesTab workspaceId={validWorkspaceId} />}
             {tab === 'aiUsage' && <AiUsageTab workspaceId={validWorkspaceId} />}
@@ -917,6 +925,21 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
     },
   })
 
+  // Who each person reports to. The server rejects self-reporting and cycles;
+  // the message it sends back is shown as-is rather than being re-worded here.
+  const updateManager = useMutation({
+    mutationFn: ({ userId, managerId }: { userId: string; managerId: string | null }) =>
+      api(`/workspaces/${workspaceId}/members/${userId}/manager`, {
+        method: 'PATCH',
+        body: { managerId },
+      }),
+    onSuccess: () => {
+      toast.success(t('settings.managerUpdated'))
+      qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] })
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.managerUpdateFailed')),
+  })
+
   const remove = useMutation({
     mutationFn: (userId: string) =>
       api(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
@@ -1089,6 +1112,25 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                   updateCapacity.mutate({ userId: m.userId, weeklyCapacityHours })
                 }
               />
+              {/* Reports to. Everyone except this person is a candidate; the
+                  server is what actually rejects a cycle. */}
+              <select
+                value={m.managerId ?? ''}
+                aria-label={t('settings.reportsToFor', { name: m.displayName })}
+                title={t('settings.reportsTo')}
+                disabled={updateManager.isPending && updateManager.variables?.userId === m.userId}
+                onChange={(e) =>
+                  updateManager.mutate({ userId: m.userId, managerId: e.target.value || null })
+                }
+                className="hidden lg:block w-36 text-xs px-2 py-1 rounded border border-border bg-card"
+              >
+                <option value="">{t('settings.reportsToNobody')}</option>
+                {(membersQuery.data ?? [])
+                  .filter((c) => c.userId !== m.userId)
+                  .map((c) => (
+                    <option key={c.userId} value={c.userId}>{c.displayName}</option>
+                  ))}
+              </select>
               <select
                 value={m.role}
                 onChange={(e) => updateRole.mutate({ userId: m.userId, role: e.target.value })}
@@ -1114,7 +1156,70 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
           )}
         </ul>
       </Card>
+
+      <ReportingTree members={membersQuery.data ?? []} />
     </div>
+  )
+}
+
+/**
+ * The reporting lines drawn out. Only shown once someone actually has a
+ * manager — an org chart of one flat level is just the roster again.
+ *
+ * Anyone whose manager is not in the list renders at the root rather than
+ * disappearing, which is what makes this safe to show while the lines are
+ * half-filled in.
+ */
+function ReportingTree({ members }: { members: Member[] }) {
+  const { t } = useTranslation()
+  if (!members.some((m) => m.managerId)) return null
+
+  const known = new Set(members.map((m) => m.userId))
+  const childrenOf = new Map<string, Member[]>()
+  const roots: Member[] = []
+  for (const m of members) {
+    const parent = m.managerId && known.has(m.managerId) ? m.managerId : null
+    if (!parent) roots.push(m)
+    else childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), m])
+  }
+
+  // A cycle is rejected on the way in, but a row inserted before that guard
+  // existed would loop forever here. Visiting each person at most once bounds it.
+  const drawn = new Set<string>()
+  const render = (node: Member, depth: number): React.ReactNode => {
+    if (drawn.has(node.userId)) return null
+    drawn.add(node.userId)
+    const kids = childrenOf.get(node.userId) ?? []
+    return (
+      <li key={node.userId}>
+        <div
+          className="flex items-center gap-2 py-1 text-sm"
+          style={{ paddingLeft: `${depth * 18}px` }}
+        >
+          {depth > 0 && <span className="text-muted-foreground/50 select-none">└</span>}
+          <span className="h-6 w-6 shrink-0 rounded-full bg-brand-300 text-foreground flex items-center justify-center text-[10px] font-semibold">
+            {node.displayName.charAt(0).toUpperCase()}
+          </span>
+          <span className="truncate">{node.displayName}</span>
+          {kids.length > 0 && (
+            <span className="text-[10px] text-muted-foreground">
+              {t('settings.reportsCount', { count: String(kids.length) })}
+            </span>
+          )}
+        </div>
+        {kids.length > 0 && <ul>{kids.map((k) => render(k, depth + 1))}</ul>}
+      </li>
+    )
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="font-semibold text-sm">{t('settings.reportingStructure')}</h2>
+        <p className="text-xs text-muted-foreground">{t('settings.reportingStructureDesc')}</p>
+      </div>
+      <ul className="px-4 py-3">{roots.map((r) => render(r, 0))}</ul>
+    </Card>
   )
 }
 
@@ -1842,6 +1947,347 @@ function PolicyRow({
 }
 
 type LabelRow = { id: string; name: string; color: string }
+
+type TaskType = {
+  id: string
+  name: string
+  icon: string | null
+  color: string | null
+  isDefault: boolean
+  position: number
+}
+
+/**
+ * Task Types — what a task *is* (Task, Campaign, Invoice), as distinct from
+ * what state it is in. A workspace may nominate one default, which new tasks
+ * pick up wherever they are created.
+ */
+function TaskTypesTab({ workspaceId }: { workspaceId: string }) {
+  const qc = useQueryClient()
+  const { t } = useTranslation()
+  const [name, setName] = useState('')
+  const [icon, setIcon] = useState('')
+  const [color, setColor] = useState('#6366f1')
+
+  const key = ['task-types', workspaceId] as const
+  const typesQuery = useQuery({
+    queryKey: key,
+    queryFn: () => api<TaskType[]>(`/workspaces/${workspaceId}/task-types`),
+  })
+  const refresh = () => qc.invalidateQueries({ queryKey: key })
+  const failed = (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('taskTypes.failed'))
+
+  const create = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/task-types`, {
+        method: 'POST',
+        body: { name: name.trim(), icon: icon.trim() || null, color },
+      }),
+    onSuccess: () => { setName(''); setIcon(''); toast.success(t('taskTypes.created')); refresh() },
+    onError: failed,
+  })
+
+  const update = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<TaskType> }) =>
+      api(`/workspaces/${workspaceId}/task-types/${id}`, { method: 'PATCH', body: patch }),
+    onSuccess: refresh,
+    onError: failed,
+  })
+
+  // The server SET NULLs the tasks rather than deleting them, and tells us how
+  // many it touched — worth saying out loud instead of a bare "deleted".
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      api<{ untypedTasks: number }>(`/workspaces/${workspaceId}/task-types/${id}`, { method: 'DELETE' }),
+    onSuccess: (res) => {
+      toast.success(
+        res.untypedTasks > 0
+          ? t('taskTypes.deletedWithTasks', { count: String(res.untypedTasks) })
+          : t('taskTypes.deleted'),
+      )
+      refresh()
+    },
+    onError: failed,
+  })
+
+  const types = typesQuery.data ?? []
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent">
+            <Shapes className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-sm">{t('taskTypes.title')}</h2>
+            <p className="text-xs text-muted-foreground">{t('taskTypes.desc')}</p>
+          </div>
+        </div>
+
+        <form
+          className="flex flex-wrap gap-2 mt-4"
+          onSubmit={(e) => { e.preventDefault(); if (name.trim()) create.mutate() }}
+        >
+          <Input
+            value={icon}
+            onChange={(e) => setIcon(e.target.value)}
+            placeholder={t('taskTypes.iconPlaceholder')}
+            aria-label={t('taskTypes.iconLabel')}
+            className="w-20 text-center"
+            maxLength={8}
+          />
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('taskTypes.namePlaceholder')}
+            aria-label={t('taskTypes.nameLabel')}
+            className="flex-1 min-w-[160px]"
+            maxLength={80}
+          />
+          <input
+            type="color"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+            aria-label={t('taskTypes.colorLabel')}
+            className="h-9 w-12 rounded-md border border-border bg-card cursor-pointer"
+          />
+          <Button type="submit" disabled={!name.trim() || create.isPending}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            {create.isPending ? t('taskTypes.adding') : t('taskTypes.add')}
+          </Button>
+        </form>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="font-semibold text-sm">{t('taskTypes.existing')}</h2>
+        </div>
+        {typesQuery.isLoading ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</p>
+        ) : types.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('taskTypes.none')}</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {types.map((tt) => (
+              <li key={tt.id} className="px-4 py-3 flex items-center gap-3">
+                <span
+                  className="h-8 w-8 shrink-0 rounded-lg flex items-center justify-center text-sm"
+                  style={{ backgroundColor: (tt.color ?? '#6366f1') + '22', color: tt.color ?? undefined }}
+                >
+                  {tt.icon || tt.name.charAt(0).toUpperCase()}
+                </span>
+                <Input
+                  defaultValue={tt.name}
+                  aria-label={t('taskTypes.renameLabel', { name: tt.name })}
+                  className="flex-1 h-8 text-sm"
+                  maxLength={80}
+                  onBlur={(e) => {
+                    const next = e.target.value.trim()
+                    if (next && next !== tt.name) update.mutate({ id: tt.id, patch: { name: next } })
+                  }}
+                />
+                {/* Exactly one default per workspace — clicking a different one
+                    moves it rather than adding a second. */}
+                <button
+                  type="button"
+                  onClick={() => update.mutate({ id: tt.id, patch: { isDefault: !tt.isDefault } })}
+                  disabled={update.isPending}
+                  title={tt.isDefault ? t('taskTypes.isDefault') : t('taskTypes.makeDefault')}
+                  aria-label={tt.isDefault ? t('taskTypes.isDefault') : t('taskTypes.makeDefault')}
+                  aria-pressed={tt.isDefault}
+                  className={cn(
+                    'h-7 w-7 shrink-0 rounded-md flex items-center justify-center',
+                    tt.isDefault
+                      ? 'text-amber-500 bg-amber-500/10'
+                      : 'text-muted-foreground hover:bg-surface-50',
+                  )}
+                >
+                  <Star className={cn('h-3.5 w-3.5', tt.isDefault && 'fill-current')} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm(t('taskTypes.deleteConfirm', { name: tt.name }))) remove.mutate(tt.id)
+                  }}
+                  disabled={remove.isPending}
+                  title={t('taskTypes.delete')}
+                  aria-label={t('taskTypes.deleteLabel', { name: tt.name })}
+                  className="h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive flex items-center justify-center"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+const WEEKDAYS: { iso: number; labelKey: TranslationKey }[] = [
+  { iso: 1, labelKey: 'workSchedule.mon' },
+  { iso: 2, labelKey: 'workSchedule.tue' },
+  { iso: 3, labelKey: 'workSchedule.wed' },
+  { iso: 4, labelKey: 'workSchedule.thu' },
+  { iso: 5, labelKey: 'workSchedule.fri' },
+  { iso: 6, labelKey: 'workSchedule.sat' },
+  { iso: 7, labelKey: 'workSchedule.sun' },
+]
+
+/**
+ * Which days the workspace works, and which dates it does not.
+ *
+ * Per-member capacity has been stored for a while; this is what tells Workload
+ * how those hours are spread. A Sun–Thu team was previously read as two days of
+ * overtime and two days idle.
+ */
+function WorkScheduleTab({ workspaceId }: { workspaceId: string }) {
+  const qc = useQueryClient()
+  const { t } = useTranslation()
+  const [day, setDay] = useState('')
+  const [holidayName, setHolidayName] = useState('')
+
+  const key = ['work-schedule', workspaceId] as const
+  const scheduleQuery = useQuery({
+    queryKey: key,
+    queryFn: () =>
+      api<{ workDays: number[]; holidays: { id: string; day: string; name: string }[] }>(
+        `/workspaces/${workspaceId}/work-schedule`,
+      ),
+  })
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: key })
+    // Workload reads capacity through this, so it must not keep a stale week.
+    qc.invalidateQueries({ queryKey: ['workload-report', workspaceId] })
+  }
+  const failed = (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('workSchedule.failed'))
+
+  const setDays = useMutation({
+    mutationFn: (workDays: number[]) =>
+      api(`/workspaces/${workspaceId}/work-schedule`, { method: 'PATCH', body: { workDays } }),
+    onSuccess: () => { toast.success(t('workSchedule.saved')); refresh() },
+    onError: failed,
+  })
+
+  const addHoliday = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/holidays`, {
+        method: 'POST',
+        body: { day, name: holidayName.trim() },
+      }),
+    onSuccess: () => { setDay(''); setHolidayName(''); toast.success(t('workSchedule.holidayAdded')); refresh() },
+    onError: failed,
+  })
+
+  const removeHoliday = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/holidays/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { toast.success(t('workSchedule.holidayRemoved')); refresh() },
+    onError: failed,
+  })
+
+  const workDays = scheduleQuery.data?.workDays ?? []
+  const holidays = scheduleQuery.data?.holidays ?? []
+
+  const toggle = (iso: number) => {
+    const next = workDays.includes(iso) ? workDays.filter((d) => d !== iso) : [...workDays, iso].sort()
+    // The server rejects an empty week too; catching it here saves a round trip
+    // and explains why nothing happened.
+    if (next.length === 0) return toast.error(t('workSchedule.needOneDay'))
+    setDays.mutate(next)
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent">
+            <CalendarDays className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-sm">{t('workSchedule.title')}</h2>
+            <p className="text-xs text-muted-foreground">{t('workSchedule.desc')}</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {WEEKDAYS.map((d) => {
+            const on = workDays.includes(d.iso)
+            return (
+              <button
+                key={d.iso}
+                type="button"
+                onClick={() => toggle(d.iso)}
+                disabled={setDays.isPending || scheduleQuery.isLoading}
+                aria-pressed={on}
+                className={cn(
+                  'px-3 py-1.5 rounded-md border text-sm transition-colors',
+                  on
+                    ? 'border-accent bg-accent/10 text-accent font-medium'
+                    : 'border-border bg-card text-muted-foreground hover:bg-surface-50',
+                )}
+              >
+                {t(d.labelKey)}
+              </button>
+            )
+          })}
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="font-semibold text-sm">{t('workSchedule.holidays')}</h2>
+          <p className="text-xs text-muted-foreground">{t('workSchedule.holidaysDesc')}</p>
+        </div>
+        <form
+          className="px-4 py-3 flex flex-wrap gap-2 border-b border-border"
+          onSubmit={(e) => { e.preventDefault(); if (day && holidayName.trim()) addHoliday.mutate() }}
+        >
+          <Input
+            type="date"
+            value={day}
+            onChange={(e) => setDay(e.target.value)}
+            aria-label={t('workSchedule.dateLabel')}
+            className="w-44"
+          />
+          <Input
+            value={holidayName}
+            onChange={(e) => setHolidayName(e.target.value)}
+            placeholder={t('workSchedule.holidayNamePlaceholder')}
+            aria-label={t('workSchedule.holidayNameLabel')}
+            className="flex-1 min-w-[160px]"
+          />
+          <Button type="submit" disabled={!day || !holidayName.trim() || addHoliday.isPending}>
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            {t('workSchedule.addHoliday')}
+          </Button>
+        </form>
+        {holidays.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('workSchedule.noHolidays')}</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {holidays.map((h) => (
+              <li key={h.id} className="px-4 py-2.5 flex items-center gap-3">
+                <span className="text-sm font-medium w-28 shrink-0 tabular-nums">{h.day}</span>
+                <span className="text-sm flex-1 truncate">{h.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeHoliday.mutate(h.id)}
+                  disabled={removeHoliday.isPending}
+                  aria-label={t('workSchedule.removeHoliday', { name: h.name })}
+                  title={t('workSchedule.removeHoliday', { name: h.name })}
+                  className="h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive flex items-center justify-center"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  )
+}
 
 function LabelsTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
