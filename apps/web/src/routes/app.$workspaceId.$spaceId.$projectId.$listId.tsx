@@ -97,6 +97,9 @@ type TaskItem = {
   createdById?: string | null
   recurrence?: Record<string, unknown> | null
   assignees?: TaskAssignee[]
+  // Sent on every list row already (tasks.service.ts attaches them); the board
+  // card is the first thing here to render them.
+  labels?: Array<{ id: string; name: string; color: string }>
   subtasks?: Subtask[]
   openBlockerCount?: number
   blocksOpenCount?: number
@@ -1907,6 +1910,14 @@ function ListDetail() {
                       return next
                     })
                   }
+                  onRename={listStatuses.length === 0 ? undefined : async (name) => {
+                    await api(`/lists/${listId}/statuses/${s.id}`, {
+                      method: 'PATCH',
+                      body: { name },
+                    })
+                    await qc.invalidateQueries({ queryKey: ['list-statuses', listId] })
+                    await refetch()
+                  }}
                   wipLimit={wipLimits[s.key]}
                   onSetWipLimit={(n) =>
                     setWipLimits((prev) => {
@@ -1925,6 +1936,16 @@ function ListDetail() {
                   }}
                 />
               ))}
+              <AddBoardGroup
+                onAdd={async (name) => {
+                  await api(`/lists/${listId}/statuses`, {
+                    method: 'POST',
+                    body: { name, color: '#94a3b8', category: 'open' },
+                  })
+                  await qc.invalidateQueries({ queryKey: ['list-statuses', listId] })
+                  await refetch()
+                }}
+              />
             </div>
             <DragOverlay>
               {draggingTask ? (
@@ -3485,6 +3506,69 @@ function CustomFieldEditor({
   )
 }
 
+/**
+ * The trailing column on the board that creates a new status.
+ *
+ * A board "group" *is* a status here, so this writes a real status row rather
+ * than a board-local grouping — which is what makes the new column survive a
+ * reload and show up in every other view.
+ */
+function AddBoardGroup({ onAdd }: { onAdd: (name: string) => Promise<void> | void }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="rounded-lg border border-dashed border-border/70 bg-transparent min-h-40 flex items-center justify-center text-sm text-muted-foreground hover:border-border hover:bg-card/50 hover:text-foreground"
+      >
+        <Plus className="h-4 w-4 mr-1.5" />
+        {t('list.board.addGroup')}
+      </button>
+    )
+  }
+  return (
+    <form
+      className="rounded-lg border border-border bg-muted/30 min-h-40 flex flex-col items-stretch justify-center gap-2 p-3"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        const trimmed = name.trim()
+        if (!trimmed || saving) return
+        setSaving(true)
+        try {
+          await onAdd(trimmed)
+          setName('')
+          setOpen(false)
+        } finally {
+          setSaving(false)
+        }
+      }}
+    >
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={t('list.board.addGroupPlaceholder')}
+        aria-label={t('list.board.addGroup')}
+        onKeyDown={(e) => { if (e.key === 'Escape') { setName(''); setOpen(false) } }}
+        className="h-8 rounded border border-border bg-background px-2 text-sm"
+      />
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" className="flex-1" disabled={!name.trim() || saving}>
+          {saving ? t('common.saving') : t('common.add')}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => { setName(''); setOpen(false) }}>
+          {t('common.cancel')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 function BoardColumn({
   status,
   tasks,
@@ -3494,6 +3578,7 @@ function BoardColumn({
   wipLimit,
   onSetWipLimit,
   onAddTask,
+  onRename,
 }: {
   status: TaskStatus
   tasks: TaskItem[]
@@ -3503,8 +3588,11 @@ function BoardColumn({
   wipLimit?: number
   onSetWipLimit: (n: number | null) => void
   onAddTask: (title: string) => Promise<void> | void
+  /** Rename the underlying status. Absent when the caller cannot edit statuses. */
+  onRename?: (name: string) => Promise<void> | void
 }) {
   const { t } = useTranslation()
+  const [renaming, setRenaming] = useState(false)
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${status}`,
   })
@@ -3532,7 +3620,33 @@ function BoardColumn({
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </button>
         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: meta.color }} />
-        <h3 className="font-medium text-sm">{meta.label}</h3>
+        {renaming && onRename ? (
+          // Renaming here edits the status itself, which is why it is the same
+          // write the Statuses dialog makes — not a board-only label.
+          <input
+            autoFocus
+            defaultValue={meta.label}
+            aria-label={t('list.board.renameColumnAria', { name: meta.label })}
+            onBlur={async (e) => {
+              const next = e.target.value.trim()
+              setRenaming(false)
+              if (next && next !== meta.label) await onRename(next)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              if (e.key === 'Escape') { setRenaming(false) }
+            }}
+            className="h-6 min-w-0 flex-1 rounded border border-border bg-background px-1 text-sm font-medium"
+          />
+        ) : (
+          <h3
+            className={cn('font-medium text-sm', onRename && 'cursor-text hover:underline decoration-dotted')}
+            title={onRename ? t('list.board.renameColumn') : undefined}
+            onClick={() => onRename && setRenaming(true)}
+          >
+            {meta.label}
+          </h3>
+        )}
         <span className={cn('text-xs tabular-nums', overWip ? 'text-red-500 font-semibold' : 'text-muted-foreground')}>
           {tasks.length}
           {wipLimit != null ? `/${wipLimit}` : ''}
@@ -3639,6 +3753,22 @@ function BoardTaskCard({
           : <Flag className={cn('h-3 w-3 mt-0.5 shrink-0', PRIORITY_COLORS[task.priority])} />}
         <div className="font-medium text-sm leading-snug">{task.title}</div>
       </div>
+      {(task.labels?.length ?? 0) > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {task.labels!.slice(0, 3).map((l) => (
+            <span
+              key={l.id}
+              className="rounded px-1.5 py-0.5 text-[10px] font-medium leading-none"
+              style={{ backgroundColor: `${l.color}22`, color: l.color }}
+            >
+              {l.name}
+            </span>
+          ))}
+          {task.labels!.length > 3 && (
+            <span className="text-[10px] text-muted-foreground">+{task.labels!.length - 3}</span>
+          )}
+        </div>
+      )}
       {(due || subtasks.length > 0 || (task.openBlockerCount ?? 0) > 0 || assignees.length > 0) && (
         <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11px] text-muted-foreground">
           {due && (

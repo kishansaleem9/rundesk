@@ -45,6 +45,7 @@ import {
   canSeePrivateItem,
   isManagerRole,
 } from '../../common/permissions/item-visibility'
+import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
@@ -1817,7 +1818,7 @@ export class TasksService {
       ),
       orderBy: [asc(tasks.position), asc(tasks.createdAt)],
       with: {
-        assignees: { with: { user: true } },
+        assignees: { with: { user: PUBLIC_USER_WITH } },
         subtasks:  { where: and(eq(tasks.isArchived, false), visFilter) },
       },
     })
@@ -1951,9 +1952,9 @@ export class TasksService {
     const row = await this.db.query.tasks.findFirst({
       where: eq(tasks.id, taskId),
       with: {
-        assignees: { with: { user: true } },
+        assignees: { with: { user: PUBLIC_USER_WITH } },
         subtasks:  { where: eq(tasks.isArchived, false), orderBy: asc(tasks.position) },
-        creator:   true,
+        creator:   PUBLIC_USER_WITH,
       },
     })
     if (!row) return null
@@ -1965,7 +1966,7 @@ export class TasksService {
         .innerJoin(labels, eq(labels.id, taskLabelAssignments.labelId))
         .where(eq(taskLabelAssignments.taskId, taskId)),
       this.db
-        .select({ watcher: taskWatchers, user: users })
+        .select({ watcher: taskWatchers, user: PUBLIC_USER_COLUMNS })
         .from(taskWatchers)
         .innerJoin(users, eq(users.id, taskWatchers.userId))
         .where(eq(taskWatchers.taskId, taskId)),
@@ -2797,7 +2798,7 @@ export class TasksService {
     const rows = await this.db.query.taskComments.findMany({
       where: eq(taskComments.taskId, taskId),
       orderBy: asc(taskComments.createdAt),
-      with: { author: true, reactions: true, assignee: true, resolver: true },
+      with: { author: PUBLIC_USER_WITH, reactions: true, assignee: PUBLIC_USER_WITH, resolver: PUBLIC_USER_WITH },
     })
     // Hydrate per-comment attachments (Plan §4). Kept as a separate query to
     // avoid a schema import cycle between comments and attachments.
@@ -2846,7 +2847,7 @@ export class TasksService {
     await this.logActivity({ taskId, actorId: authorId, action: 'commented', meta: { commentId: comment.id } })
     const hydrated = await this.db.query.taskComments.findFirst({
       where: eq(taskComments.id, comment.id),
-      with: { author: true, reactions: true, assignee: true, resolver: true },
+      with: { author: PUBLIC_USER_WITH, reactions: true, assignee: PUBLIC_USER_WITH, resolver: PUBLIC_USER_WITH },
     })
     this.realtime.emitToTask(taskId, { type: 'comment.created', taskId, comment: hydrated })
 
@@ -3547,7 +3548,7 @@ export class TasksService {
     return this.db.query.timeEntries.findMany({
       where: eq(timeEntries.taskId, taskId),
       orderBy: desc(timeEntries.startedAt),
-      with: { user: true },
+      with: { user: PUBLIC_USER_WITH },
     })
   }
 
