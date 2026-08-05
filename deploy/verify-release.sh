@@ -318,6 +318,90 @@ else
   bad "could not find this account on the roster — checked for $EMAIL"
 fi
 
+say "No task carries a password hash"
+# The fix that stopped assignees, watchers and comment authors from dragging
+# users.password_hash out through GET /tasks/:id. Checked here because a leak
+# is not something to learn about from a customer.
+TL=$(curl -fsS --max-time 20 "$API/tasks/workspace/$WS/timeline" -H "$AUTH" 2>/dev/null || true)
+TASK_ID=$(printf '%s' "$TL" | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | sed 's/.*://;s/"//g' || true)
+if [ -n "$TASK_ID" ]; then
+  FULL=$(curl -fsS --max-time 20 "$API/tasks/$TASK_ID" -H "$AUTH" 2>/dev/null || true)
+  case "$FULL" in
+    *passwordHash*|*password_hash*) bad "a password hash came back on GET /tasks/$TASK_ID" ;;
+    "") bad "could not read a task back to check it" ;;
+    *) ok "an embedded user carries no password hash" ;;
+  esac
+  # Prove the payload really does embed users, or the check above passes on a
+  # response that never had the chance to leak.
+  case "$FULL" in
+    *'"assignees"'*|*'"creator"'*|*'"watchers"'*) ok "and the payload does embed user rows (so that was a real test)" ;;
+    *) bad "no embedded users in the task payload — the leak check proved nothing" ;;
+  esac
+else
+  printf '  \033[2mSKIP\033[0m no task in this workspace to read back\n'
+fi
+
+say "Meeting notes become tasks that name their meeting"
+AI_OK=$(curl -fsS --max-time 20 "$API/ai/status" -H "$AUTH" 2>/dev/null | grep -o '"available":[a-z]*' | sed 's/.*://' || true)
+if [ "$AI_OK" != "true" ]; then
+  printf '  \033[2mSKIP\033[0m AI is not configured on this deploy (ai/status says available=%s)\n' "${AI_OK:-unknown}"
+else
+  TARGET=$(curl -fsS --max-time 20 "$API/spaces/workspace/$WS" -H "$AUTH" 2>/dev/null \
+    | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | sed 's/.*://;s/"//g' || true)
+  TPROJ=$(curl -fsS --max-time 20 "$API/projects/space/$TARGET" -H "$AUTH" 2>/dev/null \
+    | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | sed 's/.*://;s/"//g' || true)
+  TLIST=$(curl -fsS --max-time 20 "$API/lists/project/$TPROJ" -H "$AUTH" 2>/dev/null \
+    | grep -o '"id":"[0-9a-f-]\{36\}"' | head -1 | sed 's/.*://;s/"//g' || true)
+  if [ -z "$TLIST" ]; then
+    printf '  \033[2mSKIP\033[0m no list in this workspace to create action items in\n'
+  else
+    AM=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
+      -H 'Content-Type: application/json' \
+      -d '{"title":"Deploy check extraction","notes":"Ali must write the migration by Thursday. Sara must review the export path on Friday."}' 2>/dev/null || true)
+    AMID=$(printf '%s' "$AM" | jget id)
+    if [ -n "$AMID" ]; then
+      RES=$(curl -fsS --max-time 120 -X POST "$API/workspaces/$WS/meetings/$AMID/action-items" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d "{\"createIn\":\"$TLIST\"}" 2>/dev/null || true)
+      NEW_ID=$(printf '%s' "$RES" | grep -o '"created":\[{"id":"[0-9a-f-]\{36\}"' | sed 's/.*"id":"//;s/"//' || true)
+      if [ -n "$NEW_ID" ]; then
+        ok "the notes became real tasks"
+        MADE=$(curl -fsS --max-time 20 "$API/tasks/$NEW_ID" -H "$AUTH" 2>/dev/null || true)
+        printf '%s' "$MADE" | grep -q 'From meeting: Deploy check extraction' \
+          && ok "and each one says which meeting it came from" \
+          || bad "the task does not name its meeting"
+        curl -sS -o /dev/null --max-time 20 -X DELETE "$API/tasks/$NEW_ID" -H "$AUTH" || true
+      else
+        bad "extraction created nothing -> $(printf '%s' "$RES" | head -c 200)"
+      fi
+      curl -sS -o /dev/null --max-time 20 -X DELETE "$API/workspaces/$WS/meetings/$AMID" -H "$AUTH" || true
+    else
+      bad "could not create the meeting to extract from -> $AM"
+    fi
+  fi
+fi
+
+say "The web build that shipped contains this release's UI"
+# The API and the SPA are built separately, and a stale dist is the failure
+# mode that leaves every endpoint green while the browser shows yesterday's
+# app. Reads the built bundle rather than asking the browser, which cannot be
+# reached from here.
+DIST="apps/web/dist"
+if [ ! -d "$DIST" ]; then
+  bad "no $DIST — the SPA was not built by this deploy"
+else
+  for NEEDLE in "Meeting record" "does not transcribe" "Open tasks with" "Meetings with" \
+                "Ask AI about this draft" "Link a task, doc or channel"; do
+    if grep -rqF "$NEEDLE" "$DIST" 2>/dev/null; then
+      ok "the bundle contains \"$NEEDLE\""
+    else
+      bad "\"$NEEDLE\" is missing from the shipped bundle — the SPA looks stale"
+    fi
+  done
+  NEWEST=$(find "$DIST" -name '*.js' -newermt '-1 day' 2>/dev/null | head -1 || true)
+  [ -n "$NEWEST" ] && ok "and it was built within the last day" \
+    || bad "no bundle file is newer than a day — this dist predates the deploy"
+fi
+
 say "A work day outside 1–7 is refused, not silently dropped"
 # JavaScript's getDay() calls Sunday 0. Accepting it and discarding it returns a
 # 200 and a schedule the caller did not ask for, which surfaces much later as
