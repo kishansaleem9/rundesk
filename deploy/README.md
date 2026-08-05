@@ -144,7 +144,14 @@ bundle nginx is serving contains this release's code — it cannot prove anythin
 controls, which is the only way to catch a component that throws on mount or a
 chunk that 404s.
 
-It drives `http://127.0.0.1` — the machine's own nginx — so it needs no DNS, no
-certificate and no outbound access. Requests to third-party hosts (web fonts)
-are reported but never counted: those describe the network of the machine
-running the check, not the deployment.
+It uses the site's real hostname (from `APP_URL` in `.env`) but pins it to
+`127.0.0.1`, so the request carries the `Host` header nginx keys its vhost on
+while never leaving the machine — no public DNS, no hairpin NAT, no egress.
+Asking for `http://127.0.0.1` directly does *not* work: the Host would not
+match `server_name`, nginx answers with its default vhost, and the SPA is
+nowhere to be found. Set `NO_HOST_MAP=1` to resolve the hostname normally.
+
+Health is deliberately narrow: an uncaught exception, a document/script/
+stylesheet that would not load, or a 5xx. A 404 from the custom-domain probe
+and a 401 before sign-in are the app asking a question and getting a
+legitimate no — counting those reported a healthy deployment as broken.

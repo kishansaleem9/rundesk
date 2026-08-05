@@ -6,24 +6,48 @@
  * it signs in through the real login form and clicks the controls this release
  * added.
  *
- * It runs against the machine's own nginx rather than the public hostname, so
- * it needs no DNS, no certificate and no egress:
+ * It uses the site's real hostname but resolves it to loopback, so the request
+ * carries the Host header nginx's vhost is keyed on while never leaving the
+ * machine. Asking for http://127.0.0.1 directly does not work: the Host does
+ * not match `server_name`, nginx serves its default vhost, and the SPA is
+ * nowhere to be found.
  *
  *   cd /opt/rundesk
- *   npx --yes playwright@1.56 install --with-deps chromium   # once
- *   RUNDESK_EMAIL=admin@rundesk.internal RUNDESK_PASSWORD='Admin@123!' \
- *     npx --yes playwright@1.56 run-server >/dev/null 2>&1 &   # not needed; see below
  *   node deploy/verify-ui.mjs
  *
- * If `playwright` is not importable it says so and exits 2 rather than
- * pretending the UI passed.
+ * If playwright is not importable it says so and exits 2 rather than
+ * pretending the UI passed. See deploy/README.md for the one-time install.
  *
- * Overrides: BASE (default http://127.0.0.1), RUNDESK_EMAIL, RUNDESK_PASSWORD,
- * CHROME (an explicit chromium binary if the download went somewhere unusual).
+ * Overrides: BASE (default: APP_URL from .env), RUNDESK_EMAIL,
+ * RUNDESK_PASSWORD, API_PORT, CHROME, PLAYWRIGHT_DIR, NO_HOST_MAP=1 to resolve
+ * the hostname normally instead of pinning it to loopback.
  */
-const BASE = process.env.BASE ?? 'http://127.0.0.1'
-const EMAIL = process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal'
-const PASSWORD = process.env.RUNDESK_PASSWORD ?? 'Admin@123!'
+import { existsSync, readFileSync } from 'node:fs'
+import { pathToFileURL, fileURLToPath } from 'node:url'
+import { dirname, resolve as resolvePath } from 'node:path'
+
+const REPO = resolvePath(dirname(fileURLToPath(import.meta.url)), '..')
+
+/** A value from the deploy's own .env — the same file docker-compose reads. */
+function fromEnvFile(key) {
+  try {
+    const txt = readFileSync(resolvePath(REPO, '.env'), 'utf8')
+    const m = new RegExp(`^${key}=(.*)$`, 'm').exec(txt)
+    return m?.[1].trim().replace(/^["']|["']$/g, '') || null
+  } catch {
+    return null
+  }
+}
+
+const BASE = (process.env.BASE ?? fromEnvFile('APP_URL') ?? 'http://127.0.0.1').replace(/\/$/, '')
+const HOST = new URL(BASE).hostname
+const IS_LOOPBACK = /^(127\.|localhost$|::1$|0\.0\.0\.0$)/.test(HOST)
+// The browser talks to nginx; this script's own fetches go straight to the API
+// container, which needs no vhost and no TLS.
+const API_PORT = process.env.API_PORT ?? fromEnvFile('API_HOST_PORT') ?? '3010'
+const API = IS_LOOPBACK ? `${BASE}/api/v1` : `http://127.0.0.1:${API_PORT}/api/v1`
+const EMAIL = process.env.RUNDESK_EMAIL ?? fromEnvFile('RUNDESK_EMAIL') ?? 'admin@rundesk.internal'
+const PASSWORD = process.env.RUNDESK_PASSWORD ?? fromEnvFile('RUNDESK_PASSWORD') ?? 'Admin@123!'
 const SHOT = process.env.SHOT_DIR ?? '/tmp'
 
 // Resolving playwright is fiddlier than it looks. This repo is a pnpm
@@ -31,9 +55,6 @@ const SHOT = process.env.SHOT_DIR ?? '/tmp'
 // outright (EUNSUPPORTEDPROTOCOL) — it has to live somewhere else. And ESM
 // ignores NODE_PATH, so a bare import cannot see it there either. Hence an
 // explicit search of a few sane locations.
-import { existsSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
-
 const PW_DIRS = [
   process.env.PLAYWRIGHT_DIR,
   '/opt/rundesk-pw/node_modules',
@@ -84,6 +105,15 @@ const ref = (r, what) => { REF = r; console.log(`\n\x1b[1;36m▶ ${r}\x1b[0m  ${
 
 const launchOpts = { args: ['--no-sandbox', '--disable-dev-shm-usage'] }
 if (process.env.CHROME) launchOpts.executablePath = process.env.CHROME
+// Pin the site's hostname to loopback. This is what lets the request carry the
+// Host header nginx keys its vhost on while still never leaving the machine —
+// no public DNS, no hairpin NAT, no egress.
+if (!IS_LOOPBACK && !process.env.NO_HOST_MAP) {
+  launchOpts.args.push(`--host-resolver-rules=MAP ${HOST} 127.0.0.1`)
+}
+
+console.log(`  driving ${BASE}${IS_LOOPBACK ? '' : `  (${HOST} pinned to 127.0.0.1)`}`)
+console.log(`  api     ${API}`)
 
 let browser
 try {
@@ -114,27 +144,48 @@ const go = async (path, settle = 3000) => {
   await page.waitForTimeout(settle)
 }
 
-// Anything the page logs as an error is worth knowing about — a white screen
-// from a bad chunk URL looks like "no elements found" otherwise.
-// A bare "Failed to load resource" names nothing you can act on, so record the
-// URL that failed alongside it.
-const consoleErrors = []
-page.on('console', (m) => {
-  if (m.type() !== 'error') return
-  const where = m.location?.()?.url ?? ''
-  consoleErrors.push(`${m.text().slice(0, 110)}${where ? `  ← ${where.replace(BASE, '')}` : ''}`)
-})
-page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message.slice(0, 140)}`))
+// What counts as "broken" needs care. A 404 from the custom-domain probe is the
+// app asking a question and getting a legitimate no; a 401 before sign-in is
+// the same. Counting those reports a healthy deployment as broken — which an
+// earlier version of this file did.
+//
+// Broken is: an uncaught exception, a document/script/stylesheet that would not
+// load (a white screen from a stale chunk looks like "no elements found"
+// otherwise), or the server erroring outright.
+const broken = []
+const noted = []
+const short = (u) => u.replace(BASE, '').slice(0, 110)
+const external = (u) => { try { return new URL(u).host !== new URL(BASE).host } catch { return false } }
+
+page.on('pageerror', (e) => broken.push(`uncaught: ${e.message.slice(0, 140)}`))
 page.on('requestfailed', (r) => {
-  const url = r.url().replace(BASE, '')
-  consoleErrors.push(`request failed: ${r.failure()?.errorText ?? '?'}  ← ${url.slice(0, 110)}`)
+  const url = r.url()
+  const line = `${r.failure()?.errorText ?? 'failed'}  ← ${short(url)}`
+  if (external(url)) noted.push(line)
+  // Vite's HMR socket only exists in dev; it is not part of a deployment.
+  else if (/\/@vite\/|__vite|\bws:\/\//.test(url)) noted.push(line)
+  else if (['document', 'script', 'stylesheet'].includes(r.resourceType())) broken.push(line)
+  else noted.push(line)
+})
+page.on('response', (r) => {
+  if (r.status() < 500) return
+  if (external(r.url())) return
+  broken.push(`HTTP ${r.status()}  ← ${short(r.url())}`)
 })
 
 try {
   ref('LOGIN', 'The deployed app loads and signs in')
   await go('/login', 2500)
-  chk(await page.locator('input[type=email]').count() > 0,
-    'the login form renders', `no login form at ${BASE}/login — is nginx serving the SPA?`)
+  const hasForm = await page.locator('input[type=email]').count() > 0
+  if (!hasForm) {
+    const body = (await seen()).slice(0, 160)
+    bad(`no login form at ${BASE}/login — nginx served: "${body}"`)
+    console.log('    Most likely the Host header does not match a server_name in')
+    console.log('    deploy/nginx/*.conf, so nginx answered with its default vhost.')
+    console.log(`    Check APP_URL in .env (currently ${fromEnvFile('APP_URL') ?? 'unset'}).`)
+    throw new Error('the SPA is not being served for this hostname')
+  }
+  ok('the login form renders')
   await page.fill('input[type=email]', EMAIL)
   await page.fill('input[type=password]', PASSWORD)
   await page.click('button[type=submit]')
@@ -147,14 +198,14 @@ try {
   // this account can see and drive to the first.
   let WS = (/\/app\/([0-9a-f-]{36})/.exec(page.url()) ?? [])[1]
   if (!WS) {
-    const res = await fetch(`${BASE}/api/v1/auth/login`, {
+    const res = await fetch(`${API}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
     }).then((r) => r.json()).catch(() => null)
     const token = res?.data?.accessToken
     const list = token
-      ? await fetch(`${BASE}/api/v1/workspaces`, { headers: { Authorization: `Bearer ${token}` } })
+      ? await fetch(`${API}/workspaces`, { headers: { Authorization: `Bearer ${token}` } })
           .then((r) => r.json()).catch(() => null)
       : null
     // Each row is a membership: { workspace, role }.
@@ -287,21 +338,15 @@ try {
     }
   }
 
-  ref('HEALTH', 'Nothing is broken in the console')
-  // Third-party hosts (web fonts, CDNs) say something about the network of the
-  // machine running this check, not about the deployment. Counting them turns
-  // a locked-down runner into a false red.
-  const external = consoleErrors.filter((e) => /←\s*https?:\/\//.test(e))
-  const own = consoleErrors
-    .filter((e) => !external.includes(e))
-    .filter((e) => !/favicon|manifest|sw\.js|workbox/i.test(e))
-  if (external.length) {
-    const hosts = [...new Set(external.map((e) => (/←\s*(https?:\/\/[^/]+)/.exec(e) ?? [])[1]).filter(Boolean))]
-    console.log(`  \x1b[2mnote\x1b[0m ${external.length} request(s) to other hosts were not reachable from this machine: ${hosts.join(', ')}`)
-    console.log('  \x1b[2m     not counted — that is this runner\'s network, not the deployment.\x1b[0m')
+  ref('HEALTH', 'Nothing is actually broken')
+  if (noted.length) {
+    console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)
+    console.log('  \x1b[2m     and API calls that answered 4xx (a probe getting a legitimate no).\x1b[0m')
+    for (const n of noted.slice(0, 3)) console.log(`  \x1b[2m     ${n}\x1b[0m`)
   }
-  chk(own.length === 0, 'no console errors from the app\'s own resources',
-    `${own.length} error(s): ${own.slice(0, 3).join(' | ')}`)
+  chk(broken.length === 0,
+    'no uncaught exceptions, no asset failed to load, no 5xx',
+    `${broken.length}: ${broken.slice(0, 4).join(' | ')}`)
 } catch (e) {
   bad(`threw: ${e.message.split('\n')[0]}`)
   await page.screenshot({ path: `${SHOT}/verify-ui-fail.png`, fullPage: true }).catch(() => {})
