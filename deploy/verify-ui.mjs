@@ -196,20 +196,24 @@ try {
   // A super admin lands on /app/admin rather than inside a workspace, so the
   // landing URL is not a reliable source for one. Ask the API which workspaces
   // this account can see and drive to the first.
+  // A token of our own, so the script can ask the API what it should be
+  // looking at rather than inferring it from the DOM.
+  const login = await fetch(`${API}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+  }).then((r) => r.json()).catch(() => null)
+  const token = login?.data?.accessToken
+  const apiGet = (path) =>
+    token
+      ? fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then((r) => r.json()).then((j) => j?.data).catch(() => null)
+      : Promise.resolve(null)
+
   let WS = (/\/app\/([0-9a-f-]{36})/.exec(page.url()) ?? [])[1]
   if (!WS) {
-    const res = await fetch(`${API}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-    }).then((r) => r.json()).catch(() => null)
-    const token = res?.data?.accessToken
-    const list = token
-      ? await fetch(`${API}/workspaces`, { headers: { Authorization: `Bearer ${token}` } })
-          .then((r) => r.json()).catch(() => null)
-      : null
     // Each row is a membership: { workspace, role }.
-    WS = (list?.data ?? []).map((r) => (r.workspace ?? r)?.id).find(Boolean)
+    WS = ((await apiGet('/workspaces')) ?? []).map((r) => (r.workspace ?? r)?.id).find(Boolean)
     if (WS) {
       await go(`/app/${WS}`, 4000)
       ok(`this account lands on ${page.url().replace(BASE, '')}; drove to workspace ${WS}`)
@@ -276,25 +280,23 @@ try {
   ref('A3.9', 'A DM shows Chat / Calendar / Tasks; a channel does not')
   const strip = () => page.locator('button[aria-pressed]').filter({ hasText: /^(Chat|Calendar|Tasks)$/ })
   chk(await strip().count() === 0, 'a channel has no tab strip', 'a channel showed DM tabs')
-  // Any DM in the sidebar. With a single-member workspace there may be none,
-  // which is a fact about the data rather than about the feature.
-  const dmSection = page.locator('button, a').filter({ hasText: /^[A-Z][^#]{1,30}$/ })
-  const dmCount = await page.getByText(/Direct messages/i).count()
-  if (dmCount === 0) {
-    bad('no Direct messages section — cannot reach a DM to test the strip')
+  // Which DM to click comes from the API, not from scanning the sidebar. A row
+  // is an avatar plus a name, so matching its text is fragile — an earlier
+  // version skipped a DM that was plainly there.
+  const channels = (await apiGet(`/workspaces/${WS}/chat/channels`)) ?? []
+  const dm = channels.find((c) => c.isDm)
+  const dmName = dm?.dmLabel ?? dm?.dmPeerName ?? null
+  if (!dm) {
+    console.log('  \x1b[2mSKIP\x1b[0m no DM exists in this workspace — the API lists none.')
+    console.log('  \x1b[2m     Start one (or run deploy/make-dm.sh) to exercise the tabs.\x1b[0m')
+  } else if (!dmName) {
+    bad(`a DM exists (${dm.id}) but carries no name to click`)
   } else {
-    let opened = false
-    for (let i = 0; i < Math.min(await dmSection.count(), 40); i++) {
-      const el = dmSection.nth(i)
-      const label = (await el.innerText().catch(() => '')).trim()
-      if (!label || /^(Chat|Docs|Home|Inbox|Teams|Settings|People|New)$/.test(label)) continue
-      await el.click().catch(() => {})
-      await page.waitForTimeout(2000)
-      if (await strip().count() === 3) { opened = true; ok(`opened the DM with ${label}`); break }
-    }
-    if (!opened) {
-      console.log('  \x1b[2mSKIP\x1b[0m no DM in this workspace yet — start one to exercise the tabs')
-    } else {
+    await page.getByText(dmName, { exact: true }).first().click().catch(() => {})
+    await page.waitForTimeout(2500)
+    const opened = await strip().count() === 3
+    chk(opened, `opened the DM with ${dmName}`, `clicking "${dmName}" did not open the DM`)
+    if (opened) {
       chk(await strip().count() === 3, 'all three tabs render', `saw ${await strip().count()}`)
       await page.getByRole('button', { name: 'Calendar', exact: true }).click()
       await page.waitForTimeout(2200)

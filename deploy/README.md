@@ -121,8 +121,17 @@ Two checks, in this order, both on the VPS after `deploy/deploy-prod.sh`:
 
 ```bash
 bash deploy/verify-release.sh    # 55 checks — the API, the schema, the shipped bundle
-node deploy/verify-ui.mjs        # 22 checks — a real browser driving the deployed app
+node deploy/verify-ui.mjs        # 28 checks — a real browser driving the deployed app
 ```
+
+The DM tab strip needs a DM to exist. If `verify-ui.mjs` skips it, open one:
+
+```bash
+bash deploy/make-dm.sh && node deploy/verify-ui.mjs
+```
+
+That creates an empty DM between the signed-in account and the first other
+member — nothing is sent, and running it twice returns the same channel.
 
 `verify-release.sh` needs nothing extra. `verify-ui.mjs` needs Playwright once —
 installed **outside** this repo, because `npm i` inside a pnpm workspace fails on
