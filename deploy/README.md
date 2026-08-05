@@ -124,11 +124,19 @@ bash deploy/verify-release.sh    # 55 checks — the API, the schema, the shippe
 node deploy/verify-ui.mjs        # 22 checks — a real browser driving the deployed app
 ```
 
-`verify-release.sh` needs nothing extra. `verify-ui.mjs` needs Playwright once:
+`verify-release.sh` needs nothing extra. `verify-ui.mjs` needs Playwright once —
+installed **outside** this repo, because `npm i` inside a pnpm workspace fails on
+the `link:` protocol used for internal packages (`EUNSUPPORTEDPROTOCOL`):
 
 ```bash
-npm i --no-save playwright@1.56 && npx playwright install --with-deps chromium
+mkdir -p /opt/rundesk-pw && cd /opt/rundesk-pw
+npm init -y >/dev/null && npm i playwright@1.56
+npx playwright install --with-deps chromium
 ```
+
+The script looks there on its own. Anywhere else, point at it with
+`PLAYWRIGHT_DIR=/path/to/node_modules`. It exits 2 when it cannot find a
+browser — a UI nobody looked at must not read as a UI that passed.
 
 The split matters. `verify-release.sh` proves the endpoints answer and that the
 bundle nginx is serving contains this release's code — it cannot prove anything

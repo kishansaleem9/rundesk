@@ -26,15 +26,50 @@ const EMAIL = process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.RUNDESK_PASSWORD ?? 'Admin@123!'
 const SHOT = process.env.SHOT_DIR ?? '/tmp'
 
+// Resolving playwright is fiddlier than it looks. This repo is a pnpm
+// workspace using the `link:` protocol, so `npm i playwright` inside it fails
+// outright (EUNSUPPORTEDPROTOCOL) — it has to live somewhere else. And ESM
+// ignores NODE_PATH, so a bare import cannot see it there either. Hence an
+// explicit search of a few sane locations.
+import { existsSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+
+const PW_DIRS = [
+  process.env.PLAYWRIGHT_DIR,
+  '/opt/rundesk-pw/node_modules',
+  `${process.env.HOME ?? '/root'}/.rundesk-pw/node_modules`,
+  '/usr/lib/node_modules',
+].filter(Boolean)
+
 let chromium
 try {
   ;({ chromium } = await import('playwright'))
 } catch {
+  for (const dir of PW_DIRS) {
+    for (const entry of ['playwright/index.mjs', 'playwright/index.js']) {
+      const file = `${dir}/${entry}`
+      if (!existsSync(file)) continue
+      try {
+        ;({ chromium } = await import(pathToFileURL(file).href))
+      } catch { /* try the next candidate */ }
+      if (chromium) break
+    }
+    if (chromium) break
+  }
+}
+
+if (!chromium) {
   console.error(
-    '\x1b[31m✗ playwright is not installed here.\x1b[0m\n' +
-      '  Install it once, then re-run:\n' +
-      '    npx --yes playwright@1.56 install --with-deps chromium\n' +
-      '    npm i --no-save playwright@1.56\n' +
+    '\x1b[31m✗ playwright is not installed anywhere this script can see.\x1b[0m\n\n' +
+      '  Install it OUTSIDE the repo — `npm i` inside this pnpm workspace fails on\n' +
+      '  the link: protocol it uses for internal packages:\n\n' +
+      '    mkdir -p /opt/rundesk-pw && cd /opt/rundesk-pw\n' +
+      '    npm init -y >/dev/null && npm i playwright@1.56\n' +
+      '    npx playwright install --with-deps chromium\n\n' +
+      '  Then, from the repo:\n' +
+      '    node deploy/verify-ui.mjs\n\n' +
+      `  Searched: ${PW_DIRS.join(', ')}\n` +
+      '  (or set PLAYWRIGHT_DIR to the node_modules holding it)\n' +
       '  Exiting 2 rather than reporting a UI nobody looked at.',
   )
   process.exit(2)
