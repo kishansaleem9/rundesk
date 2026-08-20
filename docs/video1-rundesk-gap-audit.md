@@ -162,6 +162,33 @@ flight — telling you your inbox was empty before knowing.
 while it is outstanding: 17 checks, 16 of which fail against the previous build.
 
 
+### 0.4 Two things only the deployed instance would tell us
+
+Both suites were green against a local build, and both of these were still
+broken on the server.
+
+**Task types existed and no workspace had any.** The feature shipped with a
+working API and an empty table — nothing ever created a default set. The picker
+added to the create modal hides itself when a workspace has no types, so §1.1
+was invisible on production while passing every local check: the local test
+seeded two types in its stub, which is precisely why it passed there. Migration
+0093 backfills Task and Milestone; workspace creation seeds them going forward.
+The check no longer reports "nothing to check" — an absent feature is a
+failure, not a skip.
+
+**A migration can ship, deploy, and do nothing.** `drizzle-kit migrate` works
+from `meta/_journal.json`, not from the files on disk, and ignores any `.sql`
+not listed there — silently, still printing *migrations applied successfully*.
+0093 went out that way: file present, CI green, migration never executed.
+`scripts/check-migration-order.mjs` validated filenames and sequence
+contiguity only, so it could never have caught it; it now cross-checks every
+file against the journal in both directions.
+
+The pattern in both, and in the `-mtime` prune in §0.2, is the same: a step that
+runs, reports success, and changes nothing. Checking the outcome rather than
+whether the code ran is what found all three.
+
+
 ## 1. What she explicitly called missing
 
 These are the ones where she says outright it is absent on our end — the phrases
