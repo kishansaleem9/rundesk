@@ -221,8 +221,15 @@ reply, **forward**, **save**, assign, resolve, AI, ⋯. Replies thread *under* t
 (*"1 reply Today at 5:37 PM"*, frame `237_1507`). Saved messages get a 🔖 **Later** flag and
 show up in Inbox → Later, where they can be opened, edited, assigned, or jumped into thread.
 
-**Us.** Saved messages exist (`GET /workspaces/:ws/chat/saved`). **Forward does not** — no
-`forward` anywhere in `apps/api/src/modules/chat/chat.controller.ts`.
+**Us.** Saved messages exist (`GET /workspaces/:ws/chat/saved`) and **forward does too** —
+`workspace-chat-page.tsx:888` has a `forwardMutation` and a channel picker. My first pass
+called forward missing because there is no `forward` in the chat controller; it is
+implemented client-side as a re-post, which is why the grep came up empty.
+
+The real gaps here are narrower and were found by reading the frames: a forwarded message
+**carries no provenance** — no original author, no source channel, no "View message" link
+back (frames `235_1500`, `236_1503` show ClickUp's) — and **saved messages never surface in
+Inbox → Later**, which is the entire point of saving one.
 
 ### 2.5 Cleared notifications should age out after 30 days — `[15:51–16:40]` · size: small
 
@@ -282,7 +289,7 @@ largest item in either recording. The **meeting record** work already shipped (m
 
 | # | Ask | Timestamp | Where we stand |
 |---|---|---|---|
-| a | Loading state must show skeletons/icons, never a blank screen | `00:00–00:14` | 7 files use `animate-pulse`; needs an app-shell audit for the routes she'd hit |
+| a | Loading state must show skeletons/icons, never a blank screen | `00:00–00:14` | **We built a `Skeleton` component and never used it** — `packages/ui/src/components/skeleton.tsx`, exported at `packages/ui/src/index.ts:9`, imported by **zero** files in `apps/web/src`. The router has no `defaultPendingComponent`, so ~40 lazy route chunks load into nothing, and `app.tsx:119`/`:132` use `<Suspense fallback={null}>` |
 | b | Google Drive linked so Drive files show in search results | `04:04–04:30` | No Drive integration in `apps/api/src/modules` |
 | c | Theme: Light / Dark / **Auto** + an accent palette | `07:11` (frame `113_0716`) | We have a light/dark toggle; no Auto, no accent colours |
 | d | Keyboard shortcuts list, Download app, Help → docs *and* live chat | `07:16–07:45` | Not present in our profile menu (frame `166_1043` shows ours: Profile / Workspace settings / Help & support / Reset dock position / Sign out) |
@@ -346,3 +353,279 @@ Worth stating plainly so none of this gets rebuilt:
 
 *Frames live in the session scratchpad; the frame↔timestamp map is `/tmp/v1_kept.json`.
 Every "we have this" line above was verified by opening the file cited.*
+
+---
+
+## 6. The frame-by-frame pass, and what it changed
+
+The first draft of this document came from reading ~45 frames by hand. A second pass then read
+**all 139** — one agent per section, each also opening the code — and produced **143 frame
+descriptions, 161 spec items, 272 status rows and 157 distinct gaps**, of which **33 are ones
+she flags outright**. The full inventory is the appendix below.
+
+It corrected me in three places, which is the main reason it was worth running:
+
+- **Forward already exists.** I had called it missing on the strength of a grep for `forward`
+  in the chat controller. It is implemented client-side as a re-post
+  (`workspace-chat-page.tsx:888`), so the grep was evidence about the grep. The real gaps are
+  that a forwarded message carries no provenance, and that saved messages never reach Later.
+- **The loading gap is much more specific than "audit the app shell".** We *have* a
+  `Skeleton` component. It is exported from `packages/ui` and imported by **nothing**. Add the
+  router's missing `defaultPendingComponent` and the two `<Suspense fallback={null}>` and the
+  fix is mostly wiring something that already exists.
+- **Replies is not the finished feature I called it.** The route and its Unread/Read/All tabs
+  are real — my browser test confirmed the tabs render — but the page queries
+  `/notifications?view=all`, and nothing creates a notification when someone replies in a
+  thread. The tabs work; the pipeline behind them does not. That is precisely the shape of
+  failure a UI check congratulates you for.
+
+Two agent findings I have **not** promoted into the sections above, because they need
+checking against the live instance rather than the repo:
+
+- *"Ship the tabbed inbox to the deployed instance."* Our code has the buckets and chips, but
+  frames `014_0053` and `057_0337` show our deployed inbox as a flat `UNREAD · 32` list with
+  no tab strip, and she says *"humare paas sirf yeh notification layout hai"*. Either the
+  deployed build predates the tabs or they are not rendering there. Confirm before building
+  anything.
+- *"Start and due dates cannot carry a time of day."* The detail sheet has two
+  `datetime-local` inputs (`task-detail-sheet.tsx:4368`) and the DTO takes ISO strings, so
+  this is at most true of the **create/quick-add** path, not the product.
+
+
+## Appendix — every gap the frame-by-frame pass produced
+
+One row per finding, 15 sections, produced by reading all 139 frames against the code.
+`!` = she says outright it is missing on our end. Sizes are the agent's estimate, not a quote.
+
+### Search  ·  10 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | small | Command palette chunk fails to load and takes the whole app down | "Agar Rundex search mein open karein to yahan pe bhi ek search bar hai… Filhaal is feature ka masla hai — I don't know kya" — she opens our search, th |
+|  | medium | Location filter — scope search to a space, folder or list | "LOCATION ka matlab yeh hota hai ke woh kis space mein para hai, ya kis list mein para hai." |
+|  | medium | Folders (and Lists / Spaces) are not searchable entity types | "To yeh 3 DOTS dekh rahe hain? Main yahan se aur points pe click out kar ke, let's suppose ke mujhe FOLDERS mein search karna hai, to folders yahan pe |
+|  | large | No AI answer when search finds nothing | "jaise ke maine search kiya par mujhe koi cheez show nahi hui, like for example just mentioned that ke nahi hai" — she narrates the zero-result case a |
+|  | small | Entity-type chips are hidden behind a collapsed "Filters" button | "main \"Task\" par click karoongi na — to agar aap yeh dekh rahe ho to yeh GRAY COLOR ho gaya, to woh task mein is cheez ko search karna start ho jaye |
+|  | medium | No "⋯" overflow picker to add more entity types to the chip row | "agar lage ke yeh jo ooper unhon ne option diya, us mein se woh cheez nahi hai jo mujhe chahiye — maybe it's on other point — to yeh 3 DOTS dekh rahe  |
+|  | small | Assignee and Creator use bare <select> dropdowns instead of searchable people pickers | "Phir yahan se FILTER mein bhi hum jaa sakte hain ke acha, yeh kisi aur ko assign hai, ya phir is ka creator kaun hai… CREATOR ka matlab hai jis ne wo |
+|  | small | Task types filter missing from search | Visible in the filter panel she walks through — the row "Task types — Any ›" sits between Status and Archived. |
+|  | large | No cross-app source tabs (Google Drive / Gmail / SharePoint / Apps) | Not narrated, but present on screen for the whole section — the tab strip "All \| ClickUp \| Google Drive \| Gmail \| SharePoint \| Apps" sits directl |
+|  | small | No query suggestions or recent-search history | Not narrated. Visible in frame 020_0124: a floating bubble above the modal offering "vn" and "vnjf" as clickable completions while she types "vnjfv". |
+
+### Loading & first paint  ·  9 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | large | Kill the blank screen: ship a skeleton loading system using the Skeleton component that already exists but is never imported | "Humare end pe bhi waiting ka jo time period hai woh BLANK SCREEN na ho — woh icons hi hon." While the app is waiting to bring the user into the new w |
+| **!** | small | Add a pre-boot app-shell splash to index.html so the very first frame is never an empty dark rectangle | The waiting period must not be a blank screen — same instruction, applied to the cold-load window before any JS runs. |
+| **!** | small | Give the router a defaultPendingComponent — all ~40 lazy route chunks currently load into nothing | No blank gap while moving between screens; show the shell/icons during the wait. |
+| **!** | small | Replace the two `<Suspense fallback={null}>` with real placeholders | Same rule — the wait shows something, not nothing. |
+|  | medium | Add a 'Decline invite' action to the invitation screen (UI + API) | She walks the invite-confirmation screen at 00:18 ("ab yeh mujh se again confirmation le raha hai") — ClickUp's confirmation offers Accept and Decline |
+|  | small | Put a 'Need help?' link on the invitation screen | Visible at the bottom of ClickUp's join-team page in frame 008. |
+|  | small | Add a global route-transition progress bar | Implied by the same 00:06 instruction — the user should always be able to see that something is happening during a wait. |
+|  | medium | Extend the freshness / auto-refresh chrome beyond the Dashboard | ClickUp's Overview toolbar shows '↻ Refreshed: just now', '🕐 Auto refresh: On', 'Customize', 'Add card' — visible in frame 010 alongside the skeleton  |
+|  | medium | Workspace Bookmarks — save any Rundesk item or external URL | ClickUp's Overview carries a 'Bookmarks' card: 'Bookmarks make it easy to save ClickUp items or any URL from around the web.' + 'Add Bookmark'. |
+
+### Task types, filters & Drive  ·  9 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | small | No task-type selector in the Create modal (and POST /tasks silently drops taskTypeId) | "Rundex mein, so if we have to create a task, so yahan pe humein woh option hi [nahi] deta ke hum task type ko select kar sakein — jo mujhe add karne  |
+|  | small | Task types are invisible in a fresh workspace — no seeded Task/Milestone and the picker self-hides at zero types | Her whole argument is that a member must be able to see at a glance whether a row is a same-day task or a month-long MILESTONE. That only works if the |
+| **!** | medium | Search cannot filter by task type | Frames 047/052/061 show "Task types — Any >" as a first-class row in ClickUp's search Filters panel, sitting right beside Status — and she opens the s |
+| **!** | medium | Search has no Location filter — every query is workspace-wide | ClickUp's Filters panel offers "Location — Any >" (frames 047/052/061) to scope a search to a space, folder or list. |
+| **!** | large | No federated search across connected apps — Google Drive results never appear in the palette | "GOOGLE DRIVE ClickUp ka part nahi hai — woh ek outsourced / outer part hai... Lekin hum is ko LINK kar sakte hain apne ClickUp ke saath. Agar hum Goo |
+|  | large | No engagement-based sort modes (Trending In Workspace / Trending For You) | ClickUp's Sort menu (frame 066_0412) offers five modes; Rundesk implements three of them. |
+|  | small | Date filtering in search covers due dates only — no created/updated range | "yahan se bhi hum log search kar sakte hain ke abhi hua tha yeh — last created date kya thi — dates ke lehaz par." |
+|  | medium | Task type is never shown on a task row — only inside the detail sheet | Her stated purpose for types is at-a-glance CLARITY "kisi bhi member ko" about a row's time horizon. That requires the badge to be on the row, not two |
+|  | small | Status filter has no explicit "All" chip | ClickUp's Status submenu (frames 047/052) lists "All ✓ / Active / Closed" — All is a visible, check-marked default. |
+
+### Top bar & AI chats  ·  7 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | small | Remove the language dropdown from the top bar and default the app to English | "Yahan se English/Urdu — yeh cheez hata sakte hain; is ko hum logon ko yahan se REMOVE karna chahiye. Default par." — the language selector should not |
+| **!** | medium | No way to configure the nav / top bar — add a nav customization setting | "Lekin humare paas NAV BAR ko set down karne ka option nahi hai; lekin ClickUp pe humein option diya jaata hai." — ClickUp lets you configure what sit |
+| **!** | small | Notification bell duplicates the Inbox and offers members no way to configure notifications from it | "Hum notification yahan le ke jaa rahe hain, to humein yahan bhi rakhne ki zaroorat nahi hai — just access; ya phir humein rakhne ki zaroorat hai to y |
+|  | large | AI chats are not saved — no conversation list, no "Ask, Build, Create" | "Yeh AI CHATS hain… AI ka involvement bohot zyada hai — naya ClickUp ka vision mainly AI par depend karta hai." ClickUp keeps AI chats as durable obje |
+|  | large | No AI Agents product | "AI — in ki CHATS hain, AI AGENTS hain, aur BRAIN hai. Unhon ne teen apne software launch kiye hain." ClickUp exposes an "Agents" control in every vie |
+|  | medium | Brain has no branded, always-present entry point | ClickUp puts "✳ Brain²" in the view header of every surface, and names it in the AI Chats tooltip ("Open your AI Brain² Chats"), so the knowledge laye |
+|  | small | Sidebar favourites and recents are device-local, so any nav customization is lost on another browser | Implied by the nav-customization ask — a nav you "set down" should stay set down. |
+
+### Profile  ·  12 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+|  | large | No person profile panel — /app/profile is an account-settings form, not a profile | 'Yeh meri profile hai; yeh mujhe show karti hai ke meri activity kya hai, meri email kya hai, mera time zone kya chal raha hai, main kis ki team membe |
+|  | small | A person's local time is never shown | 'Mera time zone kya chal raha hai' — the profile shows '5:28 pm local time' for the person you are looking at. |
+|  | medium | Priorities — no 'today's most important tasks' list | 'Meri priorities kya hain — yaani ke aaj ke din mein mere kaun se important task hain jo karne hain', with a '+ Add' and the empty state '+ Add your m |
+|  | medium | Tasks buckets: Next, Unscheduled, Done and Delegated are missing; Today and Overdue are merged | 'Yahan bhi bata raha hai ke TODAY ke kya task hain, OVERDUE kaun se ho gaye the, NEXT kaun se upcoming task mere paas aa sakte hain, kaun si aisi chee |
+|  | medium | Org chart is admin-only, hidden by default, and not on a person | 'Yahan mujhe ORGANIZATION CHART show ho jayega' — the person's reporting line drawn as manager node → arrow → their card, with a 'No manager' placehol |
+|  | medium | No calendar on a person, and Google Calendar sync is not discoverable from the profile | 'CALENDAR — mera hi calendar show ho sakta hai, Google Calendar sync up kar sakti hoon.' |
+|  | medium | No per-person task activity feed (and no search/filter on activity) | 'Jis jis task ko open kiya hoga, jis document pe kaam kiya hoga — bas woh yahan pe show honge', with a search icon and a filter icon on the feed heade |
+|  | small | 'Add time off' is not reachable from a profile | '+ Add time off' sits as the first row of the profile's Activity tab, right above the person's contact details. |
+|  | small | 'Set status' — no custom status message, only four fixed presence values | A 'Set status' row in the avatar menu, separate from online/offline, plus the status pill on the profile header ('⊘ Offline'). |
+|  | small | Team membership is not visible or selectable from a person's profile | 'Main kis ki TEAM MEMBER hoon — yahan pe main woh select down kar sakti hoon.' |
+|  | medium | No 'Get StandUp' — no per-person work summary | A '✦ Get StandUp' button sitting next to the message button in the profile header, generating what this person has been doing. |
+|  | medium | Avatar menu is thin: no Notifications, Themes, Keyboard shortcuts, or Personal Tools section | The dropdown behind the avatar carries Set status, Mute notifications, Settings, Notifications, Themes, Keyboard shortcuts, Download app, Help, then a |
+
+### Status & settings  ·  10 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+|  | large | Custom status message: text + emoji + duration, with recents and presets | 'SET STATUS ka matlab yeh hota hai ke main break pe jaa rahi hoon… mere team member ko nahi pata ke main break pe jaa rahi hoon; agar unhon ne group m |
+|  | small | Mute notifications for a duration (submenu), not just on/off | 'NOTIFICATIONS, Mute ka option hai' — the ClickUp row carries a '>' chevron, i.e. mute for a chosen length of time. |
+|  | small | Keyboard shortcuts are unreachable from the UI | 'yahan pe SHORTCUTS ke baare mein bataya hai — shortcuts jo hain woh ClickUp ne diye hain ke aap kis tareeqe se woh cheez jaldi kar sakte ho; yeh unho |
+|  | small | 'Download app' entry in the profile menu | 'ClickUp app download ka option hai' — a permanent menu row that opens the app download in a new window. |
+|  | small | Language picker missing from the personal settings page | 'setting different layout pe jaati hai: apna name, email aur woh sab cheezein, aur neeche se themes wagera, languages, time format — yeh sab cheezein  |
+|  | small | Timezone is a free-text box, and there is no timezone-change notice | ClickUp's Language & Region section: a Timezone dropdown showing 'Asia/Karachi' plus a checked 'Notify me of Timezone changes'. |
+|  | medium | No high-contrast accessibility mode | ClickUp Preferences > Contrast: 'Turn on and off high contrast text and borders' → toggle 'High Contrast for increased accessibility'. |
+|  | medium | Per-user accent colour theme (and a 'Themes' entry in the profile menu) | 'themes wohi ke hum log kya themes rakh sakte hain' — the ClickUp 'Themes' menu item opens Customize > Themes with a named colour palette: Black, Purp |
+|  | medium | Help cannot book a meeting with the Rundesk team | 'agar Help pe click karti hoon to main ClickUp ki team se — ya to yeh documents read se koi bhi information le sakti hoon, ya phir main ClickUp ki tea |
+|  | medium | Help page is four hard-coded FAQs, not a documentation library | 'ya to yeh documents read se koi bhi information le sakti hoon' — read the docs to get any information you need. |
+
+### Pinned tools  ·  7 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | large | Per-user pinnable tools in the top bar (pin/unpin from a Personal Tools menu) | Users should decide which tools sit in the top bar for easy access and which do not — instead of us shipping a fixed limited set they have to live wit |
+| **!** | medium | "Personal Tools" launcher section in the user/avatar menu | When you click your profile there should be a TOOLS list — task creation, timing, notepad, clip recording, voice, doc, whiteboard, dashboard — each wi |
+|  | medium | Notepad — personal scratch notes | One of the seven icons she pinned is the Notepad; it is a first-class Personal Tool in ClickUp's list. |
+|  | medium | Standalone reminder not bound to a task | "Create Reminder" appears in ClickUp's Personal Tools list as a top-level thing you can make from anywhere. |
+|  | medium | Global entry points for Record a Clip, Talk to Text and Track Time | Loom-style recording, voice recordings and timing are three of the icons she has pinned in the top bar — one click from anywhere. |
+|  | small | Sidebar nav Favorites are browser-local, not account-level | The whole point of pinning your tools is that YOUR choice follows you. ClickUp's pin state is on the account. |
+|  | small | Dock settings has no tool picker and is desktop-XL only | The user chooses what goes in the quick-access strip; today we choose for them. |
+
+### Workspace creation  ·  9 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | medium | Workspace creation is super-admin-only; must be opened to member/manager/admin and closed to guest (and viewer) | "Workspace ka option jo hai humein SELECT DOWN karna hai: ke agar member hai woh create kar sakta hai; admin to obviously create kar sakta hai; lekin  |
+| **!** | large | No in-app create-workspace wizard — 'New workspace' is a bare one-field name dialog | "Main 'New Workspace' par click karoongi, main new workspace bana sakti hoon — phir same layout jo aap ne abhi kiya tha [signup ke waqt]." … "To works |
+|  | small | Workspace-purpose step (Work / Personal / School) does not exist | "Phir poochega — 'xyz' likhoongi to meri new workspace ka naam hai" preceded by the purpose question "What will you use this Workspace for? Work / Per |
+|  | medium | Feature-picker answers are collected and then silently thrown away | Implicit in "same layout jo aap ne abhi kiya tha" — the feature picker she demonstrates (Automations, CRM, Chat, Dashboards, Clips, Goals & OKRs, Form |
+|  | medium | No 'skip / which tool are you coming from' step in the creation flow | "Skip [ya] step, aur yahan se different tool search kar sakti hoon." |
+|  | medium | A workspace a member creates is not private to them — it is attached to the caller's existing organization | "Ab agar maine workspace banayi to yeh mere par dependent hai ke maine apne members ko share karna hai ya nahi karna, kyunke woh meri email pe ban rah |
+|  | medium | A newly created workspace is completely empty — no default Space, List, or channels | Implicit from frames 146/147 — after Finish the new ClickUp workspace already contains Space > List, All Tasks, and the General + Welcome channels, so |
+|  | small | Workspace switcher has no search box, no per-workspace avatars, and no unread indicator | On-screen in frames 146 and 149: the "Switch Workspaces" section header carries a magnifier icon, and every workspace row shows a colored letter-avata |
+|  | small | No account-level 'Workspaces' page under user settings | Visible in frames 133 and 136: ClickUp's account settings has a "My Settings" group containing Preferences, Notifications, Workspaces, Chat, Referrals |
+
+### Navigation  ·  8 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | medium | Sidebar collapse arrow — click to close the whole nav column | "yahan par ARROW ka option aaye aur main navigation CLOSE kar sakoon — mujhe nahi chahiye to space le… arrow mein is ko click karti hoon, yeh navigati |
+| **!** | medium | Icon-only rail when the sidebar is collapsed | "agar main is ko off karoon to mujhe bas ICONS show hon" / "warna humein sirf ICONS show honge" |
+|  | small | Keyboard shortcut + tooltip for the sidebar toggle (Ctrl + \) | Not spoken — read off frame 175, where ClickUp's expand button tooltips "Open sidebar  Ctrl  \". |
+|  | small | Persist the collapsed state per user and per workspace | Implied by "humari navigation ek baar mein chali jaye" — she wants it to stay gone, not re-open on every navigation. |
+|  | small | Below 1024px there is no workspace navigation at all — the hamburger is dead code | Not spoken — found while verifying the collapse work. |
+|  | medium | Second-level panel (Chat / Docs) also needs a collapse — this is where Rundesk's "double navigation" actually costs space | "yeh DOUBLE NAVIGATION rakhi hui hai… kyunke yeh SPACE leta hai" |
+|  | small | "Reset dock position" in the user menu does nothing | Not spoken — it is on screen in this section's own Rundesk frames (158, 166). |
+|  | medium | Sidebar footer "Customize Sidebar" and in-sidebar search / filter | Not asked in this section — read off frames 160, 164, 172 while transcribing the ClickUp control cluster she was pointing at. |
+
+### Inbox & notifications  ·  13 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | large | Customize importance: user-controlled Important / Not Important per notification type | 'Primary pe yeh setting ka option hai... yeh mujh se poochta hai ke mujhe kya cheezein show karwani hain. Phir yahan pe CUSTOMIZE hai: mention... comm |
+| **!** | small | Drop the 'Other' chip from the inbox | 'Ab yahan jo OTHERS wala option hai — yeh mujhe NAHI CHAHIYE humari list mein, kyunke yahan bhi same All wale hi hain — to yeh nahi chahiye. Lekin LAT |
+| **!** | small | Ship the tabbed inbox to the deployed instance | 'humare wale jo inbox hai — agar is pe click karte hain to humare paas sirf yeh notification layout hai. Balke teen hain...' |
+|  | medium | Inbox settings drawer: Show All tab, Group by date, Sort by newest first, Display mode | The gear on the Primary tab that opens 'Customize Inbox' — the container she goes through to reach Customize importance. |
+|  | small | Notify people when their follower/watcher status changes | 'FOLLOWER CHANGE — yaani ke agar mere hi task pe koi follower add ho' — listed as an Important notification type in ClickUp's panel. |
+| **!** | small | Notify on assignee change, including being removed from a task | 'kisi ne mera hi task kisi aur ko de diya aur mujhe REMOVE kar diya to mujhe woh cheez show ho' — ClickUp's 'Assignee change'. |
+|  | medium | Reaction notifications | 'Ab neeche se REACTIONS mujhe na show hon' — a togglable type in ClickUp's importance list. |
+|  | small | 'Shared with me' notification when someone shares an item with you | '[shared with] mujhe na show ho' — a togglable type in ClickUp's importance list. |
+|  | large | Request-access flow for content, plus its notification | 'agar ACCESS REQUEST — agar kisi ne koi access maanga to mujhe show ho' |
+|  | small | Give assigned comments and resolved comments their own notification types | 'kisi ne mujhe comment/assign kiya to mujhe show ho' — ClickUp lists 'Assigned comments' and 'Resolved comments' as separately togglable rows. |
+|  | small | 'Task created' / 'Subtask created' notification types | Rows in ClickUp's Customize importance list, defaulted to Not Important. |
+|  | small | 'Clear all' bulk action on the inbox | Visible top-right of ClickUp's inbox toolbar in every frame of this section, beside the gear. |
+|  | medium | 'Filter' control on the inbox | The funnel-icon 'Filter' button at the left of ClickUp's inbox toolbar. |
+
+### Chat  ·  13 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+|  | medium | Forwarded messages carry no provenance — no original author, no source channel, no "View message" link | Forward a message and, on the receiving side, the message should arrive as a quoted card showing who originally wrote it and when, with a footer "Forw |
+|  | medium | Forward is a 10-item dropdown, not a "Forward this message" modal | Clicking Forward should open a modal with a searchable "Choose a user or Channel" field, a "Write a message (optional)" note box, a preview of the mes |
+|  | large | Saved chat messages never reach Inbox → Later | Save a message, then go to Inbox → "Later" and find it there under a "Saved" heading, with the tab showing a "1 Saved" sub-count and each row reading  |
+|  | small | A saved message shows no persistent marker — no toast, no "Later" badge, no row tint | Saving should confirm itself: a toast "Message saved for later" with a link into Later, an inline "🔖 Later" badge next to the message timestamp, and a |
+|  | medium | No "Set reminder" on a saved message — reminders cannot attach to chat | The save confirmation should offer "Set reminder", so an important message can nudge you at a chosen time rather than sitting silently in a list. |
+|  | small | Emoji picker offers 6 emoji, not the full library | Clicking the add-reaction button should open the whole emoji list — "poori ki poori emoji icons ki list" — searchable and categorised. |
+|  | small | Only one quick reaction (👍) in the hover toolbar, and it is drawn as an icon not an emoji | The toolbar should lead with three one-tap emoji reactions — 👍 ✅ 🔥 — rendered as the actual emoji. |
+|  | small | No permalink to an individual message ("Copy link") and no /t/<messageId> route | Every message should have a copyable link that opens that message in its channel — the same link the Forward modal offers via "Copy link" and that "Vi |
+|  | small | Thread panel header has no "Assign to" / "Create Task" buttons, and is titled generically | Opening a thread should show "<Author>'s Thread" with "Assign to" and "Create Task ⌄" sitting right under the title, so you can turn the conversation  |
+|  | medium | "Assign" on a message does not assign anything | The person-with-arrow action on a message should assign that message to someone as an action item — the consultant lists assign among the things you c |
+|  | medium | Saved messages cannot be edited or assigned from the saved surface | From the saved item you should be able to edit the message, assign it, and open its thread — all three, without navigating back into the channel. |
+|  | small | No "…" overflow menu on the message toolbar; the right-click menu carries only 3 items | The message action bar should end in a "…" that opens the long tail of actions, so the visible bar stays short. |
+|  | small | Empty channel shows a bare headline instead of onboarding action cards | A new channel should offer "+ Add People", "Import from Slack", and cards for "Track Tasks", "Add Doc" and "Start SyncUp" (DM variant: "View Calendar" |
+
+### Retention & replies  ·  10 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | large | Chat thread replies never reach the Replies page | Replies should be the one place you check for thread replies across every channel — 'ek person 90 chats mein hai, 90 groups mein hai … ab us ko har ba |
+|  | large | Replies rows are link-outs, not inline threads with a reply box | Read and answer a thread from the Replies list itself: parent message, '1 Reply', the reply, and a composer with an 'Also send to #General' checkbox — |
+|  | small | Cleared notifications are never purged — no 30-day retention | 'after 30 DAYS baad woh saare notifications automatically VANISH ho jayenge … jaise hi aap ne clear kar diya, 30 days tak rahega aur delete ho jayega' |
+|  | small | No 30-day retention banner on the Cleared tab — and current copy promises the opposite | Tell the user, on the Cleared tab, that these will be permanently deleted after 30 days, with a way to read more. |
+|  | small | No 'Clear all' bulk action on the Inbox | 'mere paas jitne bhi notifications hain main yahan se clear kar sakti hoon. Maine sab clear kiye — woh yahan pe chale jayenge' — one button that clear |
+|  | medium | Saved chat messages don't appear in the Inbox 'Later' tab | Flag a message '🔖 Later' in a channel and find it under Inbox → Later, listed under a 'Saved' header as 'Saved in #General - Leo' with the message pre |
+|  | small | 'Replies' is not in the sidebar — only reachable from the command palette | Replies sits second in the Home sidebar, right under Inbox, and is where the user goes instead of opening 10 channels. |
+|  | small | No 'Mark unread' for a notification or a reply thread | 'agar to maine READ kiya hai to yeh is tarah se chala jayega' — read moves it to the Read tab; the 'Mark unread' button on the thread header pushes it |
+|  | medium | No per-thread mute or follow/unfollow | The Replies thread header carries a mute-thread (bell-with-slash) icon and a bookmark icon next to 'Mark unread', so a noisy thread in one of your 10  |
+|  | small | Thread panel header lacks the name and the Assign to / Create Task row | The thread panel is titled "Hamda's Thread" and puts 'Assign to' and 'Create Task' directly under the title. |
+
+### Skills (AI)  ·  12 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | large | Skills: a library of named, reusable AI playbooks (page, schema, API, nav) | "Ab yeh jo SKILL wali cheez hai na, yeh ek ClickUp ka NEW FEATURE hai — is ka matlab yeh hai ke aap jo kaam karte ho woh aap ka AGENT kar sakta hai; a |
+|  | medium | Skills empty state and starter carousel on the hub | The hub's first screen when you own nothing: a centred "Skills teach Brain how you work" empty state and a row of starter cards — Skills Miner, For yo |
+|  | medium | Prebuilt skill templates: Delegate Like Me, Brand Voice, Triage Tasks Like Me | Coloured template cards that create a skill by interviewing you: "Delegate Like Me — Assigns and hands off work the way you would"; "Brand Voice — Int |
+|  | large | Skills Miner — turn repeat work into skills automatically | "Skills Miner / Turn repeat work into skills — Scan your tasks, docs, and chats to surface workflows worth saving" behind a "Find my Skills" button; p |
+| **!** | large | AI-authored skill creation in chat, with an approve-before-create gate | Ask the assistant "Help me create a skill", have it explain what skills are, recommend specific ones grounded in your actual workspace, then propose a |
+|  | medium | Skill Memory — per-skill context that accumulates from conversation | "Yeh MEMORY hai — yeh hum jo bhi baat karenge woh STORE karega apne andar." Everything you tell a skill is retained by that skill, so it never has to  |
+|  | large | Skill Connections — bind a skill to external systems | "Aur yeh CONNECTIONS hai — agar main is ko build karoongi to main is ko kisi bhi system mein CONNECT kar sakti hoon." A skill can be wired to any conn |
+|  | medium | Persisted, auto-named AI chat threads in the sidebar | The chat that authored the skill starts as "New Chat", renames itself to "Skill Definition and Ideas", and stays in the sidebar's AI Chats list after  |
+|  | small | Answer-aware follow-up chips ("Follow ups") | Under every assistant answer, a "Follow ups" label and clickable next-step chips generated from that answer — e.g. "Create a Personal Task Organizer s |
+|  | small | Visible reasoning trace while the assistant works | A "Pondering" status with the retrieval steps streaming beneath it — "Checking what you're working on", "Checking the latest Skills basics" — before t |
+|  | medium | Per-message actions beyond copy (create task, save to doc, regenerate, thumbs up/down) | The six-icon row under each assistant answer: copy, create task, save to doc, regenerate, thumbs up, thumbs down. |
+|  | medium | Composer scope chip and model picker | The composer carries a "Skills" context chip (scoping the conversation to the surface you are on) and a model selector reading "Max ▾", plus a "+" att |
+
+### Meetings & calls  ·  15 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | large | SyncUp: in-app voice/video calls started from a channel | Start a call from inside the workspace the way ClickUp's SyncUp does — a call button in the channel header and a 'Start SyncUp — Jump on a voice call  |
+|  | medium | Pre-join preview dialog with device pickers and background effects | Before joining, show a preview with camera on/off, a background/colour picker ('BACKGROUND colours wagera select down kar sakte ho'), a mic device dro |
+|  | medium | In-call screen share (tab / window / entire screen) | From inside a call, share a browser tab, a window, or the entire screen — 'yeh mujhe poochta hai ke koi tab share karni hai, window share karni hai, y |
+|  | medium | Call participants panel with 'Invite people' | An in-call Participants panel listing who is on the call, with an invite control that can pull in existing members and add new ones — 'main PARTICIPAN |
+|  | small | Call thread — 'Every SyncUp has a thread' | A message thread attached to the call itself, so what was posted during the call survives it, with an 'Also send to #General' checkbox on each reply. |
+|  | small | In-call reactions overlay | Send an emoji reaction during a call and have it show up on the call surface — 'Agar main koi reaction doongi to woh yahan pe show ho jaata hai.' |
+|  | small | Emoji picker: search, Frequently Used, categories, add-custom '+' | The picker she opens has a 'Search...' field, a 'Frequently Used' section, a 'Smiles & People' grid, a bottom category tab strip, and a '+' to add a c |
+|  | medium | Minimise a running call to a docked picture-in-picture | Collapse the call and keep talking while browsing — 'main THREAD ko MINIMIZE kar sakti hoon yahan se, aur phir woh is tarah se show hota hai' — a smal |
+|  | medium | Call cards in the channel and a call-started notification with Join | When a call starts, everyone gets a notification and can join straight from it — 'aap ko notification aa raha hoga ke CALL ka option aaya… aap chaho t |
+| **!** | large | AI Notes: record the call and auto-generate meeting notes | An 'AI Notes' toggle inside the call that, once switched on server-side, records the whole call and writes the notes for you — 'main record karoongi a |
+|  | small | Entitlement upsell modal for gated meeting AI ('Contact your admin') | Turning on a capability the workspace has not purchased should explain itself rather than fail silently: 'Unlock AI Notetaker: Automatic meeting notes |
+|  | medium | Meetings hub page and sidebar entry | A 'Meetings' item in the Home sidebar (between Skills and My Tasks) opening a page where 'yahan pe aap ko show hongi meetings' — the place all meeting |
+|  | medium | Meeting notes list: Filters / My notes / Tags / Search + empty state | On the meetings page, a toolbar with 'Filters', a 'My notes' pill, 'Tags:', and a right-aligned 'Search', over a list of notes; when empty, 'No Meetin |
+|  | medium | Upcoming Meetings section with Join, countdown and Connect Calendar | An 'Upcoming Meetings' block with a 'Join' pill, the meeting title, a proximity badge ('in 5m'), a day timeline, and — when no calendar is connected — |
+|  | medium | Meeting-scoped AI ask-box with starter prompts, and meetings in the AI/search index | 'Hey {name}! Ready to dive into your meetings?' with a composer ('Get instant answers and insights from your meetings') and four chips: 'Summarize my  |
+
+### Task creation  ·  13 findings
+
+| | Size | Gap | Her ask |
+|---|---|---|---|
+| **!** | large | Task creation collects only a title — every other property is post-creation | Task banate waqt hi name, description, assign, start/due date + time, priority, tags, time estimate, dependency, subtasks aur checklist sab ek hi dial |
+| **!** | medium | Start and due dates cannot carry a time of day | Start date daali to time bhi poochhe (7 PM), due date daali to us ka bhi time (9:15) — 'proper duration' bane |
+| **!** | medium | No way to put a tag on a task anywhere in the product | Tags create kar saken — task ke ooper feature ke lehaz se tag rakh sakein, likh ke Enter dabao to naya tag ban jaye (YouTube jaisa) |
+| **!** | large | Task description has no slash-command editor (no table, banner, image or embed) | Description mein slash click karke table bana loon, banners rakhoon, image embed karoon — bilkul document ki tarah design kar sakoon |
+|  | small | Create modal is missing Reminder, Whiteboard and Dashboard tabs | Task banane ke baad woh Document ka poochta hai, phir Reminder ka, phir Whiteboard ka, phir Dashboard ka — sab ek hi jagah se |
+| **!** | medium | Cannot create a List from inside the task-create flow, and cannot mark it private at creation | Space select karo to woh khud bole 'pehle list banao' — list na banao to task create hi na ho; wahin se list bane aur poochhe ke PRIVATE karni hai ke  |
+| **!** | medium | No 'List settings' step after a list is created | List banne ke baad poochhe ke view kaisa chahiye — main abhi 'no thanks' karoon aur baad mein set kar loon |
+|  | small | Task type cannot be chosen while creating a task | Task banate waqt hi upar 'Task ⌄' se decide ho ke yeh Task hai ya Milestone |
+|  | medium | Date picker has no natural-language presets and no recurrence entry point | Date choose karte waqt Today / Tomorrow / This weekend / Next week / 2 weeks / 4 weeks aur 'Set Recurring' wahin milein |
+|  | large | A List cannot live directly under a Space — a Project is always required | Pehle space hoti hai, is ke baad space ke andar LISTS hoti hain |
+|  | medium | 'My Tasks' is buried inside Home instead of being a sidebar group with its own routes | My Tasks sidebar mein ho, us ke neeche Assigned to me / Today & Overdue / Personal List — aur profile pe click karo to bhi wahin se pahunch sakein |
+|  | small | Create dialog footer has no template picker, attachment or notify control | Task create karte waqt neeche Templates, attach aur notification (bell) ke controls hon |
+|  | small | Dead start-date state in the list quick-add | — |
+
