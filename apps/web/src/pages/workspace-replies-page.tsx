@@ -1,6 +1,7 @@
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
+import { ListSkeleton } from '../components/loading-skeletons'
 import { MessageCircleReply, CheckCircle2, FileText, MessageSquare } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
@@ -117,7 +118,11 @@ export function RepliesPage() {
 
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl mx-auto space-y-1">
-          {visible.length === 0 ? (
+          {notifsQuery.isPending ? (
+            // `visible` is [] until the request lands — showing the empty state
+            // here would claim you have no replies before we know.
+            <ListSkeleton rows={6} rowClassName="h-14" />
+          ) : visible.length === 0 ? (
             <EmptyState
               icon={<MessageCircleReply className="h-6 w-6" />}
               title={t('replies.emptyTitle')}

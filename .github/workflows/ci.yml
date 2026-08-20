@@ -78,3 +78,8 @@ jobs:
       # deploy asking for chunks the server has already deleted.
       - name: Stale-chunk recovery
         run: node test/e2e/stale-chunk-recovery.mjs
+
+      # Holds each response the app waits on and looks at the screen while it
+      # is outstanding. None of these are visible unless something is slow.
+      - name: Loading states are never blank
+        run: node test/e2e/loading-states.mjs

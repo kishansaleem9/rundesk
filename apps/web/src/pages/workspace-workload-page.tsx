@@ -16,6 +16,7 @@ import {
   toast,
   cn,
 } from '@rundesk/ui'
+import { ListSkeleton } from '../components/loading-skeletons'
 import { Users, Calendar, AlertTriangle, Download } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -308,7 +309,9 @@ export function WorkloadPage() {
         </div>
       </Card>
 
-      {people.length === 0 && (
+      {workloadQuery.isPending && <ListSkeleton rows={4} rowClassName="h-20" />}
+
+      {!workloadQuery.isPending && people.length === 0 && (
         <EmptyState
           icon={<Calendar className="h-6 w-6" />}
           title={t('workload.noTeammates')}

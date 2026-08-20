@@ -1,6 +1,7 @@
 import { useNavigate, useParams, useSearch, Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
+import { ListSkeleton } from '../components/loading-skeletons'
 import {
   Bell,
   AtSign,
@@ -435,7 +436,12 @@ export function InboxPage() {
 
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl mx-auto space-y-6">
-          {notifs.length === 0 ? (
+          {notifsQuery.isPending ? (
+            // Until the request lands, `notifs` is [] — and rendering the empty
+            // state here would assert there is nothing in your inbox before we
+            // know that. Skeleton rows say "still looking" instead.
+            <ListSkeleton rows={7} rowClassName="h-14" />
+          ) : notifs.length === 0 ? (
             <EmptyState
               icon={<Bell className="h-6 w-6" />}
               title={

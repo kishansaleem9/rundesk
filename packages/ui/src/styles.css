@@ -271,6 +271,25 @@
     to   { background-position: -200% 0; }
   }
 
+  /* The hairline that admits a navigation is in flight while the previous
+     page is still on screen. Indeterminate — we cannot know how long a chunk
+     will take, so it sweeps rather than filling to a fake percentage. */
+  .animate-route-progress {
+    animation: route-progress 1.1s ease-in-out infinite;
+  }
+
+  @keyframes route-progress {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(400%); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-shimmer,
+    .animate-route-progress {
+      animation: none;
+    }
+  }
+
   /* Custom Slider Thumb */
   .slider-thumb::-webkit-slider-thumb {
     -webkit-appearance: none;

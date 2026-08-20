@@ -21,6 +21,15 @@ export default defineConfig(({ mode }) => {
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // The default ('auto') injects a *classic* <script src="/registerSW.js">
+      // as the last thing in <head>. A classic script stops the HTML parser
+      // dead — and, because scripts also wait on any stylesheet still in
+      // flight, it waits for the app CSS first. So <body> could not be parsed,
+      // let alone painted, until both had landed: a guaranteed blank screen at
+      // the start of every cold load, and the boot skeleton in index.html
+      // would never have had the chance to show. `defer` keeps the worker and
+      // lets the parser through.
+      injectRegister: 'script-defer',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Rundesk',

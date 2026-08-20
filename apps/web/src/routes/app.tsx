@@ -1,6 +1,12 @@
 import { createFileRoute, Outlet, redirect, useRouterState } from '@tanstack/react-router'
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import { lazyChunk } from '../lib/chunk-reload'
+import {
+  CommandPaletteSkeleton,
+  PanelSkeleton,
+  RoutePending,
+  useRouteLoading,
+} from '../components/loading-skeletons'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
@@ -93,6 +99,7 @@ function AppShell() {
     return candidate && UUID_RE.test(candidate) ? candidate : null
   }, [pathname])
   const aiDocked = aiOpen && !!workspaceId && !isAdminRoute
+  const routeLoading = useRouteLoading()
 
   if (isAdminRoute) {
     return (
@@ -114,14 +121,17 @@ function AppShell() {
           aiOpen={aiDocked}
         />
         <main className="flex-1 overflow-auto">
-          <Outlet />
+          {/* The shell is already on screen, so only the column waits. Without
+              this the router leaves the *previous* page up for the whole fetch
+              and a click looks like it did nothing. */}
+          {routeLoading ? <RoutePending /> : <Outlet />}
         </main>
       </div>
       {aiDocked ? (
         // Narrow screens have no room for a column, so the dock overlays there
         // and becomes a real third column from md up.
         <aside className="fixed inset-y-0 right-0 z-40 w-full max-w-sm border-l border-border/60 shadow-xl md:static md:z-auto md:w-[380px] md:max-w-none md:shadow-none">
-          <Suspense fallback={null}>
+          <Suspense fallback={<PanelSkeleton className="h-full bg-card" />}>
             <AiPanel
               workspaceId={workspaceId!}
               currentView={describeCurrentView(routeId)}
@@ -134,7 +144,7 @@ function AppShell() {
         </aside>
       ) : null}
       {cmdOpen ? (
-        <Suspense fallback={null}>
+        <Suspense fallback={<CommandPaletteSkeleton />}>
           <CommandPalette
             open={cmdOpen}
             onOpenChange={setCmdOpen}

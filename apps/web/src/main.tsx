@@ -14,6 +14,7 @@ import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
 import { useCustomDomainBootstrap } from './lib/custom-domain'
 import { installChunkReloadHandlers } from './lib/chunk-reload'
+import { RoutePending } from './components/loading-skeletons'
 
 const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
 
@@ -31,6 +32,14 @@ const router = createRouter({
     queryClient,
   },
   defaultPreload: 'intent',
+  // Every route is a dynamic import, and without this they load into nothing —
+  // the blank wait called out at 00:08 in the 7 Aug review. One wiring point
+  // covers all 47 of them.
+  defaultPendingComponent: RoutePending,
+  // Show it quickly (the default 1s is long enough to read as a hang) but hold
+  // it long enough not to strobe when a chunk is already cached.
+  defaultPendingMs: 150,
+  defaultPendingMinMs: 300,
 })
 
 declare module '@tanstack/react-router' {
@@ -87,6 +96,47 @@ function App() {
   )
 }
 
+/**
+ * Take down the boot skeleton painted by index.html — but not until there is
+ * something behind it.
+ *
+ * Calling `render()` is not the same as having rendered. On a deep link (a
+ * shared URL, a bookmark, a refresh on any page) RouterProvider renders
+ * *nothing at all* until the first match resolves, and every route here is a
+ * lazy chunk. Measured: loading /app/:ws/docs with that chunk held for four
+ * seconds left `<body>` completely empty for the duration — no sidebar, no top
+ * bar. Removing the skeleton on the first frame put the blank screen straight
+ * back, one layer down.
+ *
+ * So we wait for real pixels: poll for an element in #root big enough to be
+ * something a person sees. The cap means a genuinely broken boot ends up
+ * showing whatever the app did render (the error boundary, usually) rather
+ * than shimmering forever.
+ */
+function dismissBootSkeleton() {
+  const boot = document.getElementById('boot')
+  const root = document.getElementById('root')
+  if (!boot || !root) return
+
+  const startedAt = Date.now()
+  const hasPainted = () =>
+    Array.from(root.querySelectorAll('*')).some((el) => {
+      const rect = el.getBoundingClientRect()
+      return rect.width > 40 && rect.height > 24
+    })
+
+  const tick = () => {
+    if (!hasPainted() && Date.now() - startedAt < 15_000) {
+      requestAnimationFrame(tick)
+      return
+    }
+    boot.style.transition = 'opacity 120ms ease-out'
+    boot.style.opacity = '0'
+    setTimeout(() => boot.remove(), 140)
+  }
+  requestAnimationFrame(tick)
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
@@ -96,4 +146,6 @@ createRoot(document.getElementById('root')!).render(
     </QueryClientProvider>
   </StrictMode>,
 )
+
+dismissBootSkeleton()
 
