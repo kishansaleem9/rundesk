@@ -300,17 +300,22 @@ console.log('\n0. build and deployment guardrails')
     'index.html and sw.js are served no-cache',
   )
 
-  const deploy = fs.readFileSync(path.join(REPO, 'deploy/deploy-prod.sh'), 'utf8')
-  // dist itself is still replaced wholesale — what must not happen is losing
-  // /assets/ with it. Check the order: set aside, swap, put back.
-  const setAside = deploy.indexOf('mv apps/web/dist/assets apps/web/assets.prev')
-  const swap = deploy.search(/^rm -rf apps\/web\/dist$/m)
-  const putBack = deploy.indexOf('cp -an apps/web/assets.prev')
-  check(
-    setAside !== -1 && swap !== -1 && putBack !== -1 && setAside < swap && swap < putBack,
-    'the deploy carries the previous release’s chunks across the swap',
-    `setAside=${setAside} swap=${swap} putBack=${putBack}`,
-  )
+  // Both scripts publish the SPA — deploy.sh is what the GitHub Actions deploy
+  // runs (`deploy.sh rebuild`) and what deploy/README tells people to run, so a
+  // fix that lands only in deploy-prod.sh never reaches production.
+  for (const script of ['deploy/deploy.sh', 'deploy/deploy-prod.sh']) {
+    const deploy = fs.readFileSync(path.join(REPO, script), 'utf8')
+    // dist itself is still replaced wholesale — what must not happen is losing
+    // /assets/ with it. Check the order: set aside, swap, put back.
+    const setAside = deploy.indexOf('mv apps/web/dist/assets apps/web/assets.prev')
+    const swap = deploy.search(/^\s*rm -rf apps\/web\/dist$/m)
+    const putBack = deploy.indexOf('cp -an apps/web/assets.prev')
+    check(
+      setAside !== -1 && swap !== -1 && putBack !== -1 && setAside < swap && swap < putBack,
+      `${script} carries the previous release’s chunks across the swap`,
+      `setAside=${setAside} swap=${swap} putBack=${putBack}`,
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------

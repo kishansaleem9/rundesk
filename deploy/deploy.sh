@@ -127,18 +127,59 @@ apply_schema() {
 
 build_web() {
   echo "▶ Building web SPA → apps/web/dist"
-  rm -rf apps/web/dist
   local show_seeded="${VITE_SHOW_SEEDED_LOGINS:-false}"
   echo "▶ VITE_SHOW_SEEDED_LOGINS=$show_seeded"
+  # Build into a staging dir, then publish. Every file under /assets/ is
+  # content-hashed, and the previous release's chunks are kept: a tab that was
+  # open when we deploy is still running the old index.html, and if the chunks
+  # it names disappear, every lazy import 404s and the whole app is replaced by
+  # the error boundary (see apps/web/src/lib/chunk-reload.ts). Keeping one
+  # release's worth of chunks costs a few MB and means those tabs never break.
+  rm -rf apps/web/dist.new
   docker buildx build \
     --build-arg VITE_SHOW_SEEDED_LOGINS="$show_seeded" \
     -f deploy/Dockerfile.web \
     --target export \
-    --output type=local,dest=apps/web/dist \
+    --output type=local,dest=apps/web/dist.new \
     .
+  if [ ! -s apps/web/dist.new/index.html ]; then
+    echo "✗ web build produced no index.html — refusing to publish over the live dist"
+    rm -rf apps/web/dist.new
+    exit 1
+  fi
+  rm -rf apps/web/assets.prev
+  [ -d apps/web/dist/assets ] && mv apps/web/dist/assets apps/web/assets.prev
+  rm -rf apps/web/dist
+  mv apps/web/dist.new apps/web/dist
+  if [ -d apps/web/assets.prev ]; then
+    # -n: the new build always wins; only chunks unique to the old one are added.
+    cp -an apps/web/assets.prev/. apps/web/dist/assets/ 2>/dev/null || true
+    rm -rf apps/web/assets.prev
+  fi
+  # Chunks no release has published in two weeks belong to no live tab.
+  find apps/web/dist/assets -type f -mtime +14 -delete 2>/dev/null || true
   # nginx (www-data) needs traverse + read on the dist tree
   chmod -R o+rX apps/web/dist
   chmod o+x apps/web/dist /opt/rundesk/apps/web /opt/rundesk/apps /opt/rundesk 2>/dev/null || true
+}
+
+# The installed vhost is a *copy* (`./deploy/deploy.sh nginx`), and certbot has
+# since rewritten it with the SSL block — so a rebuild must not overwrite it.
+# But a vhost that still caches index.html hands returning users a manifest
+# naming chunks this deploy has deleted, which is the crash in §0 of
+# docs/video1-rundesk-gap-audit.md. Say so loudly rather than deploying quietly
+# on top of it.
+warn_if_vhost_caches_index() {
+  local installed="/etc/nginx/sites-enabled/rundesk.theaura.agency"
+  [ -f "$installed" ] || return 0
+  grep -q 'Cache-Control "no-cache"' "$installed" && return 0
+  echo
+  echo "⚠ The live nginx vhost still caches index.html and sw.js."
+  echo "  Tabs opened before a deploy will 404 on their chunks. To fix, merge the"
+  echo "  no-cache location block from deploy/nginx/rundesk.theaura.agency.conf"
+  echo "  into $installed (keep certbot's SSL lines), then:"
+  echo "      nginx -t && systemctl reload nginx"
+  echo
 }
 
 case "$CMD" in
@@ -204,6 +245,7 @@ case "$CMD" in
     echo "▶ Applying any new DB migrations"
     apply_schema
     systemctl reload nginx
+    warn_if_vhost_caches_index
     echo "✓ Rebuild complete."
     ;;
   logs)

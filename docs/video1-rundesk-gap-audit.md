@@ -93,7 +93,7 @@ Three things the reproduction turned up that the read-only pass had not:
   `skipWaiting` + `clientsClaim` + `cleanupOutdatedCaches`, a new release activated under an
   open tab and deleted the chunks that tab was still importing.
 
-**What changed** (all verified by the 17-check suite below, which fails 5 checks when the
+**What changed** (all verified by the 18-check suite below, which fails 5 checks when the
 recovery path is disabled):
 
 | | |
@@ -103,7 +103,7 @@ recovery path is disabled):
 | `apps/web/src/components/route-error-boundary.tsx` | a stale chunk now reads "Updating Rundesk…", not "Something went wrong". |
 | `apps/web/vite.config.ts` | `navigateFallback: undefined` so navigations go to the network; chunks out of the precache and into a runtime `CacheFirst`. Precache: 69 entries → 6. |
 | `deploy/nginx/…conf` | `index.html` and the worker files get `Cache-Control: no-cache`. They had no cache headers at all, so browsers applied heuristic freshness. |
-| `deploy/deploy-prod.sh` | the previous release's `assets/` are carried across the swap, so an open tab never 404s in the first place — no reload, no interruption. |
+| `deploy/deploy.sh` + `deploy/deploy-prod.sh` | the previous release's `assets/` are carried across the swap, so an open tab never 404s in the first place — no reload, no interruption. Both, because `deploy.sh rebuild` is what the GitHub Actions deploy actually runs; a fix in only one of them never reaches production. |
 
 **The harness gap is closed too.** `deploy/verify-ui.mjs` always opens a fresh page, so it
 structurally cannot see this; the new suite stages two releases and runs in CI.
