@@ -1,21 +1,26 @@
 import { createFileRoute, Outlet, redirect, useRouterState } from '@tanstack/react-router'
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { lazyChunk } from '../lib/chunk-reload'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
 import { SupportWidget } from '../components/support-widget'
 
-const CommandPalette = lazy(async () => {
-  const mod = await import('../components/command-palette')
-  return { default: mod.CommandPalette }
-})
+const CommandPalette = lazy(
+  lazyChunk(async () => {
+    const mod = await import('../components/command-palette')
+    return { default: mod.CommandPalette }
+  }),
+)
 
 // §A6.4 — the assistant used to be reachable only from the AI page. It is
 // docked here instead, and loaded on first open so it costs nothing until then.
-const AiPanel = lazy(async () => {
-  const mod = await import('../components/ai-panel')
-  return { default: mod.AiPanel }
-})
+const AiPanel = lazy(
+  lazyChunk(async () => {
+    const mod = await import('../components/ai-panel')
+    return { default: mod.AiPanel }
+  }),
+)
 
 export const Route = createFileRoute('/app')({
   beforeLoad: ({ context }) => {

@@ -1,8 +1,9 @@
 import { Link, useRouter } from '@tanstack/react-router'
 import { Button, Card } from '@rundesk/ui'
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from '../lib/i18n'
+import { canReloadForStaleChunks, isChunkLoadError, reloadForStaleChunks } from '../lib/chunk-reload'
 
 interface RouteErrorBoundaryProps {
   error: unknown
@@ -33,11 +34,20 @@ export function RouteErrorBoundary({ error, reset }: RouteErrorBoundaryProps) {
   const { t } = useTranslation()
   const router = useRouter()
 
+  // A chunk that 404s means this tab is running a build the server no longer
+  // has — it can't be fixed in place, only reloaded (see lib/chunk-reload).
+  // Decided once, on mount, so the stamp written by the effect can't flip it.
+  const [recovering] = useState(() => isChunkLoadError(error) && canReloadForStaleChunks())
+
   useEffect(() => {
     if (typeof console !== 'undefined') {
       console.error('[route-error-boundary]', error)
     }
   }, [error])
+
+  useEffect(() => {
+    if (recovering) reloadForStaleChunks()
+  }, [recovering])
 
   const message =
     error instanceof Error
@@ -52,6 +62,27 @@ export function RouteErrorBoundary({ error, reset }: RouteErrorBoundaryProps) {
       return
     }
     router.invalidate()
+  }
+
+  // Reloading to the current build isn't an error the user needs to read — it's
+  // an update. Say so, and don't offer buttons that fight the reload.
+  if (recovering) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center p-6 bg-background"
+        data-testid="route-updating"
+      >
+        <Card className="max-w-lg w-full p-8 text-center bg-card/80 backdrop-blur">
+          <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-muted text-muted-foreground flex items-center justify-center">
+            <RefreshCw className="h-6 w-6 animate-spin" />
+          </div>
+          <h1 className="font-display text-2xl font-semibold text-foreground mb-2">
+            {t('routeError.updatingTitle')}
+          </h1>
+          <p className="text-sm text-muted-foreground">{t('routeError.updatingBody')}</p>
+        </Card>
+      </div>
+    )
   }
 
   return (

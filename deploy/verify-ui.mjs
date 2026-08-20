@@ -18,6 +18,12 @@
  * If playwright is not importable it says so and exits 2 rather than
  * pretending the UI passed. See deploy/README.md for the one-time install.
  *
+ * One thing this deliberately cannot cover: it always opens a *fresh* page, so
+ * it always fetches the current manifest and can never see a chunk that a
+ * deploy has deleted out from under an already-open tab — the crash in the
+ * 7 Aug review video. That needs two releases staged side by side, which is
+ * what test/e2e/stale-chunk-recovery.mjs does (and CI runs).
+ *
  * Overrides: BASE (default: APP_URL from .env), RUNDESK_EMAIL,
  * RUNDESK_PASSWORD, API_PORT, CHROME, PLAYWRIGHT_DIR, NO_HOST_MAP=1 to resolve
  * the hostname normally instead of pinning it to loopback.

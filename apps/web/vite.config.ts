@@ -47,11 +47,36 @@ export default defineConfig(({ mode }) => {
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
-        // Don't precache the JS bundle on every release — it's too big and
-        // breaks updates. Use stale-while-revalidate instead.
+        // vite-plugin-pwa defaults this to 'index.html', which registers a
+        // NavigationRoute *ahead* of everything in runtimeCaching — so every
+        // navigation was answered from the worker's own precached shell and
+        // the NetworkFirst HTML rule below never once matched. A worker that
+        // hasn't updated yet then pins the tab to a shell whose chunks the
+        // server has already deleted. Navigations go to the network instead;
+        // the NetworkFirst rule still serves the last good HTML when offline.
+        navigateFallback: undefined,
+        // Precache the shell only. This glob used to include `js`, which
+        // precached all ~60 route chunks — the opposite of the intent below.
+        // Because the worker runs skipWaiting + clientsClaim +
+        // cleanupOutdatedCaches, a new release would activate under an already
+        // open tab and delete the very chunks that tab was still importing.
+        globPatterns: ['index.html', '**/*.{css,svg,png,ico,woff2}'],
+        globIgnores: ['assets/**'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         runtimeCaching: [
+          {
+            // Build chunks. The filename is the version, so they're immutable
+            // and can be served from cache forever — and, crucially, they age
+            // out on their own instead of being evicted the moment a new
+            // release activates.
+            urlPattern: ({ url }) => url.pathname.startsWith('/assets/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'rundesk-assets',
+              expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             // App shell — HTML
             urlPattern: ({ request }) => request.mode === 'navigate',
@@ -74,7 +99,6 @@ export default defineConfig(({ mode }) => {
             },
           },
         ],
-        navigateFallbackDenylist: [/^\/api/],
       },
       devOptions: {
         // Disable in dev to avoid SW caching interfering with HMR

@@ -2765,6 +2765,8 @@ export const en = {
   'routeError.fallbackMessage': 'An unexpected error occurred while rendering this page.',
   'routeError.title': 'Something went wrong',
   'routeError.goHome': 'Go home',
+  'routeError.updatingTitle': 'Updating Rundesk…',
+  'routeError.updatingBody': 'A new version was released while this tab was open. Reloading to pick it up.',
 
   // List view (board/table/calendar/gantt)
   'list.defaultListName': 'Tasks',
@@ -7791,6 +7793,8 @@ export const es: Record<TranslationKey, string> = {
   'routeError.fallbackMessage': 'Se produjo un error inesperado al renderizar esta página.',
   'routeError.title': 'Algo salió mal',
   'routeError.goHome': 'Ir al inicio',
+  'routeError.updatingTitle': 'Actualizando Rundesk…',
+  'routeError.updatingBody': 'Se publicó una nueva versión mientras esta pestaña estaba abierta. Recargando para aplicarla.',
 
   // List view (board/table/calendar/gantt)
   'list.defaultListName': 'Tareas',
@@ -12794,6 +12798,8 @@ export const ar: Record<TranslationKey, string> = {
   'routeError.fallbackMessage': 'حدث خطأ غير متوقع أثناء عرض هذه الصفحة.',
   'routeError.title': 'حدث خطأ ما',
   'routeError.goHome': 'الذهاب إلى الصفحة الرئيسية',
+  'routeError.updatingTitle': '…جارٍ تحديث Rundesk',
+  'routeError.updatingBody': 'صدر إصدار جديد بينما كانت هذه التبويبة مفتوحة. يتم إعادة التحميل لتطبيقه.',
 
   // List view (board/table/calendar/gantt)
   'list.defaultListName': 'المهام',
@@ -17674,6 +17680,8 @@ export const ur: Record<TranslationKey, string> = {
   'routeError.fallbackMessage': 'اس صفحے کو رینڈر کرتے وقت ایک غیر متوقع خرابی پیش آئی۔',
   'routeError.title': 'کچھ غلط ہو گیا',
   'routeError.goHome': 'ہوم جائیں',
+  'routeError.updatingTitle': '…Rundesk اپ ڈیٹ ہو رہا ہے',
+  'routeError.updatingBody': 'یہ ٹیب کھلا ہونے کے دوران نیا ورژن جاری ہوا۔ اسے لینے کے لیے دوبارہ لوڈ کیا جا رہا ہے۔',
   'list.defaultListName': 'ٹاسکس',
   'list.addTask': 'ٹاسک شامل کریں',
   'list.createTask': 'ٹاسک بنائیں',

@@ -35,7 +35,9 @@ Frame `015_0101.jpg` shows our error boundary, verbatim:
    [ Try again ]  [ Go home ]
 ```
 
-**It is a stale-chunk crash, and the cause is on our side in three places:**
+**It is a stale-chunk crash, and the cause is on our side in three places** (the `file:line`
+references below describe the code *as it was when the video was recorded* — §0.1 has what
+it looks like now):
 
 | | Evidence |
 |---|---|
@@ -56,16 +58,55 @@ thing**, so the recording almost certainly under-reports how often this is being
 open a *fresh* page, so they always fetch a current manifest. This failure only exists for a
 session that predates the deploy. That is a real hole in the harness, not just in the app.
 
-**The fix is three small independent changes**, and all three are worth doing:
-
-1. **Retry, then reload once** — wrap dynamic imports so a chunk-load failure triggers a
-   single hard reload, guarded by a `sessionStorage` flag so it can never loop.
-2. **Stop deleting old assets** — keep the previous build's `assets/` alongside the new one
-   so in-flight sessions can still resolve the chunk they were promised. Cheap; a few MB.
-3. **Tell the user a new version exists** rather than letting them discover it by crashing.
-
 Everything else in this document is a feature. This one is a live outage on the primary
 navigation control, and it should go first.
+
+### 0.1 Reproduced, then fixed
+
+Her note that *"in my browser it was opening fine"* is not a contradiction — it is the
+diagnosis. A browser that loads the page **after** a deploy fetches the current manifest and
+asks for chunks that exist. Only a session that predates the deploy asks for a deleted one.
+
+Reproduced locally end to end (`test/e2e/stale-chunk-recovery.mjs`): two real builds, a tab
+opened on the first, the server flipped to the second underneath it. Clicking search produced
+the video's screen character for character —
+
+```
+Something went wrong
+Failed to fetch dynamically imported module: …/assets/command-palette-C0vgjVgR.js
+Try again  Go home
+```
+
+Three things the reproduction turned up that the read-only pass had not:
+
+- **The blast radius is the whole app, not search.** Every screen is a dynamic import —
+  47 generated lazy routes plus the palette and the AI dock. Search is simply what she
+  clicked. In the negative-control run, clicking a sidebar link went blank instead.
+- **The service worker made a plain reload useless.** `vite-plugin-pwa` defaults
+  `workbox.navigateFallback` to `index.html`, which registers a `NavigationRoute` *ahead of*
+  everything in `runtimeCaching`. So every navigation was answered from the worker's own
+  precached shell, and the `NetworkFirst` HTML rule written in `vite.config.ts` had never
+  matched a single request. A recovery reload landed straight back on the stale shell, whose
+  entry chunk 404s too — a blank page.
+- **`globPatterns` precached all 60 chunks**, directly against the intent of the comment
+  above it ("Don't precache the JS bundle on every release — it breaks updates"). With
+  `skipWaiting` + `clientsClaim` + `cleanupOutdatedCaches`, a new release activated under an
+  open tab and deleted the chunks that tab was still importing.
+
+**What changed** (all verified by the 17-check suite below, which fails 5 checks when the
+recovery path is disabled):
+
+| | |
+|---|---|
+| `apps/web/src/lib/chunk-reload.ts` | new. Recognises a chunk-load failure in any engine, retires the service worker and its caches, then reloads — once per 30s, so a genuinely broken deploy fails honestly instead of spinning. |
+| `apps/web/src/main.tsx` | listens for `vite:preloadError` and chunk-shaped `unhandledrejection`, which is what covers all 47 generated routes without touching the generated file. |
+| `apps/web/src/components/route-error-boundary.tsx` | a stale chunk now reads "Updating Rundesk…", not "Something went wrong". |
+| `apps/web/vite.config.ts` | `navigateFallback: undefined` so navigations go to the network; chunks out of the precache and into a runtime `CacheFirst`. Precache: 69 entries → 6. |
+| `deploy/nginx/…conf` | `index.html` and the worker files get `Cache-Control: no-cache`. They had no cache headers at all, so browsers applied heuristic freshness. |
+| `deploy/deploy-prod.sh` | the previous release's `assets/` are carried across the swap, so an open tab never 404s in the first place — no reload, no interruption. |
+
+**The harness gap is closed too.** `deploy/verify-ui.mjs` always opens a fresh page, so it
+structurally cannot see this; the new suite stages two releases and runs in CI.
 
 ---
 
@@ -330,7 +371,9 @@ Worth stating plainly so none of this gets rebuilt:
 ## 5. Suggested order
 
 **Now — it is broken in production**
-0. Stale-chunk crash on search (§0). Three small changes, plus a harness gap to close.
+0. ~~Stale-chunk crash on search (§0).~~ **Done** — reproduced, fixed in the app, the
+   worker, the vhost and the deploy, and covered by `test/e2e/stale-chunk-recovery.mjs`
+   in CI. Ships with the next deploy. See §0.1.
 
 **Fast, high visible value**
 1. Task type in the create modal (§1.1) — UI over a working API

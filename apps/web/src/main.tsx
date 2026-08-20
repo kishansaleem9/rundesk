@@ -13,8 +13,14 @@ import { api } from './lib/api'
 import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
 import { useCustomDomainBootstrap } from './lib/custom-domain'
+import { installChunkReloadHandlers } from './lib/chunk-reload'
 
 const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
+
+// Chunk failures that never reach a React boundary — a hover-preload, or an
+// import() awaited in an event handler. Installed before the router exists so
+// nothing can slip through during startup.
+installChunkReloadHandlers()
 
 const router = createRouter({
   routeTree,

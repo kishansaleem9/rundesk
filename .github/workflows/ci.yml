@@ -41,3 +41,35 @@ jobs:
 
       - name: Migration sequence guardrail
         run: node scripts/check-migration-order.mjs
+
+  stale-chunks:
+    name: Stale-chunk recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.1
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Builds two releases and drives a browser across the deploy between
+      # them. Guards the crash from the 7 Aug review video: a tab open across a
+      # deploy asking for chunks the server has already deleted.
+      - name: Stale-chunk recovery
+        run: node test/e2e/stale-chunk-recovery.mjs
