@@ -114,7 +114,7 @@ if [ ! -s apps/web/dist.new/index.html ]; then
   exit 1
 fi
 rm -rf apps/web/assets.prev
-[ -d apps/web/dist/assets ] && mv apps/web/dist/assets apps/web/assets.prev
+if [ -d apps/web/dist/assets ]; then mv apps/web/dist/assets apps/web/assets.prev; fi
 rm -rf apps/web/dist
 mv apps/web/dist.new apps/web/dist
 if [ -d apps/web/assets.prev ]; then
@@ -159,10 +159,9 @@ installed_vhost="/etc/nginx/sites-enabled/rundesk.theaura.agency"
 if [ -f "$installed_vhost" ] && ! grep -q 'Cache-Control "no-cache"' "$installed_vhost"; then
   echo
   echo "⚠ The live nginx vhost still caches index.html and sw.js."
-  echo "  Tabs opened before a deploy will 404 on their chunks. To fix, merge the"
-  echo "  no-cache location block from deploy/nginx/rundesk.theaura.agency.conf"
-  echo "  into $installed_vhost (keep certbot's SSL lines), then:"
-  echo "      nginx -t && systemctl reload nginx"
+  echo "  Tabs opened before a deploy will 404 on their chunks. Fix it with:"
+  echo "      sudo ./deploy/patch-nginx-cache-headers.sh"
+  echo "  (edits $installed_vhost in place, keeping certbot's SSL lines)"
   echo
 fi
 
