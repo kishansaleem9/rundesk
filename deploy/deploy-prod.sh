@@ -148,4 +148,22 @@ echo "▶ Running seed (idempotent)"
 docker exec rundesk-api sh -lc "cd /app/packages/db && pnpm exec tsx src/seed.ts" || true
 
 systemctl reload nginx
+
+# The installed vhost is a *copy* (deploy/deploy.sh nginx), and certbot has
+# since rewritten it with the SSL block — so this script must not overwrite it.
+# But a vhost that still caches index.html hands returning users a manifest
+# naming chunks this deploy has deleted, which is the crash in §0 of
+# docs/video1-rundesk-gap-audit.md. Say so loudly rather than deploying quietly
+# on top of it.
+installed_vhost="/etc/nginx/sites-enabled/rundesk.theaura.agency"
+if [ -f "$installed_vhost" ] && ! grep -q 'Cache-Control "no-cache"' "$installed_vhost"; then
+  echo
+  echo "⚠ The live nginx vhost still caches index.html and sw.js."
+  echo "  Tabs opened before a deploy will 404 on their chunks. To fix, merge the"
+  echo "  no-cache location block from deploy/nginx/rundesk.theaura.agency.conf"
+  echo "  into $installed_vhost (keep certbot's SSL lines), then:"
+  echo "      nginx -t && systemctl reload nginx"
+  echo
+fi
+
 echo "✓ Deploy complete."
