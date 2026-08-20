@@ -133,6 +133,35 @@ structurally cannot see this; the new suite stages two releases and runs in CI.
 
 ---
 
+### 0.3 The waiting states were three bugs, not one
+
+§2.9a read as "use the Skeleton component we already built". Driving the app
+with each response held open found four separate blank waits, three of which
+were invisible from the code:
+
+- **`<head>` blocked the parser outright.** `vite-plugin-pwa` injects a
+  *classic* `<script src="/registerSW.js">` as the last thing in `<head>`, and a
+  classic script waits on any stylesheet still in flight. `<body>` could not be
+  parsed — `document.body` was measurably `null` — let alone painted, until both
+  the app CSS and that script had landed. No skeleton anywhere in the app could
+  have shown, because the app's markup did not exist yet.
+- **Deep links rendered nothing at all.** Landing on `/app/:ws/docs` with that
+  chunk held for four seconds left `<body>` completely empty: no sidebar, no top
+  bar. `RouterProvider` renders nothing until the first match resolves, so no
+  in-router fallback covers it.
+- **`defaultPendingComponent` does not fire for our routes.** Every route is a
+  `.lazy()` chunk with no loader, so the match never enters the status that
+  option keys off. Navigating left the *previous* page frozen on screen for the
+  whole fetch.
+
+Plus the one the audit did predict, worse than described: pages reading
+`query.data ?? []` rendered their **empty state** while the request was in
+flight — telling you your inbox was empty before knowing.
+
+`test/e2e/loading-states.mjs` holds each response open and looks at the screen
+while it is outstanding: 17 checks, 16 of which fail against the previous build.
+
+
 ## 1. What she explicitly called missing
 
 These are the ones where she says outright it is absent on our end — the phrases
@@ -398,22 +427,32 @@ Worth stating plainly so none of this gets rebuilt:
    worker, the vhost and the deploy, and covered by `test/e2e/stale-chunk-recovery.mjs`
    in CI. Ships with the next deploy. See §0.1.
 
-**Fast, high visible value**
-1. Task type in the create modal (§1.1) — UI over a working API
-2. Remove "Other" from Inbox (§2.2); language dropdown out of the top bar (§1.5)
-3. Sidebar collapse to icons (§1.3)
-4. 30-day retention for cleared notifications (§2.5)
+**Fast, high visible value — done**
+1. ~~Task type in the create modal (§1.1)~~ — **done**. Not only UI: the create
+   DTO had no `taskTypeId` and the pipe runs `whitelist: true`, so the client's
+   choice was stripped in transit and every task got the list's default. Type
+   also added as a search filter, end to end.
+2. ~~Remove "Other" from Inbox (§2.2); language dropdown out of the top bar
+   (§1.5)~~ — **done**. Language moved to personal settings, not deleted.
+3. ~~Sidebar collapse to icons (§1.3)~~ — **done**, persisted, and the boot
+   skeleton reads the same preference.
+4. ~~30-day retention for cleared notifications (§2.5)~~ — **done**. Measured
+   from `dismissedAt`, never `createdAt`; the Cleared view now says so.
+5. ~~Never a blank screen while waiting (§2.9a)~~ — **done**, and bigger than it
+   looked: see §0.3.
+
+**Still open**
 
 **Substantial but well-understood**
-5. Workspace creation for members, guests/viewers excluded (§1.2)
-6. Pinned personal tools (§1.4)
-7. Search: Location + Task types filters, Folders/Lists/Spaces as types, the ⋯ chip
+6. Workspace creation for members, guests/viewers excluded (§1.2)
+7. Pinned personal tools (§1.4)
+8. Search: Location + Task types filters, Folders/Lists/Spaces as types, the ⋯ chip
    customiser (§2.1)
-8. Notification importance model (§2.3); message forward (§2.4)
-9. Profile panel (§2.6)
+9. Notification importance model (§2.3); message forward (§2.4)
+10. Profile panel (§2.6)
 
 **Scope first**
-10. Skills (§2.7), SyncUp (§2.8), Google Drive search (§2.9b)
+11. Skills (§2.7), SyncUp (§2.8), Google Drive search (§2.9b)
 
 ---
 

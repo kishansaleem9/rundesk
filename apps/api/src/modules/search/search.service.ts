@@ -38,6 +38,8 @@ export type SearchFilters = {
   /** §A2.4 — narrow to tasks a given member created. */
   creatorId?: string
   labelId?: string
+  /** §1.1 — narrow to one task type (Task, Milestone, …). */
+  taskTypeId?: string
   dueAfter?: Date
   dueBefore?: Date
   /**
@@ -286,6 +288,7 @@ export class SearchService implements OnModuleInit {
         filters.assigneeId ||
         filters.creatorId ||
         filters.labelId ||
+        filters.taskTypeId ||
         filters.dueAfter ||
         filters.dueBefore ||
         hasCustomFieldFilter,
@@ -385,6 +388,7 @@ export class SearchService implements OnModuleInit {
               ),
             )
           }
+          if (filters.taskTypeId) conds.push(eq(tasks.taskTypeId, filters.taskTypeId))
           if (filters.dueAfter) conds.push(gte(tasks.dueDate, filters.dueAfter))
           if (filters.dueBefore) conds.push(lte(tasks.dueDate, filters.dueBefore))
           if (hasCustomFieldFilter) {

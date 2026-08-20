@@ -111,6 +111,7 @@ export function CommandPalette({
   const [statusFilter, setStatusFilter] = useState<'' | 'open' | 'in_progress' | 'closed'>('')
   const [priorityFilter, setPriorityFilter] = useState<'' | 'urgent' | 'high' | 'normal' | 'low'>('')
   const [labelFilter, setLabelFilter] = useState<string>('')
+  const [taskTypeFilter, setTaskTypeFilter] = useState<string>('')
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')
   const [creatorFilter, setCreatorFilter] = useState<string>('')
   const [includeArchived, setIncludeArchived] = useState(false)
@@ -142,6 +143,13 @@ export function CommandPalette({
     queryKey: ['labels', workspaceId],
     queryFn: () => api<Array<{ id: string; name: string; color: string }>>(`/workspaces/${workspaceId}/labels`),
   })
+  // §1.1 — "Task types is also a filter row in search." Same shape as labels.
+  const taskTypesQuery = useQuery({
+    enabled: open && Boolean(workspaceId),
+    queryKey: ['task-types', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string }>>(`/workspaces/${workspaceId}/task-types`),
+  })
 
   type CustomFieldDef = {
     id: string
@@ -171,6 +179,7 @@ export function CommandPalette({
     setStatusFilter((f.statusCategory as any) ?? '')
     setPriorityFilter((f.priority as any) ?? '')
     setLabelFilter((f.labelId as string) ?? '')
+    setTaskTypeFilter((f.taskTypeId as string) ?? '')
     setAssigneeFilter((f.assigneeId as string) ?? '')
     setCreatorFilter((f.creatorId as string) ?? '')
     setIncludeArchived(f.includeArchived === true)
@@ -187,6 +196,7 @@ export function CommandPalette({
       if (statusFilter) filters.statusCategory = statusFilter
       if (priorityFilter) filters.priority = priorityFilter
       if (labelFilter) filters.labelId = labelFilter
+      if (taskTypeFilter) filters.taskTypeId = taskTypeFilter
       if (assigneeFilter) filters.assigneeId = assigneeFilter
       if (creatorFilter) filters.creatorId = creatorFilter
       if (includeArchived) filters.includeArchived = true
@@ -218,6 +228,7 @@ export function CommandPalette({
     (statusFilter ? 1 : 0) +
     (priorityFilter ? 1 : 0) +
     (labelFilter ? 1 : 0) +
+    (taskTypeFilter ? 1 : 0) +
     (assigneeFilter ? 1 : 0) +
     (creatorFilter ? 1 : 0) +
     (includeArchived ? 1 : 0) +
@@ -232,7 +243,7 @@ export function CommandPalette({
 
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
+    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeParam) params.set('types', typeParam)
@@ -240,6 +251,7 @@ export function CommandPalette({
       if (statusFilter) params.set('statusCategory', statusFilter)
       if (priorityFilter) params.set('priority', priorityFilter)
       if (labelFilter) params.set('labelId', labelFilter)
+      if (taskTypeFilter) params.set('taskTypeId', taskTypeFilter)
       if (assigneeFilter) params.set('assigneeId', assigneeFilter)
       if (creatorFilter) params.set('creatorId', creatorFilter)
       if (includeArchived) params.set('includeArchived', 'true')
@@ -379,6 +391,7 @@ export function CommandPalette({
               setStatusFilter('')
               setPriorityFilter('')
               setLabelFilter('')
+              setTaskTypeFilter('')
               setAssigneeFilter('')
               setCreatorFilter('')
               setIncludeArchived(false)
@@ -453,6 +466,23 @@ export function CommandPalette({
               {labelsQuery.data!.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name}
+                </option>
+              ))}
+            </select>
+          </FilterGroup>
+        )}
+        {(taskTypesQuery.data?.length ?? 0) > 0 && (
+          <FilterGroup label={t('palette.filterTaskType')}>
+            <select
+              value={taskTypeFilter}
+              onChange={(e) => setTaskTypeFilter(e.target.value)}
+              data-testid="palette-task-type-filter"
+              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+            >
+              <option value="">{t('palette.filterAny')}</option>
+              {taskTypesQuery.data!.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name}
                 </option>
               ))}
             </select>

@@ -130,6 +130,39 @@ if [ -n "$TID" ]; then
   DEFAULTS=$(printf '%s' "$LIST" | grep -o '"isDefault":true' | wc -l | tr -d ' ')
   [ "$DEFAULTS" = "1" ] && ok "exactly one default type" || bad "found $DEFAULTS defaults, expected 1"
 
+  # §1.1 — a task can be created *as* a type. tasks.service.ts always accepted
+  # taskTypeId, but the global pipe runs whitelist:true and CreateTaskDto had no
+  # such field, so the client's choice was stripped in transit and every task
+  # got the list's default. The only way to see that is to send one and read the
+  # task back.
+  # There is no "lists in a workspace" route — walk space -> project -> list.
+  SPID=$(curl -fsS --max-time 20 "$API/spaces/workspace/$WS" -H "$AUTH" 2>/dev/null | jget id || true)
+  PRID=$([ -n "$SPID" ] && curl -fsS --max-time 20 "$API/projects/space/$SPID" -H "$AUTH" 2>/dev/null | jget id || true)
+  LID=$([ -n "$PRID" ] && curl -fsS --max-time 20 "$API/lists/project/$PRID" -H "$AUTH" 2>/dev/null | jget id || true)
+  if [ -n "$LID" ]; then
+    NEW=$(curl -fsS --max-time 20 -X POST "$API/tasks" -H "$AUTH" \
+      -H 'Content-Type: application/json' \
+      -d "{\"listId\":\"$LID\",\"title\":\"deploy check — typed task\",\"taskTypeId\":\"$TID\"}" 2>/dev/null || true)
+    NEW_ID=$(printf '%s' "$NEW" | jget id)
+    if [ -n "$NEW_ID" ]; then
+      READ=$(curl -fsS --max-time 20 "$API/tasks/$NEW_ID" -H "$AUTH" 2>/dev/null || true)
+      printf '%s' "$READ" | grep -q "$TID" \
+        && ok "a task can be created as a chosen type" \
+        || bad "the chosen type did not stick -> $(printf '%s' "$READ" | head -c 160)"
+      curl -fsS --max-time 20 -X DELETE "$API/tasks/$NEW_ID" -H "$AUTH" >/dev/null 2>&1 || true
+    else
+      bad "could not create a task to check the type -> $(printf '%s' "$NEW" | head -c 160)"
+    fi
+
+    # …and search can narrow to it.
+    HITS=$(curl -fsS --max-time 20 "$API/search?q=deploy&taskTypeId=$TID" -H "$AUTH" 2>/dev/null || true)
+    printf '%s' "$HITS" | grep -q '"data"' \
+      && ok "search accepts a taskTypeId filter" \
+      || bad "search with taskTypeId -> $(printf '%s' "$HITS" | head -c 160)"
+  else
+    bad "no list available to create a typed task in"
+  fi
+
   DEL=$(curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/task-types/$TID" -H "$AUTH" 2>/dev/null || true)
   printf '%s' "$DEL" | grep -q 'untypedTasks' \
     && ok "delete reports how many tasks it untyped" || bad "delete -> $DEL"

@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
 } from 'class-validator'
 
 // Note: only the create handler is converted to a DTO. The update handler keeps
@@ -55,6 +56,17 @@ export class CreateTaskDto {
   @IsOptional()
   @IsString()
   parentTaskId?: string
+
+  /**
+   * §1.1 — "yahan pe humein woh option hi nahi deta ke hum task type ko select
+   * kar sakein". tasks.service.ts has taken a taskTypeId since task types
+   * shipped, but the pipe runs with `whitelist: true`, so a client sending one
+   * had it silently stripped before the service ever saw it: the create path
+   * could only ever produce the list's default type.
+   */
+  @IsOptional()
+  @IsUUID()
+  taskTypeId?: string
 
   @IsOptional()
   @IsArray()

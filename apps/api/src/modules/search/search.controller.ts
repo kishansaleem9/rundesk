@@ -35,6 +35,7 @@ export class SearchController {
     @Query('creatorId') creatorId?: string,
     @Query('includeArchived') includeArchived?: string,
     @Query('labelId') labelId?: string,
+    @Query('taskTypeId') taskTypeId?: string,
     @Query('dueAfter') dueAfter?: string,
     @Query('dueBefore') dueBefore?: string,
     @Query('customFieldId') customFieldId?: string,
@@ -59,6 +60,8 @@ export class SearchController {
     if (creatorId) filters.creatorId = creatorId
     if (includeArchived === 'true') filters.includeArchived = true
     if (labelId) filters.labelId = labelId
+    // §1.1 — she filters search by type as well as choosing one at create time.
+    if (taskTypeId) filters.taskTypeId = taskTypeId
     if (sort === 'updated' || sort === 'created') filters.sort = sort
     const parseDate = (s?: string) => {
       if (!s) return undefined

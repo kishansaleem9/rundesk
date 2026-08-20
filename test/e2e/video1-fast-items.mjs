@@ -110,15 +110,25 @@ const TASK_TYPES = [
   { id: 'tt-milestone', name: 'Milestone', icon: 'flag', isDefault: false },
 ]
 function stubBody(url) {
+  // The create form will not submit without a list, so the whole
+  // space -> project -> list chain has to answer.
   const data = url.includes('/users/me')
     ? USER
     : url.includes('/task-types')
       ? TASK_TYPES
       : url.includes('/plan')
         ? { label: 'Free', usage: { members: 2 } }
-        : url.includes('/branding') || url.includes('/counts')
-          ? {}
-          : []
+        : url.includes('/spaces/workspace/')
+          ? [{ id: 'sp-1', name: 'Space One' }]
+          : url.includes('/projects/space/')
+            ? [{ id: 'pr-1', name: 'Project One' }]
+            : url.includes('/lists/project/')
+              ? [{ id: 'li-1', name: 'List One' }]
+              : url.endsWith('/tasks') || url.includes('/tasks?')
+                ? { id: 'task-1' }
+                : url.includes('/branding') || url.includes('/counts')
+                  ? {}
+                  : []
   return JSON.stringify({ data, error: null })
 }
 
@@ -128,13 +138,21 @@ async function openApp(route = `/app/${WS}/inbox`, seed = {}) {
     viewport: { width: 1440, height: 900 },
     serviceWorkers: 'block',
   })
-  await ctx.route('**/api/**', (route_) =>
-    route_.fulfill({
+  /** Every API call the app made, so a test can assert what it actually sent. */
+  const calls = []
+  await ctx.route('**/api/**', (route_) => {
+    const request = route_.request()
+    calls.push({
+      method: request.method(),
+      url: request.url(),
+      body: request.postData() ?? '',
+    })
+    return route_.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: stubBody(route_.request().url()),
-    }),
-  )
+      body: stubBody(request.url()),
+    })
+  })
   const page = await ctx.newPage()
   await page.addInitScript(
     (entries) => {
@@ -148,7 +166,7 @@ async function openApp(route = `/app/${WS}/inbox`, seed = {}) {
     .first()
     .waitFor({ timeout: 20000 })
     .catch(() => {})
-  return { ctx, page }
+  return { ctx, page, calls }
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +277,77 @@ console.log('\n§1.3  the sidebar collapses to icons')
   await page.reload({ waitUntil: 'networkidle' })
   await page.waitForTimeout(1200)
   check((await widthOf()) < 90, 'the choice survives a reload')
+  await ctx.close()
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n§1.1  task type at create time, and as a search filter')
+// ---------------------------------------------------------------------------
+{
+  const { ctx, page, calls } = await openApp()
+
+  // The create modal. "yahan pe humein woh option hi nahi deta ke hum task type
+  // ko select kar sakein."
+  await page.getByRole('button', { name: /^new$/i }).first().click()
+  await page.waitForTimeout(900)
+  const typeSelect = page.locator('[data-testid="quick-create-task-type"]')
+  const hasSelect = (await typeSelect.count()) > 0
+  check(hasSelect, 'the create modal offers a task type')
+  if (hasSelect) {
+    const options = await typeSelect.locator('option').allInnerTexts()
+    check(
+      options.some((o) => /milestone/i.test(o)),
+      `the workspace's types are listed (${options.join(', ')})`,
+    )
+
+    // …and it has to reach the server, not just render. The DTO ran with
+    // whitelist:true and no taskTypeId field, so it was stripped in transit.
+    await page.locator('form input').first().fill('Ship the milestone')
+    const selects = page.locator('form select')
+    await selects.nth(0).selectOption('sp-1')
+    await page.waitForTimeout(400)
+    await selects.nth(1).selectOption('pr-1')
+    await page.waitForTimeout(400)
+    await selects.nth(2).selectOption('li-1')
+    await page.waitForTimeout(400)
+    await typeSelect.selectOption('tt-milestone')
+    const before = calls.length
+    await page.locator('form button[type="submit"]').first().click()
+    await page.waitForTimeout(1200)
+    const post = calls
+      .slice(before)
+      .find((c) => c.method === 'POST' && /\/tasks(\?|$)/.test(c.url))
+    check(!!post, 'creating posts to /tasks', calls.slice(before).map((c) => c.method + ' ' + c.url).join(' | '))
+    check(
+      !!post && post.body.includes('tt-milestone'),
+      'and the chosen type is in the request body',
+      post?.body?.slice(0, 120),
+    )
+  }
+  await ctx.close()
+}
+
+{
+  const { ctx, page, calls } = await openApp()
+  // The search half.
+  await page.getByRole('textbox', { name: /search/i }).first().click()
+  await page.waitForTimeout(1500)
+  const filtersToggle = page.getByRole('button', { name: /filter/i }).first()
+  if ((await filtersToggle.count()) > 0) await filtersToggle.click().catch(() => {})
+  await page.waitForTimeout(600)
+
+  const typeFilter = page.locator('[data-testid="palette-task-type-filter"]')
+  const hasFilter = (await typeFilter.count()) > 0
+  check(hasFilter, 'search offers a Task type filter')
+  if (hasFilter) {
+    const before = calls.length
+    await typeFilter.selectOption('tt-milestone')
+    await page.waitForTimeout(1500)
+    const search = calls
+      .slice(before)
+      .find((c) => c.url.includes('/search') && c.url.includes('taskTypeId=tt-milestone'))
+    check(!!search, 'and choosing one narrows the search request', calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
+  }
   await ctx.close()
 }
 

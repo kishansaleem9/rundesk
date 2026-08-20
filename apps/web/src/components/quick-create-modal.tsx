@@ -10,6 +10,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
 type List = { id: string; name: string }
+type TaskType = { id: string; name: string; isDefault?: boolean }
 
 type Mode = 'task' | 'list' | 'folder' | 'project' | 'space' | 'doc'
 
@@ -140,6 +141,7 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const [spaceId, setSpaceId] = useState('')
   const [projectId, setProjectId] = useState('')
   const [listId, setListId] = useState('')
+  const [taskTypeId, setTaskTypeId] = useState('')
 
   const spaces = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -155,13 +157,21 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     queryFn: () => api<List[]>(`/lists/project/${projectId}`),
     enabled: !!projectId,
   }).data ?? []
+  // §1.1 — "hum is ko 'task' ka naam nahi de sakte — woh MILESTONE hai."
+  // Types are per workspace, so this does not wait on the space/project/list
+  // chain; leaving it unset still falls back to the list's default type.
+  const taskTypes = useQuery({
+    queryKey: ['task-types', workspaceId],
+    queryFn: () => api<TaskType[]>(`/workspaces/${workspaceId}/task-types`),
+  }).data ?? []
 
   const create = useMutation({
     mutationFn: () =>
       api<{ id: string }>(`/tasks`, {
         method: 'POST',
         // Omit status → backend seeds the list's first/default status.
-        body: { listId, title, priority: 'normal' },
+        // Omit taskTypeId → same, for the list's default type.
+        body: { listId, title, priority: 'normal', ...(taskTypeId ? { taskTypeId } : {}) },
       }),
     onSuccess: (task) => {
       qc.invalidateQueries({ queryKey: ['tasks', listId] })
@@ -190,6 +200,18 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         <Select labelKey="quickCreate.selectProject" value={projectId} onChange={(v) => { setProjectId(v); setListId('') }} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
         <Select labelKey="quickCreate.selectList" value={listId} onChange={setListId} options={lists.map((l) => ({ value: l.id, label: l.name }))} disabled={!projectId} />
       </div>
+      {taskTypes.length > 0 && (
+        <Select
+          labelKey="quickCreate.selectTaskType"
+          value={taskTypeId}
+          onChange={setTaskTypeId}
+          options={taskTypes.map((type) => ({
+            value: type.id,
+            label: type.isDefault ? `${type.name} (${t('quickCreate.taskTypeDefault')})` : type.name,
+          }))}
+          data-testid="quick-create-task-type"
+        />
+      )}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" disabled={!title.trim() || !listId || create.isPending}>
@@ -443,12 +465,14 @@ function Select({
   onChange,
   options,
   disabled,
+  'data-testid': testId,
 }: {
   labelKey: TranslationKey
   value: string
   onChange: (v: string) => void
   options: { value: string; label: string }[]
   disabled?: boolean
+  'data-testid'?: string
 }) {
   const { t } = useTranslation()
   return (
@@ -458,6 +482,7 @@ function Select({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
+        data-testid={testId}
         className="w-full h-9 px-2 rounded-md border border-border bg-card text-sm disabled:opacity-50"
       >
         <option value="">{t('quickCreate.selectPlaceholder')}</option>
