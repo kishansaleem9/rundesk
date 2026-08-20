@@ -32,3 +32,8 @@ packages/*/src/**/*.js.map
 
 # TS incremental cache
 *.tsbuildinfo
+
+# Written by deploy/lib/publish-web-dist.sh on the deploy host: the list of
+# chunks a build emitted, read by the next deploy to know which files on disk
+# belong to the outgoing release and are worth keeping.
+apps/web/.build-assets
