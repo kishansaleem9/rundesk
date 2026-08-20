@@ -424,9 +424,17 @@ try {
 
   ref('§1.1', 'Task type at create time and in search')
   {
+    // The picker hides itself when a workspace has no types, so this is not a
+    // skippable precondition — it *is* the feature. Production had zero until
+    // migration 0093 backfilled Task and Milestone.
     const types = (await apiGet(`/workspaces/${WS}/task-types`)) ?? []
+    chk(
+      Array.isArray(types) && types.some((t) => /milestone/i.test(t?.name ?? '')),
+      `the workspace has task types (${(types ?? []).map((t) => t?.name).join(', ') || 'none'})`,
+      'the workspace has no Milestone type, so the picker stays hidden',
+    )
     if (!Array.isArray(types) || types.length === 0) {
-      bad('the workspace has no task types, so the picker is hidden — nothing to check')
+      bad('nothing to check the picker against')
     } else {
       await go(`/app/${WS}`, 3500)
       const newBtn = page.getByRole('button', { name: /^new$/i }).first()

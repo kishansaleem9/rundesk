@@ -117,6 +117,14 @@ WS=$(curl -fsS --max-time 20 "$API/workspaces" -H "$AUTH" | grep -o '"id":"[^"]*
 echo "  ok — workspace $WS"
 
 say "Task types: create, default, apply, delete"
+# §1.1 — a workspace with no types hides the picker, so the feature is only
+# real if every workspace starts with some. Migration 0093 backfills them and
+# workspace creation seeds them; without that, production had zero.
+SEEDED=$(curl -fsS --max-time 20 "$API/workspaces/$WS/task-types" -H "$AUTH" 2>/dev/null || true)
+printf '%s' "$SEEDED" | grep -q 'Milestone' \
+  && ok "the workspace ships with a Milestone type" \
+  || bad "no default task types -> $(printf '%s' "$SEEDED" | head -c 160)"
+
 TT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/task-types" -H "$AUTH" \
   -H 'Content-Type: application/json' \
   -d '{"name":"Deploy check","icon":"✅","isDefault":true}' 2>/dev/null || true)
