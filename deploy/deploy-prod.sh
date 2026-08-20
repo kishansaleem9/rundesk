@@ -14,6 +14,9 @@ set -a
 source .env
 set +a
 
+# shellcheck source=lib/publish-web-dist.sh
+source deploy/lib/publish-web-dist.sh
+
 required_table_missing() {
   docker exec rundesk-postgres psql -U "${POSTGRES_USER:-rundesk}" -d "${POSTGRES_DB:-rundesk}" -tAc \
     "SELECT to_regclass('public.organization_members') IS NULL;" | tr -d '[:space:]'
@@ -100,12 +103,8 @@ echo "▶ Pulling latest from git"
 git pull --ff-only
 
 echo "▶ Building web SPA → apps/web/dist"
-# Build into a staging dir, then publish. Every file under /assets/ is
-# content-hashed, and the previous release's chunks are kept: a tab that was
-# open when we deploy is still running the old index.html, and if the chunks it
-# names disappear, every lazy import 404s and the whole app is replaced by the
-# error boundary (see apps/web/src/lib/chunk-reload.ts). Keeping one release's
-# worth of chunks costs a few MB and means those tabs never break at all.
+# Build into a staging dir; publish_web_dist swaps it in and carries the
+# previous release's chunks across (deploy/lib/publish-web-dist.sh).
 rm -rf apps/web/dist.new
 docker buildx build -f deploy/Dockerfile.web --target export --output type=local,dest=apps/web/dist.new .
 if [ ! -s apps/web/dist.new/index.html ]; then
@@ -113,17 +112,7 @@ if [ ! -s apps/web/dist.new/index.html ]; then
   rm -rf apps/web/dist.new
   exit 1
 fi
-rm -rf apps/web/assets.prev
-if [ -d apps/web/dist/assets ]; then mv apps/web/dist/assets apps/web/assets.prev; fi
-rm -rf apps/web/dist
-mv apps/web/dist.new apps/web/dist
-if [ -d apps/web/assets.prev ]; then
-  # -n: the new build always wins; only chunks unique to the old one are added.
-  cp -an apps/web/assets.prev/. apps/web/dist/assets/ 2>/dev/null || true
-  rm -rf apps/web/assets.prev
-fi
-# Chunks no release has published in two weeks belong to no live tab.
-find apps/web/dist/assets -type f -mtime +14 -delete 2>/dev/null || true
+publish_web_dist
 chmod -R o+rX apps/web/dist
 chmod o+x apps/web/dist /opt/rundesk/apps/web /opt/rundesk/apps /opt/rundesk 2>/dev/null || true
 

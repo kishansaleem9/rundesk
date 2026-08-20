@@ -302,20 +302,29 @@ console.log('\n0. build and deployment guardrails')
 
   // Both scripts publish the SPA — deploy.sh is what the GitHub Actions deploy
   // runs (`deploy.sh rebuild`) and what deploy/README tells people to run, so a
-  // fix that lands only in deploy-prod.sh never reaches production.
+  // fix that lands only in deploy-prod.sh never reaches production. They share
+  // deploy/lib/publish-web-dist.sh; what it *does* is covered directly by
+  // test/deploy/publish-web-dist.test.sh.
   for (const script of ['deploy/deploy.sh', 'deploy/deploy-prod.sh']) {
     const deploy = fs.readFileSync(path.join(REPO, script), 'utf8')
-    // dist itself is still replaced wholesale — what must not happen is losing
-    // /assets/ with it. Check the order: set aside, swap, put back.
-    const setAside = deploy.indexOf('mv apps/web/dist/assets apps/web/assets.prev')
-    const swap = deploy.search(/^\s*rm -rf apps\/web\/dist$/m)
-    const putBack = deploy.indexOf('cp -an apps/web/assets.prev')
     check(
-      setAside !== -1 && swap !== -1 && putBack !== -1 && setAside < swap && swap < putBack,
-      `${script} carries the previous release’s chunks across the swap`,
-      `setAside=${setAside} swap=${swap} putBack=${putBack}`,
+      deploy.includes('source deploy/lib/publish-web-dist.sh') &&
+        /^\s*publish_web_dist$/m.test(deploy),
+      `${script} publishes through publish_web_dist`,
     )
   }
+  // Age is not a valid proxy for which release published a chunk: deploys can
+  // be weeks apart, and `--output type=local` writes the mtimes baked into the
+  // Docker layer. A prune like this deleted the carried-over chunks on the
+  // 20 Aug deploy — the carry-forward looked implemented and did nothing.
+  const publishLib = fs.readFileSync(
+    path.join(REPO, 'deploy/lib/publish-web-dist.sh'),
+    'utf8',
+  )
+  check(
+    !/^[^#\n]*find\s+apps\/web\/dist\/assets[^\n]*-delete/m.test(publishLib),
+    'chunks are not pruned by file age',
+  )
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,9 @@ cd "$(dirname "$0")/.."
 
 CMD="${1:-up}"
 
+# shellcheck source=lib/publish-web-dist.sh
+source deploy/lib/publish-web-dist.sh
+
 ensure_env() {
   if [ ! -f .env ]; then
     echo "❌ .env missing at repo root. Copy deploy/env.production.template to .env first."
@@ -129,12 +132,8 @@ build_web() {
   echo "▶ Building web SPA → apps/web/dist"
   local show_seeded="${VITE_SHOW_SEEDED_LOGINS:-false}"
   echo "▶ VITE_SHOW_SEEDED_LOGINS=$show_seeded"
-  # Build into a staging dir, then publish. Every file under /assets/ is
-  # content-hashed, and the previous release's chunks are kept: a tab that was
-  # open when we deploy is still running the old index.html, and if the chunks
-  # it names disappear, every lazy import 404s and the whole app is replaced by
-  # the error boundary (see apps/web/src/lib/chunk-reload.ts). Keeping one
-  # release's worth of chunks costs a few MB and means those tabs never break.
+  # Build into a staging dir; publish_web_dist swaps it in and carries the
+  # previous release's chunks across (deploy/lib/publish-web-dist.sh).
   rm -rf apps/web/dist.new
   docker buildx build \
     --build-arg VITE_SHOW_SEEDED_LOGINS="$show_seeded" \
@@ -147,17 +146,7 @@ build_web() {
     rm -rf apps/web/dist.new
     exit 1
   fi
-  rm -rf apps/web/assets.prev
-  if [ -d apps/web/dist/assets ]; then mv apps/web/dist/assets apps/web/assets.prev; fi
-  rm -rf apps/web/dist
-  mv apps/web/dist.new apps/web/dist
-  if [ -d apps/web/assets.prev ]; then
-    # -n: the new build always wins; only chunks unique to the old one are added.
-    cp -an apps/web/assets.prev/. apps/web/dist/assets/ 2>/dev/null || true
-    rm -rf apps/web/assets.prev
-  fi
-  # Chunks no release has published in two weeks belong to no live tab.
-  find apps/web/dist/assets -type f -mtime +14 -delete 2>/dev/null || true
+  publish_web_dist
   # nginx (www-data) needs traverse + read on the dist tree
   chmod -R o+rX apps/web/dist
   chmod o+x apps/web/dist /opt/rundesk/apps/web /opt/rundesk/apps /opt/rundesk 2>/dev/null || true

@@ -93,7 +93,7 @@ Three things the reproduction turned up that the read-only pass had not:
   `skipWaiting` + `clientsClaim` + `cleanupOutdatedCaches`, a new release activated under an
   open tab and deleted the chunks that tab was still importing.
 
-**What changed** (all verified by the 18-check suite below, which fails 5 checks when the
+**What changed** (all verified by the 19-check suite below, which fails 5 checks when the
 recovery path is disabled):
 
 | | |
@@ -103,7 +103,30 @@ recovery path is disabled):
 | `apps/web/src/components/route-error-boundary.tsx` | a stale chunk now reads "Updating Rundesk…", not "Something went wrong". |
 | `apps/web/vite.config.ts` | `navigateFallback: undefined` so navigations go to the network; chunks out of the precache and into a runtime `CacheFirst`. Precache: 69 entries → 6. |
 | `deploy/nginx/…conf` | `index.html` and the worker files get `Cache-Control: no-cache`. They had no cache headers at all, so browsers applied heuristic freshness. |
-| `deploy/deploy.sh` + `deploy/deploy-prod.sh` | the previous release's `assets/` are carried across the swap, so an open tab never 404s in the first place — no reload, no interruption. Both, because `deploy.sh rebuild` is what the GitHub Actions deploy actually runs; a fix in only one of them never reaches production. |
+| `deploy/lib/publish-web-dist.sh` | both deploy scripts publish through it. It keeps two generations of chunks on disk — this build's and the previous build's — so an open tab never 404s in the first place: no reload, no interruption. Shared, because `deploy.sh rebuild` is what the GitHub Actions deploy actually runs and a fix in only one script never reaches production. |
+
+### 0.2 It took two goes to land
+
+The first deploy of this carried the old chunks over and then deleted them one
+line later:
+
+```bash
+cp -an apps/web/assets.prev/. apps/web/dist/assets/     # carry the old release over
+find apps/web/dist/assets -type f -mtime +14 -delete    # …and immediately bin it
+```
+
+The preceding build was 15 days old, so `-mtime +14` matched every carried file.
+The verification caught it — `assets on disk (was 61) : 61`, and the chunk an
+open tab needed still answering `HTTP 404` — but only because the check was
+written to look at the outcome rather than at whether the code ran.
+
+File age was never the right signal, twice over: deploys here can be weeks
+apart, and `--output type=local` writes the mtimes baked into the Docker layer,
+so a *cached* `vite build` layer exports files stamped with whenever that layer
+was first built. Generations are tracked by manifest now
+(`apps/web/.build-assets`), and `test/deploy/publish-web-dist.test.sh` publishes
+three releases in a row and asserts what survives — it fails on exactly the
+prune that shipped.
 
 **The harness gap is closed too.** `deploy/verify-ui.mjs` always opens a fresh page, so it
 structurally cannot see this; the new suite stages two releases and runs in CI.
