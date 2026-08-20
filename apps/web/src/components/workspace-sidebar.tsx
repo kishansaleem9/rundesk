@@ -1,8 +1,11 @@
 import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSidebarStore } from '../store/sidebar'
 import {
   ChevronDown,
+  PanelLeftClose,
+  PanelLeftOpen,
   Check,
   Home,
   Inbox,
@@ -47,6 +50,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { ContainerEditDialog, type ContainerEditValues } from './container-edit-dialog'
@@ -57,7 +63,7 @@ import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { MoveDialog, type MovableKind } from './move-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
 import { useResolvedFlags } from '../lib/use-feature-flags'
-import { FLAGS } from '@rundesk/feature-flags'
+import { FLAGS, type FlagKey } from '@rundesk/feature-flags'
 
 function isUuidLike(value: string | undefined): value is string {
   if (!value) return false
@@ -140,6 +146,49 @@ function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: 
   ]
 }
 
+/**
+ * §1.3 — the destinations the collapsed rail carries, in sidebar order, with
+ * the same feature-flag guards the expanded list uses. Kept as data so the two
+ * cannot drift: a flag turned off has to hide the entry in both.
+ */
+function railEntries(
+  workspaceId: string,
+  featureEnabled: (flag?: FlagKey) => boolean,
+  isAdmin: boolean,
+): Array<{ path: string; label: string; icon: typeof Home; exact?: boolean }> {
+  const base = `/app/${workspaceId}`
+  const all: Array<{
+    path: string
+    label: string
+    icon: typeof Home
+    exact?: boolean
+    flag?: FlagKey
+  }> = [
+    { path: base, label: 'Home', icon: Home, exact: true },
+    { path: `${base}/inbox`, label: 'Inbox', icon: Inbox },
+    { path: `${base}/chat`, label: 'Teams', icon: MessageCircle },
+    { path: `${base}/docs`, label: 'Docs', icon: FileText },
+    { path: `${base}/dashboard`, label: 'Dashboards', icon: LayoutDashboard },
+    { path: `${base}/ai`, label: 'AI', icon: Bot, flag: FLAGS.AI },
+    { path: `${base}/shared`, label: 'Shared with me', icon: Users },
+    { path: `${base}/whiteboards`, label: 'Whiteboards', icon: Frame },
+    { path: `${base}/forms`, label: 'Forms', icon: ClipboardList, flag: FLAGS.FORMS },
+    { path: `${base}/automations`, label: 'Automations', icon: Zap, flag: FLAGS.AI_AUTOMATIONS },
+    { path: `${base}/workload`, label: 'Workload', icon: BarChart3, flag: FLAGS.VIEWS_WORKLOAD },
+    { path: `${base}/timeline`, label: 'Timeline', icon: GitBranch },
+    { path: `${base}/goals`, label: 'Goals', icon: ClipboardList, flag: FLAGS.GOALS },
+    { path: `${base}/reports`, label: 'Reports', icon: BarChart3, flag: FLAGS.REPORTING },
+    { path: `${base}/time`, label: 'Time', icon: Clock3, flag: FLAGS.TIME_TRACKING },
+    { path: `${base}/templates`, label: 'Templates', icon: Layers },
+    { path: `${base}/integrations`, label: 'Integrations', icon: PlugZap, flag: FLAGS.INTEGRATIONS },
+    { path: `${base}/mindmaps`, label: 'Mind maps', icon: Frame },
+    { path: `${base}/clips`, label: 'Clips', icon: MessageCircle },
+  ]
+  const visible = all.filter((entry) => !entry.flag || featureEnabled(entry.flag))
+  if (isAdmin) visible.push({ path: `${base}/settings`, label: 'Settings', icon: Settings })
+  return visible.map(({ flag: _flag, ...entry }) => entry)
+}
+
 function recentFromPathname(pathname: string, workspaceId: string): NavRecent | null {
   const current = normalizePath(pathname)
   const hit = workspaceNavEntries(workspaceId).find((entry) =>
@@ -186,6 +235,8 @@ export function WorkspaceSidebar() {
   // Whatever the user chose to share — one panel serves every object type.
   const [shareItem, setShareItem] = useState<{ type: ShareObjectType; id: string; name: string } | null>(null)
   const [openSwitcher, setOpenSwitcher] = useState(false)
+  const collapsed = useSidebarStore((state) => state.collapsed)
+  const toggleCollapsed = useSidebarStore((state) => state.toggle)
   const [spacesExpanded, setSpacesExpanded] = useState(true)
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
   const [browseExpanded, setBrowseExpanded] = useState(true)
@@ -635,9 +686,87 @@ export function WorkspaceSidebar() {
     }
   }, [])
 
+  // §1.3 — "agar main is ko off karoon to mujhe bas ICONS show hon — kyunke yeh
+  // SPACE leta hai." Collapsed is a genuinely different sidebar rather than the
+  // same one squeezed: the tree, the switcher and the section headers have no
+  // useful icon-only form, so the rail carries the destinations and nothing
+  // else, and the page gets the other 232px.
+  if (collapsed) {
+    return (
+      <aside
+        data-testid="workspace-sidebar"
+        data-collapsed="true"
+        className="w-14 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0"
+      >
+        <div className="border-b border-border/60 p-2 flex justify-center">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                aria-label={t('nav.expandSidebar')}
+                aria-expanded={false}
+                data-testid="sidebar-toggle"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent/10 hover:text-foreground transition-colors"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t('nav.expandSidebar')}</TooltipContent>
+          </Tooltip>
+        </div>
+        <nav className="flex-1 overflow-y-auto scrollbar-none py-2 flex flex-col items-center gap-1">
+          {workspaceId
+            ? railEntries(workspaceId, featureEnabled, isAdmin).map((entry) => {
+                  const Icon = entry.icon
+                  const active = isNavPathActive(pathname, entry.path, entry.exact)
+                  return (
+                    <Tooltip key={entry.path}>
+                      <TooltipTrigger asChild>
+                        <Link
+                          to={entry.path}
+                          aria-label={navLabel(entry.label)}
+                          aria-current={active ? 'page' : undefined}
+                          className={cn(
+                            'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
+                            active
+                              ? 'bg-accent/15 text-foreground'
+                              : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
+                          )}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </Link>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{navLabel(entry.label)}</TooltipContent>
+                    </Tooltip>
+                  )
+                })
+            : null}
+        </nav>
+      </aside>
+    )
+  }
+
   return (
-    <aside className="w-72 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0">
+    <aside
+      data-testid="workspace-sidebar"
+      data-collapsed="false"
+      className="w-72 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0"
+    >
       <div className="border-b border-border/60 p-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={t('nav.collapseSidebar')}
+            aria-expanded
+            data-testid="sidebar-toggle"
+            title={t('nav.collapseSidebar')}
+            className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/10 hover:text-foreground transition-colors"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
         <button
           className="w-full rounded-lg border border-border/60 bg-card px-3 py-2 text-left hover:bg-accent/10 transition-colors"
           onClick={() => setOpenSwitcher((v) => !v)}
@@ -657,7 +786,11 @@ export function WorkspaceSidebar() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{currentWorkspace?.name ?? t('common.workspace')}</p>
               <p className="truncate text-xs text-muted-foreground">{currentOrg?.name ?? t('nav.selectWorkspace')}</p>
-              {workspacePlanQuery.data && (
+              {/* Guarded field by field: this renders inside the sidebar, which
+                  is inside the app shell, so a plan payload missing `usage`
+                  took the whole application down to the error boundary rather
+                  than dropping one line of small print. */}
+              {workspacePlanQuery.data?.usage?.members !== undefined && (
                 <p className="truncate text-[10px] text-muted-foreground/80">
                   {t('nav.workspacePlanLine', {
                     plan: workspacePlanQuery.data.label,

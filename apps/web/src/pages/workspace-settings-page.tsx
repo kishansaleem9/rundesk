@@ -11,7 +11,6 @@ import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
 import { RolesTab } from '../components/roles-tab'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { LanguageSwitcher } from '../components/language-switcher'
 import { TrashTab } from '../components/trash-tab'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
@@ -704,14 +703,6 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     <PlanCard workspaceId={workspaceId} />
     <BillingCard workspaceId={workspaceId} />
     <Card className="p-6 space-y-5">
-      {/* Personal preference (Plan §13): user's UI language. */}
-      <div className="flex items-center justify-between gap-4 rounded-lg border border-border/60 bg-card/40 p-3">
-        <div>
-          <div className="text-sm font-medium">{t('settings.language')}</div>
-          <div className="text-xs text-muted-foreground">{t('settings.languageDesc')}</div>
-        </div>
-        <LanguageSwitcher />
-      </div>
       <div>
         <Label>{t('settings.workspaceId')}</Label>
         <Input value={wsQuery.data.id} readOnly className="font-mono text-xs" />

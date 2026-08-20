@@ -184,31 +184,33 @@ const HUMAN_TYPES = new Set([
 ])
 
 /**
- * ClickUp's Important / Other split, over the same predicate.
- *
  * Primary is what a person sent you — a mention, a comment, an assignment, a
- * message. Other is what the system sent you: due-date reminders, status
- * transitions, briefings, billing. The distinction that matters at 200
+ * message. Everything else is what the system sent you: due-date reminders,
+ * status transitions, briefings, billing. The distinction that matters at 200
  * notifications is not what kind of object it was about, it is whether someone
  * is waiting on you.
+ *
+ * §2.2 — there was a third chip, Other, holding the complement. She asked for
+ * it to go: "yeh mujhe NAHI CHAHIYE humari list mein, kyunke yahan bhi same
+ * 'All' wale hi hain". Nothing is hidden by dropping it — system notifications
+ * were always in All as well, so Other only ever offered a second route to the
+ * same rows. An earlier audit of ours argued for keeping the split; hers is the
+ * call that counts.
  */
-export type InboxFilter = 'all' | 'primary' | 'other'
+export type InboxFilter = 'all' | 'primary'
 
 export function matchesInboxFilter(type: string, filter: InboxFilter): boolean {
   if (filter === 'all') return true
-  const human = HUMAN_TYPES.has(type)
-  return filter === 'primary' ? human : !human
+  return HUMAN_TYPES.has(type)
 }
 
 const FILTER_LABEL_KEY: Record<InboxFilter, TranslationKey> = {
   all: 'inbox.filterAll',
   primary: 'inbox.filterPrimary',
-  other: 'inbox.filterOther',
 }
 const FILTER_HINT_KEY: Record<InboxFilter, TranslationKey> = {
   all: 'inbox.filterAllHint',
   primary: 'inbox.filterPrimaryHint',
-  other: 'inbox.filterOtherHint',
 }
 
 /** A run of notifications about the same thing, rendered as one row (§A2.7). */
@@ -287,7 +289,6 @@ export function InboxPage() {
   const filterCounts: Record<InboxFilter, number> = {
     all: all.length,
     primary: primaryCount,
-    other: all.length - primaryCount,
   }
 
   // Every triage verb moves rows between buckets, so the tab counts and the
@@ -409,10 +410,10 @@ export function InboxPage() {
               </button>
             ))}
           </div>
-          {/* §A2.6b — a derived filter, not extra tabs: Primary is what a person
-              sent you, Other is what the system did. */}
+          {/* §A2.6b — a derived filter, not extra tabs: Primary is what a
+              person sent you; All is everything. */}
           <div className="flex items-center gap-1 border-l border-border/50 pl-3">
-            {(['all', 'primary', 'other'] as const).map((f) => (
+            {(['all', 'primary'] as const).map((f) => (
               <button
                 key={f}
                 type="button"

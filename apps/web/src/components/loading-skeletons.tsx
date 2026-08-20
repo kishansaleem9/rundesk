@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouterState } from '@tanstack/react-router'
 import { Skeleton } from '@rundesk/ui'
+import { useSidebarStore } from '../store/sidebar'
 
 /**
  * Waiting states.
@@ -139,6 +140,28 @@ export function useRouteLoading({ delayMs = 150, minMs = 300 } = {}): boolean {
   return visible
 }
 
+/** Mirrors whichever sidebar this session has — §1.3 made it collapsible. */
+function SidebarSkeleton() {
+  const collapsed = useSidebarStore((s) => s.collapsed)
+  if (collapsed) {
+    return (
+      <div className="w-14 border-r border-border/60 py-3.5 flex flex-col items-center gap-3.5 shrink-0">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-7 w-7 rounded-[9px]" />
+        ))}
+      </div>
+    )
+  }
+  return (
+    <div className="w-72 border-r border-border/60 p-3.5 flex flex-col gap-3.5 shrink-0">
+      <Skeleton className="h-12 w-full" />
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Skeleton key={i} className="h-6 w-full" />
+      ))}
+    </div>
+  )
+}
+
 /**
  * The whole application, as shapes. Shown when a route is loading and there is
  * no shell on screen yet to put a page skeleton inside — a cold load or a deep
@@ -150,11 +173,7 @@ export function AppShellSkeleton() {
   return (
     <div className="h-screen flex bg-background" aria-busy="true" aria-live="polite">
       <span className="sr-only">Loading…</span>
-      <div className="w-14 border-r border-border/60 py-3.5 flex flex-col items-center gap-3.5 shrink-0">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-7 w-7 rounded-[9px]" />
-        ))}
-      </div>
+      <SidebarSkeleton />
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="h-14 border-b border-border/60 flex items-center gap-3 px-4">
           <Skeleton className="h-5 w-44" />

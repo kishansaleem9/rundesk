@@ -83,3 +83,6 @@ jobs:
       # is outstanding. None of these are visible unless something is slow.
       - name: Loading states are never blank
         run: node test/e2e/loading-states.mjs
+
+      - name: video1 fast items
+        run: node test/e2e/video1-fast-items.mjs

@@ -6,6 +6,7 @@ import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Mo
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
+import { LanguageSwitcher } from '../components/language-switcher'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
 import { PasswordInput } from '../components/password-input'
 import { formatDateTimeWith } from '../lib/date-format'
@@ -346,6 +347,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
       </div>
 
       <ThemeSelector />
+      <LanguageSelector />
 
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <span className="text-xs text-muted-foreground">
@@ -357,6 +359,27 @@ function GeneralTab({ profile }: { profile: Profile }) {
         </Button>
       </div>
     </Card>
+  )
+}
+
+/**
+ * §1.5 — the UI language lived in the top bar, which she asked to have cleared:
+ * "yeh cheez hata sakte hain; is ko hum logon ko yahan se REMOVE karna
+ * chahiye". It is a personal setting people change once, so it belongs with the
+ * other personal settings rather than in permanent view — which is also where
+ * ClickUp keeps it (Preferences → Language & Region). It was previously only in
+ * *workspace* settings, an odd home for something that is not per-workspace.
+ */
+function LanguageSelector() {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-1.5 pt-1">
+      <Label>{t('settings.language')}</Label>
+      <p className="text-xs text-muted-foreground">{t('settings.languageDesc')}</p>
+      <div className="pt-1">
+        <LanguageSwitcher />
+      </div>
+    </div>
   )
 }
 

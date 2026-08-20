@@ -59,6 +59,17 @@
         } catch (e) {
           /* first visit, or storage blocked — the shipped dark class stands */
         }
+        try {
+          // §1.3 — the sidebar can be collapsed to an icon rail, and that is a
+          // persisted preference. Draw the skeleton at the width this session
+          // actually uses, so the real sidebar does not jump into place.
+          var sidebar = JSON.parse(localStorage.getItem('rundesk.sidebar') || '{}')
+          if (sidebar.state && sidebar.state.collapsed) {
+            document.documentElement.setAttribute('data-boot-rail', 'collapsed')
+          }
+        } catch (e) {
+          /* expanded is the default */
+        }
       })()
     </script>
     <style>
@@ -77,15 +88,32 @@
         --boot-block: #131c3a;
         --boot-edge: #1b2547;
       }
+      /* Matches the real sidebar: 288px expanded, 56px collapsed. */
       #boot .rail {
-        width: 56px;
+        width: 288px;
         border-right: 1px solid var(--boot-edge);
-        padding: 14px 0;
+        padding: 14px;
         display: flex;
         flex-direction: column;
-        align-items: center;
         gap: 14px;
         flex: none;
+      }
+      #boot .rail i {
+        height: 26px;
+      }
+      #boot .rail i:first-child {
+        height: 48px;
+      }
+      html[data-boot-rail='collapsed'] #boot .rail {
+        width: 56px;
+        padding: 14px 0;
+        align-items: center;
+      }
+      html[data-boot-rail='collapsed'] #boot .rail i,
+      html[data-boot-rail='collapsed'] #boot .rail i:first-child {
+        width: 28px;
+        height: 28px;
+        border-radius: 9px;
       }
       #boot .body {
         flex: 1;
@@ -163,8 +191,7 @@
         >Loading Rundesk…</span
       >
       <div class="rail" aria-hidden="true">
-        <i class="dot"></i><i class="dot"></i><i class="dot"></i><i class="dot"></i>
-        <i class="dot"></i><i class="dot"></i>
+        <i></i><i></i><i></i><i></i><i></i><i></i>
       </div>
       <div class="body" aria-hidden="true">
         <div class="bar">

@@ -43,7 +43,6 @@ import {
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { applyBrandColor } from '../lib/branding'
-import { LanguageSwitcher } from './language-switcher'
 import { useTranslation } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
@@ -106,7 +105,6 @@ export function AppTopbar({
         <AiDockToggle workspaceId={params.workspaceId} onToggle={onAiToggle} open={!!aiOpen} />
       )}
       <QuickCreateButton />
-      <LanguageSwitcher withIcon={false} className="hidden sm:inline-flex" />
       <ThemeToggle />
       <NotificationsBell workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
       <UserMenu workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
