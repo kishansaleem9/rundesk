@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const MIGRATIONS_DIR = path.resolve(process.cwd(), 'packages/db/src/migrations')
@@ -38,7 +38,43 @@ async function main() {
     }
   }
 
-  ok(`Validated ${files.length} migration files with contiguous sequences 0000..${String(seqs.length - 1).padStart(4, '0')}`)
+  // A .sql file on disk is not a migration. drizzle-kit migrate works from
+  // meta/_journal.json and ignores anything not listed there — silently, and
+  // still reporting "migrations applied successfully". 0093 shipped that way:
+  // the file was present, CI was green, and the migration never ran.
+  const journalPath = path.join(MIGRATIONS_DIR, 'meta', '_journal.json')
+  let journal
+  try {
+    journal = JSON.parse(await readFile(journalPath, 'utf8'))
+  } catch (err) {
+    fail(`Could not read ${journalPath}: ${err?.message ?? err}`)
+  }
+
+  const tags = (journal.entries ?? []).map((e) => e.tag)
+  const tagSet = new Set(tags)
+  if (tags.length !== tagSet.size) fail('Duplicate tag in _journal.json')
+
+  for (const { file } of numbered) {
+    const tag = file.replace(/\.sql$/, '')
+    if (!tagSet.has(tag)) {
+      fail(`${file} has no entry in meta/_journal.json — drizzle would skip it silently`)
+    }
+  }
+  for (const tag of tags) {
+    if (!bySeq.has(Number(tag.slice(0, 4)))) {
+      fail(`_journal.json lists ${tag}, but there is no such .sql file`)
+    }
+  }
+
+  const idxs = (journal.entries ?? []).map((e) => e.idx)
+  for (let i = 0; i < idxs.length; i++) {
+    if (idxs[i] !== i) fail(`_journal.json idx out of order at position ${i}: got ${idxs[i]}`)
+  }
+
+  ok(
+    `Validated ${files.length} migration files with contiguous sequences 0000..${String(seqs.length - 1).padStart(4, '0')}, ` +
+      `each present in meta/_journal.json`,
+  )
 }
 
 main().catch((err) => fail(err?.message ?? String(err)))

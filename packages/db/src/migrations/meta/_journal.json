@@ -652,6 +652,13 @@
       "when": 1900000084005,
       "tag": "0092_meetings",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1900000085005,
+      "tag": "0093_default_task_types",
+      "breakpoints": true
     }
   ]
 }
