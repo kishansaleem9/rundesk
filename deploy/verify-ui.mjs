@@ -346,6 +346,157 @@ try {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // The video1 fast items, on the deployed instance. They are covered against a
+  // local build by test/e2e/video1-fast-items.mjs; this is the same claims
+  // against the thing users actually load.
+  // -------------------------------------------------------------------------
+
+  ref('§1.5', 'The language switcher is out of the top bar')
+  await go(`/app/${WS}`, 3500)
+  {
+    const header = page.locator('header').first()
+    const topbar = (await header.innerText().catch(() => '')).replace(/\s+/g, ' ')
+    chk(
+      !/english|urdu|espa\u00f1ol|\u0627\u0644\u0639\u0631\u0628\u064a\u0629/i.test(topbar),
+      'no language control in the top bar',
+      `top bar still offers a language: ${topbar.slice(0, 90)}`,
+    )
+    await go('/app/profile', 3500)
+    chk(
+      /language/i.test(await seen()),
+      'it is in personal settings instead — a move, not a deletion',
+      'the language control is nowhere to be found',
+    )
+  }
+
+  ref('§2.2', 'The Inbox "Other" chip is gone, Later stays')
+  await go(`/app/${WS}/inbox`, 4000)
+  {
+    const labels = (await page.locator('header button').allInnerTexts())
+      .map((t) => t.split('\n')[0].trim())
+      .filter(Boolean)
+    chk(
+      !labels.some((l) => /^other$/i.test(l)),
+      `no Other control in the header (${labels.join(', ')})`,
+      `Other is still there: ${labels.join(', ')}`,
+    )
+    chk(labels.some((l) => /^later$/i.test(l)), 'Later is still there', 'Later went missing too')
+    await go(`/app/${WS}/inbox?filter=other`, 3500)
+    const body = await seen()
+    chk(
+      !/something went wrong/i.test(body),
+      'an old ?filter=other link still lands on a working inbox',
+      'the removed filter breaks old links',
+    )
+  }
+
+  ref('§1.3', 'The sidebar collapses to icons')
+  await go(`/app/${WS}`, 4000)
+  {
+    const sidebar = page.locator('[data-testid="workspace-sidebar"]')
+    const toggle = page.locator('[data-testid="sidebar-toggle"]').first()
+    const width = async () => (await sidebar.boundingBox().catch(() => null))?.width ?? 0
+    const expanded = await width()
+    if ((await toggle.count()) === 0) {
+      bad('no collapse control on the sidebar')
+    } else {
+      await toggle.click()
+      await page.waitForTimeout(1200)
+      const collapsed = await width()
+      chk(
+        expanded > 200 && collapsed > 0 && collapsed < 90,
+        `collapses ${Math.round(expanded)}px -> ${Math.round(collapsed)}px`,
+        `width went ${Math.round(expanded)} -> ${Math.round(collapsed)}`,
+      )
+      chk(
+        (await sidebar.locator('a').count()) >= 5,
+        'the destinations are still reachable as icons',
+        'the rail has no links',
+      )
+      // Put it back — this runs against the real account and should not leave
+      // the sidebar collapsed for whoever logs in next.
+      await page.locator('[data-testid="sidebar-toggle"]').first().click()
+      await page.waitForTimeout(1200)
+      chk((await width()) > 200, 'and expands again', 'it would not expand back')
+    }
+  }
+
+  ref('§1.1', 'Task type at create time and in search')
+  {
+    const types = (await apiGet(`/workspaces/${WS}/task-types`)) ?? []
+    if (!Array.isArray(types) || types.length === 0) {
+      bad('the workspace has no task types, so the picker is hidden — nothing to check')
+    } else {
+      await go(`/app/${WS}`, 3500)
+      const newBtn = page.getByRole('button', { name: /^new$/i }).first()
+      if ((await newBtn.count()) === 0) {
+        bad('no New button to open the create modal')
+      } else {
+        await newBtn.click()
+        await page.waitForTimeout(1500)
+        chk(
+          (await page.locator('[data-testid="quick-create-task-type"]').count()) > 0,
+          'the create modal offers a task type',
+          'the create modal still has no type control',
+        )
+        await page.keyboard.press('Escape')
+        await page.waitForTimeout(600)
+      }
+      await page.getByRole('textbox', { name: /search/i }).first().click().catch(() => {})
+      await page.waitForTimeout(2500)
+      const filterToggle = page.getByRole('button', { name: /filter/i }).first()
+      if ((await filterToggle.count()) > 0) await filterToggle.click().catch(() => {})
+      await page.waitForTimeout(1000)
+      chk(
+        (await page.locator('[data-testid="palette-task-type-filter"]').count()) > 0,
+        'search offers a Task type filter',
+        'no task-type filter in the palette',
+      )
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(600)
+    }
+  }
+
+  ref('§2.9a', 'A slow route shows shapes, not a blank screen')
+  {
+    // Hold one route chunk and look at the screen while it is outstanding. This
+    // is the only way to see a waiting state — which is exactly why every
+    // previous pass over this deployment missed that they were blank.
+    //
+    // The worker has to go first. On the deployed site it is registered and
+    // serves /assets/ CacheFirst, and a request the worker makes is not
+    // intercepted by page.route — the delay below would silently not apply and
+    // this would report a blank screen that was never blank.
+    await page.evaluate(async () => {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(regs.map((r) => r.unregister().catch(() => false)))
+      }
+      if (typeof caches !== 'undefined') {
+        const names = await caches.keys()
+        await Promise.all(names.map((n) => caches.delete(n).catch(() => false)))
+      }
+    }).catch(() => {})
+    await page.route('**/assets/*docs.lazy-*', async (route) => {
+      await new Promise((r) => setTimeout(r, 4000))
+      return route.continue()
+    })
+    await go(`/app/${WS}/inbox`, 3500)
+    const docsLink = page.locator(`a[href$="/${WS}/docs"]`).first()
+    if ((await docsLink.count()) === 0) {
+      bad('no Docs link to navigate to')
+    } else {
+      await docsLink.click()
+      await page.waitForTimeout(1200)
+      const shapes = await page.locator('.animate-shimmer').count()
+      const busy = await page.locator('[aria-busy="true"]').count()
+      chk(shapes >= 4, `the wait is drawn as shapes (${shapes})`, 'the content area was blank')
+      chk(busy > 0, 'and announced to assistive tech', 'nothing marked aria-busy')
+    }
+    await page.unroute('**/assets/*docs.lazy-*')
+  }
+
   ref('HEALTH', 'Nothing is actually broken')
   if (noted.length) {
     console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)
