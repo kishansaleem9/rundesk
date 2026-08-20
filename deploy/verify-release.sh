@@ -418,6 +418,18 @@ AFTER=$(curl -fsS --max-time 20 "$API/workspaces/$WS/work-schedule" -H "$AUTH" 2
 [ "$BEFORE" = "$AFTER" ] && ok "and the schedule is unchanged by the rejected calls" \
   || bad "a rejected call still modified the schedule"
 
+# ---------------------------------------------------------------------------
+say "Cleared notifications age out after 30 days (§2.5)"
+# The purge itself runs at 4am, which is a long time to wait to find out
+# whether a deploy wired it up. The service logs its policy on boot instead.
+RETENTION_LOG=$(docker logs rundesk-api 2>&1 | grep -c 'notification retention active' || true)
+[ "${RETENTION_LOG:-0}" -gt 0 ] \
+  && ok "the retention job is registered on this release" \
+  || bad "no retention line in the API log — the job did not start"
+docker logs rundesk-api 2>&1 | grep -o 'deleted after [0-9]* days' | tail -1 | grep -q 'after 30 days' \
+  && ok "and the window is 30 days" \
+  || bad "the retention window is not 30 days"
+
 echo
 printf '\033[1m%s passed, %s failed\033[0m\n' "$PASS" "$FAIL"
 if [ "$FAIL" -eq 0 ]; then

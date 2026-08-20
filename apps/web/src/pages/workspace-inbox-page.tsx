@@ -388,7 +388,10 @@ export function InboxPage() {
           </div>
         </div>
         <p className="text-sm text-muted-foreground mt-0.5 max-w-xl">
-          {t('inbox.subtitle')}
+          {/* §2.5 — clearing is not archiving: the server deletes cleared rows
+              after 30 days. Say so where the cleared ones are, rather than
+              letting people discover it by missing something. */}
+          {view === 'cleared' ? t('inbox.clearedRetentionNote') : t('inbox.subtitle')}
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">

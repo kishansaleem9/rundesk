@@ -66,6 +66,7 @@ export const en = {
 
   // Inbox
   'inbox.title': 'Notifications',
+  'inbox.clearedRetentionNote': 'Cleared notifications are removed automatically after 30 days.',
   'inbox.subtitle': "Mentions, comments, and updates across every workspace you're part of.",
   'inbox.new': '{{count}} new',
   'inbox.emptyTitle': "You're all caught up",
@@ -5108,6 +5109,7 @@ export const es: Record<TranslationKey, string> = {
   'topbar.markAllRead': 'Marcar todo como leído',
 
   'inbox.title': 'Notificaciones',
+  'inbox.clearedRetentionNote': 'Las notificaciones borradas se eliminan automáticamente después de 30 días.',
   'inbox.subtitle': 'Menciones, comentarios y novedades de todos los espacios en los que participas.',
   'inbox.new': '{{count}} nuevas',
   'inbox.emptyTitle': 'Estás al día',
@@ -10113,6 +10115,7 @@ export const ar: Record<TranslationKey, string> = {
   'topbar.markAllRead': 'تعليم الكل كمقروء',
 
   'inbox.title': 'الإشعارات',
+  'inbox.clearedRetentionNote': 'تُحذف الإشعارات المُزالة تلقائيًا بعد 30 يومًا.',
   'inbox.subtitle': 'الإشارات والتعليقات والتحديثات عبر كل مساحات العمل التي تشارك فيها.',
   'inbox.new': '{{count}} جديدة',
   'inbox.emptyTitle': 'أنت على اطّلاع بكل شيء',
@@ -15115,6 +15118,7 @@ export const ur: Record<TranslationKey, string> = {
   'topbar.notifications': 'اطلاعات',
   'topbar.markAllRead': 'سب کو پڑھا ہوا نشان زد کریں',
   'inbox.title': 'اطلاعات',
+  'inbox.clearedRetentionNote': 'صاف کیے گئے نوٹیفکیشنز 30 دن بعد خود بخود حذف ہو جاتے ہیں۔',
   'inbox.subtitle': 'ہر اُس ورک اسپیس میں ذکر، تبصرے اور اپ ڈیٹس جس کا آپ حصہ ہیں۔',
   'inbox.new': '{{count}} نئی',
   'inbox.emptyTitle': 'آپ سب کچھ دیکھ چکے ہیں',
