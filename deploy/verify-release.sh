@@ -149,16 +149,33 @@ if [ -n "$TID" ]; then
       printf '%s' "$READ" | grep -q "$TID" \
         && ok "a task can be created as a chosen type" \
         || bad "the chosen type did not stick -> $(printf '%s' "$READ" | head -c 160)"
+
+      # …and search narrows to it. A second type gives the negative case: a
+      # filter that returns everything regardless would pass the positive one on
+      # its own. The workspace is a path segment here, not a query param.
+      OTHER=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/task-types" -H "$AUTH" \
+        -H 'Content-Type: application/json' -d '{"name":"Deploy check other"}' 2>/dev/null || true)
+      OID=$(printf '%s' "$OTHER" | jget id)
+
+      MINE=$(curl -fsS --max-time 25 "$API/search/$WS?q=deploy&taskTypeId=$TID" -H "$AUTH" 2>/dev/null || true)
+      printf '%s' "$MINE" | grep -q "$NEW_ID" \
+        && ok "search finds it when filtered to that type" \
+        || bad "taskTypeId=$TID did not return the task -> $(printf '%s' "$MINE" | head -c 200)"
+
+      if [ -n "$OID" ]; then
+        NOTMINE=$(curl -fsS --max-time 25 "$API/search/$WS?q=deploy&taskTypeId=$OID" -H "$AUTH" 2>/dev/null || true)
+        printf '%s' "$NOTMINE" | grep -q "$NEW_ID" \
+          && bad "filtering to a different type still returned it — the filter is not applied" \
+          || ok "and excludes it when filtered to a different type"
+        curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/task-types/$OID" -H "$AUTH" >/dev/null 2>&1 || true
+      else
+        bad "could not create a second task type for the negative case"
+      fi
+
       curl -fsS --max-time 20 -X DELETE "$API/tasks/$NEW_ID" -H "$AUTH" >/dev/null 2>&1 || true
     else
       bad "could not create a task to check the type -> $(printf '%s' "$NEW" | head -c 160)"
     fi
-
-    # …and search can narrow to it.
-    HITS=$(curl -fsS --max-time 20 "$API/search?q=deploy&taskTypeId=$TID" -H "$AUTH" 2>/dev/null || true)
-    printf '%s' "$HITS" | grep -q '"data"' \
-      && ok "search accepts a taskTypeId filter" \
-      || bad "search with taskTypeId -> $(printf '%s' "$HITS" | head -c 160)"
   else
     bad "no list available to create a typed task in"
   fi
