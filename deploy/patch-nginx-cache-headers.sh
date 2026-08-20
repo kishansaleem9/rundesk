@@ -76,7 +76,13 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-BACKUP="${VHOST}.bak.$(date +%Y%m%d%H%M%S)"
+# NOT beside the vhost: Debian's nginx.conf includes sites-enabled/* wholesale,
+# so a backup left there is *loaded as config* — you get "conflicting server
+# name … ignored" and a second, stale copy of the site one filename away from
+# taking precedence. Keep backups out of every include path.
+BACKUP_DIR="${BACKUP_DIR:-/var/backups/rundesk-nginx}"
+mkdir -p "$BACKUP_DIR"
+BACKUP="$BACKUP_DIR/$(basename "$VHOST").bak.$(date +%Y%m%d%H%M%S)"
 cp "$VHOST" "$BACKUP"
 echo "▶ backed up to $BACKUP"
 
