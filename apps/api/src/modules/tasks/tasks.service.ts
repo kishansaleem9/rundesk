@@ -2931,9 +2931,13 @@ export class TasksService {
     }
   }
 
-  async removeWatcher(taskId: string, userId: string) {
+  async removeWatcher(taskId: string, userId: string, actorId?: string) {
     await this.db.delete(taskWatchers).where(and(eq(taskWatchers.taskId, taskId), eq(taskWatchers.userId, userId)))
     this.realtime.emitToTask(taskId, { type: 'watchers.updated', taskId })
+    // The type is task_follower_changed, not task_follower_added: a follower
+    // leaving is the same change to the same roster, and she named the event
+    // "FOLLOWER CHANGE".
+    await this.notifyFollowerChanged(taskId, userId, actorId).catch(() => undefined)
     return this.getTask(taskId)
   }
 

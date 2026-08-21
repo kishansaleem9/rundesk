@@ -358,16 +358,21 @@ export class TasksController {
   async addWatcher(
     @Param('taskId') taskId: string,
     @Body() body: { userId: string },
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.tasks.addWatcher(taskId, body.userId)
+    // §2.2 — the actor has to reach the service or the follower-changed
+    // notification cannot leave them out, and they would be told about their
+    // own click.
+    return this.tasks.addWatcher(taskId, body.userId, user.id)
   }
 
   @Delete(':taskId/watchers/:userId')
   async removeWatcher(
     @Param('taskId') taskId: string,
     @Param('userId') userId: string,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.tasks.removeWatcher(taskId, userId)
+    return this.tasks.removeWatcher(taskId, userId, user.id)
   }
 
   // --- Attachments ---------------------------------------------------------

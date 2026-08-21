@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import {
   NotificationsService,
   PRIMARY_SELECTABLE_TYPES,
@@ -27,6 +29,17 @@ import {
  *   ['nonsense']  — not a choice. Storing it would leave Primary permanently
  *                   empty with no way to tell from the UI why.
  */
+
+/** Walk up to the workspace root: this compiles to CJS, so no import.meta. */
+function workspaceRoot(from: string): string {
+  let dir = from
+  for (;;) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir
+    const up = dirname(dir)
+    if (up === dir) throw new Error('workspace root not found')
+    dir = up
+  }
+}
 
 function fakeDb(saved?: unknown) {
   const writes: unknown[] = []
@@ -169,5 +182,61 @@ describe('Primary is what you chose (§2.2)', () => {
         .updatePreferences('u1', { primaryTypes: ['message_reaction', 'shared_with_me'] })
         .then(() => assert.ok(true))
     })
+  })
+})
+
+/**
+ * §2.2 — the emitters, checked at the source.
+ *
+ * A type with no emitter is a checkbox that governs nothing, and an emitter
+ * that cannot see who acted tells people about their own clicks. The second is
+ * exactly what shipped first: `addWatcher` grew an `actorId` parameter and its
+ * only caller did not pass one, so the "leave the actor out" filter never once
+ * applied. Nothing failed — the notification simply went to the wrong set.
+ *
+ * TasksService needs ten collaborators to construct, so these read the source.
+ * That is the weaker claim and is labelled as one rather than dressed up as
+ * behaviour.
+ */
+describe('the emitters exist and know who acted (source-level, §2.2)', () => {
+  const read = (rel: string) => readFileSync(join(workspaceRoot(process.cwd()), rel), 'utf8')
+  const tasksService = read('apps/api/src/modules/tasks/tasks.service.ts')
+  const tasksController = read('apps/api/src/modules/tasks/tasks.controller.ts')
+  const chatService = read('apps/api/src/modules/chat/chat.service.ts')
+  const sharesService = read('apps/api/src/modules/shares/shares.service.ts')
+  const integrations = read(
+    'apps/api/src/modules/integrations/connections/integration-connections.service.ts',
+  )
+
+  it('being taken off a task tells the person it happened to', () => {
+    assert.match(tasksService, /type: 'task_unassigned'/)
+    // …and not when you took yourself off.
+    assert.match(tasksService, /userId !== actorId/)
+  })
+
+  it('a follower change tells the task, and the endpoint says who did it', () => {
+    assert.match(tasksService, /type: 'task_follower_changed'/)
+    assert.match(
+      tasksController,
+      /addWatcher\(taskId, body\.userId, user\.id\)/,
+      'without the actor the exclusion below can never fire',
+    )
+    assert.match(tasksController, /removeWatcher\(taskId, userId, user\.id\)/)
+    assert.match(tasksService, /recipients\.delete\(actorId\)/)
+  })
+
+  it('a reaction tells the author, and never for your own message', () => {
+    assert.match(chatService, /type: 'message_reaction'/)
+    assert.match(chatService, /message\.authorId !== userId/)
+  })
+
+  it('a share tells an existing member, not an invited address', () => {
+    assert.match(sharesService, /type: 'shared_with_me'/)
+    assert.match(sharesService, /userId && userId !== actor\.id/)
+  })
+
+  it('an access request tells the admins who can grant it', () => {
+    assert.match(integrations, /type: 'access_requested'/)
+    assert.match(integrations, /'workspace_admin', 'super_admin'/)
   })
 })
