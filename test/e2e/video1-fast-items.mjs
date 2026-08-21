@@ -407,7 +407,12 @@ console.log('\n§1.3  the sidebar collapses to icons')
   const collapsed = await widthOf()
   check(collapsed > 0 && collapsed < 90, `collapses to a rail (${Math.round(collapsed)}px)`)
 
-  // "mujhe bas ICONS show hon" — links, but no labels taking up room.
+  // "mujhe bas ICONS show hon" — the icon rail, not the wide sidebar. This used
+  // to assert the rail carried no text at all, which read the line too
+  // literally: what she was pointing at when she said it was ClickUp's own app
+  // bar ("yeh NAVIGATION hai IN KI"), and that labels every icon. A column of
+  // unlabelled pictograms you have to hover to identify is not what she asked
+  // for; it is what "sirf icons" sounds like out of context.
   //
   // Scoped to the rail's own nav, not the whole <aside>: the floating dock is a
   // DOM descendant of the sidebar even though it is fixed-position chrome, so
@@ -416,7 +421,15 @@ console.log('\n§1.3  the sidebar collapses to icons')
   const railLinks = await rail.locator('a').count()
   const railText = (await rail.innerText()).trim()
   check(railLinks >= 5, `the destinations are still reachable (${railLinks} icons)`)
-  check(railText.length === 0, 'and no labels are taking up the space', railText.slice(0, 60))
+  check(
+    /home/i.test(railText) && /inbox/i.test(railText),
+    'and each icon says what it is',
+    railText.slice(0, 60) || '(the rail is unlabelled)',
+  )
+  // Labelled, but still a rail: the whole point was the space the wide sidebar
+  // took. If this ever creeps past ~90px it has stopped being the thing she
+  // asked for.
+  check(collapsed < 90, `and it is still narrow (${Math.round(collapsed)}px)`)
 
   // "kyunke yeh SPACE leta hai" — the point is the page getting the room.
   const mainWidth = await page

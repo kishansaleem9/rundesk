@@ -589,7 +589,7 @@ export function WorkspaceSidebar() {
    * dock. Only when the dock is actually over the sidebar — drag it out to the
    * canvas and the sidebar gets its full height back.
    */
-  const sidebarWidth = collapsed ? 56 : 288
+  const sidebarWidth = collapsed ? 72 : 288
   const dockOverlapsSidebar = dockSize.h > 0 && dockPos.x < sidebarWidth
   const listPadBottom = dockOverlapsSidebar ? dockPos.y + dockSize.h + 12 : 0
   const updateDockConfig = async (patch: { appearance?: { size?: string; opacity?: number; orientation?: string } }) => {
@@ -759,7 +759,7 @@ export function WorkspaceSidebar() {
             children shrink to fit and 19 icons squash instead of scrolling, so
             the rail silently loses the bottom of the list on a short window. */}
         <nav
-          className="flex-1 min-h-0 overflow-y-auto scrollbar-none py-2 flex flex-col items-center gap-1"
+          className="flex-1 min-h-0 overflow-y-auto scrollbar-none px-1.5 py-2 flex flex-col items-center gap-0.5"
           style={{ paddingBottom: listPadBottom + 8 }}
         >
           {workspaceId
@@ -771,18 +771,31 @@ export function WorkspaceSidebar() {
                       <TooltipTrigger asChild>
                         <Link
                           to={entry.path}
-                          aria-label={navLabel(entry.label)}
                           aria-current={active ? 'page' : undefined}
+                          data-testid={`rail-${entry.path.split('/').pop()}`}
                           className={cn(
-                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors',
+                            'flex w-full shrink-0 flex-col items-center gap-0.5 rounded-lg px-0.5 py-1.5 transition-colors',
                             active
                               ? 'bg-accent/15 text-foreground'
                               : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
                           )}
                         >
-                          <Icon className="h-4 w-4" />
+                          <Icon className="h-4 w-4 shrink-0" />
+                          {/*
+                            §1.3 — "sirf ICONS show hon" was about the wide
+                            sidebar eating space, not about hiding what the
+                            icons are. The thing she was pointing at when she
+                            said it — "yeh NAVIGATION hai IN KI" — labels every
+                            icon in its app bar, and without that the rail is a
+                            column of pictograms you have to hover to read.
+                            Small enough to keep the rail a rail.
+                          */}
+                          <span className="w-full truncate text-center text-[9px] leading-tight">
+                            {navLabel(entry.label)}
+                          </span>
                         </Link>
                       </TooltipTrigger>
+                      {/* Still worth having: a long label truncates. */}
                       <TooltipContent side="right">{navLabel(entry.label)}</TooltipContent>
                     </Tooltip>
                   )
@@ -798,7 +811,7 @@ export function WorkspaceSidebar() {
       data-collapsed={collapsed ? 'true' : 'false'}
       className={cn(
         'border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0',
-        collapsed ? 'w-14' : 'w-72',
+        collapsed ? 'w-[72px]' : 'w-72',
       )}
     >
       {collapsed && railBody}
