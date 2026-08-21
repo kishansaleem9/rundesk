@@ -31,6 +31,8 @@ export const en = {
 
   // Navigation
   'nav.collapseSidebar': 'Collapse sidebar',
+  'nav.expandItem': 'Expand {{name}}',
+  'nav.collapseItem': 'Collapse {{name}}',
   'nav.expandSidebar': 'Expand sidebar',
   'nav.home': 'Home',
   'nav.inbox': 'Inbox',
@@ -5062,6 +5064,8 @@ export const es: Record<TranslationKey, string> = {
   'common.optional': 'opcional',
 
   'nav.collapseSidebar': 'Contraer barra lateral',
+  'nav.expandItem': 'Expandir {{name}}',
+  'nav.collapseItem': 'Contraer {{name}}',
   'nav.expandSidebar': 'Expandir barra lateral',
   'nav.home': 'Inicio',
   'nav.inbox': 'Bandeja',
@@ -10054,6 +10058,8 @@ export const ar: Record<TranslationKey, string> = {
   'common.optional': 'اختياري',
 
   'nav.collapseSidebar': 'طيّ الشريط الجانبي',
+  'nav.expandItem': 'توسيع {{name}}',
+  'nav.collapseItem': 'طيّ {{name}}',
   'nav.expandSidebar': 'توسيع الشريط الجانبي',
   'nav.home': 'الرئيسية',
   'nav.inbox': 'الوارد',
@@ -15045,6 +15051,8 @@ export const ur: Record<TranslationKey, string> = {
   'common.retry': 'دوبارہ کوشش کریں',
   'common.optional': 'اختیاری',
   'nav.collapseSidebar': 'سائیڈبار سکیڑیں',
+  'nav.expandItem': '{{name}} کھولیں',
+  'nav.collapseItem': '{{name}} سکیڑیں',
   'nav.expandSidebar': 'سائیڈبار پھیلائیں',
   'nav.home': 'ہوم',
   'nav.inbox': 'ان باکس',

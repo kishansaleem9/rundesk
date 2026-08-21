@@ -538,6 +538,79 @@ console.log('\n§1.1  task type at create time, and as a search filter')
   await ctx.close()
 }
 
+console.log('\n§1.3b  the tree opens, closes, and opens again — and the dock stays off it')
+{
+  // Same route the section above uses: the sidebar is shell chrome and renders
+  // on any workspace route, and this one is known to reach the stubs it needs.
+  const { ctx, page } = await openApp()
+  await page.waitForTimeout(3000)
+
+  const toggle = page.locator('[data-testid="space-toggle-sp-1"]')
+  const link = page.locator('[data-testid="space-link-sp-1"]')
+  const child = page.locator('[data-testid="project-link-pr-1"]')
+
+  check((await toggle.count()) > 0, 'the space row has its own expand control')
+  check((await link.count()) > 0, 'and the name is a separate target')
+
+  // The nesting this replaced was a <Link> inside the toggle <button>: invalid
+  // HTML, and one click both navigated and toggled, so whether a space opened
+  // depended on which half of the row you hit.
+  const nested = await page.evaluate(
+    () => document.querySelectorAll('button a').length,
+  )
+  check(nested === 0, 'no link is nested inside a button', `${nested} found`)
+
+  if ((await toggle.count()) > 0) {
+    await toggle.click()
+    await page.waitForTimeout(800)
+    const openedOnce = (await child.count()) > 0
+    check(openedOnce, 'the chevron opens the space')
+
+    await toggle.click()
+    await page.waitForTimeout(800)
+    check((await child.count()) === 0, 'and closes it again')
+
+    // The reported bug: closing was easy, reopening was not.
+    await toggle.click()
+    await page.waitForTimeout(800)
+    check((await child.count()) > 0, 'and opens it a second time')
+  }
+
+  // Opening a space must never fold it away. Navigating to something and having
+  // it disappear underneath you is how the tree became unusable.
+  if ((await link.count()) > 0) {
+    await link.click()
+    await page.waitForTimeout(1200)
+    check((await child.count()) > 0, 'clicking the name opens the space, never closes it')
+  }
+
+  /*
+   * The floating dock is `fixed` at the bottom-left — on top of the sidebar,
+   * not beside it. Rows underneath it are hidden and, worse, unclickable: a
+   * fixed z-50 layer takes the click. The tree has to reserve room for it.
+   */
+  const overlap = await page.evaluate(() => {
+    const tree = document.querySelector('[data-testid="sidebar-tree"]')
+    const dock = [...document.querySelectorAll('div')].find(
+      (el) => getComputedStyle(el).position === 'fixed' && !!el.querySelector('a[href*="/app/"]'),
+    )
+    if (!tree || !dock) return { ok: false, why: 'tree or dock missing' }
+    const d = dock.getBoundingClientRect()
+    const pad = parseFloat(getComputedStyle(tree).paddingBottom) || 0
+    // Anything the tree can scroll to must be able to clear the dock.
+    const last = [...tree.querySelectorAll('a,button')].pop()
+    const lastBottom = last ? last.getBoundingClientRect().bottom : 0
+    return { ok: pad >= d.height, pad, dockH: d.height, lastBottom, dockTop: d.top }
+  })
+  check(
+    overlap.ok,
+    `the tree reserves room for the dock (pad ${Math.round(overlap.pad ?? 0)}px >= dock ${Math.round(overlap.dockH ?? 0)}px)`,
+    JSON.stringify(overlap),
+  )
+
+  await ctx.close()
+}
+
 await browser.close()
 server.close()
 

@@ -250,6 +250,18 @@ export function WorkspaceSidebar() {
   const [showDockSettings, setShowDockSettings] = useState(false)
   const [viewport, setViewport] = useState({ w: 1400, h: 900 })
   const dockRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * The dock is `fixed` and defaults to the bottom-left corner — which is on
+   * top of this sidebar, not beside it. So the last rows of the tree sat under
+   * it: hidden, and worse, unclickable, because a fixed z-50 layer takes the
+   * click. Closing a space near the bottom of the list and then not being able
+   * to reopen it is that, not a broken toggle.
+   *
+   * Measured rather than assumed: the dock changes size with its orientation
+   * setting, and it is `hidden xl:flex`, so below that breakpoint it has no
+   * height and this correctly reserves nothing.
+   */
+  const [dockSize, setDockSize] = useState({ w: 0, h: 0 })
   const { organizations, workspaces, setWorkspaces } = useAuthStore()
   const qc = useQueryClient()
   const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>({})
@@ -555,6 +567,31 @@ export function WorkspaceSidebar() {
     opacity: 0.9,
     orientation: 'horizontal',
   }
+
+  // Keep dockSize honest as the dock resizes, the orientation setting changes,
+  // or the xl breakpoint takes it away entirely (display:none reports 0, which
+  // is exactly the reservation we want then).
+  useEffect(() => {
+    const el = dockRef.current
+    if (!el || typeof ResizeObserver === 'undefined') {
+      setDockSize({ w: 0, h: 0 })
+      return
+    }
+    const measure = () => setDockSize({ w: el.offsetWidth, h: el.offsetHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [workspaceId, appearance.orientation, appearance.size, collapsed])
+
+  /**
+   * How much room the tree must leave at the bottom so no row ends up under the
+   * dock. Only when the dock is actually over the sidebar — drag it out to the
+   * canvas and the sidebar gets its full height back.
+   */
+  const sidebarWidth = collapsed ? 56 : 288
+  const dockOverlapsSidebar = dockSize.h > 0 && dockPos.x < sidebarWidth
+  const listPadBottom = dockOverlapsSidebar ? dockPos.y + dockSize.h + 12 : 0
   const updateDockConfig = async (patch: { appearance?: { size?: string; opacity?: number; orientation?: string } }) => {
     if (!workspaceId) return
     await api(`/dashboards/dock/${workspaceId}`, {
@@ -721,7 +758,10 @@ export function WorkspaceSidebar() {
         {/* min-h-0 is what makes overflow-y-auto real here: without it the flex
             children shrink to fit and 19 icons squash instead of scrolling, so
             the rail silently loses the bottom of the list on a short window. */}
-        <nav className="flex-1 min-h-0 overflow-y-auto scrollbar-none py-2 flex flex-col items-center gap-1">
+        <nav
+          className="flex-1 min-h-0 overflow-y-auto scrollbar-none py-2 flex flex-col items-center gap-1"
+          style={{ paddingBottom: listPadBottom + 8 }}
+        >
           {workspaceId
             ? railEntries(workspaceId, featureEnabled, isAdmin).map((entry) => {
                   const Icon = entry.icon
@@ -883,7 +923,13 @@ export function WorkspaceSidebar() {
         )}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div
+        className="flex-1 min-h-0 overflow-y-auto"
+        // Room for the floating dock, so the last rows can scroll clear of it
+        // rather than sitting underneath a layer that eats their clicks.
+        style={{ paddingBottom: listPadBottom }}
+        data-testid="sidebar-tree"
+      >
         {workspaceId && (
           <div className="p-2 space-y-2">
           <NavLink to="/app/$workspaceId" params={{ workspaceId }} icon={Home} label={t('nav.home')} />
@@ -1130,21 +1176,28 @@ export function WorkspaceSidebar() {
               const renderProjectNode = (project: (typeof space.projects)[number]) => (
                 <div key={project.id} className="space-y-0.5">
                   <div className="group flex items-center gap-1">
+                    {/* Same split as the space row above, for the same reason. */}
                     <button
-                      className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                      type="button"
                       onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
+                      aria-expanded={!!expandedProjects[project.id]}
+                      aria-label={t(expandedProjects[project.id] ? 'nav.collapseItem' : 'nav.expandItem', { name: project.name })}
+                      data-testid={`project-toggle-${project.id}`}
+                      className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/10"
                     >
                       <ChevronDown
                         className={cn('h-3 w-3 transition-transform', expandedProjects[project.id] && 'rotate-180')}
                       />
-                      <Link
-                        to="/app/$workspaceId/$spaceId/$projectId"
-                        params={{ workspaceId, spaceId: space.id, projectId: project.id }}
-                        className="truncate hover:text-foreground"
-                      >
-                        {project.name}
-                      </Link>
                     </button>
+                    <Link
+                      to="/app/$workspaceId/$spaceId/$projectId"
+                      params={{ workspaceId, spaceId: space.id, projectId: project.id }}
+                      onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: true }))}
+                      data-testid={`project-link-${project.id}`}
+                      className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-1.5 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                    >
+                      <span className="truncate">{project.name}</span>
+                    </Link>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button
@@ -1297,24 +1350,41 @@ export function WorkspaceSidebar() {
               return (
               <div key={space.id} className="space-y-0.5">
                 <div className="group flex items-center gap-1">
+                  {/*
+                    Two targets, not one. This used to be a <Link> nested inside
+                    the toggle <button> — invalid HTML, and behaviourally it
+                    meant a single click both navigated and toggled, so opening
+                    a space you had just closed depended on which half of the
+                    row you happened to hit. ClickUp separates them: the chevron
+                    expands, the name opens the space.
+                  */}
                   <button
-                    className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                    type="button"
                     onClick={() => setExpandedSpaces((prev) => ({ ...prev, [space.id]: !prev[space.id] }))}
+                    aria-expanded={!!expandedSpaces[space.id]}
+                    aria-label={t(expandedSpaces[space.id] ? 'nav.collapseItem' : 'nav.expandItem', { name: space.name })}
+                    data-testid={`space-toggle-${space.id}`}
+                    className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/10"
                   >
                     <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expandedSpaces[space.id] && 'rotate-180')} />
+                  </button>
+                  <Link
+                    to="/app/$workspaceId/$spaceId"
+                    params={{ workspaceId, spaceId: space.id }}
+                    // Opening a space reveals it. Never the reverse: navigating
+                    // to something and having it fold away underneath you is
+                    // how the tree became unusable.
+                    onClick={() => setExpandedSpaces((prev) => ({ ...prev, [space.id]: true }))}
+                    data-testid={`space-link-${space.id}`}
+                    className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-1.5 py-1.5 text-sm text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                  >
                     {space.icon ? (
                       <span className="h-4 w-4 shrink-0 flex items-center justify-center text-sm leading-none">{space.icon}</span>
                     ) : (
                       <FolderOpen className="h-4 w-4 shrink-0" style={space.color ? { color: space.color } : undefined} />
                     )}
-                    <Link
-                      to="/app/$workspaceId/$spaceId"
-                      params={{ workspaceId, spaceId: space.id }}
-                      className="truncate hover:text-foreground"
-                    >
-                      {space.name}
-                    </Link>
-                  </button>
+                    <span className="truncate">{space.name}</span>
+                  </Link>
                   <button
                     className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground"
                     aria-label={t('nav.addProjectTo', { name: space.name })}
