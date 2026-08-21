@@ -35,6 +35,17 @@ export type TimeFormatPreference = (typeof TIME_FORMAT_VALUES)[number]
 export const WEEK_START_VALUES = ['sunday', 'monday', 'saturday'] as const
 export type WeekStartPreference = (typeof WEEK_START_VALUES)[number]
 
+/**
+ * §1.5 — the top-bar controls a member is allowed to put away.
+ *
+ * Search and the user menu are deliberately absent: one is the primary way to
+ * find anything and the other is how you get to this setting, so hiding either
+ * would be a trap. Everything else is the member's call —
+ * "yeh option jo hai woh humare members ke paas hona chahiye".
+ */
+export const TOPBAR_ITEMS = ['notifications', 'theme', 'timer', 'ai', 'create'] as const
+export type TopbarItem = (typeof TOPBAR_ITEMS)[number]
+
 /** Image content types accepted for avatar uploads, mapped to a file extension. */
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -80,6 +91,7 @@ export class UsersService {
       dateFormat?: string
       timeFormat?: string
       weekStart?: string
+      topbarHidden?: string[]
     },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
@@ -97,12 +109,28 @@ export class UsersService {
     if (patch.weekStart !== undefined && !WEEK_START_VALUES.includes(patch.weekStart as WeekStartPreference)) {
       throw new BadRequestException(`Unsupported week start: ${patch.weekStart}`)
     }
+    if (patch.topbarHidden !== undefined) {
+      // Validate every entry rather than storing what arrived: this is a jsonb
+      // column, so an unvalidated array is a place to park arbitrary data on
+      // another user's row via a field the client controls.
+      if (!Array.isArray(patch.topbarHidden)) {
+        throw new BadRequestException('topbarHidden must be an array')
+      }
+      const unknown = patch.topbarHidden.filter(
+        (item) => !TOPBAR_ITEMS.includes(item as TopbarItem),
+      )
+      if (unknown.length > 0) {
+        throw new BadRequestException(`Unknown top bar item(s): ${unknown.join(', ')}`)
+      }
+      // De-duplicate so the stored value is a set, not a log of clicks.
+      patch.topbarHidden = [...new Set(patch.topbarHidden)]
+    }
     // SECURITY: whitelist the self-editable profile columns. Spreading the raw
     // body let a caller mass-assign any users column — most critically `role`,
     // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
     // super-admin. Only copy the fields a user is allowed to change themselves.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db

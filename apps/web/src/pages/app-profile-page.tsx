@@ -13,6 +13,7 @@ import { formatDateTimeWith } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { encodeQr } from '../lib/qr'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { TOPBAR_ITEMS, useHiddenTopbarItems, useSetTopbarItem, type TopbarItem } from '../lib/topbar-prefs'
 
 type Profile = {
   id: string
@@ -349,6 +350,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
 
       <ThemeSelector />
       <LanguageSelector />
+      <TopbarSelector />
 
       <div className="flex items-center justify-between pt-3 border-t border-border">
         <span className="text-xs text-muted-foreground">
@@ -360,6 +362,61 @@ function GeneralTab({ profile }: { profile: Profile }) {
         </Button>
       </div>
     </Card>
+  )
+}
+
+/**
+ * §1.5 — "Lekin humare paas NAV BAR ko set down karne ka option nahi hai;
+ * lekin ClickUp pe humein option diya jaata hai."
+ *
+ * This is that option. She asked for the notification bell to go "[Default
+ * par]" because notifications already live in Inbox, and said that if it were
+ * kept, the choice should sit with the member. Both: the bell starts off, and
+ * every optional control in the row can be put back or put away here.
+ *
+ * Search and the user menu are absent on purpose — hiding the way you find
+ * things, or the way you reach this setting, would be a trap rather than a
+ * preference.
+ */
+const TOPBAR_LABEL_KEY: Record<TopbarItem, TranslationKey> = {
+  notifications: 'profile.topbarNotifications',
+  theme: 'profile.topbarTheme',
+  timer: 'profile.topbarTimer',
+  ai: 'profile.topbarAi',
+  create: 'profile.topbarCreate',
+}
+
+function TopbarSelector() {
+  const { t } = useTranslation()
+  const hidden = useHiddenTopbarItems()
+  const setItem = useSetTopbarItem()
+
+  return (
+    <div className="space-y-1.5 pt-1">
+      <Label>{t('profile.topbarTitle')}</Label>
+      <p className="text-xs text-muted-foreground">{t('profile.topbarDesc')}</p>
+      <div className="grid gap-1.5 pt-1 sm:grid-cols-2">
+        {TOPBAR_ITEMS.map((item) => {
+          const shown = !hidden.has(item)
+          return (
+            <label
+              key={item}
+              className="flex items-center gap-2.5 rounded-md border border-border px-3 py-2 text-sm cursor-pointer hover:bg-muted/40"
+            >
+              <input
+                type="checkbox"
+                checked={shown}
+                data-testid={`topbar-toggle-${item}`}
+                disabled={setItem.isPending}
+                onChange={(e) => setItem.mutate({ item, visible: e.target.checked })}
+                className="h-4 w-4 rounded border-border"
+              />
+              <span>{t(TOPBAR_LABEL_KEY[item])}</span>
+            </label>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

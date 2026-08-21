@@ -197,6 +197,80 @@ console.log('\n§1.5  the language switcher is out of the top bar')
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n§1.5  the notification bell — off by default, and a member can put it back')
+// ---------------------------------------------------------------------------
+{
+  // "hum notification yahan le ke jaa rahe hain, to humein yahan bhi rakhne ki
+  // zaroorat nahi hai … [Default par]" — and, if kept, "yeh option jo hai woh
+  // humare members ke paas hona chahiye". Both halves, plus the general
+  // complaint underneath them: "humare paas NAV BAR ko set down karne ka option
+  // nahi hai".
+  const { ctx, page } = await openApp()
+  const bell = page.locator('header button[aria-label*="otification" i], header [data-testid="notifications-bell"]')
+  check((await bell.count()) === 0, 'the bell is not in the top bar by default')
+
+  // The control she said does not exist.
+  await page.goto(`${BASE}/app/profile`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const toggle = page.locator('[data-testid="topbar-toggle-notifications"]')
+  check((await toggle.count()) > 0, 'a member can configure the top bar from their profile')
+  if ((await toggle.count()) > 0) {
+    check(!(await toggle.isChecked()), 'and the bell shows as off there')
+    const sent = []
+    await page.route('**/api/**', (route_) => {
+      const r = route_.request()
+      if (r.method() === 'PATCH') sent.push(r.postData() ?? '')
+      return route_.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: stubBody(r.url()),
+      })
+    })
+    await toggle.check()
+    await page.waitForTimeout(1200)
+    check(
+      sent.some((b) => b.includes('topbarHidden')),
+      'turning it on saves the preference to the member, not the browser',
+      sent.join(' | ').slice(0, 120),
+    )
+    check(
+      sent.some((b) => !JSON.parse(b || '{}').topbarHidden?.includes('notifications')),
+      'and the bell is removed from the hidden set',
+      sent.join(' | ').slice(0, 120),
+    )
+  }
+  await ctx.close()
+}
+
+// The bell is back on for a member who asked for it.
+{
+  const shown = { ...SESSION, state: { ...SESSION.state, user: { ...USER, topbarHidden: [] } } }
+  const ctx = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    serviceWorkers: 'block',
+  })
+  await ctx.route('**/api/**', (route_) =>
+    route_.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: route_.request().url().includes('/users/me')
+        ? JSON.stringify({ data: { ...USER, topbarHidden: [] }, error: null })
+        : stubBody(route_.request().url()),
+    }),
+  )
+  const page = await ctx.newPage()
+  await page.addInitScript(
+    ([k, v]) => window.localStorage.setItem(k, v),
+    ['rundesk.auth', JSON.stringify(shown)],
+  )
+  await page.goto(`${BASE}/app/${WS}/inbox`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1500)
+  const bell = page.locator('header button[aria-label*="otification" i], header [data-testid="notifications-bell"]')
+  check((await bell.count()) > 0, 'a member who turns it back on gets it back')
+  await ctx.close()
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n§2.2  the Inbox "Other" chip is gone')
 // ---------------------------------------------------------------------------
 {

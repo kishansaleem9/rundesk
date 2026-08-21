@@ -67,6 +67,18 @@ export const users = pgTable('users', {
   dateFormat:    text('date_format').notNull().default('system'),
   timeFormat:    text('time_format').notNull().default('system'),
   weekStart:     text('week_start').notNull().default('sunday'),
+  // §1.5 — which optional top-bar controls this member has put away.
+  //
+  // > "hum notification yahan le ke jaa rahe hain, to humein yahan bhi rakhne
+  // >  ki zaroorat nahi hai … ya phir humein rakhne ki zaroorat hai to yeh
+  // >  option jo hai woh humare members ke paas hona chahiye … Lekin humare
+  // >  paas NAV BAR ko set down karne ka option nahi hai."
+  //
+  // Stored as what is *hidden* rather than what is shown, so a control added
+  // later appears for everyone by default instead of silently staying off for
+  // every existing member. The bell ships hidden — that is her "[Default par]"
+  // — and a member can put it back.
+  topbarHidden:  jsonb('topbar_hidden').$type<string[]>().notNull().default(['notifications']),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

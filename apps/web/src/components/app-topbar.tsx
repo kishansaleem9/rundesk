@@ -54,6 +54,7 @@ import { useMentionNames } from '../hooks/use-mention-names'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS } from '@rundesk/feature-flags'
 import { InlineSkeleton } from './loading-skeletons'
+import { useTopbarVisible } from '../lib/topbar-prefs'
 
 type Workspace = { id: string; name: string; slug: string }
 type WorkspaceEntry = { workspace: Workspace; role: string }
@@ -78,6 +79,7 @@ export function AppTopbar({
   onAiToggle?: () => void
   aiOpen?: boolean
 }) {
+  const visible = useTopbarVisible()
   const { t } = useTranslation()
   const params = useParams({ strict: false }) as {
     workspaceId?: string
@@ -100,14 +102,22 @@ export function AppTopbar({
       <BrandingApplier workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
       <Breadcrumbs {...params} />
       <div className="flex-1" />
-      <TimerIndicator />
+      {/* §1.5 — "yeh option jo hai woh humare members ke paas hona chahiye …
+          humare paas NAV BAR ko set down karne ka option nahi hai". Search and
+          the user menu are not optional: one is how you find anything, the
+          other is how you reach the setting that governs this row. The bell
+          ships hidden — her "[Default par]" — because notifications already
+          have a home in Inbox. */}
+      {visible('timer') && <TimerIndicator />}
       <SearchBar onCommandOpen={onCommandOpen} />
-      {onAiToggle && isUuidLike(params.workspaceId) && (
+      {visible('ai') && onAiToggle && isUuidLike(params.workspaceId) && (
         <AiDockToggle workspaceId={params.workspaceId} onToggle={onAiToggle} open={!!aiOpen} />
       )}
-      <QuickCreateButton />
-      <ThemeToggle />
-      <NotificationsBell workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
+      {visible('create') && <QuickCreateButton />}
+      {visible('theme') && <ThemeToggle />}
+      {visible('notifications') && (
+        <NotificationsBell workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
+      )}
       <UserMenu workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
     </header>
   )
@@ -665,6 +675,7 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
         <button
           className="relative h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
           aria-label={t('topbar.notifications')}
+          data-testid="notifications-bell"
         >
           <Bell className="h-4 w-4" />
           {unread > 0 && (

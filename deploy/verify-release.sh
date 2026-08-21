@@ -489,6 +489,20 @@ AFTER=$(curl -fsS --max-time 20 "$API/workspaces/$WS/work-schedule" -H "$AUTH" 2
   || bad "a rejected call still modified the schedule"
 
 # ---------------------------------------------------------------------------
+say "The top bar is a member preference, bell off by default (§1.5)"
+ME=$(curl -fsS --max-time 20 "$API/users/me" -H "$AUTH" 2>/dev/null || true)
+printf '%s' "$ME" | grep -q 'topbarHidden' \
+  && ok "the profile carries a top bar preference" \
+  || bad "no topbarHidden on /users/me -> $(printf '%s' "$ME" | head -c 160)"
+printf '%s' "$ME" | grep -o '"topbarHidden":\[[^]]*\]' | grep -q 'notifications' \
+  && ok "and the bell starts hidden" \
+  || bad "the bell is not hidden by default -> $(printf '%s' "$ME" | grep -o '"topbarHidden":\[[^]]*\]')"
+BADITEM=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/users/me" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"topbarHidden":["search"]}' || true)
+[ "$BADITEM" = "400" ] \
+  && ok "an unknown top bar item is refused (400)" \
+  || bad "topbarHidden=[search] answered $BADITEM — arbitrary values reach a jsonb column"
+
 say "Cleared notifications age out after 30 days (§2.5)"
 # The purge itself runs at 4am, which is a long time to wait to find out
 # whether a deploy wired it up. The service logs its policy on boot instead.

@@ -7,6 +7,8 @@ export type AuthUser = {
   displayName: string
   role: string
   avatarUrl?: string | null
+  /** §1.5 — top-bar controls this member has put away (lib/topbar-prefs). */
+  topbarHidden?: string[] | null
 }
 
 export type AuthOrg = {

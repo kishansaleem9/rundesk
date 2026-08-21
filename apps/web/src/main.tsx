@@ -67,6 +67,9 @@ function useSessionHydration() {
           displayName: me.displayName,
           role: me.role,
           avatarUrl: me.avatarUrl ?? null,
+          // §1.5 — this field is copied explicitly like the rest; leaving it
+          // out would silently reset the top bar on every page load.
+          topbarHidden: me.topbarHidden ?? null,
         })
         // Cross-device theme (Plan §13.1): the server preference wins on load.
         if (me.theme && THEME_VALUES.includes(me.theme as Theme)) {
