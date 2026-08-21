@@ -215,6 +215,37 @@ try {
       ? fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } })
           .then((r) => r.json()).then((j) => j?.data).catch(() => null)
       : Promise.resolve(null)
+  const apiPost = (path, body) =>
+    token
+      ? fetch(`${API}${path}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body ?? {}),
+        }).then((r) => r.json()).then((j) => j?.data).catch(() => null)
+      : Promise.resolve(null)
+  // apiGet swallows the status, so a 404 and an empty list look identical. Some
+  // checks below turn on exactly that difference.
+  const apiRead = (path) =>
+    token
+      ? fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then(async (r) => ({ status: r.status, data: (await r.json().catch(() => null))?.data }))
+          .catch(() => ({ status: 0, data: null }))
+      : Promise.resolve({ status: 0, data: null })
+
+  /**
+   * Poll until it is true, or give up and say so. A fixed sleep is a guess about
+   * how long something takes; this is a claim about whether it happened, and it
+   * is the difference between a flaky check and a real one.
+   */
+  const until = async (fn, ms = 8000, step = 250) => {
+    const deadline = Date.now() + ms
+    for (;;) {
+      const v = await fn().catch(() => null)
+      if (v) return v
+      if (Date.now() > deadline) return null
+      await new Promise((r) => setTimeout(r, step))
+    }
+  }
 
   let WS = (/\/app\/([0-9a-f-]{36})/.exec(page.url()) ?? [])[1]
   if (!WS) {
@@ -391,6 +422,163 @@ try {
     )
   }
 
+  ref('§2.2b', 'Primary is customisable, and Later holds saved messages')
+  await go(`/app/${WS}/inbox?filter=primary`, 4000)
+  {
+    const customise = page.locator('[data-testid="primary-customise"]')
+    if ((await customise.count()) === 0) {
+      bad('no customise control on the Primary chip')
+    } else {
+      await customise.click()
+      await page.waitForTimeout(1200)
+      const boxes = await page
+        .locator('[data-testid="primary-customise-panel"] input[type="checkbox"]')
+        .count()
+      chk(boxes >= 10, `the customiser offers ${boxes} kinds`, `only ${boxes} offered`)
+      // The five she named that had no type until this release.
+      for (const type of [
+        'task_unassigned',
+        'task_follower_changed',
+        'message_reaction',
+        'shared_with_me',
+        'access_requested',
+      ]) {
+        chk(
+          (await page.locator(`[data-testid="primary-type-${type}"]`).count()) > 0,
+          `${type} is offered`,
+          `${type} is missing from the customiser`,
+        )
+      }
+
+      /*
+       * A rendered checkbox proves nothing about whether ticking it is
+       * remembered, and "remembered" is the whole feature — she is choosing
+       * once, not every visit. So tick one for real and ask the API, which is
+       * the only witness that cannot be fooled by local component state. The
+       * unit tests for this ran against a stubbed db; this is the deployed one.
+       */
+      const box = page.locator('[data-testid="primary-type-message_reaction"]')
+      const typesNow = async () =>
+        new Set((await apiGet('/notifications/preferences'))?.primaryTypes ?? [])
+      if ((await box.count()) === 0) {
+        // Already reported missing above; clicking it would throw and take the
+        // rest of the run down with it.
+        bad('cannot check that a choice persists: the checkbox is not there')
+      } else {
+        const was = (await typesNow()).has('message_reaction')
+        await box.click()
+        const landed = await until(async () =>
+          (await typesNow()).has('message_reaction') === !was ? true : null,
+        )
+        chk(
+          landed,
+          `ticking a kind is saved (message_reaction -> ${!was ? 'on' : 'off'})`,
+          'the tick never reached the API, so the choice dies with the tab',
+        )
+        // Leave the account as we found it: this is someone's real Primary. The
+        // second click sends whatever the component currently holds, so wait for
+        // the invalidated query to land first — clicking on stale state would
+        // re-send the set we are trying to undo.
+        await until(async () => ((await box.isChecked()) === !was ? true : null))
+        await box.click()
+        const restored = await until(async () =>
+          (await typesNow()).has('message_reaction') === was ? true : null,
+        )
+        chk(restored, 'and untickable again', 'could not restore the original choice')
+      }
+      await customise.click()
+      await page.waitForTimeout(400)
+    }
+  }
+  {
+    // Saved messages need a starred message to show, and this account may have
+    // none. The claim that survives either way is that the endpoint the tab
+    // depends on exists on *this* build — a 404 here is the tab permanently
+    // empty, which looks identical to "nothing saved" from the screenshot.
+    const saved = await apiRead(`/workspaces/${WS}/chat/saved`)
+    chk(
+      saved.status === 200,
+      `the saved-messages endpoint answers (${Array.isArray(saved.data) ? saved.data.length : 0} saved)`,
+      `Later's saved-messages source answered ${saved.status}`,
+    )
+    await go(`/app/${WS}/inbox?view=later`, 4000)
+    chk(
+      !/something went wrong/i.test(await seen()),
+      'the Later tab renders',
+      'the Later tab threw',
+    )
+    if (Array.isArray(saved.data) && saved.data.length > 0) {
+      chk(
+        (await page.locator('[data-testid="later-saved-messages"]').count()) > 0,
+        `and shows the ${saved.data.length} saved message(s) — the tab she goes looking in`,
+        'saved messages exist but Later does not show them',
+      )
+    } else {
+      ok('nothing is starred on this account, so the saved section is correctly absent')
+    }
+  }
+
+  ref('§2.5', 'Clear all, and the retention clock')
+  {
+    /*
+     * Both controls here are conditional on there being something to act on:
+     * Clear all renders only with unread rows, and the countdown only attaches
+     * to a cleared one. Checking them against whatever the account happens to
+     * hold makes a green run mean "the inbox was empty" as often as it means
+     * "the feature works". So seed the precondition and check the real thing.
+     */
+    const seeded = await apiPost('/notifications/test', { workspaceId: WS })
+    const counts = (await apiGet('/notifications/counts')) ?? {}
+    chk(
+      seeded !== null && (counts.inbox ?? 0) > 0,
+      'seeded a notification to clear',
+      'could not seed a notification, so the checks below would prove nothing',
+    )
+
+    await go(`/app/${WS}/inbox`, 4000)
+    const clearAll = page.locator('[data-testid="inbox-clear-all"]')
+    chk(
+      (await clearAll.count()) > 0,
+      'the Inbox offers Clear all',
+      'no bulk clear — the thing she actually did on screen',
+    )
+
+    // Clicking it bins everything in the bucket. That is fine when the only
+    // thing there is ours, and not ours to do otherwise: RUNDESK_EMAIL may well
+    // be a person. When it is, clear just the seeded row and say the click was
+    // skipped rather than passing silently on a weaker check.
+    const mine = ((await apiGet('/notifications?view=inbox')) ?? []).filter(
+      (n) => n.type === 'test_notification',
+    )
+    const onlyOurs = (counts.inbox ?? 0) === 1 && mine.length >= 1
+    if (onlyOurs && (await clearAll.count()) > 0) {
+      await clearAll.click()
+      const emptied = await until(async () =>
+        ((await apiGet('/notifications/counts')) ?? {}).inbox === 0 ? true : null,
+      )
+      chk(emptied, 'clicking it empties the Inbox', 'Clear all did not clear the Inbox')
+    } else {
+      for (const n of mine) await apiPost(`/notifications/${n.id}/clear`)
+      ok(
+        `clicked nothing: this account holds ${counts.inbox} live notifications, ` +
+          'so only the seeded row was cleared (the button is checked above)',
+      )
+    }
+
+    await go(`/app/${WS}/inbox?view=cleared`, 4000)
+    const rows = await page.locator('[data-testid="retention-countdown"]').count()
+    chk(
+      rows > 0,
+      `${rows} cleared row(s) show how long is left before deletion`,
+      'a row was just cleared, but nothing says when it goes — clearing reads as archiving',
+    )
+    chk(
+      /30 days/i.test(await seen()),
+      'and the tab states the 30-day policy',
+      'the Cleared tab never mentions the 30 days',
+    )
+  }
+
   ref('§1.3', 'The sidebar collapses to icons')
   await go(`/app/${WS}`, 4000)
   {
@@ -414,6 +602,16 @@ try {
         'the destinations are still reachable as icons',
         'the rail has no links',
       )
+      // The floating dock lives inside this component; as an early return the
+      // collapsed branch never reached it, so collapsing deleted it.
+      const dockAlive = await page.evaluate(
+        () =>
+          [...document.querySelectorAll('div')].some(
+            (el) =>
+              getComputedStyle(el).position === 'fixed' && !!el.querySelector('a[href*="/app/"]'),
+          ),
+      )
+      chk(dockAlive, 'and the floating dock survives collapsing', 'collapsing removed the dock')
       // Put it back — this runs against the real account and should not leave
       // the sidebar collapsed for whoever logs in next.
       await page.locator('[data-testid="sidebar-toggle"]').first().click()
