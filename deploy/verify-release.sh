@@ -125,9 +125,14 @@ printf '%s' "$SEEDED" | grep -q 'Milestone' \
   && ok "the workspace ships with a Milestone type" \
   || bad "no default task types -> $(printf '%s' "$SEEDED" | head -c 160)"
 
+# Deliberately NOT the default. An earlier version created this type with
+# isDefault:true and then checked that a task created "as" it carried it — which
+# passed while the controller was silently dropping taskTypeId, because the task
+# picked the type up as the workspace default instead. A non-default type is the
+# only version of this check that tests the wire.
 TT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/task-types" -H "$AUTH" \
   -H 'Content-Type: application/json' \
-  -d '{"name":"Deploy check","icon":"✅","isDefault":true}' 2>/dev/null || true)
+  -d '{"name":"Deploy check","icon":"✅"}' 2>/dev/null || true)
 TID=$(printf '%s' "$TT" | jget id)
 if [ -n "$TID" ]; then ok "created a task type"; else bad "create -> $TT"; fi
 
@@ -166,9 +171,15 @@ if [ -n "$TID" ]; then
     NEW_ID=$(printf '%s' "$NEW" | jget id)
     if [ -n "$NEW_ID" ]; then
       READ=$(curl -fsS --max-time 20 "$API/tasks/$NEW_ID" -H "$AUTH" 2>/dev/null || true)
+      DEFAULT_TID=$(printf '%s' "$SEEDED" | grep -o '{"id":"[0-9a-f-]\{36\}"[^}]*"isDefault":true' | head -1 | sed 's/.*"id":"//;s/".*//' || true)
       printf '%s' "$READ" | grep -q "$TID" \
-        && ok "a task can be created as a chosen type" \
-        || bad "the chosen type did not stick -> $(printf '%s' "$READ" | head -c 160)"
+        && ok "a task can be created as a chosen non-default type" \
+        || bad "the chosen type did not stick -> $(printf '%s' "$READ" | head -c 200)"
+      if [ -n "$DEFAULT_TID" ]; then
+        printf '%s' "$READ" | grep -q "$DEFAULT_TID" \
+          && bad "the task took the workspace default instead of the chosen type" \
+          || ok "and not the workspace default, so the choice really travelled"
+      fi
 
       # …and search narrows to it. A second type gives the negative case: a
       # filter that returns everything regardless would pass the positive one on

@@ -121,6 +121,12 @@ export class TasksController {
       parentTaskId: body.parentTaskId,
       assigneeIds: body.assigneeIds,
       labelIds: body.labelIds,
+      // §1.1 — this handler builds the argument field by field, so a field
+      // added to the DTO and honoured by the service still goes nowhere unless
+      // it is named here. taskTypeId was accepted by the DTO, validated and
+      // used by createTask, and dropped in between: choosing a type on create
+      // has never once applied.
+      taskTypeId: body.taskTypeId,
       createdById: user.id,
     })
   }
