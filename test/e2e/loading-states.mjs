@@ -140,6 +140,21 @@ async function openContext({ delay = () => 0 } = {}) {
   return { ctx, page }
 }
 
+/**
+ * Poll until `predicate` holds, or give up. "The skeleton clears" is a claim
+ * about convergence, not about a particular millisecond — writing it as a fixed
+ * sleep makes it a bet on how fast the machine is, and that bet loses on a CI
+ * runner even when the app is behaving. Returns whether it converged.
+ */
+async function waitUntil(predicate, timeoutMs = 8000, stepMs = 200) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await predicate()) return true
+    if (Date.now() > deadline) return false
+    await sleep(stepMs)
+  }
+}
+
 /** Does the viewport contain anything a person would see? */
 async function paintedElements(page) {
   return page.evaluate(() => {
@@ -195,8 +210,7 @@ console.log('\n1. boot — before any of the app has run')
     .first()
     .waitFor({ timeout: 20000 })
     .catch(() => {})
-  await page.waitForTimeout(600)
-  const bootGone = (await page.locator('#boot').count()) === 0
+  const bootGone = await waitUntil(async () => (await page.locator('#boot').count()) === 0)
   check(
     bootShowed && bootGone,
     'the boot skeleton is removed once the app renders',
@@ -344,12 +358,12 @@ console.log('\n6. deep link — the worst of them, and the one no page had cover
     .waitFor({ timeout: 20000 })
     .catch(() => {})
   await page.waitForTimeout(900)
-  check(
-    shapes >= 8 &&
+  const cleared = await waitUntil(
+    async () =>
       (await page.locator('#boot').count()) === 0 &&
       (await page.locator('.animate-shimmer').count()) === 0,
-    'every skeleton clears once the route lands',
   )
+  check(shapes >= 8 && cleared, 'every skeleton clears once the route lands')
   await ctx.close()
 }
 

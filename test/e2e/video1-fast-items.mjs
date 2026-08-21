@@ -132,6 +132,21 @@ function stubBody(url) {
   return JSON.stringify({ data, error: null })
 }
 
+/**
+ * Poll until `predicate` holds, or give up. A transition finishing is a claim
+ * about convergence, not about a particular millisecond — as a fixed sleep it
+ * is a bet on machine speed, and that bet loses on a CI runner while the app is
+ * behaving perfectly.
+ */
+async function waitUntil(predicate, timeoutMs = 8000, stepMs = 150) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    if (await predicate()) return true
+    if (Date.now() > deadline) return false
+    await new Promise((r) => setTimeout(r, stepMs))
+  }
+}
+
 const browser = await chromium.launch(LAUNCH)
 async function openApp(route = `/app/${WS}/inbox`, seed = {}) {
   const ctx = await browser.newContext({
@@ -323,7 +338,10 @@ console.log('\n§1.3  the sidebar collapses to icons')
   check(expanded > 200, `starts expanded (${Math.round(expanded)}px)`)
 
   await page.locator('[data-testid="sidebar-toggle"]').first().click()
-  await page.waitForTimeout(500)
+  await waitUntil(async () => {
+    const w = await widthOf()
+    return w > 0 && w < 90
+  })
   const collapsed = await widthOf()
   check(collapsed > 0 && collapsed < 90, `collapses to a rail (${Math.round(collapsed)}px)`)
 
@@ -342,15 +360,18 @@ console.log('\n§1.3  the sidebar collapses to icons')
   check(mainWidth > 1300, `the page takes the space back (${Math.round(mainWidth)}px)`)
 
   await page.locator('[data-testid="sidebar-toggle"]').first().click()
-  await page.waitForTimeout(500)
+  await waitUntil(async () => (await widthOf()) > 200)
   check((await widthOf()) > 200, 'and it expands again')
 
   // The preference has to survive a reload, or it is not a preference.
   await page.locator('[data-testid="sidebar-toggle"]').first().click()
-  await page.waitForTimeout(400)
+  await waitUntil(async () => (await widthOf()) < 90)
   await page.reload({ waitUntil: 'networkidle' })
-  await page.waitForTimeout(1200)
-  check((await widthOf()) < 90, 'the choice survives a reload')
+  const persisted = await waitUntil(async () => {
+    const w = await widthOf()
+    return w > 0 && w < 90
+  })
+  check(persisted, 'the choice survives a reload', `${Math.round(await widthOf())}px after reload`)
   await ctx.close()
 }
 

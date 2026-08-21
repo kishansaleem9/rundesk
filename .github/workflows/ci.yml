@@ -47,8 +47,8 @@ jobs:
       - name: Web publish keeps the previous release's chunks
         run: bash test/deploy/publish-web-dist.test.sh
 
-  stale-chunks:
-    name: Stale-chunk recovery
+  browser-suites:
+    name: Browser suites
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
