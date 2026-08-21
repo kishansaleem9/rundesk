@@ -680,6 +680,13 @@
       "when": 1900000088005,
       "tag": "0096_notification_kinds",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1900000089005,
+      "tag": "0097_restore_default_task_type",
+      "breakpoints": true
     }
   ]
 }

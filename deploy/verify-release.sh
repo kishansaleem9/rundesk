@@ -141,7 +141,10 @@ if [ -n "$TID" ]; then
   printf '%s' "$LIST" | grep -q 'Deploy check' && ok "it is listed" || bad "list -> $LIST"
 
   DEFAULTS=$(printf '%s' "$LIST" | grep -o '"isDefault":true' | wc -l | tr -d ' ')
-  [ "$DEFAULTS" = "1" ] && ok "exactly one default type" || bad "found $DEFAULTS defaults, expected 1"
+  # 0 is the interesting failure: deleting the default used to leave a workspace
+  # with none, which makes every later task untyped and hides the picker.
+  [ "$DEFAULTS" = "1" ] && ok "exactly one default type" \
+    || bad "found $DEFAULTS defaults, expected 1 (0 means nothing re-nominated one after a delete)"
 
   # §1.1 — a task can be created *as* a type. tasks.service.ts always accepted
   # taskTypeId, but the global pipe runs whitelist:true and CreateTaskDto had no
@@ -175,10 +178,17 @@ if [ -n "$TID" ]; then
       printf '%s' "$READ" | grep -q "$TID" \
         && ok "a task can be created as a chosen non-default type" \
         || bad "the chosen type did not stick -> $(printf '%s' "$READ" | head -c 200)"
-      if [ -n "$DEFAULT_TID" ]; then
-        printf '%s' "$READ" | grep -q "$DEFAULT_TID" \
-          && bad "the task took the workspace default instead of the chosen type" \
-          || ok "and not the workspace default, so the choice really travelled"
+      # Not `if [ -n ... ]`: when this could not find the default it skipped
+      # silently, and the run showed neither a pass nor a fail for the one
+      # assertion that distinguishes "the choice travelled" from "the task took
+      # the default anyway". A check that quietly no-ops is worse than one that
+      # fails, because the output looks fine.
+      if [ -z "$DEFAULT_TID" ]; then
+        bad "could not identify the workspace default, so the check below proves nothing"
+      elif printf '%s' "$READ" | grep -q "$DEFAULT_TID"; then
+        bad "the task took the workspace default instead of the chosen type"
+      else
+        ok "and not the workspace default, so the choice really travelled"
       fi
 
       # …and search narrows to it. A second type gives the negative case: a

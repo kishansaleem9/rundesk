@@ -142,13 +142,49 @@ export class TaskTypesService {
    */
   async remove(workspaceId: string, typeId: string, userId: string) {
     await this.assertAdmin(workspaceId, userId)
-    await this.byId(workspaceId, typeId)
+    // One lookup, reused: byId already returns the row, and asking twice for
+    // the same record to read one boolean off it is two round trips for no
+    // reason.
+    const existing = await this.byId(workspaceId, typeId)
     const [{ count } = { count: 0 }] = await this.db
       .select({ count: sql<number>`count(*)::int` })
       .from(tasks)
       .where(eq(tasks.taskTypeId, typeId))
+    const wasDefault = existing.isDefault
     await this.db.delete(taskTypes).where(and(eq(taskTypes.workspaceId, workspaceId), eq(taskTypes.id, typeId)))
+
+    // Deleting the default used to leave the workspace with none, and nothing
+    // re-nominated one — so every task created afterwards came out untyped,
+    // and the create-modal picker and the search filter both went back to
+    // hiding themselves. Production reached that state during a deploy check,
+    // which is how it was found: "found 0 defaults, expected 1".
+    if (wasDefault) await this.ensureDefault(workspaceId)
     return { ok: true, untypedTasks: Number(count) || 0 }
+  }
+
+  /**
+   * Make sure the workspace still has exactly one default, promoting the first
+   * remaining type if it has none. A workspace with types but no default is a
+   * silently broken state: tasks come out untyped and nothing says why.
+   */
+  private async ensureDefault(workspaceId: string) {
+    const [existing] = await this.db
+      .select({ id: taskTypes.id })
+      .from(taskTypes)
+      .where(and(eq(taskTypes.workspaceId, workspaceId), eq(taskTypes.isDefault, true)))
+      .limit(1)
+    if (existing) return
+    const [candidate] = await this.db
+      .select({ id: taskTypes.id })
+      .from(taskTypes)
+      .where(eq(taskTypes.workspaceId, workspaceId))
+      .orderBy(asc(taskTypes.position), asc(taskTypes.createdAt))
+      .limit(1)
+    if (!candidate) return
+    await this.db
+      .update(taskTypes)
+      .set({ isDefault: true, updatedAt: new Date() })
+      .where(eq(taskTypes.id, candidate.id))
   }
 
   /** Scoped by workspace, so a valid id from another tenant reads as missing. */
