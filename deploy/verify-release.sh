@@ -148,6 +148,18 @@ if [ -n "$TID" ]; then
   PRID=$([ -n "$SPID" ] && curl -fsS --max-time 20 "$API/projects/space/$SPID" -H "$AUTH" 2>/dev/null | jget id || true)
   LID=$([ -n "$PRID" ] && curl -fsS --max-time 20 "$API/lists/project/$PRID" -H "$AUTH" 2>/dev/null | jget id || true)
   if [ -n "$LID" ]; then
+    # A taskTypeId from another workspace must be refused. The PATCH path always
+    # scoped it (task-types.service.ts, byId); the create path did not when the
+    # field was opened up, so a caller could type a task with somebody else's
+    # id. A well-formed uuid that is not this workspace's is exactly that case.
+    FOREIGN=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/tasks" -H "$AUTH" \
+      -H 'Content-Type: application/json' \
+      -d "{\"listId\":\"$LID\",\"title\":\"deploy check — foreign type\",\"taskTypeId\":\"00000000-0000-4000-8000-000000000000\"}" || true)
+    case "$FOREIGN" in
+      400|404) ok "a task type from another workspace is refused ($FOREIGN)" ;;
+      *)       bad "a foreign taskTypeId answered $FOREIGN — it was accepted" ;;
+    esac
+
     NEW=$(curl -fsS --max-time 20 -X POST "$API/tasks" -H "$AUTH" \
       -H 'Content-Type: application/json' \
       -d "{\"listId\":\"$LID\",\"title\":\"deploy check — typed task\",\"taskTypeId\":\"$TID\"}" 2>/dev/null || true)

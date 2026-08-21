@@ -4,18 +4,9 @@ import { alias } from 'drizzle-orm/pg-core'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
 import * as dns from 'dns'
-import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers, workspaceHolidays, taskTypes } from '@rundesk/db'
+import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers, workspaceHolidays, taskTypes, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 
-/**
- * §1.1 — what a new workspace starts with. Kept deliberately short: two types
- * cover the distinction she was drawing, and a workspace admin can add more.
- * Migration 0093 backfills the same pair into workspaces that predate this.
- */
-const DEFAULT_TASK_TYPES = [
-  { name: 'Task', icon: '✓', isDefault: true, position: 0 },
-  { name: 'Milestone', icon: '◆', isDefault: false, position: 1 },
-] as const
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { R2Service } from '../../common/storage/r2.service'

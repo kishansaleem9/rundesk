@@ -1380,6 +1380,30 @@ export class TasksService {
    * when types are not in use, which is the state every existing workspace
    * starts in — so this stays a no-op until someone opts in.
    */
+  /**
+   * Is this type one the list's own workspace defines?
+   *
+   * The PATCH path has always checked (task-types.service.ts:169 —
+   * `byId(workspaceId, typeId)`), but when taskTypeId was opened up on create
+   * it was passed straight through, so a caller could type a task with an id
+   * belonging to somebody else's workspace. Same question, asked the same way,
+   * on both paths.
+   */
+  private async taskTypeBelongsToList(listId: string, taskTypeId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: taskTypes.id })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .innerJoin(
+        taskTypes,
+        and(eq(taskTypes.workspaceId, spaces.workspaceId), eq(taskTypes.id, taskTypeId)),
+      )
+      .where(eq(lists.id, listId))
+      .limit(1)
+    return !!row
+  }
+
   private async defaultTaskTypeForList(listId: string): Promise<string | null> {
     const [row] = await this.db
       .select({ id: taskTypes.id })
@@ -1477,6 +1501,9 @@ export class TasksService {
     // A workspace that has nominated a default type gets it applied here, so
     // every task created through any surface — quick-add, board, import — is
     // typed without each of them having to know types exist.
+    if (data.taskTypeId && !(await this.taskTypeBelongsToList(data.listId, data.taskTypeId))) {
+      throw new BadRequestException('That task type does not belong to this workspace')
+    }
     const taskTypeId = data.taskTypeId ?? (await this.defaultTaskTypeForList(data.listId))
 
     const [task] = await this.db

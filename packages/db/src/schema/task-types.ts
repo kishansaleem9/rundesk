@@ -34,3 +34,21 @@ export const taskTypes = pgTable(
 export const taskTypesRelations = relations(taskTypes, ({ one }) => ({
   workspace: one(workspaces, { fields: [taskTypes.workspaceId], references: [workspaces.id] }),
 }))
+
+/**
+ * §1.1 — what a workspace starts with.
+ *
+ * Lives beside the table rather than in one service because workspaces are
+ * created from two places: workspaces.service.create() and, for the very first
+ * workspace of a new account, auth.service.signUp() which inserts the row
+ * itself. Seeding only the first left every account created through signup with
+ * no types at all — and all three type controls hide themselves when a
+ * workspace has none, so the feature was invisible on exactly the path most
+ * workspaces are born on.
+ *
+ * Migration 0093 backfills the same pair into workspaces that predate this.
+ */
+export const DEFAULT_TASK_TYPES = [
+  { name: 'Task', icon: '\u2713', isDefault: true, position: 0 },
+  { name: 'Milestone', icon: '\u25c6', isDefault: false, position: 1 },
+] as const

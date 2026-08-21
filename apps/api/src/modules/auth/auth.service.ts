@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config'
 import { randomUUID, randomBytes, createHash } from 'node:crypto'
 import { and, eq, isNull, desc } from 'drizzle-orm'
 import { compareSync, hashSync } from 'bcryptjs'
-import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications } from '@rundesk/db'
+import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications, taskTypes, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { UsersService } from '../users/users.service'
@@ -334,6 +334,15 @@ export class AuthService {
         userId: user.id,
         role: 'workspace_admin',
       })
+
+      // §1.1 — this path inserts the workspace itself rather than going through
+      // workspacesService.create(), so seeding types only there left every
+      // account created through signup with none. A workspace with no types
+      // hides the type picker, the search filter and the settings tab, so the
+      // feature was invisible on the path most workspaces are actually born on.
+      await tx.insert(taskTypes).values(
+        DEFAULT_TASK_TYPES.map((type) => ({ ...type, workspaceId: workspace.id })),
+      )
 
       // 6. Create initial invitations
       const inviteTokens: Array<{ email: string; token: string; claimUrl: string }> = []
