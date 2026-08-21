@@ -148,20 +148,41 @@ async function waitUntil(predicate, timeoutMs = 8000, stepMs = 150) {
 }
 
 const browser = await chromium.launch(LAUNCH)
-async function openApp(route = `/app/${WS}/inbox`, seed = {}) {
+async function openApp(route = `/app/${WS}/inbox`, seed = {}, profile = {}) {
   const ctx = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     serviceWorkers: 'block',
   })
   /** Every API call the app made, so a test can assert what it actually sent. */
   const calls = []
+  // The profile is mutable, and a PATCH to it is applied. A stub that accepts a
+  // write and then keeps answering with the old value is not a stand-in for the
+  // server, it is a contradiction: the UI writes, re-reads, sees no change and
+  // reverts — which is a test failure that says nothing about the app.
+  const me = { ...USER, ...profile }
   await ctx.route('**/api/**', (route_) => {
     const request = route_.request()
-    calls.push({
-      method: request.method(),
-      url: request.url(),
-      body: request.postData() ?? '',
-    })
+    const body = request.postData() ?? ''
+    calls.push({ method: request.method(), url: request.url(), body })
+    if (request.method() === 'PATCH' && request.url().includes('/users/me')) {
+      try {
+        Object.assign(me, JSON.parse(body || '{}'))
+      } catch {
+        /* a malformed body is the test's problem, not the app's */
+      }
+      return route_.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: me, error: null }),
+      })
+    }
+    if (request.url().includes('/users/me')) {
+      return route_.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: me, error: null }),
+      })
+    }
     return route_.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -220,8 +241,8 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
   // humare members ke paas hona chahiye". Both halves, plus the general
   // complaint underneath them: "humare paas NAV BAR ko set down karne ka option
   // nahi hai".
-  const { ctx, page } = await openApp()
-  const bell = page.locator('header button[aria-label*="otification" i], header [data-testid="notifications-bell"]')
+  const { ctx, page, calls } = await openApp()
+  const bell = page.locator('header [data-testid="notifications-bell"]')
   check((await bell.count()) === 0, 'the bell is not in the top bar by default')
 
   // The control she said does not exist.
@@ -231,56 +252,42 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
   check((await toggle.count()) > 0, 'a member can configure the top bar from their profile')
   if ((await toggle.count()) > 0) {
     check(!(await toggle.isChecked()), 'and the bell shows as off there')
-    const sent = []
-    await page.route('**/api/**', (route_) => {
-      const r = route_.request()
-      if (r.method() === 'PATCH') sent.push(r.postData() ?? '')
-      return route_.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: stubBody(r.url()),
-      })
-    })
+    const before = calls.length
     await toggle.check()
-    await page.waitForTimeout(1200)
+    await waitUntil(async () =>
+      calls.slice(before).some((c) => c.method === 'PATCH' && c.body.includes('topbarHidden')),
+    )
+    const patches = calls.slice(before).filter((c) => c.method === 'PATCH')
     check(
-      sent.some((b) => b.includes('topbarHidden')),
+      patches.length > 0,
       'turning it on saves the preference to the member, not the browser',
-      sent.join(' | ').slice(0, 120),
+      calls.slice(before).map((c) => c.method).join(','),
     )
     check(
-      sent.some((b) => !JSON.parse(b || '{}').topbarHidden?.includes('notifications')),
+      patches.some((c) => {
+        try {
+          return !JSON.parse(c.body || '{}').topbarHidden?.includes('notifications')
+        } catch {
+          return false
+        }
+      }),
       'and the bell is removed from the hidden set',
-      sent.join(' | ').slice(0, 120),
+      patches.map((c) => c.body).join(' | ').slice(0, 120),
     )
+    check(await toggle.isChecked(), 'and the control reflects the saved state')
   }
   await ctx.close()
 }
 
 // The bell is back on for a member who asked for it.
 {
-  const shown = { ...SESSION, state: { ...SESSION.state, user: { ...USER, topbarHidden: [] } } }
-  const ctx = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
-    serviceWorkers: 'block',
-  })
-  await ctx.route('**/api/**', (route_) =>
-    route_.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: route_.request().url().includes('/users/me')
-        ? JSON.stringify({ data: { ...USER, topbarHidden: [] }, error: null })
-        : stubBody(route_.request().url()),
-    }),
+  const { ctx, page } = await openApp(
+    `/app/${WS}/inbox`,
+    { 'rundesk.auth': JSON.stringify({ ...SESSION, state: { ...SESSION.state, user: { ...USER, topbarHidden: [] } } }) },
+    { topbarHidden: [] },
   )
-  const page = await ctx.newPage()
-  await page.addInitScript(
-    ([k, v]) => window.localStorage.setItem(k, v),
-    ['rundesk.auth', JSON.stringify(shown)],
-  )
-  await page.goto(`${BASE}/app/${WS}/inbox`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(1500)
-  const bell = page.locator('header button[aria-label*="otification" i], header [data-testid="notifications-bell"]')
+  await page.waitForTimeout(1200)
+  const bell = page.locator('header [data-testid="notifications-bell"]')
   check((await bell.count()) > 0, 'a member who turns it back on gets it back')
   await ctx.close()
 }
