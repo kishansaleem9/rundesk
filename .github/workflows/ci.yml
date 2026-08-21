@@ -47,6 +47,12 @@ jobs:
       - name: Web publish keeps the previous release's chunks
         run: bash test/deploy/publish-web-dist.test.sh
 
+      # A timed-out locator in one section of the deployed-UI check used to end
+      # the whole run while the summary still read like a near-complete pass.
+      # Needs no browser: it drives verify-ui.mjs against a stub.
+      - name: Deployed-UI check survives a section that throws
+        run: bash test/deploy/verify-ui-isolation.test.sh
+
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest
