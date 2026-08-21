@@ -57,19 +57,36 @@ export function useSetTopbarItem() {
   const user = useAuthStore((s) => s.user)
   const setUser = useAuthStore((s) => s.setUser)
 
+  const next = (item: TopbarItem, visible: boolean) => {
+    const current = new Set<string>(
+      Array.isArray(user?.topbarHidden) ? user.topbarHidden : DEFAULT_HIDDEN,
+    )
+    if (visible) current.delete(item)
+    else current.add(item)
+    return [...current]
+  }
+
   return useMutation({
     mutationFn: async ({ item, visible }: { item: TopbarItem; visible: boolean }) => {
-      const current = new Set<string>(
-        Array.isArray(user?.topbarHidden) ? user.topbarHidden : DEFAULT_HIDDEN,
-      )
-      if (visible) current.delete(item)
-      else current.add(item)
-      const topbarHidden = [...current]
+      const topbarHidden = next(item, visible)
       await api('/users/me', { method: 'PATCH', body: { topbarHidden } })
       return topbarHidden
     },
-    onSuccess: (topbarHidden) => {
-      if (user) setUser({ ...user, topbarHidden })
+    // Applied before the request, not after it. This is a checkbox: it has to
+    // move when you click it. Waiting for a round trip means it sits there
+    // looking broken on a slow connection, and it made the browser test flaky
+    // for the same reason a person would find it unconvincing — the control did
+    // not reflect the click yet.
+    onMutate: ({ item, visible }) => {
+      const previous = user?.topbarHidden ?? null
+      if (user) setUser({ ...user, topbarHidden: next(item, visible) })
+      return { previous }
+    },
+    onError: (_error, _vars, context) => {
+      // Put it back rather than leaving the control disagreeing with the server.
+      if (user && context) setUser({ ...user, topbarHidden: context.previous })
+    },
+    onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['users', 'me'] })
     },
   })

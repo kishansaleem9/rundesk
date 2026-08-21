@@ -21,6 +21,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const WEB = path.join(REPO, 'apps/web')
@@ -138,21 +139,6 @@ async function openContext({ delay = () => 0 } = {}) {
     ['rundesk.auth', JSON.stringify(SESSION)],
   )
   return { ctx, page }
-}
-
-/**
- * Poll until `predicate` holds, or give up. "The skeleton clears" is a claim
- * about convergence, not about a particular millisecond — writing it as a fixed
- * sleep makes it a bet on how fast the machine is, and that bet loses on a CI
- * runner even when the app is behaving. Returns whether it converged.
- */
-async function waitUntil(predicate, timeoutMs = 8000, stepMs = 200) {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    if (await predicate()) return true
-    if (Date.now() > deadline) return false
-    await sleep(stepMs)
-  }
 }
 
 /** Does the viewport contain anything a person would see? */

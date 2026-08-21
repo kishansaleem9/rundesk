@@ -18,6 +18,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const WEB = path.join(REPO, 'apps/web')
@@ -132,21 +133,6 @@ function stubBody(url) {
   return JSON.stringify({ data, error: null })
 }
 
-/**
- * Poll until `predicate` holds, or give up. A transition finishing is a claim
- * about convergence, not about a particular millisecond — as a fixed sleep it
- * is a bet on machine speed, and that bet loses on a CI runner while the app is
- * behaving perfectly.
- */
-async function waitUntil(predicate, timeoutMs = 8000, stepMs = 150) {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    if (await predicate()) return true
-    if (Date.now() > deadline) return false
-    await new Promise((r) => setTimeout(r, stepMs))
-  }
-}
-
 const browser = await chromium.launch(LAUNCH)
 async function openApp(route = `/app/${WS}/inbox`, seed = {}, profile = {}) {
   const ctx = await browser.newContext({
@@ -253,7 +239,10 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
   if ((await toggle.count()) > 0) {
     check(!(await toggle.isChecked()), 'and the bell shows as off there')
     const before = calls.length
-    await toggle.check()
+    // click + wait, not .check(): .check() asserts the box is checked the
+    // instant the click returns, which is a claim about round-trip latency
+    // rather than about the control. It failed roughly two runs in five.
+    await toggle.click()
     await waitUntil(async () =>
       calls.slice(before).some((c) => c.method === 'PATCH' && c.body.includes('topbarHidden')),
     )
@@ -274,7 +263,10 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
       'and the bell is removed from the hidden set',
       patches.map((c) => c.body).join(' | ').slice(0, 120),
     )
-    check(await toggle.isChecked(), 'and the control reflects the saved state')
+    check(
+      await waitUntil(async () => await toggle.isChecked()),
+      'and the control reflects the saved state',
+    )
   }
   await ctx.close()
 }
