@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate, useParams, useSearch, Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
@@ -53,6 +54,17 @@ type Notification = {
 }
 
 type TriageCounts = { inbox: number; later: number; cleared: number; unread: number }
+
+/** §2.2 — a starred chat message, shown in Later alongside snoozed rows. */
+type SavedMessage = {
+  id: string
+  channelId: string
+  channelName: string | null
+  body: string | null
+  authorName: string | null
+  createdAt: string
+  savedAt: string
+}
 
 /** The three buckets the API partitions on (§A2.6a). */
 const VIEWS = ['inbox', 'later', 'cleared'] as const
@@ -206,24 +218,46 @@ const HUMAN_TYPES = new Set([
 ])
 
 /**
- * Primary is what a person sent you — a mention, a comment, an assignment, a
- * message. Everything else is what the system sent you: due-date reminders,
- * status transitions, briefings, billing. The distinction that matters at 200
- * notifications is not what kind of object it was about, it is whether someone
- * is waiting on you.
+ * §2.2 — Primary is what *you* said you want here.
  *
- * §2.2 — there was a third chip, Other, holding the complement. She asked for
- * it to go: "yeh mujhe NAHI CHAHIYE humari list mein, kyunke yahan bhi same
- * 'All' wale hi hain". Nothing is hidden by dropping it — system notifications
- * were always in All as well, so Other only ever offered a second route to the
- * same rows. An earlier audit of ours argued for keeping the split; hers is the
- * call that counts.
+ * > "Primary pe yeh setting ka option hai; is par main click karti hoon to yeh
+ * >  mujh se poochta hai ke mujhe kya cheezein show karwani hain … Phir aap ko
+ * >  Primary mein sirf wohi notifications show honge jo aap chahte hain."
+ *
+ * It used to be the hardcoded HUMAN_TYPES set above, which is a reasonable
+ * default and not what she asked for — she spent a minute on the customiser and
+ * named ten kinds she would turn on or off. HUMAN_TYPES is now only the
+ * starting point; the chosen set lives in notification preferences.
+ *
+ * There was also a third chip, Other, holding the complement. She asked for it
+ * to go: "yeh mujhe NAHI CHAHIYE humari list mein, kyunke yahan bhi same 'All'
+ * wale hi hain" — nothing is hidden by dropping it, since system notifications
+ * were always in All too.
  */
 export type InboxFilter = 'all' | 'primary'
 
-export function matchesInboxFilter(type: string, filter: InboxFilter): boolean {
+/** Every type the customiser offers, in the order it shows them. */
+export const PRIMARY_SELECTABLE_TYPES: Array<{ type: string; labelKey: TranslationKey }> = [
+  { type: 'task_mentioned', labelKey: 'inbox.type.mentioned' },
+  { type: 'doc_mentioned', labelKey: 'inbox.type.mentioned' },
+  { type: 'task_commented', labelKey: 'inbox.type.commented' },
+  { type: 'doc_commented', labelKey: 'inbox.type.commented' },
+  { type: 'task_assigned', labelKey: 'inbox.type.assigned' },
+  { type: 'chat_message', labelKey: 'inbox.type.newMessage' },
+  { type: 'task_due_soon', labelKey: 'inbox.type.dueSoon' },
+  { type: 'task_overdue', labelKey: 'inbox.type.overdue' },
+  { type: 'task_status_changed', labelKey: 'inbox.type.statusChanged' },
+  { type: 'task_updated', labelKey: 'inbox.type.taskUpdated' },
+  { type: 'task_blocked', labelKey: 'inbox.type.blocked' },
+]
+
+export function matchesInboxFilter(
+  type: string,
+  filter: InboxFilter,
+  primaryTypes?: Set<string>,
+): boolean {
   if (filter === 'all') return true
-  return HUMAN_TYPES.has(type)
+  return (primaryTypes ?? HUMAN_TYPES).has(type)
 }
 
 const FILTER_LABEL_KEY: Record<InboxFilter, TranslationKey> = {
@@ -233,6 +267,88 @@ const FILTER_LABEL_KEY: Record<InboxFilter, TranslationKey> = {
 const FILTER_HINT_KEY: Record<InboxFilter, TranslationKey> = {
   all: 'inbox.filterAllHint',
   primary: 'inbox.filterPrimaryHint',
+}
+
+
+/**
+ * §2.2 — the customiser she opened from the Primary chip.
+ *
+ * > "Phir yahan pe CUSTOMIZE hai: ke agar koi mujhe MENTION kare to mujhe show
+ * >  ho; agar kisi ne COMMENT kiya hai to mujhe … Ab neeche se REACTIONS mujhe
+ * >  na show hon … Yeh log ne neeche saare ke saare inhein long list likh ke
+ * >  rakhi hai; aap chaho to show kar sakte hain."
+ *
+ * A long list you tick through, and Primary then shows only what you ticked.
+ * Every change saves immediately — this is a view filter, so there is nothing
+ * to commit and no state worth losing to a mis-click on Cancel.
+ */
+function PrimaryCustomiser({
+  selected,
+  pending,
+  onChange,
+}: {
+  selected: Set<string>
+  pending: boolean
+  onChange: (types: string[]) => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+
+  const toggle = (type: string) => {
+    const next = new Set(selected)
+    if (next.has(type)) next.delete(type)
+    else next.add(type)
+    onChange([...next])
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={t('inbox.customisePrimary')}
+        title={t('inbox.customisePrimary')}
+        data-testid="primary-customise"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+      >
+        <Settings className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <>
+          {/* Click-away. A popover that only closes via its own button strands
+              people who expect anywhere-else to dismiss it. */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div
+            className="absolute right-0 z-50 mt-1 w-72 rounded-lg border border-border/70 bg-card p-2 shadow-xl"
+            data-testid="primary-customise-panel"
+          >
+            <p className="px-2 pb-1.5 pt-1 text-[11px] text-muted-foreground">
+              {t('inbox.customisePrimaryHint')}
+            </p>
+            <div className="max-h-72 overflow-y-auto">
+              {PRIMARY_SELECTABLE_TYPES.map(({ type, labelKey }) => (
+                <label
+                  key={type}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] hover:bg-accent/10"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selected.has(type)}
+                    disabled={pending}
+                    onChange={() => toggle(type)}
+                    data-testid={`primary-type-${type}`}
+                    className="h-3.5 w-3.5 rounded border-border"
+                  />
+                  <span>{t(labelKey)}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 /** A run of notifications about the same thing, rendered as one row (§A2.7). */
@@ -300,14 +416,43 @@ export function InboxPage() {
     },
   })
 
+  // §2.2 — what this member chose to see in Primary. Falls back to the default
+  // set while it loads, so the counts do not jump as the request lands.
+  const prefsQuery = useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: () => api<{ primaryTypes?: string[] }>('/notifications/preferences'),
+  })
+  const primaryTypes = new Set(prefsQuery.data?.primaryTypes ?? [...HUMAN_TYPES])
+  const setPrimaryTypes = useMutation({
+    mutationFn: (types: string[]) =>
+      api('/notifications/preferences', { method: 'POST', body: { primaryTypes: types } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notification-preferences'] }),
+  })
+
+  /**
+   * §2.2 — "aap Inbox mein jaoge, LATER mein jaoge, to aap ko woh message show
+   * hoga … Later mein SAVED messages show hote hain."
+   *
+   * Later held only snoozed notifications; the messages you starred lived in a
+   * separate panel inside Chat, which is not where she went looking for them.
+   * The tab merges both now — a saved message is exactly a thing you put aside
+   * for later, which is what the bucket is called.
+   */
+  const savedQuery = useQuery({
+    enabled: view === 'later' && !!workspaceId,
+    queryKey: ['chat-saved', workspaceId],
+    queryFn: () => api<SavedMessage[]>(`/workspaces/${workspaceId}/chat/saved`),
+  })
+  const savedMessages = view === 'later' ? (savedQuery.data ?? []) : []
+
   const { namesById } = useMentionNames(workspaceId)
   const counts = countsQuery.data ?? { inbox: 0, later: 0, cleared: 0, unread: 0 }
   const all = notifsQuery.data ?? []
-  const notifs = all.filter((n) => matchesInboxFilter(n.type, filter))
+  const notifs = all.filter((n) => matchesInboxFilter(n.type, filter, primaryTypes))
   const unread = notifs.filter((n) => !n.readAt)
   // Counts per chip, so the split tells you where the traffic is before you
   // click into it. Derived from the list already loaded — no extra request.
-  const primaryCount = all.filter((n) => matchesInboxFilter(n.type, 'primary')).length
+  const primaryCount = all.filter((n) => matchesInboxFilter(n.type, 'primary', primaryTypes)).length
   const filterCounts: Record<InboxFilter, number> = {
     all: all.length,
     primary: primaryCount,
@@ -482,18 +627,68 @@ export function InboxPage() {
                 <span className="tabular-nums text-[10px] text-muted-foreground">{filterCounts[f]}</span>
               </button>
             ))}
+            {/* §2.2 — "Primary pe yeh setting ka option hai; is par main click
+                karti hoon to yeh mujh se poochta hai ke mujhe kya cheezein show
+                karwani hain." */}
+            {filter === 'primary' && (
+              <PrimaryCustomiser
+                selected={primaryTypes}
+                pending={setPrimaryTypes.isPending}
+                onChange={(types) => setPrimaryTypes.mutate(types)}
+              />
+            )}
           </div>
         </div>
       </header>
 
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl mx-auto space-y-6">
+          {/* §2.2 — the messages she starred, in the tab she goes looking for
+              them in: "Later mein SAVED messages show hote hain". */}
+          {view === 'later' && savedMessages.length > 0 && (
+            <section data-testid="later-saved-messages">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                {t('inbox.savedMessages')}
+              </h2>
+              <div className="space-y-1">
+                {savedMessages.map((msg) => (
+                  <Card
+                    key={msg.id}
+                    variant="glass"
+                    onClick={() =>
+                      navigate({
+                        to: '/app/$workspaceId/chat',
+                        params: { workspaceId },
+                        search: { channel: msg.channelId, message: msg.id },
+                      })
+                    }
+                    className="p-3 cursor-pointer hover:bg-accent/5 flex items-start gap-2.5"
+                  >
+                    <MessageSquare className="h-4 w-4 shrink-0 text-indigo-500 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] truncate">
+                        <MentionText text={msg.body ?? ''} namesById={namesById} />
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                        {[msg.authorName, msg.channelName && `#${msg.channelName}`]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                      {formatDistanceToNowStrict(new Date(msg.savedAt), { addSuffix: true })}
+                    </span>
+                  </Card>
+                ))}
+              </div>
+            </section>
+          )}
           {notifsQuery.isPending ? (
             // Until the request lands, `notifs` is [] — and rendering the empty
             // state here would assert there is nothing in your inbox before we
             // know that. Skeleton rows say "still looking" instead.
             <ListSkeleton rows={7} rowClassName="h-14" />
-          ) : notifs.length === 0 ? (
+          ) : notifs.length === 0 && savedMessages.length === 0 ? (
             <EmptyState
               icon={<Bell className="h-6 w-6" />}
               title={

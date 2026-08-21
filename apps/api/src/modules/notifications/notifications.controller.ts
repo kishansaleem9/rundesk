@@ -67,6 +67,8 @@ export class NotificationsController {
       digest?: { enabled?: boolean; frequency?: 'daily' | 'weekly'; hour?: number }
       briefing?: { enabled?: boolean; hour?: number }
       reminderLeadDays?: number[]
+      /** §2.2 — which types the Inbox's Primary chip shows. */
+      primaryTypes?: string[]
     },
   ) {
     return this.notifications.updatePreferences(user.id, body)

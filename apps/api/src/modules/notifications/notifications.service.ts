@@ -168,6 +168,49 @@ type NotificationEventKey =
 
 type NotificationChannelMatrix = Record<'inApp' | 'web' | 'mobile' | 'email', boolean>
 
+/**
+ * §2.2 — every notification type the Primary customiser may offer. Kept as a
+ * value rather than only a type so the API can reject anything else: this ends
+ * up in a jsonb column straight from the client.
+ */
+export const PRIMARY_SELECTABLE_TYPES = [
+  'task_mentioned',
+  'doc_mentioned',
+  'task_commented',
+  'doc_commented',
+  'task_assigned',
+  'chat_message',
+  'task_due_soon',
+  'task_overdue',
+  'task_status_changed',
+  'task_updated',
+  'task_blocked',
+  'approval_needed',
+  'ai_briefing',
+  'workload_alert',
+] as const
+
+/** What Primary shows for someone who has never opened the customiser. */
+export const DEFAULT_PRIMARY_TYPES: string[] = [
+  'task_mentioned',
+  'doc_mentioned',
+  'task_commented',
+  'doc_commented',
+  'task_assigned',
+  'chat_message',
+]
+
+function normalizePrimaryTypes(value: unknown): string[] {
+  if (!Array.isArray(value)) return DEFAULT_PRIMARY_TYPES
+  const allowed = new Set<string>(PRIMARY_SELECTABLE_TYPES)
+  const chosen = [...new Set(value.filter((v): v is string => typeof v === 'string'))].filter((v) =>
+    allowed.has(v),
+  )
+  // An empty Primary is a legitimate choice — it means "show me nothing here" —
+  // but an array of nothing but junk is a malformed request, not that choice.
+  return value.length > 0 && chosen.length === 0 ? DEFAULT_PRIMARY_TYPES : chosen
+}
+
 type DigestFrequency = 'daily' | 'weekly'
 
 type NotificationPreferences = {
@@ -195,6 +238,23 @@ type NotificationPreferences = {
   /** §10.4 — lead days for due-date reminders (subset of {1,2,7}). */
   reminderLeadDays: number[]
   /**
+   * §2.2 — which notification types the Inbox's Primary chip shows.
+   *
+   * > "Primary pe yeh setting ka option hai; is par main click karti hoon to
+   * >  yeh mujh se poochta hai ke mujhe kya cheezein show karwani hain … Phir
+   * >  aap ko Primary mein sirf wohi notifications show honge jo aap chahte
+   * >  hain."
+   *
+   * Distinct from `events` above, which decides whether a notification is
+   * *delivered* and over which channel. This decides what the Primary view
+   * shows once it has arrived — "don't put this in Primary" is not the same
+   * request as "never tell me".
+   *
+   * Absent means the default set, so an account that has never opened the
+   * customiser keeps behaving exactly as before.
+   */
+  primaryTypes?: string[]
+  /**
    * §A4.7 — whether creating, being assigned to, or commenting on a task
    * subscribes you to it. The behaviour has always been on and invisible; this
    * makes it a choice. Off means only an explicit Watch adds you.
@@ -215,9 +275,12 @@ type NotificationPreferencesPatch = {
   briefing?: Partial<NotificationPreferences['briefing']>
   reminderLeadDays?: number[]
   autoFollow?: boolean
+  /** §2.2 — which types the Inbox's Primary chip shows. */
+  primaryTypes?: string[]
 }
 
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  primaryTypes: DEFAULT_PRIMARY_TYPES,
   channels: {
     webEnabled: true,
     mobileEnabled: false,
@@ -1016,6 +1079,7 @@ export class NotificationsService {
       },
       briefing: normalizeBriefingPrefs({ ...base.briefing, ...(patch.briefing ?? {}) }),
       reminderLeadDays: normalizeReminderLeadDays(patch.reminderLeadDays ?? base.reminderLeadDays),
+    primaryTypes: normalizePrimaryTypes(patch.primaryTypes ?? base.primaryTypes),
       autoFollow: patch.autoFollow ?? base.autoFollow,
       // §14.3 — carry through the onboarding-dismissed flag untouched (set out of
       // band by WorkspacesService) so editing notification prefs never resets it.

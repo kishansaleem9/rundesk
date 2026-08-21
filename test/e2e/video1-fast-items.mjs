@@ -115,8 +115,22 @@ function stubBody(url) {
   // space -> project -> list chain has to answer.
   const data = url.includes('/users/me')
     ? USER
-    : url.includes('/task-types')
-      ? TASK_TYPES
+    : url.includes('/notifications/preferences')
+      ? { primaryTypes: ['task_mentioned', 'chat_message'] }
+      : url.includes('/chat/saved')
+        ? [
+            {
+              id: 'm1',
+              channelId: 'c1',
+              channelName: 'general',
+              body: 'the one she starred',
+              authorName: 'Sam',
+              createdAt: new Date(0).toISOString(),
+              savedAt: new Date(0).toISOString(),
+            },
+          ]
+        : url.includes('/task-types')
+          ? TASK_TYPES
       : url.includes('/plan')
         ? { label: 'Free', usage: { members: 2 } }
         : url.includes('/spaces/workspace/')
@@ -288,7 +302,7 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
 console.log('\n§2.2  the Inbox "Other" chip is gone')
 // ---------------------------------------------------------------------------
 {
-  const { ctx, page } = await openApp(`/app/${WS}/inbox`)
+  const { ctx, page, calls } = await openApp(`/app/${WS}/inbox`)
   await page.waitForTimeout(800)
   // Two rows of controls in the header: the triage views (Inbox / Later /
   // Cleared) and the filter chips over them (All / Primary).
@@ -312,6 +326,55 @@ console.log('\n§2.2  the Inbox "Other" chip is gone')
     'and Later — the one she asked to keep',
     allHeaderLabels.join(', '),
   )
+
+  // §2.2 — "Primary pe yeh setting ka option hai … yeh mujh se poochta hai ke
+  // mujhe kya cheezein show karwani hain."
+  await page.goto(`${BASE}/app/${WS}/inbox?filter=primary`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1000)
+  const customise = page.locator('[data-testid="primary-customise"]')
+  check((await customise.count()) > 0, 'Primary offers the customise control')
+  if ((await customise.count()) > 0) {
+    await customise.click()
+    const panel = page.locator('[data-testid="primary-customise-panel"]')
+    check(
+      await waitUntil(async () => (await panel.count()) > 0),
+      'and it opens a list of what can show there',
+    )
+    const boxes = await panel.locator('input[type="checkbox"]').count()
+    check(boxes >= 8, `offering the long list she described (${boxes} kinds)`)
+    // The stub says this member chose mentions + chat, so those are ticked and
+    // the rest are not — the panel reflects the stored choice, not a default.
+    check(
+      await page.locator('[data-testid="primary-type-task_mentioned"]').isChecked(),
+      'with the choice this member made already ticked',
+    )
+    check(
+      !(await page.locator('[data-testid="primary-type-task_overdue"]').isChecked()),
+      'and what they left off, off',
+    )
+    const before = calls.length
+    await page.locator('[data-testid="primary-type-task_overdue"]').click()
+    check(
+      await waitUntil(async () =>
+        calls
+          .slice(before)
+          .some((c) => c.method === 'POST' && c.body.includes('primaryTypes')),
+      ),
+      'ticking one saves it',
+    )
+  }
+
+  // §2.2 — "Later mein SAVED messages show hote hain."
+  await page.goto(`${BASE}/app/${WS}/inbox?view=later`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const saved = page.locator('[data-testid="later-saved-messages"]')
+  check((await saved.count()) > 0, 'Later shows the messages she saved')
+  if ((await saved.count()) > 0) {
+    check(
+      /the one she starred/.test(await saved.innerText()),
+      'with the message itself, not just a count',
+    )
+  }
 
   // A bookmark to the removed filter must not strand anyone.
   await page.goto(`${BASE}/app/${WS}/inbox?filter=other`, { waitUntil: 'networkidle' })
