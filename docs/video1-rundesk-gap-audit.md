@@ -189,6 +189,39 @@ runs, reports success, and changes nothing. Checking the outcome rather than
 whether the code ran is what found all three.
 
 
+### 0.5 What auditing against her words, not the diff, turned up
+
+Every one of the six "fast" items passed its own tests and its own production
+verification, and every one of them was incomplete. The audit that found this
+read her transcript and the code together; the tests could not have found it,
+because each test asserted the thing that had been built.
+
+The pattern, in every case: **the requirement was larger than the summary of
+it.** Three examples that cost the most:
+
+- §1.5 was recorded as "drop the language dropdown, rethink the bell". What she
+  said was three things: remove the bell *"[Default par]"*, put the choice with
+  *"humare members"*, and — underneath both — *"humare paas NAV BAR ko set down
+  karne ka option nahi hai"*. The answer was not a bell flag but the nav-bar
+  control she said did not exist.
+- §2.9a was recorded as "show skeletons". The blank screen she named was the
+  one after *"new workspace mein le ke aata"* — the workspace Home — and that
+  was the one screen left rendering "Nothing here yet" mid-request.
+- §1.1 was recorded as "UI over a working API". The API silently dropped the
+  field, because the create DTO had no `taskTypeId` and the pipe runs
+  `whitelist: true`.
+
+Two smaller lessons worth keeping:
+
+- **A feature nobody can reach is not shipped.** Task types existed with a
+  working API and an empty table; every control hid itself; the local test
+  seeded types in its stub and passed.
+- **A step that reports success is not a step that ran.** Migration 0093 was not
+  in the drizzle journal and never executed, while the log said "migrations
+  applied successfully". The `-mtime` prune deleted the chunks it had just
+  carried over. Both were found by checking the outcome rather than the code.
+
+
 ## 1. What she explicitly called missing
 
 These are the ones where she says outright it is absent on our end — the phrases
@@ -467,6 +500,12 @@ Worth stating plainly so none of this gets rebuilt:
    from `dismissedAt`, never `createdAt`; the Cleared view now says so.
 5. ~~Never a blank screen while waiting (§2.9a)~~ — **done**, and bigger than it
    looked: see §0.3.
+
+**All of the above are now closed end to end.** An audit of the six against her
+transcript — rather than against the diff — found 20 further gaps, of which two
+were holes opened by the fixes themselves (a `taskTypeId` accepted from any
+workspace, and signup-born workspaces still getting no task types). All are
+fixed; §0.5 records what the audit taught.
 
 **Still open**
 
