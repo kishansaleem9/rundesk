@@ -83,6 +83,10 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   subtasks:   many(tasks, { relationName: 'subtasks' }),
   creator:    one(users, { fields: [tasks.createdById], references: [users.id] }),
   assignees:  many(taskAssignees),
+  // §1.1 — so a task read can carry what kind of task it is without a second
+  // query per row. The type was settable and filterable but never displayed
+  // anywhere a member scans work.
+  taskType:   one(taskTypes, { fields: [tasks.taskTypeId], references: [taskTypes.id] }),
 }))
 
 export const taskAssigneesRelations = relations(taskAssignees, ({ one }) => ({

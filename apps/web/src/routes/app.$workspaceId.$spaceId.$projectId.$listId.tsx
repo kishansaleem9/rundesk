@@ -82,6 +82,37 @@ type Subtask = {
   isMilestone?: boolean
 }
 
+
+/**
+ * §1.1 — what kind of task this is, on the row.
+ *
+ * The type was settable in the create modal, changeable in the detail sheet and
+ * filterable in search, and visible in none of the places a member actually
+ * scans work — so you had to open a task to learn what it was.
+ *
+ * The workspace default is deliberately not drawn. Every task has a type now,
+ * so marking the ordinary ones would put an icon on every row and carry no
+ * information; the point is to see the ones that are something else. Milestones
+ * already have their diamond, so they are not doubled up either.
+ */
+function TaskTypeMark({
+  type,
+}: {
+  type?: { id: string; name: string; icon: string | null; isDefault?: boolean } | null
+}) {
+  if (!type || type.isDefault || !type.icon) return null
+  return (
+    <span
+      className="shrink-0 text-[11px] leading-none opacity-70"
+      title={type.name}
+      aria-label={type.name}
+      data-testid="task-type-mark"
+    >
+      {type.icon}
+    </span>
+  )
+}
+
 type TaskItem = {
   id: string
   title: string
@@ -90,6 +121,8 @@ type TaskItem = {
   status: TaskStatus
   statusCategory?: StatusCategory
   isMilestone?: boolean
+  /** §1.1 — what kind of task this is, so a row can show it. */
+  taskType?: { id: string; name: string; icon: string | null; isDefault?: boolean } | null
   startDate?: string | null
   dueDate?: string | null
   createdAt?: string | null
@@ -3124,6 +3157,7 @@ function TableView({
                         )}
                       >
                         {task.isMilestone && <Diamond className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />}
+                        <TaskTypeMark type={task.taskType} />
                         {task.title}
                       </span>
                     )}

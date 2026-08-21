@@ -1404,6 +1404,39 @@ export class TasksService {
     return !!row
   }
 
+  /**
+   * §1.1 — does this type make its tasks milestones?
+   *
+   * tasks.isMilestone is what the timeline, list badges, subtask rows and the
+   * client portal all render from, and the type is what a person now sets. This
+   * is the one question that keeps the two from contradicting each other.
+   */
+  private async typeIsMilestone(taskTypeId: string | null): Promise<boolean> {
+    if (!taskTypeId) return false
+    const [row] = await this.db
+      .select({ isMilestone: taskTypes.isMilestone })
+      .from(taskTypes)
+      .where(eq(taskTypes.id, taskTypeId))
+      .limit(1)
+    return !!row?.isMilestone
+  }
+
+  /** The milestone type of the workspace this list belongs to, if it has one. */
+  private async milestoneTypeForList(listId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: taskTypes.id })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .innerJoin(
+        taskTypes,
+        and(eq(taskTypes.workspaceId, spaces.workspaceId), eq(taskTypes.isMilestone, true)),
+      )
+      .where(eq(lists.id, listId))
+      .limit(1)
+    return row?.id ?? null
+  }
+
   private async defaultTaskTypeForList(listId: string): Promise<string | null> {
     const [row] = await this.db
       .select({ id: taskTypes.id })
@@ -1505,13 +1538,24 @@ export class TasksService {
       throw new BadRequestException('That task type does not belong to this workspace')
     }
     const taskTypeId = data.taskTypeId ?? (await this.defaultTaskTypeForList(data.listId))
+    // §1.1 — keep the two in step from the first write. Asking for a milestone
+    // type makes the task render as one; asking for a milestone without naming
+    // a type picks up the workspace's milestone type, so the type filter can
+    // find it. Either way there is one answer, not two.
+    let resolvedTypeId = taskTypeId
+    let isMilestone = data.isMilestone ?? false
+    if (await this.typeIsMilestone(resolvedTypeId)) {
+      isMilestone = true
+    } else if (isMilestone && !data.taskTypeId) {
+      resolvedTypeId = (await this.milestoneTypeForList(data.listId)) ?? resolvedTypeId
+    }
 
     const [task] = await this.db
       .insert(tasks)
       .values({
         listId: data.listId,
         parentTaskId: data.parentTaskId,
-        taskTypeId,
+        taskTypeId: resolvedTypeId,
         createdById: data.createdById,
         title: data.title,
         description: data.description,
@@ -1522,7 +1566,7 @@ export class TasksService {
         startDate: data.startDate,
         dueDate: data.dueDate,
         timeEstimate: data.timeEstimate,
-        isMilestone: data.isMilestone ?? false,
+        isMilestone,
       })
       .returning()
 
@@ -1847,6 +1891,10 @@ export class TasksService {
       with: {
         assignees: { with: { user: PUBLIC_USER_WITH } },
         subtasks:  { where: and(eq(tasks.isArchived, false), visFilter) },
+        // §1.1 — carried so a row can show what kind of task it is. Without it
+        // the type was something you could set and filter by but never see
+        // without opening the task.
+        taskType:  true,
       },
     })
     // Attach labels (drizzle's with doesn't follow the join-table->label shape cleanly)
@@ -2241,6 +2289,22 @@ export class TasksService {
       const wasClosed = (before.statusCategory as StatusCategory) === 'closed'
       if (nextCategory === 'closed' && !wasClosed) set.completedAt = new Date()
       if (nextCategory !== 'closed' && wasClosed) set.completedAt = null
+    }
+
+    // §1.1 — the third way these two can be changed. The task sheet has a
+    // diamond toggle that PATCHes isMilestone directly, and the type picker
+    // sits next to it: without this, using one leaves the other stale and the
+    // Milestone type filter cannot find a task the app is drawing as a
+    // milestone. Only fills in a *missing* type — a task deliberately typed as
+    // something else keeps that type and just carries the marker.
+    // (This path cannot set the type itself — that is PATCH /tasks/:id/task-type
+    //  — so there is no caller intent to preserve here, only consistency.)
+    if (set.isMilestone === true && !before.taskTypeId) {
+      const milestoneType = await this.milestoneTypeForList(before.listId)
+      if (milestoneType) set.taskTypeId = milestoneType
+    }
+    if (set.isMilestone === false && before.taskTypeId) {
+      if (await this.typeIsMilestone(before.taskTypeId)) set.taskTypeId = null
     }
 
     const [after] = await this.db.update(tasks).set(set).where(eq(tasks.id, taskId)).returning()

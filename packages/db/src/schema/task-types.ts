@@ -21,6 +21,18 @@ export const taskTypes = pgTable(
     color:       text('color'),
     /** Applied to new tasks when none is chosen; at most one per workspace. */
     isDefault:   boolean('is_default').notNull().default(false),
+    /**
+     * §1.1 — does wearing this type make a task a milestone?
+     *
+     * tasks.isMilestone already drove the diamond on the timeline, the badge in
+     * lists and the client portal, and it shipped long before task types. When
+     * types arrived with a "Milestone" among them, the two were unrelated:
+     * setting the type did not draw the diamond, and drawing the diamond did not
+     * make the task findable by the Milestone type filter. This is the link.
+     * The type is what you set; tasks.isMilestone stays what everything renders
+     * from, kept in step by the service.
+     */
+    isMilestone: boolean('is_milestone').notNull().default(false),
     position:    integer('position').notNull().default(0),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -49,6 +61,8 @@ export const taskTypesRelations = relations(taskTypes, ({ one }) => ({
  * Migration 0093 backfills the same pair into workspaces that predate this.
  */
 export const DEFAULT_TASK_TYPES = [
-  { name: 'Task', icon: '\u2713', isDefault: true, position: 0 },
-  { name: 'Milestone', icon: '\u25c6', isDefault: false, position: 1 },
+  { name: 'Task', icon: '\u2713', isDefault: true, isMilestone: false, position: 0 },
+  // §1.1 — isMilestone links this to tasks.is_milestone, which is what the
+  // timeline diamond, the list badge and the client portal render from.
+  { name: 'Milestone', icon: '\u25c6', isDefault: false, isMilestone: true, position: 1 },
 ] as const

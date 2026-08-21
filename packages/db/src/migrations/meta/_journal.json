@@ -666,6 +666,13 @@
       "when": 1900000086005,
       "tag": "0094_topbar_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1900000087005,
+      "tag": "0095_milestone_type_link",
+      "breakpoints": true
     }
   ]
 }

@@ -166,12 +166,17 @@ export class TaskTypesService {
   async setForTask(taskId: string, typeId: string | null, userId: string) {
     const workspaceId = await this.workspaceOfTask(taskId)
     await this.assertMember(workspaceId, userId)
-    if (typeId) await this.byId(workspaceId, typeId)
+    const type = typeId ? await this.byId(workspaceId, typeId) : null
+    // §1.1 — the type is what a person sets; tasks.isMilestone is what the
+    // timeline, list badges and the client portal render from. Moving onto a
+    // milestone type has to draw the diamond, and moving off one has to stop
+    // drawing it — otherwise the two disagree and the app shows a milestone the
+    // Milestone filter cannot find.
     const [row] = await this.db
       .update(tasks)
-      .set({ taskTypeId: typeId, updatedAt: new Date() })
+      .set({ taskTypeId: typeId, isMilestone: !!type?.isMilestone, updatedAt: new Date() })
       .where(eq(tasks.id, taskId))
-      .returning({ id: tasks.id, taskTypeId: tasks.taskTypeId })
+      .returning({ id: tasks.id, taskTypeId: tasks.taskTypeId, isMilestone: tasks.isMilestone })
     return row
   }
 }
