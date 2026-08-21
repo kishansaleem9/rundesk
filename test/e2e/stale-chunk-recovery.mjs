@@ -186,7 +186,7 @@ const server = http.createServer((req, res) => {
   }
   // Only real navigations — the SPA fallback also answers socket.io polling.
   if (req.headers['sec-fetch-dest'] === 'document') documentRequests++
-  const noCache = /(index\.html|sw\.js|registerSW\.js|push-sw\.js|manifest\.webmanifest)$/
+  const noCache = /(index\.html|sw\.js|registerSW\.js|push-sw\.js|manifest\.webmanifest|version\.json)$/
   res.writeHead(200, {
     'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream',
     ...(noCache.test(file) ? { 'cache-control': 'no-cache' } : {}),
@@ -287,6 +287,30 @@ console.log('\n0. build and deployment guardrails')
     'hashed chunks are not precached, so a new release cannot evict them',
     precached.filter((u) => u.startsWith('assets/')).slice(0, 3).join(','),
   )
+  // Dropping navigateFallback was not enough on its own. Precaching a URL also
+  // registers a precache route for it, and workbox resolves "/" through
+  // `directoryIndex` (default 'index.html') — so the bare origin was answered
+  // from the worker's own copy while deep links went to the network. One shell,
+  // two ages, depending how you arrived. That is what pinned a real browser to
+  // a build from before three shipped features on 21 Aug 2026.
+  check(
+    !precached.some((u) => u === 'index.html' || u.endsWith('/index.html')),
+    'index.html is not precached, so HTML always comes from the network',
+    precached.filter((u) => u.includes('index.html')).join(','),
+  )
+  check(
+    fs.existsSync(path.join(distB, 'version.json')),
+    'the build stamps a version.json for running tabs to compare against',
+  )
+  {
+    const a = JSON.parse(fs.readFileSync(path.join(distA, 'version.json'), 'utf8'))
+    const b = JSON.parse(fs.readFileSync(path.join(distB, 'version.json'), 'utf8'))
+    check(
+      !!a.buildId && !!b.buildId && a.buildId !== b.buildId,
+      'and two releases stamp different ids',
+      `A=${a.buildId} B=${b.buildId}`,
+    )
+  }
 
   const vhost = fs.readFileSync(
     path.join(REPO, 'deploy/nginx/rundesk.theaura.agency.conf'),
@@ -451,6 +475,109 @@ console.log('\n4. a deploy that is actually broken')
   check(reloads <= 3, `no reload loop (${reloads} document loads)`)
   breakPalette = false
   await ctx.close()
+}
+
+// ---------------------------------------------------------------------------
+// 5. A tab that is merely *old* — nothing broken, nothing to click.
+//
+// Every case above starts with something failing: a chunk 404s and recovery
+// kicks in. The quiet case has no failure at all. A tab open across a deploy
+// keeps running the build it loaded with, every chunk it wants is either
+// cached or still on disk, and so it simply goes on being an older product.
+//
+// That is what happened on 21 Aug 2026: a browser sat on a build from before
+// three shipped features, showed none of them, and the only way out anyone
+// found was clearing site data. Every check we had agreed the deploy was fine
+// and every one of them was right — they open fresh profiles, or set
+// serviceWorkers: 'block'. All of them see a first visit; none see a return.
+//
+// So this one keeps the worker, deploys underneath it, and asks whether the
+// tab ever finds out.
+// ---------------------------------------------------------------------------
+console.log('\n5. a tab that is only out of date, with nothing broken')
+{
+  live = distA
+  keepOldAssets = true
+  breakPalette = false
+
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await ctx.route('**/api/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: route.request().url().includes('/users/me') ? JSON.stringify(USER) : '[]',
+    }),
+  )
+  const page = await ctx.newPage()
+  await page.addInitScript(
+    ([k, v]) => window.localStorage.setItem(k, v),
+    ['rundesk.auth', JSON.stringify(SESSION)],
+  )
+  // Poll fast. The real cadence is minutes; what is under test is "does it
+  // notice and offer", not the constant. Crucially the tab must NOT reload to
+  // find out — reloading is the thing we are making unnecessary, and a test
+  // that reloads has fetched the new build and proved nothing.
+  await page.addInitScript(() => {
+    window.__RUNDESK_BUILD_CHECK_MS__ = 1000
+  })
+  await page.goto(`${BASE}/app/${WS}/inbox`, { waitUntil: 'networkidle' })
+  await page.getByRole('textbox', { name: /search/i }).first()
+    .waitFor({ state: 'visible', timeout: 20000 })
+
+  const runningA = await page.evaluate(async () => {
+    const res = await fetch('/version.json', { cache: 'no-store' })
+    return (await res.json()).buildId
+  })
+
+  // Nothing is on screen yet, because nothing is wrong yet.
+  check(
+    (await page.locator('[data-testid="new-build-available"]').count()) === 0,
+    'says nothing while the tab is current',
+  )
+
+  // Deploy underneath it. No reload, no navigation — the tab just sits there,
+  // exactly as one left open on a second monitor would.
+  live = distB
+
+  // Before the reload, while the old worker is still the one answering: it must
+  // not be able to serve "/" from its own copy of the shell. Checked here and
+  // not after, because after the reload the new worker has already run
+  // cleanupOutdatedCaches and the question can no longer come out wrong.
+  const entryOf = (html) => (/assets\/(index-[A-Za-z0-9_-]+\.js)/.exec(html) ?? [])[1]
+  const rootHtml = await page.evaluate(async () => (await fetch('/', { cache: 'no-store' })).text())
+  const liveIndex = fs.readFileSync(path.join(distB, 'index.html'), 'utf8')
+  check(
+    !!entryOf(rootHtml) && entryOf(rootHtml) === entryOf(liveIndex),
+    'the bare origin serves the live shell, not the worker’s copy',
+    `served ${entryOf(rootHtml)}, live is ${entryOf(liveIndex)}`,
+  )
+
+  const pill = page.locator('[data-testid="new-build-available"]')
+  const noticed = await pill
+    .waitFor({ state: 'visible', timeout: 15000 })
+    .then(() => true)
+    .catch(() => false)
+  check(noticed, 'a stale tab is told there is a newer build')
+
+  if (noticed) {
+    await page.locator('[data-testid="new-build-reload"]').click()
+    await page.waitForTimeout(4000)
+    await page.getByRole('textbox', { name: /search/i }).first()
+      .waitFor({ state: 'visible', timeout: 20000 })
+      .catch(() => {})
+    const runningNow = await page.evaluate(async () => {
+      const res = await fetch('/version.json', { cache: 'no-store' })
+      return (await res.json()).buildId
+    })
+    check(runningNow !== runningA, 'and reloading lands on the new one', `${runningA} -> ${runningNow}`)
+    check(
+      (await page.locator('[data-testid="new-build-available"]').count()) === 0,
+      'and stops saying so once it is current',
+    )
+  }
+
+  await ctx.close()
+  keepOldAssets = false
 }
 
 await browser.close()

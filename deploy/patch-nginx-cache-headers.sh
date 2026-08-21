@@ -55,7 +55,7 @@ awk -v anchor="$ANCHOR" '
     print "    # index.html is the manifest that names the hashed chunks; a stale copy"
     print "    # points at files a later deploy has removed, so every lazy import 404s"
     print "    # and the app dies. See apps/web/src/lib/chunk-reload.ts."
-    print "    location ~ ^/(index\\.html|sw\\.js|registerSW\\.js|push-sw\\.js|manifest\\.webmanifest)$ {"
+    print "    location ~ ^/(index\\.html|sw\\.js|registerSW\\.js|push-sw\\.js|manifest\\.webmanifest|version\\.json)$ {"
     print "        add_header Cache-Control \"no-cache\" always;"
     print "        try_files $uri /index.html;"
     print "    }"

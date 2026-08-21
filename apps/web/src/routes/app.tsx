@@ -11,6 +11,7 @@ import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
 import { SupportWidget } from '../components/support-widget'
+import { NewBuildAvailable } from '../components/new-build-available'
 
 const CommandPalette = lazy(
   lazyChunk(async () => {
@@ -107,6 +108,8 @@ function AppShell() {
         <div className="flex-1 min-w-0 overflow-auto">
           <Outlet />
         </div>
+        {/* Both shells: a tab left on either one goes just as stale. */}
+        <NewBuildAvailable />
       </div>
     )
   }
@@ -155,6 +158,7 @@ function AppShell() {
       ) : null}
       <ShortcutsOverlay />
       <SupportWidget />
+      <NewBuildAvailable />
     </div>
   )
 }

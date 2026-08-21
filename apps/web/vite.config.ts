@@ -4,6 +4,20 @@ import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'node:path'
 
+/**
+ * Identity of this build, baked into the bundle and written to /version.json.
+ *
+ * A tab open across a deploy goes on running the code it started with — there
+ * is no event for "the server has something newer". On 21 Aug 2026 that meant
+ * a browser sat on a build from before three shipped features, showing none of
+ * them, with nothing broken and nothing to click. The only fix available was
+ * clearing site data, which is not something to ask of anyone.
+ *
+ * So the build says who it is, and the running app can ask the server the same
+ * question. Not a version to compare — an identity to differ from.
+ */
+const BUILD_ID = process.env.VITE_BUILD_ID || Date.now().toString(36)
+
 export default defineConfig(({ mode }) => {
   const env = {
     ...loadEnv(mode, path.resolve(__dirname, '../../'), ''),
@@ -13,7 +27,22 @@ export default defineConfig(({ mode }) => {
     (env.VITE_DEV_API_ORIGIN?.replace(/\/$/, '') || 'http://localhost:3001')
 
   return {
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID),
+  },
   plugins: [
+    {
+      // Emitted rather than kept in public/, so it can never be stale: it is
+      // written from the same constant the bundle is compiled with.
+      name: 'rundesk-build-stamp',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: JSON.stringify({ buildId: BUILD_ID }),
+        })
+      },
+    },
     TanStackRouterVite({
       routesDirectory: './src/routes',
       generatedRouteTree: './src/routeTree.gen.ts',
@@ -64,12 +93,24 @@ export default defineConfig(({ mode }) => {
         // server has already deleted. Navigations go to the network instead;
         // the NetworkFirst rule still serves the last good HTML when offline.
         navigateFallback: undefined,
-        // Precache the shell only. This glob used to include `js`, which
-        // precached all ~60 route chunks — the opposite of the intent below.
-        // Because the worker runs skipWaiting + clientsClaim +
-        // cleanupOutdatedCaches, a new release would activate under an already
-        // open tab and delete the very chunks that tab was still importing.
-        globPatterns: ['index.html', '**/*.{css,svg,png,ico,woff2}'],
+        // Precache static media only — deliberately *not* index.html.
+        //
+        // Dropping navigateFallback above was not enough on its own. Precaching
+        // a URL also registers a precache route for it, and workbox resolves a
+        // request for "/" through `directoryIndex` (default: 'index.html'). So
+        // the bare origin was still answered from the worker's own copy while
+        // deep links went to the network — the same shell served two different
+        // ages depending on how you arrived, which is worse than either.
+        //
+        // HTML now always comes from the network. The NetworkFirst rule below
+        // still serves the last good copy offline, which is the only thing
+        // precaching it bought.
+        //
+        // This glob used to include `js`, which precached all ~60 route chunks
+        // — the opposite of the intent. Because the worker runs skipWaiting +
+        // clientsClaim + cleanupOutdatedCaches, a new release would activate
+        // under an open tab and delete the chunks it was still importing.
+        globPatterns: ['**/*.{css,svg,png,ico,woff2}'],
         globIgnores: ['assets/**'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         runtimeCaching: [

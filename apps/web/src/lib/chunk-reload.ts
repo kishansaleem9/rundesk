@@ -88,7 +88,7 @@ export function canReloadForStaleChunks(): boolean {
  *
  * Bounded: a wedged worker must not be able to hold the reload hostage.
  */
-async function retireStaleWorker(): Promise<void> {
+export async function retireStaleWorker(): Promise<void> {
   const teardown = (async () => {
     if ('serviceWorker' in navigator) {
       const registrations = await navigator.serviceWorker.getRegistrations()
