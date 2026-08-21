@@ -112,6 +112,22 @@ export class NotificationsController {
     return this.notifications.markAllRead(user.id)
   }
 
+  /**
+   * §2.5 — clear everything in the Inbox at once. `types` narrows it to what
+   * the Primary chip is showing, so clearing while filtered does not also bin
+   * what the filter was hiding.
+   */
+  @Post('clear-all')
+  clearAll(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body?: { types?: string[] },
+  ) {
+    const types = Array.isArray(body?.types)
+      ? body.types.filter((t): t is string => typeof t === 'string')
+      : undefined
+    return this.notifications.clearAll(user.id, { types })
+  }
+
   @Post(':notificationId/clear')
   clear(
     @Param('notificationId') notificationId: string,

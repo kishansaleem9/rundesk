@@ -174,6 +174,28 @@ function isCommentOrMention(type: string): boolean {
 // §A2.6b — human-authored traffic, as opposed to the machine-generated alerts
 // (due dates, status transitions, briefings). A derived predicate over data the
 // client already holds; no classification column needed.
+/**
+ * §2.5 — how long a cleared notification is kept, mirroring
+ * NotificationRetentionService.RETENTION_DAYS on the server.
+ *
+ * > "jaise hi aap ne clear kar diya, 30 days tak rahega aur delete ho jayega.
+ * >  TRASH ka bhi yehi scene hai."
+ *
+ * She described this in detail, and the Cleared tab said nothing about it: rows
+ * were dated by when the notification arrived, so something cleared today could
+ * sit under a "200 days ago" heading with no hint it expires at all.
+ */
+const RETENTION_DAYS = 30
+
+/** Days left before a cleared row is deleted, or null if it is not cleared. */
+function daysUntilDeleted(dismissedAt: string | null | undefined): number | null {
+  if (!dismissedAt) return null
+  const cleared = new Date(dismissedAt).getTime()
+  if (Number.isNaN(cleared)) return null
+  const elapsedDays = (Date.now() - cleared) / (24 * 60 * 60 * 1000)
+  return Math.max(0, Math.ceil(RETENTION_DAYS - elapsedDays))
+}
+
 const HUMAN_TYPES = new Set([
   'task_mentioned',
   'doc_mentioned',
@@ -312,6 +334,19 @@ export function InboxPage() {
       Promise.all(ids.map((id) => api(`/notifications/${id}/clear`, { method: 'POST' }))),
     onSuccess: refreshAll,
   })
+  // §2.5 — "mere paas jitne bhi notifications hain main yahan se clear kar
+  // sakti hoon. Maine sab clear kiye." Clearing was per-row only.
+  const clearAll = useMutation({
+    mutationFn: () =>
+      api('/notifications/clear-all', {
+        method: 'POST',
+        // Only what the chip is showing. Clearing while filtered to Primary
+        // must not also bin what the filter was hiding.
+        body: filter === 'primary' ? { types: [...HUMAN_TYPES] } : {},
+      }),
+    onSuccess: refreshAll,
+  })
+
   const unclear = useMutation({
     mutationFn: (ids: string[]) =>
       Promise.all(ids.map((id) => api(`/notifications/${id}/unclear`, { method: 'POST' }))),
@@ -338,7 +373,9 @@ export function InboxPage() {
   const groups = groupNotifications(notifs)
   const buckets: Array<{ bucket: string; groups: NotificationGroup[] }> = []
   for (const group of groups) {
-    const bucket = dayBucket(group.latest.createdAt)
+    const bucket = dayBucket(
+      view === 'cleared' ? (group.latest.dismissedAt ?? group.latest.createdAt) : group.latest.createdAt,
+    )
     const last = buckets[buckets.length - 1]
     if (last && last.bucket === bucket) last.groups.push(group)
     else buckets.push({ bucket, groups: [group] })
@@ -372,6 +409,17 @@ export function InboxPage() {
                 >
                   {t('topbar.markAllRead')}
                 </button>
+                {view === 'inbox' && notifs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => clearAll.mutate()}
+                    disabled={clearAll.isPending}
+                    data-testid="inbox-clear-all"
+                    className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
+                  >
+                    {t('inbox.clearAll')}
+                  </button>
+                )}
               </>
             )}
             {/* §A2.11 — delivery preferences were reachable only from the
@@ -586,8 +634,24 @@ function NotificationRow({
             </Badge>
           )}
           <span className="text-xs text-muted-foreground ml-auto tabular-nums shrink-0">
-            {formatDistanceToNowStrict(new Date(notif.createdAt), { addSuffix: true })}
+            {/* §2.5 — on the Cleared tab the useful date is when you cleared it,
+                not when it arrived, because that is what the 30 days runs from. */}
+            {view === 'cleared' && notif.dismissedAt
+              ? t('inbox.clearedAgo', {
+                  when: formatDistanceToNowStrict(new Date(notif.dismissedAt), {
+                    addSuffix: true,
+                  }),
+                })
+              : formatDistanceToNowStrict(new Date(notif.createdAt), { addSuffix: true })}
           </span>
+          {view === 'cleared' && daysUntilDeleted(notif.dismissedAt) !== null && (
+            <span
+              className="text-[10px] text-muted-foreground/80 tabular-nums shrink-0"
+              data-testid="retention-countdown"
+            >
+              {t('inbox.deletedInDays', { count: daysUntilDeleted(notif.dismissedAt)! })}
+            </span>
+          )}
         </div>
         <div className="text-sm text-foreground mt-1 truncate">{notif.title}</div>
         {notif.body && (

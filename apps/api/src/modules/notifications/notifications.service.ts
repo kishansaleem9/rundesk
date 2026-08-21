@@ -538,6 +538,35 @@ export class NotificationsService {
     return { ok: true }
   }
 
+  /**
+   * §2.5 — "mere paas jitne bhi notifications hain main yahan se clear kar
+   * sakti hoon. Maine sab clear kiye — woh yahan pe chale jayenge."
+   *
+   * Clearing was per-row only, which is not what she did on screen. Scoped to
+   * the Inbox bucket exactly as markAllRead is: a row saved for Later is not
+   * something you meant to clear, and a row already cleared is not something to
+   * re-stamp — re-stamping would silently restart its 30-day retention.
+   *
+   * `types` honours the Primary/All chip. Without it, clearing while filtered
+   * to Primary would also bin everything the filter was hiding, which is a
+   * surprise you cannot see happening.
+   */
+  async clearAll(userId: string, opts: { types?: string[] } = {}) {
+    const now = new Date()
+    const rows = await this.db
+      .update(notifications)
+      .set({ dismissedAt: now, snoozedUntil: null })
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          this.viewCondition('inbox', now),
+          opts.types?.length ? inArray(notifications.type, opts.types as never) : undefined,
+        ),
+      )
+      .returning({ id: notifications.id })
+    return { ok: true, cleared: rows.length }
+  }
+
   async unreadCount(userId: string) {
     const [row] = await this.db
       .select({ count: sql<number>`count(*)::int` })
