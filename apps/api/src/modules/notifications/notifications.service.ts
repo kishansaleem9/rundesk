@@ -639,6 +639,11 @@ export class NotificationsService {
    */
   async clearAll(userId: string, opts: { types?: string[] } = {}) {
     const now = new Date()
+    // An explicit empty list means "none of these", not "no filter". Omitting
+    // `types` is how a caller asks to clear the whole bucket; treating `[]` the
+    // same way turns "clear what the chip shows" into "clear everything" the
+    // moment the chip is showing nothing.
+    if (opts.types && opts.types.length === 0) return { ok: true, cleared: 0 }
     const rows = await this.db
       .update(notifications)
       .set({ dismissedAt: now, snoozedUntil: null })

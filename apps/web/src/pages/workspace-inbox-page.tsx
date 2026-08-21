@@ -283,6 +283,26 @@ export function matchesInboxFilter(
   return (primaryTypes ?? HUMAN_TYPES).has(type)
 }
 
+/**
+ * §2.5 — what Clear all is allowed to bin: exactly what the chip is showing.
+ *
+ * This has to be derived from the same set the list is filtered by, and it is a
+ * pure function so that "the same set" is testable rather than a thing you
+ * check by reading two call sites and hoping. It was not, briefly: the payload
+ * named the hardcoded HUMAN_TYPES while the rows on screen came from the
+ * member's customised `primaryTypes`, so a customised Primary cleared the rows
+ * it was hiding and left the ones it was showing. Nothing errored, and you
+ * cannot see the wrong rows disappear — that is the whole hazard.
+ */
+export function clearAllPayload(
+  filter: InboxFilter,
+  primaryTypes: Set<string>,
+): { types?: string[] } {
+  // All means all: no narrowing, so an omitted `types` rather than a list.
+  if (filter === 'all') return {}
+  return { types: [...primaryTypes] }
+}
+
 const FILTER_LABEL_KEY: Record<InboxFilter, TranslationKey> = {
   all: 'inbox.filterAll',
   primary: 'inbox.filterPrimary',
@@ -508,9 +528,9 @@ export function InboxPage() {
     mutationFn: () =>
       api('/notifications/clear-all', {
         method: 'POST',
-        // Only what the chip is showing. Clearing while filtered to Primary
-        // must not also bin what the filter was hiding.
-        body: filter === 'primary' ? { types: [...HUMAN_TYPES] } : {},
+        // Only what the chip is showing — the member's own Primary set, not the
+        // default one it started from.
+        body: clearAllPayload(filter, primaryTypes),
       }),
     onSuccess: refreshAll,
   })

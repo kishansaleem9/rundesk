@@ -106,10 +106,31 @@ describe('clear all (§2.5)', () => {
     assert.ok(!/"type" in/.test(sql), `expected no type filter, got: ${sql}`)
   })
 
-  it('treats an empty type list as no filter, not as "clear nothing"', async () => {
+  /**
+   * This assertion used to say the opposite, and was right at the time: Primary
+   * was a hardcoded set, `[]` could not come from the UI, and reading it as "no
+   * filter" was a harmless tidy-up of a call that could not happen.
+   *
+   * Making Primary customisable changed what `[]` means. It is now the literal
+   * answer to "which kinds do you want in Primary?" from someone who chose
+   * none — so the old reading turns the most explicit possible "nothing" into
+   * the most destructive possible "everything". The button is hidden when the
+   * chip has no rows, so this needs a stale list to reach from the web app, but
+   * the endpoint takes it from anyone.
+   */
+  it('treats an empty type list as "none of them", not as "all of them"', async () => {
     const { svc, calls } = service()
-    await svc.clearAll('u1', { types: [] })
-    const { sql } = rendered(calls[0].condition)
-    assert.ok(!/"type" in/.test(sql), `expected no type filter, got: ${sql}`)
+    const result = await svc.clearAll('u1', { types: [] })
+    assert.deepEqual(result, { ok: true, cleared: 0 })
+    assert.equal(calls.length, 0, 'an empty selection must not reach the database at all')
+  })
+
+  it('still clears the whole bucket when types are omitted entirely', async () => {
+    // The distinction the case above turns on: absent means unfiltered, empty
+    // means nothing. Pinned here so a later tidy-up cannot collapse the two.
+    const { svc, calls } = service()
+    const result = await svc.clearAll('u1', {})
+    assert.deepEqual(result, { ok: true, cleared: 2 })
+    assert.equal(calls.length, 1)
   })
 })
