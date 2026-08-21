@@ -345,8 +345,13 @@ console.log('\n§1.3  the sidebar collapses to icons')
   check(collapsed > 0 && collapsed < 90, `collapses to a rail (${Math.round(collapsed)}px)`)
 
   // "mujhe bas ICONS show hon" — links, but no labels taking up room.
-  const railLinks = await sidebar.locator('a').count()
-  const railText = (await sidebar.innerText()).trim()
+  //
+  // Scoped to the rail's own nav, not the whole <aside>: the floating dock is a
+  // DOM descendant of the sidebar even though it is fixed-position chrome, so
+  // measuring the aside counts the dock's links and its drag handle too.
+  const rail = page.locator('[data-testid="workspace-sidebar"][data-collapsed="true"] > nav')
+  const railLinks = await rail.locator('a').count()
+  const railText = (await rail.innerText()).trim()
   check(railLinks >= 5, `the destinations are still reachable (${railLinks} icons)`)
   check(railText.length === 0, 'and no labels are taking up the space', railText.slice(0, 60))
 
@@ -357,6 +362,31 @@ console.log('\n§1.3  the sidebar collapses to icons')
     .boundingBox()
     .then((b) => b?.width ?? 0)
   check(mainWidth > 1300, `the page takes the space back (${Math.round(mainWidth)}px)`)
+
+  // The dock is fixed-position chrome that lives inside the sidebar component.
+  // As an early return, the collapsed branch never reached it, so collapsing
+  // deleted the quick-nav pill with no way back except expanding again.
+  const dock = page.locator('nav, div').filter({ has: page.locator('a[href$="/inbox"]') })
+  const dockVisible = async () =>
+    await page.evaluate(() => {
+      const fixed = [...document.querySelectorAll('div')].filter(
+        (el) => getComputedStyle(el).position === 'fixed' && el.querySelector('a[href*="/app/"]'),
+      )
+      return fixed.length > 0
+    })
+  check(await dockVisible(), 'the floating dock survives collapsing')
+  void dock
+
+  // Every icon keeps its size rather than squashing — the rail must scroll.
+  const squashed = await page.evaluate(() => {
+    const nav = document.querySelector(
+      '[data-testid="workspace-sidebar"][data-collapsed="true"] > nav',
+    )
+    if (!nav) return -1
+    return [...nav.querySelectorAll('a')].filter((a) => a.getBoundingClientRect().height < 30)
+      .length
+  })
+  check(squashed === 0, `no icon is squashed (${squashed} under 30px)`)
 
   await page.locator('[data-testid="sidebar-toggle"]').first().click()
   await waitUntil(async () => (await widthOf()) > 200)

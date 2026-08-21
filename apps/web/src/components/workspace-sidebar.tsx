@@ -167,9 +167,12 @@ function railEntries(
   }> = [
     { path: base, label: 'Home', icon: Home, exact: true },
     { path: `${base}/inbox`, label: 'Inbox', icon: Inbox },
-    { path: `${base}/chat`, label: 'Teams', icon: MessageCircle },
-    { path: `${base}/docs`, label: 'Docs', icon: FileText },
-    { path: `${base}/dashboard`, label: 'Dashboards', icon: LayoutDashboard },
+    // Guarded to match the floating dock, which gates exactly these three. A
+    // ClickApp turned off has to disappear from every surface, or the rail
+    // becomes the one place a disabled feature is still reachable.
+    { path: `${base}/chat`, label: 'Teams', icon: MessageCircle, flag: FLAGS.CHAT },
+    { path: `${base}/docs`, label: 'Docs', icon: FileText, flag: FLAGS.DOCS },
+    { path: `${base}/dashboard`, label: 'Dashboards', icon: LayoutDashboard, flag: FLAGS.VIEWS_DASHBOARD },
     { path: `${base}/ai`, label: 'AI', icon: Bot, flag: FLAGS.AI },
     { path: `${base}/shared`, label: 'Shared with me', icon: Users },
     { path: `${base}/whiteboards`, label: 'Whiteboards', icon: Frame },
@@ -692,13 +695,12 @@ export function WorkspaceSidebar() {
   // same one squeezed: the tree, the switcher and the section headers have no
   // useful icon-only form, so the rail carries the destinations and nothing
   // else, and the page gets the other 232px.
-  if (collapsed) {
-    return (
-      <aside
-        data-testid="workspace-sidebar"
-        data-collapsed="true"
-        className="w-14 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0"
-      >
+  // The rail and the full sidebar are one tree, not two returns. As an early
+  // return the collapsed branch never reached the floating dock further down —
+  // so collapsing silently deleted the quick-nav pill and its settings gear,
+  // with no way to get either back short of expanding again.
+  const railBody = (
+    <>
         <div className="border-b border-border/60 p-2 flex justify-center">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -716,7 +718,10 @@ export function WorkspaceSidebar() {
             <TooltipContent side="right">{t('nav.expandSidebar')}</TooltipContent>
           </Tooltip>
         </div>
-        <nav className="flex-1 overflow-y-auto scrollbar-none py-2 flex flex-col items-center gap-1">
+        {/* min-h-0 is what makes overflow-y-auto real here: without it the flex
+            children shrink to fit and 19 icons squash instead of scrolling, so
+            the rail silently loses the bottom of the list on a short window. */}
+        <nav className="flex-1 min-h-0 overflow-y-auto scrollbar-none py-2 flex flex-col items-center gap-1">
           {workspaceId
             ? railEntries(workspaceId, featureEnabled, isAdmin).map((entry) => {
                   const Icon = entry.icon
@@ -729,7 +734,7 @@ export function WorkspaceSidebar() {
                           aria-label={navLabel(entry.label)}
                           aria-current={active ? 'page' : undefined}
                           className={cn(
-                            'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
+                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors',
                             active
                               ? 'bg-accent/15 text-foreground'
                               : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
@@ -744,16 +749,21 @@ export function WorkspaceSidebar() {
                 })
             : null}
         </nav>
-      </aside>
-    )
-  }
+    </>
+  )
 
   return (
     <aside
       data-testid="workspace-sidebar"
-      data-collapsed="false"
-      className="w-72 border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0"
+      data-collapsed={collapsed ? 'true' : 'false'}
+      className={cn(
+        'border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0',
+        collapsed ? 'w-14' : 'w-72',
+      )}
     >
+      {collapsed && railBody}
+      {!collapsed && (
+      <>
       <div className="border-b border-border/60 p-3">
         <div className="flex items-center gap-2">
           <button
@@ -1469,6 +1479,11 @@ export function WorkspaceSidebar() {
           )}
         </div>
       </div>
+      </>
+      )}
+      {/* Outside the collapsed/expanded split on purpose: the dock is fixed-
+          position chrome, and it belongs to the workspace rather than to the
+          sidebar's width. */}
       {workspaceId && (
         <>
           <div
