@@ -5,6 +5,7 @@ import { BadgeCheck, Building2, ChevronDown, Globe, Search, ShieldAlert } from '
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 const PAGE_SIZE = 25
 
@@ -126,12 +127,12 @@ export function AdminDirectoryPage() {
         <div className="px-4 py-3 border-b border-border text-sm font-medium flex items-center justify-between gap-2">
           <span>{tCount('adminDirectory.resultsCount', total)}</span>
           {query.isFetching && (
-            <span className="text-xs text-muted-foreground">{t('common.loading')}</span>
+            <span className="text-xs text-muted-foreground"><InlineSkeleton /></span>
           )}
         </div>
 
         {query.isLoading ? (
-          <div className="px-4 py-8 text-sm text-muted-foreground">{t('adminDirectory.loading')}</div>
+          <div className="px-4 py-8 text-sm text-muted-foreground"><InlineSkeleton /></div>
         ) : query.isError ? (
           <div className="px-4 py-8 text-sm text-destructive">{t('adminDirectory.loadError')}</div>
         ) : users.length === 0 ? (

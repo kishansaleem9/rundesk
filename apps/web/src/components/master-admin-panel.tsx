@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type Org = {
   id: string
@@ -179,7 +180,7 @@ export function MasterAdminPanel() {
           />
           <div className="space-y-2 max-h-[520px] overflow-auto pr-1">
             {orgsQuery.isLoading && (
-              <div className="text-xs text-muted-foreground px-1 py-2">{t('masterAdmin.loadingOrgs')}</div>
+              <div className="text-xs text-muted-foreground px-1 py-2"><InlineSkeleton /></div>
             )}
             {orgsQuery.isError && (
               <div className="text-xs text-destructive px-1 py-2">{t('masterAdmin.loadError')}</div>
@@ -389,7 +390,7 @@ function OpsMetricsSection() {
       </div>
 
       {metricsQuery.isLoading && (
-        <div className="text-xs text-muted-foreground">{t('ops.loading')}</div>
+        <div className="text-xs text-muted-foreground"><InlineSkeleton /></div>
       )}
       {metricsQuery.isError && (
         <div className="text-xs text-destructive">{t('ops.error')}</div>
@@ -421,7 +422,7 @@ function OpsMetricsSection() {
       <div className="space-y-2">
         <h3 className="text-sm font-semibold">{t('ops.orgTableTitle')}</h3>
         {orgsQuery.isLoading && (
-          <div className="text-xs text-muted-foreground">{t('ops.loading')}</div>
+          <div className="text-xs text-muted-foreground"><InlineSkeleton /></div>
         )}
         {orgsQuery.isError && (
           <div className="text-xs text-destructive">{t('ops.error')}</div>
@@ -602,7 +603,7 @@ function TenantDatabasesSection() {
         <p className="text-xs text-muted-foreground max-w-2xl">{t('tenantDb.subtitle')}</p>
       </div>
 
-      {dbsQuery.isLoading && <div className="text-xs text-muted-foreground">{t('tenantDb.loading')}</div>}
+      {dbsQuery.isLoading && <div className="text-xs text-muted-foreground"><InlineSkeleton /></div>}
       {dbsQuery.isError && <div className="text-xs text-destructive">{t('tenantDb.error')}</div>}
       {!dbsQuery.isLoading && !dbsQuery.isError && dbs.length === 0 && (
         <div className="text-xs text-muted-foreground">{t('tenantDb.empty')}</div>
@@ -778,7 +779,7 @@ function WorkspacePlansCard({ orgId }: { orgId: string }) {
       </h3>
       <p className="text-xs text-muted-foreground">{t('masterAdmin.planSubtitle')}</p>
       {workspacesQuery.isLoading && (
-        <div className="text-xs text-muted-foreground">{t('masterAdmin.planLoading')}</div>
+        <div className="text-xs text-muted-foreground"><InlineSkeleton /></div>
       )}
       {!workspacesQuery.isLoading && workspaces.length === 0 && (
         <div className="text-xs text-muted-foreground">{t('masterAdmin.planNoWorkspaces')}</div>

@@ -33,6 +33,7 @@ import { ContainerMembersSheet } from '../components/container-members-sheet'
 import { ContainerEditDialog, type ContainerEditValues } from '../components/container-edit-dialog'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
 import { SpaceViewsDialog } from '../components/space-views-dialog'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Project = {
   id: string
@@ -290,7 +291,7 @@ function SpaceHome() {
 
         {isLoading ? (
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
-            {t('spaceShell.loadingProjects')}
+            <InlineSkeleton />
           </div>
         ) : projects.length === 0 && folders.length === 0 ? (
           <WorkEmptyState

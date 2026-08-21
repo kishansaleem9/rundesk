@@ -33,6 +33,7 @@ import {
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Clip = {
   id: string
@@ -371,7 +372,7 @@ export function ClipsPage() {
       ) : null}
 
       {clipsQuery.isLoading ? (
-        <Card className="p-6 text-sm text-muted-foreground">{t('clips.loading')}</Card>
+        <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Video className="h-6 w-6" />}

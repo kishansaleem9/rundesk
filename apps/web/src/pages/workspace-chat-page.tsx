@@ -53,6 +53,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
 import { ChatAttachmentList } from '../components/chat/chat-attachments'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Channel = {
   id: string
@@ -1648,7 +1649,7 @@ export function ChatPage() {
               </div>
               <div className="flex-1 overflow-y-auto space-y-2.5">
                 {editHistoryQuery.isLoading ? (
-                  <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
+                  <div className="text-xs text-muted-foreground"><InlineSkeleton /></div>
                 ) : (editHistoryQuery.data?.edits.length ?? 0) === 0 ? (
                   <div className="text-xs text-muted-foreground">{t('chat.noEditHistory')}</div>
                 ) : (
@@ -2613,7 +2614,7 @@ function PinnedPanel({
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {loading ? (
-          <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
+          <div className="text-xs text-muted-foreground"><InlineSkeleton /></div>
         ) : messages.length === 0 ? (
           <div className="text-xs text-muted-foreground">{t('chat.noPinnedMessages')}</div>
         ) : (
@@ -2722,7 +2723,7 @@ function SavedPanel({
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
         {loading ? (
-          <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
+          <div className="text-xs text-muted-foreground"><InlineSkeleton /></div>
         ) : messages.length === 0 ? (
           <div className="text-xs text-muted-foreground">{t('chat.noSavedMessages')}</div>
         ) : filtered.length === 0 ? (
@@ -2948,7 +2949,7 @@ function FilesPanel({
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
         {filesQuery.isLoading ? (
-          <div className="p-1 text-xs text-muted-foreground">{t('common.loading')}</div>
+          <div className="p-1 text-xs text-muted-foreground"><InlineSkeleton /></div>
         ) : files.length === 0 ? (
           <div className="p-1 text-xs text-muted-foreground">{t('chat.noFilesShared')}</div>
         ) : (
@@ -3106,7 +3107,7 @@ function SearchPanel({
         {!hasCriteria ? (
           <div className="p-1 text-xs text-muted-foreground">{t('chat.searchPrompt')}</div>
         ) : searchQuery.isLoading ? (
-          <div className="p-1 text-xs text-muted-foreground">{t('common.loading')}</div>
+          <div className="p-1 text-xs text-muted-foreground"><InlineSkeleton /></div>
         ) : results.length === 0 ? (
           <div className="p-1 text-xs text-muted-foreground">{t('chat.noSearchResults')}</div>
         ) : (
@@ -3178,7 +3179,7 @@ function DmSharedPanel({
         {t(mode === 'calendar' ? 'chat.dmSharedMeetings' : 'chat.dmSharedTasks', { name: peerName })}
       </p>
       {isLoading ? (
-        <p className="text-[13px] text-muted-foreground">{t('common.loading')}</p>
+        <p className="text-[13px] text-muted-foreground"><InlineSkeleton /></p>
       ) : rows.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">
           {t(mode === 'calendar' ? 'chat.dmNoMeetings' : 'chat.dmNoTasks', { name: peerName })}
@@ -3344,7 +3345,7 @@ function ThreadPanel({
           </div>
         ))}
         {loading && replies.length === 0 && (
-          <p className="py-6 text-center text-[12px] text-muted-foreground">{t('common.loading')}</p>
+          <p className="py-6 text-center text-[12px] text-muted-foreground"><InlineSkeleton /></p>
         )}
         {!loading && replies.length === 0 && (
           <p className="py-6 text-center text-[12px] text-muted-foreground">{t('chat.noRepliesYet')}</p>
@@ -3591,7 +3592,7 @@ function InsertReferencePicker({
       <div className="max-h-56 overflow-y-auto pb-1">
         {tab === 'tasks' &&
           (tasksQuery.isLoading ? (
-            <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('common.loading')}</div>
+            <div className="px-3 py-3 text-[12px] text-muted-foreground"><InlineSkeleton /></div>
           ) : tasks.length === 0 ? (
             <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingTasks')}</div>
           ) : (
@@ -3606,7 +3607,7 @@ function InsertReferencePicker({
           ))}
         {tab === 'docs' &&
           (docsQuery.isLoading ? (
-            <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('common.loading')}</div>
+            <div className="px-3 py-3 text-[12px] text-muted-foreground"><InlineSkeleton /></div>
           ) : docs.length === 0 ? (
             <div className="px-3 py-3 text-[12px] text-muted-foreground">{t('chat.noMatchingDocs')}</div>
           ) : (

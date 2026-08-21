@@ -5,6 +5,7 @@ import { Shield, Search, Download } from 'lucide-react'
 import { api, downloadFile } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type AuditLog = {
   id: string
@@ -260,7 +261,7 @@ export function AuditLogPage() {
       </div>
 
       <div className="space-y-2">
-        {logsQuery.isLoading && <p className="text-sm text-muted-foreground">{t('common.loading')}</p>}
+        {logsQuery.isLoading && <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>}
         {!logsQuery.isLoading && logs.length === 0 && (
           <Card className="p-8 text-center text-muted-foreground">
             <Shield className="h-8 w-8 mx-auto mb-2 opacity-30" />

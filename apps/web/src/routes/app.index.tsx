@@ -14,6 +14,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
+import { CardGridSkeleton } from '../components/loading-skeletons'
 
 export const Route = createFileRoute('/app/')({
   component: WorkspacePicker,
@@ -73,7 +74,13 @@ function WorkspacePicker() {
   }
 
   if (isLoading) {
-    return <p className="text-muted-foreground p-8">{t('appIndex.loadingWorkspaces')}</p>
+    // §2.9a — "woh icons hi hon". A line of grey text on an empty column is
+    // not that, and this is the screen she was describing when she said it.
+    return (
+      <div className="p-8">
+        <CardGridSkeleton cards={3} />
+      </div>
+    )
   }
 
   if (error) {

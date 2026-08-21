@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check } from 'lucide-react'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check , Loader2} from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
@@ -12,6 +12,7 @@ import { PasswordInput } from '../components/password-input'
 import { formatDateTimeWith } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { encodeQr } from '../lib/qr'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Profile = {
   id: string
@@ -72,7 +73,7 @@ export function ProfilePage() {
           </nav>
 
           <div>
-            {profileQuery.isLoading && <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>}
+            {profileQuery.isLoading && <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>}
             {profileQuery.data && tab === 'general' && <GeneralTab profile={profileQuery.data} />}
             {profileQuery.data && tab === 'security' && <SecurityTab />}
             {tab === 'notifications' && <NotificationsTab />}
@@ -660,7 +661,7 @@ function SecurityTab() {
         </div>
         <div className="mt-4 space-y-2">
           {sessionsQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">{t('profile.loadingSessions')}</p>
+            <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>
           ) : (sessionsQuery.data ?? []).length === 0 ? (
             <p className="text-sm text-muted-foreground">{t('profile.noSessions')}</p>
           ) : (
@@ -759,7 +760,7 @@ function TotpCard() {
         </div>
         {!enabled && step === 'idle' && (
           <Button variant="outline" size="sm" onClick={() => setupMutation.mutate()} disabled={setupMutation.isPending}>
-            {setupMutation.isPending ? t('common.loading') : t('profile.setup2fa')}
+            {setupMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : t('profile.setup2fa')}
           </Button>
         )}
         {enabled && (

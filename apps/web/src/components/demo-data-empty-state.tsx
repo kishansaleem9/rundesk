@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 /**
  * Empty-workspace welcome card with a one-click "Load demo data" CTA.
@@ -161,7 +162,7 @@ export function DemoDataEmptyState({
               {seed.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  {t('common.loading')}
+                  <InlineSkeleton />
                 </>
               ) : (
                 t('demoData.loadCta')

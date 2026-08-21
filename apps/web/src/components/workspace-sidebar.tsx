@@ -64,6 +64,7 @@ import { MoveDialog, type MovableKind } from './move-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS, type FlagKey } from '@rundesk/feature-flags'
+import { ListSkeleton } from './loading-skeletons'
 
 function isUuidLike(value: string | undefined): value is string {
   if (!value) return false
@@ -1447,7 +1448,13 @@ export function WorkspaceSidebar() {
               </div>
               )
             })}
-            {spaceTreeQuery.isLoading && <p className="px-2 py-1 text-xs text-muted-foreground">{t('nav.loadingSpaces')}</p>}
+            {/* §2.9a — the boot skeleton draws this as shapes; handing over to
+                the words "Loading spaces…" is the visible seam. */}
+            {spaceTreeQuery.isLoading && (
+              <div className="px-2 py-1">
+                <ListSkeleton rows={4} rowClassName="h-5" className="space-y-1.5" />
+              </div>
+            )}
             {!spaceTreeQuery.isLoading && (spacesQuery.data?.length ?? 0) === 0 && (
               <p className="px-2 py-1 text-xs text-muted-foreground">{t('nav.noSpaces')}</p>
             )}

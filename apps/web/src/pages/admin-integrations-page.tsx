@@ -5,6 +5,7 @@ import { Plug } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type WorkspaceEntry = {
   workspace: { id: string; name: string; slug: string }
@@ -118,7 +119,7 @@ export function AdminIntegrationsPage() {
           {t('adminIntegrations.accessRequests')} · {filteredRequests.length}
         </div>
         {requestsQuery.isLoading ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminIntegrations.loadingRequests')}</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground"><InlineSkeleton /></div>
         ) : filteredRequests.length === 0 ? (
           <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminIntegrations.emptyRequests')}</div>
         ) : (

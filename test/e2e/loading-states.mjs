@@ -353,6 +353,133 @@ console.log('\n6. deep link — the worst of them, and the one no page had cover
   await ctx.close()
 }
 
+// ---------------------------------------------------------------------------
+console.log('\n7. the screen she actually named — arriving in a workspace')
+// ---------------------------------------------------------------------------
+{
+  // "jab tak woh humein new workspace mein nahi le ke aata" — the wait that
+  // runs until it lands you in the workspace. Every panel on that page read
+  // `data ?? []` and went straight to its empty state, so a fresh workspace
+  // announced it had nothing before a single request had come back. Nothing in
+  // this suite opened the page, which is why it survived.
+  const { ctx, page } = await openContext({
+    delay: (url) => (/\/notifications|\/tasks|\/announcements|\/personal/.test(url) ? 4000 : 0),
+  })
+  await page.goto(`${BASE}/app/${WS}`, { waitUntil: 'domcontentloaded' })
+  await page
+    .getByRole('textbox', { name: /search/i })
+    .first()
+    .waitFor({ timeout: 20000 })
+    .catch(() => {})
+  await page.waitForTimeout(1200)
+
+  const claimsEmptyNow = async () =>
+    /nothing here yet|when activity happens|no tasks|nothing in your personal/i.test(
+      await page.evaluate(() => document.body?.innerText ?? ''),
+    )
+  const shapesNow = () => page.locator('main .animate-shimmer').count()
+
+  // Home shows one panel at a time, so each of the three has to be visited —
+  // all three read `data ?? []` and went straight to their empty state.
+  const inboxShapes = await shapesNow()
+  check(inboxShapes >= 3, `the Inbox panel is drawn as shapes (${inboxShapes})`)
+  check(!(await claimsEmptyNow()), 'and does not announce it is empty before it knows')
+
+  for (const panel of [/assigned to me/i, /personal/i]) {
+    const tab = page.getByRole('button', { name: panel }).first()
+    if ((await tab.count()) === 0) {
+      check(false, `the ${panel} panel is reachable`)
+      continue
+    }
+    await tab.click()
+    await page.waitForTimeout(500)
+    const n = await shapesNow()
+    check(n >= 3, `the ${panel} panel is drawn as shapes (${n})`)
+    check(
+      !(await claimsEmptyNow()),
+      `and ${panel} does not announce it is empty before it knows`,
+    )
+  }
+  await ctx.close()
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n8. the workspace picker, the list view, and opening a task')
+// ---------------------------------------------------------------------------
+{
+  // Three surfaces that answered a wait with a line of grey text. The picker is
+  // the create-a-workspace screen she was describing; the list view is the most
+  // used surface in the product; the task sheet was the largest blank area left.
+  const { ctx, page } = await openContext({
+    delay: (url) => (/\/workspaces(\?|$)/.test(url) ? 4000 : 0),
+  })
+  await page.goto(`${BASE}/app`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+  const pickerText = await page.evaluate(() => document.body?.innerText ?? '')
+  const pickerShapes = await page.locator('.animate-shimmer').count()
+  check(pickerShapes >= 3, `the workspace picker draws shapes (${pickerShapes})`)
+  check(
+    !/loading workspaces/i.test(pickerText),
+    'and not the words "Loading workspaces…"',
+    pickerText.replace(/\n/g, ' ').slice(0, 90),
+  )
+  await ctx.close()
+}
+
+// ---------------------------------------------------------------------------
+console.log('\n9. no surface answers a wait with the word "Loading"')
+// ---------------------------------------------------------------------------
+{
+  // A blanket guard over the whole app rather than a list of pages: no locale
+  // string that a user would *read* as a waiting state may still be referenced
+  // by a component. 79 sites were.
+  //
+  // Deliberately not a grep of the built bundle: the skeletons carry an sr-only
+  // "Loading…" for screen readers, which is correct and would make a bundle
+  // grep fail forever. This asks the narrower, real question — is any visible
+  // "Loading…" copy still wired to a surface?
+  const catalogs = fs.readFileSync(
+    path.join(WEB, 'src/lib/i18n/catalogs.ts'),
+    'utf8',
+  )
+  const en = catalogs.slice(
+    catalogs.indexOf('export const en = {'),
+    catalogs.indexOf('export const es'),
+  )
+  const loadingKeys = [...en.matchAll(/^\s*'([^']+)': '(Loading[^']*)'/gm)].map((m) => ({
+    key: m[1],
+    text: m[2],
+  }))
+
+  const sources = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (/\.tsx?$/.test(entry.name) && !full.includes('i18n')) {
+        sources.push(fs.readFileSync(full, 'utf8'))
+      }
+    }
+  }
+  walk(path.join(WEB, 'src'))
+  const allSource = sources.join('\n')
+
+  // Absolute, not "unless it looks like a button": a first pass tried to allow
+  // button labels and got it wrong, because the <Button> tag sits on the line
+  // above the label. A button that needs to say something while a click is in
+  // flight should say what it is doing ("Setting up…") or show a spinner, so
+  // there is no legitimate reason for any of these keys to be referenced.
+  const stillRendered = loadingKeys.filter(
+    ({ key }) => allSource.split(`t('${key}')`).length - 1 > 0,
+  )
+
+  check(
+    stillRendered.length === 0,
+    `no visible "Loading…" copy is wired to a surface (${loadingKeys.length} such strings exist, none referenced)`,
+    stillRendered.map((k) => `${k.key}="${k.text}"`).join(' | '),
+  )
+}
+
 await browser.close()
 server.close()
 

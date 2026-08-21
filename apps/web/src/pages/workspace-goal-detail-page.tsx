@@ -25,6 +25,7 @@ import {
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type GoalStatus = 'on_track' | 'at_risk' | 'off_track' | 'completed'
 
@@ -100,7 +101,7 @@ export function GoalDetailPage() {
   })
 
   if (goalQuery.isLoading) {
-    return <div className="p-6 text-sm text-muted-foreground">{t('goalDetail.loading')}</div>
+    return <div className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></div>
   }
   if (goalQuery.isError || !goalQuery.data) {
     return (

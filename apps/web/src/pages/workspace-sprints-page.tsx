@@ -15,6 +15,7 @@ import {
   WorkCreateCard,
   WorkProgressBar,
 } from '../components/work/work-ui'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 const STATUS_META: Record<
   SprintStatus,
@@ -99,7 +100,7 @@ export function SprintsPage() {
       <WorkHubBody>
         {sprintsQuery.isLoading ? (
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
-            {t('sprints.loading')}
+            <InlineSkeleton />
           </div>
         ) : (
           <>

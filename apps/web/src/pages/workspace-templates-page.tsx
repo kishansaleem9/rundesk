@@ -35,6 +35,7 @@ import {
   Check,
   ListTree,
 } from 'lucide-react'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 function isUuidLike(value?: string): value is string {
   if (!value) return false
@@ -167,7 +168,7 @@ export function TemplatesPage() {
         </div>
 
         {templatesQuery.isLoading ? (
-          <Card variant="glass" className="p-6 text-sm text-muted-foreground">{t('templates.loading')}</Card>
+          <Card variant="glass" className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
         ) : filtered.length === 0 ? (
           <Card variant="glass" className="p-6 text-sm text-muted-foreground">
             {query || filter !== 'all'
@@ -309,7 +310,7 @@ function ApplyTemplateDialog({
           <div className="space-y-1.5">
             <Label>{t('templates.targetSpace')}</Label>
             {spacesQuery.isLoading ? (
-              <p className="text-xs text-muted-foreground">{t('templates.loadingSpaces')}</p>
+              <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>
             ) : spaces.length === 0 ? (
               <p className="text-xs text-warning">{t('templates.noSpaces')}</p>
             ) : (
@@ -407,7 +408,7 @@ function SaveTemplateDialog({
           <div className="space-y-1.5">
             <Label>{t('templates.space')}</Label>
             {spaces.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{spacesQuery.isLoading ? t('common.loading') : t('templates.noSpacesShort')}</p>
+              <p className="text-xs text-muted-foreground">{spacesQuery.isLoading ? <InlineSkeleton width="6rem" /> : t('templates.noSpacesShort')}</p>
             ) : (
               <select
                 value={effectiveSpace}
@@ -421,7 +422,7 @@ function SaveTemplateDialog({
           <div className="space-y-1.5">
             <Label>{t('templates.project')}</Label>
             {projectsQuery.isLoading ? (
-              <p className="text-xs text-muted-foreground">{t('templates.loadingProjects')}</p>
+              <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>
             ) : projects.length === 0 ? (
               <p className="text-xs text-warning">{t('templates.noProjects')}</p>
             ) : (

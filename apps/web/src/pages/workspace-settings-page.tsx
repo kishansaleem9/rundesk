@@ -16,6 +16,7 @@ import { useResolvedFlags } from '../lib/use-feature-flags'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Workspace = {
   id: string
@@ -267,7 +268,7 @@ function PlanCard({ workspaceId }: { workspaceId: string }) {
     queryKey: ['workspace-plan', workspaceId],
     queryFn: () => api<PlanUsageResponse>(`/workspaces/${workspaceId}/plan`),
   })
-  if (planQuery.isLoading) return <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>
+  if (planQuery.isLoading) return <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
   if (!planQuery.data) return null
   const p = planQuery.data
   const usageLine = (used: number, limit: number | null) =>
@@ -381,7 +382,7 @@ function BillingCard({ workspaceId }: { workspaceId: string }) {
     onError: (e) => toast.error(e instanceof ApiError ? e.message : t('billing.portalError')),
   })
 
-  if (billingQuery.isLoading) return <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>
+  if (billingQuery.isLoading) return <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
   if (!billingQuery.data) return null
   const b = billingQuery.data
 
@@ -689,7 +690,7 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
     },
   })
 
-  if (!wsQuery.data) return <Card className="p-6 text-sm text-muted-foreground">{t('common.loading')}</Card>
+  if (!wsQuery.data) return <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
 
   const dirty =
     name !== wsQuery.data.name ||
@@ -2055,7 +2056,7 @@ function TaskTypesTab({ workspaceId }: { workspaceId: string }) {
           <h2 className="font-semibold text-sm">{t('taskTypes.existing')}</h2>
         </div>
         {typesQuery.isLoading ? (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</p>
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground"><InlineSkeleton /></p>
         ) : types.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">{t('taskTypes.none')}</p>
         ) : (
@@ -2483,7 +2484,7 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
         </div>
         <ul className="divide-y divide-border/60">
           {tasksQuery.isLoading && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('common.loading')}</li>
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center"><InlineSkeleton /></li>
           )}
           {!tasksQuery.isLoading && tasks.length === 0 && (
             <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.archivedTasksEmpty')}</li>
@@ -2518,7 +2519,7 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
         </div>
         <ul className="divide-y divide-border/60">
           {workspacesQuery.isLoading && (
-            <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('common.loading')}</li>
+            <li className="px-4 py-6 text-sm text-muted-foreground text-center"><InlineSkeleton /></li>
           )}
           {!workspacesQuery.isLoading && archivedWs.length === 0 && (
             <li className="px-4 py-6 text-sm text-muted-foreground text-center">{t('settings.archivedWorkspacesEmpty')}</li>

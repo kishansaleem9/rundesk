@@ -61,6 +61,8 @@ import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useDateFormat } from '../lib/date-format'
+import { TaskSheetSkeleton } from './loading-skeletons'
+import { InlineSkeleton } from './loading-skeletons'
 
 /**
  * Stream a task/project summary from the SSE endpoint (Plan §7.5), invoking
@@ -618,7 +620,9 @@ export function TaskDetailSheet({
         )}
       >
         {!taskId ? null : detailQuery.isLoading ? (
-          <p className="text-sm text-muted-foreground">{t('taskDetail.loadingTask')}</p>
+          // §2.9a — one line of muted text in a full-height sheet was the
+          // closest thing to a blank screen left in the app.
+          <TaskSheetSkeleton />
         ) : detailQuery.data ? (
           <>
             {/* Cover band — renders the saved coverColor when set, else the brand gradient. */}
@@ -4472,7 +4476,7 @@ function CustomFieldsPanelInner({
   })
 
   if (fieldsQuery.isLoading) {
-    return <p className="text-sm text-muted-foreground">{t('taskDetail.loadingCustomFields')}</p>
+    return <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>
   }
 
   const fields = fieldsQuery.data ?? []

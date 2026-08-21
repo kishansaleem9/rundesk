@@ -28,6 +28,7 @@ import {
 import { ContainerMembersSheet } from '../components/container-members-sheet'
 import { ContainerEditDialog, type ContainerEditValues } from '../components/container-edit-dialog'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type List = {
   id: string
@@ -277,7 +278,7 @@ function ProjectHome() {
 
         {isLoading ? (
           <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
-            {t('projectShell.loadingLists')}
+            <InlineSkeleton />
           </div>
         ) : lists.length === 0 ? (
           <WorkEmptyState
@@ -517,7 +518,7 @@ function SuggestTasksPanel({
 
       {suggestQ.isLoading ? (
         <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> {t('projectShell.suggestLoading')}
+          <Loader2 className="h-4 w-4 animate-spin" /> <InlineSkeleton />
         </div>
       ) : suggestQ.isError ? (
         <div className="py-6 text-center text-sm text-muted-foreground">{t('projectShell.suggestError')}</div>
@@ -663,7 +664,7 @@ function ProjectHealthSection({ workspaceId, projectId }: { workspaceId: string;
       <p className="text-[13px] text-muted-foreground mb-4 -mt-1">{t('projectShell.healthDesc')}</p>
 
       {isLoading ? (
-        <Card className="p-4 text-sm text-muted-foreground border-border/80">{t('common.loading')}</Card>
+        <Card className="p-4 text-sm text-muted-foreground border-border/80"><InlineSkeleton /></Card>
       ) : !current || points.length === 0 ? (
         <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
           {t('projectShell.healthNoData')}
@@ -840,7 +841,7 @@ function CustomFieldsSection({
       )}
 
       {fieldsQuery.isLoading ? (
-        <Card className="p-4 text-sm text-muted-foreground border-border/80">{t('common.loading')}</Card>
+        <Card className="p-4 text-sm text-muted-foreground border-border/80"><InlineSkeleton /></Card>
       ) : fields.length === 0 ? (
         <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
           {t('projectShell.noFieldsBody')}
@@ -1009,7 +1010,7 @@ function ProjectActivitySection({
         </Card>
       )}
       {isLoading ? (
-        <Card className="p-4 text-sm text-muted-foreground border-border/80">{t('common.loading')}</Card>
+        <Card className="p-4 text-sm text-muted-foreground border-border/80"><InlineSkeleton /></Card>
       ) : activity.length === 0 ? (
         <Card className="p-4 text-[13px] text-muted-foreground border-dashed border-border/80">
           {t('projectShell.noActivityBody')}
@@ -1292,7 +1293,7 @@ function ClientInvoicesSection({ workspaceId, projectId }: { workspaceId: string
 
           <div className="border-t border-border/60 pt-3">
             {invoicesQuery.isLoading ? (
-              <div className="text-[13px] text-muted-foreground">{t('invoices.loading')}</div>
+              <div className="text-[13px] text-muted-foreground"><InlineSkeleton /></div>
             ) : invoices.length === 0 ? (
               <div className="text-[13px] text-muted-foreground">{t('invoices.empty')}</div>
             ) : (
@@ -1404,7 +1405,7 @@ function InvoiceLineItems({
   return (
     <div className="mt-2 rounded-md border border-border/60 bg-muted/20 p-2">
       {detailQuery.isLoading ? (
-        <div className="text-[12px] text-muted-foreground">{t('invoices.lineItemsLoading')}</div>
+        <div className="text-[12px] text-muted-foreground"><InlineSkeleton /></div>
       ) : lineItems.length === 0 ? (
         <div className="text-[12px] text-muted-foreground">{t('invoices.noLineItems')}</div>
       ) : (

@@ -59,6 +59,7 @@ import { Callout, ListEmbed } from '../lib/tiptap-doc-blocks'
 import { MentionText } from './mention-text'
 import { DocTemplatesDialog, DOC_TEMPLATES, type DocTemplate } from './doc-templates'
 import { useMentionNames } from '../hooks/use-mention-names'
+import { InlineSkeleton } from './loading-skeletons'
 
 type Doc = {
   id: string
@@ -1160,7 +1161,7 @@ function DocsIndexPane({
         </thead>
         <tbody>
           {isLoading && (
-            <tr><td colSpan={5} className="px-3 py-4 text-xs text-muted-foreground">{t('common.loading')}</td></tr>
+            <tr><td colSpan={5} className="px-3 py-4 text-xs text-muted-foreground"><InlineSkeleton /></td></tr>
           )}
           {!isLoading && rows.length === 0 && (
             <tr><td colSpan={5} className="px-3 py-4 text-xs text-muted-foreground">{t('docs.noDocsInScope')}</td></tr>
@@ -1455,7 +1456,7 @@ function DocHistoryPane({
         </Button>
       </div>
       <div className="flex-1 overflow-auto p-2 space-y-1.5">
-        {revisionsQuery.isLoading && <p className="text-xs text-muted-foreground px-2 py-1">{t('common.loading')}</p>}
+        {revisionsQuery.isLoading && <p className="text-xs text-muted-foreground px-2 py-1"><InlineSkeleton /></p>}
         {!revisionsQuery.isLoading && revs.length === 0 && (
           <p className="text-xs text-muted-foreground px-2 py-1">{t('docs.noSavedVersions')}</p>
         )}
@@ -1575,7 +1576,7 @@ function DocCommentsPane({ docId, workspaceId }: { docId: string; workspaceId: s
       </header>
       <div className="flex-1 overflow-auto px-3 py-3 space-y-3">
         {commentsQuery.isLoading && (
-          <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
+          <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>
         )}
         {!commentsQuery.isLoading && grouped.roots.length === 0 && (
           <p className="text-xs text-muted-foreground">

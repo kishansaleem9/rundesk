@@ -18,6 +18,7 @@ import {
 import { FileText, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 /**
  * Maps a stored priority identifier to its display label key. The raw value is
@@ -86,7 +87,7 @@ export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
   })
 
   if (templatesQuery.isLoading) {
-    return <Card className="p-6 text-sm text-muted-foreground">{t('taskTemplates.loading')}</Card>
+    return <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
   }
 
   const templates = templatesQuery.data ?? []

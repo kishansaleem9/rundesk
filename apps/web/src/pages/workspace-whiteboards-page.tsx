@@ -24,6 +24,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { CursorLayer, useCanvasCursors } from '../lib/use-canvas-cursors'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Whiteboard = {
   id: string
@@ -429,7 +430,7 @@ export function WhiteboardsPage() {
       <div className="flex gap-3 min-h-0 flex-1">
         <Card className="w-72 p-2 space-y-1 overflow-auto">
           {boardsQuery.isLoading ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">{t('whiteboards.loadingList')}</div>
+            <div className="px-3 py-2 text-xs text-muted-foreground"><InlineSkeleton /></div>
           ) : null}
           {filtered.map((b) => (
             <button

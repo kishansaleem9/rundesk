@@ -5,6 +5,7 @@ import { Webhook, Plus, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type WorkspaceEntry = {
   workspace: { id: string; name: string; slug: string }
@@ -152,7 +153,7 @@ export function AdminWebhooksPage() {
           {tCount('adminWebhooks.configuredCount', (hooks.data ?? []).length)}
         </div>
         {hooks.isLoading ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminWebhooks.loadingWebhooks')}</div>
+          <div className="px-4 py-6 text-sm text-muted-foreground"><InlineSkeleton /></div>
         ) : (hooks.data ?? []).length === 0 ? (
           <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminWebhooks.noWebhooks')}</div>
         ) : (

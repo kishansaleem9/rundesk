@@ -13,6 +13,7 @@ import {
 import { Search, Layers, Folder, FolderKanban, Check, CornerUpLeft } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 /** What can be moved, and therefore what the picker offers as destinations. */
 export type MovableKind = 'folder' | 'project' | 'list' | 'task'
@@ -199,7 +200,7 @@ export function MoveDialog({
 
         <div className="max-h-[320px] overflow-y-auto -mx-1 px-1">
           {targetsQuery.isLoading ? (
-            <p className="py-6 text-center text-[13px] text-muted-foreground">{t('common.loading')}</p>
+            <p className="py-6 text-center text-[13px] text-muted-foreground"><InlineSkeleton /></p>
           ) : filtered.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-muted-foreground">{t('move.noTargets')}</p>
           ) : (

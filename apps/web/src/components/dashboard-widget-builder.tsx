@@ -37,6 +37,7 @@ import {
   ChevronDown,
   Sun,
 } from 'lucide-react'
+import { InlineSkeleton } from './loading-skeletons'
 
 type WidgetType =
   | 'tasks-due'
@@ -516,7 +517,7 @@ function TasksDueTile({ Icon, workspaceId }: { Icon: React.ElementType; workspac
       <div className="flex items-baseline gap-2 mt-1">
         <span className="font-display text-3xl font-semibold tabular-nums">{q.data?.dueToday ?? '—'}</span>
         <span className="text-[10px] text-muted-foreground">
-          {q.data ? t('dashboardWidget.ofTotal', { total: q.data.total }) : t('common.loading')}
+          {q.data ? t('dashboardWidget.ofTotal', { total: q.data.total }) : <InlineSkeleton width="4rem" />}
         </span>
       </div>
       <ul className="mt-2 space-y-1 overflow-hidden flex-1">
@@ -580,7 +581,7 @@ function CompletionTile({ Icon, workspaceId }: { Icon: React.ElementType; worksp
         {q.data ? `${q.data.completionRate}%` : '—'}
       </div>
       <div className="text-[11px] text-muted-foreground">
-        {q.data ? t('dashboardWidget.completedOfTotal', { completed: q.data.completed, total: q.data.total }) : t('common.loading')}
+        {q.data ? t('dashboardWidget.completedOfTotal', { completed: q.data.completed, total: q.data.total }) : <InlineSkeleton width="5rem" />}
       </div>
       <div className="mt-auto flex items-center gap-1 pt-1">
         {(['week', 'month'] as const).map((p) => (

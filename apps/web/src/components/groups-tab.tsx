@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type Member = {
   userId: string
@@ -195,7 +196,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
 
           <div className="space-y-1 max-h-[420px] overflow-auto">
             {groupsQuery.isLoading && (
-              <p className="text-xs text-muted-foreground italic">{t('common.loading')}</p>
+              <p className="text-xs text-muted-foreground italic"><InlineSkeleton /></p>
             )}
             {groupsQuery.isSuccess && groups.length === 0 && (
               <p className="text-xs text-muted-foreground italic">

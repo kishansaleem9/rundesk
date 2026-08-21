@@ -28,6 +28,7 @@ import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useDateFormat } from '../lib/date-format'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { InlineSkeleton } from './loading-skeletons'
 
 type TrashType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc'
 
@@ -286,7 +287,7 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
               {trashQuery.isLoading && (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                    {t('common.loading')}
+                    <InlineSkeleton />
                   </td>
                 </tr>
               )}

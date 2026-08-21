@@ -5,6 +5,7 @@ import { api, ApiError } from '../../lib/api'
 import { useTranslation, type TranslationKey } from '../../lib/i18n'
 import { formatMentionsPlain } from '../../lib/mentions'
 import type { ChatAttachment, ChatMessage } from './chat-types'
+import { InlineSkeleton } from '../loading-skeletons'
 
 /** Human-readable file size for attachment chips (e.g. "1.2 MB"). */
 function formatBytes(bytes: number): string {
@@ -346,7 +347,7 @@ function ComposerBox({
           {uploading && (
             <span className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-[12px] text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              {t('chat.uploading')}
+              <InlineSkeleton />
             </span>
           )}
         </div>
@@ -454,7 +455,7 @@ function ComposerBox({
                   className="w-full border-b border-border bg-transparent px-2.5 py-1.5 text-[13px] outline-none"
                 />
                 <div className="max-h-56 overflow-y-auto py-1">
-                  {pickerLoading && <p className="px-2.5 py-2 text-[12px] text-muted-foreground">{t('common.loading')}</p>}
+                  {pickerLoading && <p className="px-2.5 py-2 text-[12px] text-muted-foreground"><InlineSkeleton /></p>}
                   {!pickerLoading && pickerHits.length === 0 && (
                     <p className="px-2.5 py-2 text-[12px] text-muted-foreground">{t('chat.linkNoResults')}</p>
                   )}

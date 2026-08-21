@@ -12,6 +12,7 @@ import {
 import { Bell, Smartphone, Globe, Mail, Volume2, Moon, Check, Send, Eye } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type Channel = 'inApp' | 'web' | 'mobile' | 'email'
 type EventKey = 'mention' | 'assigned' | 'comment' | 'due' | 'status' | 'doc' | 'chat' | 'activity'
@@ -237,7 +238,7 @@ export function PushNotificationsPanel() {
   })
 
   if (prefsQuery.isLoading) {
-    return <Card variant="glass" className="p-5 text-sm text-muted-foreground">{t('pushNotifications.loadingPreferences')}</Card>
+    return <Card variant="glass" className="p-5 text-sm text-muted-foreground"><InlineSkeleton /></Card>
   }
 
   return (

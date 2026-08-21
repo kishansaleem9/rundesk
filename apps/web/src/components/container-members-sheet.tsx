@@ -12,6 +12,7 @@ import {
 import { Trash2, UserPlus, Globe, Lock, GitBranch } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type ContainerKind = 'space' | 'project'
 
@@ -261,7 +262,7 @@ export function ContainerMembersSheet({
             {tCount('containerMembers.memberCount', members.length)}
           </p>
           {membersQuery.isLoading ? (
-            <p className="text-[13px] text-muted-foreground py-4">{t('containerMembers.loadingMembers')}</p>
+            <p className="text-[13px] text-muted-foreground py-4"><InlineSkeleton /></p>
           ) : members.length === 0 ? (
             <p className="text-[13px] text-muted-foreground py-4">{t('containerMembers.noMembers')}</p>
           ) : (

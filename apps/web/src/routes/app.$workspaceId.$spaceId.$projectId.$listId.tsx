@@ -47,6 +47,7 @@ import { SharePanel } from '../components/share-panel'
 import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
+import { ListSkeleton } from '../components/loading-skeletons'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Status is now a free-text key validated against the list's list_statuses.
@@ -1811,9 +1812,8 @@ function ListDetail() {
 
       <div className="flex-1 overflow-auto p-4 sm:p-6">
         {isLoading ? (
-          <div className="rounded-lg border border-border/80 p-8 text-center text-[13px] text-muted-foreground">
-            {t('list.loadingTasks')}
-          </div>
+          // §2.9a — rows, not the words "Loading tasks…" in a box.
+          <ListSkeleton rows={8} rowClassName="h-10" />
         ) : visibleTasks.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/80 bg-[#fbfbfc]/60 dark:bg-[#16181d]/40 p-12 text-center">
             <p className="text-[15px] font-medium text-foreground mb-1">{t('list.noTasksYet')}</p>

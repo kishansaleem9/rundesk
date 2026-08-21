@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -286,7 +287,7 @@ function AiSuggestionsSection({ workspaceId }: { workspaceId: string }) {
       <p className="text-xs text-muted-foreground mb-3">{t('automations.aiSuggestionsDesc')}</p>
 
       {query.isLoading ? (
-        <p className="text-sm text-muted-foreground">{t('automations.aiSuggestLoading')}</p>
+        <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>
       ) : query.isError ? (
         <p className="text-sm text-muted-foreground">{t('automations.aiSuggestError')}</p>
       ) : suggestions.length === 0 ? (
@@ -421,7 +422,7 @@ function AutomationRow({
       {expanded && (
         <div className="border-t border-border px-4 py-3 bg-muted/30">
           <p className="text-xs font-medium text-muted-foreground mb-2">{t('automations.runHistory')}</p>
-          {runsQuery.isLoading && <p className="text-xs text-muted-foreground">{t('common.loading')}</p>}
+          {runsQuery.isLoading && <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>}
           {!runsQuery.isLoading && (!runsQuery.data || runsQuery.data.length === 0) && (
             <p className="text-xs text-muted-foreground">{t('automations.noRuns')}</p>
           )}

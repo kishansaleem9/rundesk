@@ -5,6 +5,7 @@ import { Check, UserPlus } from 'lucide-react'
 import { api } from '../../lib/api'
 import { initials } from './chat-utils'
 import { useTranslation } from '../../lib/i18n'
+import { InlineSkeleton } from '../loading-skeletons'
 
 type WsMember = { userId: string; displayName: string; email: string }
 type ChannelMember = { userId: string }
@@ -73,7 +74,7 @@ export function AddPeopleDialog({
 
         <div className="max-h-72 overflow-y-auto space-y-0.5">
           {wsQ.isLoading ? (
-            <p className="text-sm text-muted-foreground py-4">{t('chat.loadingTeammates')}</p>
+            <p className="text-sm text-muted-foreground py-4"><InlineSkeleton /></p>
           ) : candidates.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4">{t('chat.everyoneHere')}</p>
           ) : (

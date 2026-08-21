@@ -13,6 +13,7 @@ import {
 import { UserPlus, X, Mail, Lock } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 /** Every object a share can be attached to. */
 export type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard'
@@ -150,7 +151,7 @@ export function SharePanel({
             {t('share.sharedWith')}
           </p>
           {sharesQuery.isLoading ? (
-            <p className="py-4 text-center text-[13px] text-muted-foreground">{t('common.loading')}</p>
+            <p className="py-4 text-center text-[13px] text-muted-foreground"><InlineSkeleton /></p>
           ) : items.length === 0 ? (
             <p className="py-4 text-center text-[13px] text-muted-foreground">{t('share.noneYet')}</p>
           ) : (

@@ -7,6 +7,7 @@ import { format, startOfWeek, addDays } from 'date-fns'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type TimeEntry = {
   id: string
@@ -439,7 +440,7 @@ export function TimePage() {
             </div>
             {sheetMode === 'team' ? (
               teamWeekQuery.isLoading ? (
-                <div className="py-8 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
+                <div className="py-8 text-center text-sm text-muted-foreground"><InlineSkeleton /></div>
               ) : (teamWeekQuery.data ?? []).length === 0 ? (
                 <div className="py-8 text-center text-sm text-muted-foreground">{t('time.noTimeThisWeek')}</div>
               ) : (
@@ -546,7 +547,7 @@ export function TimePage() {
               <div className="text-center">{t('time.col.billableHours')}</div>
             </div>
             {monthlyQuery.isLoading ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
+              <div className="py-6 text-center text-sm text-muted-foreground"><InlineSkeleton /></div>
             ) : (monthlyQuery.data ?? []).length === 0 ? (
               <div className="py-6 text-center text-sm text-muted-foreground">{t('time.noMonthly')}</div>
             ) : (

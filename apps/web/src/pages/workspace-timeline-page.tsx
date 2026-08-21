@@ -5,6 +5,7 @@ import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
 import { GanttChart, Diamond } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type TimelineTask = {
   id: string
@@ -265,7 +266,7 @@ export function TimelinePage() {
 
       {tasksQuery.isLoading ? (
         <Card variant="glass" className="p-12 text-center text-sm text-muted-foreground">
-          {t('timeline.loading')}
+          <InlineSkeleton />
         </Card>
       ) : tasks.length === 0 ? (
         <EmptyState

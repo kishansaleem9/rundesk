@@ -53,6 +53,7 @@ import { formatMentionsPlain } from '../lib/mentions'
 import { useMentionNames } from '../hooks/use-mention-names'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS } from '@rundesk/feature-flags'
+import { InlineSkeleton } from './loading-skeletons'
 
 type Workspace = { id: string; name: string; slug: string }
 type WorkspaceEntry = { workspace: Workspace; role: string }
@@ -690,7 +691,7 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
         </div>
         <div className="flex-1 overflow-y-auto">
           {listQuery.isLoading ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
+            <div className="p-8 text-center text-sm text-muted-foreground"><InlineSkeleton /></div>
           ) : notifs.length === 0 ? (
             <div className="flex flex-col items-center gap-2 p-8 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-gradient-soft text-white shadow-glow">

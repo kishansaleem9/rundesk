@@ -1,6 +1,7 @@
 import { createFileRoute, Link, Outlet, useMatches, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState as EmptyStateCard, Button, Badge } from '@rundesk/ui'
+import { ListSkeleton } from '../components/loading-skeletons'
 import { FLAGS } from '@rundesk/feature-flags'
 import {
   Bell,
@@ -284,7 +285,14 @@ function WorkspaceHome() {
                   </Link>
                 </div>
               )}
-              {selectedItems.length === 0 ? (
+              {/* §2.9a — this is the screen you land on after "new workspace
+                  mein le ke aata", and every panel on it read `data ?? []` and
+                  went straight to its empty state, so a fresh workspace
+                  announced it had nothing before a single request had come
+                  back. Shapes until we know. */}
+              {notificationsQuery.isPending ? (
+                <ListSkeleton rows={3} rowClassName="h-16" />
+              ) : selectedItems.length === 0 ? (
                 <EmptyStateCard
                   icon={<Bell className="h-6 w-6" />}
                   title={t('appWorkspace.emptyInboxTitle')}
@@ -352,9 +360,11 @@ function WorkspaceHome() {
                   </Card>
                 </Link>
               ))}
-              {(section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).length === 0 && (
-                <EmptyStateCard icon={<ListChecks className="h-6 w-6" />} title={t('appWorkspace.emptyTasksTitle')} description={t('appWorkspace.emptyTasksBody')} />
-              )}
+              {myTasksQuery.isPending && <ListSkeleton rows={3} rowClassName="h-14" />}
+              {!myTasksQuery.isPending &&
+                (section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).length === 0 && (
+                  <EmptyStateCard icon={<ListChecks className="h-6 w-6" />} title={t('appWorkspace.emptyTasksTitle')} description={t('appWorkspace.emptyTasksBody')} />
+                )}
             </div>
           )}
 
@@ -378,7 +388,9 @@ function WorkspaceHome() {
                   <Plus className="h-4 w-4" /> {t('appWorkspace.add')}
                 </Button>
               </form>
-              {personalTasks.length === 0 ? (
+              {personalTasksQuery.isPending ? (
+                <ListSkeleton rows={3} rowClassName="h-11" />
+              ) : personalTasks.length === 0 ? (
                 <EmptyStateCard
                   icon={<ListChecks className="h-6 w-6" />}
                   title={t('appWorkspace.emptyPersonalTitle')}

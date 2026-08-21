@@ -22,6 +22,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type MindMap = {
   id: string
@@ -245,7 +246,7 @@ export function MindMapsPage() {
     if (!active) {
       return (
         <div className="p-6 flex min-h-[40vh] items-center justify-center text-muted-foreground text-sm">
-          {t('mindmaps.loadingMap')}
+          <InlineSkeleton />
         </div>
       )
     }
@@ -374,7 +375,7 @@ export function MindMapsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {mapsQuery.isLoading ? (
-          <Card className="p-4 text-sm text-muted-foreground">{t('mindmaps.loadingList')}</Card>
+          <Card className="p-4 text-sm text-muted-foreground"><InlineSkeleton /></Card>
         ) : null}
         {filtered.map((m) => (
           <Card

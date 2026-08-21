@@ -5,6 +5,7 @@ import { Button, Card, Input } from '@rundesk/ui'
 import { CheckCircle2, AlertCircle, Loader2, Upload, FileText, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 export const Route = createFileRoute('/submit/$slug')({
   component: PublicFormPage,
@@ -391,7 +392,7 @@ function FormFieldRenderer({
               } ${uploading ? 'opacity-60 pointer-events-none' : ''}`}
             >
               {uploading ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> {t('submitForm.uploading')}</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> <InlineSkeleton /></>
               ) : (
                 <><Upload className="h-4 w-4" /> {t('submitForm.chooseFile')} <span className="text-muted-foreground">{t('submitForm.maxFileSize')}</span></>
               )}

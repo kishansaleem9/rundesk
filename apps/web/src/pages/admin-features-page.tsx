@@ -6,6 +6,7 @@ import type { FlagKey } from '@rundesk/feature-flags'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 // ---------------------------------------------------------------------------
 // Flag metadata — derived from the registry (we don't modify the registry).
@@ -378,7 +379,7 @@ export function FeatureFlagsPanel() {
       </div>
 
       {resolvedQuery.isLoading && (
-        <p className="text-sm text-muted-foreground">{t('adminFeatures.loading')}</p>
+        <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>
       )}
       {resolvedQuery.isError && (
         <p className="text-sm text-destructive">{t('adminFeatures.loadError')}</p>

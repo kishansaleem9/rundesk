@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ClipboardList } from 'lucide-react'
 import { api } from './api'
 import { useTranslation } from './i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 /**
  * A5.8 — the block types the slash palette was missing. Table and divider come
@@ -142,7 +143,7 @@ function ListEmbedView(props: NodeViewProps) {
       </div>
       <div className="divide-y divide-border/40">
         {tasksQuery.isLoading && (
-          <p className="px-3 py-2 text-xs text-muted-foreground">{t('common.loading')}</p>
+          <p className="px-3 py-2 text-xs text-muted-foreground"><InlineSkeleton /></p>
         )}
         {tasksQuery.isError && (
           <p className="px-3 py-2 text-xs text-muted-foreground">{t('docs.embedUnavailable')}</p>

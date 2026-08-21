@@ -30,6 +30,7 @@ import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import type { SprintDetail, SprintVelocityRow } from '../lib/sprint-types'
 import { isSprintTaskDone, sprintDayProgress } from '../lib/sprint-types'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 const STATUS_LABEL: Record<string, TranslationKey> = {
   planned: 'sprintDetail.status.planned',
@@ -101,7 +102,7 @@ export function SprintDetailPage() {
   if (sprintQuery.isLoading) {
     return (
       <WorkPageShell>
-        <div className="p-8 text-center text-[13px] text-muted-foreground">{t('sprintDetail.loading')}</div>
+        <div className="p-8 text-center text-[13px] text-muted-foreground"><InlineSkeleton /></div>
       </WorkPageShell>
     )
   }

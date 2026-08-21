@@ -28,6 +28,7 @@ import { api, downloadFilePost } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type WorkloadMove = {
   fromUserId: string
@@ -526,7 +527,7 @@ export function InsightsPage() {
         <Card variant="glass" className="overflow-hidden p-0">
           <div className="flex items-center justify-between border-b border-border/40 px-4 py-2">
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              {contribQ.data?.period.label ?? t('insights.contributionLoading')}
+              {contribQ.data?.period.label ?? <InlineSkeleton width="7rem" />}
             </div>
             {contribQ.data?.source === 'ai' && (
               <Badge variant="gradient" className="text-[9px] uppercase">
@@ -546,7 +547,7 @@ export function InsightsPage() {
           <ul className="divide-y divide-border/30">
             {contribQ.isLoading ? (
               <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-                {t('insights.contributionLoading')}
+                <InlineSkeleton />
               </li>
             ) : contrib.length === 0 ? (
               <li className="px-4 py-6 text-center text-sm text-muted-foreground">
@@ -615,7 +616,7 @@ export function InsightsPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {wbQ.isLoading ? (
             <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">
-              {t('insights.workloadLoading')}
+              <InlineSkeleton />
             </Card>
           ) : visibleWorkload.length === 0 ? (
             <Card className="p-6 col-span-full text-center text-sm text-muted-foreground">

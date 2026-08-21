@@ -15,6 +15,7 @@ import {
 import { api } from '../lib/api'
 import { goToDestination } from '../lib/notification-nav'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard'
 type ShareLevel = 'view' | 'comment' | 'edit' | 'admin'
@@ -124,7 +125,7 @@ export function SharedWithMePage() {
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl mx-auto space-y-6">
           {sharedQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+            <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>
           ) : groups.length === 0 ? (
             <EmptyState
               icon={<Users className="h-6 w-6" />}

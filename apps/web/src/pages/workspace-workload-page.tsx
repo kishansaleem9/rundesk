@@ -22,6 +22,7 @@ import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 export function WorkloadPage() {
   const { t } = useTranslation()
@@ -619,7 +620,7 @@ function WorkloadCell({
         </div>
         <div className="max-h-64 overflow-auto p-1.5">
           {dayQuery.isLoading && (
-            <div className="px-2 py-3 text-[11px] text-muted-foreground">{t('common.loading')}</div>
+            <div className="px-2 py-3 text-[11px] text-muted-foreground"><InlineSkeleton /></div>
           )}
           {dayQuery.isError && (
             <div className="px-2 py-3 text-[11px] text-muted-foreground">{t('workload.dayLoadError')}</div>

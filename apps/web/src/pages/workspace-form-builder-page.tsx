@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from '../components/loading-skeletons'
 
 const FIELD_TYPES = [
   { value: 'short_text', labelKey: 'formBuilder.fieldType.shortText' },
@@ -234,7 +235,7 @@ export function FormBuilderPage() {
 
   const form = formQuery.data
   if (!form && formQuery.isLoading) {
-    return <div className="p-6 text-muted-foreground">{t('formBuilder.loadingForm')}</div>
+    return <div className="p-6 text-muted-foreground"><InlineSkeleton /></div>
   }
   if (!form) {
     return <div className="p-6 text-muted-foreground">{t('formBuilder.formNotFound')}</div>
@@ -1051,7 +1052,7 @@ function SubmissionsTab({
     window.history.replaceState(null, '', nextUrl)
   }, [filter, preset])
 
-  if (loading) return <div className="text-muted-foreground text-sm">{t('common.loading')}</div>
+  if (loading) return <div className="text-muted-foreground text-sm"><InlineSkeleton /></div>
   if (submissions.length === 0) {
     return (
       <div className="text-center text-muted-foreground py-16">

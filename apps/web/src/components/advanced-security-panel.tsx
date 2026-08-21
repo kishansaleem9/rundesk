@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type SecuritySettings = {
   workspaceId: string
@@ -99,7 +100,7 @@ export function AdvancedSecurityPanel({ workspaceId }: { workspaceId: string }) 
   if (isLoading || !data) {
     return (
       <Card variant="glass" className="p-5 text-sm text-muted-foreground">
-        {t('advancedSecurity.loading')}
+        <InlineSkeleton />
       </Card>
     )
   }

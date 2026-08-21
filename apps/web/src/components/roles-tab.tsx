@@ -4,6 +4,7 @@ import { Badge, Button, Card, Checkbox, Input, Label, Textarea, toast, cn } from
 import { Plus, Trash2, Shield, Save, X, Lock, UserPlus, UserMinus } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type PermissionDef = {
   key: string
@@ -199,7 +200,7 @@ export function RolesTab({ workspaceId }: { workspaceId: string }) {
           </div>
           <div className="max-h-[640px] overflow-auto">
             {rolesQuery.isLoading && (
-              <div className="p-4 text-xs text-muted-foreground">{t('common.loading')}</div>
+              <div className="p-4 text-xs text-muted-foreground"><InlineSkeleton /></div>
             )}
             {rolesQuery.data?.length === 0 && !creating && (
               <div className="p-4 text-xs text-muted-foreground">
@@ -579,7 +580,7 @@ function MemberAssignmentPanel({
       {expanded && (
         <div className="border-t border-border/40 divide-y divide-border/40 max-h-72 overflow-auto">
           {membersQuery.isLoading || assigneesQuery.isLoading ? (
-            <div className="p-4 text-xs text-muted-foreground">{t('rolesTab.loadingMembers')}</div>
+            <div className="p-4 text-xs text-muted-foreground"><InlineSkeleton /></div>
           ) : (
             (membersQuery.data ?? []).map((m) => {
               const assigned = hasRole(m.workspaceMemberId ?? null)

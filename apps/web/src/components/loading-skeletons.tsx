@@ -234,3 +234,64 @@ export function CommandPaletteSkeleton() {
     </div>
   )
 }
+
+/**
+ * The task detail sheet. It opens at full height over the page, so the wait
+ * there is the largest single blank area in the app — it used to hold one line
+ * of muted text. Shaped like the real sheet: cover band, title, the meta grid,
+ * then description and activity.
+ */
+export function TaskSheetSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Loading…</span>
+      <Skeleton className="h-24 w-full rounded-lg" />
+      <div className="space-y-3">
+        <Skeleton className="h-7 w-2/3" />
+        <div className="grid grid-cols-2 gap-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-6 flex-1 rounded-md" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <Skeleton className="h-4 w-24" />
+      <ListSkeleton rows={3} rowClassName="h-4" className="space-y-2" />
+      <Skeleton className="h-4 w-20" />
+      <ListSkeleton rows={3} rowClassName="h-12" />
+    </div>
+  )
+}
+
+/**
+ * A wait that lives inside running text — a table cell, a list item, a
+ * paragraph, a dropdown's "loading teammates" line.
+ *
+ * Deliberately a <span> with inline-block bars: these sites are inside <p>,
+ * <td> and <li>, where a <div> would be invalid nesting. This exists so
+ * "icons, not text" reaches the 79 places that answered a wait with the word
+ * "Loading…", without restructuring each one's markup.
+ */
+export function InlineSkeleton({
+  width = '9rem',
+  className = '',
+}: {
+  width?: string
+  className?: string
+}) {
+  return (
+    <span
+      role="status"
+      aria-label="Loading"
+      className={`inline-flex items-center gap-1.5 align-middle ${className}`}
+    >
+      <span
+        className="inline-block h-3.5 rounded bg-muted/40 animate-shimmer"
+        style={{ width }}
+      />
+      <span className="inline-block h-3.5 w-10 rounded bg-muted/40 animate-shimmer opacity-60" />
+    </span>
+  )
+}
