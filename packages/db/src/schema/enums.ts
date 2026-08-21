@@ -91,6 +91,18 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // §14.1 — Stripe dunning: a failed payment left the subscription past_due.
   // Written to workspace admins by the billing webhook handler.
   'billing_past_due',
+  // §2.2 — five kinds she named in the Primary customiser that had no type at
+  // all, so the customiser could not have offered them however good it was.
+  /** Someone took you off a task you were assigned to. */
+  'task_unassigned',
+  /** A follower/watcher was added to or removed from a task you are on. */
+  'task_follower_changed',
+  /** Someone reacted to your message. */
+  'message_reaction',
+  /** Something was shared with you. */
+  'shared_with_me',
+  /** Someone asked for access to something you control. */
+  'access_requested',
   // §A2.11 — self-served "send me a test" from the delivery-preferences panel.
   'test_notification',
 ])

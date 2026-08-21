@@ -6,9 +6,10 @@ import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../../auth/guards/workspace-admin.guard'
 import { SecurityModule } from '../../security/security.module'
 import { CustomRolesModule } from '../../custom-roles/custom-roles.module'
+import { NotificationsModule } from '../../notifications/notifications.module'
 
 @Module({
-  imports: [DatabaseModule, SecurityModule, CustomRolesModule],
+  imports: [DatabaseModule, SecurityModule, CustomRolesModule, NotificationsModule],
   controllers: [IntegrationConnectionsController],
   providers: [IntegrationConnectionsService, WorkspaceMemberGuard, WorkspaceAdminGuard],
   exports: [IntegrationConnectionsService],

@@ -2851,6 +2851,26 @@ export class TasksService {
     await this.assertTaskWriteAccess(taskId, actorId)
     await this.db.delete(taskAssignees).where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, userId)))
     await this.logActivity({ taskId, actorId, action: 'unassigned', meta: { userId } })
+
+    // §2.2 — "kisi ne mera hi task kisi aur ko de diya aur mujhe REMOVE kar
+    // diya to mujhe woh cheez show ho." Being taken off a task is otherwise
+    // something you find out by noticing it is gone.
+    if (userId !== actorId) {
+      const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
+      const ctx = taskRow ? await this.resolveWorkspaceForList(taskRow.listId) : null
+      if (taskRow && ctx) {
+        await this.notifications
+          .create({
+            userId,
+            workspaceId: ctx.workspaceId,
+            actorId,
+            type: 'task_unassigned',
+            title: taskRow.title,
+            target: { entityType: 'task', entityId: taskId },
+          })
+          .catch(() => undefined)
+      }
+    }
     return this.getTask(taskId)
   }
 
@@ -2872,10 +2892,43 @@ export class TasksService {
   }
 
   // --- Watchers ------------------------------------------------------------
-  async addWatcher(taskId: string, userId: string) {
+  async addWatcher(taskId: string, userId: string, actorId?: string) {
     await this.db.insert(taskWatchers).values({ taskId, userId }).onConflictDoNothing()
     this.realtime.emitToTask(taskId, { type: 'watchers.updated', taskId })
+    // §2.2 — "FOLLOWER CHANGE — yaani ke agar mere hi task pe koi follower add
+    // ho." Told to the people already on the task: it is their task whose
+    // roster changed.
+    await this.notifyFollowerChanged(taskId, userId, actorId).catch(() => undefined)
     return this.getTask(taskId)
+  }
+
+  /** §2.2 — tell a task's assignees that its follower list moved. */
+  private async notifyFollowerChanged(taskId: string, subjectId: string, actorId?: string) {
+    const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
+    if (!taskRow) return
+    const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+    if (!ctx) return
+    const assignees = await this.db
+      .select({ userId: taskAssignees.userId })
+      .from(taskAssignees)
+      .where(eq(taskAssignees.taskId, taskId))
+    // Not the person who did it, and not the person it was about — neither
+    // needs telling what they already know.
+    const recipients = new Set(assignees.map((a) => a.userId))
+    recipients.delete(subjectId)
+    if (actorId) recipients.delete(actorId)
+    for (const recipient of recipients) {
+      await this.notifications
+        .create({
+          userId: recipient,
+          workspaceId: ctx.workspaceId,
+          actorId: actorId ?? null,
+          type: 'task_follower_changed',
+          title: taskRow.title,
+          target: { entityType: 'task', entityId: taskId },
+        })
+        .catch(() => undefined)
+    }
   }
 
   async removeWatcher(taskId: string, userId: string) {

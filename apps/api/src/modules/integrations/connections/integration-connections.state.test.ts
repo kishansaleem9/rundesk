@@ -28,7 +28,7 @@ function fakeConfig(vals: Record<string, string | undefined>): ConfigService {
 }
 
 const makeSvc = (vals: Record<string, string | undefined>) =>
-  new IntegrationConnectionsService({} as any, {} as any, fakeConfig(vals))
+  new IntegrationConnectionsService({} as any, {} as any, fakeConfig(vals), {} as any)
 
 const payload = { provider: 'github', workspaceId: 'w1', userId: 'u1', ts: 1_700_000_000_000 }
 

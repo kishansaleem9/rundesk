@@ -33,7 +33,7 @@ function stubDb(results: unknown[][]) {
 }
 
 function service(db: any) {
-  return new SharesService(db, {} as any, {} as any, {} as any)
+  return new SharesService(db, {} as any, {} as any, {} as any, {} as any)
 }
 
 describe('SharesService.listSharedWithMe', () => {

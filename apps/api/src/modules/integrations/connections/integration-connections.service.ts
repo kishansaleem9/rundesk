@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Db } from '@rundesk/db'
 import {
@@ -11,6 +11,7 @@ import {
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
 import { SecurityService } from '../../security/security.service'
+import { NotificationsService } from '../../notifications/notifications.service'
 
 type Provider =
   | 'github'
@@ -50,6 +51,7 @@ export class IntegrationConnectionsService {
     @Inject(DB_TOKEN) private readonly db: Db,
     private readonly security: SecurityService,
     private readonly config: ConfigService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(workspaceId: string) {
@@ -291,6 +293,34 @@ export class IntegrationConnectionsService {
       description: `Requested access to ${provider}`,
       metadata: { provider, note: note ?? null },
     })
+
+    // §2.2 — "agar ACCESS REQUEST — agar kisi ne koi access maanga to mujhe
+    // show ho." It reached an audit log and an admin screen nobody watches;
+    // the person who can grant it now hears about it where they read
+    // everything else.
+    const admins = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+        ),
+      )
+    for (const admin of admins) {
+      if (admin.userId === userId) continue
+      await this.notifications
+        .create({
+          userId: admin.userId,
+          workspaceId,
+          actorId: userId,
+          type: 'access_requested',
+          title: provider,
+          body: note?.trim() || undefined,
+          target: { entityType: 'integration', entityId: provider },
+        })
+        .catch(() => undefined)
+    }
     return created
   }
 

@@ -9,6 +9,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
+import { NotificationsService } from '../notifications/notifications.service'
 
 /** Everything that can be shared. */
 export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc', 'channel', 'dashboard'] as const
@@ -63,6 +64,7 @@ export class SharesService {
     private security: SecurityService,
     private email: EmailService,
     private config: ConfigService,
+    private notifications: NotificationsService,
   ) {}
 
   assertType(t: string): ShareType {
@@ -477,6 +479,24 @@ export class SharesService {
       description: `Shared ${type} "${loc.name}" with ${invitedEmail ?? userId} (${level})`,
       ipAddress: ip, metadata: { level, invitedEmail, userId },
     })
+
+    // §2.2 — "[shared with] mujhe na show ho" is a choice she makes in the
+    // Primary customiser, and it can only be offered if the type exists. An
+    // email already goes out below; this is the in-app half, which is what the
+    // Inbox filters over. Only for an existing member — an invited address has
+    // no account to notify yet.
+    if (userId && userId !== actor.id) {
+      await this.notifications
+        .create({
+          userId,
+          workspaceId: loc.workspaceId,
+          actorId: actor.id,
+          type: 'shared_with_me',
+          title: loc.name,
+          target: { entityType: type, entityId: id },
+        })
+        .catch(() => undefined)
+    }
 
     // Tell the person they were given access. Never let a mail failure undo a
     // grant that is already committed — the share stands either way.

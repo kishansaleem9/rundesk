@@ -673,6 +673,13 @@
       "when": 1900000087005,
       "tag": "0095_milestone_type_link",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1900000088005,
+      "tag": "0096_notification_kinds",
+      "breakpoints": true
     }
   ]
 }

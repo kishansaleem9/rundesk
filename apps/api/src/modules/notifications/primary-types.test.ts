@@ -126,4 +126,48 @@ describe('Primary is what you chose (§2.2)', () => {
       )
     }
   })
+
+  describe('the kinds she named that had no type at all', () => {
+    // The customiser can only offer what the API can emit, so five of the ten
+    // kinds she went through were unofferable however good the picker was.
+    const named = [
+      'task_unassigned',
+      'task_follower_changed',
+      'message_reaction',
+      'shared_with_me',
+      'access_requested',
+    ]
+
+    it('are all selectable now', () => {
+      for (const type of named) {
+        assert.ok(
+          (PRIMARY_SELECTABLE_TYPES as readonly string[]).includes(type),
+          `${type} is not offered by the customiser`,
+        )
+      }
+    })
+
+    it('default to on for the three she asked to see', () => {
+      // "kisi ne mera hi task kisi aur ko de diya aur mujhe REMOVE kar diya to
+      // mujhe woh cheez show ho" / "FOLLOWER CHANGE" / "agar ACCESS REQUEST …
+      // to mujhe show ho".
+      for (const type of ['task_unassigned', 'task_follower_changed', 'access_requested']) {
+        assert.ok(DEFAULT_PRIMARY_TYPES.includes(type), `${type} should start on`)
+      }
+    })
+
+    it('default to off for the two she asked not to see', () => {
+      // "Ab neeche se REACTIONS mujhe na show hon, [shared with] mujhe na show ho."
+      for (const type of ['message_reaction', 'shared_with_me']) {
+        assert.ok(!DEFAULT_PRIMARY_TYPES.includes(type), `${type} should start off`)
+      }
+    })
+
+    it('can still be turned on, since off by default is not the same as absent', () => {
+      const { svc } = service()
+      return svc
+        .updatePreferences('u1', { primaryTypes: ['message_reaction', 'shared_with_me'] })
+        .then(() => assert.ok(true))
+    })
+  })
 })

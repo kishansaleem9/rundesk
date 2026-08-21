@@ -2291,6 +2291,23 @@ export class ChatService {
         channelId: message.channelId,
         messageId,
       })
+      // §2.2 — one of the kinds she went through in the Primary customiser.
+      // She turns it off for herself ("neeche se REACTIONS mujhe na show hon"),
+      // which is a choice the picker can only offer if the type exists.
+      // Reacting to your own message tells you nothing.
+      if (message.authorId && message.authorId !== userId) {
+        await this.notifications
+          .create({
+            userId: message.authorId,
+            workspaceId: channel.workspaceId,
+            actorId: userId,
+            type: 'message_reaction',
+            title: emoji,
+            body: message.body ?? undefined,
+            target: { entityType: 'chat_message', entityId: messageId },
+          })
+          .catch(() => undefined)
+      }
     }
     return { ok: true, added: true }
   }

@@ -20,6 +20,11 @@ import {
   Clock4,
   Settings,
   Undo2,
+  UserMinus,
+  Users,
+  SmilePlus,
+  Share2,
+  KeyRound,
 } from 'lucide-react'
 import { formatDistanceToNowStrict, isToday, isYesterday } from 'date-fns'
 import { api } from '../lib/api'
@@ -100,6 +105,12 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; labelK
   task_updated: { icon: RefreshCw, color: 'text-cyan-500', labelKey: 'inbox.type.taskUpdated' },
   task_blocked: { icon: Ban, color: 'text-red-500', labelKey: 'inbox.type.blocked' },
   test_notification: { icon: Bell, color: 'text-muted-foreground', labelKey: 'inbox.type.test' },
+  // §2.2 — the kinds she went through in the customiser.
+  task_unassigned: { icon: UserMinus, color: 'text-orange-500', labelKey: 'inbox.type.unassigned' },
+  task_follower_changed: { icon: Users, color: 'text-sky-500', labelKey: 'inbox.type.followerChanged' },
+  message_reaction: { icon: SmilePlus, color: 'text-pink-500', labelKey: 'inbox.type.reaction' },
+  shared_with_me: { icon: Share2, color: 'text-violet-500', labelKey: 'inbox.type.sharedWithMe' },
+  access_requested: { icon: KeyRound, color: 'text-amber-600', labelKey: 'inbox.type.accessRequested' },
 }
 
 /**
@@ -215,6 +226,11 @@ const HUMAN_TYPES = new Set([
   'doc_commented',
   'task_assigned',
   'chat_message',
+  // §2.2 — she asked for these three by name. Mirrors DEFAULT_PRIMARY_TYPES on
+  // the server; the two must agree or the counts differ from the list.
+  'task_unassigned',
+  'task_follower_changed',
+  'access_requested',
 ])
 
 /**
@@ -249,6 +265,13 @@ export const PRIMARY_SELECTABLE_TYPES: Array<{ type: string; labelKey: Translati
   { type: 'task_status_changed', labelKey: 'inbox.type.statusChanged' },
   { type: 'task_updated', labelKey: 'inbox.type.taskUpdated' },
   { type: 'task_blocked', labelKey: 'inbox.type.blocked' },
+  { type: 'task_unassigned', labelKey: 'inbox.type.unassigned' },
+  { type: 'task_follower_changed', labelKey: 'inbox.type.followerChanged' },
+  { type: 'access_requested', labelKey: 'inbox.type.accessRequested' },
+  // Offered and off by default, because she said so: "Ab neeche se REACTIONS
+  // mujhe na show hon, [shared with] mujhe na show ho."
+  { type: 'message_reaction', labelKey: 'inbox.type.reaction' },
+  { type: 'shared_with_me', labelKey: 'inbox.type.sharedWithMe' },
 ]
 
 export function matchesInboxFilter(

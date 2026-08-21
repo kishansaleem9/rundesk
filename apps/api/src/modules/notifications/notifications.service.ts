@@ -155,6 +155,16 @@ type NotificationType =
   | 'ai_briefing'
   | 'workload_alert'
   | 'test_notification'
+  // §2.2 — five kinds she named in the Primary customiser that had no type at
+  // all, so the customiser could not have offered them however good it was.
+  // "kisi ne mera hi task kisi aur ko de diya aur mujhe REMOVE kar diya to
+  // mujhe woh cheez show ho" / "FOLLOWER CHANGE" / "neeche se REACTIONS" /
+  // "[shared with]" / "agar ACCESS REQUEST".
+  | 'task_unassigned'
+  | 'task_follower_changed'
+  | 'message_reaction'
+  | 'shared_with_me'
+  | 'access_requested'
 
 type NotificationEventKey =
   | 'mention'
@@ -188,6 +198,11 @@ export const PRIMARY_SELECTABLE_TYPES = [
   'approval_needed',
   'ai_briefing',
   'workload_alert',
+  'task_unassigned',
+  'task_follower_changed',
+  'message_reaction',
+  'shared_with_me',
+  'access_requested',
 ] as const
 
 /** What Primary shows for someone who has never opened the customiser. */
@@ -198,6 +213,14 @@ export const DEFAULT_PRIMARY_TYPES: string[] = [
   'doc_commented',
   'task_assigned',
   'chat_message',
+  // On by default because she asked for them by name: "kisi ne mera hi task
+  // kisi aur ko de diya aur mujhe REMOVE kar diya to mujhe woh cheez show ho",
+  // "FOLLOWER CHANGE", "agar ACCESS REQUEST … to mujhe show ho".
+  'task_unassigned',
+  'task_follower_changed',
+  'access_requested',
+  // Offered but off, because she said so: "Ab neeche se REACTIONS mujhe na show
+  // hon, [shared with] mujhe na show ho."
 ]
 
 function normalizePrimaryTypes(value: unknown): string[] {
