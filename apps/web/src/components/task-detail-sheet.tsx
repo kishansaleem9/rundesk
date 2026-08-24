@@ -781,6 +781,7 @@ export function TaskDetailSheet({
                     title={t('taskDetail.tab.watchers')}
                     aria-label={t('taskDetail.tab.watchers')}
                     onClick={() => setWatchersOpen(true)}
+                    data-testid="task-followers-open"
                     className="relative h-8 w-8 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground"
                   >
                     <Bell className="h-4 w-4" />
@@ -2806,6 +2807,8 @@ function WatchersPanel({
           <select
             value={selectedUserId}
             onChange={(e) => setSelectedUserId(e.target.value)}
+            aria-label={t('taskDetail.addWatcherOption')}
+            data-testid="add-follower-select"
             className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
           >
             <option value="">{t('taskDetail.addWatcherOption')}</option>
@@ -2819,6 +2822,7 @@ function WatchersPanel({
             size="sm"
             onClick={() => addWatcher.mutate(selectedUserId)}
             disabled={!selectedUserId || addWatcher.isPending}
+            data-testid="add-follower-submit"
           >
             {t('taskDetail.add')}
           </Button>

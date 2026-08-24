@@ -239,4 +239,75 @@ describe('the emitters exist and know who acted (source-level, §2.2)', () => {
     assert.match(integrations, /type: 'access_requested'/)
     assert.match(integrations, /'workspace_admin', 'super_admin'/)
   })
+
+  /**
+   * §11 [13:33] — "Follower ke liye main is par click karoongi to abhi main aap
+   * ko add karoongi, aur even to maine aap ko task assign bhi nahi kiya."
+   *
+   * The endpoint and its notification are covered above. What this adds is the
+   * other half of her sentence: the panel must add the person you *picked*, and
+   * adding a follower must not assign them. Both are one identifier apart from
+   * being wrong — posting `currentUser.id` instead of the selection would look
+   * identical on screen until someone else failed to get the notification.
+   *
+   * Source-level, and weaker for it: the list route this panel lives on needs a
+   * large amount of stubbing to render, so a browser test here would have been
+   * testing that scaffolding rather than this behaviour.
+   */
+  it('the follower panel adds the person picked, and assigns nobody (§11)', () => {
+    const sheet = read('apps/web/src/components/task-detail-sheet.tsx')
+    // Bounded by the next top-level declaration, not by the first line-start
+    // brace: an earlier version stopped short of the Add button and failed on a
+    // string that was there all along.
+    const start = sheet.indexOf('function WatchersPanel(')
+    const rest = start === -1 ? '' : sheet.slice(start + 1)
+    const next = rest.search(/\n(function|export|const [A-Z])/)
+    const panel = start === -1 ? '' : rest.slice(0, next === -1 ? undefined : next)
+    assert.ok(panel, 'could not find WatchersPanel')
+
+    // Adding posts the selected id, not the caller's.
+    assert.match(
+      panel,
+      /addWatcher\.mutate\(selectedUserId\)/,
+      'the Add button does not send the selection',
+    )
+    // The chain, in two links: the button hands `selectedUserId` to the
+    // mutation, and the mutation forwards its parameter as `userId`. Written
+    // against the shorthand the code actually uses — an earlier version of this
+    // assertion guessed `userId: selectedUserId` and failed on correct code.
+    assert.match(
+      panel,
+      /mutationFn: \(userId: string\)[\s\S]{0,200}?JSON\.stringify\(\{ userId \}\)/,
+      'the add request does not forward the id it was given',
+    )
+    // Only people who are not already following are offered — otherwise the
+    // list quietly grows duplicates that read as a bug.
+    assert.match(panel, /!watcherIds\.has\(m\.userId\)/, 'already-following members are still offered')
+    /*
+     * And it never *writes* an assignment — that is the whole point of a
+     * follower. Stated as "every request this panel makes goes to /watchers"
+     * rather than "the word assignee never appears": the panel legitimately
+     * reads assigneeIds to explain why you are already following a task you
+     * were assigned, and an earlier version of this check condemned that.
+     */
+    const requests = [...panel.matchAll(/api\(`([^`]+)`/g)].map((m) => m[1])
+    assert.ok(requests.length > 0, 'no requests found in the panel')
+    for (const url of requests) {
+      assert.match(
+        url,
+        /\/watchers/,
+        `the follower panel calls ${url} — adding a follower must not assign anyone`,
+      )
+    }
+  })
+
+  it('the bell she described is the way in (§11)', () => {
+    const sheet = read('apps/web/src/components/task-detail-sheet.tsx')
+    // "let's suppose yeh dekh rahe hain aap — BELL ICON yeh hai" [13:29].
+    assert.match(
+      sheet,
+      /data-testid="task-followers-open"[\s\S]{0,400}?<Bell/,
+      'the followers control is not a bell',
+    )
+  })
 })
