@@ -145,6 +145,8 @@ export function CommandPalette({
   const [createdBefore, setCreatedBefore] = useState<string>('')
   // §2 [02:35] — Location: which space it sits in, or which list.
   const [spaceFilter, setSpaceFilter] = useState<string>('')
+  /** The folder step between space and list — projects hang off a folder. */
+  const [folderFilter, setFolderFilter] = useState<string>('')
   const [listFilter, setListFilter] = useState<string>('')
   const [customFieldId, setCustomFieldId] = useState<string>('')
   const [customFieldValue, setCustomFieldValue] = useState<string>('')
@@ -221,6 +223,7 @@ export function CommandPalette({
     setCreatedAfter((f.createdAfter as string) ?? '')
     setCreatedBefore((f.createdBefore as string) ?? '')
     setSpaceFilter((f.spaceId as string) ?? '')
+    setFolderFilter((f.folderId as string) ?? '')
     setListFilter((f.listId as string) ?? '')
     setCustomFieldId((f.customFieldId as string) ?? '')
     setCustomFieldValue((f.customFieldValue as string) ?? '')
@@ -242,6 +245,7 @@ export function CommandPalette({
       if (createdAfter) filters.createdAfter = createdAfter
       if (createdBefore) filters.createdBefore = createdBefore
       if (spaceFilter) filters.spaceId = spaceFilter
+      if (folderFilter) filters.folderId = folderFilter
       if (listFilter) filters.listId = listFilter
       if (customFieldId && customFieldValue) {
         filters.customFieldId = customFieldId
@@ -273,6 +277,15 @@ export function CommandPalette({
    * "which list" is a question that only means anything after "which space",
    * and every list in the workspace at once is a haystack, not a location.
    */
+  /**
+   * §2 — the folders inside the chosen space. Same reasoning as the lists
+   * below: "which folder" only means something once a space is picked.
+   */
+  const locationFoldersQuery = useQuery({
+    enabled: open && Boolean(workspaceId) && Boolean(spaceFilter),
+    queryKey: ['location-folders', spaceFilter],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/${spaceFilter}/folders`),
+  })
   const locationListsQuery = useQuery({
     enabled: open && Boolean(workspaceId) && Boolean(spaceFilter),
     queryKey: ['location-lists', workspaceId, spaceFilter],
@@ -306,6 +319,7 @@ export function CommandPalette({
     (createdAfter ? 1 : 0) +
     (createdBefore ? 1 : 0) +
     (spaceFilter ? 1 : 0) +
+    (folderFilter ? 1 : 0) +
     (listFilter ? 1 : 0) +
     (hasCustomField ? 1 : 0)
   const hasFilter = activeFilterCount > 0
@@ -316,7 +330,7 @@ export function CommandPalette({
 
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, createdAfter, createdBefore, spaceFilter, listFilter, customFieldId, customFieldValue],
+    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, createdAfter, createdBefore, spaceFilter, folderFilter, listFilter, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeParam) params.set('types', typeParam)
@@ -333,6 +347,7 @@ export function CommandPalette({
       if (createdAfter) params.set('createdAfter', createdAfter)
       if (createdBefore) params.set('createdBefore', createdBefore)
       if (spaceFilter) params.set('spaceId', spaceFilter)
+      if (folderFilter) params.set('folderId', folderFilter)
       if (listFilter) params.set('listId', listFilter)
       if (hasCustomField) {
         params.set('customFieldId', customFieldId)
@@ -483,12 +498,17 @@ export function CommandPalette({
           </button>
         )}
       </div>
-      <div
-        className={cn(
-          'flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60',
-          filtersOpen ? 'flex' : 'hidden',
-        )}
-      >
+      {/*
+        §2 [01:33] — "main 'Task' par click karoongi na — to agar aap yeh dekh
+        rahe ho to yeh GRAY COLOR ho gaya, to woh task mein is cheez ko search
+        karna start ho jayega."
+        She reaches for a type immediately. This row used to sit inside the
+        collapsible panel below, so narrowing to Tasks or Docs — the first thing
+        she does — cost a click on "Filters" first, and the ⋯ she describes was
+        two levels down. The type chips are part of the search bar; the rest are
+        filters.
+      */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60">
         <FilterGroup label={t('palette.filterType')}>
           <FilterChip active={typeFilter.size === 0} onClick={() => setTypeFilter(new Set())}>
             {t('palette.all')}
@@ -556,6 +576,13 @@ export function CommandPalette({
             </div>
           )}
         </FilterGroup>
+      </div>
+      <div
+        className={cn(
+          'flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60',
+          filtersOpen ? 'flex' : 'hidden',
+        )}
+      >
         <FilterGroup label={t('palette.filterSort')}>
           {([
             ['relevance', 'palette.sortRelevance'],
@@ -713,7 +740,8 @@ export function CommandPalette({
               value={spaceFilter}
               onChange={(e) => {
                 setSpaceFilter(e.target.value)
-                // The old list belongs to the old space.
+                // The old folder and list belong to the old space.
+                setFolderFilter('')
                 setListFilter('')
               }}
               aria-label={t('palette.filterSpace')}
@@ -727,6 +755,22 @@ export function CommandPalette({
                 </option>
               ))}
             </select>
+            {(locationFoldersQuery.data?.length ?? 0) > 0 && (
+              <select
+                value={folderFilter}
+                onChange={(e) => setFolderFilter(e.target.value)}
+                aria-label={t('palette.filterFolder')}
+                data-testid="palette-folder-filter"
+                className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+              >
+                <option value="">{t('palette.filterAnyFolder')}</option>
+                {locationFoldersQuery.data!.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            )}
             {(locationListsQuery.data?.length ?? 0) > 0 && (
               <select
                 value={listFilter}

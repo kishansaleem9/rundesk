@@ -370,6 +370,33 @@ describe('§2 search: the containers, Location, and created dates', () => {
     assert.ok(q.params.includes('space-1'), `space not bound: ${q.sql} ${JSON.stringify(q.params)}`)
   })
 
+  it('narrows to a folder — the level between the two she named [02:35]', async () => {
+    /*
+     * The frame-by-frame pass reads Location as "a space, folder or list"; the
+     * transcript only says "kis space mein para hai, ya kis list mein para
+     * hai". Folders are the level in between, and they became searchable in
+     * their own right, so being unable to scope *to* one was the half left
+     * undone. A task reaches its folder through list → project → folderId.
+     */
+    const { db, wheres } = makeDb({ tasks: [], docs: [] })
+    await new SearchService(db, config).search('w1', 'u1', 'alpha', 10, { folderId: 'folder-1' })
+    const q = sqlFor(wheres, 'tasks')
+    assert.ok(q, 'no predicate captured')
+    assert.match(q.sql, /"folder_id" =/, `not scoped by folder: ${q.sql}`)
+    assert.ok(q.params.includes('folder-1'), `folder not bound: ${JSON.stringify(q.params)}`)
+  })
+
+  it('a folder-only search takes the filtered path', async () => {
+    // Same trap as spaceId and createdAfter: absent from hasTaskFilter, it
+    // routes to Meili, which ignores it, and the search answers unfiltered.
+    const { db, fromTables } = makeDb({ tasks: [], docs: [] })
+    await new SearchService(db, config).search('w1', 'u1', 'alpha', 10, { folderId: 'f1' })
+    assert.ok(
+      !fromTables.includes('docs'),
+      'docs were searched, so the folder filter never reached the query builder',
+    )
+  })
+
   it('offers every container type the API will accept', async () => {
     // A type the service can return but the controller rejects is a filter that
     // silently does nothing — the §1.1 bug, in a different place.

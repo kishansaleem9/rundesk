@@ -69,6 +69,11 @@ export type SearchFilters = {
    * hai, ya kis list mein para hai." Which container it sits in.
    */
   spaceId?: string
+  /**
+   * A folder groups projects inside a space, so narrowing to one means
+   * "anything under these projects" — the level between the two she named.
+   */
+  folderId?: string
   listId?: string
   /**
    * §A2.4 — search hard-excluded archived rows, which is right by default and
@@ -327,6 +332,7 @@ export class SearchService implements OnModuleInit {
         filters.createdAfter ||
         filters.createdBefore ||
         filters.spaceId ||
+        filters.folderId ||
         filters.listId ||
         hasCustomFieldFilter,
     )
@@ -437,6 +443,9 @@ export class SearchService implements OnModuleInit {
           // Location narrows by container. `spaceId` is already joined below.
           if (filters.listId) conds.push(eq(tasks.listId, filters.listId))
           if (filters.spaceId) conds.push(eq(spaces.id, filters.spaceId))
+          // A folder sits between the space and the list: it groups projects,
+          // and the task branch is already joined through projects to reach here.
+          if (filters.folderId) conds.push(eq(projects.folderId, filters.folderId))
           if (hasCustomFieldFilter) {
             conds.push(
               await this.customFieldValueCondition(

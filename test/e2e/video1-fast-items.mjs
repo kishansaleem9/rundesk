@@ -156,6 +156,8 @@ function stubBody(url) {
           ? TASK_TYPES
       : url.includes('/plan')
         ? { label: 'Free', usage: { members: 2 } }
+        : /\/spaces\/[^/]+\/folders$/.test(url.split('?')[0])
+          ? [{ id: 'fo-1', name: 'Folder One' }]
         : url.includes('/spaces/workspace/')
           ? [{ id: 'sp-1', name: 'Space One' }]
           : url.includes('/projects/space/')
@@ -653,15 +655,20 @@ console.log('\n§2  the search bar she walked through')
   const { ctx, page, calls } = await openApp()
   await page.getByRole('textbox', { name: /search/i }).first().click()
   await page.waitForTimeout(1500)
+
+  /*
+   * [01:33] — "main 'Task' par click karoongi na". Checked *before* touching
+   * the Filters toggle: she reaches for a type straight away, and this row used
+   * to be hidden until you opened that panel.
+   */
+  check(
+    (await page.locator('[data-testid="palette-type-task"]').count()) > 0,
+    'the type chips are on the bar without opening Filters',
+  )
+
   const filtersToggle = page.getByRole('button', { name: /filter/i }).first()
   if ((await filtersToggle.count()) > 0) await filtersToggle.click().catch(() => {})
   await page.waitForTimeout(800)
-
-  // The bar carries the everyday types; the containers are not among them.
-  check(
-    (await page.locator('[data-testid="palette-type-task"]').count()) > 0,
-    'the type chips are there',
-  )
   check(
     (await page.locator('[data-testid="palette-type-folder"]').count()) === 0,
     'and Folders is not one of them yet — it lives behind the ⋯',
@@ -721,6 +728,23 @@ console.log('\n§2  the search bar she walked through')
     await page.waitForTimeout(1600)
     const req = calls.slice(before).find((c) => c.url.includes('/search/') && c.url.includes('spaceId=sp-1'))
     check(!!req, 'and choosing one narrows the search by space', calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
+
+    // The folder step between space and list — "a space, folder or list".
+    const folder = page.locator('[data-testid="palette-folder-filter"]')
+    if ((await folder.count()) > 0) {
+      const beforeF = calls.length
+      await folder.selectOption({ index: 1 }).catch(() => {})
+      await page.waitForTimeout(1600)
+      check(
+        calls.slice(beforeF).some((c) => c.url.includes('folderId=')),
+        'and by folder',
+        calls.slice(beforeF).map((c) => c.url).slice(-3).join(' | '),
+      )
+    } else {
+      // The stub space has no folders, so there is nothing to pick. Said out
+      // loud rather than passing on a control that never rendered.
+      check(false, 'the folder step is offered once a space is chosen')
+    }
 
     // The list options only mean anything once a space is chosen.
     const list = page.locator('[data-testid="palette-list-filter"]')

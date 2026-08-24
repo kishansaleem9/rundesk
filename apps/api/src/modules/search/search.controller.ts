@@ -43,6 +43,7 @@ export class SearchController {
     @Query('createdBefore') createdBefore?: string,
     // §2 [02:35] — Location: which space, or which list.
     @Query('spaceId') spaceId?: string,
+    @Query('folderId') folderId?: string,
     @Query('listId') listId?: string,
     @Query('customFieldId') customFieldId?: string,
     @Query('customFieldValue') customFieldValue?: string,
@@ -79,6 +80,7 @@ export class SearchController {
     filters.createdAfter = parseDate(createdAfter)
     filters.createdBefore = parseDate(createdBefore)
     if (spaceId) filters.spaceId = spaceId
+    if (folderId) filters.folderId = folderId
     if (listId) filters.listId = listId
     // Custom-field value filter — only applied when both the field and a
     // non-empty value are supplied (Plan §11.2).
