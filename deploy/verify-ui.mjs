@@ -722,15 +722,23 @@ try {
     await go(`/app/${WS}`, 3500)
     await page.getByRole('textbox', { name: /search/i }).first().click().catch(() => {})
     await page.waitForTimeout(2500)
+
+    /*
+     * Checked before the Filters toggle is touched, which this section used not
+     * to do. She reaches for a type immediately — "main 'Task' par click
+     * karoongi na" [01:33] — and the row used to live inside the collapsible
+     * panel, so the first thing anyone does cost a click to discover. Clicking
+     * Filters first would pass either way and prove nothing.
+     */
+    chk(
+      (await page.locator('[data-testid="palette-type-task"]').count()) > 0,
+      'the type chips are on the bar without opening Filters',
+      'the type chips are still behind the Filters toggle',
+    )
+
     const filters = page.getByRole('button', { name: /filter/i }).first()
     if ((await filters.count()) > 0) await filters.click().catch(() => {})
     await page.waitForTimeout(1200)
-
-    chk(
-      (await page.locator('[data-testid="palette-type-task"]').count()) > 0,
-      'the type chips render',
-      'no type chips in the palette',
-    )
     /*
      * Order matters here, and the first version of this section had it wrong.
      *
@@ -782,6 +790,104 @@ try {
       res.status === 200,
       `the API accepts the container types (${Array.isArray(res.data) ? res.data.length : 0} hit(s))`,
       `searching folders/lists/spaces answered ${res.status}`,
+    )
+    /*
+     * …and narrowing *to* a folder, which is the half the frame pass caught.
+     * A folder id that cannot exist is the point: if the filter is applied the
+     * result is empty, and if it is ignored the query answers with whatever
+     * matched "a" — so a non-empty result here is the failure, not the pass.
+     */
+    const scoped = await apiRead(
+      `/search/${WS}?q=a&folderId=00000000-0000-0000-0000-000000000000&limit=5`,
+    )
+    chk(
+      scoped.status === 200 && Array.isArray(scoped.data) && scoped.data.length === 0,
+      'and scopes to a folder — an unknown one matches nothing, so the filter applied',
+      `answered ${scoped.status} with ${
+        Array.isArray(scoped.data) ? scoped.data.length : '?'
+      } hit(s); anything non-empty means folderId was ignored`,
+    )
+  })
+
+  await section('§6b', 'Tools can be pinned from the avatar menu', async () => {
+    // §6 [07:48] — "Jab apni profile pe click karti hoon, yahan pe TOOLS hai."
+    // The picker existed only in profile settings, two navigations from here.
+    await go(`/app/${WS}`, 3500)
+    const menu = page.locator('[data-testid="user-menu"]')
+    if ((await menu.count()) === 0) {
+      bad('no user menu to open')
+    } else {
+      await menu.click()
+      await page.waitForTimeout(900)
+      chk(
+        (await page.locator('[data-testid="menu-pin-docs"]').count()) > 0,
+        'the avatar menu carries a Tools section',
+        'pinning is still only in profile settings',
+      )
+      // Read-only: this is somebody's real top bar. §2.2b already proves a
+      // preference toggle round-trips to the server on this instance.
+      await page.keyboard.press('Escape').catch(() => {})
+      await page.waitForTimeout(400)
+    }
+  })
+
+  await section('§7b', 'New Workspace opens the stepped flow', async () => {
+    await go(`/app/${WS}`, 3500)
+    const switcher = page.locator('[data-testid="workspace-switcher"]')
+    if ((await switcher.count()) === 0) {
+      bad('no workspace switcher')
+      return
+    }
+    await switcher.click()
+    await page.waitForTimeout(900)
+    const newWs = page.locator('[data-testid="new-workspace"]')
+    if ((await newWs.count()) === 0) {
+      bad('no New Workspace control')
+      return
+    }
+    await newWs.click()
+    await page.waitForTimeout(1200)
+    chk(
+      (await page.locator('[data-testid="create-workspace-flow"]').count()) > 0,
+      'it opens the flow, not a bare name dialog',
+      'still a single-field dialog',
+    )
+    chk(
+      (await page.locator('[data-testid="workspace-name"]').count()) > 0,
+      'and asks for the name first',
+      'no name field in the flow',
+    )
+    /*
+     * Stops here deliberately. Finishing would create a real workspace on a
+     * real account, and the steps after this one are covered by the browser
+     * suite against a stub. What only the instance can tell us is that the
+     * flow opens at all, which is what changed.
+     */
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.waitForTimeout(500)
+  })
+
+  await section('§14b', 'Chat replies reach the Replies page', async () => {
+    // §14 [16:41] — the page filtered on task and doc comments only, so a chat
+    // thread reply was the one thing the replies surface never showed.
+    await go(`/app/${WS}/replies`, 4000)
+    const body = await seen()
+    chk(!/something went wrong/i.test(body), 'the Replies page renders', 'Replies threw')
+    const res = await apiRead('/notifications?view=all')
+    const kinds = new Set(
+      (Array.isArray(res.data) ? res.data : []).map((n) => n?.type).filter(Boolean),
+    )
+    chk(
+      res.status === 200,
+      `notifications read back (${kinds.size} kind(s) present)`,
+      `notifications answered ${res.status}`,
+    )
+    // Said plainly rather than asserted: this account may simply have no chat
+    // replies yet, and an empty set is not evidence either way.
+    ok(
+      kinds.has('chat_reply')
+        ? 'and a chat_reply is among them'
+        : 'no chat_reply on this account yet, so there is nothing to file here',
     )
   })
 
