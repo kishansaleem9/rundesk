@@ -17,6 +17,7 @@ import {
   BarChart3,
   CreditCard,
   Archive,
+  ArrowUpRight,
   ArchiveRestore,
   Clock4,
   Settings,
@@ -708,7 +709,7 @@ export function InboxPage() {
                         search: { channel: msg.channelId, message: msg.id },
                       })
                     }
-                    className="p-3 cursor-pointer hover:bg-accent/5 flex items-start gap-2.5"
+                    className="group p-3 cursor-pointer hover:bg-accent/5 flex items-start gap-2.5"
                   >
                     <MessageSquare className="h-4 w-4 shrink-0 text-indigo-500 mt-0.5" />
                     <div className="min-w-0 flex-1">
@@ -723,6 +724,26 @@ export function InboxPage() {
                     </div>
                     <span className="text-xs text-muted-foreground tabular-nums shrink-0">
                       {formatDistanceToNowStrict(new Date(msg.savedAt), { addSuffix: true })}
+                    </span>
+                    {/*
+                      §12 [15:31] — "aap us pe click karoge to aap ke paas woh
+                      poora message hoga; aap us ko EDIT bhi kar sakte ho, aap
+                      us ko ASSIGN bhi kar sakte ho, aap us ke THREAD mein bhi
+                      jaa sakte ho."
+
+                      Those actions live on the message itself, and this row has
+                      always opened it — but silently, so nothing told you they
+                      were a click away. The affordance is the fix, not a second
+                      copy of chat's toolbar in the Inbox: two implementations
+                      of edit and assign would drift, and the one here would be
+                      the poorer of them.
+                    */}
+                    <span
+                      className="shrink-0 inline-flex items-center gap-1 rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] text-muted-foreground group-hover:text-foreground"
+                      data-testid={`saved-open-${msg.id}`}
+                    >
+                      <ArrowUpRight className="h-3 w-3" />
+                      {t('inbox.openMessage')}
                     </span>
                   </Card>
                 ))}

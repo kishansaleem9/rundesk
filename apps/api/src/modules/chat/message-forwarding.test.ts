@@ -77,6 +77,46 @@ describe('§14 a chat reply is its own kind', () => {
   })
 })
 
+/**
+ * §12 [15:31] — a saved message, and what you can do with it.
+ *
+ * > "aap Inbox mein jaoge, LATER mein jaoge, to aap ko woh message show hoga;
+ * >  aap us pe click karoge to aap ke paas woh poora message hoga; aap us ko
+ * >  EDIT bhi kar sakte ho, aap us ko ASSIGN bhi kar sakte ho, aap us ke THREAD
+ * >  mein bhi jaa sakte ho."
+ *
+ * Those three actions live on the message in chat, and the Later row has always
+ * opened it — but silently, with nothing on the row saying so. The frame pass
+ * read that as the actions being missing; the honest reading is that they were
+ * unreachable-looking rather than unreachable.
+ *
+ * Fixed by making the row say what it does, not by growing a second edit and
+ * assign inside the Inbox: two implementations of the same action drift, and
+ * the copy here would be the poorer one.
+ */
+describe('§12 a saved message opens where its actions are', () => {
+  const inbox = read('apps/web/src/pages/workspace-inbox-page.tsx')
+  const chat = read('apps/web/src/pages/workspace-chat-page.tsx')
+
+  it('the Later row says it opens the message', () => {
+    assert.match(inbox, /data-testid=\{`saved-open-\$\{msg\.id\}`\}/, 'the row gives no affordance')
+  })
+
+  it('and opens it at the message, not just the channel', () => {
+    const row = /savedMessages\.map\(\(msg\) => \(([\s\S]*?)\n {16}\)\)/.exec(inbox)?.[1] ?? inbox
+    assert.match(row, /search: \{ channel: msg\.channelId, message: msg\.id \}/,
+      'lands on the channel without finding the message')
+  })
+
+  it('where edit, assign and the thread actually are', () => {
+    // The claim the row is making on chat's behalf. If these ever move, the
+    // affordance above becomes a promise the destination does not keep.
+    assert.match(chat, /setEditingBody\(m\.body\)/, 'no edit on a chat message')
+    assert.match(chat, /createTaskFromMessage/, 'no assign on a chat message')
+    assert.match(chat, /setThreadParentId\(parentId\)/, 'no thread to open')
+  })
+})
+
 describe('§12 forwarding carries its origin', () => {
   const service = read('apps/api/src/modules/chat/chat.service.ts')
   const controller = read('apps/api/src/modules/chat/chat.controller.ts')
