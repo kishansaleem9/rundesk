@@ -4,18 +4,28 @@ import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 'drizzle-orm'
 import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, taskAttachments, docs, lists, projects, spaces,
-  savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
+  folders, savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
   customFieldDefinitions, customFieldValues,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
-import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import {
+  resolveIsManager,
+  taskVisibilityFilter,
+  listVisibilityFilter,
+  folderVisibilityFilter,
+} from '../../common/permissions/item-visibility'
 
 // Every entity the search can return. The Postgres-only ones (user, comment,
 // channel, message) belong here too — leaving them out meant a filter naming
 // one was discarded as invalid and the search silently ran unfiltered.
-export type SearchEntityType = 'task' | 'doc' | 'file' | 'user' | 'comment' | 'channel' | 'message'
+// §2 [02:03] — "let's suppose ke mujhe FOLDERS mein search karna hai, to folders
+// yahan pe appear ho jayega". The containers are things you look for by name
+// just as much as the tasks inside them, and they were not searchable at all.
+export type SearchEntityType =
+  | 'task' | 'doc' | 'file' | 'user' | 'comment' | 'channel' | 'message'
+  | 'folder' | 'list' | 'space'
 /**
  * One search result. `sortedAt` is only present on the branches that carry a
  * timestamp (tasks, docs); files, people and messages leave it unset and sort
@@ -42,6 +52,19 @@ export type SearchFilters = {
   taskTypeId?: string
   dueAfter?: Date
   dueBefore?: Date
+  /**
+   * §2 [04:00] — "abhi hua tha yeh — last created date kya thi — dates ke
+   * lehaz par". Distinct from the due dates above: when a thing was made, not
+   * when it is owed. Sorting by created already existed; filtering did not.
+   */
+  createdAfter?: Date
+  createdBefore?: Date
+  /**
+   * §2 [02:35] — "LOCATION ka matlab yeh hota hai ke woh kis space mein para
+   * hai, ya kis list mein para hai." Which container it sits in.
+   */
+  spaceId?: string
+  listId?: string
   /**
    * §A2.4 — search hard-excluded archived rows, which is right by default and
    * wrong when you are hunting for something you archived last month.
@@ -291,6 +314,15 @@ export class SearchService implements OnModuleInit {
         filters.taskTypeId ||
         filters.dueAfter ||
         filters.dueBefore ||
+        // These belong here for the same reason as every line above it: Meili
+        // indexes none of them, so a search carrying one has to take the
+        // Postgres path. Leaving a filter out of this list does not error — it
+        // routes to Meili, which ignores it and answers as though you had not
+        // filtered at all. "The filter did nothing" is the failure mode.
+        filters.createdAfter ||
+        filters.createdBefore ||
+        filters.spaceId ||
+        filters.listId ||
         hasCustomFieldFilter,
     )
     const wantTasks = !filters.types || filters.types.includes('task')
@@ -391,6 +423,11 @@ export class SearchService implements OnModuleInit {
           if (filters.taskTypeId) conds.push(eq(tasks.taskTypeId, filters.taskTypeId))
           if (filters.dueAfter) conds.push(gte(tasks.dueDate, filters.dueAfter))
           if (filters.dueBefore) conds.push(lte(tasks.dueDate, filters.dueBefore))
+          if (filters.createdAfter) conds.push(gte(tasks.createdAt, filters.createdAfter))
+          if (filters.createdBefore) conds.push(lte(tasks.createdAt, filters.createdBefore))
+          // Location narrows by container. `spaceId` is already joined below.
+          if (filters.listId) conds.push(eq(tasks.listId, filters.listId))
+          if (filters.spaceId) conds.push(eq(spaces.id, filters.spaceId))
           if (hasCustomFieldFilter) {
             conds.push(
               await this.customFieldValueCondition(
@@ -526,7 +563,8 @@ export class SearchService implements OnModuleInit {
     types?: string[],
   ) {
     const wants = (t: string) => !types || types.includes(t)
-    if (!wants('user') && !wants('comment') && !wants('channel') && !wants('message')) return []
+    const EXTRA_TYPES = ['user', 'comment', 'channel', 'message', 'folder', 'list', 'space']
+    if (!EXTRA_TYPES.some(wants)) return []
     // Chat search must respect channel access (Plan §6): a user may only see
     // hits from public channels or channels they belong to — never from private
     // channels or DMs they're not a member of. Compute their channels once and
@@ -540,7 +578,8 @@ export class SearchService implements OnModuleInit {
     const accessibleChannel =
       memberChannelIds.length > 0 ? or(publicChannel, inArray(chatChannels.id, memberChannelIds)) : publicChannel
 
-    const [userHits, commentHits, channelHits, messageHits] = await Promise.all([
+    const [userHits, commentHits, channelHits, messageHits, folderHits, listHits, spaceHits] =
+      await Promise.all([
       this.db
         .select({ id: users.id, displayName: users.displayName, email: users.email })
         .from(users)
@@ -569,6 +608,52 @@ export class SearchService implements OnModuleInit {
         .where(and(eq(chatChannels.workspaceId, workspaceId), ilike(chatMessages.body, like), accessibleChannel))
         .orderBy(desc(chatMessages.createdAt))
         .limit(limit),
+      /*
+       * §2 [02:03] — the containers themselves. Scoped with the same visibility
+       * filters every other read path uses, so a private folder or list stays
+       * invisible here too; search must not become the one surface where a
+       * container you cannot open is still discoverable by name.
+       */
+      wants('folder')
+        ? this.db
+            .select({ id: folders.id, name: folders.name, spaceId: folders.spaceId, spaceName: spaces.name })
+            .from(folders)
+            .innerJoin(spaces, eq(spaces.id, folders.spaceId))
+            .where(
+              and(
+                eq(spaces.workspaceId, workspaceId),
+                ilike(folders.name, like),
+                eq(folders.isArchived, false),
+                folderVisibilityFilter(userId, isManager),
+              ),
+            )
+            .limit(limit)
+        : Promise.resolve([]),
+      wants('list')
+        ? this.db
+            .select({
+              id: lists.id, name: lists.name,
+              projectId: projects.id, spaceId: spaces.id, projectName: projects.name,
+            })
+            .from(lists)
+            .innerJoin(projects, eq(projects.id, lists.projectId))
+            .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+            .where(
+              and(
+                eq(spaces.workspaceId, workspaceId),
+                ilike(lists.name, like),
+                listVisibilityFilter(userId, isManager),
+              ),
+            )
+            .limit(limit)
+        : Promise.resolve([]),
+      wants('space')
+        ? this.db
+            .select({ id: spaces.id, name: spaces.name })
+            .from(spaces)
+            .where(and(eq(spaces.workspaceId, workspaceId), ilike(spaces.name, like)))
+            .limit(limit)
+        : Promise.resolve([]),
     ])
     return [
       ...(wants('user') ? userHits : []).map((u) => ({
@@ -586,6 +671,20 @@ export class SearchService implements OnModuleInit {
       ...(wants('message') ? messageHits : []).map((m) => ({
         id: `message-${m.id}`, entityType: 'message', title: 'Chat message', content: m.body.slice(0, 200),
         url: `/app/${workspaceId}/chat?channel=${m.channelId}&message=${m.id}`,
+      })),
+      // Containers say where they live, because "Design" as a folder name is
+      // only useful once you know which space it is in.
+      ...folderHits.map((f) => ({
+        id: `folder-${f.id}`, entityType: 'folder', title: f.name, content: f.spaceName ?? '',
+        url: `/app/${workspaceId}/${f.spaceId}`,
+      })),
+      ...listHits.map((l) => ({
+        id: `list-${l.id}`, entityType: 'list', title: l.name, content: l.projectName ?? '',
+        url: `/app/${workspaceId}/${l.spaceId}/${l.projectId}/${l.id}`,
+      })),
+      ...spaceHits.map((sp) => ({
+        id: `space-${sp.id}`, entityType: 'space', title: sp.name, content: '',
+        url: `/app/${workspaceId}/${sp.id}`,
       })),
     ]
   }

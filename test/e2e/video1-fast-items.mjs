@@ -624,6 +624,111 @@ console.log('\n§1.3b  the tree opens, closes, and opens again — and the dock 
   await ctx.close()
 }
 
+console.log('\n§2  the search bar she walked through')
+// ---------------------------------------------------------------------------
+{
+  const { ctx, page, calls } = await openApp()
+  await page.getByRole('textbox', { name: /search/i }).first().click()
+  await page.waitForTimeout(1500)
+  const filtersToggle = page.getByRole('button', { name: /filter/i }).first()
+  if ((await filtersToggle.count()) > 0) await filtersToggle.click().catch(() => {})
+  await page.waitForTimeout(800)
+
+  // The bar carries the everyday types; the containers are not among them.
+  check(
+    (await page.locator('[data-testid="palette-type-task"]').count()) > 0,
+    'the type chips are there',
+  )
+  check(
+    (await page.locator('[data-testid="palette-type-folder"]').count()) === 0,
+    'and Folders is not one of them yet — it lives behind the ⋯',
+  )
+
+  /*
+   * [02:01] "yeh 3 DOTS dekh rahe hain? Main yahan se aur points pe click out
+   * kar ke, let's suppose ke mujhe FOLDERS mein search karna hai, to folders
+   * yahan pe appear ho jayega. To main woh cheez search kar sakti hoon us ke
+   * ooper click kar ke." — two steps: reveal, then select.
+   */
+  const more = page.locator('[data-testid="palette-more-types"]')
+  check((await more.count()) > 0, 'there is a ⋯ for the rest')
+  if ((await more.count()) > 0) {
+    await more.click()
+    await page.waitForTimeout(500)
+    const addFolder = page.locator('[data-testid="palette-add-type-folder"]')
+    check((await addFolder.count()) > 0, 'and Folders is offered in it')
+    if ((await addFolder.count()) > 0) {
+      await addFolder.click()
+      await page.waitForTimeout(500)
+      const chip = page.locator('[data-testid="palette-type-folder"]')
+      check((await chip.count()) > 0, 'choosing it makes the chip appear in the bar')
+
+      // Revealed but not yet searched — the second click is what narrows.
+      const before = calls.length
+      await chip.click()
+      await page.waitForTimeout(1500)
+      const req = calls
+        .slice(before)
+        .find((c) => c.url.includes('/search/') && c.url.includes('types=') && c.url.includes('folder'))
+      check(
+        !!req,
+        'and clicking it searches in folders',
+        calls.slice(before).map((c) => c.url).slice(-3).join(' | '),
+      )
+    }
+  }
+  await ctx.close()
+}
+
+{
+  const { ctx, page, calls } = await openApp()
+  await page.getByRole('textbox', { name: /search/i }).first().click()
+  await page.waitForTimeout(1500)
+  const filtersToggle = page.getByRole('button', { name: /filter/i }).first()
+  if ((await filtersToggle.count()) > 0) await filtersToggle.click().catch(() => {})
+  await page.waitForTimeout(800)
+
+  // [02:35] "LOCATION ka matlab yeh hota hai ke woh kis space mein para hai,
+  // ya kis list mein para hai."
+  const space = page.locator('[data-testid="palette-space-filter"]')
+  check((await space.count()) > 0, 'Location offers a space')
+  if ((await space.count()) > 0) {
+    const before = calls.length
+    await space.selectOption('sp-1')
+    await page.waitForTimeout(1600)
+    const req = calls.slice(before).find((c) => c.url.includes('/search/') && c.url.includes('spaceId=sp-1'))
+    check(!!req, 'and choosing one narrows the search by space', calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
+
+    // The list options only mean anything once a space is chosen.
+    const list = page.locator('[data-testid="palette-list-filter"]')
+    if ((await list.count()) > 0) {
+      const before2 = calls.length
+      await list.selectOption('li-1')
+      await page.waitForTimeout(1600)
+      const req2 = calls.slice(before2).find((c) => c.url.includes('listId=li-1'))
+      check(!!req2, 'and by list', calls.slice(before2).map((c) => c.url).slice(-3).join(' | '))
+    } else {
+      check(false, 'the lists for that space are offered')
+    }
+  }
+
+  // [04:00] "last created date kya thi — dates ke lehaz par".
+  const created = page.locator('[data-testid="palette-created-after"]')
+  check((await created.count()) > 0, 'there is a created-date filter')
+  if ((await created.count()) > 0) {
+    const before = calls.length
+    await created.fill('2026-01-01')
+    await page.waitForTimeout(1600)
+    const req = calls.slice(before).find((c) => c.url.includes('createdAfter=2026-01-01'))
+    check(
+      !!req,
+      'and it reaches the request as createdAfter, not dueAfter',
+      calls.slice(before).map((c) => c.url).slice(-3).join(' | '),
+    )
+  }
+  await ctx.close()
+}
+
 await browser.close()
 server.close()
 

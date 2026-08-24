@@ -25,6 +25,7 @@ import {
   List as ListIcon,
   MessageCircleReply,
   MessageSquare,
+  MoreHorizontal,
   Paperclip,
   Plus,
   Settings,
@@ -56,7 +57,20 @@ const ENTITY_ICON: Record<string, React.ElementType> = {
   comment: MessageSquare,
   user: Users,
 }
-const ENTITY_ORDER = ['task', 'doc', 'file', 'comment', 'channel', 'message', 'user'] as const
+const ENTITY_ORDER = [
+  'task', 'doc', 'file', 'comment', 'channel', 'message', 'user',
+  // §2 [02:03] — the containers. Reached through the ⋯, like she did.
+  'folder', 'list', 'space',
+] as const
+/**
+ * §2 [02:01] — "yeh 3 DOTS dekh rahe hain? Main yahan se aur points pe click
+ * out kar ke … to folders yahan pe appear ho jayega."
+ *
+ * The bar carries the everyday types; the rest live behind the ⋯ and are
+ * promoted into it when chosen. Ten chips in one row is the thing she was
+ * complaining about elsewhere — a wall of options nobody reads.
+ */
+const PRIMARY_TYPES: readonly SearchEntityType[] = ['task', 'doc', 'file', 'user']
 /** The entity types the search API accepts in its `types` filter. */
 type SearchEntityType = (typeof ENTITY_ORDER)[number]
 const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
@@ -67,6 +81,9 @@ const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
   channel: 'palette.entityChannels',
   message: 'palette.entityMessages',
   user: 'palette.entityPeople',
+  folder: 'palette.entityFolders',
+  list: 'palette.entityLists',
+  space: 'palette.entitySpaces',
 }
 const PRIORITY_LABEL_KEY: Record<string, TranslationKey> = {
   urgent: 'palette.priorityUrgent',
@@ -100,6 +117,9 @@ export function CommandPalette({
   // the default because it is what a text query is for.
   const [sortBy, setSortBy] = useState<'relevance' | 'updated' | 'created'>('relevance')
   const [typeFilter, setTypeFilter] = useState<Set<SearchEntityType>>(() => new Set())
+  /** Types promoted out of the ⋯ menu and now showing as chips. */
+  const [revealedTypes, setRevealedTypes] = useState<Set<SearchEntityType>>(() => new Set())
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false)
   const typeParam = [...typeFilter].join(',')
   const toggleType = (v: SearchEntityType) =>
     setTypeFilter((cur) => {
@@ -117,6 +137,12 @@ export function CommandPalette({
   const [includeArchived, setIncludeArchived] = useState(false)
   const [dueAfter, setDueAfter] = useState<string>('')
   const [dueBefore, setDueBefore] = useState<string>('')
+  // §2 [04:00] — "last created date kya thi — dates ke lehaz par".
+  const [createdAfter, setCreatedAfter] = useState<string>('')
+  const [createdBefore, setCreatedBefore] = useState<string>('')
+  // §2 [02:35] — Location: which space it sits in, or which list.
+  const [spaceFilter, setSpaceFilter] = useState<string>('')
+  const [listFilter, setListFilter] = useState<string>('')
   const [customFieldId, setCustomFieldId] = useState<string>('')
   const [customFieldValue, setCustomFieldValue] = useState<string>('')
   // §A2.4 — the strip used to sit open above every result; in a modal that is
@@ -174,7 +200,11 @@ export function CommandPalette({
   const applyPreset = (s: SavedSearch) => {
     const f = s.filters ?? {}
     setQuery(s.query ?? '')
-    setTypeFilter(new Set(((f.types as SearchEntityType[]) ?? []).filter((x) => ENTITY_ORDER.includes(x))))
+    const savedTypes = ((f.types as SearchEntityType[]) ?? []).filter((x) => ENTITY_ORDER.includes(x))
+    setTypeFilter(new Set(savedTypes))
+    // A saved search that narrows to Folders has to show the Folders chip, or
+    // the filter is on with nothing on screen accounting for it.
+    setRevealedTypes(new Set(savedTypes.filter((x) => !PRIMARY_TYPES.includes(x))))
     setSortBy((f.sort as 'updated' | 'created') ?? 'relevance')
     setStatusFilter((f.statusCategory as any) ?? '')
     setPriorityFilter((f.priority as any) ?? '')
@@ -185,6 +215,10 @@ export function CommandPalette({
     setIncludeArchived(f.includeArchived === true)
     setDueAfter((f.dueAfter as string) ?? '')
     setDueBefore((f.dueBefore as string) ?? '')
+    setCreatedAfter((f.createdAfter as string) ?? '')
+    setCreatedBefore((f.createdBefore as string) ?? '')
+    setSpaceFilter((f.spaceId as string) ?? '')
+    setListFilter((f.listId as string) ?? '')
     setCustomFieldId((f.customFieldId as string) ?? '')
     setCustomFieldValue((f.customFieldValue as string) ?? '')
   }
@@ -202,6 +236,10 @@ export function CommandPalette({
       if (includeArchived) filters.includeArchived = true
       if (dueAfter) filters.dueAfter = dueAfter
       if (dueBefore) filters.dueBefore = dueBefore
+      if (createdAfter) filters.createdAfter = createdAfter
+      if (createdBefore) filters.createdBefore = createdBefore
+      if (spaceFilter) filters.spaceId = spaceFilter
+      if (listFilter) filters.listId = listFilter
       if (customFieldId && customFieldValue) {
         filters.customFieldId = customFieldId
         filters.customFieldValue = customFieldValue
@@ -221,6 +259,34 @@ export function CommandPalette({
     queryFn: () => api<Array<{ userId: string; displayName: string; email: string }>>(`/workspaces/${workspaceId}/members`),
   })
 
+  /** §2 [02:35] — the spaces a Location filter can name. */
+  const spacesQuery = useQuery({
+    enabled: open && Boolean(workspaceId),
+    queryKey: ['location-spaces', workspaceId],
+    queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
+  })
+  /**
+   * The lists inside the chosen space. Fetched only once a space is picked —
+   * "which list" is a question that only means anything after "which space",
+   * and every list in the workspace at once is a haystack, not a location.
+   */
+  const locationListsQuery = useQuery({
+    enabled: open && Boolean(workspaceId) && Boolean(spaceFilter),
+    queryKey: ['location-lists', workspaceId, spaceFilter],
+    queryFn: async () => {
+      const projects = await api<Array<{ id: string; name: string }>>(`/projects/space/${spaceFilter}`)
+      const perProject = await Promise.all(
+        projects.map(async (pr) => {
+          const lists = await api<Array<{ id: string; name: string }>>(`/lists/project/${pr.id}`)
+          // Prefixed, because "Backlog" appears under half the projects in a
+          // workspace and the bare name would not tell you which one you picked.
+          return lists.map((l) => ({ id: l.id, name: `${pr.name} / ${l.name}` }))
+        }),
+      )
+      return perProject.flat()
+    },
+  })
+
   const hasCustomField = customFieldId !== '' && customFieldValue !== ''
   // §A2.4 — the tally on the Filters button. Each active control counts once.
   const activeFilterCount =
@@ -234,6 +300,10 @@ export function CommandPalette({
     (includeArchived ? 1 : 0) +
     (dueAfter ? 1 : 0) +
     (dueBefore ? 1 : 0) +
+    (createdAfter ? 1 : 0) +
+    (createdBefore ? 1 : 0) +
+    (spaceFilter ? 1 : 0) +
+    (listFilter ? 1 : 0) +
     (hasCustomField ? 1 : 0)
   const hasFilter = activeFilterCount > 0
 
@@ -243,7 +313,7 @@ export function CommandPalette({
 
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, customFieldId, customFieldValue],
+    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, createdAfter, createdBefore, spaceFilter, listFilter, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeParam) params.set('types', typeParam)
@@ -257,6 +327,10 @@ export function CommandPalette({
       if (includeArchived) params.set('includeArchived', 'true')
       if (dueAfter) params.set('dueAfter', dueAfter)
       if (dueBefore) params.set('dueBefore', dueBefore)
+      if (createdAfter) params.set('createdAfter', createdAfter)
+      if (createdBefore) params.set('createdBefore', createdBefore)
+      if (spaceFilter) params.set('spaceId', spaceFilter)
+      if (listFilter) params.set('listId', listFilter)
       if (hasCustomField) {
         params.set('customFieldId', customFieldId)
         params.set('customFieldValue', customFieldValue)
@@ -416,11 +490,68 @@ export function CommandPalette({
           <FilterChip active={typeFilter.size === 0} onClick={() => setTypeFilter(new Set())}>
             {t('palette.all')}
           </FilterChip>
-          {ENTITY_ORDER.map((v) => (
-            <FilterChip key={v} active={typeFilter.has(v)} onClick={() => toggleType(v)}>
+          {ENTITY_ORDER.filter(
+            (v) => PRIMARY_TYPES.includes(v) || revealedTypes.has(v) || typeFilter.has(v),
+          ).map((v) => (
+            <FilterChip
+              key={v}
+              active={typeFilter.has(v)}
+              onClick={() => toggleType(v)}
+              testId={`palette-type-${v}`}
+            >
               {t(ENTITY_LABEL_KEY[v])}
             </FilterChip>
           ))}
+          {/*
+            §2 [02:01] — the ⋯. Choosing a type from here makes its chip appear
+            in the bar; clicking that chip is what actually searches in it, the
+            two steps she described.
+          */}
+          {ENTITY_ORDER.some((v) => !PRIMARY_TYPES.includes(v) && !revealedTypes.has(v) && !typeFilter.has(v)) && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setTypeMenuOpen((v) => !v)}
+                aria-expanded={typeMenuOpen}
+                aria-label={t('palette.moreTypes')}
+                title={t('palette.moreTypes')}
+                data-testid="palette-more-types"
+                className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+              >
+                <MoreHorizontal className="h-3 w-3" />
+              </button>
+              {typeMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setTypeMenuOpen(false)}
+                    aria-hidden="true"
+                  />
+                  <div
+                    className="absolute left-0 z-50 mt-1 w-44 rounded-lg border border-border/70 bg-card p-1 shadow-xl"
+                    data-testid="palette-more-types-menu"
+                  >
+                    {ENTITY_ORDER.filter(
+                      (v) => !PRIMARY_TYPES.includes(v) && !revealedTypes.has(v) && !typeFilter.has(v),
+                    ).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        data-testid={`palette-add-type-${v}`}
+                        onClick={() => {
+                          setRevealedTypes((prev) => new Set(prev).add(v))
+                          setTypeMenuOpen(false)
+                        }}
+                        className="w-full rounded-md px-2 py-1 text-left text-[12px] text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+                      >
+                        {t(ENTITY_LABEL_KEY[v])}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </FilterGroup>
         <FilterGroup label={t('palette.filterSort')}>
           {([
@@ -542,6 +673,75 @@ export function CommandPalette({
             className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
           />
         </FilterGroup>
+        {/*
+          §2 [04:00] — "abhi hua tha yeh — last created date kya thi". A separate
+          question from the due dates above: when it was made, not when it is owed.
+        */}
+        <FilterGroup label={t('palette.filterCreated')}>
+          <input
+            type="date"
+            value={createdAfter}
+            onChange={(e) => setCreatedAfter(e.target.value)}
+            title={t('palette.createdAfter')}
+            aria-label={t('palette.createdAfter')}
+            data-testid="palette-created-after"
+            className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
+          />
+          <span className="text-[11px] text-muted-foreground/60">→</span>
+          <input
+            type="date"
+            value={createdBefore}
+            onChange={(e) => setCreatedBefore(e.target.value)}
+            title={t('palette.createdBefore')}
+            aria-label={t('palette.createdBefore')}
+            data-testid="palette-created-before"
+            className="h-6 rounded-md border border-border/70 bg-transparent px-1 text-[11px] text-muted-foreground"
+          />
+        </FilterGroup>
+        {/*
+          §2 [02:35] — "LOCATION ka matlab yeh hota hai ke woh kis space mein
+          para hai, ya kis list mein para hai." Space first; the list options
+          follow whichever space is chosen, because a flat list of every list in
+          the workspace is not a location, it is a haystack.
+        */}
+        {(spacesQuery.data?.length ?? 0) > 0 && (
+          <FilterGroup label={t('palette.filterLocation')}>
+            <select
+              value={spaceFilter}
+              onChange={(e) => {
+                setSpaceFilter(e.target.value)
+                // The old list belongs to the old space.
+                setListFilter('')
+              }}
+              aria-label={t('palette.filterSpace')}
+              data-testid="palette-space-filter"
+              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+            >
+              <option value="">{t('palette.filterAnywhere')}</option>
+              {spacesQuery.data!.map((sp) => (
+                <option key={sp.id} value={sp.id}>
+                  {sp.name}
+                </option>
+              ))}
+            </select>
+            {(locationListsQuery.data?.length ?? 0) > 0 && (
+              <select
+                value={listFilter}
+                onChange={(e) => setListFilter(e.target.value)}
+                aria-label={t('palette.filterList')}
+                data-testid="palette-list-filter"
+                className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
+              >
+                <option value="">{t('palette.filterAnyList')}</option>
+                {locationListsQuery.data!.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </FilterGroup>
+        )}
         {(customFieldsQuery.data?.length ?? 0) > 0 && (
           <FilterGroup label={t('palette.filterCustomField')}>
             <select
@@ -770,15 +970,18 @@ function FilterChip({
   active,
   onClick,
   children,
+  testId,
 }: {
   active: boolean
   onClick: () => void
   children: React.ReactNode
+  testId?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-testid={testId}
       className={cn(
         'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
         active

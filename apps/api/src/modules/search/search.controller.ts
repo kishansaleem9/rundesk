@@ -7,8 +7,8 @@ import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SearchService, type SearchEntityType, type SearchFilters } from './search.service'
+import { ENTITY_TYPES } from './entity-types'
 
-const ENTITY_TYPES: SearchEntityType[] = ['task', 'doc', 'file', 'user', 'comment', 'channel', 'message']
 const STATUS_CATEGORIES = new Set(['open', 'in_progress', 'closed'])
 const PRIORITIES = new Set(['urgent', 'high', 'normal', 'low'])
 
@@ -38,6 +38,12 @@ export class SearchController {
     @Query('taskTypeId') taskTypeId?: string,
     @Query('dueAfter') dueAfter?: string,
     @Query('dueBefore') dueBefore?: string,
+    // §2 [04:00] — when it was made, as distinct from when it is due.
+    @Query('createdAfter') createdAfter?: string,
+    @Query('createdBefore') createdBefore?: string,
+    // §2 [02:35] — Location: which space, or which list.
+    @Query('spaceId') spaceId?: string,
+    @Query('listId') listId?: string,
     @Query('customFieldId') customFieldId?: string,
     @Query('customFieldValue') customFieldValue?: string,
     @Query('sort') sort?: string,
@@ -70,6 +76,10 @@ export class SearchController {
     }
     filters.dueAfter = parseDate(dueAfter)
     filters.dueBefore = parseDate(dueBefore)
+    filters.createdAfter = parseDate(createdAfter)
+    filters.createdBefore = parseDate(createdBefore)
+    if (spaceId) filters.spaceId = spaceId
+    if (listId) filters.listId = listId
     // Custom-field value filter — only applied when both the field and a
     // non-empty value are supplied (Plan §11.2).
     if (customFieldId && customFieldValue != null && customFieldValue !== '') {
