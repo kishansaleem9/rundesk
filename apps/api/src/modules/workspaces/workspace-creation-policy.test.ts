@@ -66,6 +66,55 @@ describe('who may create a workspace (§7)', () => {
     }
   })
 
+  /**
+   * §7 — the answers the flow collects have to survive the trip.
+   *
+   * The global ValidationPipe runs whitelist: true, so a field absent from
+   * CreateWorkspaceDto is stripped before the handler ever sees it. That is
+   * precisely how §1.1's taskTypeId went missing: the client sent it, the
+   * server never received it, and nothing reported a problem — the task simply
+   * got the wrong type. Same class had these been added to the body and not the
+   * DTO.
+   */
+  it('declares purpose and comingFrom on the DTO, or they never arrive', () => {
+    const dto = readFileSync(
+      join(workspaceRoot(process.cwd()), 'apps/api/src/modules/workspaces/dto/create-workspace.dto.ts'),
+      'utf8',
+    )
+    assert.match(dto, /purpose\?: string/, 'purpose is not on the DTO — the pipe will strip it')
+    assert.match(dto, /comingFrom\?: string/, 'comingFrom is not on the DTO — the pipe will strip it')
+    // And purpose is constrained, since it decides what the workspace starts with.
+    assert.match(dto, /IsIn\(\['work', 'personal', 'school'\]\)/, 'purpose accepts anything')
+  })
+
+  it('stores both, rather than asking and discarding', () => {
+    const svc = readFileSync(
+      join(workspaceRoot(process.cwd()), 'apps/api/src/modules/workspaces/workspaces.service.ts'),
+      'utf8',
+    )
+    assert.match(svc, /purpose: dto\.purpose \?\? null/, 'purpose is collected and thrown away')
+    assert.match(svc, /comingFrom: dto\.comingFrom \?\? null/, 'comingFrom is collected and thrown away')
+  })
+
+  it('gives a new workspace somewhere to land', () => {
+    /*
+     * A workspace with no space has no project, so no list — and the sidebar,
+     * the create modal and every list view have nothing to show. The frame pass
+     * flagged exactly that state.
+     */
+    const svc = readFileSync(
+      join(workspaceRoot(process.cwd()), 'apps/api/src/modules/workspaces/workspaces.service.ts'),
+      'utf8',
+    )
+    const create = /async create\([\s\S]*?\n {2}async /.exec(svc)?.[0] ?? ''
+    assert.ok(create, 'could not find create')
+    for (const table of ['spaces', 'projects', 'lists']) {
+      assert.match(create, new RegExp(`insert\\(${table}\\)`), `a new workspace has no ${table}`)
+    }
+    // And the starter content follows the answer, which is why it was asked.
+    assert.match(svc, /STARTER_CONTENT\[dto\.purpose/, 'purpose does not shape what the workspace starts with')
+  })
+
   it('is what the endpoint actually enforces', () => {
     /*
      * The policy being right is worth nothing if the controller still carries

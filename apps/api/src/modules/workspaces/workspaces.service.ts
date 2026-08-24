@@ -123,6 +123,26 @@ export function normalizeHost(host: string | null | undefined): string {
   return h
 }
 
+/**
+ * §7 — what a brand-new workspace opens with.
+ *
+ * "Ab agar maine workspace banayi to yeh mere par dependent hai ke maine apne
+ * members ko share karna hai ya nahi karna" [09:43]: it is theirs to fill. But
+ * an empty workspace has no space, so no project, so no list — and the sidebar,
+ * the create modal and every list view all have nothing to show. One of each is
+ * the smallest arrangement where the product works on arrival, and all of it
+ * can be renamed or deleted.
+ *
+ * Keyed off the purpose the flow just asked for, because that is the point of
+ * asking. 'Personal' and 'Work' want different first words.
+ */
+const STARTER_CONTENT: Record<string, { space: string; project: string; list: string }> = {
+  work: { space: 'Team', project: 'Projects', list: 'To do' },
+  personal: { space: 'Personal', project: 'My projects', list: 'To do' },
+  school: { space: 'Study', project: 'Courses', list: 'Assignments' },
+  default: { space: 'Space', project: 'Projects', list: 'To do' },
+}
+
 @Injectable()
 export class WorkspacesService {
   constructor(
@@ -852,7 +872,15 @@ export class WorkspacesService {
     return { ok: true }
   }
 
-  async create(userId: string, dto: CreateWorkspaceDto & { organizationId?: string }) {
+  async create(
+    userId: string,
+    dto: CreateWorkspaceDto & {
+      organizationId?: string
+      /** §7 — what the creation flow asked. */
+      purpose?: string | null
+      comingFrom?: string | null
+    },
+  ) {
     const requestedSlug = slugify(dto.slug ?? dto.name)
     const finalSlug = await this.reserveUniqueSlug(requestedSlug)
 
@@ -904,6 +932,10 @@ export class WorkspacesService {
           slug: finalSlug,
           logoUrl: dto.logoUrl,
           primaryColor: dto.primaryColor,
+          // §7 — kept, not discarded. Asking and then throwing the answer away
+          // costs someone a step and buys them nothing.
+          purpose: dto.purpose ?? null,
+          comingFrom: dto.comingFrom ?? null,
         })
         .returning()
 
@@ -921,6 +953,31 @@ export class WorkspacesService {
       await tx.insert(taskTypes).values(
         DEFAULT_TASK_TYPES.map((type) => ({ ...type, workspaceId: workspace.id })),
       )
+
+      /*
+       * §7 — somewhere to land.
+       *
+       * A workspace created with nothing in it opens on an empty screen with no
+       * obvious first move, which is the state the frame pass flagged. One
+       * space, one project, one list is the smallest thing that makes the
+       * sidebar, the create modal and the list view all work on arrival — and
+       * it is all removable, so nobody is stuck with our guess.
+       *
+       * Named from the purpose she gave, because "Personal" and "Work" want
+       * different first words and we just asked which it was.
+       */
+      const seed = STARTER_CONTENT[dto.purpose ?? ''] ?? STARTER_CONTENT.default
+      const [space] = await tx
+        .insert(spaces)
+        .values({ workspaceId: workspace.id, name: seed.space, createdById: userId })
+        .returning()
+      const [project] = await tx
+        .insert(projects)
+        .values({ spaceId: space.id, name: seed.project, createdById: userId })
+        .returning()
+      await tx
+        .insert(lists)
+        .values({ projectId: project.id, name: seed.list, createdById: userId })
 
       return workspace
     })

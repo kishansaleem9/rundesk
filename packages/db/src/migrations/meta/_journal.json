@@ -715,6 +715,13 @@
       "when": 1900000089009,
       "tag": "0101_chat_reply_notification",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1900000089010,
+      "tag": "0102_workspace_creation_answers",
+      "breakpoints": true
     }
   ]
 }

@@ -920,7 +920,7 @@ console.log('\n§7  any member can make a workspace; a guest cannot')
 {
   // "WORKSPACE IS A FEATURE jo ke har member kar sakta hai — it's not
   // necessary ke humare paas kuch admin hi aaye jo kar sake" [09:29].
-  const { ctx, page } = await openApp(`/app/${WS}/inbox`, {}, { role: 'member' })
+  const { ctx, page, calls } = await openApp(`/app/${WS}/inbox`, {}, { role: 'member' })
   await page.waitForTimeout(2500)
   // The switcher holds it.
   // Address the switcher directly. `sidebar button` .first() hits the collapse
@@ -935,6 +935,77 @@ console.log('\n§7  any member can make a workspace; a guest cannot')
   check(
     (await page.locator('[data-testid="new-workspace"]').count()) > 0,
     'a member is offered New Workspace',
+  )
+
+  /*
+   * …and it opens the flow she describes, not a single name field.
+   * "same layout jo aap ne abhi kiya tha [signup ke waqt]" [08:43],
+   * "Skip ya step, aur yahan se different tool search kar sakti hoon" [08:54],
+   * "'xyz' likhoongi to meri new workspace ka naam hai, aur main is ko Finish
+   * karoongi to meri workspace ban jayegi" [09:02].
+   */
+  await page.locator('[data-testid="new-workspace"]').click()
+  await page.waitForTimeout(900)
+  check((await page.locator('[data-testid="create-workspace-flow"]').count()) > 0, 'it opens a stepped flow')
+
+  await page.locator('[data-testid="workspace-name"]').fill('xyz')
+  await page.locator('[data-testid="workspace-next"]').click()
+  await page.waitForTimeout(500)
+  check(
+    (await page.locator('[data-testid="workspace-purpose-work"]').count()) > 0,
+    'and asks what the workspace is for',
+  )
+  await page.locator('[data-testid="workspace-purpose-personal"]').click()
+  await page.waitForTimeout(500)
+
+  const toolSearch = page.locator('[data-testid="workspace-tool-search"]')
+  check((await toolSearch.count()) > 0, 'then which tool you are coming from, searchable')
+  await toolSearch.fill('trel')
+  await page.waitForTimeout(400)
+  await page.locator('[data-testid="workspace-tool-trello"]').click()
+
+  const before = calls.length
+  await page.locator('[data-testid="workspace-finish"]').click()
+  const posted = await waitUntil(
+    () => calls.slice(before).some((c) => c.method === 'POST' && /\/workspaces$/.test(c.url.split('?')[0])),
+    { timeoutMs: 10000 },
+  )
+  check(posted, 'Finish creates it', calls.slice(before).map((c) => c.method + ' ' + c.url).slice(-3).join(' | '))
+  const post = calls.slice(before).find((c) => c.method === 'POST' && /\/workspaces$/.test(c.url.split('?')[0]))
+  check(!!post && post.body.includes('xyz'), 'with the name typed', post?.body?.slice(0, 120))
+  check(
+    !!post && post.body.includes('personal') && post.body.includes('Trello'),
+    'and the answers it collected — asked and then discarded is worse than not asking',
+    post?.body?.slice(0, 160),
+  )
+  await ctx.close()
+}
+
+{
+  // "Skip ya step" [08:54] — a skip finishes, it does not stall.
+  const { ctx, page, calls } = await openApp(`/app/${WS}/inbox`, {}, { role: 'member' })
+  await page.waitForTimeout(2500)
+  await page.locator('[data-testid="workspace-switcher"]').click()
+  await page.waitForTimeout(800)
+  await page.locator('[data-testid="new-workspace"]').click()
+  await page.waitForTimeout(900)
+  await page.locator('[data-testid="workspace-name"]').fill('skipped')
+  await page.locator('[data-testid="workspace-next"]').click()
+  await page.waitForTimeout(500)
+  await page.locator('[data-testid="workspace-skip-purpose"]').click()
+  await page.waitForTimeout(500)
+  const before = calls.length
+  await page.locator('[data-testid="workspace-skip-tool"]').click()
+  const posted = await waitUntil(
+    () => calls.slice(before).some((c) => c.method === 'POST' && /\/workspaces$/.test(c.url.split('?')[0])),
+    { timeoutMs: 10000 },
+  )
+  check(posted, 'skipping every optional step still creates the workspace')
+  const post = calls.slice(before).find((c) => c.method === 'POST' && /\/workspaces$/.test(c.url.split('?')[0]))
+  check(
+    !!post && post.body.includes('skipped') && !post.body.includes('comingFrom'),
+    'and sends only what was actually answered',
+    post?.body?.slice(0, 140),
   )
   await ctx.close()
 }

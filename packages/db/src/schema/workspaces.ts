@@ -38,6 +38,22 @@ export const workspaces = pgTable('workspaces', {
   slug:           text('slug').notNull(),
   logoUrl:        text('logo_url'),
   primaryColor:   text('primary_color'),
+  /**
+   * §7 — what the creation flow asked, and what it was told.
+   *
+   * "Main 'New Workspace' par click karoongi … same layout jo aap ne abhi kiya
+   * tha [signup ke waqt]" [08:43], and "Skip ya step, aur yahan se different
+   * tool search kar sakti hoon" [08:54].
+   *
+   * Kept rather than discarded. The frame pass noted the equivalent answers
+   * being collected and thrown away, which is worse than not asking: it costs
+   * someone two steps and buys them nothing. `purpose` shapes what the new
+   * workspace starts with; `comingFrom` is what they were using before, and is
+   * null when they skip — a skip is an answer too, and not the same as never
+   * having been asked.
+   */
+  purpose:        text('purpose'),
+  comingFrom:     text('coming_from'),
   // Secondary brand accent (Plan §13.5). Applied app-wide alongside
   // primaryColor; drives the design system's --accent CSS variable.
   accentColor:    text('accent_color'),

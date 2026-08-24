@@ -56,6 +56,7 @@ import {
 } from '@rundesk/ui'
 import { api } from '../lib/api'
 import { ContainerEditDialog, type ContainerEditValues } from './container-edit-dialog'
+import { CreateWorkspaceFlow, type WorkspaceDraft } from './create-workspace-flow'
 import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
@@ -433,10 +434,20 @@ export function WorkspaceSidebar() {
 
   // §2.2 — create a workspace under the caller's existing organization and add
   // it to the session so the switcher shows it immediately, then navigate in.
-  const submitWorkspaceDialog = async (values: ContainerEditValues) => {
+  const submitWorkspaceDialog = async (values: WorkspaceDraft) => {
     setSavingWs(true)
     try {
-      const created = await api<{ id: string }>(`/workspaces`, { method: 'POST', body: { name: values.name } })
+      // §7 — the flow's answers travel with the name. They are declared on
+      // CreateWorkspaceDto, or the pipe's whitelist would drop them in transit
+      // exactly as it dropped taskTypeId in §1.1.
+      const created = await api<{ id: string }>(`/workspaces`, {
+        method: 'POST',
+        body: {
+          name: values.name,
+          ...(values.purpose ? { purpose: values.purpose } : {}),
+          ...(values.comingFrom ? { comingFrom: values.comingFrom } : {}),
+        },
+      })
       // Re-read the membership list (now including the new workspace) and push it
       // into the auth store so the switcher + guards see it without a reload.
       const rows = await api<Array<{ workspace: { id: string; name: string; slug: string; organizationId: string }; role: string }>>(
@@ -1779,13 +1790,11 @@ export function WorkspaceSidebar() {
         />
       )}
 
-      <ContainerEditDialog
+      <CreateWorkspaceFlow
         open={wsDialogOpen}
         onOpenChange={setWsDialogOpen}
-        title={t('nav.newWorkspace')}
-        initial={{ name: '' }}
         submitting={savingWs}
-        onSubmit={submitWorkspaceDialog}
+        onFinish={submitWorkspaceDialog}
       />
     </aside>
   )
