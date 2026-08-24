@@ -731,7 +731,37 @@ try {
       'the type chips render',
       'no type chips in the palette',
     )
-    // [02:01] the ⋯, and Folders behind it.
+    /*
+     * Order matters here, and the first version of this section had it wrong.
+     *
+     * The ⋯ menu closes by click-away, not by Escape — so an Escape aimed at it
+     * reaches the palette dialog behind it and closes the whole thing. These two
+     * assertions then ran against an unmounted palette and reported the filters
+     * missing from the deployed build. They were there the whole time; the test
+     * had shut the door before looking.
+     *
+     * So: everything that is simply *present* is checked first, and the ⋯ —
+     * which changes state — goes last.
+     */
+    // [02:35] Location, and [04:00] created dates.
+    // Location only renders once the workspace's spaces have loaded, so this
+    // waits for it rather than sampling once — a slow query is not the same
+    // fact as a missing filter, and sampling cannot tell them apart.
+    chk(
+      await until(async () =>
+        (await page.locator('[data-testid="palette-space-filter"]').count()) > 0 ? true : null,
+      6000),
+      'Location narrows by space',
+      'no Location filter',
+    )
+    chk(
+      (await page.locator('[data-testid="palette-created-after"]').count()) > 0,
+      'and there is a created-date filter, distinct from due dates',
+      'no created-date filter',
+    )
+
+    // [02:01] the ⋯, and Folders behind it. Last, because opening it puts a
+    // click-away layer over the panel.
     const more = page.locator('[data-testid="palette-more-types"]')
     if ((await more.count()) === 0) {
       bad('no ⋯ for the types that are not on the bar')
@@ -743,22 +773,7 @@ try {
         'Folders is offered behind the ⋯ — "mujhe FOLDERS mein search karna hai"',
         'Folders is not offered',
       )
-      await page.keyboard.press('Escape').catch(() => {})
-      await page.waitForTimeout(400)
     }
-    // [02:35] Location, and [04:00] created dates.
-    chk(
-      (await page.locator('[data-testid="palette-space-filter"]').count()) > 0,
-      'Location narrows by space',
-      'no Location filter',
-    )
-    chk(
-      (await page.locator('[data-testid="palette-created-after"]').count()) > 0,
-      'and there is a created-date filter, distinct from due dates',
-      'no created-date filter',
-    )
-    await page.keyboard.press('Escape').catch(() => {})
-    await page.waitForTimeout(500)
 
     // The containers are searchable at all — asked of the API directly, since a
     // workspace may genuinely have nothing matching a given word.
