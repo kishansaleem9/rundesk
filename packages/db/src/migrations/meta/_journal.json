@@ -687,6 +687,13 @@
       "when": 1900000089005,
       "tag": "0097_restore_default_task_type",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1900000089006,
+      "tag": "0098_topbar_pinned",
+      "breakpoints": true
     }
   ]
 }

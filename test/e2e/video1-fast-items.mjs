@@ -729,6 +729,71 @@ console.log('\n§2  the search bar she walked through')
   await ctx.close()
 }
 
+console.log('\n§6  pinning a tool puts it in the top bar')
+// ---------------------------------------------------------------------------
+{
+  // Starts from a profile that has pinned nothing beyond the defaults, so the
+  // tool under test is genuinely absent before the click.
+  const { ctx, page, calls } = await openApp('/app/profile', {}, { topbarPinned: ['create'] })
+  await page.waitForTimeout(2500)
+
+  check(
+    (await page.locator('[data-testid="topbar-tool-docs"]').count()) === 0,
+    'an unpinned tool is not in the bar',
+  )
+
+  const box = page.locator('[data-testid="topbar-toggle-docs"]')
+  check((await box.count()) > 0, 'the picker offers Docs — "yeh document ka" [07:58]')
+  if ((await box.count()) > 0) {
+    const before = calls.length
+    await box.check()
+    await page.waitForTimeout(1500)
+
+    // It has to reach the server: this is a preference on the person, not the
+    // browser they happen to be sitting at.
+    const patch = calls
+      .slice(before)
+      .find((c) => c.method === 'PATCH' && c.url.includes('/users/me') && c.body.includes('topbarPinned'))
+    check(!!patch, 'pinning writes topbarPinned', calls.slice(before).map((c) => c.method + ' ' + c.url).join(' | '))
+    check(
+      !!patch && patch.body.includes('docs'),
+      'and names the tool that was pinned',
+      patch?.body?.slice(0, 140),
+    )
+  }
+  await ctx.close()
+}
+
+{
+  // …and with it pinned, the bar carries it and it leads somewhere. A tool that
+  // is offered in the picker and then goes nowhere is worse than no tool.
+  // The inbox route rather than the workspace home: the home route does not
+  // fully render against these stubs (the same reason §1.3b uses it), and the
+  // top bar is shell chrome that shows on either.
+  const { ctx, page } = await openApp(`/app/${WS}/inbox`, {}, {
+    topbarPinned: ['create', 'docs', 'whiteboards', 'dashboards'],
+  })
+  await page.waitForTimeout(2500)
+  for (const tool of ['docs', 'whiteboards', 'dashboards']) {
+    const el = page.locator(`[data-testid="topbar-tool-${tool}"]`)
+    const there = (await el.count()) > 0
+    check(there, `a pinned ${tool} shows in the bar`)
+    if (there) {
+      const href = await el.first().getAttribute('href')
+      check(
+        !!href && href.startsWith(`/app/${WS}/`),
+        `and points into the workspace (${href})`,
+      )
+    }
+  }
+  // The bell stays off unless asked for — §1.5 "[Default par]".
+  check(
+    (await page.locator('[data-testid="topbar-tool-notifications"]').count()) === 0,
+    'and nothing unpinned crept in',
+  )
+  await ctx.close()
+}
+
 await browser.close()
 server.close()
 

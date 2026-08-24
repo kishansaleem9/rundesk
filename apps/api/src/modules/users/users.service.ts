@@ -36,15 +36,39 @@ export const WEEK_START_VALUES = ['sunday', 'monday', 'saturday'] as const
 export type WeekStartPreference = (typeof WEEK_START_VALUES)[number]
 
 /**
- * §1.5 — the top-bar controls a member is allowed to put away.
+ * §1.5 / §6 — every top-bar control a member governs.
  *
  * Search and the user menu are deliberately absent: one is the primary way to
- * find anything and the other is how you get to this setting, so hiding either
+ * find anything and the other is how you reach this setting, so hiding either
  * would be a trap. Everything else is the member's call —
  * "yeh option jo hai woh humare members ke paas hona chahiye".
+ *
+ * §6 [07:55–08:03] — every tool a member can pin to the top bar.
+ *
+ * She lists what she pins: "yeh task creation ka option hai, yeh timing ka
+ * option, yeh document ka, yeh Loom ka, yeh voice recordings ka, yeh
+ * whiteboards ka, aur yeh dashboard ka option hai." The first five entries
+ * below are the chrome that was already there; the rest are hers.
+ *
+ * The complaint this answers is [08:29]: "as compared to hum limited de dein
+ * ke okay, theek hai, something ke hum ne rakha hai aur woh us ko choose karna
+ * parega." A short list we picked is the thing she was objecting to, so adding
+ * to this list is how the answer stays answered.
  */
-export const TOPBAR_ITEMS = ['notifications', 'theme', 'timer', 'ai', 'create'] as const
+export const TOPBAR_ITEMS = [
+  'notifications', 'theme', 'timer', 'ai', 'create',
+  'docs', 'clips', 'recordings', 'whiteboards', 'dashboards',
+] as const
 export type TopbarItem = (typeof TOPBAR_ITEMS)[number]
+
+/**
+ * What a member who has never opened the picker gets.
+ *
+ * Deliberately small. The point of pinning is that the bar holds what *you*
+ * reach for, and a bar preloaded with ten icons has made the choice for you
+ * again — just with a longer list.
+ */
+export const DEFAULT_PINNED: TopbarItem[] = ['create', 'timer', 'theme']
 
 /** Image content types accepted for avatar uploads, mapped to a file extension. */
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
@@ -92,6 +116,7 @@ export class UsersService {
       timeFormat?: string
       weekStart?: string
       topbarHidden?: string[]
+      topbarPinned?: string[]
     },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
@@ -125,12 +150,27 @@ export class UsersService {
       // De-duplicate so the stored value is a set, not a log of clicks.
       patch.topbarHidden = [...new Set(patch.topbarHidden)]
     }
+    if (patch.topbarPinned !== undefined) {
+      // Same reasoning as topbarHidden above: a jsonb column fed straight from
+      // the client is a place to park arbitrary data on a user row unless every
+      // entry is checked against the catalogue.
+      if (!Array.isArray(patch.topbarPinned)) {
+        throw new BadRequestException('topbarPinned must be an array')
+      }
+      const unknown = patch.topbarPinned.filter(
+        (item) => !TOPBAR_ITEMS.includes(item as TopbarItem),
+      )
+      if (unknown.length > 0) {
+        throw new BadRequestException(`Unknown top bar item(s): ${unknown.join(', ')}`)
+      }
+      patch.topbarPinned = [...new Set(patch.topbarPinned)]
+    }
     // SECURITY: whitelist the self-editable profile columns. Spreading the raw
     // body let a caller mass-assign any users column — most critically `role`,
     // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
     // super-admin. Only copy the fields a user is allowed to change themselves.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db

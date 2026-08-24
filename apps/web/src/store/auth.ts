@@ -9,6 +9,8 @@ export type AuthUser = {
   avatarUrl?: string | null
   /** §1.5 — top-bar controls this member has put away (lib/topbar-prefs). */
   topbarHidden?: string[] | null
+  /** §6 — the tools pinned to the top bar. null = never chosen. */
+  topbarPinned?: string[] | null
 }
 
 export type AuthOrg = {

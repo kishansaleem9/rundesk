@@ -21,34 +21,74 @@ import { useAuthStore } from '../store/auth'
  * they happen to be sitting at.
  */
 
-export const TOPBAR_ITEMS = ['notifications', 'theme', 'timer', 'ai', 'create'] as const
+/**
+ * §6 [07:55–08:03] — every tool that can be pinned.
+ *
+ * "yeh task creation ka option hai, yeh timing ka option, yeh document ka, yeh
+ * Loom ka, yeh voice recordings ka, yeh whiteboards ka, aur yeh dashboard ka
+ * option hai." Mirrors TOPBAR_ITEMS in the API, which validates the write.
+ */
+export const TOPBAR_ITEMS = [
+  'notifications', 'theme', 'timer', 'ai', 'create',
+  'docs', 'clips', 'recordings', 'whiteboards', 'dashboards',
+] as const
 export type TopbarItem = (typeof TOPBAR_ITEMS)[number]
 
-/** What the top bar shows before the profile has loaded. */
-const DEFAULT_HIDDEN: TopbarItem[] = ['notifications']
+/** The five that existed before pinning, used to migrate an old hidden-list. */
+const LEGACY_ITEMS: TopbarItem[] = ['notifications', 'theme', 'timer', 'ai', 'create']
 
 /**
- * Read the current member's hidden set.
- *
- * Falls back to the default while the profile is in flight, so the bell does
- * not flash into view on every page load and then disappear — the flicker would
- * read as a bug, and it is exactly the control she asked to stop seeing.
+ * What a member who has never opened the picker gets. Small on purpose: a bar
+ * preloaded with ten icons has made the choice for them again.
  */
-export function useHiddenTopbarItems(): Set<TopbarItem> {
-  const stored = useAuthStore((s) => s.user?.topbarHidden)
-  const list = Array.isArray(stored) ? stored : DEFAULT_HIDDEN
-  return new Set(list.filter((item): item is TopbarItem =>
-    (TOPBAR_ITEMS as readonly string[]).includes(item),
-  ))
+const DEFAULT_PINNED: TopbarItem[] = ['create', 'timer', 'theme']
+
+const isItem = (v: unknown): v is TopbarItem =>
+  typeof v === 'string' && (TOPBAR_ITEMS as readonly string[]).includes(v)
+
+/**
+ * §6 — the pinned set, migrating anyone who only has the old hidden-list.
+ *
+ * The two are opposites, so this cannot be a rename. `topbarHidden` said what
+ * to take away and everything absent was shown; `topbarPinned` says what to
+ * show and everything absent is not. Reading a member's old hidden-list as a
+ * pinned one would empty their bar; ignoring it would fill it with five things
+ * they had already put away. So: null means never chosen, and is derived from
+ * whatever they had. An empty array means they pinned nothing, which is a
+ * decision and is left alone.
+ */
+export function resolvePinned(
+  pinned: unknown,
+  hidden: unknown,
+): Set<TopbarItem> {
+  if (Array.isArray(pinned)) return new Set(pinned.filter(isItem))
+  if (Array.isArray(hidden)) {
+    const away = new Set(hidden.filter(isItem))
+    return new Set(LEGACY_ITEMS.filter((item) => !away.has(item)))
+  }
+  return new Set(DEFAULT_PINNED)
+}
+
+/**
+ * The current member's pinned set.
+ *
+ * Resolves to a default while the profile is in flight, so nothing flashes into
+ * the bar on load and then vanishes — a flicker reads as a bug, and the bell in
+ * particular is the control she asked to stop seeing.
+ */
+export function usePinnedTopbarItems(): Set<TopbarItem> {
+  const pinned = useAuthStore((s) => s.user?.topbarPinned)
+  const hidden = useAuthStore((s) => s.user?.topbarHidden)
+  return resolvePinned(pinned, hidden)
 }
 
 export function useTopbarVisible(): (item: TopbarItem) => boolean {
-  const hidden = useHiddenTopbarItems()
-  return (item: TopbarItem) => !hidden.has(item)
+  const pinned = usePinnedTopbarItems()
+  return (item: TopbarItem) => pinned.has(item)
 }
 
 /**
- * Show or hide one control. Writes through to the server and updates the
+ * Pin or unpin one tool. Writes through to the server and updates the
  * cached profile, so the top bar reacts on the same tick rather than after a
  * refetch.
  */
@@ -58,19 +98,17 @@ export function useSetTopbarItem() {
   const setUser = useAuthStore((s) => s.setUser)
 
   const next = (item: TopbarItem, visible: boolean) => {
-    const current = new Set<string>(
-      Array.isArray(user?.topbarHidden) ? user.topbarHidden : DEFAULT_HIDDEN,
-    )
-    if (visible) current.delete(item)
-    else current.add(item)
+    const current = resolvePinned(user?.topbarPinned, user?.topbarHidden)
+    if (visible) current.add(item)
+    else current.delete(item)
     return [...current]
   }
 
   return useMutation({
     mutationFn: async ({ item, visible }: { item: TopbarItem; visible: boolean }) => {
-      const topbarHidden = next(item, visible)
-      await api('/users/me', { method: 'PATCH', body: { topbarHidden } })
-      return topbarHidden
+      const topbarPinned = next(item, visible)
+      await api('/users/me', { method: 'PATCH', body: { topbarPinned } })
+      return topbarPinned
     },
     // Applied before the request, not after it. This is a checkbox: it has to
     // move when you click it. Waiting for a round trip means it sits there
@@ -78,13 +116,13 @@ export function useSetTopbarItem() {
     // for the same reason a person would find it unconvincing — the control did
     // not reflect the click yet.
     onMutate: ({ item, visible }) => {
-      const previous = user?.topbarHidden ?? null
-      if (user) setUser({ ...user, topbarHidden: next(item, visible) })
+      const previous = user?.topbarPinned ?? null
+      if (user) setUser({ ...user, topbarPinned: next(item, visible) })
       return { previous }
     },
     onError: (_error, _vars, context) => {
       // Put it back rather than leaving the control disagreeing with the server.
-      if (user && context) setUser({ ...user, topbarHidden: context.previous })
+      if (user && context) setUser({ ...user, topbarPinned: context.previous })
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['users', 'me'] })

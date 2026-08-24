@@ -19,6 +19,11 @@ import {
   Inbox as InboxIcon,
   Square,
   BellOff,
+  FileText,
+  Film,
+  Mic,
+  Frame,
+  LayoutDashboard,
 } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import {
@@ -43,7 +48,7 @@ import {
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { applyBrandColor } from '../lib/branding'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { QuickCreateModal } from './quick-create-modal'
@@ -54,7 +59,7 @@ import { useMentionNames } from '../hooks/use-mention-names'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS } from '@rundesk/feature-flags'
 import { InlineSkeleton } from './loading-skeletons'
-import { useTopbarVisible } from '../lib/topbar-prefs'
+import { useTopbarVisible, type TopbarItem } from '../lib/topbar-prefs'
 
 type Workspace = { id: string; name: string; slug: string }
 type WorkspaceEntry = { workspace: Workspace; role: string }
@@ -65,6 +70,59 @@ type List = { id: string; name: string }
 function isUuidLike(value?: string): value is string {
   if (!value) return false
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+/**
+ * §6 [07:55–08:03] — the tools she pins, and where each one goes.
+ *
+ * "yeh task creation ka option hai, yeh timing ka option, yeh document ka, yeh
+ * Loom ka, yeh voice recordings ka, yeh whiteboards ka, aur yeh dashboard ka
+ * option hai." Task creation and timing are the QuickCreate button and the
+ * timer indicator, which the bar already had; these five are the rest.
+ *
+ * Kept as data next to the render so a tool cannot be offered in the picker and
+ * then lead nowhere — a checkbox governing nothing is worse than no checkbox.
+ */
+const PINNABLE_TOOLS: Array<{
+  item: TopbarItem
+  path: string
+  icon: typeof FileText
+  labelKey: TranslationKey
+}> = [
+  { item: 'docs', path: '/docs', icon: FileText, labelKey: 'profile.topbarDocs' },
+  { item: 'clips', path: '/clips', icon: Film, labelKey: 'profile.topbarClips' },
+  { item: 'recordings', path: '/clips?kind=audio', icon: Mic, labelKey: 'profile.topbarRecordings' },
+  { item: 'whiteboards', path: '/whiteboards', icon: Frame, labelKey: 'profile.topbarWhiteboards' },
+  { item: 'dashboards', path: '/dashboard', icon: LayoutDashboard, labelKey: 'profile.topbarDashboards' },
+]
+
+/** One pinned tool: an icon that says what it is on hover, and goes there. */
+function PinnedTool({
+  to,
+  icon: Icon,
+  label,
+  testId,
+}: {
+  to: string
+  icon: typeof FileText
+  label: string
+  testId: string
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Link
+          to={to}
+          aria-label={label}
+          data-testid={testId}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/10 hover:text-foreground transition-colors"
+        >
+          <Icon className="h-4 w-4" />
+        </Link>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 export function AppTopbar({
@@ -114,6 +172,22 @@ export function AppTopbar({
         <AiDockToggle workspaceId={params.workspaceId} onToggle={onAiToggle} open={!!aiOpen} />
       )}
       {visible('create') && <QuickCreateButton />}
+      {/*
+        §6 [07:55–08:03] — the tools she pins. Each is a shortcut to a place
+        that already exists, which is the whole point: "kya cheezein rakhni hain
+        on the top view jo us ko easy to access ho".
+        Workspace-scoped, so they only appear where they lead somewhere.
+      */}
+      {isUuidLike(params.workspaceId) &&
+        PINNABLE_TOOLS.filter((tool) => visible(tool.item)).map((tool) => (
+          <PinnedTool
+            key={tool.item}
+            to={`/app/${params.workspaceId}${tool.path}`}
+            icon={tool.icon}
+            label={t(tool.labelKey)}
+            testId={`topbar-tool-${tool.item}`}
+          />
+        ))}
       {visible('theme') && <ThemeToggle />}
       {visible('notifications') && (
         <NotificationsBell workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />

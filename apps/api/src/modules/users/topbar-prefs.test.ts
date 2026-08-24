@@ -82,9 +82,59 @@ describe('top bar preferences (§1.5)', () => {
     assert.equal(writes[0].passwordHash, undefined)
   })
 
-  it('offers every optional control, and neither search nor the user menu', () => {
-    assert.deepEqual([...TOPBAR_ITEMS].sort(), ['ai', 'create', 'notifications', 'theme', 'timer'])
+  it('never offers search or the user menu, whatever else it grows to hold', () => {
+    // The half of this worth keeping. One is how you find anything and the
+    // other is how you reach the setting that governs this row, so making
+    // either hideable is a trap the member cannot get out of.
     assert.ok(!(TOPBAR_ITEMS as readonly string[]).includes('search'))
     assert.ok(!(TOPBAR_ITEMS as readonly string[]).includes('userMenu'))
+  })
+
+  /*
+   * This used to assert the catalogue was exactly those five. That was right
+   * under §1.5, where the list was "the controls a member may put away", and it
+   * is wrong under §6, where the list is "the tools a member may pin" — and
+   * where [08:29] is the objection to a short list we chose: "as compared to
+   * hum limited de dein ke okay, theek hai, something ke hum ne rakha hai aur
+   * woh us ko choose karna parega."
+   *
+   * So it is replaced rather than deleted, by the invariant that actually
+   * matters now: everything she named is offerable.
+   */
+  it('offers every tool she pins at [07:55]–[08:03]', () => {
+    for (const tool of [
+      'create',      // "yeh task creation ka option hai"
+      'timer',       // "yeh timing ka option"
+      'docs',        // "yeh document ka"
+      'clips',       // "yeh Loom ka"
+      'recordings',  // "yeh voice recordings ka"
+      'whiteboards', // "yeh whiteboards ka"
+      'dashboards',  // "aur yeh dashboard ka option hai"
+    ]) {
+      assert.ok(
+        (TOPBAR_ITEMS as readonly string[]).includes(tool),
+        `${tool} is not pinnable, but she names it`,
+      )
+    }
+  })
+
+  it('validates a pinned list the same way it validates a hidden one', async () => {
+    // Same jsonb column hazard: unvalidated, it is a place to park arbitrary
+    // data on a user row through a field the client controls.
+    const { svc } = service()
+    await assert.rejects(
+      () => svc.updateProfile('u1', { topbarPinned: ['docs', 'not-a-control'] }),
+      /Unknown top bar item/,
+    )
+    await assert.rejects(
+      () => svc.updateProfile('u1', { topbarPinned: { evil: true } as never }),
+      /must be an array/,
+    )
+  })
+
+  it('de-duplicates a pinned list, so it stores a set and not a log of clicks', async () => {
+    const { svc, writes } = service()
+    await svc.updateProfile('u1', { topbarPinned: ['docs', 'docs', 'timer'] })
+    assert.deepEqual(writes[0].topbarPinned, ['docs', 'timer'])
   })
 })

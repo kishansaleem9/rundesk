@@ -79,6 +79,20 @@ export const users = pgTable('users', {
   // every existing member. The bell ships hidden — that is her "[Default par]"
   // — and a member can put it back.
   topbarHidden:  jsonb('topbar_hidden').$type<string[]>().notNull().default(['notifications']),
+  /**
+   * §6 [07:51] — "main yahan koi bhi tool PIN kar sakti hoon."
+   *
+   * The column above is opt-*out*: absence means shown. That was right while
+   * the bar held five controls we had chosen, and wrong the moment the
+   * catalogue grew to the tools she actually pins — every new one would appear
+   * unbidden in everyone's bar, which is the opposite of the ask.
+   *
+   * So pinning is opt-*in*, and NULL is load-bearing: it means "has never
+   * chosen", which is distinct from an empty array meaning "chose to pin
+   * nothing". The first is migrated from topbarHidden so nobody's bar changes
+   * under them; the second is a decision to respect.
+   */
+  topbarPinned:  jsonb('topbar_pinned').$type<string[] | null>(),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

@@ -13,7 +13,7 @@ import { formatDateTimeWith } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { encodeQr } from '../lib/qr'
 import { InlineSkeleton } from '../components/loading-skeletons'
-import { TOPBAR_ITEMS, useHiddenTopbarItems, useSetTopbarItem, type TopbarItem } from '../lib/topbar-prefs'
+import { TOPBAR_ITEMS, usePinnedTopbarItems, useSetTopbarItem, type TopbarItem } from '../lib/topbar-prefs'
 
 type Profile = {
   id: string
@@ -384,11 +384,18 @@ const TOPBAR_LABEL_KEY: Record<TopbarItem, TranslationKey> = {
   timer: 'profile.topbarTimer',
   ai: 'profile.topbarAi',
   create: 'profile.topbarCreate',
+  // §6 [07:58–08:03] — "yeh document ka, yeh Loom ka, yeh voice recordings ka,
+  // yeh whiteboards ka, aur yeh dashboard ka option hai."
+  docs: 'profile.topbarDocs',
+  clips: 'profile.topbarClips',
+  recordings: 'profile.topbarRecordings',
+  whiteboards: 'profile.topbarWhiteboards',
+  dashboards: 'profile.topbarDashboards',
 }
 
 function TopbarSelector() {
   const { t } = useTranslation()
-  const hidden = useHiddenTopbarItems()
+  const pinned = usePinnedTopbarItems()
   const setItem = useSetTopbarItem()
 
   return (
@@ -397,7 +404,7 @@ function TopbarSelector() {
       <p className="text-xs text-muted-foreground">{t('profile.topbarDesc')}</p>
       <div className="grid gap-1.5 pt-1 sm:grid-cols-2">
         {TOPBAR_ITEMS.map((item) => {
-          const shown = !hidden.has(item)
+          const shown = pinned.has(item)
           return (
             <label
               key={item}

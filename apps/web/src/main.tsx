@@ -67,9 +67,14 @@ function useSessionHydration() {
           displayName: me.displayName,
           role: me.role,
           avatarUrl: me.avatarUrl ?? null,
-          // §1.5 — this field is copied explicitly like the rest; leaving it
-          // out would silently reset the top bar on every page load.
+          // §1.5 / §6 — these are copied explicitly like the rest, and the
+          // comment is here because leaving one out fails quietly: the top bar
+          // simply resets to defaults on every load, with nothing to say why.
+          // §6 shipped with topbarPinned missing from this list, and the
+          // symptom was a tool you could pin, that wrote to the server
+          // correctly, and never appeared.
           topbarHidden: me.topbarHidden ?? null,
+          topbarPinned: me.topbarPinned ?? null,
         })
         // Cross-device theme (Plan §13.1): the server preference wins on load.
         if (me.theme && THEME_VALUES.includes(me.theme as Theme)) {
