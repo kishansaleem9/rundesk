@@ -81,7 +81,7 @@ describe('who may create a workspace (§7)', () => {
     // setPlan, which reserves *commercial plan changes* to a super admin and
     // has nothing to do with who may make a workspace. Condemning that would
     // have been the test being wrong, loudly.
-    const create = /async create\([\s\S]*?\n  \}/.exec(controller)?.[0] ?? ''
+    const create = /async create\([\s\S]*?\n {2}\}/.exec(controller)?.[0] ?? ''
     assert.ok(create, 'could not find the create handler')
     assert.match(create, /canCreateWorkspace\(user\.role\)/, 'the endpoint does not use the policy')
     assert.ok(
