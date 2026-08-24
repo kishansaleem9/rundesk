@@ -19,6 +19,7 @@ import {
   Inbox as InboxIcon,
   Square,
   BellOff,
+  Pin,
   FileText,
   Film,
   Mic,
@@ -59,7 +60,14 @@ import { useMentionNames } from '../hooks/use-mention-names'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS } from '@rundesk/feature-flags'
 import { InlineSkeleton } from './loading-skeletons'
-import { useTopbarVisible, type TopbarItem } from '../lib/topbar-prefs'
+import {
+  useTopbarVisible,
+  usePinnedTopbarItems,
+  useSetTopbarItem,
+  TOPBAR_ITEMS,
+  TOPBAR_LABEL_KEY,
+  type TopbarItem,
+} from '../lib/topbar-prefs'
 
 type Workspace = { id: string; name: string; slug: string }
 type WorkspaceEntry = { workspace: Workspace; role: string }
@@ -859,6 +867,9 @@ const PRESENCE_CHOICES = [
 
 function UserMenu({ workspaceId }: { workspaceId?: string }) {
   const user = useAuthStore((s) => s.user)
+  // §6 — pinning, from the menu behind the avatar.
+  const pinned = usePinnedTopbarItems()
+  const setTool = useSetTopbarItem()
   const refreshToken = useAuthStore((s) => s.refreshToken)
   const clear = useAuthStore((s) => s.clear)
   const navigate = useNavigate()
@@ -923,6 +934,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
         <button
           className="rounded-full ring-2 ring-transparent transition-all hover:ring-border focus-visible:outline-none focus-visible:ring-ring"
           aria-label={t('topbar.userMenu')}
+          data-testid="user-menu"
         >
           <PersonAvatar name={user?.displayName ?? '?'} imageUrl={user?.avatarUrl} size="md" />
         </button>
@@ -965,6 +977,50 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
             ))}
           </div>
         </div>
+        {/*
+          §6 [07:48] — "Jab apni profile pe click karti hoon, yahan pe TOOLS
+          hai. Ab main yahan koi bhi tool PIN kar sakti hoon."
+          This is where she pins from: the menu behind her avatar, not a
+          settings page two navigations away. The profile page keeps the same
+          picker — one is the place you pass through, the other the place you go
+          when you are already changing preferences.
+        */}
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1.5">
+          <div className="px-1 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+            {t('topbar.toolsHeading')}
+          </div>
+          <div className="grid grid-cols-2 gap-1">
+            {TOPBAR_ITEMS.map((item) => {
+              const isPinned = pinned.has(item)
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  // The menu stays open: pinning several in a row is the point,
+                  // and closing after each would make it a chore.
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setTool.mutate({ item, visible: !isPinned })
+                  }}
+                  disabled={setTool.isPending}
+                  aria-pressed={isPinned}
+                  data-testid={`menu-pin-${item}`}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors text-left',
+                    isPinned
+                      ? 'bg-accent/15 text-foreground font-medium'
+                      : 'text-muted-foreground hover:bg-accent/10',
+                  )}
+                >
+                  <Pin className={cn('h-3 w-3 shrink-0', !isPinned && 'opacity-40')} />
+                  <span className="truncate">{t(TOPBAR_LABEL_KEY[item])}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={(e) => { e.preventDefault(); toggleMute.mutate(!muted) }}>
           {muted ? <BellOff className="h-4 w-4 text-muted-foreground" /> : <Bell className="h-4 w-4 text-muted-foreground" />}
           {muted ? t('topbar.unmuteNotifications') : t('topbar.muteNotifications')}

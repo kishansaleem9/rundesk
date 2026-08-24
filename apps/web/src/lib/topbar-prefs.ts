@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import { useAuthStore } from '../store/auth'
+import type { TranslationKey } from './i18n'
 
 /**
  * §1.5 — which top-bar controls a member has put away.
@@ -33,6 +34,26 @@ export const TOPBAR_ITEMS = [
   'docs', 'clips', 'recordings', 'whiteboards', 'dashboards',
 ] as const
 export type TopbarItem = (typeof TOPBAR_ITEMS)[number]
+
+/**
+ * What each tool is called. Lives here rather than beside one of its two
+ * surfaces — the profile page and the avatar menu both offer pinning, and a
+ * tool named in one and not the other is the kind of drift nobody notices.
+ */
+export const TOPBAR_LABEL_KEY: Record<TopbarItem, TranslationKey> = {
+  notifications: 'profile.topbarNotifications',
+  theme: 'profile.topbarTheme',
+  timer: 'profile.topbarTimer',
+  ai: 'profile.topbarAi',
+  create: 'profile.topbarCreate',
+  // §6 [07:58–08:03] — "yeh document ka, yeh Loom ka, yeh voice recordings ka,
+  // yeh whiteboards ka, aur yeh dashboard ka option hai."
+  docs: 'profile.topbarDocs',
+  clips: 'profile.topbarClips',
+  recordings: 'profile.topbarRecordings',
+  whiteboards: 'profile.topbarWhiteboards',
+  dashboards: 'profile.topbarDashboards',
+}
 
 /** The five that existed before pinning, used to migrate an old hidden-list. */
 const LEGACY_ITEMS: TopbarItem[] = ['notifications', 'theme', 'timer', 'ai', 'create']

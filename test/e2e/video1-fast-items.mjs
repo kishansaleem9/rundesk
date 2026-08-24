@@ -860,6 +860,61 @@ console.log('\n§6  pinning a tool puts it in the top bar')
   await ctx.close()
 }
 
+console.log('\n§6b  pinning from the avatar menu, where she does it')
+// ---------------------------------------------------------------------------
+{
+  /*
+   * "Jab apni profile pe click karti hoon, yahan pe TOOLS hai. Ab main yahan
+   * koi bhi tool PIN kar sakti hoon" [07:48] — and unpinning takes it straight
+   * off the bar: "maine unpin ki hai to ooper se saare ke saare jo hain woh
+   * khatam ho gaye hain" [08:07].
+   *
+   * The picker existed only in profile settings, two navigations away from the
+   * place she opens it.
+   */
+  const { ctx, page, calls } = await openApp(`/app/${WS}/inbox`, {}, {
+    topbarPinned: ['create', 'docs'],
+  })
+  await page.waitForTimeout(2500)
+
+  check(
+    (await page.locator('[data-testid="topbar-tool-docs"]').count()) > 0,
+    'docs starts pinned, so there is something to unpin',
+  )
+
+  // Open the avatar menu. Addressed directly: `header button` .last() is a
+  // guess about layout, and it guessed wrong.
+  await page.locator('[data-testid="user-menu"]').click()
+  await page.waitForTimeout(800)
+  const pinDocs = page.locator('[data-testid="menu-pin-docs"]')
+  check((await pinDocs.count()) > 0, 'the avatar menu offers Tools')
+
+  if ((await pinDocs.count()) > 0) {
+    check(
+      (await pinDocs.getAttribute('aria-pressed')) === 'true',
+      'and shows docs as pinned',
+    )
+    const before = calls.length
+    await pinDocs.click()
+    const wrote = await waitUntil(
+      () =>
+        calls
+          .slice(before)
+          .some((c) => c.method === 'PATCH' && c.url.includes('/users/me') && c.body.includes('topbarPinned')),
+      { timeoutMs: 10000 },
+    )
+    check(wrote, 'unpinning writes the preference', calls.slice(before).map((c) => c.method + ' ' + c.url).slice(-3).join(' | '))
+
+    // "ooper se saare ke saare jo hain woh khatam ho gaye hain" — off the bar.
+    const gone = await waitUntil(
+      async () => (await page.locator('[data-testid="topbar-tool-docs"]').count()) === 0,
+      { timeoutMs: 8000 },
+    )
+    check(gone, 'and it leaves the top bar straight away')
+  }
+  await ctx.close()
+}
+
 console.log('\n§7  any member can make a workspace; a guest cannot')
 // ---------------------------------------------------------------------------
 {
