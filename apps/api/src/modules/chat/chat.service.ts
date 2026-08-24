@@ -1300,6 +1300,8 @@ export class ChatService {
         createdAt: chatMessages.createdAt,
         authorName: users.displayName,
         authorAvatarUrl: users.avatarUrl,
+        // §12 — where this was forwarded from, if it was.
+        forwardedFromId: chatMessages.forwardedFromId,
       })
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
@@ -1385,6 +1387,48 @@ export class ChatService {
       replyStatRows.map((r) => [r.parentId as string, { replyCount: r.replyCount, lastReplyAt: r.lastReplyAt }]),
     )
 
+    /*
+     * §12 — resolve where each forwarded message came from, for "View Message".
+     *
+     * Access is re-checked here against *the reader*, not the forwarder. Those
+     * are different people: forwarding was authorised when it happened, against
+     * whoever did it, and the recipient may have no business in the source
+     * channel at all. Offering them a link would be an invitation to a room
+     * they were never in. When the source is out of reach the message still
+     * says it was forwarded — it just does not offer to take you there, which
+     * is the truthful version of the same fact.
+     */
+    const forwardIds = [...new Set(ordered.map((m) => m.forwardedFromId).filter(Boolean))] as string[]
+    const forwardedFrom = new Map<string, { channelId: string; channelName: string | null } | null>()
+    if (forwardIds.length > 0) {
+      const sources = await this.db
+        .select({
+          id: chatMessages.id,
+          channelId: chatChannels.id,
+          channelName: chatChannels.name,
+          isPrivate: chatChannels.isPrivate,
+          isDm: chatChannels.isDm,
+        })
+        .from(chatMessages)
+        .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+        .where(inArray(chatMessages.id, forwardIds))
+      const myChannels = new Set(
+        (
+          await this.db
+            .select({ channelId: chatChannelMembers.channelId })
+            .from(chatChannelMembers)
+            .where(eq(chatChannelMembers.userId, userId))
+        ).map((r) => r.channelId),
+      )
+      for (const src of sources) {
+        const reachable = (!src.isPrivate && !src.isDm) || myChannels.has(src.channelId)
+        forwardedFrom.set(
+          src.id,
+          reachable ? { channelId: src.channelId, channelName: src.channelName } : null,
+        )
+      }
+    }
+
     return ordered.map((message) => {
       const byEmoji = grouped.get(message.id)
       const reactions =
@@ -1403,6 +1447,10 @@ export class ChatService {
         message.authorId === userId ? computeDeliveryStatus(message.createdAt, otherMembers) : null
       return {
         ...message,
+        // null when it was forwarded from somewhere this reader cannot follow.
+        forwardedFrom: message.forwardedFromId
+          ? forwardedFrom.get(message.forwardedFromId) ?? null
+          : null,
         reactions,
         attachments: attachmentsByMessage.get(message.id) ?? [],
         replyCount: stats?.replyCount ?? 0,
@@ -1528,6 +1576,8 @@ export class ChatService {
     parentMessageId?: string | null
     mentions?: Array<{ userId: string; offset?: number; length?: number }>
     attachmentIds?: string[]
+    /** §12 — the message this one is a forward of. */
+    forwardedFromId?: string | null
   }) {
     this.assertCanPost(await this.assertChannelAccess(data.channelId, data.authorId))
     const body = data.body.trim()
@@ -1544,6 +1594,33 @@ export class ChatService {
     ])
     const normalizedMentions = [...mentionIds].map((userId) => ({ userId, offset: 0, length: 0 }))
 
+    /*
+     * §12 — forwarding, checked before it is recorded.
+     *
+     * The id names a message in some other channel, so it has to be read
+     * through the same access check as everything else: without it, forwarding
+     * a message you cannot see would mint a permanent link to it, and "View
+     * Message" would be an invitation to a channel you were never in. An
+     * unreadable or unknown source is dropped rather than refused — the forward
+     * still lands, just as an ordinary message, which is what it is without a
+     * source anyone can follow.
+     */
+    let forwardedFromId: string | null = null
+    if (data.forwardedFromId) {
+      const [source] = await this.db
+        .select({ id: chatMessages.id, channelId: chatMessages.channelId })
+        .from(chatMessages)
+        .where(eq(chatMessages.id, data.forwardedFromId))
+        .limit(1)
+      if (source) {
+        const readable = await this.assertChannelAccess(source.channelId, data.authorId).then(
+          () => true,
+          () => false,
+        )
+        if (readable) forwardedFromId = source.id
+      }
+    }
+
     const [row] = await this.db
       .insert(chatMessages)
       .values({
@@ -1552,6 +1629,7 @@ export class ChatService {
         body,
         parentMessageId: data.parentMessageId ?? null,
         mentions: normalizedMentions.length > 0 ? normalizedMentions : null,
+        forwardedFromId,
       })
       .returning()
 

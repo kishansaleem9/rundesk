@@ -694,6 +694,13 @@
       "when": 1900000089006,
       "tag": "0098_topbar_pinned",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1900000089007,
+      "tag": "0099_message_forwarding",
+      "breakpoints": true
     }
   ]
 }

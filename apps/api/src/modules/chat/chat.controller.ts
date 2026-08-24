@@ -284,13 +284,16 @@ export class ChatController {
   post(
     @Param('channelId') channelId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { body: string; parentMessageId?: string | null; mentions?: Array<{ userId: string; offset?: number; length?: number }>; attachmentIds?: string[] },
+    @Body() body: { body: string; parentMessageId?: string | null; mentions?: Array<{ userId: string; offset?: number; length?: number }>; attachmentIds?: string[]; forwardedFromId?: string | null },
   ) {
     return this.chat.postMessage({
       channelId,
       authorId: user.id,
       body: body.body,
       parentMessageId: body.parentMessageId,
+      // §12 — forwarded from, if this is a forward. Access-checked in the
+      // service against the sender before it is recorded.
+      forwardedFromId: body.forwardedFromId,
       mentions: body.mentions,
       attachmentIds: body.attachmentIds,
     })

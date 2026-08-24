@@ -52,6 +52,20 @@ export const chatMessages = pgTable('chat_messages', {
   channelId:       uuid('channel_id').notNull().references(() => chatChannels.id, { onDelete: 'cascade' }),
   authorId:        uuid('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   parentMessageId: uuid('parent_message_id').references((): AnyPgColumn => chatMessages.id, { onDelete: 'cascade' }),
+  /**
+   * §12 [15:00] — the message this one was forwarded from.
+   *
+   * "see, aap ke yahan pe aa gaya hai message ke maine aap ko message forward
+   * kiya. Aap 'View Message' dekhoge to aap us group mein chale jaoge."
+   * Forwarding copied the text and kept nothing, so the recipient saw a plain
+   * message with no sign it came from elsewhere and no route back.
+   *
+   * SET NULL rather than CASCADE, unlike the thread parent above: deleting the
+   * original must not delete every message anyone forwarded from it. The copy
+   * survives, and loses only its link — which is the honest outcome, since the
+   * thing it pointed at is gone.
+   */
+  forwardedFromId: uuid('forwarded_from_id').references((): AnyPgColumn => chatMessages.id, { onDelete: 'set null' }),
   body:            text('body').notNull(),
   mentions:        jsonb('mentions').$type<Array<{ userId: string }>>(),
   editedAt:        timestamp('edited_at', { withTimezone: true }),

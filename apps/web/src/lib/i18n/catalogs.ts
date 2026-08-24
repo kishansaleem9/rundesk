@@ -229,6 +229,8 @@ export const en = {
   'chat.like': 'Like',
   'chat.reply': 'Reply',
   'chat.forward': 'Forward',
+  'chat.forwarded': 'Forwarded',
+  'chat.viewMessage': 'View message',
   'chat.forwardTo': 'Forward to',
   'chat.editMessage': 'Edit message',
 
@@ -5273,6 +5275,8 @@ export const es: Record<TranslationKey, string> = {
   'chat.like': 'Me gusta',
   'chat.reply': 'Responder',
   'chat.forward': 'Reenviar',
+  'chat.forwarded': 'Reenviado',
+  'chat.viewMessage': 'Ver mensaje',
   'chat.forwardTo': 'Reenviar a',
   'chat.editMessage': 'Editar mensaje',
 
@@ -10285,6 +10289,8 @@ export const ar: Record<TranslationKey, string> = {
   'chat.like': 'إعجاب',
   'chat.reply': 'رد',
   'chat.forward': 'إعادة توجيه',
+  'chat.forwarded': 'مُعاد توجيهه',
+  'chat.viewMessage': 'عرض الرسالة',
   'chat.forwardTo': 'إعادة التوجيه إلى',
   'chat.editMessage': 'تعديل الرسالة',
 
@@ -15289,6 +15295,8 @@ export const ur: Record<TranslationKey, string> = {
   'chat.like': 'پسند',
   'chat.reply': 'جواب دیں',
   'chat.forward': 'آگے بھیجیں',
+  'chat.forwarded': 'فارورڈ شدہ',
+  'chat.viewMessage': 'پیغام دیکھیں',
   'chat.forwardTo': 'کس کو آگے بھیجیں',
   'chat.editMessage': 'پیغام میں ترمیم کریں',
   'workload.subtitle': 'آپ کی ٹیم میں گنجائش کا ہیٹ میپ۔ جب کوئی زیادہ بوجھ تلے ہو تو خانے سرخ ہو جاتے ہیں۔',

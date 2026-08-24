@@ -101,6 +101,13 @@ type Message = {
   authorAvatarUrl?: string | null
   body: string
   parentMessageId?: string | null
+  /**
+   * §12 — set when this message is a forward. `forwardedFrom` is null when the
+   * source sits in a channel this reader cannot open: still a forward, just not
+   * one they can follow.
+   */
+  forwardedFromId?: string | null
+  forwardedFrom?: { channelId: string; channelName: string | null } | null
   editedAt?: string | null
   pinnedAt?: string | null
   pinnedById?: string | null
@@ -886,11 +893,19 @@ export function ChatPage() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotRemoveEmoji')),
   })
 
+  /**
+   * §12 [15:00] — "aap 'View Message' dekhoge to aap us group mein chale jaoge."
+   *
+   * This used to post the body text and nothing else, which is a copy-paste
+   * rather than a forward: the recipient saw a message indistinguishable from
+   * one somebody typed, with no route back to where it came from. It now
+   * carries the source id, and the server resolves the link per reader.
+   */
   const forwardMutation = useMutation({
-    mutationFn: ({ channelId, body }: { channelId: string; body: string }) =>
+    mutationFn: ({ channelId, body, sourceId }: { channelId: string; body: string; sourceId: string }) =>
       api<Message>(`/chat/channels/${channelId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ body }),
+        body: JSON.stringify({ body, forwardedFromId: sourceId }),
       }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['chat-messages', vars.channelId] })
@@ -1874,6 +1889,41 @@ export function ChatPage() {
                         </div>
                       ) : (
                         <div className="text-[14px] whitespace-pre-wrap break-words leading-[1.45] text-foreground/90">
+                          {/*
+                            §12 [15:00] — a forward says it is one, and offers
+                            the way back: "aap 'View Message' dekhoge to aap us
+                            group mein chale jaoge." No link when the source
+                            sits somewhere this reader cannot open — still
+                            labelled, because that part is true either way.
+                          */}
+                          {m.forwardedFromId && (
+                            <div
+                              className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                              data-testid={`forwarded-${m.id}`}
+                            >
+                              <Forward className="h-3 w-3 shrink-0" />
+                              <span>{t('chat.forwarded')}</span>
+                              {m.forwardedFrom && (
+                                <button
+                                  type="button"
+                                  data-testid={`forwarded-view-${m.id}`}
+                                  onClick={() =>
+                                    navigate({
+                                      to: '/app/$workspaceId/chat',
+                                      params: { workspaceId },
+                                      search: {
+                                        channel: m.forwardedFrom!.channelId,
+                                        message: m.forwardedFromId!,
+                                      },
+                                    })
+                                  }
+                                  className="underline underline-offset-2 hover:text-foreground"
+                                >
+                                  {t('chat.viewMessage')}
+                                </button>
+                              )}
+                            </div>
+                          )}
                           {m.body && <ChatMessageBody text={m.body} namesById={namesById} customEmoji={emojiByCode} />}
                           {m.editedAt && (
                             <button
@@ -2013,7 +2063,12 @@ export function ChatPage() {
                                   onClick={() =>
                                     forwardMutation.mutate({
                                       channelId: channel.id,
-                                      body: `Forwarded message:\n${m.body}`,
+                                      // No "Forwarded message:" prefix any more —
+                                      // the message says so itself now, and the
+                                      // prefix became part of the text the moment
+                                      // anyone forwarded it onward again.
+                                      body: m.body,
+                                      sourceId: m.id,
                                     })
                                   }
                                 >
