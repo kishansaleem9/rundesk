@@ -93,6 +93,20 @@ export const users = pgTable('users', {
    * under them; the second is a decision to respect.
    */
   topbarPinned:  jsonb('topbar_pinned').$type<string[] | null>(),
+  /**
+   * §1.3 — whether the workspace sidebar is collapsed to its icon rail.
+   *
+   * Was localStorage only, so "mujhe nahi chahiye to space le" [10:24] held on
+   * one browser and was forgotten on the next. §1.5 already settled where this
+   * kind of choice belongs — "yeh option jo hai woh humare members ke paas hona
+   * chahiye" — and this is the same kind of choice, stored the other way.
+   *
+   * Nullable: null means never chosen, so an account that has not touched the
+   * arrow keeps the expanded default rather than inheriting somebody's false.
+   * The browser copy stays as well, because index.html reads it to draw the
+   * rail at the right width before React is running.
+   */
+  sidebarCollapsed: boolean('sidebar_collapsed'),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

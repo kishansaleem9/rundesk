@@ -14,6 +14,7 @@ import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
 import { useCustomDomainBootstrap } from './lib/custom-domain'
 import { installChunkReloadHandlers } from './lib/chunk-reload'
+import { useSidebarStore, setSidebarPersister } from './store/sidebar'
 import { RoutePending } from './components/loading-skeletons'
 
 const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
@@ -22,6 +23,21 @@ const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
 // import() awaited in an event handler. Installed before the router exists so
 // nothing can slip through during startup.
 installChunkReloadHandlers()
+
+/*
+ * §1.3 — send the collapse to the member's row when they change it.
+ *
+ * Registered here rather than inside the store so the store keeps no dependency
+ * on the api client. Failure is swallowed on purpose: a preference that did not
+ * reach the server is a preference that will not follow you to another browser,
+ * which is a smaller problem than a sidebar that refuses to collapse.
+ */
+setSidebarPersister((collapsed) => {
+  if (!useAuthStore.getState().isAuthenticated()) return
+  void api('/users/me', { method: 'PATCH', body: { sidebarCollapsed: collapsed } }).catch(
+    () => undefined,
+  )
+})
 
 const router = createRouter({
   routeTree,
@@ -76,6 +92,12 @@ function useSessionHydration() {
           topbarHidden: me.topbarHidden ?? null,
           topbarPinned: me.topbarPinned ?? null,
         })
+        // §1.3 — the server's collapse wins on load, so the choice travels
+        // between browsers. null means never chosen: leave the local value
+        // (and therefore the boot skeleton's guess) alone.
+        if (typeof me.sidebarCollapsed === 'boolean') {
+          useSidebarStore.getState().hydrateCollapsed(me.sidebarCollapsed)
+        }
         // Cross-device theme (Plan §13.1): the server preference wins on load.
         if (me.theme && THEME_VALUES.includes(me.theme as Theme)) {
           useThemeStore.getState().hydrateTheme(me.theme as Theme)

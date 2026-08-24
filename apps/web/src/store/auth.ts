@@ -11,6 +11,8 @@ export type AuthUser = {
   topbarHidden?: string[] | null
   /** §6 — the tools pinned to the top bar. null = never chosen. */
   topbarPinned?: string[] | null
+  /** §1.3 — the sidebar collapse. null = never chosen. */
+  sidebarCollapsed?: boolean | null
 }
 
 export type AuthOrg = {

@@ -117,6 +117,8 @@ export class UsersService {
       weekStart?: string
       topbarHidden?: string[]
       topbarPinned?: string[]
+      /** §1.3 — the sidebar collapse, as a preference of the person. */
+      sidebarCollapsed?: boolean
     },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
@@ -165,12 +167,17 @@ export class UsersService {
       }
       patch.topbarPinned = [...new Set(patch.topbarPinned)]
     }
+    if (patch.sidebarCollapsed !== undefined && typeof patch.sidebarCollapsed !== 'boolean') {
+      // A jsonb column would swallow anything; this one is a boolean and should
+      // say so rather than storing whatever arrived.
+      throw new BadRequestException('sidebarCollapsed must be a boolean')
+    }
     // SECURITY: whitelist the self-editable profile columns. Spreading the raw
     // body let a caller mass-assign any users column — most critically `role`,
     // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
     // super-admin. Only copy the fields a user is allowed to change themselves.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db

@@ -417,7 +417,7 @@ console.log('\n§2.2  the Inbox "Other" chip is gone')
 console.log('\n§1.3  the sidebar collapses to icons')
 // ---------------------------------------------------------------------------
 {
-  const { ctx, page } = await openApp()
+  const { ctx, page, calls } = await openApp()
   const sidebar = page.locator('[data-testid="workspace-sidebar"]')
   const widthOf = async () => (await sidebar.boundingBox())?.width ?? 0
 
@@ -494,8 +494,27 @@ console.log('\n§1.3  the sidebar collapses to icons')
   check((await widthOf()) > 200, 'and it expands again')
 
   // The preference has to survive a reload, or it is not a preference.
+  const beforeCollapse = calls.length
   await page.locator('[data-testid="sidebar-toggle"]').first().click()
   await waitUntil(async () => (await widthOf()) < 90)
+
+  /*
+   * …and it has to leave this browser. It was localStorage only, so "mujhe nahi
+   * chahiye to space le" [10:24] held on one machine and was forgotten on the
+   * next — the frame pass caught that, the transcript on its own did not.
+   */
+  const wrote = await waitUntil(() =>
+    calls
+      .slice(beforeCollapse)
+      .some((c) => c.method === 'PATCH' && c.url.includes('/users/me') && c.body.includes('sidebarCollapsed')),
+    { timeoutMs: 10000 },
+  )
+  check(
+    wrote,
+    'and is written to the member, not just this browser',
+    calls.slice(beforeCollapse).map((c) => c.method + ' ' + c.url).slice(-4).join(' | '),
+  )
+
   await page.reload({ waitUntil: 'networkidle' })
   const persisted = await waitUntil(async () => {
     const w = await widthOf()
