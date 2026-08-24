@@ -794,6 +794,50 @@ console.log('\n§6  pinning a tool puts it in the top bar')
   await ctx.close()
 }
 
+console.log('\n§7  any member can make a workspace; a guest cannot')
+// ---------------------------------------------------------------------------
+{
+  // "WORKSPACE IS A FEATURE jo ke har member kar sakta hai — it's not
+  // necessary ke humare paas kuch admin hi aaye jo kar sake" [09:29].
+  const { ctx, page } = await openApp(`/app/${WS}/inbox`, {}, { role: 'member' })
+  await page.waitForTimeout(2500)
+  // The switcher holds it.
+  // Address the switcher directly. `sidebar button` .first() hits the collapse
+  // toggle, which folds the sidebar away — and then BOTH cases below see zero
+  // buttons, so the guest one passes for the wrong reason. It did, on the first
+  // run of this section.
+  const openSwitcher = async (p) => {
+    await p.locator('[data-testid="workspace-switcher"]').click()
+    await p.waitForTimeout(800)
+  }
+  await openSwitcher(page)
+  check(
+    (await page.locator('[data-testid="new-workspace"]').count()) > 0,
+    'a member is offered New Workspace',
+  )
+  await ctx.close()
+}
+
+{
+  // "jo GUEST hai sirf woh create NAHI kar sakta" [09:22]. Offering a button
+  // that comes back 403 is worse than not offering it.
+  const { ctx, page } = await openApp(`/app/${WS}/inbox`, {}, { role: 'guest' })
+  await page.waitForTimeout(2500)
+  await page.locator('[data-testid="workspace-switcher"]').click()
+  await page.waitForTimeout(800)
+  // Proves the switcher really opened, so "no button" means denied rather than
+  // "nothing rendered at all".
+  const switcherOpen = await page
+    .locator('[data-testid="workspace-switcher"][aria-expanded="true"]')
+    .count()
+  check(switcherOpen > 0, 'the switcher opens for a guest too')
+  check(
+    (await page.locator('[data-testid="new-workspace"]').count()) === 0,
+    'a guest is not',
+  )
+  await ctx.close()
+}
+
 await browser.close()
 server.close()
 

@@ -229,7 +229,7 @@ export function WorkspaceSidebar() {
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : undefined
-  const { isAdmin } = useWorkspaceRole(workspaceId)
+  const { isAdmin, canCreateWorkspace } = useWorkspaceRole(workspaceId)
   // §5 ClickApps — hide nav entries for features a workspace admin turned off.
   const { featureEnabled } = useResolvedFlags(workspaceId)
   // Whatever the user chose to move — drives the shared Move picker below.
@@ -833,6 +833,8 @@ export function WorkspaceSidebar() {
         </div>
         <button
           className="w-full rounded-lg border border-border/60 bg-card px-3 py-2 text-left hover:bg-accent/10 transition-colors"
+          data-testid="workspace-switcher"
+          aria-expanded={openSwitcher}
           onClick={() => setOpenSwitcher((v) => !v)}
         >
           <div className="flex items-center gap-2.5">
@@ -920,18 +922,24 @@ export function WorkspaceSidebar() {
                 </div>
               )
             })}
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full mt-1"
-              onClick={() => {
-                setOpenSwitcher(false)
-                setWsDialogOpen(true)
-              }}
-            >
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              {t('nav.newWorkspace')}
-            </Button>
+            {/* §7 — a guest cannot create one, so do not offer a button that
+                will come back 403. Everyone else can: "baaqi sab create kar
+                sakte hain" [09:26]. */}
+            {canCreateWorkspace && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full mt-1"
+                data-testid="new-workspace"
+                onClick={() => {
+                  setOpenSwitcher(false)
+                  setWsDialogOpen(true)
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                {t('nav.newWorkspace')}
+              </Button>
+            )}
           </div>
         )}
       </div>

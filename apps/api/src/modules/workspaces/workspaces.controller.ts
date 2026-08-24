@@ -8,6 +8,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
+import { canCreateWorkspace } from './workspace-creation-policy'
 
 @ApiTags('workspaces')
 @ApiBearerAuth()
@@ -33,12 +34,14 @@ export class WorkspacesController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a new workspace (Super Admin only, per plan §3.3)' })
+  @ApiOperation({ summary: 'Create a new workspace (§7 — any member except a guest)' })
   async create(@CurrentUser() user: any, @Body() dto: CreateWorkspaceDto) {
-    // The first workspace is provisioned at signup; creating additional
-    // workspaces is a Super-Admin-only action (Plan §3.3).
-    if (user.role !== 'super_admin') {
-      throw new ForbiddenException('Only a Super Admin can create additional workspaces')
+    // §7 [09:29] — "WORKSPACE IS A FEATURE jo ke har member kar sakta hai —
+    // it's not necessary ke humare paas kuch admin hi aaye jo kar sake." This
+    // was Super-Admin-only, which is the thing she called missing outright at
+    // [10:03]. The rule lives in workspace-creation-policy.ts with her wording.
+    if (!canCreateWorkspace(user.role)) {
+      throw new ForbiddenException('Guests cannot create workspaces')
     }
     return this.workspacesService.create(user.id, dto)
   }

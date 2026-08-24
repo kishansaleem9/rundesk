@@ -8,7 +8,18 @@ function resolve(workspaceId: string | undefined, user: { role?: string } | null
   const isSuperAdmin = user?.role === 'super_admin'
   const isAdmin = isSuperAdmin || role === 'workspace_admin'
   const isManagerOrAbove = isAdmin || role === 'manager'
-  return { role, isSuperAdmin, isAdmin, isManagerOrAbove }
+  /*
+   * §7 [09:29] — "WORKSPACE IS A FEATURE jo ke har member kar sakta hai."
+   *
+   * Keyed on the *account* role, not the workspace one: making a workspace is
+   * not an act inside the workspace you happen to be looking at. Mirrors
+   * canCreateWorkspace on the API, which is the authority — this only decides
+   * whether to offer the button, and offering one that 403s is the state this
+   * fixes.
+   */
+  const accountRole = user?.role ?? role
+  const canCreateWorkspace = accountRole !== 'guest' && accountRole !== 'viewer'
+  return { role, isSuperAdmin, isAdmin, isManagerOrAbove, canCreateWorkspace }
 }
 
 /** React hook: the current user's role for a given workspace (admin gating, etc.). */
