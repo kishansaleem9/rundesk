@@ -718,6 +718,124 @@ try {
     }
   })
 
+  await section('§2', 'The search bar she walked through', async () => {
+    await go(`/app/${WS}`, 3500)
+    await page.getByRole('textbox', { name: /search/i }).first().click().catch(() => {})
+    await page.waitForTimeout(2500)
+    const filters = page.getByRole('button', { name: /filter/i }).first()
+    if ((await filters.count()) > 0) await filters.click().catch(() => {})
+    await page.waitForTimeout(1200)
+
+    chk(
+      (await page.locator('[data-testid="palette-type-task"]').count()) > 0,
+      'the type chips render',
+      'no type chips in the palette',
+    )
+    // [02:01] the ⋯, and Folders behind it.
+    const more = page.locator('[data-testid="palette-more-types"]')
+    if ((await more.count()) === 0) {
+      bad('no ⋯ for the types that are not on the bar')
+    } else {
+      await more.click()
+      await page.waitForTimeout(700)
+      chk(
+        (await page.locator('[data-testid="palette-add-type-folder"]').count()) > 0,
+        'Folders is offered behind the ⋯ — "mujhe FOLDERS mein search karna hai"',
+        'Folders is not offered',
+      )
+      await page.keyboard.press('Escape').catch(() => {})
+      await page.waitForTimeout(400)
+    }
+    // [02:35] Location, and [04:00] created dates.
+    chk(
+      (await page.locator('[data-testid="palette-space-filter"]').count()) > 0,
+      'Location narrows by space',
+      'no Location filter',
+    )
+    chk(
+      (await page.locator('[data-testid="palette-created-after"]').count()) > 0,
+      'and there is a created-date filter, distinct from due dates',
+      'no created-date filter',
+    )
+    await page.keyboard.press('Escape').catch(() => {})
+    await page.waitForTimeout(500)
+
+    // The containers are searchable at all — asked of the API directly, since a
+    // workspace may genuinely have nothing matching a given word.
+    const res = await apiRead(`/search/${WS}?q=a&types=folder,list,space&limit=5`)
+    chk(
+      res.status === 200,
+      `the API accepts the container types (${Array.isArray(res.data) ? res.data.length : 0} hit(s))`,
+      `searching folders/lists/spaces answered ${res.status}`,
+    )
+  })
+
+  await section('§6', 'The tools she pins are offered', async () => {
+    await go('/app/profile', 3500)
+    // [07:55]–[08:03] — "yeh document ka, yeh Loom ka, yeh voice recordings ka,
+    // yeh whiteboards ka, aur yeh dashboard ka option hai."
+    for (const tool of ['docs', 'clips', 'recordings', 'whiteboards', 'dashboards']) {
+      chk(
+        (await page.locator(`[data-testid="topbar-toggle-${tool}"]`).count()) > 0,
+        `${tool} can be pinned`,
+        `${tool} is not offered, but she names it`,
+      )
+    }
+    // Read-only on purpose: this is somebody's real top bar, and §2.2b already
+    // proves a preference toggle round-trips to the server on this instance.
+  })
+
+  await section('§7', 'A workspace can be created from the switcher', async () => {
+    await go(`/app/${WS}`, 3500)
+    const switcher = page.locator('[data-testid="workspace-switcher"]')
+    if ((await switcher.count()) === 0) {
+      bad('no workspace switcher to open')
+    } else {
+      await switcher.click()
+      await page.waitForTimeout(900)
+      chk(
+        (await page.locator('[data-testid="new-workspace"]').count()) > 0,
+        'New Workspace is offered — "har member kar sakta hai"',
+        'no New Workspace control',
+      )
+      await page.keyboard.press('Escape').catch(() => {})
+      await page.waitForTimeout(400)
+    }
+    // Not checked here: that a guest is refused. This account is an admin and
+    // there is no way to become a guest without editing a real member's role.
+    // The policy and its guest case are covered by the API's own tests.
+  })
+
+  await section('§14', 'Unread is visible without opening the chat', async () => {
+    await go(`/app/${WS}/inbox`, 4500)
+    const rows = page.locator('[data-testid^="notif-"]')
+    const count = await rows.count()
+    chk(count > 0, `the Inbox has ${count} row(s) to judge`, 'no notifications to check against')
+    if (count > 0) {
+      const states = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid^="notif-"]')].map((el) => ({
+          unread: el.getAttribute('data-unread'),
+          bg: getComputedStyle(el).backgroundColor,
+          border: getComputedStyle(el).borderLeftWidth,
+        })),
+      )
+      const unread = states.filter((r) => r.unread === 'true')
+      const read = states.filter((r) => r.unread === 'false')
+      chk(unread.length > 0, `${unread.length} unread row(s) are marked as such`, 'nothing is marked unread')
+      if (unread.length > 0 && read.length > 0) {
+        const differs =
+          unread[0].bg !== read[0].bg || unread[0].border !== read[0].border
+        chk(differs, 'and unread rows are painted differently from read ones',
+          `unread ${JSON.stringify(unread[0])} vs read ${JSON.stringify(read[0])}`)
+      } else {
+        // Everything on screen is in the same state, so there is nothing to
+        // contrast — said out loud rather than passing on a comparison that
+        // never happened.
+        ok(`only ${unread.length ? 'unread' : 'read'} rows are present, so no contrast to check here`)
+      }
+    }
+  })
+
   await section('§2.9a', 'A slow route shows shapes, not a blank screen', async () => {
     {
       // Hold one route chunk and look at the screen while it is outstanding. This
