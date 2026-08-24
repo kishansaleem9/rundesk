@@ -708,6 +708,13 @@
       "when": 1900000089008,
       "tag": "0100_sidebar_collapsed",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1900000089009,
+      "tag": "0101_chat_reply_notification",
+      "breakpoints": true
     }
   ]
 }

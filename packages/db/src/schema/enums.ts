@@ -79,6 +79,11 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'task_status_changed',
   'task_updated',
   'chat_message',
+  // §14 [16:50] — "Agar aap bhi yahan reply karte ho na … to phir jo hai woh
+  // mujhe yahan show hoga UNREAD mein." A reply into a thread is its own kind:
+  // typed as a plain chat_message it could never reach the Replies page, which
+  // only ever looked for task and doc comments.
+  'chat_reply',
   'doc_mentioned',
   'doc_commented',
   'approval_needed',

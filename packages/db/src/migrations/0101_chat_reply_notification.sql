@@ -1,0 +1,11 @@
+-- §14 [16:41] — chat thread replies had no way to reach the Replies page.
+--
+-- "Ab yahan pe jo REPLY wapas hai … agar aap bhi yahan reply karte ho na, koi
+-- NEW MESSAGE likhte ho — to phir jo hai woh mujhe yahan show hoga UNREAD
+-- mein." The page filtered on task_commented and doc_commented only, and a
+-- thread reply was recorded as an ordinary chat_message, so it never appeared.
+--
+-- A distinct type rather than widening the filter to every chat message:
+-- otherwise Replies becomes a second Inbox, and a top-level channel message is
+-- not a reply to anything.
+ALTER TYPE "notification_type" ADD VALUE IF NOT EXISTS 'chat_reply';

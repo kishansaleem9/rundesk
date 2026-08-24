@@ -148,6 +148,8 @@ type NotificationType =
   | 'task_status_changed'
   | 'task_updated'
   | 'chat_message'
+  // §14 — a reply into a chat thread, so the Replies page can find it.
+  | 'chat_reply'
   | 'doc_mentioned'
   | 'doc_commented'
   | 'approval_needed'
@@ -190,6 +192,8 @@ export const PRIMARY_SELECTABLE_TYPES = [
   'doc_commented',
   'task_assigned',
   'chat_message',
+  // §14 — a reply in a thread, distinct from a new channel message.
+  'chat_reply',
   'task_due_soon',
   'task_overdue',
   'task_status_changed',

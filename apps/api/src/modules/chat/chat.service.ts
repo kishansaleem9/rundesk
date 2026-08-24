@@ -1751,8 +1751,16 @@ export class ChatService {
         userId,
         workspaceId: channel.workspaceId,
         actorId: data.authorId,
-        type: 'chat_message',
-        title: channel.isDm ? `New message from ${author?.displayName ?? 'a teammate'}` : `New message in ${channelLabel}`,
+        // §14 — a reply into a thread is its own kind, so the Replies page can
+        // find it. Typed as a plain chat_message it never could.
+        type: data.parentMessageId ? 'chat_reply' : 'chat_message',
+        title: data.parentMessageId
+          ? channel.isDm
+            ? `New reply from ${author?.displayName ?? 'a teammate'}`
+            : `New reply in ${channelLabel}`
+          : channel.isDm
+            ? `New message from ${author?.displayName ?? 'a teammate'}`
+            : `New message in ${channelLabel}`,
         body: body.slice(0, 180),
         target: {
           entityType: 'chat_message',

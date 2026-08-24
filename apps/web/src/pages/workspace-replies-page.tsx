@@ -22,7 +22,20 @@ type Notification = {
 }
 
 /** Comment traffic aimed at you — the API's two "someone replied" types. */
-const REPLY_TYPES = new Set(['task_commented', 'doc_commented'])
+/**
+ * §14 [16:41] — what counts as a reply.
+ *
+ * "Ab yahan pe jo REPLY wapas hai — yeh wohi cheez hai … agar aap bhi yahan
+ * reply karte ho na, koi NEW MESSAGE likhte ho — to phir jo hai woh mujhe yahan
+ * show hoga UNREAD mein."
+ *
+ * Chat thread replies were missing: they arrived typed as ordinary chat
+ * messages, and this page only ever looked for task and doc comments. They have
+ * their own type now — not every chat message, because a top-level channel
+ * message is not a reply to anything, and folding those in would make this a
+ * second Inbox.
+ */
+const REPLY_TYPES = new Set(['task_commented', 'doc_commented', 'chat_reply'])
 
 const FILTERS = ['unread', 'read', 'all'] as const
 export type ReplyFilter = (typeof FILTERS)[number]

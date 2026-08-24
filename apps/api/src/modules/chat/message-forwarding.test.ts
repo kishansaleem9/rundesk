@@ -32,6 +32,51 @@ const read = (rel: string) => readFileSync(join(workspaceRoot(process.cwd()), re
  * Handing them a working link would be an invitation to a room they were never
  * in — a permission leak dressed as a convenience.
  */
+/**
+ * §14 [16:41] — a reply in a chat thread has to reach the Replies page.
+ *
+ * > "Ab yahan pe jo REPLY wapas hai — yeh wohi cheez hai … agar aap bhi yahan
+ * >  reply karte ho na, koi NEW MESSAGE likhte ho — to phir jo hai woh mujhe
+ * >  yahan show hoga UNREAD mein."
+ *
+ * It could not. Replies filtered on task_commented and doc_commented, and a
+ * thread reply was recorded as an ordinary chat_message — so the one surface
+ * built for replies was the one place chat replies never appeared. Nothing
+ * errored; the page was simply always missing them.
+ */
+describe('§14 a chat reply is its own kind', () => {
+  const service = read('apps/api/src/modules/chat/chat.service.ts')
+  const repliesPage = read('apps/web/src/pages/workspace-replies-page.tsx')
+
+  it('types a threaded message as a reply, and a top-level one as a message', () => {
+    assert.match(
+      service,
+      /type: data\.parentMessageId \? 'chat_reply' : 'chat_message'/,
+      'every chat message is still recorded as the same kind',
+    )
+  })
+
+  it('and the Replies page looks for it', () => {
+    assert.match(repliesPage, /REPLY_TYPES = new Set\(\[[^\]]*'chat_reply'/, 'Replies still ignores chat')
+  })
+
+  it('but not every chat message — Replies is not a second Inbox', () => {
+    // Folding plain chat_message in would fill this page with channel traffic
+    // nobody replied to, which is the opposite of what it is for.
+    const set = /REPLY_TYPES = new Set\(\[([^\]]*)\]/.exec(repliesPage)?.[1] ?? ''
+    assert.ok(set, 'could not read REPLY_TYPES')
+    assert.ok(!/'chat_message'/.test(set), `Replies swallows all chat: ${set}`)
+  })
+
+  it('is offered in the Primary customiser like any other kind', async () => {
+    const { PRIMARY_SELECTABLE_TYPES } = await import('../notifications/notifications.service')
+    assert.ok(
+      (PRIMARY_SELECTABLE_TYPES as readonly string[]).includes('chat_reply'),
+      'a kind that cannot be turned off is a kind you are stuck with',
+    )
+  })
+})
+
 describe('§12 forwarding carries its origin', () => {
   const service = read('apps/api/src/modules/chat/chat.service.ts')
   const controller = read('apps/api/src/modules/chat/chat.controller.ts')
