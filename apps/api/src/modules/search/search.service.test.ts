@@ -379,3 +379,112 @@ describe('§2 search: the containers, Location, and created dates', () => {
     }
   })
 })
+
+/**
+ * §4 [04:20] — "Agar hum Google Drive se search karenge to woh humari Google
+ * Drive se bhi cheezein dhoond ke mila ke de sakta hai."
+ *
+ * The OAuth provider and token storage already existed; nothing searched. The
+ * interesting cases are the ones where Drive is not available, because an
+ * integration being down must never take the whole search down with it — a
+ * search that throws because Google timed out is worse than one that quietly
+ * returns the local results.
+ */
+describe('§4 Google Drive in search', () => {
+  const connected = {
+    workspace_integration_connections: [{ status: 'connected', accessToken: 'tok' }],
+    tasks: [],
+    docs: [],
+  }
+
+  /**
+   * A SearchService whose one Drive call is answered locally.
+   *
+   * Overriding the method rather than stubbing fetch is forced, not stylistic:
+   * safeFetch issues through node:http (no global to replace) and its SSRF
+   * guard rejects loopback, so a local server is not an option either. A first
+   * attempt here stubbed globalThis.fetch and intercepted nothing — the tests
+   * failed rather than passing hollow, which is the only reason it was caught.
+   */
+  class FakeDrive extends SearchService {
+    seen: string[] = []
+    constructor(
+      db: never,
+      private reply: { status: number; files: unknown[] } | 'throw',
+    ) {
+      super(db, config)
+    }
+    protected override async driveRequest(url: string) {
+      this.seen.push(url)
+      if (this.reply === 'throw') throw new Error('getaddrinfo ENOTFOUND')
+      return { status: this.reply.status, text: JSON.stringify({ files: this.reply.files }) }
+    }
+  }
+  const drive = (db: unknown, files: unknown[], status = 200) =>
+    new FakeDrive(db as never, { status, files })
+
+  it('returns Drive files as their own kind, linking out to Drive', async () => {
+    const { db } = makeDb(connected)
+    const svc = drive(db, [
+      { id: 'F1', name: 'Q3 budget.xlsx', webViewLink: 'https://drive.google.com/file/d/F1/view' },
+    ])
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    const hit = res.find((h) => h.entityType === 'drive')
+    assert.ok(hit, `no drive hit: ${JSON.stringify(res)}`)
+    assert.equal(hit.title, 'Q3 budget.xlsx')
+    assert.match(hit.url, /^https:\/\/drive\.google\.com\//, 'a Drive file opens in Drive')
+    // Says where it came from — a result that leaves the product should admit it.
+    assert.equal(hit.content, 'Google Drive')
+  })
+
+  it('escapes the term, so an apostrophe cannot rewrite the Drive query', async () => {
+    // Drive's `q` is a query language and the term is interpolated into a
+    // quoted string inside it. "Ali's notes" would otherwise close that string
+    // early and change what was asked.
+    const { db } = makeDb(connected)
+    const svc = drive(db, [])
+    await svc.search('w1', 'u1', "Ali's notes", 10, { types: ['drive'] })
+    assert.equal(svc.seen.length, 1, 'Drive was not called')
+    const q = decodeURIComponent(new URL(svc.seen[0]).searchParams.get('q') ?? '')
+    assert.ok(q.includes("Ali\\'s notes"), `apostrophe not escaped: ${q}`)
+    assert.ok(q.includes('trashed = false'), `deleted files should stay deleted: ${q}`)
+  })
+
+  it('asks Drive for nothing when no Drive is linked', async () => {
+    const { db } = makeDb({ workspace_integration_connections: [], tasks: [], docs: [] })
+    const svc = drive(db, [])
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    assert.equal(svc.seen.length, 0, 'called Drive without a connection')
+    assert.equal(res.length, 0)
+  })
+
+  it('ignores a connection that is not connected', async () => {
+    const { db } = makeDb({
+      workspace_integration_connections: [{ status: 'revoked', accessToken: 'tok' }],
+      tasks: [],
+      docs: [],
+    })
+    const svc = drive(db, [])
+    await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    assert.equal(svc.seen.length, 0, 'used a token from a revoked connection')
+  })
+
+  it('survives Drive being down, and still answers', async () => {
+    const { db } = makeDb({ ...connected, tasks: [] })
+    const svc = new FakeDrive(db as never, 'throw')
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    assert.deepEqual(res, [], 'a broken integration must not throw out of search')
+  })
+
+  it('survives Drive answering with an error status', async () => {
+    const { db } = makeDb(connected)
+    const svc = drive(db, [{ id: 'F1', name: 'leaked' }], 403)
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    assert.deepEqual(res, [], 'a 403 body must not be read as results')
+  })
+
+  it('is offered by the controller', async () => {
+    const { ENTITY_TYPES } = await import('./entity-types')
+    assert.ok(ENTITY_TYPES.includes('drive' as never), 'drive is not an accepted type')
+  })
+})

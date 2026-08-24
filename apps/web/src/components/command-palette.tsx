@@ -61,6 +61,8 @@ const ENTITY_ORDER = [
   'task', 'doc', 'file', 'comment', 'channel', 'message', 'user',
   // §2 [02:03] — the containers. Reached through the ⋯, like she did.
   'folder', 'list', 'space',
+  // §4 [04:20] — the linked Google Drive, reached through the ⋯ like the rest.
+  'drive',
 ] as const
 /**
  * §2 [02:01] — "yeh 3 DOTS dekh rahe hain? Main yahan se aur points pe click
@@ -84,6 +86,7 @@ const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
   folder: 'palette.entityFolders',
   list: 'palette.entityLists',
   space: 'palette.entitySpaces',
+  drive: 'palette.entityDrive',
 }
 const PRIORITY_LABEL_KEY: Record<string, TranslationKey> = {
   urgent: 'palette.priorityUrgent',

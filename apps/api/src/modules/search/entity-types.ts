@@ -23,4 +23,6 @@ export const ENTITY_TYPES: SearchEntityType[] = [
   'folder',
   'list',
   'space',
+  // §4 [04:20] — files from the workspace's linked Google Drive.
+  'drive',
 ]

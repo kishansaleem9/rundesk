@@ -5,11 +5,13 @@ import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 
 import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, taskAttachments, docs, lists, projects, spaces,
   folders, savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
+  workspaceIntegrationConnections,
   customFieldDefinitions, customFieldValues,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
+import { safeFetch } from '../../common/http/safe-fetch'
 import {
   resolveIsManager,
   taskVisibilityFilter,
@@ -26,6 +28,9 @@ import {
 export type SearchEntityType =
   | 'task' | 'doc' | 'file' | 'user' | 'comment' | 'channel' | 'message'
   | 'folder' | 'list' | 'space'
+  // §4 [04:20] — "Agar hum Google Drive se search karenge to woh humari Google
+  // Drive se bhi cheezein dhoond ke mila ke de sakta hai."
+  | 'drive'
 /**
  * One search result. `sortedAt` is only present on the branches that carry a
  * timestamp (tasks, docs); files, people and messages leave it unset and sort
@@ -331,6 +336,9 @@ export class SearchService implements OnModuleInit {
     // Uploaded files (task attachments + clips). Like docs they carry none of the
     // task-specific filters, so a task-filtered search excludes them (Plan §11.1).
     const wantFiles = (!filters.types || filters.types.includes('file')) && !hasTaskFilter
+    // §4 — Drive carries none of the task-specific filters, so a task-filtered
+    // search excludes it, exactly as docs and files are excluded above.
+    const wantDrive = (!filters.types || filters.types.includes('drive')) && !hasTaskFilter
 
     // Nothing to match on at all → empty. (Filter-only searches are allowed.)
     if (!trimmed && !hasTaskFilter && !filters.types) return []
@@ -381,7 +389,8 @@ export class SearchService implements OnModuleInit {
       const extras = await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
-      return this.merge(filters.sort, limit, [...safeMeili, ...extras, ...clipHits])
+      const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit) : []
+      return this.merge(filters.sort, limit, [...safeMeili, ...extras, ...clipHits, ...driveHits])
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
@@ -465,6 +474,7 @@ export class SearchService implements OnModuleInit {
     // Uploaded files: task attachments (Postgres, access-scoped) + clips (R2).
     const fileHits = wantFiles ? await this.searchTaskAttachments(workspaceId, userId, isManager, like, limit) : []
     const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
+    const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit) : []
 
     // Extras only for a general text search (no type/task-specific filter).
     const extras = like ? await this.searchExtras(workspaceId, userId, like, limit, isManager, filters.types) : []
@@ -488,6 +498,7 @@ export class SearchService implements OnModuleInit {
       })),
       ...fileHits,
       ...clipHits,
+      ...driveHits,
       ...extras,
     ])
   }
@@ -554,6 +565,90 @@ export class SearchService implements OnModuleInit {
    * names none of them short-circuits to nothing, which is why the caller can
    * hand its type chips straight through instead of skipping this entirely.
    */
+  /**
+   * The one network call Drive search makes, behind a method so a test can
+   * replace it.
+   *
+   * `safeFetch` issues through node:http rather than global fetch — there is no
+   * global to stub — and its SSRF guard rejects loopback, so a local test server
+   * is not an option either. Without this seam the Drive tests would either hit
+   * the real Google or, worse, quietly pass while never calling anything.
+   */
+  protected async driveRequest(url: string, token: string): Promise<{ status: number; text: string } | null> {
+    const res = await safeFetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeoutMs: 10_000,
+    })
+    return { status: res.status, text: res.text() }
+  }
+
+  /**
+   * §4 [04:20] — files from the workspace's linked Google Drive.
+   *
+   * "Yeh ClickUp ki quality hai ke woh apni workspace ko itna BROADER mein le
+   * ke jaa raha hai" [04:26]: the point is that searching here reaches past
+   * here. Returns nothing — never throws — when no Drive is linked, when the
+   * token has gone stale, or when Google is having a bad day: an integration
+   * being down must not take the whole search down with it.
+   */
+  private async searchDrive(workspaceId: string, query: string, limit: number): Promise<SearchHit[]> {
+    const trimmed = query.trim()
+    if (!trimmed) return []
+    const [conn] = await this.db
+      .select({
+        status: workspaceIntegrationConnections.status,
+        accessToken: workspaceIntegrationConnections.accessToken,
+      })
+      .from(workspaceIntegrationConnections)
+      .where(
+        and(
+          eq(workspaceIntegrationConnections.workspaceId, workspaceId),
+          eq(workspaceIntegrationConnections.provider, 'google-drive'),
+        ),
+      )
+      .limit(1)
+    if (!conn || conn.status !== 'connected' || !conn.accessToken) return []
+
+    // Drive's `q` is its own query language, and the term is interpolated into
+    // a quoted string inside it. A name containing an apostrophe would close
+    // that string early and change the query — so escape backslashes first,
+    // then quotes, exactly as Google's grammar requires.
+    const escaped = trimmed.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+    const base = process.env.GOOGLE_DRIVE_API_URL ?? 'https://www.googleapis.com/drive/v3'
+    const params = new URLSearchParams({
+      q: `name contains '${escaped}' and trashed = false`,
+      fields: 'files(id,name,mimeType,webViewLink,modifiedTime)',
+      pageSize: String(Math.min(Math.max(limit, 1), 25)),
+    })
+    try {
+      const res = await this.driveRequest(`${base}/files?${params.toString()}`, conn.accessToken)
+      if (!res || res.status < 200 || res.status >= 300) return []
+      const body = JSON.parse(res.text) as {
+        files?: Array<{
+          id?: string
+          name?: string
+          mimeType?: string
+          webViewLink?: string
+          modifiedTime?: string
+        }>
+      }
+      return (body.files ?? [])
+        .filter((f) => f.id && f.name)
+        .map((f) => ({
+          id: `drive-${f.id}`,
+          entityType: 'drive',
+          title: f.name as string,
+          // Says it is not from here, because a result that opens a new tab to
+          // another product should say so before you click it.
+          content: 'Google Drive',
+          url: f.webViewLink ?? `https://drive.google.com/file/d/${f.id}/view`,
+          sortedAt: f.modifiedTime ? new Date(f.modifiedTime) : null,
+        }))
+    } catch {
+      return []
+    }
+  }
+
   private async searchExtras(
     workspaceId: string,
     userId: string,
