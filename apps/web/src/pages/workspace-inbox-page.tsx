@@ -766,7 +766,7 @@ export function InboxPage() {
                         namesById={namesById}
                         view={view}
                         onOpen={async () => {
-                          await Promise.all(unreadIds.map((id) => markRead.mutateAsync(id)))
+                          
                           const destination = await resolveNotificationDestination(group.latest.target, workspaceId)
                           if (destination) go(destination)
                         }}
@@ -837,10 +837,16 @@ function NotificationRow({
 
   return (
     <Card
+      data-testid={`notif-${notif.id}`}
+      data-unread={unread ? 'true' : 'false'}
       variant="glass"
       onClick={() => void onOpen?.()}
       className={cn(
         'group p-3 flex items-start gap-3 hover:border-accent/30 transition-all cursor-pointer',
+        // §14 [16:56] — "yahan show hoga UNREAD mein; agar to maine READ kiya
+        // hai to yeh is tarah se chala jayega". The row has to look different,
+        // or the Inbox cannot answer "is there anything new" at a glance —
+        // which is the whole reason not to open ten chats.
         unread && 'border-l-2 border-l-accent bg-accent/5',
       )}
     >

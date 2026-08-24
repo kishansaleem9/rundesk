@@ -115,6 +115,29 @@ function stubBody(url) {
   // space -> project -> list chain has to answer.
   const data = url.includes('/users/me')
     ? USER
+    // §14 — one unread and one already read, so the row treatments can be told
+    // apart. Both are chat replies: her case is "aap bhi yahan reply karte ho".
+    : /\/notifications(\?|$)/.test(url)
+      ? [
+          {
+            id: 'n-unread',
+            type: 'chat_message',
+            title: 'New message in #general',
+            body: 'a reply nobody has read',
+            readAt: null,
+            createdAt: new Date(0).toISOString(),
+            target: { entityType: 'chat_message', entityId: 'm1', url: '/app/x/chat' },
+          },
+          {
+            id: 'n-read',
+            type: 'chat_message',
+            title: 'New message in #random',
+            body: 'a reply already read',
+            readAt: new Date(0).toISOString(),
+            createdAt: new Date(0).toISOString(),
+            target: { entityType: 'chat_message', entityId: 'm2', url: '/app/x/chat' },
+          },
+        ]
     : url.includes('/notifications/preferences')
       ? { primaryTypes: ['task_mentioned', 'chat_message'] }
       : url.includes('/chat/saved')
@@ -835,6 +858,60 @@ console.log('\n§7  any member can make a workspace; a guest cannot')
     (await page.locator('[data-testid="new-workspace"]').count()) === 0,
     'a guest is not',
   )
+  await ctx.close()
+}
+
+console.log('\n§14  you can tell what is unread without opening the chat')
+// ---------------------------------------------------------------------------
+{
+  /*
+   * "woh 10 groups mein hai — ab us ko har baar chat open karne ki zaroorat
+   * nahi honi chahiye ke woh dekhe ke is mein reply aaya ya nahi. Woh yahan pe
+   * aaye, us ko yahan notification ho jaye — acha, yeh unread message hai"
+   * [17:16]. The Inbox has to answer that at a glance, which means an unread
+   * row must not look like a read one.
+   */
+  const { ctx, page, calls } = await openApp()
+  await page.waitForTimeout(2500)
+
+  const unreadRow = page.locator('[data-testid="notif-n-unread"]')
+  const readRow = page.locator('[data-testid="notif-n-read"]')
+  check((await unreadRow.count()) > 0 && (await readRow.count()) > 0, 'both replies show in the Inbox')
+
+  if ((await unreadRow.count()) > 0 && (await readRow.count()) > 0) {
+    check(
+      (await unreadRow.getAttribute('data-unread')) === 'true',
+      'the unread one is marked unread',
+    )
+    check(
+      (await readRow.getAttribute('data-unread')) === 'false',
+      'and the read one is not',
+    )
+
+    // Marked is not the same as *looking* different. Compare what is painted.
+    const [unreadStyle, readStyle] = await page.evaluate(() => {
+      const pick = (id) => {
+        const el = document.querySelector(`[data-testid="notif-${id}"]`)
+        const cs = el ? getComputedStyle(el) : null
+        return cs ? { bg: cs.backgroundColor, border: cs.borderLeftWidth + ' ' + cs.borderLeftColor } : null
+      }
+      return [pick('n-unread'), pick('n-read')]
+    })
+    check(
+      !!unreadStyle && !!readStyle && JSON.stringify(unreadStyle) !== JSON.stringify(readStyle),
+      'and they are painted differently — the glance she describes',
+      `unread ${JSON.stringify(unreadStyle)} vs read ${JSON.stringify(readStyle)}`,
+    )
+
+    // "agar to maine READ kiya hai to yeh is tarah se chala jayega" [16:59].
+    const before = calls.length
+    await unreadRow.click()
+    await page.waitForTimeout(1200)
+    const marked = calls
+      .slice(before)
+      .find((c) => c.method === 'POST' && /\/notifications\/n-unread\/read$/.test(c.url.split('?')[0]))
+    check(!!marked, 'opening it marks it read', calls.slice(before).map((c) => c.method + ' ' + c.url).slice(-4).join(' | '))
+  }
   await ctx.close()
 }
 
