@@ -1170,7 +1170,35 @@ try {
       'a token leaked into the skill connection payload',
     )
 
-    // A disabled skill cannot be invoked — the Enabled tab is a switch.
+    // §15 — "browse, install, and manage". Enabled is the set THIS person
+    // installed, so writing a skill opts you into it and removing it empties
+    // the tab without touching the library.
+    const enabledNow = (await apiGet(`/workspaces/${WS}/skills?tab=enabled`)) ?? []
+    chk(
+      enabledNow.some((s) => s.id === created.id),
+      'creating a skill puts it in your Enabled tab',
+      'the author was not opted into their own skill',
+    )
+    await fetch(`${API}/workspaces/${WS}/skills/${created.id}/install`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => null)
+    const afterRemove = (await apiGet(`/workspaces/${WS}/skills?tab=enabled`)) ?? []
+    chk(
+      !afterRemove.some((s) => s.id === created.id),
+      'removing it takes it off your list',
+      'an uninstalled skill is still listed as enabled',
+    )
+    const stillThere = (await apiGet(`/workspaces/${WS}/skills?tab=all`)) ?? []
+    chk(
+      stillThere.some((s) => s.id === created.id),
+      'but leaves it in the library',
+      'uninstalling deleted the skill itself',
+    )
+    await apiPost(`/workspaces/${WS}/skills/${created.id}/install`, {})
+
+    // A disabled skill cannot be invoked — that is the AUTHOR's switch, and a
+    // different thing from whether you installed it.
     await fetch(`${API}/workspaces/${WS}/skills/${created.id}`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

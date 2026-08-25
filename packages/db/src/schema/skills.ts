@@ -11,17 +11,28 @@ import { workspaceIntegrationConnections } from './integration-connections'
  *    kar sakta hai" — [17:38], and again at [19:12]: a SKILL, not a feature.
  *
  * A skill is a **named, reusable playbook**: a persona plus instructions that
- * shape the assistant's reply when a person invokes it. ClickUp's own copy is
- * the same shape — "turn a repetitive workflow into a skill that Brain reuses,
- * so you never explain it again" — reuse of an explanation, not delegation of
- * authority.
+ * shape the assistant's reply when a person invokes it.
  *
- * Deliberate boundary: a skill does **not** act unattended. Nothing in the
- * video shows a skill running on its own — every frame is a person asking and
- * the assistant answering, right down to the approval gate at [18:58]
- * ("Approve this approach and I'll create it"). Giving a stored row the power
- * to act would be inventing an authority nobody granted. When that authority
- * is wanted it should be granted explicitly, on a surface built for it.
+ * That boundary is not our invention, and it is worth being exact because
+ * [17:46] ("aap ka AGENT kar sakta hai; aap REPLACE ho sakte ho") sounds like
+ * the opposite. In ClickUp these are two different products:
+ *
+ *   AI Skills — "reusable instructions that allow Brain to load the right
+ *   workflow, format, or expertise on demand instead of rewriting the same
+ *   prompt every time. Think of a Skill as a saved playbook… you define the
+ *   steps, context, and style one time, and Brain follows it every time the
+ *   Skill is used."
+ *
+ *   Autopilot / Super Agents — the layer that ACTS: they "perform actions
+ *   based on defined triggers and conditions", run on Lists, Folders, Spaces
+ *   and Chat Channels, and are configured with "instructions, triggers,
+ *   skills, knowledge, and memory" — where "the Skills section holds all of
+ *   your Super Agent's tools".
+ *
+ * So a Skill is a component an Agent uses, not a small Agent. Her sentence
+ * describes the category; the Skills Hub she is demonstrating is the
+ * instructions half of it. Building action into this table would not be
+ * ambition, it would be the wrong product.
  */
 export const skills = pgTable(
   'skills',
@@ -49,7 +60,14 @@ export const skills = pgTable(
      * published to colleagues by accident.
      */
     visibility:  text('visibility').$type<'private' | 'workspace'>().notNull().default('private'),
-    /** Her library's Enabled tab. A disabled skill stays listed but cannot be invoked. */
+    /**
+     * The author's kill-switch over their own skill, for everyone at once — a
+     * disabled skill stays listed but cannot be invoked by anyone.
+     *
+     * NOT her library's Enabled tab: that is per-person and lives in
+     * `skill_installs` below, because "browse, install, and manage" is what a
+     * hub does and three tabs over one library need three different scopes.
+     */
     enabled:     boolean('enabled').notNull().default(true),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -120,11 +138,48 @@ export const skillConnections = pgTable(
   ],
 )
 
+/**
+ * §15 — who has installed a skill.
+ *
+ * ClickUp's Skills Hub is where you "browse, INSTALL, and manage" skills, and
+ * her library tabs are All Skills / Enabled / Created by me (frame `285_1743`).
+ * Three tabs over one library only mean three different things if Enabled is
+ * per-person: otherwise it is a filter on a flag the author controls, which
+ * would sit oddly next to "Created by me".
+ *
+ * So installing is a row here, not a column on the skill. The author's
+ * `skills.enabled` stays what it is — a kill-switch over their own skill for
+ * everyone — and this records who chose to pick it up.
+ */
+export const skillInstalls = pgTable(
+  'skill_installs',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    skillId:     uuid('skill_id').notNull().references(() => skills.id, { onDelete: 'cascade' }),
+    // Denormalised so "what has this person installed" is one indexed read.
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    installedAt: timestamp('installed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Installing twice is the same as installing once.
+    unique('uq_skill_installs_skill_user').on(t.skillId, t.userId),
+    index('idx_skill_installs_user_ws').on(t.userId, t.workspaceId),
+  ],
+)
+
+export const skillInstallsRelations = relations(skillInstalls, ({ one }) => ({
+  skill:     one(skills, { fields: [skillInstalls.skillId], references: [skills.id] }),
+  workspace: one(workspaces, { fields: [skillInstalls.workspaceId], references: [workspaces.id] }),
+  user:      one(users, { fields: [skillInstalls.userId], references: [users.id] }),
+}))
+
 export const skillsRelations = relations(skills, ({ one, many }) => ({
   workspace:   one(workspaces, { fields: [skills.workspaceId], references: [workspaces.id] }),
   createdBy:   one(users, { fields: [skills.createdById], references: [users.id] }),
   memories:    many(skillMemories),
   connections: many(skillConnections),
+  installs:    many(skillInstalls),
 }))
 
 export const skillMemoriesRelations = relations(skillMemories, ({ one }) => ({

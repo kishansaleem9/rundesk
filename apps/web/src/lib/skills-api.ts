@@ -63,6 +63,7 @@ export const skillKeys = {
   memories: (workspaceId: string, id: string) => ['skills', workspaceId, 'memories', id] as const,
   connections: (workspaceId: string, id: string) =>
     ['skills', workspaceId, 'connections', id] as const,
+  installed: (workspaceId: string) => ['skills', workspaceId, 'installed'] as const,
 }
 
 export function useSkills(workspaceId: string, tab: SkillTab) {
@@ -88,6 +89,30 @@ export function useSkillTemplates(workspaceId: string) {
     enabled: !!workspaceId,
     // The carousel copy only changes when we ship, so stop refetching it.
     staleTime: Infinity,
+  })
+}
+
+/**
+ * §15 — the ids this person has installed, in one read.
+ *
+ * A Set here rather than an `installed` boolean on each skill row: the same
+ * skill appears in All Skills and in Enabled, and a flag baked into the row
+ * would have to be kept in step across both caches.
+ */
+export function useInstalledSkillIds(workspaceId: string) {
+  return useQuery({
+    queryKey: skillKeys.installed(workspaceId),
+    queryFn: async () => new Set(await api<string[]>(`${base(workspaceId)}/installed`)),
+    enabled: !!workspaceId,
+  })
+}
+
+export function useSetSkillInstalled(workspaceId: string) {
+  const invalidate = useSkillInvalidator(workspaceId)
+  return useMutation({
+    mutationFn: ({ id, installed }: { id: string; installed: boolean }) =>
+      api(`${base(workspaceId)}/${id}/install`, { method: installed ? 'POST' : 'DELETE' }),
+    onSuccess: invalidate,
   })
 }
 

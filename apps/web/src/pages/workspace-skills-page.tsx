@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { Button, Input, Badge, cn, toast } from '@rundesk/ui'
-import { Gem, Plus, Search, Sparkles, UserCheck, CheckCircle2, Loader2 } from 'lucide-react'
+import { Gem, Plus, Search, Sparkles, UserCheck, CheckCircle2, Loader2, Check, Download } from 'lucide-react'
 import { SkillAuthorPanel } from '../components/skill-author-panel'
 import { useTranslation } from '../lib/i18n'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { useAuthStore } from '../store/auth'
 import {
   useCreateSkill,
+  useInstalledSkillIds,
+  useSetSkillInstalled,
   useSkillCounts,
   useSkillTemplates,
   useSkills,
@@ -56,6 +58,8 @@ export function SkillsPage() {
   const { data: counts } = useSkillCounts(workspaceId)
   const { data: templates = [] } = useSkillTemplates(workspaceId)
   const create = useCreateSkill(workspaceId)
+  const { data: installed } = useInstalledSkillIds(workspaceId)
+  const setInstalled = useSetSkillInstalled(workspaceId)
 
   // `?? []` inside the deps would be a fresh array every render, so the memo
   // would never actually memoise. Read the query data directly instead.
@@ -215,7 +219,15 @@ export function SkillsPage() {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="skills-list">
           {filtered.map((skill) => (
-            <SkillCard key={skill.id} skill={skill} workspaceId={workspaceId} mine={skill.createdById === me} />
+            <SkillCard
+              key={skill.id}
+              skill={skill}
+              workspaceId={workspaceId}
+              mine={skill.createdById === me}
+              installed={installed?.has(skill.id) ?? false}
+              busy={setInstalled.isPending}
+              onToggleInstall={(next) => setInstalled.mutate({ id: skill.id, installed: next })}
+            />
           ))}
         </div>
       )}
@@ -240,17 +252,35 @@ function SkillCard({
   skill,
   workspaceId,
   mine,
+  installed,
+  busy,
+  onToggleInstall,
 }: {
   skill: Skill
   workspaceId: string
   mine: boolean
+  installed: boolean
+  busy: boolean
+  onToggleInstall: (next: boolean) => void
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   return (
-    <button
+    // A div, not a button: the install control lives inside, and a button
+    // inside a button is invalid HTML that browsers resolve by dropping one.
+    <div
+      role="button"
+      tabIndex={0}
       data-testid={`skill-${skill.id}`}
-      className="text-left rounded-xl border border-border/70 bg-card p-4 hover:border-primary/50 hover:shadow-sm transition-all"
+      className="text-left rounded-xl border border-border/70 bg-card p-4 hover:border-primary/50 hover:shadow-sm transition-all cursor-pointer"
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return
+        e.preventDefault()
+        navigate({
+          to: '/app/$workspaceId/skills/$skillId' as never,
+          params: { workspaceId, skillId: skill.id } as never,
+        })
+      }}
       onClick={() =>
         navigate({
           to: '/app/$workspaceId/skills/$skillId' as never,
@@ -272,17 +302,40 @@ function SkillCard({
       {skill.description && (
         <p className="text-xs text-muted-foreground mt-2 line-clamp-2">{skill.description}</p>
       )}
-      <div className="flex items-center gap-1.5 mt-3">
-        <Badge variant="secondary" className="text-[10px]">
-          {skill.visibility === 'workspace' ? t('skills.shared') : t('skills.private')}
-        </Badge>
-        {mine && (
-          <Badge variant="outline" className="text-[10px]">
-            {t('skills.tab.mine')}
+      <div className="flex items-center justify-between gap-2 mt-3">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Badge variant="secondary" className="text-[10px]">
+            {skill.visibility === 'workspace' ? t('skills.shared') : t('skills.private')}
           </Badge>
-        )}
+          {mine && (
+            <Badge variant="outline" className="text-[10px]">
+              {t('skills.tab.mine')}
+            </Badge>
+          )}
+        </div>
+        {/* §15 — "browse, INSTALL, and manage". Stopping propagation because
+            the whole card navigates, and installing is not opening. */}
+        <button
+          data-testid={`skill-install-${skill.id}`}
+          data-installed={installed ? 'true' : 'false'}
+          disabled={busy}
+          title={installed ? t('skills.uninstall') : t('skills.install')}
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleInstall(!installed)
+          }}
+          className={cn(
+            'shrink-0 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors',
+            installed
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
+              : 'border-border/70 text-muted-foreground hover:border-primary/50 hover:text-foreground',
+          )}
+        >
+          {installed ? <Check className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+          {installed ? t('skills.installed') : t('skills.install')}
+        </button>
       </div>
-    </button>
+    </div>
   )
 }
 

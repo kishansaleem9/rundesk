@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { PgDialect } from 'drizzle-orm/pg-core'
-import { skillConnections, skillMemories, skills, workspaceIntegrationConnections } from '@rundesk/db'
+import {
+  skillConnections,
+  skillInstalls,
+  skillMemories,
+  skills,
+  workspaceIntegrationConnections,
+} from '@rundesk/db'
 import { SkillsService } from './skills.service'
 import { skillTabFilter, visibleSkillsFilter } from './skill-visibility'
 import { SKILL_TEMPLATES, skillTemplate } from './skill-templates'
@@ -43,11 +49,12 @@ const shape = (condition: unknown) => render(condition).sql.replace(/\$\d+/g, '$
  * through the same thenable node, so a call's table, predicate and values can
  * be inspected after the fact.
  */
-type TableKey = 'skills' | 'skillMemories' | 'skillConnections' | 'integrations'
+type TableKey = 'skills' | 'skillMemories' | 'skillConnections' | 'skillInstalls' | 'integrations'
 const TABLES = new Map<unknown, TableKey>([
   [skills, 'skills'],
   [skillMemories, 'skillMemories'],
   [skillConnections, 'skillConnections'],
+  [skillInstalls, 'skillInstalls'],
   [workspaceIntegrationConnections, 'integrations'],
 ])
 
@@ -74,6 +81,7 @@ function fakeDb(rows: Partial<Record<TableKey, unknown[]>> = {}) {
       values: (v: Record<string, unknown>) => ((call.values = v), node),
       set: (v: Record<string, unknown>) => ((call.set = v), node),
       onConflictDoUpdate: (c: unknown) => ((call.conflict = c), node),
+      onConflictDoNothing: () => ((call.conflict = 'do-nothing'), node),
       returning: () => node,
       then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) =>
         Promise.resolve(call.table ? rows[call.table] ?? [] : []).then(res, rej),
@@ -123,8 +131,24 @@ describe('§15 skill visibility', () => {
     }
   })
 
-  it('enabled and mine each add a real narrowing clause', () => {
-    assert.match(shape(skillTabFilter('enabled', WS, ME)), /"enabled" = \$\?/)
+  it('Enabled means installed BY ME, not a flag the author set', () => {
+    // ClickUp's hub is where you "browse, install, and manage" skills, so the
+    // tab is this person's set. Reading it as skills.enabled would show a
+    // switch someone else controls, next to a tab about authorship.
+    const enabled = shape(skillTabFilter('enabled', WS, ME))
+    assert.match(enabled, /exists \(select 1 from "skill_installs"/)
+    assert.match(enabled, /"skill_installs"\."skill_id" = "skills"\."id"/)
+    assert.match(enabled, /"skill_installs"\."user_id" = \$\?/)
+    assert.doesNotMatch(
+      enabled,
+      /"skills"\."enabled" = \$\?/,
+      'the Enabled tab is filtering the author flag again',
+    )
+    // Correlated, so it cannot multiply rows the way a join would.
+    assert.doesNotMatch(enabled, /join/i)
+  })
+
+  it('mine narrows to what this person wrote', () => {
     const mine = shape(skillTabFilter('mine', WS, ME))
     // created_by_id appears twice: once inside the or(), once as the narrowing.
     assert.equal(mine.match(/"created_by_id" = \$\?/g)?.length, 2)
@@ -210,7 +234,7 @@ describe('§15 skills service — create', () => {
   it('seeds instructions from the template but lets the author override', async () => {
     const { calls, svc } = fakeDb({ skills: [mySkill] })
     await svc.create(WS, ME, { name: 'Brand Voice', archetype: 'brand_voice' })
-    const seeded = calls.find((c) => c.op === 'insert')?.values
+    const seeded = calls.find((c) => c.op === 'insert' && c.table === 'skills')?.values
     assert.equal(seeded?.instructions, skillTemplate('brand_voice')!.instructions)
 
     const own = fakeDb({ skills: [mySkill] })
@@ -219,13 +243,79 @@ describe('§15 skills service — create', () => {
       archetype: 'brand_voice',
       instructions: 'my own wording',
     })
-    assert.equal(own.calls.find((c) => c.op === 'insert')?.values?.instructions, 'my own wording')
+    assert.equal(
+      own.calls.find((c) => c.op === 'insert' && c.table === 'skills')?.values?.instructions,
+      'my own wording',
+    )
   })
 
   it('defaults to private, so writing a skill never publishes it', async () => {
     const { calls, svc } = fakeDb({ skills: [mySkill] })
     await svc.create(WS, ME, { name: 'Draft' })
-    assert.equal(calls.find((c) => c.op === 'insert')?.values?.visibility, 'private')
+    assert.equal(
+      calls.find((c) => c.op === 'insert' && c.table === 'skills')?.values?.visibility,
+      'private',
+    )
+  })
+})
+
+describe('§15 installing — "browse, install, and manage"', () => {
+  const published = { ...mySkill, createdById: SOMEONE_ELSE, visibility: 'workspace' }
+
+  it("lets a colleague pick up a published skill without asking its author", async () => {
+    // The entire point of publishing one. Installing is not editing, so it
+    // must not go through the owner check.
+    const { calls, svc } = fakeDb({ skills: [published], skillInstalls: [] })
+    const result = await svc.install(WS, ME, SKILL)
+    assert.deepEqual(result, { ok: true, installed: true })
+    const insert = calls.find((c) => c.op === 'insert' && c.table === 'skillInstalls')
+    assert.equal(insert?.values?.userId, ME, 'installed it for the wrong person')
+    assert.equal(insert?.conflict, 'do-nothing', 'installing twice would raise instead of no-op')
+  })
+
+  it("refuses to install someone else's private skill", async () => {
+    // `install` goes through `get`, so an id you cannot see is 404 — the same
+    // answer as everywhere else, and it does not confirm the id is real.
+    const { svc } = fakeDb({ skills: [] })
+    await assert.rejects(() => svc.install(WS, ME, SKILL), /not found/i)
+  })
+
+  it('lets you uninstall a skill you can no longer see', async () => {
+    // Access can be revoked after you installed something — the author makes
+    // it private again. Routing uninstall through `get` would 404 and leave
+    // the row on your list forever, with no way to take it off.
+    const { calls, svc } = fakeDb({ skills: [] })
+    const result = await svc.uninstall(WS, ME, SKILL)
+    assert.deepEqual(result, { ok: true, installed: false })
+    const del = calls.find((c) => c.op === 'delete' && c.table === 'skillInstalls')
+    assert.ok(del, 'nothing was deleted')
+    assert.deepEqual(render(del?.where).params, [SKILL, ME, WS])
+  })
+
+  it('uninstalls only your own row', async () => {
+    const { calls, svc } = fakeDb({ skills: [] })
+    await svc.uninstall(WS, ME, SKILL)
+    const where = calls.find((c) => c.op === 'delete' && c.table === 'skillInstalls')?.where
+    // Without the user predicate this would take the skill off everyone's list.
+    assert.match(shape(where), /"user_id" = \$\?/)
+    assert.ok(!render(where).params.includes(SOMEONE_ELSE))
+  })
+
+  it('installs a skill for its author when they create it', async () => {
+    // Writing one is choosing to use it; an empty Enabled tab right after
+    // creating a skill reads as "it did not save".
+    const { calls, svc } = fakeDb({ skills: [mySkill] })
+    await svc.create(WS, ME, { name: 'Brand Voice', archetype: 'brand_voice' })
+    const install = calls.find((c) => c.op === 'insert' && c.table === 'skillInstalls')
+    assert.ok(install, 'the author was not opted into their own skill')
+    assert.equal(install?.values?.userId, ME)
+  })
+
+  it('scopes the installed list to this person and workspace', async () => {
+    const { calls, svc } = fakeDb({ skillInstalls: [{ skillId: SKILL }] })
+    assert.deepEqual(await svc.installedIds(WS, ME), [SKILL])
+    const where = calls.find((c) => c.table === 'skillInstalls')?.where
+    assert.deepEqual(render(where).params, [WS, ME])
   })
 })
 
@@ -269,13 +359,16 @@ describe('§15 skill connections', () => {
     // A binding waiting on an admin is a state, not an error.
     const { calls, svc } = fakeDb({ skills: [mySkill], skillConnections: [{ id: 'sc1' }] })
     await svc.addConnection(WS, ME, SKILL, { provider: 'slack' })
-    assert.equal(calls.find((c) => c.op === 'insert')?.values?.connectionId, null)
+    assert.equal(
+      calls.find((c) => c.op === 'insert' && c.table === 'skillConnections')?.values?.connectionId,
+      null,
+    )
   })
 
   it('stores no credential of its own', async () => {
     const { calls, svc } = fakeDb({ skills: [mySkill], skillConnections: [{ id: 'sc1' }] })
     await svc.addConnection(WS, ME, SKILL, { provider: 'slack' })
-    const values = calls.find((c) => c.op === 'insert')?.values ?? {}
+    const values = calls.find((c) => c.op === 'insert' && c.table === 'skillConnections')?.values ?? {}
     for (const key of Object.keys(values)) {
       assert.ok(
         !/token|secret|password|credential/i.test(key),

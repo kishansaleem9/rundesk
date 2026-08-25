@@ -446,11 +446,31 @@ the lookups it performs, drafts the whole skill grounded in them, and stops on h
 *"Approve this approach and I'll create it, or tell me one tweak you want first"* — with the
 follow-up chips that change per answer.
 
-**One honest note on the boundary.** `[17:46]` is *"woh aap ka AGENT kar sakta hai; aap
-REPLACE ho sakte ho"* — her spoken framing is more ambitious than what is built. The frames
-support the narrower reading (ClickUp's own flow stops for approval, and no frame shows a
-skill acting alone), but the decision to stop there was ours, not hers, and should be revisited
-with her rather than treated as settled.
+**The boundary, settled from ClickUp's own documentation (25 Aug).** `[17:46]` — *"woh aap ka
+AGENT kar sakta hai; aap REPLACE ho sakte ho"* — reads as if a skill should act. It does not,
+and this is not our judgement call: in ClickUp these are **two different products**.
+
+> **AI Skills** — "reusable instructions that allow Brain to load the right workflow, format,
+> or expertise on demand instead of rewriting the same prompt every time. Think of a Skill as
+> a saved playbook… you define the steps, context, and style one time, and Brain follows it
+> every time the Skill is used." Invoked by the person: "the /Slash Command for AI Skills
+> appears for everyone in the Workspace."
+>
+> **Autopilot / Super Agents** — the layer that ACTS. They "perform actions based on defined
+> triggers and conditions", run on Lists, Folders, Spaces and Chat Channels, and are configured
+> with "instructions, triggers, skills, knowledge, and memory" — where "the Skills section
+> holds all of your Super Agent's tools."
+
+So a Skill is a **component an Agent uses**, not a small Agent. Her sentence names the
+category; the Skills Hub she is demonstrating is the instructions half. An Agent product is a
+separate, larger build — and Rundesk already has most of its machinery in `ai-command.ts`
+(a bounded tool set, a pure planner, `executeActions`) behind the same propose→confirm gate.
+
+**Corrected the same day:** the library's **Enabled** tab was reading `skills.enabled`, the
+author's flag. ClickUp's hub is where you "browse, **install**, and manage" skills, so Enabled
+is the set *this person installed* — otherwise three tabs over one library are two views of
+authorship and none of use. `skill_installs` (migration `0104`) fixes that; `skills.enabled`
+keeps its real meaning as the author's kill-switch over their own skill for everyone.
 
 **Still open:** Skills Miner and team-wide discovery (the two "scan my workspace" cards are
 the only starters not yet wired), persisted auto-named chat threads, per-message actions

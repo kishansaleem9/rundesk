@@ -8,13 +8,19 @@ import {
 import { and, desc, eq, sql } from 'drizzle-orm'
 import {
   skillConnections,
+  skillInstalls,
   skillMemories,
   skills,
   workspaceIntegrationConnections,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { skillTabFilter, visibleSkillsFilter, type SkillTab } from './skill-visibility'
+import {
+  installedByFilter,
+  skillTabFilter,
+  visibleSkillsFilter,
+  type SkillTab,
+} from './skill-visibility'
 import { SKILL_TEMPLATES, skillTemplate } from './skill-templates'
 import type { SkillProposal } from './skill-proposal'
 
@@ -108,6 +114,13 @@ export class SkillsService {
           enabled: input.enabled ?? true,
         })
         .returning()
+      // Writing a skill is choosing to use it. Leaving the author's own skill
+      // out of their Enabled tab would make creating one feel like it did not
+      // take, and is not how anyone would describe what they just did.
+      await this.db
+        .insert(skillInstalls)
+        .values({ skillId: row.id, workspaceId, userId })
+        .onConflictDoNothing()
       return row
     } catch (err) {
       // uq_skills_ws_owner_name — one person, one skill of a given name.
@@ -199,6 +212,53 @@ export class SkillsService {
     // Memories and connections cascade at the database, so this is one delete.
     await this.db.delete(skills).where(eq(skills.id, id))
     return { ok: true }
+  }
+
+  // ─── Installing ───────────────────────────────────────────────────────────
+
+  /**
+   * §15 — "browse, install, and manage".
+   *
+   * Installing needs only the right to SEE the skill, which is the whole point
+   * of publishing one: a colleague picks it up without needing anything from
+   * its author. It is also idempotent, because a hub button pressed twice
+   * means the same thing as pressed once.
+   */
+  async install(workspaceId: string, userId: string, skillId: string) {
+    const skill = await this.get(workspaceId, userId, skillId)
+    await this.db
+      .insert(skillInstalls)
+      .values({ skillId: skill.id, workspaceId, userId })
+      .onConflictDoNothing()
+    return { ok: true, installed: true }
+  }
+
+  /**
+   * Uninstalling is scoped to this person and this skill, and deliberately does
+   * NOT go through `get`: someone whose access was revoked after installing
+   * must still be able to take it off their own list rather than being stuck
+   * with a row they can no longer read.
+   */
+  async uninstall(workspaceId: string, userId: string, skillId: string) {
+    await this.db
+      .delete(skillInstalls)
+      .where(
+        and(
+          eq(skillInstalls.skillId, skillId),
+          eq(skillInstalls.userId, userId),
+          eq(skillInstalls.workspaceId, workspaceId),
+        ),
+      )
+    return { ok: true, installed: false }
+  }
+
+  /** Which of these skills the caller has installed — one read, not N. */
+  async installedIds(workspaceId: string, userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ skillId: skillInstalls.skillId })
+      .from(skillInstalls)
+      .where(and(eq(skillInstalls.workspaceId, workspaceId), eq(skillInstalls.userId, userId)))
+    return rows.map((r) => r.skillId)
   }
 
   // ─── Memory ───────────────────────────────────────────────────────────────
@@ -432,7 +492,10 @@ export class SkillsService {
     const [row] = await this.db
       .select({
         all: sql<number>`count(*)::int`,
-        enabled: sql<number>`count(*) filter (where ${skills.enabled})::int`,
+        // Matches the Enabled TAB, which is what the number sits next to — the
+        // author's `enabled` flag is a different thing and counting it here
+        // would put a number beside a tab that shows a different set.
+        enabled: sql<number>`count(*) filter (where ${installedByFilter(userId)})::int`,
         mine: sql<number>`count(*) filter (where ${skills.createdById} = ${userId})::int`,
       })
       .from(skills)

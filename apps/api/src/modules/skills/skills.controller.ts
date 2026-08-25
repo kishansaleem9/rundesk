@@ -75,6 +75,31 @@ export class SkillsController {
     return this.svc.createFromProposal(workspaceId, user.id, body)
   }
 
+  @Get('installed')
+  @ApiOperation({ summary: '§15 — ids of the skills the caller has installed' })
+  installed(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.svc.installedIds(workspaceId, user.id)
+  }
+
+  @Post(':id/install')
+  @ApiOperation({ summary: "§15 — the hub's install: needs only the right to see it" })
+  install(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.svc.install(workspaceId, user.id, id)
+  }
+
+  @Delete(':id/install')
+  uninstall(
+    @Param('workspaceId') workspaceId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.svc.uninstall(workspaceId, user.id, id)
+  }
+
   @Get(':id')
   get(
     @Param('workspaceId') workspaceId: string,

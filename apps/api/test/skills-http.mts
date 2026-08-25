@@ -140,12 +140,53 @@ async function main() {
   chk(prompt.includes('Connected systems: github'), 'so do the connections', 'connections did not reach the prompt')
   chk(prompt.includes('do not take actions on your own'), 'and the boundary is the last word', 'the boundary is missing from a real prompt')
 
-  console.log('\n▶ counts and tabs')
+  console.log('\n▶ installing — "browse, install, and manage"')
+  // Enabled is the set THIS person installed, not the author's flag. Writing a
+  // skill counts as choosing to use it, so it starts installed.
+  chk(
+    ((await call('GET', `/workspaces/${WS}/skills?tab=enabled`)).data ?? []).length === 1,
+    'creating a skill puts it in your Enabled tab',
+    'the author was not opted into their own skill',
+  )
+  chk(
+    ((await call('GET', `/workspaces/${WS}/skills/installed`)).data ?? []).includes(skill.id),
+    'and the installed list agrees',
+    'the installed list disagrees with the Enabled tab',
+  )
+  await call('DELETE', `/workspaces/${WS}/skills/${skill.id}/install`)
+  chk(
+    ((await call('GET', `/workspaces/${WS}/skills?tab=enabled`)).data ?? []).length === 0,
+    'removing it empties the Enabled tab',
+    'an uninstalled skill is still listed as enabled',
+  )
+  chk(
+    ((await call('GET', `/workspaces/${WS}/skills?tab=all`)).data ?? []).length === 1,
+    'but it stays in All Skills',
+    'uninstalling deleted it from the library',
+  )
+  await call('POST', `/workspaces/${WS}/skills/${skill.id}/install`)
+  await call('POST', `/workspaces/${WS}/skills/${skill.id}/install`)
+  chk(
+    ((await call('GET', `/workspaces/${WS}/skills?tab=enabled`)).data ?? []).length === 1,
+    'installing twice is installing once',
+    'a second install duplicated the row',
+  )
+
+  console.log('\n▶ counts and the author kill-switch')
   chk((await call('GET', `/workspaces/${WS}/skills/counts`)).data?.all === 1, 'counts see exactly the visible skills', 'counts are wrong')
+  chk((await call('GET', `/workspaces/${WS}/skills/counts`)).data?.enabled === 1, 'and the Enabled count matches the Enabled tab', 'the count and the tab disagree')
   await call('PATCH', `/workspaces/${WS}/skills/${skill.id}`, { enabled: false })
-  chk(((await call('GET', `/workspaces/${WS}/skills?tab=enabled`)).data ?? []).length === 0, 'a disabled skill leaves the Enabled tab', 'a disabled skill is still listed as enabled')
-  chk(((await call('GET', `/workspaces/${WS}/skills?tab=all`)).data ?? []).length === 1, 'but stays in All Skills', 'the disabled skill vanished entirely')
-  chk(await svc.buildInvocationContext(WS, ME, skill.id).then(() => false).catch(() => true), 'and cannot be invoked', 'a disabled skill was still invocable')
+  // Disabling is the AUTHOR's switch and a different thing from installing: it
+  // stops the skill working for everyone while leaving it on their list, so the
+  // person who installed it can see why it stopped rather than watching it
+  // disappear.
+  chk(
+    ((await call('GET', `/workspaces/${WS}/skills?tab=enabled`)).data ?? []).length === 1,
+    'disabling leaves it on your list, marked',
+    'disabling silently removed it from the Enabled tab',
+  )
+  chk(await svc.buildInvocationContext(WS, ME, skill.id).then(() => false).catch(() => true), 'but it cannot be invoked', 'a disabled skill was still invocable')
+  await call('PATCH', `/workspaces/${WS}/skills/${skill.id}`, { enabled: true })
 
   console.log('\n▶ drafting a skill — the lookups are real [18:33]')
   {

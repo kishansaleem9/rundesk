@@ -5145,6 +5145,12 @@ export const en = {
   'skills.author.open': 'Open it',
   'skills.author.build': 'Build one with AI',
   'skills.author.nothingSaved': 'Nothing is saved until you approve it.',
+
+  // §15 — the hub is where you browse, INSTALL and manage skills.
+  'skills.install': 'Install',
+  'skills.installed': 'Installed',
+  'skills.uninstall': 'Remove from my skills',
+  'skills.tab.enabledHint': 'The skills you have installed',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10248,6 +10254,12 @@ export const es: Record<TranslationKey, string> = {
   'skills.author.build': 'Crear una con IA',
   'skills.author.nothingSaved': 'No se guarda nada hasta que lo apruebes.',
 
+  // §15 — the hub is where you browse, INSTALL and manage skills.
+  'skills.install': 'Instalar',
+  'skills.installed': 'Instalada',
+  'skills.uninstall': 'Quitar de mis habilidades',
+  'skills.tab.enabledHint': 'Las habilidades que has instalado',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15349,6 +15361,12 @@ export const ar: Record<TranslationKey, string> = {
   'skills.author.build': 'أنشئها بالذكاء الاصطناعي',
   'skills.author.nothingSaved': 'لا يُحفظ شيء حتى توافق عليه.',
 
+  // §15 — the hub is where you browse, INSTALL and manage skills.
+  'skills.install': 'تثبيت',
+  'skills.installed': 'مثبَّتة',
+  'skills.uninstall': 'إزالة من مهاراتي',
+  'skills.tab.enabledHint': 'المهارات التي ثبَّتها',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20294,6 +20312,12 @@ export const ur: Record<TranslationKey, string> = {
   'skills.author.open': 'کھولیں',
   'skills.author.build': 'AI سے بنوائیں',
   'skills.author.nothingSaved': 'جب تک آپ منظوری نہ دیں، کچھ محفوظ نہیں ہوتا۔',
+
+  // §15 — the hub is where you browse, INSTALL and manage skills.
+  'skills.install': 'انسٹال کریں',
+  'skills.installed': 'انسٹال شدہ',
+  'skills.uninstall': 'میری اسکلز سے ہٹائیں',
+  'skills.tab.enabledHint': 'وہ اسکلز جو آپ نے انسٹال کی ہیں',
 
 }
 

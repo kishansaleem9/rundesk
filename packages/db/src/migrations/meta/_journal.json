@@ -729,6 +729,13 @@
       "when": 1900000089011,
       "tag": "0103_skills",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1900000089012,
+      "tag": "0104_skill_installs",
+      "breakpoints": true
     }
   ]
 }
