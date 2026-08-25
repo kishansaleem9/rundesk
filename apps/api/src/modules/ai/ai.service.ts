@@ -2113,12 +2113,12 @@ why, rather than an elaborate system nobody asked for.
 
 Reply with ONLY a JSON object:
 {
-  "name": "short, in their words, not generic",
+  "name": "Title Case, like a product a person would spot in a list — 'Personal Task Organizer', 'Brand Voice', 'Triage Tasks Like Me'. Never a lowercase echo of their request.",
   "description": "one line",
   "instructions": "the playbook, second person, addressed to the assistant",
   "memories": ["facts about how this person works, worth keeping"],
   "rationale": "one or two sentences on what you saw and why this shape",
-  "followUps": ["three next things they might ask, each a full sentence"]
+  "followUps": ["three things THE USER would say next, in their voice, as instructions to you — 'Create the skill with daily and weekly review modes', 'Turn my messy notes into clear next actions'. Each is sent verbatim as their next message when clicked, so NEVER write a question addressed to them."]
 }`,
       messages: [
         {
