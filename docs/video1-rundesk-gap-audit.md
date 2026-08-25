@@ -836,10 +836,10 @@ One row per finding, 15 sections, produced by reading all 139 frames against the
 |  | medium | Call cards in the channel and a call-started notification with Join | When a call starts, everyone gets a notification and can join straight from it — 'aap ko notification aa raha hoga ke CALL ka option aaya… aap chaho t |
 | **!** | large | AI Notes: record the call and auto-generate meeting notes | An 'AI Notes' toggle inside the call that, once switched on server-side, records the whole call and writes the notes for you — 'main record karoongi a |
 |  | small | Entitlement upsell modal for gated meeting AI ('Contact your admin') | Turning on a capability the workspace has not purchased should explain itself rather than fail silently: 'Unlock AI Notetaker: Automatic meeting notes |
-|  | medium | Meetings hub page and sidebar entry | A 'Meetings' item in the Home sidebar (between Skills and My Tasks) opening a page where 'yahan pe aap ko show hongi meetings' — the place all meeting |
-|  | medium | Meeting notes list: Filters / My notes / Tags / Search + empty state | On the meetings page, a toolbar with 'Filters', a 'My notes' pill, 'Tags:', and a right-aligned 'Search', over a list of notes; when empty, 'No Meetin |
-|  | medium | Upcoming Meetings section with Join, countdown and Connect Calendar | An 'Upcoming Meetings' block with a 'Join' pill, the meeting title, a proximity badge ('in 5m'), a day timeline, and — when no calendar is connected — |
-|  | medium | Meeting-scoped AI ask-box with starter prompts, and meetings in the AI/search index | 'Hey {name}! Ready to dive into your meetings?' with a composer ('Get instant answers and insights from your meetings') and four chips: 'Summarize my  |
+| ✅ | medium | Meetings hub page and sidebar entry | A 'Meetings' item in the Home sidebar (between Skills and My Tasks) opening a page where 'yahan pe aap ko show hongi meetings' — the place all meeting |
+| ✅ | medium | Meeting notes list: Filters / My notes / Tags / Search + empty state | On the meetings page, a toolbar with 'Filters', a 'My notes' pill, 'Tags:', and a right-aligned 'Search', over a list of notes; when empty, 'No Meetin |
+| ✅ | medium | Upcoming Meetings section with Join, countdown and Connect Calendar | An 'Upcoming Meetings' block with a 'Join' pill, the meeting title, a proximity badge ('in 5m'), a day timeline, and — when no calendar is connected — |
+| ✅ | medium | Meeting-scoped AI ask-box with starter prompts, and meetings in the AI/search index | 'Hey {name}! Ready to dive into your meetings?' with a composer ('Get instant answers and insights from your meetings') and four chips: 'Summarize my  |
 
 ### Task creation  ·  13 findings
 

@@ -46,6 +46,22 @@ export class MeetingsController {
     return this.meetings.create(workspaceId, user.id, body)
   }
 
+  @Post('workspaces/:workspaceId/meetings/ask')
+  @ApiOperation({ summary: '§2.8 — ask about your meetings, answered from their records' })
+  ask(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { question?: string },
+  ) {
+    return this.meetings.ask(workspaceId, user.id, body?.question ?? '')
+  }
+
+  @Get('workspaces/:workspaceId/meetings/upcoming')
+  @ApiOperation({ summary: '§2.8 — meetings still to come, soonest first' })
+  upcoming(@Param('workspaceId') workspaceId: string, @CurrentUser() user: { id: string }) {
+    return this.meetings.upcoming(workspaceId, user.id)
+  }
+
   @Get('workspaces/:workspaceId/meetings/:meetingId')
   @ApiOperation({ summary: 'One meeting with its attendees' })
   get(

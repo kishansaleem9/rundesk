@@ -42,6 +42,7 @@ import {
   Globe,
   Users,
   Gem,
+  Video,
 } from 'lucide-react'
 import {
   Button,
@@ -112,6 +113,7 @@ function navIconForLabel(label: string) {
   if (key.includes('team') || key.includes('chat')) return MessageCircle
   if (key.includes('doc')) return FileText
   if (key.includes('dashboard')) return LayoutDashboard
+  if (key.includes('meeting')) return Video
   if (key.includes('skill')) return Gem
   if (key.includes('ai')) return Bot
   if (key.includes('whiteboard')) return Frame
@@ -136,6 +138,7 @@ function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: 
     { label: 'Shared with me', path: `${base}/shared` },
     { label: 'AI', path: `${base}/ai` },
     { label: 'Skills', path: `${base}/skills` },
+    { label: 'Meetings', path: `${base}/meetings` },
     { label: 'Whiteboards', path: `${base}/whiteboards` },
     { label: 'Forms', path: `${base}/forms` },
     { label: 'Automations', path: `${base}/automations` },
@@ -182,6 +185,8 @@ function railEntries(
     // §15 — a skill is an AI surface, so it rides the same ClickApp flag: a
     // workspace with AI turned off must not find Skills still reachable here.
     { path: `${base}/skills`, label: 'Skills', icon: Gem, flag: FLAGS.AI },
+    // §2.8 — she puts Meetings directly after Skills [19:12].
+    { path: `${base}/meetings`, label: 'Meetings', icon: Video },
     { path: `${base}/shared`, label: 'Shared with me', icon: Users },
     { path: `${base}/whiteboards`, label: 'Whiteboards', icon: Frame },
     { path: `${base}/forms`, label: 'Forms', icon: ClipboardList, flag: FLAGS.FORMS },
@@ -557,6 +562,7 @@ export function WorkspaceSidebar() {
       case 'Dashboards': return t('nav.dashboards')
       case 'AI': return t('nav.ai')
       case 'Skills': return t('nav.skills')
+      case 'Meetings': return t('nav.meetings')
       case 'Shared with me': return t('nav.sharedWithMe')
       case 'Whiteboards': return t('nav.whiteboards')
       case 'Forms': return t('nav.forms')
@@ -1162,6 +1168,10 @@ export function WorkspaceSidebar() {
                 {/* §15 — her "AI Chats" section, frames `296_1817` → `304_1907`:
                     the conversation that authored a skill is still listed after
                     the panel is closed. */}
+                {/* §2.8 — "yahan pe aap ko show hongi meetings" [19:16]. Not
+                    behind the AI flag: a meeting record is a record, and the
+                    page is useful with the assistant switched off. */}
+                <NavLink to={"/app/$workspaceId/meetings" as any} params={{ workspaceId }} icon={Video} label={t('nav.meetings')} compact />
                 {featureEnabled(FLAGS.AI) && <AiChatsSection workspaceId={workspaceId} />}
                 {/* A1.7 — without this row a privately shared list is only
                     reachable by link, since it is hidden from the tree below. */}
@@ -1841,6 +1851,7 @@ function NavLink({
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/skills'
+    | '/app/$workspaceId/meetings'
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/whiteboards'
@@ -1890,6 +1901,7 @@ function DockLink({
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/skills'
+    | '/app/$workspaceId/meetings'
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/settings'

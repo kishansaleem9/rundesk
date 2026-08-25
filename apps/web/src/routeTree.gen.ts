@@ -53,6 +53,7 @@ import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$worksp
 import { Route as AppWorkspaceIdReportsRouteImport } from './routes/app.$workspaceId.reports'
 import { Route as AppWorkspaceIdRepliesRouteImport } from './routes/app.$workspaceId.replies'
 import { Route as AppWorkspaceIdMindmapsRouteImport } from './routes/app.$workspaceId.mindmaps'
+import { Route as AppWorkspaceIdMeetingsRouteImport } from './routes/app.$workspaceId.meetings'
 import { Route as AppWorkspaceIdIntegrationsRouteImport } from './routes/app.$workspaceId.integrations'
 import { Route as AppWorkspaceIdInsightsRouteImport } from './routes/app.$workspaceId.insights'
 import { Route as AppWorkspaceIdInboxRouteImport } from './routes/app.$workspaceId.inbox'
@@ -343,6 +344,13 @@ const AppWorkspaceIdMindmapsRoute = AppWorkspaceIdMindmapsRouteImport.update({
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.mindmaps.lazy').then((d) => d.Route),
 )
+const AppWorkspaceIdMeetingsRoute = AppWorkspaceIdMeetingsRouteImport.update({
+  id: '/meetings',
+  path: '/meetings',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.meetings.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdIntegrationsRoute =
   AppWorkspaceIdIntegrationsRouteImport.update({
     id: '/integrations',
@@ -572,6 +580,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
   '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
+  '/app/$workspaceId/meetings': typeof AppWorkspaceIdMeetingsRoute
   '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
   '/app/$workspaceId/replies': typeof AppWorkspaceIdRepliesRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
@@ -638,6 +647,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
   '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
+  '/app/$workspaceId/meetings': typeof AppWorkspaceIdMeetingsRoute
   '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
   '/app/$workspaceId/replies': typeof AppWorkspaceIdRepliesRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
@@ -705,6 +715,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/inbox': typeof AppWorkspaceIdInboxRoute
   '/app/$workspaceId/insights': typeof AppWorkspaceIdInsightsRoute
   '/app/$workspaceId/integrations': typeof AppWorkspaceIdIntegrationsRoute
+  '/app/$workspaceId/meetings': typeof AppWorkspaceIdMeetingsRoute
   '/app/$workspaceId/mindmaps': typeof AppWorkspaceIdMindmapsRoute
   '/app/$workspaceId/replies': typeof AppWorkspaceIdRepliesRoute
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
@@ -776,6 +787,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/insights'
     | '/app/$workspaceId/integrations'
+    | '/app/$workspaceId/meetings'
     | '/app/$workspaceId/mindmaps'
     | '/app/$workspaceId/replies'
     | '/app/$workspaceId/reports'
@@ -842,6 +854,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/insights'
     | '/app/$workspaceId/integrations'
+    | '/app/$workspaceId/meetings'
     | '/app/$workspaceId/mindmaps'
     | '/app/$workspaceId/replies'
     | '/app/$workspaceId/reports'
@@ -908,6 +921,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/insights'
     | '/app/$workspaceId/integrations'
+    | '/app/$workspaceId/meetings'
     | '/app/$workspaceId/mindmaps'
     | '/app/$workspaceId/replies'
     | '/app/$workspaceId/reports'
@@ -1258,6 +1272,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdMindmapsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/meetings': {
+      id: '/app/$workspaceId/meetings'
+      path: '/meetings'
+      fullPath: '/app/$workspaceId/meetings'
+      preLoaderRoute: typeof AppWorkspaceIdMeetingsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/integrations': {
       id: '/app/$workspaceId/integrations'
       path: '/integrations'
@@ -1546,6 +1567,7 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdInboxRoute: typeof AppWorkspaceIdInboxRoute
   AppWorkspaceIdInsightsRoute: typeof AppWorkspaceIdInsightsRoute
   AppWorkspaceIdIntegrationsRoute: typeof AppWorkspaceIdIntegrationsRoute
+  AppWorkspaceIdMeetingsRoute: typeof AppWorkspaceIdMeetingsRoute
   AppWorkspaceIdMindmapsRoute: typeof AppWorkspaceIdMindmapsRoute
   AppWorkspaceIdRepliesRoute: typeof AppWorkspaceIdRepliesRoute
   AppWorkspaceIdReportsRoute: typeof AppWorkspaceIdReportsRoute
@@ -1574,6 +1596,7 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdInboxRoute: AppWorkspaceIdInboxRoute,
   AppWorkspaceIdInsightsRoute: AppWorkspaceIdInsightsRoute,
   AppWorkspaceIdIntegrationsRoute: AppWorkspaceIdIntegrationsRoute,
+  AppWorkspaceIdMeetingsRoute: AppWorkspaceIdMeetingsRoute,
   AppWorkspaceIdMindmapsRoute: AppWorkspaceIdMindmapsRoute,
   AppWorkspaceIdRepliesRoute: AppWorkspaceIdRepliesRoute,
   AppWorkspaceIdReportsRoute: AppWorkspaceIdReportsRoute,

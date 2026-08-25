@@ -43,6 +43,7 @@ import { DatabaseModule } from '../dist/apps/api/src/common/database/database.mo
 import { SkillsModule } from '../dist/apps/api/src/modules/skills/skills.module.js'
 import { SkillsService } from '../dist/apps/api/src/modules/skills/skills.service.js'
 import { ChatThreadsService } from '../dist/apps/api/src/modules/ai/chat-threads.service.js'
+import { MeetingsService } from '../dist/apps/api/src/modules/meetings/meetings.service.js'
 import { AiService } from '../dist/apps/api/src/modules/ai/ai.service.js'
 import { DB_TOKEN } from '../dist/apps/api/src/common/database/database.module.js'
 
@@ -517,6 +518,81 @@ async function main() {
       'deleting it takes it off the list',
       'the deleted thread is still listed',
     )
+  }
+
+  console.log('\n▶ the Meetings hub — [19:16] "yahan pe aap ko show hongi meetings"')
+  {
+    const ai = new AiService({ get: () => undefined }, app.get(DB_TOKEN), {})
+    const meetings = new MeetingsService(app.get(DB_TOKEN), ai as never, {} as never)
+
+    const past = await meetings.create(WS, ME, {
+      title: 'Pricing review',
+      startsAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      notes: 'Agreed to raise prices in Q3.',
+    })
+    const soon = await meetings.create(WS, ME, {
+      title: 'Standup',
+      startsAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    })
+
+    const upcoming = await meetings.upcoming(WS, ME)
+    chk(upcoming.some((m) => m.id === soon.id), 'a meeting still to come is upcoming', 'the upcoming meeting was missing')
+    chk(
+      !upcoming.some((m) => m.id === past.id),
+      'and one that already happened is not',
+      'a past meeting was listed as upcoming',
+    )
+    chk(
+      upcoming.length < 2 || new Date(upcoming[0].startsAt!) <= new Date(upcoming[1].startsAt!),
+      'soonest first — the one about to start is the one being looked for',
+      'upcoming meetings came back in the wrong order',
+    )
+
+    // The boundary the server owns. A browser clock cannot be trusted with it.
+    const justPast = await meetings.upcoming(WS, ME, new Date(Date.now() + 10 * 60 * 1000))
+    chk(
+      !justPast.some((m) => m.id === soon.id),
+      'the split is made against the server clock, not the caller’s',
+      'the upcoming split ignored the time it was given',
+    )
+
+    const listed = await meetings.list(WS, ME)
+    chk(listed.some((m) => m.id === past.id), 'a recorded meeting is listed on the hub', 'the meeting was not listed')
+
+    // What the ask-box reads: notes bounded, attendees flattened, no key here
+    // so the answer is the honest refusal rather than an invention.
+    const context = await meetings.recentForAi(WS, ME)
+    chk(context.some((m) => m.title === 'Pricing review'), 'the ask-box can read the records', 'the AI context was empty')
+    chk(
+      context.every((m) => (m.notes?.length ?? 0) <= 1200),
+      'with notes bounded per meeting rather than the list truncated',
+      'a meeting sent unbounded notes',
+    )
+    const answered = await meetings.ask(WS, ME, 'What did we decide?')
+    chk(
+      answered.grounded === false && /no model is configured/i.test(answered.answer),
+      'and says plainly when it could not read them',
+      `unexpected answer: ${answered.answer.slice(0, 80)}`,
+    )
+    let refusedEmpty = false
+    try {
+      await meetings.ask(WS, ME, '   ')
+    } catch {
+      refusedEmpty = true
+    }
+    chk(refusedEmpty, 'an empty question is refused', 'an empty question was sent to the model')
+
+    // A colleague outside the workspace gets nothing.
+    let refusedOutsider = false
+    try {
+      await meetings.upcoming('99999999-9999-4999-8999-999999999999', ME)
+    } catch {
+      refusedOutsider = true
+    }
+    chk(refusedOutsider, 'and a workspace you are not in answers nothing', 'meetings leaked across workspaces')
+
+    await meetings.remove(WS, past.id, ME).catch(() => {})
+    await meetings.remove(WS, soon.id, ME).catch(() => {})
   }
 
   console.log('\n▶ cleanup')

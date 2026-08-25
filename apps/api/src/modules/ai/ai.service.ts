@@ -2303,6 +2303,67 @@ Skills they already have: ${owned.length ? owned.join(', ') : 'none'}.`,
     return response.content[0]?.type === 'text' ? response.content[0].text : ''
   }
 
+  /**
+   * §2.8 — the meetings ask-box: "Get instant answers and insights from your
+   * meetings" with her four starter chips (frame `310`).
+   *
+   * Grounded in the meetings themselves, passed in by the caller rather than
+   * read here — MeetingsService owns the membership check, and doing the read
+   * there keeps one access rule instead of two that can drift.
+   *
+   * Refuses rather than improvises when there is nothing to read: an answer
+   * about meetings you have not had is worse than being told there are none.
+   */
+  async askAboutMeetings(
+    question: string,
+    meetingsContext: Array<{
+      title: string
+      startsAt: Date | null
+      notes: string | null
+      attendees: string[]
+    }>,
+    ctx: AiCtx = {},
+  ): Promise<{ answer: string; grounded: boolean }> {
+    if (meetingsContext.length === 0) {
+      return {
+        answer:
+          'There are no meetings recorded here yet, so there is nothing for me to read. ' +
+          'Record one from the AI panel’s Meeting notes tab and ask me again.',
+        grounded: false,
+      }
+    }
+    if (!this.isAvailable()) {
+      return {
+        answer: `I can see ${meetingsContext.length} meeting(s), but no model is configured on this instance, so I cannot read them for you.`,
+        grounded: false,
+      }
+    }
+
+    const transcript = meetingsContext
+      .map((m) => {
+        const when = m.startsAt ? new Date(m.startsAt).toISOString().split('T')[0] : 'no date'
+        const who = m.attendees.length ? ` — with ${m.attendees.join(', ')}` : ''
+        return `## ${m.title} (${when})${who}\n${m.notes ?? '(no notes were kept)'}`
+      })
+      .join('\n\n')
+
+    const response = await this.complete('meetings.ask', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1200,
+      system: `You answer questions about someone's meetings, using ONLY the records below.
+
+Cite meetings by their title and date so the answer can be checked. If the
+records do not contain the answer, say which meetings you looked at and that
+they do not cover it — do not fill the gap. Many meetings here will have no
+notes kept; say so rather than inferring what was discussed from the title.
+
+Today is ${new Date().toISOString().split('T')[0]}.`,
+      messages: [{ role: 'user', content: `${question}\n\n---\n\n${transcript}` }],
+    })
+    const answer = response.content[0]?.type === 'text' ? response.content[0].text : ''
+    return { answer, grounded: true }
+  }
+
   async command(workspaceId: string, message: string, ctx: AiCtx = {}): Promise<CommandPlan> {
     const [workspaceContext, planCtx] = await Promise.all([
       this.buildWorkspaceContext(workspaceId, ctx.userId ?? ''),

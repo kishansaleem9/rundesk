@@ -1533,6 +1533,73 @@ try {
     chk(gone.status === 404, 'and the check cleans up after itself', `the chat survived deletion (${gone.status})`)
   })
 
+  await section('§2.8', 'Meetings have a page — "yahan pe aap ko show hongi meetings"', async () => {
+    // [19:16]. The whole meetings API already existed — list, get, attendees,
+    // action items — with no page and no route: an endpoint with no button.
+    await go(`/app/${WS}/meetings`, 4000)
+    chk(
+      (await page.locator('[data-testid="meetings-page"]').count()) > 0,
+      'the Meetings hub renders at /meetings',
+      'no Meetings hub — the route did not resolve',
+    )
+    chk(
+      (await page.locator('[data-testid="meetings-upcoming"]').count()) > 0,
+      'with an Upcoming Meetings block',
+      'no Upcoming Meetings block',
+    )
+    // Either meetings, or the Connect Calendar door — never a blank space.
+    const upcomingRows = await page.locator('[data-testid^="meeting-upcoming-"]').count()
+    const connect = await page.locator('[data-testid="meetings-connect-calendar"]').count()
+    chk(
+      upcomingRows + connect > 0,
+      upcomingRows ? `${upcomingRows} upcoming` : 'and a Connect Calendar prompt when there are none',
+      'the upcoming block rendered blank',
+    )
+
+    chk(
+      (await page.locator('[data-testid="meetings-ask"]').count()) > 0,
+      'the meetings ask-box is on the page',
+      'no ask-box',
+    )
+    chk(
+      (await page.locator('[data-testid="meetings-ask-starters"] button').count()) >= 4,
+      'with her four starter prompts',
+      'fewer than four starter prompts',
+    )
+    chk(
+      (await page.locator('[data-testid="meetings-search"]').count()) > 0 &&
+        (await page.locator('[data-testid="meetings-mine"]').count()) > 0,
+      'and the notes list has My notes and Search',
+      'the notes toolbar is missing controls',
+    )
+
+    // A list, or an honest empty state saying where meetings come from.
+    const rows = await page.locator('[data-testid^="meeting-"]').count()
+    const empty = await page.locator('[data-testid="meetings-empty"]').count()
+    chk(rows + empty > 0, rows ? `${rows} meeting row(s)` : 'and says so when there are none', 'the notes list rendered blank')
+
+    // The sidebar entry, which is how anyone would find this.
+    await go(`/app/${WS}`, 3500)
+    chk(
+      (await page.locator('a[href$="/meetings"]').count()) > 0,
+      'and the sidebar has a Meetings entry',
+      'Meetings is not reachable from the sidebar',
+    )
+
+    // The ask endpoint answers, and says whether it read anything.
+    const asked = await apiPost(`/workspaces/${WS}/meetings/ask`, { question: 'Summarize my recent meetings' })
+    if (asked) {
+      chk(typeof asked.answer === 'string' && asked.answer.length > 0, 'asking about meetings answers', 'the ask returned nothing')
+      chk(
+        typeof asked.grounded === 'boolean',
+        `and says whether it read any records (grounded: ${asked.grounded})`,
+        'the answer does not say whether it was grounded',
+      )
+    } else {
+      ok('the meetings ask is gated on this instance, so it could not be exercised')
+    }
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)

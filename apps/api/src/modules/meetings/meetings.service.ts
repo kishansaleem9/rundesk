@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
-import { and, desc, eq, inArray, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, ne } from 'drizzle-orm'
 import { meetings, meetingAttendees, workspaceMembers, users, tasks, taskAssignees, lists, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -86,6 +86,69 @@ export class MeetingsService {
       .limit(200)
     const attendees = await this.attendeesFor(rows.map((r) => r.id))
     return rows.map((r) => ({ ...r, attendees: attendees.get(r.id) ?? [] }))
+  }
+
+  /**
+   * §2.8 — the "Upcoming Meetings" block, with a Join pill and a countdown.
+   *
+   * Split on the SERVER against `now()` rather than filtered in the browser:
+   * a client clock that is wrong — a laptop woken from sleep, a machine in the
+   * wrong timezone — would move a meeting between "upcoming" and "past" with
+   * nothing to say it had, and the person would simply not be told about a call
+   * that is about to start.
+   */
+  async upcoming(workspaceId: string, userId: string, now: Date = new Date()) {
+    await this.assertMember(workspaceId, userId)
+    const rows = await this.db
+      .select()
+      .from(meetings)
+      .where(and(eq(meetings.workspaceId, workspaceId), gte(meetings.startsAt, now)))
+      // Soonest first: the one about to start is the one being looked for.
+      .orderBy(asc(meetings.startsAt))
+      .limit(10)
+    const attendees = await this.attendeesFor(rows.map((r) => r.id))
+    return rows.map((r) => ({ ...r, attendees: attendees.get(r.id) ?? [] }))
+  }
+
+  /**
+   * §2.8 — what the meetings ask-box answers from.
+   *
+   * Notes are truncated per meeting rather than the list being cut short: a
+   * question like "what did I miss this week" is answered badly by three
+   * meetings in full and wrongly by none of the others.
+   */
+  async recentForAi(workspaceId: string, userId: string, limit = 20) {
+    await this.assertMember(workspaceId, userId)
+    const rows = await this.db
+      .select({
+        id: meetings.id,
+        title: meetings.title,
+        startsAt: meetings.startsAt,
+        notes: meetings.notes,
+        createdAt: meetings.createdAt,
+      })
+      .from(meetings)
+      .where(eq(meetings.workspaceId, workspaceId))
+      .orderBy(desc(meetings.startsAt), desc(meetings.createdAt))
+      .limit(limit)
+    const attendees = await this.attendeesFor(rows.map((r) => r.id))
+    return rows.map((r) => ({
+      ...r,
+      notes: r.notes ? r.notes.slice(0, 1200) : null,
+      attendees: ((attendees.get(r.id) ?? []) as Array<{ name?: string | null; email?: string | null }>)
+        .map((a) => a.name ?? a.email ?? 'someone'),
+    }))
+  }
+
+  /**
+   * §2.8 — the ask-box. The membership check and the read live here; the AI
+   * only sees records this person is already allowed to see.
+   */
+  async ask(workspaceId: string, userId: string, question: string) {
+    const asked = (question ?? '').trim()
+    if (!asked) throw new BadRequestException('Ask something about your meetings')
+    const context = await this.recentForAi(workspaceId, userId)
+    return this.ai.askAboutMeetings(asked, context, { userId, workspaceId })
   }
 
   async get(workspaceId: string, meetingId: string, userId: string) {
