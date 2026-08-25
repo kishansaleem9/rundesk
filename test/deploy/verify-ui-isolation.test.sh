@@ -62,11 +62,35 @@ const locator = (sel) => {
   }
   return self
 }
+let pendingRoute = null
 const page = {
   url: () => URL_,
   goto: async () => {}, waitForTimeout: async () => {}, waitForURL: async () => {},
   fill: async () => {}, click: async () => {}, screenshot: async () => {},
-  route: async () => {}, unroute: async () => {}, evaluate: async () => false,
+  // Reproduces the 25 Aug crash deterministically rather than by timing: the
+  // handler is captured at route() and invoked, unawaited, at unroute() — which
+  // is exactly the ordering that broke, a handler completing against a route
+  // Playwright has already released. Firing it on a timer instead looked like a
+  // test and was not: process.exit() discards pending timers, so the handler
+  // never ran and the assertion passed with the bug present.
+  route: async (_pattern, handler) => { pendingRoute = handler },
+  unroute: async () => {
+    const handler = pendingRoute
+    pendingRoute = null
+    if (typeof handler !== 'function') return
+    // AWAITED, not fire-and-forget. The stub's api helpers short-circuit to
+    // resolved promises once the fake login fails, so everything after §2.9a is
+    // microtasks — a setTimeout inside the handler would never get a turn and
+    // the assertion would pass without the handler ever finishing. Awaiting it
+    // here (verify-ui awaits unroute) guarantees it runs to completion.
+    await handler({
+      continue: async () => {
+        console.error('STUB-VIOLATION: the handler continued a released route')
+        throw new Error('Route is already handled!')
+      },
+    }).catch(() => {})
+  },
+  evaluate: async () => false,
   locator, getByRole: () => locator('role'), on: () => {},
   mouse: { click: async () => {} }, keyboard: { press: async () => {} },
 }
@@ -82,6 +106,22 @@ JS
 # and it falls back to reading the workspace id out of the stubbed URL.
 run_with_throw() {
   PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" THROW_ON="$1" \
+    node "$REPO/deploy/verify-ui.mjs" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+# CHUNK_HOLD_MS shortens §2.9a's deliberate 4s hold so the handler actually
+# fires within a stub run — otherwise the process exits first and the assertion
+# below passes without ever exercising the path.
+run_route_handler() {
+  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" CHUNK_HOLD_MS=20 \
+    node "$REPO/deploy/verify-ui.mjs" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
+}
+
+# A rejection from anywhere at all, to prove the process-level guard catches
+# what no section guard can.
+run_with_stray_rejection() {
+  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" \
+    NODE_OPTIONS="--import=$WORK/stray.mjs" \
     node "$REPO/deploy/verify-ui.mjs" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 }
 
@@ -119,7 +159,42 @@ else
 fi
 
 echo
-echo "4. an unrigged run reaches the end too"
+echo "4. the §2.9a route handler survives being unrouted while it sleeps"
+# The 25 Aug crash: the handler continued a route Playwright had already
+# released, and the rejection killed the process before §15 ran.
+out="$(run_route_handler)"
+if grep -q 'STUB-VIOLATION' <<<"$out"; then
+  check no "the handler leaves a released route alone" "it still continues a released route"
+else
+  check ok "the handler leaves a released route alone"
+fi
+if grep -q 'HEALTH' <<<"$out"; then
+  check ok "and the run reaches the end"
+else
+  check no "and the run reaches the end" "the process died — this is the 25 Aug regression"
+fi
+
+echo
+echo "5. a stray rejection from anywhere is one failure, not the end of the run"
+# The guard behind the fix: no section try/catch can catch a promise nobody
+# awaits, so the process-level handler has to turn it into a FAIL.
+cat > "$WORK/stray.mjs" <<'MJS'
+setTimeout(() => { Promise.reject(new Error('something nobody awaited')) }, 40)
+MJS
+out="$(run_with_stray_rejection)"
+if grep -q 'unhandled rejection: something nobody awaited' <<<"$out"; then
+  check ok "the stray rejection is reported"
+else
+  check no "the stray rejection is reported" "it was swallowed instead"
+fi
+if grep -qE '^[0-9]+ passed, [0-9]+ failed' <<<"$out"; then
+  check ok "and the run still prints a summary"
+else
+  check no "and the run still prints a summary" "no summary — a dead run looks like a stopped one"
+fi
+
+echo
+echo "6. an unrigged run reaches the end too"
 out2="$(run_with_throw '')"
 if grep -qF '▶ HEALTH' <<<"$out2"; then
   check ok "HEALTH is reached with nothing rigged"

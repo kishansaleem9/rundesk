@@ -109,6 +109,25 @@ const bad = (m) => { results.push([REF, false, m]); console.log(`  \x1b[31mFAIL\
 const chk = (c, g, b) => (c ? ok(g) : bad(b))
 const ref = (r, what) => { REF = r; console.log(`\n\x1b[1;36m▶ ${r}\x1b[0m  ${what}`) }
 
+/**
+ * A stray rejection must not be able to end the run.
+ *
+ * Every section already runs inside its own try/catch, but that only catches
+ * what a section AWAITS. A promise created inside a section and left running —
+ * a route handler still asleep, a navigation nobody waited on — rejects later,
+ * outside any of them, and Node's default is to kill the process. When that
+ * happens mid-run the summary never prints and every section after it silently
+ * never ran, which reads as "the check stopped" rather than "the check failed".
+ *
+ * It happened on 25 Aug: §2.9a's route handler continued a route that had been
+ * unrouted while it slept, and took §15 with it. That specific bug is fixed
+ * above; this is the guard that keeps the next one to a single FAIL.
+ */
+process.on('unhandledRejection', (err) => {
+  const message = err instanceof Error ? err.message.split('\n')[0] : String(err)
+  bad(`unhandled rejection: ${message}`)
+})
+
 const launchOpts = { args: ['--no-sandbox', '--disable-dev-shm-usage'] }
 if (process.env.CHROME) launchOpts.executablePath = process.env.CHROME
 // Pin the site's hostname to loopback. This is what lets the request carry the
@@ -993,10 +1012,22 @@ try {
           await Promise.all(names.map((n) => caches.delete(n).catch(() => false)))
         }
       }).catch(() => {})
-      await page.route('**/assets/*docs.lazy-*', async (route) => {
-        await new Promise((r) => setTimeout(r, 4000))
-        return route.continue()
-      })
+      // The handler outlives the assertions on purpose — it is asleep holding
+      // the chunk while the screen is inspected. So it must survive being
+      // unrouted mid-sleep: `unroute` does not cancel an in-flight handler, and
+      // continuing a route Playwright has already released throws "Route is
+      // already handled!" from a promise nobody is awaiting, which kills the
+      // whole process. That is exactly what happened on 25 Aug: §2.9a used to
+      // be the last section, so the run exited before the timer landed; adding
+      // §15 after it gave the rejection time to surface and took out every
+      // section that followed.
+      let holdingChunk = true
+      const slowChunk = async (route) => {
+        await new Promise((r) => setTimeout(r, Number(process.env.CHUNK_HOLD_MS ?? 4000)))
+        if (!holdingChunk) return
+        await route.continue().catch(() => {})
+      }
+      await page.route('**/assets/*docs.lazy-*', slowChunk)
       await go(`/app/${WS}/inbox`, 3500)
       const docsLink = page.locator(`a[href$="/${WS}/docs"]`).first()
       if ((await docsLink.count()) === 0) {
@@ -1009,7 +1040,8 @@ try {
         chk(shapes >= 4, `the wait is drawn as shapes (${shapes})`, 'the content area was blank')
         chk(busy > 0, 'and announced to assistive tech', 'nothing marked aria-busy')
       }
-      await page.unroute('**/assets/*docs.lazy-*')
+      holdingChunk = false
+      await page.unroute('**/assets/*docs.lazy-*', slowChunk).catch(() => {})
     }
   })
 
