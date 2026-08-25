@@ -252,6 +252,25 @@ export class SkillsService {
     return { ok: true, installed: false }
   }
 
+  /**
+   * The skills this person can invoke by slash command: installed, visible, and
+   * not switched off by their author.
+   *
+   * `enabled` is filtered HERE rather than left to the invocation check, so a
+   * skill its author has disabled stops appearing in the composer's menu. It
+   * would otherwise be offered, typed, and then refused — which reads as the
+   * command being broken rather than the skill being off.
+   */
+  listInstalled(workspaceId: string, userId: string) {
+    return this.db
+      .select({ id: skills.id, name: skills.name })
+      .from(skills)
+      .where(
+        and(visibleSkillsFilter(workspaceId, userId), eq(skills.enabled, true), installedByFilter(userId)),
+      )
+      .orderBy(skills.name)
+  }
+
   /** Which of these skills the caller has installed — one read, not N. */
   async installedIds(workspaceId: string, userId: string): Promise<string[]> {
     const rows = await this.db

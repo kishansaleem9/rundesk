@@ -314,3 +314,37 @@ export function useCreateSkillFromProposal(workspaceId: string) {
     onSuccess: invalidate,
   })
 }
+
+/**
+ * §15 — a skill's slash command, mirroring the server's `skillSlug`.
+ *
+ * Two copies of one rule is exactly the thing that rots, so
+ * `skill-slug-parity.test.ts` reads the server's implementation and runs both
+ * over the same inputs. If they ever disagree the composer offers a command the
+ * server will not resolve, which looks like the command being broken.
+ */
+export function skillSlug(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '')
+}
+
+/** The installed skills this person can type as /slug, ready for the composer. */
+export function useSkillCommands(workspaceId: string) {
+  return useQuery({
+    queryKey: ['skills', workspaceId, 'commands'],
+    queryFn: async () => {
+      const rows = await api<Skill[]>(`${base(workspaceId)}?tab=enabled`)
+      return rows
+        .filter((s) => s.enabled)
+        .map((s) => ({ slug: skillSlug(s.name), name: s.name, id: s.id }))
+        .filter((s) => s.slug.length > 0)
+    },
+    enabled: !!workspaceId,
+  })
+}

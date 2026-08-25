@@ -31,6 +31,8 @@ import { TaskRemindersService } from '../reminders/task-reminders.service'
 import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
 import { SharesService, type ShareLevel } from '../shares/shares.service'
+import { SkillsService } from '../skills/skills.service'
+import { isReservedSlug, resolveSlug } from '../skills/skill-slug'
 import { fetchLinkPreview, type UnfurlResult } from './link-unfurl'
 
 const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
@@ -96,6 +98,7 @@ export class ChatService {
     private reminders: TaskRemindersService,
     private presence: PresenceService,
     private shares: SharesService,
+    private skills: SkillsService,
   ) {}
 
   private sanitizeFileName(input: string): string {
@@ -1927,6 +1930,72 @@ export class ChatService {
         body: `⏰ **Reminder set** (${phrase}) — ${title}`,
       })
       return { kind: 'remind' as const, reminder, task, message }
+    }
+
+    // §15 — a skill's slash command. ClickUp: "The /Slash Command for AI Skills
+    // appears for everyone in the Workspace", which is the primary way a skill
+    // is used: you type it where the work is, not from a settings page.
+    //
+    // Only skills this person has INSTALLED are reachable. Making every
+    // published skill typable would grow the command namespace with the team,
+    // collide constantly, and leave "Enabled" describing nothing.
+    if (cmd && !isReservedSlug(cmd)) {
+      const installed = await this.skills.listInstalled(channel.workspaceId, userId)
+      const resolved = resolveSlug(cmd, installed)
+      if (resolved.kind === 'ambiguous') {
+        throw new BadRequestException(
+          `/${cmd} matches more than one of your skills (${resolved.names.join(', ')}). Rename one of them.`,
+        )
+      }
+      if (resolved.kind === 'match') {
+        if (!trimmed) throw new BadRequestException(`Usage: /${cmd} <what you want>`)
+
+        // Through SkillsService, so its visibility and enabled checks run on the
+        // one path that builds a prompt — a disabled skill is refused here
+        // exactly as it is in the AI panel.
+        const invocation = await this.skills.buildInvocationContext(
+          channel.workspaceId,
+          userId,
+          resolved.skill.id,
+        )
+        const skillPrompt = this.skills.renderSkillPrompt(invocation)
+
+        // The question goes in as the person's own message, so the channel
+        // reads as a conversation rather than an answer to nothing.
+        const asked = await this.postMessage({
+          channelId,
+          authorId: userId,
+          body: `/${cmd} ${trimmed}`,
+        })
+
+        const aiUserId = await this.ensureAiUser()
+        await this.db
+          .insert(chatChannelMembers)
+          .values({ channelId: channel.id, userId: aiUserId })
+          .onConflictDoNothing()
+        const context = await this.ai.buildWorkspaceContext(channel.workspaceId, userId)
+        const answer = await this.ai.chatReply(
+          [{ role: 'user', content: trimmed }],
+          context,
+          { userId, workspaceId: channel.workspaceId },
+          skillPrompt,
+        )
+        if (!answer) throw new BadRequestException(`/${cmd} did not come back with an answer`)
+
+        const [aiMsg] = await this.db
+          .insert(chatMessages)
+          .values({ channelId: channel.id, authorId: aiUserId, body: answer })
+          .returning()
+        this.realtime.emitToWorkspace(channel.workspaceId, {
+          type: 'chat.message.created',
+          workspaceId: channel.workspaceId,
+          channelId: channel.id,
+          // Named as the skill, not "Rundesk AI": the whole point of invoking
+          // one is that this answer came from somewhere specific.
+          message: { ...aiMsg, authorName: invocation.skill.name, reactions: [] },
+        })
+        return { kind: 'skill' as const, skill: resolved.skill, message: asked, reply: aiMsg }
+      }
     }
 
     throw new BadRequestException(`Unknown command: /${cmd}`)

@@ -8,6 +8,7 @@ import { ChatHeader } from '../components/chat/chat-header'
 import { AddPeopleDialog } from '../components/chat/add-people-dialog'
 import { SharePanel } from '../components/share-panel'
 import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
+import { useSkillCommands } from '../lib/skills-api'
 import {
   formatDateDivider,
   formatMessageTime,
@@ -199,6 +200,9 @@ type MemberActivityItem = {
 export function ChatPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/chat' })
+  // §15 — the installed skills this person can type as /slug, offered in the
+  // composer's command menu alongside /task and /remind.
+  const { data: skillCommands = [] } = useSkillCommands(workspaceId)
   const deepLink = useSearch({ from: '/app/$workspaceId/chat' }) as { channel?: string; message?: string }
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -1036,8 +1040,10 @@ export function ChatPage() {
   // Slash commands (§6.3): /task and /remind run server-side, which posts a
   // confirmation message (delivered via realtime) instead of the literal command.
   const runCommandMutation = useMutation({
-    mutationFn: ({ command, text }: { command: 'task' | 'remind'; text: string }) =>
-      api<{ kind: 'task' | 'remind' }>(`/chat/channels/${selectedId}/commands`, {
+    // `command` is a free string now: §15 skills are reached by their own
+    // slugged name, so the set is not fixed at compile time.
+    mutationFn: ({ command, text }: { command: string; text: string }) =>
+      api<{ kind: 'task' | 'remind' | 'skill' }>(`/chat/channels/${selectedId}/commands`, {
         method: 'POST',
         body: JSON.stringify({ command, text }),
       }),
@@ -1045,6 +1051,10 @@ export function ChatPage() {
       setInput('')
       setPendingAttachments([])
       if (selectedId) qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+      // A skill posts its own question and answer into the channel, so a toast
+      // saying "task created" would be plainly wrong and one saying "done"
+      // would be noise on top of a visible reply.
+      if (res?.kind === 'skill') return
       toast.success(res?.kind === 'remind' ? t('chat.reminderCreated') : t('chat.taskCreatedFromMessage'))
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotRunCommand')),
@@ -1130,10 +1140,19 @@ export function ChatPage() {
     // Slash commands (§6.3): a leading /task or /remind runs server-side instead
     // of posting a literal message. Only for fresh top-level sends (not replies /
     // attachment posts), so normal messages are untouched.
-    const slash = /^\/(task|remind)\b\s*([\s\S]*)$/i.exec(body)
-    if (slash && !replyTo && pendingAttachments.length === 0) {
+    // §15 — the set of commands now includes this person's installed skills,
+    // so match any leading /word and let the SERVER decide whether it knows it.
+    // Matching only names the client knows about would mean a skill installed
+    // in another tab is typed and posted as literal text until a refresh.
+    const slash = /^\/([\w-]+)\b\s*([\s\S]*)$/i.exec(body)
+    const command = slash?.[1]?.toLowerCase()
+    const known =
+      command === 'task' ||
+      command === 'remind' ||
+      skillCommands.some((sc) => sc.slug === command)
+    if (slash && known && !replyTo && pendingAttachments.length === 0) {
       if (runCommandMutation.isPending) return
-      runCommandMutation.mutate({ command: slash[1].toLowerCase() as 'task' | 'remind', text: slash[2] ?? '' })
+      runCommandMutation.mutate({ command: command!, text: slash[2] ?? '' })
       return
     }
     sendMutation.mutate({
@@ -2282,6 +2301,7 @@ export function ChatPage() {
         <div className={cn(dmSharedOpen && 'hidden')}>
         <ChatComposer
             workspaceId={workspaceId}
+          skillCommands={skillCommands}
           channelLabel={channelLabel}
           value={input}
           onChange={setInput}

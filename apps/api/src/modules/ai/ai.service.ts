@@ -1122,9 +1122,19 @@ Current date: ${new Date().toISOString().split('T')[0]}`
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
     workspaceContext: string,
     ctx: AiCtx = {},
+    /**
+     * §15 — answering as a skill invoked by its slash command. First in the
+     * prompt and replacing the generic description, for the same reason as
+     * `chatStream`: a skill that asks for a particular voice must not be
+     * overruled by a default two lines below it.
+     */
+    skillPrompt?: string,
   ): Promise<string> {
-    const systemPrompt = `You are Rundesk AI, an assistant inside the Rundesk project management chat.
-A teammate mentioned you (@Rundesk). Answer helpfully and concisely in 1-4 sentences.
+    const intro = skillPrompt?.trim()
+      ? skillPrompt.trim()
+      : `You are Rundesk AI, an assistant inside the Rundesk project management chat.
+A teammate mentioned you (@Rundesk). Answer helpfully and concisely in 1-4 sentences.`
+    const systemPrompt = `${intro}
 
 Workspace context:
 ${workspaceContext}

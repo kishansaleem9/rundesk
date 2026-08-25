@@ -260,6 +260,40 @@ async function main() {
   )
   await call('DELETE', `/workspaces/${WS}/skills/${approved.data.id}`)
 
+  console.log('\n▶ the slash command — "appears for everyone in the Workspace"')
+  {
+    // What the composer would offer: installed, visible, not switched off.
+    const offered = await svc.listInstalled(WS, ME)
+    chk(offered.some((s) => s.id === skill.id), 'an installed skill is offered as a command', 'the installed skill was not offered')
+
+    await call('PATCH', `/workspaces/${WS}/skills/${skill.id}`, { enabled: false })
+    const whileOff = await svc.listInstalled(WS, ME)
+    chk(
+      !whileOff.some((s) => s.id === skill.id),
+      'a skill its author switched off stops being offered',
+      'a disabled skill is still offered, so it would be typed and then refused',
+    )
+    await call('PATCH', `/workspaces/${WS}/skills/${skill.id}`, { enabled: true })
+
+    await call('DELETE', `/workspaces/${WS}/skills/${skill.id}/install`)
+    const whileOut = await svc.listInstalled(WS, ME)
+    chk(
+      !whileOut.some((s) => s.id === skill.id),
+      'and one you have not installed is not in your command menu',
+      'an uninstalled skill is still typable',
+    )
+    await call('POST', `/workspaces/${WS}/skills/${skill.id}/install`)
+
+    ACTING_AS = THEM
+    const theirs = await svc.listInstalled(WS, THEM)
+    chk(
+      !theirs.some((s) => s.id === skill.id),
+      "and a colleague's command menu is their own",
+      "one person's installs leaked into another's command menu",
+    )
+    ACTING_AS = ME
+  }
+
   console.log('\n▶ templates')
   const titles = ((await call('GET', `/workspaces/${WS}/skills/templates`)).data ?? []).map((x) => x.title)
   chk(['Delegate Like Me','Brand Voice','Triage Tasks Like Me'].every((n) => titles.includes(n)), 'the hub is served her three starter templates', `got ${JSON.stringify(titles)}`)

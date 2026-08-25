@@ -61,7 +61,10 @@ function buildSvc(db: any, grantedLevel: string | null = null) {
   const presence = { statusFor: mock.fn(async () => ({})) } as any
   // No share grants by default: plain membership decides access, as before.
   const shares = { directLevel: mock.fn(async () => grantedLevel) } as any
-  return new ChatService(db, realtime, notifications, tasks, ai, r2, reminders, presence, shares)
+  // §15 — a workspace with no installed skills, so /task and /remind behave
+  // exactly as they did and an unknown command is still unknown.
+  const skills = { listInstalled: mock.fn(async () => []) } as any
+  return new ChatService(db, realtime, notifications, tasks, ai, r2, reminders, presence, shares, skills)
 }
 
 describe('ChatService.setSaved', () => {

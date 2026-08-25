@@ -62,6 +62,7 @@ function ComposerBox({
   uploading,
   workspaceId,
   enableSlashCommands,
+  skillCommands = [],
   customEmoji,
   leadingTools,
 }: {
@@ -85,6 +86,8 @@ function ComposerBox({
   // Slash commands (Plan §6.3): show the /task //remind hint while the composer
   // input is a bare leading command token. Only the main composer opts in.
   enableSlashCommands?: boolean
+  /** §15 — the caller's installed skills, each typable as /slug. */
+  skillCommands?: Array<{ slug: string; name: string }>
   // Workspace custom emoji (Plan §6.3) — the same list the reaction picker uses.
   // Shown below the standard grid; clicking inserts the `:shortcode:` token that
   // the message body renderer substitutes back into the emoji image.
@@ -97,12 +100,18 @@ function ComposerBox({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   // Slash-command autocomplete: matches while the user is still typing the
   // command name (a leading "/word", no space yet). Clears once args begin.
+  // §15 — "The /Slash Command for AI Skills appears for everyone in the
+  // Workspace." A skill you have installed is typable right here, next to the
+  // commands the composer already owns.
   const slashCommands = [
     { cmd: '/task', desc: t('chat.slashTaskDesc') },
     { cmd: '/remind', desc: t('chat.slashRemindDesc') },
+    ...skillCommands.map((s) => ({ cmd: `/${s.slug}`, desc: s.name })),
   ]
+  // Allow '-' as well as word characters: a skill's command is its slugged
+  // name, so /brand-voice must keep matching while it is being typed.
   const slashMatches =
-    enableSlashCommands && /^\/\w*$/.test(value)
+    enableSlashCommands && /^\/[\w-]*$/.test(value)
       ? slashCommands.filter((c) => c.cmd.startsWith(value.toLowerCase()))
       : []
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -545,6 +554,7 @@ function ComposerBox({
 
 export function ChatComposer({
   workspaceId,
+  skillCommands,
   channelLabel,
   value,
   onChange,
@@ -562,6 +572,8 @@ export function ChatComposer({
   customEmoji,
   leadingTools,
 }: {
+  /** §15 — installed skills, each typable as /slug in the command menu. */
+  skillCommands?: Array<{ slug: string; name: string }>
   channelLabel: string
   value: string
   onChange: (value: string) => void
@@ -616,6 +628,7 @@ export function ChatComposer({
         customEmoji={customEmoji}
         leadingTools={leadingTools}
         enableSlashCommands
+        skillCommands={skillCommands}
       />
 
       <p className="text-[10px] text-muted-foreground mt-1.5 px-0.5">
