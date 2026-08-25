@@ -28,6 +28,7 @@ import { RemindersModule } from './modules/reminders/reminders.module'
 import { PresenceModule } from './modules/presence/presence.module'
 import { TimeOffModule } from './modules/time-off/time-off.module'
 import { PersonalTasksModule } from './modules/personal-tasks/personal-tasks.module'
+import { SkillsModule } from './modules/skills/skills.module'
 import { SprintsModule } from './modules/sprints/sprints.module'
 import { TimeEntriesModule } from './modules/time-entries/time-entries.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
@@ -111,6 +112,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     PresenceModule,
     TimeOffModule,
     PersonalTasksModule,
+    SkillsModule,
     SprintsModule,
     TimeEntriesModule,
     NotificationsModule,
