@@ -1,9 +1,11 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
-import { aiChatMessages, aiChatThreads } from '@rundesk/db'
+import { aiChatMessages, aiChatThreads, lists, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { AiService } from './ai.service'
+import { TasksService } from '../tasks/tasks.service'
+import { DocsService } from '../docs/docs.service'
 import {
   DEFAULT_THREAD_TITLE,
   cleanTitle,
@@ -25,6 +27,8 @@ export class ChatThreadsService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private ai: AiService,
+    private tasks: TasksService,
+    private docs: DocsService,
   ) {}
 
   list(workspaceId: string, userId: string) {
@@ -141,6 +145,105 @@ export class ChatThreadsService {
       .set({ title })
       .where(eq(aiChatThreads.id, threadId))
     return title
+  }
+
+  // ─── The six-icon row, frames `302_1842` / `303_1858` ─────────────────────
+
+  /**
+   * Fetch one message, having proved the caller owns its thread.
+   *
+   * Every action below goes through this rather than reading by message id:
+   * a message id alone names nothing the caller has been shown to own, and
+   * three separate access checks is three chances to write one wrong.
+   */
+  private async ownMessage(workspaceId: string, userId: string, threadId: string, messageId: string) {
+    await this.own(workspaceId, userId, threadId)
+    const [row] = await this.db
+      .select()
+      .from(aiChatMessages)
+      .where(and(eq(aiChatMessages.id, messageId), eq(aiChatMessages.threadId, threadId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('Message not found')
+    return row
+  }
+
+  /** The oldest live list in the workspace — the same rule `/task` in chat uses. */
+  private async defaultList(workspaceId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: lists.id })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false)))
+      .orderBy(asc(lists.createdAt))
+      .limit(1)
+    return row?.id ?? null
+  }
+
+  /** "Create task from this" — the second icon. */
+  async createTaskFrom(workspaceId: string, userId: string, threadId: string, messageId: string) {
+    const message = await this.ownMessage(workspaceId, userId, threadId, messageId)
+    const listId = await this.defaultList(workspaceId)
+    if (!listId) {
+      throw new BadRequestException(
+        'No list is available to create a task in yet — create a space, project and list first.',
+      )
+    }
+    // The first line is the title and the whole answer is the body: an answer's
+    // opening sentence is what it is about, and truncating the rest into a
+    // title would lose the part worth keeping.
+    const title = message.content.split('\n').find((l) => l.trim())?.trim().slice(0, 200) ?? 'From Rundesk AI'
+    const task = await this.tasks.createTask({
+      listId,
+      title,
+      description: message.content,
+      createdById: userId,
+    })
+    return { task }
+  }
+
+  /** "Save to doc" — the third icon. */
+  async saveToDoc(workspaceId: string, userId: string, threadId: string, messageId: string) {
+    const message = await this.ownMessage(workspaceId, userId, threadId, messageId)
+    const thread = await this.own(workspaceId, userId, threadId)
+    const doc = await this.docs.create({
+      workspaceId,
+      // Named after the conversation, not the answer: you are saving this out
+      // of somewhere, and the thread's title is what you will look for later.
+      title: thread.title === DEFAULT_THREAD_TITLE ? 'From Rundesk AI' : thread.title,
+      createdById: userId,
+    })
+    await this.docs.update(doc.id, userId, {
+      content: {
+        type: 'doc',
+        content: message.content
+          .split('\n\n')
+          .filter((block) => block.trim())
+          .map((block) => ({
+            type: 'paragraph',
+            content: [{ type: 'text', text: block.trim() }],
+          })),
+      },
+    })
+    return { doc }
+  }
+
+  /** Thumbs up / down — the last two icons. Pressing the same one again clears it. */
+  async setFeedback(
+    workspaceId: string,
+    userId: string,
+    threadId: string,
+    messageId: string,
+    feedback: 'up' | 'down' | null,
+  ) {
+    const message = await this.ownMessage(workspaceId, userId, threadId, messageId)
+    const next = message.feedback === feedback ? null : feedback
+    const [row] = await this.db
+      .update(aiChatMessages)
+      .set({ feedback: next })
+      .where(eq(aiChatMessages.id, messageId))
+      .returning()
+    return row
   }
 
   /** A person renaming their own thread turns the automatic naming off for good. */

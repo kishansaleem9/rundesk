@@ -49,6 +49,12 @@ export const aiChatMessages = pgTable(
     threadId:  uuid('thread_id').notNull().references(() => aiChatThreads.id, { onDelete: 'cascade' }),
     role:      text('role').$type<'user' | 'assistant'>().notNull(),
     content:   text('content').notNull(),
+    /**
+     * §15 — the last two of her six icons. Null until someone says something;
+     * replaced rather than accumulated, because the question is "was this
+     * answer good", not "how has your opinion of it changed".
+     */
+    feedback:  text('feedback').$type<'up' | 'down'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('idx_ai_chat_messages_thread').on(t.threadId, t.createdAt)],

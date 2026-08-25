@@ -460,6 +460,8 @@ export interface AiChatMessage {
   threadId: string
   role: 'user' | 'assistant'
   content: string
+  /** §15 — a vote already cast on this answer. */
+  feedback: 'up' | 'down' | null
   createdAt: string
 }
 
@@ -516,5 +518,35 @@ export function useAiChatActions(workspaceId: string) {
       api(`${chatBase(workspaceId)}/${threadId}`, { method: 'PATCH', body: { title } }).then(refresh),
     remove: (threadId: string) =>
       api(`${chatBase(workspaceId)}/${threadId}`, { method: 'DELETE' }).then(refresh),
+  }
+}
+
+
+/**
+ * §15 — the six-icon row's server-side halves, frames `302_1842` / `303_1858`.
+ *
+ * Copy and regenerate are client-side; these three are not. Each is scoped to
+ * the thread as well as the message, so a message id on its own never reaches
+ * the server as a thing to act on.
+ */
+export function useAiMessageActions(workspaceId: string, threadId: string | null) {
+  const qc = useQueryClient()
+  const path = (messageId: string, action: string) =>
+    `${chatBase(workspaceId)}/${threadId}/messages/${messageId}/${action}`
+  return {
+    createTask: (messageId: string) =>
+      api<{ task: { id: string; title: string } }>(path(messageId, 'task'), { method: 'POST' }),
+    saveToDoc: (messageId: string) =>
+      api<{ doc: { id: string; title: string } }>(path(messageId, 'doc'), { method: 'POST' }),
+    setFeedback: (messageId: string, feedback: 'up' | 'down') =>
+      api<AiChatMessage>(path(messageId, 'feedback'), {
+        method: 'PATCH',
+        body: { feedback },
+      }).then((row) => {
+        // Refresh the thread so a reopen shows the vote that was cast, rather
+        // than the state the panel happened to be holding.
+        if (threadId) qc.invalidateQueries({ queryKey: aiChatKeys.one(workspaceId, threadId) })
+        return row
+      }),
   }
 }

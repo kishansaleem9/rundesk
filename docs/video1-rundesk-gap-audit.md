@@ -478,8 +478,7 @@ Workspace"), per-user **install** so Enabled means what the hub means, **Skills 
 the tasks and docs you actually made, and carries the lines that suggested each result), and
 **team discovery** ("skills created across your workspace" — a plain query, not a model call).
 
-**Still open:** per-message actions (create task / save to doc / regenerate / thumbs) and the
-model picker.
+**Still open:** the model picker.
 
 ### 2.8 SyncUp — calls inside the app — `[19:16–21:15]` · size: very large
 
@@ -815,7 +814,7 @@ One row per finding, 15 sections, produced by reading all 139 frames against the
 | ✅ | medium | Persisted, auto-named AI chat threads in the sidebar — **built** | The chat that authored the skill starts as "New Chat", renames itself to "Skill Definition and Ideas", and stays in the sidebar's AI Chats list after  |
 | ✅ | small | Answer-aware follow-up chips ("Follow ups") — **built** | Under every assistant answer, a "Follow ups" label and clickable next-step chips generated from that answer — e.g. "Create a Personal Task Organizer s |
 | ✅ | small | Visible reasoning trace while the assistant works — **built** | A "Pondering" status with the retrieval steps streaming beneath it — "Checking what you're working on", "Checking the latest Skills basics" — before t |
-|  | medium | Per-message actions beyond copy (create task, save to doc, regenerate, thumbs up/down) | The six-icon row under each assistant answer: copy, create task, save to doc, regenerate, thumbs up, thumbs down. |
+| ✅ | medium | Per-message actions beyond copy (create task, save to doc, regenerate, thumbs up/down) — **built** | The six-icon row under each assistant answer: copy, create task, save to doc, regenerate, thumbs up, thumbs down. |
 |  | medium | Composer scope chip and model picker | The composer carries a "Skills" context chip (scoping the conversation to the surface you are on) and a model selector reading "Max ▾", plus a "+" att |
 
 ### Meetings & calls  ·  15 findings

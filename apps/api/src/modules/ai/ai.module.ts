@@ -13,6 +13,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
 import { PlansModule } from '../plans/plans.module'
 import { SearchModule } from '../search/search.module'
 import { SkillsModule } from '../skills/skills.module'
+import { DocsModule } from '../docs/docs.module'
 
 @Module({
   // NotificationsModule supplies NotificationsService for briefing + workload
@@ -25,7 +26,7 @@ import { SkillsModule } from '../skills/skills.module'
   // skill (§15) — the service also owns the visibility and enabled checks, so
   // resolving the skill through it is what stops a caller invoking one they
   // cannot see. Skills imports nothing from Ai, so no cycle.
-  imports: [TasksModule, NotificationsModule, PlansModule, SearchModule, SkillsModule],
+  imports: [TasksModule, NotificationsModule, PlansModule, SearchModule, SkillsModule, DocsModule],
   controllers: [AiController, KnowledgeController, ChatThreadsController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;
   // WorkloadAlertService owns the daily @Cron that alerts managers about

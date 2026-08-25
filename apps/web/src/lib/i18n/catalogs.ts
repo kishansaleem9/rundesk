@@ -5168,6 +5168,14 @@ export const en = {
   'skills.discover.run': 'Scan my workspace',
 
   'nav.aiChats': 'AI Chats',
+
+  'aiPanel.createTask': 'Create a task from this',
+  'aiPanel.taskCreated': 'Task created — {{title}}',
+  'aiPanel.saveToDoc': 'Save to a doc',
+  'aiPanel.savedToDoc': 'Saved to a doc',
+  'aiPanel.regenerate': 'Try again',
+  'aiPanel.thumbsUp': 'Good answer',
+  'aiPanel.thumbsDown': 'Bad answer',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10294,6 +10302,14 @@ export const es: Record<TranslationKey, string> = {
 
   'nav.aiChats': 'Chats de IA',
 
+  'aiPanel.createTask': 'Crear una tarea con esto',
+  'aiPanel.taskCreated': 'Tarea creada — {{title}}',
+  'aiPanel.saveToDoc': 'Guardar en un documento',
+  'aiPanel.savedToDoc': 'Guardado en un documento',
+  'aiPanel.regenerate': 'Intentar de nuevo',
+  'aiPanel.thumbsUp': 'Buena respuesta',
+  'aiPanel.thumbsDown': 'Mala respuesta',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15418,6 +15434,14 @@ export const ar: Record<TranslationKey, string> = {
 
   'nav.aiChats': 'محادثات الذكاء الاصطناعي',
 
+  'aiPanel.createTask': 'أنشئ مهمة من هذا',
+  'aiPanel.taskCreated': 'تم إنشاء المهمة — {{title}}',
+  'aiPanel.saveToDoc': 'احفظ في مستند',
+  'aiPanel.savedToDoc': 'حُفظ في مستند',
+  'aiPanel.regenerate': 'حاول مرة أخرى',
+  'aiPanel.thumbsUp': 'إجابة جيدة',
+  'aiPanel.thumbsDown': 'إجابة سيئة',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20386,6 +20410,14 @@ export const ur: Record<TranslationKey, string> = {
   'skills.discover.run': 'میرا ورک اسپیس اسکین کریں',
 
   'nav.aiChats': 'AI چیٹس',
+
+  'aiPanel.createTask': 'اس سے ٹاسک بنائیں',
+  'aiPanel.taskCreated': 'ٹاسک بن گیا — {{title}}',
+  'aiPanel.saveToDoc': 'دستاویز میں محفوظ کریں',
+  'aiPanel.savedToDoc': 'دستاویز میں محفوظ ہو گیا',
+  'aiPanel.regenerate': 'دوبارہ کوشش کریں',
+  'aiPanel.thumbsUp': 'اچھا جواب',
+  'aiPanel.thumbsDown': 'خراب جواب',
 
 }
 

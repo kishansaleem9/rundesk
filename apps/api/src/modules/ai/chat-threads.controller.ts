@@ -55,6 +55,49 @@ export class ChatThreadsController {
     return this.svc.append(workspaceId, user.id, threadId, body)
   }
 
+  // ─── The six-icon row under an assistant answer ───────────────────────────
+
+  @Post(':threadId/messages/:messageId/task')
+  @ApiOperation({ summary: '§15 — "create task from this" (frame 302_1842)' })
+  createTaskFrom(
+    @Param('workspaceId') workspaceId: string,
+    @Param('threadId') threadId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.svc.createTaskFrom(workspaceId, user.id, threadId, messageId)
+  }
+
+  @Post(':threadId/messages/:messageId/doc')
+  @ApiOperation({ summary: '§15 — "save to doc"' })
+  saveToDoc(
+    @Param('workspaceId') workspaceId: string,
+    @Param('threadId') threadId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.svc.saveToDoc(workspaceId, user.id, threadId, messageId)
+  }
+
+  @Patch(':threadId/messages/:messageId/feedback')
+  @ApiOperation({ summary: '§15 — thumbs up / down; pressing the same one again clears it' })
+  setFeedback(
+    @Param('workspaceId') workspaceId: string,
+    @Param('threadId') threadId: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { feedback: 'up' | 'down' | null },
+  ) {
+    const value = body?.feedback
+    return this.svc.setFeedback(
+      workspaceId,
+      user.id,
+      threadId,
+      messageId,
+      value === 'up' || value === 'down' ? value : null,
+    )
+  }
+
   @Patch(':threadId')
   rename(
     @Param('workspaceId') workspaceId: string,

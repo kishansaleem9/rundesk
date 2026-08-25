@@ -366,7 +366,33 @@ async function main() {
     // No key here, so titling takes the deterministic path — which is the one
     // an instance without ANTHROPIC_API_KEY actually runs.
     const ai = new AiService({ get: () => undefined }, app.get(DB_TOKEN), {})
-    const threads = new ChatThreadsService(app.get(DB_TOKEN), ai)
+    // Tasks and Docs are recorders rather than the real services: mounting
+    // those drags in Realtime, Notifications and Storage, and they have their
+    // own tests. What is under test here is what THIS code hands them — the
+    // access check that runs first, the title it picks, and the shape it sends.
+    const wrote: Record<string, unknown[]> = { tasks: [], docs: [], updates: [] }
+    const tasksStub = {
+      createTask: async (input: unknown) => {
+        wrote.tasks.push(input)
+        return { id: 'task-1', title: (input as { title: string }).title }
+      },
+    }
+    const docsStub = {
+      create: async (input: unknown) => {
+        wrote.docs.push(input)
+        return { id: 'doc-1', title: (input as { title?: string }).title ?? '' }
+      },
+      update: async (_id: string, _userId: string, patch: unknown) => {
+        wrote.updates.push(patch)
+        return { id: 'doc-1' }
+      },
+    }
+    const threads = new ChatThreadsService(
+      app.get(DB_TOKEN),
+      ai,
+      tasksStub as never,
+      docsStub as never,
+    )
 
     const thread = await threads.create(WS, ME, undefined)
     chk(thread.title === 'New Chat', 'a new chat starts as "New Chat"', `started as "${thread.title}"`)
@@ -417,6 +443,73 @@ async function main() {
       hidden = true
     }
     chk(hidden, "and a colleague cannot open it", "another person could read this thread")
+
+    // §15 — the six-icon row's server-side halves, frames 302_1842 / 303_1858.
+    {
+      const reloaded = await threads.get(WS, ME, thread.id)
+      const answer = reloaded.messages.find((m) => m.role === 'assistant')!
+
+      const voted = await threads.setFeedback(WS, ME, thread.id, answer.id, 'up')
+      chk(voted?.feedback === 'up', 'an answer can be marked good', `feedback was ${voted?.feedback}`)
+      const cleared = await threads.setFeedback(WS, ME, thread.id, answer.id, 'up')
+      chk(cleared?.feedback === null, 'and pressing it again clears the vote', `feedback stayed ${cleared?.feedback}`)
+      const flipped = await threads.setFeedback(WS, ME, thread.id, answer.id, 'down')
+      chk(flipped?.feedback === 'down', 'and it can be changed to the other one', `feedback was ${flipped?.feedback}`)
+      const persisted = await threads.get(WS, ME, thread.id)
+      chk(
+        persisted.messages.find((m) => m.id === answer.id)?.feedback === 'down',
+        'the vote survives reopening the thread',
+        'the vote was not persisted',
+      )
+
+      // The action must be scoped to the thread, not just the message id.
+      let refusedForeign = false
+      try {
+        await threads.setFeedback(WS, THEM, thread.id, answer.id, 'up')
+      } catch {
+        refusedForeign = true
+      }
+      chk(refusedForeign, "and a colleague cannot vote on your thread", "someone else could vote on this thread")
+
+      // Save to doc: an answer that outlives the conversation.
+      await threads.saveToDoc(WS, ME, thread.id, answer.id)
+      const docInput = wrote.docs.at(-1) as { title?: string; workspaceId?: string; createdById?: string }
+      chk(!!docInput, 'an answer can be saved to a doc', 'saving to a doc wrote nothing')
+      chk(
+        docInput?.title === 'My planning notes',
+        'named after the conversation, which is what you will look for later',
+        `the doc was called "${docInput?.title}"`,
+      )
+      chk(docInput?.createdById === ME, 'owned by whoever saved it', `owner was ${docInput?.createdById}`)
+      const body = wrote.updates.at(-1) as { content?: { content?: unknown[] } }
+      chk(
+        (body?.content?.content?.length ?? 0) > 0,
+        'and the answer is actually in it',
+        'the doc was created empty',
+      )
+
+      // Create a task from an answer. No list exists in this fixture workspace,
+      // so the honest outcome is a clear refusal rather than a task in limbo.
+      let taskRefusal = ''
+      try {
+        await threads.createTaskFrom(WS, ME, thread.id, answer.id)
+      } catch (err) {
+        taskRefusal = err instanceof Error ? err.message : String(err)
+      }
+      chk(
+        /no list is available/i.test(taskRefusal) || wrote.tasks.length > 0,
+        taskRefusal ? 'with no list to put it in, it says so plainly' : 'an answer becomes a task',
+        `unexpected outcome: ${taskRefusal || 'silent'}`,
+      )
+
+      let refusedForeignDoc = false
+      try {
+        await threads.saveToDoc(WS, THEM, thread.id, answer.id)
+      } catch {
+        refusedForeignDoc = true
+      }
+      chk(refusedForeignDoc, "and a colleague cannot save your answer anywhere", "someone else could act on this thread")
+    }
 
     await threads.remove(WS, ME, thread.id)
     chk(

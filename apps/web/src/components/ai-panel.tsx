@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Input, cn } from '@rundesk/ui'
+import { Button, Input, cn, toast } from '@rundesk/ui'
 import {
   Sparkles,
   Send,
@@ -12,17 +12,24 @@ import {
   CheckCircle2,
   Wand2,
   Gem,
+  CheckSquare,
+  FileOutput,
+  RefreshCw,
+  ThumbsUp,
+  ThumbsDown,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
-import { useAiChatActions, useAiChatThread } from '../lib/skills-api'
+import { useAiChatActions, useAiChatThread, useAiMessageActions } from '../lib/skills-api'
 
 type Message = {
   role: 'user' | 'assistant'
   content: string
   id: string
+  /** §15 — a vote already cast, restored when a thread is reopened. */
+  feedback?: 'up' | 'down' | null
 }
 
 type AiPanelProps = {
@@ -126,21 +133,46 @@ export function AiPanel({
     if (!loaded || loaded.id !== threadId) return
     loadedThreadRef.current = threadId
     setMessages(
-      loaded.messages.map((m) => ({ role: m.role, content: m.content, id: m.id })),
+      loaded.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+        id: m.id,
+        feedback: m.feedback ?? null,
+      })),
     )
   }, [threadId, threadQuery.data])
 
-  async function sendMessage(content: string) {
+  /**
+   * §15 — the loop icon. Drops the last answer and asks the same question
+   * again, rather than appending a second answer below the first: the point is
+   * to replace one you did not like, and leaving both makes the panel a log of
+   * attempts.
+   */
+  function regenerate() {
+    if (isStreaming) return
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')
+    if (!lastUser) return
+    setMessages((prev) => {
+      const cut = [...prev]
+      while (cut.length > 0 && cut[cut.length - 1].role === 'assistant') cut.pop()
+      return cut
+    })
+    void sendMessage(lastUser.content, { skipEcho: true })
+  }
+
+  async function sendMessage(content: string, opts: { skipEcho?: boolean } = {}) {
     if (!content.trim() || isStreaming) return
     setInput('')
 
     const userMsg: Message = { role: 'user', content, id: Date.now().toString() }
-    setMessages((prev) => [...prev, userMsg])
+    // A regenerate re-uses the question already on screen, so echoing it again
+    // would show it twice.
+    if (!opts.skipEcho) setMessages((prev) => [...prev, userMsg])
     // Written alongside, not awaited: the message is already on screen, and
     // blocking the answer on a write nobody is waiting for would make the
     // assistant feel slower than it is. A failed write loses one turn of
     // history, never the reply.
-    if (threadId) void chat.append(threadId, 'user', content).catch(() => {})
+    if (threadId && !opts.skipEcho) void chat.append(threadId, 'user', content).catch(() => {})
     setIsStreaming(true)
     setStreamBuffer('')
 
@@ -313,7 +345,20 @@ export function AiPanel({
         )}
 
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            workspaceId={workspaceId}
+            threadId={threadId}
+            // Only the LAST answer can be regenerated: re-asking from the
+            // middle of a conversation would silently discard everything said
+            // after it, which is not what a refresh icon promises.
+            onRegenerate={
+              !isStreaming && msg.role === 'assistant' && msg.id === messages[messages.length - 1]?.id
+                ? () => regenerate()
+                : undefined
+            }
+          />
         ))}
 
         {/* Streaming */}
@@ -420,10 +465,23 @@ export function AiPanel({
   )
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  workspaceId,
+  threadId,
+  onRegenerate,
+}: {
+  message: Message
+  workspaceId: string
+  threadId: string | null
+  onRegenerate?: () => void
+}) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState<'task' | 'doc' | null>(null)
+  const [vote, setVote] = useState<'up' | 'down' | null>(message.feedback ?? null)
   const isUser = message.role === 'user'
+  const actions = useAiMessageActions(workspaceId, threadId)
 
   function copy() {
     navigator.clipboard.writeText(message.content)
@@ -456,18 +514,133 @@ function MessageBubble({ message }: { message: Message }) {
         >
           {message.content}
         </div>
-        <button
-          onClick={copy}
-          className="absolute -bottom-4 right-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-          title={t('aiPanel.copy')}
-        >
-          {copied ? (
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-          ) : (
-            <Clipboard className="h-3.5 w-3.5" />
+        {/* §15 — her six-icon row, frames `302_1842` / `303_1858`: copy, create
+            task, save to doc, regenerate, thumbs up, thumbs down.
+            Only under an ANSWER: "save this to a doc" under your own question
+            would save the question. */}
+        <div
+          className={cn(
+            'flex items-center gap-2 pt-1 text-muted-foreground transition-opacity',
+            // A vote is a state, not a hover affordance — hiding it would make
+            // it impossible to tell you had already voted.
+            vote ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
           )}
-        </button>
+          data-testid={isUser ? undefined : 'ai-message-actions'}
+        >
+          <IconAction onClick={copy} title={t('aiPanel.copy')} testid="ai-action-copy">
+            {copied ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Clipboard className="h-3.5 w-3.5" />
+            )}
+          </IconAction>
+
+          {!isUser && (
+            <>
+              <IconAction
+                title={t('aiPanel.createTask')}
+                testid="ai-action-task"
+                disabled={!threadId || busy !== null}
+                onClick={async () => {
+                  setBusy('task')
+                  try {
+                    const { task } = await actions.createTask(message.id)
+                    toast.success(t('aiPanel.taskCreated', { title: task.title }))
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : t('aiPanel.errorMessage'))
+                  } finally {
+                    setBusy(null)
+                  }
+                }}
+              >
+                {busy === 'task' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckSquare className="h-3.5 w-3.5" />}
+              </IconAction>
+
+              <IconAction
+                title={t('aiPanel.saveToDoc')}
+                testid="ai-action-doc"
+                disabled={!threadId || busy !== null}
+                onClick={async () => {
+                  setBusy('doc')
+                  try {
+                    await actions.saveToDoc(message.id)
+                    toast.success(t('aiPanel.savedToDoc'))
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : t('aiPanel.errorMessage'))
+                  } finally {
+                    setBusy(null)
+                  }
+                }}
+              >
+                {busy === 'doc' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileOutput className="h-3.5 w-3.5" />}
+              </IconAction>
+
+              {onRegenerate && (
+                <IconAction title={t('aiPanel.regenerate')} testid="ai-action-regenerate" onClick={onRegenerate}>
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </IconAction>
+              )}
+
+              <IconAction
+                title={t('aiPanel.thumbsUp')}
+                testid="ai-action-up"
+                disabled={!threadId}
+                onClick={async () => {
+                  // Optimistic, and pressing the same one again clears it —
+                  // the server applies the identical rule, so a failed write
+                  // just leaves the two briefly disagreeing.
+                  const next = vote === 'up' ? null : 'up'
+                  setVote(next)
+                  await actions.setFeedback(message.id, 'up').catch(() => setVote(vote))
+                }}
+              >
+                <ThumbsUp className={cn('h-3.5 w-3.5', vote === 'up' && 'text-emerald-500')} />
+              </IconAction>
+
+              <IconAction
+                title={t('aiPanel.thumbsDown')}
+                testid="ai-action-down"
+                disabled={!threadId}
+                onClick={async () => {
+                  const next = vote === 'down' ? null : 'down'
+                  setVote(next)
+                  await actions.setFeedback(message.id, 'down').catch(() => setVote(vote))
+                }}
+              >
+                <ThumbsDown className={cn('h-3.5 w-3.5', vote === 'down' && 'text-destructive')} />
+              </IconAction>
+            </>
+          )}
+        </div>
       </div>
     </div>
+  )
+}
+
+function IconAction({
+  children,
+  onClick,
+  title,
+  testid,
+  disabled,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  title: string
+  testid: string
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      data-testid={testid}
+      disabled={disabled}
+      className="hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+    >
+      {children}
+    </button>
   )
 }
