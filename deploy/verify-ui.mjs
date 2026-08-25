@@ -1013,6 +1013,140 @@ try {
     }
   })
 
+  await section('§15', 'Skills exist, and a skill is more than a row', async () => {
+    // [17:38] "yeh ek ClickUp ka NEW FEATURE hai"; [19:12] a SKILL, not a
+    // feature. Before this branch there was no `skill` anywhere in the app.
+    await go(`/app/${WS}/skills`, 4000)
+    chk(
+      (await page.locator('[data-testid="skills-page"]').count()) > 0,
+      'the Skills hub renders at /skills',
+      'no Skills hub — the route did not resolve',
+    )
+    chk(
+      (await page.locator('[data-testid="new-skill"]').count()) > 0,
+      'her "+ New Skill" is the primary action',
+      'no New Skill button',
+    )
+    // Her carousel, from frame 285_1743. Served from the server's catalogue,
+    // so this is also a check that the templates endpoint answered.
+    for (const archetype of ['delegate_like_me', 'brand_voice', 'triage_like_me']) {
+      chk(
+        (await page.locator(`[data-testid="skill-starter-${archetype}"]`).count()) > 0,
+        `the ${archetype} starter card is offered`,
+        `${archetype} is missing from the carousel`,
+      )
+    }
+    for (const tab of ['all', 'enabled', 'mine']) {
+      chk(
+        (await page.locator(`[data-testid="skills-tab-${tab}"]`).count()) > 0,
+        `the ${tab} tab is present`,
+        `the ${tab} tab is missing`,
+      )
+    }
+  })
+
+  await section('§15b', 'A skill keeps what it is told, and what it may reach', async () => {
+    // The full round trip against the real server, because three of this
+    // branch's genuine bugs only ever showed up here.
+    const created = await apiPost(`/workspaces/${WS}/skills`, {
+      name: `verify-ui skill ${Date.now()}`,
+      description: 'created by verify-ui',
+      archetype: 'brand_voice',
+    })
+    if (!created?.id) {
+      bad('could not create a skill through the API')
+      return
+    }
+
+    // The template seeded the playbook — otherwise "create from Brand Voice"
+    // creates an empty skill and the card was decoration.
+    chk(
+      typeof created.instructions === 'string' && created.instructions.includes('our voice'),
+      'creating from a template seeds its playbook',
+      `the skill came back with no seeded instructions (${JSON.stringify(created.instructions)?.slice(0, 60)})`,
+    )
+    chk(created.visibility === 'private', 'a new skill is private until published', `new skill was ${created.visibility}`)
+
+    // [18:42] MEMORY.
+    const memory = await apiPost(`/workspaces/${WS}/skills/${created.id}/memories`, {
+      content: 'verify-ui: the audience is technical founders',
+      source: 'manual',
+    })
+    chk(!!memory?.id, 'a skill remembers what it is told', 'the memory was not stored')
+    const memories = (await apiGet(`/workspaces/${WS}/skills/${created.id}/memories`)) ?? []
+    chk(
+      memories.some((m) => m.content?.includes('technical founders')),
+      'and reads it back',
+      'the memory did not come back from the list',
+    )
+
+    // [18:58] CONNECTIONS — a provider the workspace has not granted is a
+    // real state ("waiting on an admin"), not an error.
+    const binding = await apiPost(`/workspaces/${WS}/skills/${created.id}/connections`, {
+      provider: 'github',
+    })
+    chk(!!binding?.id, 'a skill can name a system it may draw on', 'the connection was refused')
+    const bindings = (await apiGet(`/workspaces/${WS}/skills/${created.id}/connections`)) ?? []
+    const github = bindings.find((b) => b.provider === 'github')
+    chk(!!github, 'and the binding is listed', 'the binding did not come back')
+    chk(
+      github ? !('accessToken' in github) && !('refreshToken' in github) : false,
+      'without carrying a credential of its own',
+      'a token leaked into the skill connection payload',
+    )
+
+    // A disabled skill cannot be invoked — the Enabled tab is a switch.
+    await fetch(`${API}/workspaces/${WS}/skills/${created.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    }).catch(() => null)
+    const refused = await fetch(`${API}/ai/chat`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'hello' }],
+        workspaceId: WS,
+        skillId: created.id,
+      }),
+    }).then((r) => r.status).catch(() => 0)
+    // 503 means this instance has no ANTHROPIC_API_KEY, which is a legitimate
+    // answer and not a failure of the skill gate — say which happened rather
+    // than passing on a technicality.
+    if (refused === 503) {
+      ok('AI is not configured on this instance, so the chat gate could not be exercised')
+    } else {
+      chk(
+        refused >= 400 && refused < 500,
+        `a disabled skill is refused rather than silently answered as the generic assistant (${refused})`,
+        `a disabled skill was accepted by /ai/chat (${refused})`,
+      )
+    }
+
+    // The detail page renders all three sections for a real skill.
+    await go(`/app/${WS}/skills/${created.id}`, 4000)
+    for (const part of ['skill-detail', 'skill-memory', 'skill-connections']) {
+      chk(
+        (await page.locator(`[data-testid="${part}"]`).count()) > 0,
+        `${part} renders`,
+        `${part} is missing from the skill page`,
+      )
+    }
+    chk(
+      (await page.locator('[data-testid="skill-memory-list"]').count()) > 0,
+      'the memory it was told is on the page',
+      'the memory section rendered empty despite a stored memory',
+    )
+
+    // Put the instance back the way it was found.
+    await fetch(`${API}/workspaces/${WS}/skills/${created.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => null)
+    const gone = await apiRead(`/workspaces/${WS}/skills/${created.id}`)
+    chk(gone.status === 404, 'and the check cleans up after itself', `the skill survived deletion (${gone.status})`)
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)
