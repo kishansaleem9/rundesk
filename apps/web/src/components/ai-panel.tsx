@@ -11,6 +11,7 @@ import {
   Clipboard,
   CheckCircle2,
   Wand2,
+  Gem,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -37,6 +38,11 @@ type AiPanelProps = {
   onAskHandled?: () => void
   onClose?: () => void
   className?: string
+  /** §15 — answer as this skill. The server enforces that the caller can see
+   * it and that it is enabled; this only says which one to ask for. */
+  skillId?: string
+  /** Shown on the composer chip, from frame `296_1817`. Display only. */
+  skillName?: string
 }
 
 // Stable catalog-key identifiers; the localized text is both shown and sent
@@ -56,6 +62,8 @@ export function AiPanel({
   onAskHandled,
   onClose,
   className,
+  skillId,
+  skillName,
 }: AiPanelProps) {
   const { t, locale } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
@@ -109,12 +117,23 @@ export function AiPanel({
           // via buildWorkspaceContext (Plan §7.6), plus the current-view hint.
           workspaceId,
           currentView,
+          // §15 — omitted entirely when absent, so a normal chat turn is
+          // byte-identical to what it was before skills existed.
+          ...(skillId ? { skillId } : {}),
         }),
         signal: controller.signal,
       })
 
       if (!response.ok || !response.body) {
-        throw new Error('Stream request failed')
+        // A refused skill comes back as JSON with a reason ("This skill is
+        // disabled", "Skill not found"). Swallowing it and saying "Stream
+        // request failed" would hide the one thing the person can act on.
+        const reason = await response
+          .clone()
+          .json()
+          .then((body: { error?: string }) => body?.error)
+          .catch(() => undefined)
+        throw new Error(reason || 'Stream request failed')
       }
 
       const reader = response.body.getReader()
@@ -292,6 +311,19 @@ export function AiPanel({
               ? t('ai.voicePermissionDenied')
               : t('ai.voiceError')}
           </p>
+        )}
+        {/* §15 — the composer's context chip, frame `296_1817`. It is not
+            decoration: it is the only thing on screen that says this answer is
+            coming from a skill rather than the generic assistant, and it must
+            stay visible while the reply streams. */}
+        {skillId && (
+          <div
+            className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-foreground"
+            data-testid="ai-skill-chip"
+          >
+            <Gem className="h-3 w-3 text-primary" />
+            <span className="truncate max-w-[14rem]">{skillName ?? t('skills.title')}</span>
+          </div>
         )}
         {/* relative z-50 lifts the composer above the fixed support-widget launcher
             (bottom-6 right-6 z-40), which otherwise intercepts clicks on the Send button. */}

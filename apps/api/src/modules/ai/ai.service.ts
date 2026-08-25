@@ -1037,13 +1037,28 @@ Focus on the key goals, current status, and any blockers.`,
     workspaceContext: string,
     res: Response,
     ctx: AiCtx = {},
+    /**
+     * §15 — the skill being answered as, already rendered by SkillsService
+     * (playbook + memory + connections + the no-unattended-action boundary).
+     *
+     * It goes *first* in the system prompt, ahead of the generic assistant
+     * description: last-writer-wins on conflicting instructions is the wrong
+     * way round here — a skill that says "be blunt" must not be overruled by a
+     * default two lines below it. The generic text then reads as the fallback
+     * it is, and the skill's own boundary sentence is the last word.
+     */
+    skillPrompt?: string,
   ): Promise<void> {
     // Enforce rate limits before we hijack the reply for streaming.
     await this.assertWithinRateLimit(ctx)
 
-    const systemPrompt = `You are Rundesk AI, an intelligent assistant embedded in the Rundesk project management platform.
+    const intro = skillPrompt?.trim()
+      ? skillPrompt.trim()
+      : `You are Rundesk AI, an intelligent assistant embedded in the Rundesk project management platform.
 You help users manage tasks, understand their workspace, draft messages, generate content, and answer questions.
-Be concise, helpful, and action-oriented.
+Be concise, helpful, and action-oriented.`
+
+    const systemPrompt = `${intro}
 
 Workspace context:
 ${workspaceContext}

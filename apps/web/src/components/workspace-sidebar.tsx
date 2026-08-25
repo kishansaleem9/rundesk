@@ -41,6 +41,7 @@ import {
   Lock,
   Globe,
   Users,
+  Gem,
 } from 'lucide-react'
 import {
   Button,
@@ -110,6 +111,7 @@ function navIconForLabel(label: string) {
   if (key.includes('team') || key.includes('chat')) return MessageCircle
   if (key.includes('doc')) return FileText
   if (key.includes('dashboard')) return LayoutDashboard
+  if (key.includes('skill')) return Gem
   if (key.includes('ai')) return Bot
   if (key.includes('whiteboard')) return Frame
   if (key.includes('form')) return ClipboardList
@@ -132,6 +134,7 @@ function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: 
     { label: 'Dashboards', path: `${base}/dashboard` },
     { label: 'Shared with me', path: `${base}/shared` },
     { label: 'AI', path: `${base}/ai` },
+    { label: 'Skills', path: `${base}/skills` },
     { label: 'Whiteboards', path: `${base}/whiteboards` },
     { label: 'Forms', path: `${base}/forms` },
     { label: 'Automations', path: `${base}/automations` },
@@ -175,6 +178,9 @@ function railEntries(
     { path: `${base}/docs`, label: 'Docs', icon: FileText, flag: FLAGS.DOCS },
     { path: `${base}/dashboard`, label: 'Dashboards', icon: LayoutDashboard, flag: FLAGS.VIEWS_DASHBOARD },
     { path: `${base}/ai`, label: 'AI', icon: Bot, flag: FLAGS.AI },
+    // §15 — a skill is an AI surface, so it rides the same ClickApp flag: a
+    // workspace with AI turned off must not find Skills still reachable here.
+    { path: `${base}/skills`, label: 'Skills', icon: Gem, flag: FLAGS.AI },
     { path: `${base}/shared`, label: 'Shared with me', icon: Users },
     { path: `${base}/whiteboards`, label: 'Whiteboards', icon: Frame },
     { path: `${base}/forms`, label: 'Forms', icon: ClipboardList, flag: FLAGS.FORMS },
@@ -549,6 +555,7 @@ export function WorkspaceSidebar() {
       case 'Docs': return t('nav.docs')
       case 'Dashboards': return t('nav.dashboards')
       case 'AI': return t('nav.ai')
+      case 'Skills': return t('nav.skills')
       case 'Shared with me': return t('nav.sharedWithMe')
       case 'Whiteboards': return t('nav.whiteboards')
       case 'Forms': return t('nav.forms')
@@ -1145,6 +1152,11 @@ export function WorkspaceSidebar() {
               <div className="space-y-1">
                 {featureEnabled(FLAGS.AI) && (
                   <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact />
+                )}
+                {/* §15 — "Skills" sits next to AI, as it does in her sidebar
+                    between Replies and Meetings [17:38]. */}
+                {featureEnabled(FLAGS.AI) && (
+                  <NavLink to={"/app/$workspaceId/skills" as any} params={{ workspaceId }} icon={Gem} label={t('nav.skills')} compact />
                 )}
                 {/* A1.7 — without this row a privately shared list is only
                     reachable by link, since it is hidden from the tree below. */}
@@ -1823,6 +1835,7 @@ function NavLink({
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/ai'
+    | '/app/$workspaceId/skills'
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/whiteboards'
@@ -1871,6 +1884,7 @@ function DockLink({
     | '/app/$workspaceId/inbox'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/ai'
+    | '/app/$workspaceId/skills'
     | '/app/$workspaceId/docs'
     | '/app/$workspaceId/dashboard'
     | '/app/$workspaceId/settings'

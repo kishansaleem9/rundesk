@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
+import { useSkill } from '../lib/skills-api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
@@ -116,7 +117,7 @@ function writingModeLabelKey(mode: string): TranslationKey {
 export function AiPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
-  const { prompt } = useSearch({ from: '/app/$workspaceId/ai' })
+  const { prompt, skillId } = useSearch({ from: '/app/$workspaceId/ai' })
   const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing'>('chat')
 
   // §A2.3 — `?prompt=` is a question handed over from another surface; the chat
@@ -127,6 +128,10 @@ export function AiPage() {
     [prompt],
   )
   const navigate = useNavigate({ from: '/app/$workspaceId/ai' })
+
+  // Only for the composer chip's label — the server resolves the skill itself,
+  // and does the access check while it is there.
+  const { data: activeSkill } = useSkill(workspaceId, skillId ?? '')
 
   return (
     <div className="h-full flex flex-col">
@@ -177,7 +182,12 @@ export function AiPage() {
           <AiPanel
             workspaceId={workspaceId}
             ask={handedOverAsk}
-            onAskHandled={() => navigate({ search: {}, replace: true })}
+            // Clearing the prompt must not also clear the skill: dropping the
+            // whole search object here would silently end the skill's scope
+            // after exactly one answer.
+            onAskHandled={() => navigate({ search: (prev) => ({ ...prev, prompt: undefined }), replace: true })}
+            skillId={skillId}
+            skillName={activeSkill?.name}
             className="h-full"
           />
         )}

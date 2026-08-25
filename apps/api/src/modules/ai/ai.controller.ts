@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService } from './ai.service'
+import { SkillsService } from '../skills/skills.service'
 import { BriefingService } from './briefing.service'
 import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -22,6 +23,7 @@ export class AiController {
   constructor(
     private readonly ai: AiService,
     private readonly briefings: BriefingService,
+    private readonly skills: SkillsService,
   ) {}
 
   @Get('status')
@@ -232,6 +234,8 @@ export class AiController {
       workspaceContext?: string
       workspaceId?: string
       currentView?: string
+      /** §15 — answer as this skill. Ignored without a workspaceId. */
+      skillId?: string
     },
     @Res() res: any,
   ) {
@@ -245,10 +249,39 @@ export class AiController {
     const context = body.workspaceId
       ? await this.ai.buildWorkspaceContext(body.workspaceId, user.id, { currentView: body.currentView })
       : body.workspaceContext ?? ''
-    await this.ai.chatStream(body.messages, context, res as any, {
-      userId: user.id,
-      workspaceId: body.workspaceId,
-    })
+
+    // §15 — resolve the skill through SkillsService rather than reading the row
+    // here. The service owns the visibility filter and the enabled check, so
+    // going through it is what stops a caller invoking a skill they cannot see,
+    // or one its owner has switched off. A skillId without a workspaceId is not
+    // resolvable at all: the id alone names nothing this endpoint may open.
+    let skillPrompt: string | undefined
+    if (body.skillId && body.workspaceId) {
+      try {
+        const invocation = await this.skills.buildInvocationContext(
+          body.workspaceId,
+          user.id,
+          body.skillId,
+        )
+        skillPrompt = this.skills.renderSkillPrompt(invocation)
+      } catch (err) {
+        // Failing closed matters more than streaming something: silently
+        // answering as the generic assistant would look like the skill worked.
+        const status = err instanceof HttpException ? err.getStatus() : HttpStatus.BAD_REQUEST
+        res.status(status).send({
+          error: err instanceof Error ? err.message : 'Skill unavailable',
+        })
+        return
+      }
+    }
+
+    await this.ai.chatStream(
+      body.messages,
+      context,
+      res as any,
+      { userId: user.id, workspaceId: body.workspaceId },
+      skillPrompt,
+    )
   }
 
   @Post('suggest-tasks')

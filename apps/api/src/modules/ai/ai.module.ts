@@ -10,6 +10,7 @@ import { TasksModule } from '../tasks/tasks.module'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { PlansModule } from '../plans/plans.module'
 import { SearchModule } from '../search/search.module'
+import { SkillsModule } from '../skills/skills.module'
 
 @Module({
   // NotificationsModule supplies NotificationsService for briefing + workload
@@ -18,7 +19,11 @@ import { SearchModule } from '../search/search.module'
   // PlansModule supplies PlanFeatureGuard + PlansService for the §14.1 AI gate.
   // SearchModule supplies SearchService for §15.1 knowledge retrieval (it's
   // @Global, but importing it makes the dependency explicit).
-  imports: [TasksModule, NotificationsModule, PlansModule, SearchModule],
+  // SkillsModule supplies SkillsService so a chat turn can be answered *as* a
+  // skill (§15) — the service also owns the visibility and enabled checks, so
+  // resolving the skill through it is what stops a caller invoking one they
+  // cannot see. Skills imports nothing from Ai, so no cycle.
+  imports: [TasksModule, NotificationsModule, PlansModule, SearchModule, SkillsModule],
   controllers: [AiController, KnowledgeController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;
   // WorkloadAlertService owns the daily @Cron that alerts managers about

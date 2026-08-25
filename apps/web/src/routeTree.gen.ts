@@ -47,6 +47,7 @@ import { Route as AppWorkspaceIdTimelineRouteImport } from './routes/app.$worksp
 import { Route as AppWorkspaceIdTimeRouteImport } from './routes/app.$workspaceId.time'
 import { Route as AppWorkspaceIdTemplatesRouteImport } from './routes/app.$workspaceId.templates'
 import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspaceId.sprints'
+import { Route as AppWorkspaceIdSkillsRouteImport } from './routes/app.$workspaceId.skills'
 import { Route as AppWorkspaceIdSharedRouteImport } from './routes/app.$workspaceId.shared'
 import { Route as AppWorkspaceIdSettingsRouteImport } from './routes/app.$workspaceId.settings'
 import { Route as AppWorkspaceIdReportsRouteImport } from './routes/app.$workspaceId.reports'
@@ -67,6 +68,7 @@ import { Route as AppWorkspaceIdAiRouteImport } from './routes/app.$workspaceId.
 import { Route as AppWorkspaceIdSpaceIdRouteImport } from './routes/app.$workspaceId.$spaceId'
 import { Route as AppWorkspaceIdTimeApprovalsRouteImport } from './routes/app.$workspaceId.time.approvals'
 import { Route as AppWorkspaceIdSprintsSprintIdRouteImport } from './routes/app.$workspaceId.sprints.$sprintId'
+import { Route as AppWorkspaceIdSkillsSkillIdRouteImport } from './routes/app.$workspaceId.skills.$skillId'
 import { Route as AppWorkspaceIdGoalsGoalIdRouteImport } from './routes/app.$workspaceId.goals.$goalId'
 import { Route as AppWorkspaceIdFormsFormIdRouteImport } from './routes/app.$workspaceId.forms.$formId'
 import { Route as AppWorkspaceIdSpaceIdProjectIdRouteImport } from './routes/app.$workspaceId.$spaceId.$projectId'
@@ -296,6 +298,13 @@ const AppWorkspaceIdSprintsRoute = AppWorkspaceIdSprintsRouteImport.update({
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.sprints.lazy').then((d) => d.Route),
 )
+const AppWorkspaceIdSkillsRoute = AppWorkspaceIdSkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.skills.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdSharedRoute = AppWorkspaceIdSharedRouteImport.update({
   id: '/shared',
   path: '/shared',
@@ -474,6 +483,16 @@ const AppWorkspaceIdSprintsSprintIdRoute =
       (d) => d.Route,
     ),
   )
+const AppWorkspaceIdSkillsSkillIdRoute =
+  AppWorkspaceIdSkillsSkillIdRouteImport.update({
+    id: '/$skillId',
+    path: '/$skillId',
+    getParentRoute: () => AppWorkspaceIdSkillsRoute,
+  } as any).lazy(() =>
+    import('./routes/app.$workspaceId.skills.$skillId.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const AppWorkspaceIdGoalsGoalIdRoute =
   AppWorkspaceIdGoalsGoalIdRouteImport.update({
     id: '/$goalId',
@@ -547,6 +566,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
+  '/app/$workspaceId/skills': typeof AppWorkspaceIdSkillsRouteWithChildren
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
@@ -565,6 +585,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
+  '/app/$workspaceId/skills/$skillId': typeof AppWorkspaceIdSkillsSkillIdRoute
   '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
   '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
   '/app/$workspaceId/forms/': typeof AppWorkspaceIdFormsIndexLazyRoute
@@ -610,6 +631,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
+  '/app/$workspaceId/skills': typeof AppWorkspaceIdSkillsRouteWithChildren
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
   '/app/$workspaceId/whiteboards': typeof AppWorkspaceIdWhiteboardsRoute
@@ -626,6 +648,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
+  '/app/$workspaceId/skills/$skillId': typeof AppWorkspaceIdSkillsSkillIdRoute
   '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
   '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
   '/app/$workspaceId/forms': typeof AppWorkspaceIdFormsIndexLazyRoute
@@ -675,6 +698,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
+  '/app/$workspaceId/skills': typeof AppWorkspaceIdSkillsRouteWithChildren
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
@@ -693,6 +717,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/$spaceId/$projectId': typeof AppWorkspaceIdSpaceIdProjectIdRouteWithChildren
   '/app/$workspaceId/forms/$formId': typeof AppWorkspaceIdFormsFormIdRoute
   '/app/$workspaceId/goals/$goalId': typeof AppWorkspaceIdGoalsGoalIdRoute
+  '/app/$workspaceId/skills/$skillId': typeof AppWorkspaceIdSkillsSkillIdRoute
   '/app/$workspaceId/sprints/$sprintId': typeof AppWorkspaceIdSprintsSprintIdRoute
   '/app/$workspaceId/time/approvals': typeof AppWorkspaceIdTimeApprovalsRoute
   '/app/$workspaceId/forms/': typeof AppWorkspaceIdFormsIndexLazyRoute
@@ -743,6 +768,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/shared'
+    | '/app/$workspaceId/skills'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
@@ -761,6 +787,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/goals/$goalId'
+    | '/app/$workspaceId/skills/$skillId'
     | '/app/$workspaceId/sprints/$sprintId'
     | '/app/$workspaceId/time/approvals'
     | '/app/$workspaceId/forms/'
@@ -806,6 +833,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/shared'
+    | '/app/$workspaceId/skills'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/timeline'
     | '/app/$workspaceId/whiteboards'
@@ -822,6 +850,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/goals/$goalId'
+    | '/app/$workspaceId/skills/$skillId'
     | '/app/$workspaceId/sprints/$sprintId'
     | '/app/$workspaceId/time/approvals'
     | '/app/$workspaceId/forms'
@@ -870,6 +899,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/shared'
+    | '/app/$workspaceId/skills'
     | '/app/$workspaceId/sprints'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
@@ -888,6 +918,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/$spaceId/$projectId'
     | '/app/$workspaceId/forms/$formId'
     | '/app/$workspaceId/goals/$goalId'
+    | '/app/$workspaceId/skills/$skillId'
     | '/app/$workspaceId/sprints/$sprintId'
     | '/app/$workspaceId/time/approvals'
     | '/app/$workspaceId/forms/'
@@ -1170,6 +1201,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdSprintsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/skills': {
+      id: '/app/$workspaceId/skills'
+      path: '/skills'
+      fullPath: '/app/$workspaceId/skills'
+      preLoaderRoute: typeof AppWorkspaceIdSkillsRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/shared': {
       id: '/app/$workspaceId/shared'
       path: '/shared'
@@ -1338,6 +1376,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdSprintsSprintIdRouteImport
       parentRoute: typeof AppWorkspaceIdSprintsRoute
     }
+    '/app/$workspaceId/skills/$skillId': {
+      id: '/app/$workspaceId/skills/$skillId'
+      path: '/$skillId'
+      fullPath: '/app/$workspaceId/skills/$skillId'
+      preLoaderRoute: typeof AppWorkspaceIdSkillsSkillIdRouteImport
+      parentRoute: typeof AppWorkspaceIdSkillsRoute
+    }
     '/app/$workspaceId/goals/$goalId': {
       id: '/app/$workspaceId/goals/$goalId'
       path: '/$goalId'
@@ -1424,6 +1469,17 @@ const AppWorkspaceIdGoalsRouteChildren: AppWorkspaceIdGoalsRouteChildren = {
 const AppWorkspaceIdGoalsRouteWithChildren =
   AppWorkspaceIdGoalsRoute._addFileChildren(AppWorkspaceIdGoalsRouteChildren)
 
+interface AppWorkspaceIdSkillsRouteChildren {
+  AppWorkspaceIdSkillsSkillIdRoute: typeof AppWorkspaceIdSkillsSkillIdRoute
+}
+
+const AppWorkspaceIdSkillsRouteChildren: AppWorkspaceIdSkillsRouteChildren = {
+  AppWorkspaceIdSkillsSkillIdRoute: AppWorkspaceIdSkillsSkillIdRoute,
+}
+
+const AppWorkspaceIdSkillsRouteWithChildren =
+  AppWorkspaceIdSkillsRoute._addFileChildren(AppWorkspaceIdSkillsRouteChildren)
+
 interface AppWorkspaceIdSprintsRouteChildren {
   AppWorkspaceIdSprintsSprintIdRoute: typeof AppWorkspaceIdSprintsSprintIdRoute
   AppWorkspaceIdSprintsIndexLazyRoute: typeof AppWorkspaceIdSprintsIndexLazyRoute
@@ -1471,6 +1527,7 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdReportsRoute: typeof AppWorkspaceIdReportsRoute
   AppWorkspaceIdSettingsRoute: typeof AppWorkspaceIdSettingsRoute
   AppWorkspaceIdSharedRoute: typeof AppWorkspaceIdSharedRoute
+  AppWorkspaceIdSkillsRoute: typeof AppWorkspaceIdSkillsRouteWithChildren
   AppWorkspaceIdSprintsRoute: typeof AppWorkspaceIdSprintsRouteWithChildren
   AppWorkspaceIdTemplatesRoute: typeof AppWorkspaceIdTemplatesRoute
   AppWorkspaceIdTimeRoute: typeof AppWorkspaceIdTimeRouteWithChildren
@@ -1498,6 +1555,7 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdReportsRoute: AppWorkspaceIdReportsRoute,
   AppWorkspaceIdSettingsRoute: AppWorkspaceIdSettingsRoute,
   AppWorkspaceIdSharedRoute: AppWorkspaceIdSharedRoute,
+  AppWorkspaceIdSkillsRoute: AppWorkspaceIdSkillsRouteWithChildren,
   AppWorkspaceIdSprintsRoute: AppWorkspaceIdSprintsRouteWithChildren,
   AppWorkspaceIdTemplatesRoute: AppWorkspaceIdTemplatesRoute,
   AppWorkspaceIdTimeRoute: AppWorkspaceIdTimeRouteWithChildren,
