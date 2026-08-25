@@ -422,8 +422,24 @@ panel with a reasoning trace, a **Skills** context chip and a **model picker (Ma
 She also names **Memory** (stores what you discuss) and **Connections** (connect a skill to
 any system).
 
-**Us.** Nothing — no `Skill` anywhere in `apps/web/src/pages`. This is a product in its own
-right, not a feature; it needs scoping before it needs building.
+**Us.** ~~Nothing — no `Skill` anywhere in `apps/web/src/pages`.~~ **Built** (25 Aug 2026),
+first slice: `skills` / `skill_memories` / `skill_connections` (migration `0103`), a
+`SkillsService` + controller scoped by workspace membership, a hub at
+`/app/:workspaceId/skills` with her `+ New Skill`, starter carousel, three tabs and empty
+state, a skill page carrying the playbook + **Memory** `[18:42]` + **Connections** `[18:58]`,
+and `?skillId=` scoping a chat so a skill actually shapes the reply.
+
+**The boundary, stated deliberately.** A skill is a named, reusable playbook — a persona plus
+instructions — and it **does not act unattended**. Nothing in the video shows one doing so:
+every frame is a person asking and the assistant answering, down to the approval gate at
+`[18:58]` ("Approve this approach and I'll create it"). Building autonomous action would be
+inventing an authority nobody granted. When it is wanted, it should be granted explicitly, on
+a surface built for it.
+
+**Still open** from the twelve findings below: Skills Miner and team-wide discovery (the two
+"scan my workspace" cards are the only starters not yet wired), AI-authored skill creation in
+chat with its approve-before-create gate, persisted auto-named chat threads, follow-up chips,
+the visible reasoning trace, per-message actions, and the model picker.
 
 ### 2.8 SyncUp — calls inside the app — `[19:16–21:15]` · size: very large
 
@@ -749,13 +765,13 @@ One row per finding, 15 sections, produced by reading all 139 frames against the
 
 | | Size | Gap | Her ask |
 |---|---|---|---|
-| **!** | large | Skills: a library of named, reusable AI playbooks (page, schema, API, nav) | "Ab yeh jo SKILL wali cheez hai na, yeh ek ClickUp ka NEW FEATURE hai — is ka matlab yeh hai ke aap jo kaam karte ho woh aap ka AGENT kar sakta hai; a |
-|  | medium | Skills empty state and starter carousel on the hub | The hub's first screen when you own nothing: a centred "Skills teach Brain how you work" empty state and a row of starter cards — Skills Miner, For yo |
-|  | medium | Prebuilt skill templates: Delegate Like Me, Brand Voice, Triage Tasks Like Me | Coloured template cards that create a skill by interviewing you: "Delegate Like Me — Assigns and hands off work the way you would"; "Brand Voice — Int |
+| ✅ | large | Skills: a library of named, reusable AI playbooks (page, schema, API, nav) — **built** | "Ab yeh jo SKILL wali cheez hai na, yeh ek ClickUp ka NEW FEATURE hai — is ka matlab yeh hai ke aap jo kaam karte ho woh aap ka AGENT kar sakta hai; a |
+| ✅ | medium | Skills empty state and starter carousel on the hub — **built** | The hub's first screen when you own nothing: a centred "Skills teach Brain how you work" empty state and a row of starter cards — Skills Miner, For yo |
+| ✅ | medium | Prebuilt skill templates: Delegate Like Me, Brand Voice, Triage Tasks Like Me — **built** | Coloured template cards that create a skill by interviewing you: "Delegate Like Me — Assigns and hands off work the way you would"; "Brand Voice — Int |
 |  | large | Skills Miner — turn repeat work into skills automatically | "Skills Miner / Turn repeat work into skills — Scan your tasks, docs, and chats to surface workflows worth saving" behind a "Find my Skills" button; p |
 | **!** | large | AI-authored skill creation in chat, with an approve-before-create gate | Ask the assistant "Help me create a skill", have it explain what skills are, recommend specific ones grounded in your actual workspace, then propose a |
-|  | medium | Skill Memory — per-skill context that accumulates from conversation | "Yeh MEMORY hai — yeh hum jo bhi baat karenge woh STORE karega apne andar." Everything you tell a skill is retained by that skill, so it never has to  |
-|  | large | Skill Connections — bind a skill to external systems | "Aur yeh CONNECTIONS hai — agar main is ko build karoongi to main is ko kisi bhi system mein CONNECT kar sakti hoon." A skill can be wired to any conn |
+| ✅ | medium | Skill Memory — per-skill context that accumulates from conversation — **built** | "Yeh MEMORY hai — yeh hum jo bhi baat karenge woh STORE karega apne andar." Everything you tell a skill is retained by that skill, so it never has to  |
+| ✅ | large | Skill Connections — bind a skill to external systems — **built** | "Aur yeh CONNECTIONS hai — agar main is ko build karoongi to main is ko kisi bhi system mein CONNECT kar sakti hoon." A skill can be wired to any conn |
 |  | medium | Persisted, auto-named AI chat threads in the sidebar | The chat that authored the skill starts as "New Chat", renames itself to "Skill Definition and Ideas", and stays in the sidebar's AI Chats list after  |
 |  | small | Answer-aware follow-up chips ("Follow ups") | Under every assistant answer, a "Follow ups" label and clickable next-step chips generated from that answer — e.g. "Create a Personal Task Organizer s |
 |  | small | Visible reasoning trace while the assistant works | A "Pondering" status with the retrieval steps streaming beneath it — "Checking what you're working on", "Checking the latest Skills basics" — before t |
