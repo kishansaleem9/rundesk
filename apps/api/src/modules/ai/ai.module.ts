@@ -5,6 +5,8 @@ import { WorkloadAlertService } from './workload-alert.service'
 import { EmbeddingService } from './embedding.service'
 import { KnowledgeIndexerService } from './knowledge-indexer.service'
 import { AiController } from './ai.controller'
+import { ChatThreadsService } from './chat-threads.service'
+import { ChatThreadsController } from './chat-threads.controller'
 import { KnowledgeController } from './knowledge.controller'
 import { TasksModule } from '../tasks/tasks.module'
 import { NotificationsModule } from '../notifications/notifications.module'
@@ -24,7 +26,7 @@ import { SkillsModule } from '../skills/skills.module'
   // resolving the skill through it is what stops a caller invoking one they
   // cannot see. Skills imports nothing from Ai, so no cycle.
   imports: [TasksModule, NotificationsModule, PlansModule, SearchModule, SkillsModule],
-  controllers: [AiController, KnowledgeController],
+  controllers: [AiController, KnowledgeController, ChatThreadsController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;
   // WorkloadAlertService owns the daily @Cron that alerts managers about
   // overloaded teammates (§7.12) — both must be provided here or their crons
@@ -32,7 +34,7 @@ import { SkillsModule } from '../skills/skills.module'
   // re-embeds each workspace into the §15.1 semantic store; EmbeddingService is
   // the pluggable embedder (env-gated real API + deterministic local default)
   // used by both the indexer and AiService's knowledge retrieval.
-  providers: [AiService, BriefingService, WorkloadAlertService, EmbeddingService, KnowledgeIndexerService],
+  providers: [AiService, BriefingService, WorkloadAlertService, EmbeddingService, KnowledgeIndexerService, ChatThreadsService],
   exports: [AiService],
 })
 export class AiModule {}

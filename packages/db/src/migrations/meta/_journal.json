@@ -736,6 +736,13 @@
       "when": 1900000089012,
       "tag": "0104_skill_installs",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1900000089013,
+      "tag": "0105_ai_chat_threads",
+      "breakpoints": true
     }
   ]
 }

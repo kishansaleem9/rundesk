@@ -2263,6 +2263,36 @@ Skills they already have: ${owned.length ? owned.join(', ') : 'none'}.`,
     }
   }
 
+  /**
+   * §15 — name a chat from what it is about, frames `296_1817` → `297_1820`.
+   *
+   * Returns '' when no model is configured rather than inventing something:
+   * the caller has a deterministic fallback built from the first question,
+   * which is a better name than anything guessed here.
+   */
+  async titleForChat(
+    messages: Array<{ role: string; content: string }>,
+    ctx: AiCtx = {},
+  ): Promise<string> {
+    if (!this.isAvailable() || messages.length === 0) return ''
+    const transcript = messages
+      .slice(0, 6)
+      .map((m) => `${m.role}: ${m.content.slice(0, 500)}`)
+      .join('\n')
+    const response = await this.complete('chat.title', ctx, {
+      // The cheap model on purpose: this is a three-word heading, and running
+      // it on the expensive one would cost real money per conversation for no
+      // difference anyone could see.
+      model: 'claude-haiku-4-5',
+      max_tokens: 40,
+      system:
+        'Name this conversation in 2-5 words, like a heading in a sidebar. ' +
+        'Reply with ONLY the title — no quotes, no punctuation at the end, no explanation.',
+      messages: [{ role: 'user', content: transcript }],
+    })
+    return response.content[0]?.type === 'text' ? response.content[0].text : ''
+  }
+
   async command(workspaceId: string, message: string, ctx: AiCtx = {}): Promise<CommandPlan> {
     const [workspaceContext, planCtx] = await Promise.all([
       this.buildWorkspaceContext(workspaceId, ctx.userId ?? ''),

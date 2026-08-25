@@ -42,6 +42,7 @@ import passport from 'passport'
 import { DatabaseModule } from '../dist/apps/api/src/common/database/database.module.js'
 import { SkillsModule } from '../dist/apps/api/src/modules/skills/skills.module.js'
 import { SkillsService } from '../dist/apps/api/src/modules/skills/skills.service.js'
+import { ChatThreadsService } from '../dist/apps/api/src/modules/ai/chat-threads.service.js'
 import { AiService } from '../dist/apps/api/src/modules/ai/ai.service.js'
 import { DB_TOKEN } from '../dist/apps/api/src/common/database/database.module.js'
 
@@ -359,6 +360,71 @@ async function main() {
   console.log('\n▶ templates')
   const titles = ((await call('GET', `/workspaces/${WS}/skills/templates`)).data ?? []).map((x) => x.title)
   chk(['Delegate Like Me','Brand Voice','Triage Tasks Like Me'].every((n) => titles.includes(n)), 'the hub is served her three starter templates', `got ${JSON.stringify(titles)}`)
+
+  console.log('\n▶ AI chats that outlive the panel — frames 296_1817 → 304_1907')
+  {
+    // No key here, so titling takes the deterministic path — which is the one
+    // an instance without ANTHROPIC_API_KEY actually runs.
+    const ai = new AiService({ get: () => undefined }, app.get(DB_TOKEN), {})
+    const threads = new ChatThreadsService(app.get(DB_TOKEN), ai)
+
+    const thread = await threads.create(WS, ME, undefined)
+    chk(thread.title === 'New Chat', 'a new chat starts as "New Chat"', `started as "${thread.title}"`)
+
+    await threads.append(WS, ME, thread.id, { role: 'user', content: 'Help me create a skill' })
+    const stillNew = await threads.get(WS, ME, thread.id)
+    chk(
+      stillNew.title === 'New Chat',
+      'and stays that way until there is an exchange to name',
+      `renamed from one message: "${stillNew.title}"`,
+    )
+
+    const { title } = await threads.append(WS, ME, thread.id, {
+      role: 'assistant',
+      content: 'Skills are reusable playbooks…',
+    })
+    chk(!!title && title !== 'New Chat', `then names itself — "${title}"`, 'the thread never got a name')
+
+    const listed = await threads.list(WS, ME)
+    const mine = listed.find((t) => t.id === thread.id)
+    chk(!!mine, 'and appears in the sidebar list', 'the thread was not listed')
+    chk(mine?.messageCount === 2, 'carrying its message count', `count was ${mine?.messageCount}`)
+
+    const reopened = await threads.get(WS, ME, thread.id)
+    chk(reopened.messages.length === 2, 'reopening it brings the conversation back', `got ${reopened.messages.length} message(s)`)
+    chk(
+      reopened.messages[0]?.role === 'user' && reopened.messages[1]?.role === 'assistant',
+      'in the order it happened',
+      'the messages came back out of order',
+    )
+
+    // The rename rule: once a person names it, the model never renames it back.
+    await threads.rename(WS, ME, thread.id, 'My planning notes')
+    await threads.append(WS, ME, thread.id, { role: 'user', content: 'and another thing entirely' })
+    await threads.append(WS, ME, thread.id, { role: 'assistant', content: 'sure' })
+    const afterRename = await threads.get(WS, ME, thread.id)
+    chk(
+      afterRename.title === 'My planning notes',
+      'a name you chose survives everything said after it',
+      `your title was replaced with "${afterRename.title}"`,
+    )
+
+    // A thread is one person's.
+    let hidden = false
+    try {
+      await threads.get(WS, THEM, thread.id)
+    } catch {
+      hidden = true
+    }
+    chk(hidden, "and a colleague cannot open it", "another person could read this thread")
+
+    await threads.remove(WS, ME, thread.id)
+    chk(
+      !(await threads.list(WS, ME)).some((t) => t.id === thread.id),
+      'deleting it takes it off the list',
+      'the deleted thread is still listed',
+    )
+  }
 
   console.log('\n▶ cleanup')
   const ownerDelete = await call('DELETE', `/workspaces/${WS}/skills/${skill.id}`)
