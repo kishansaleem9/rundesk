@@ -105,7 +105,7 @@ JS
 # Port 9 (discard) is never listening, so the script's own API fetches fail fast
 # and it falls back to reading the workspace id out of the stubbed URL.
 run_with_throw() {
-  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" THROW_ON="$1" \
+  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" API_READY_MS=0 THROW_ON="$1" \
     node "$REPO/deploy/verify-ui.mjs" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 }
 
@@ -113,14 +113,14 @@ run_with_throw() {
 # fires within a stub run — otherwise the process exits first and the assertion
 # below passes without ever exercising the path.
 run_route_handler() {
-  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" CHUNK_HOLD_MS=20 \
+  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" API_READY_MS=0 CHUNK_HOLD_MS=20 \
     node "$REPO/deploy/verify-ui.mjs" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 }
 
 # A rejection from anywhere at all, to prove the process-level guard catches
 # what no section guard can.
 run_with_stray_rejection() {
-  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" \
+  PLAYWRIGHT_DIR="$WORK/pw" BASE=http://127.0.0.1:9 SHOT_DIR="$WORK" API_READY_MS=0 \
     NODE_OPTIONS="--import=$WORK/stray.mjs" \
     node "$REPO/deploy/verify-ui.mjs" 2>&1 | sed 's/\x1b\[[0-9;]*m//g'
 }

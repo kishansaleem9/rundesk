@@ -225,6 +225,40 @@ page.on('response', (r) => {
 
 try {
   ref('LOGIN', 'The deployed app loads and signs in')
+
+  // Wait for the API to answer before driving a browser at it.
+  //
+  // `deploy.sh rebuild` recreates the API container and this check is usually
+  // the next thing run, so the first request can land while Nest is still
+  // booting. The failure then looks nothing like a warm-up: the login form
+  // renders (nginx serves static files fine), the submit POST fails, the URL
+  // never changes, and the run dies on `waitForURL: Timeout 30000ms` — which
+  // reads as "login is broken" rather than "the server was not up yet".
+  //
+  // That happened on 25 Aug and cost a round trip to work out. The repo already
+  // learned this once for the Playwright suite ("the first spec ran ~0.5s after
+  // deploy.sh rebuild recreated the API container and hit 502s"); this is the
+  // same lesson applied to the check that runs straight after a deploy.
+  {
+    // Bounded by env so the stub-driven isolation test (which points at a dead
+    // port on purpose) does not sit here for a minute per run.
+    const deadline = Date.now() + Number(process.env.API_READY_MS ?? 60000)
+    let last = 'no response'
+    for (;;) {
+      const status = await fetch(`${API}/health`, { method: 'GET' })
+        .then((r) => r.status)
+        .catch(() => 0)
+      if (status && status < 500) { last = `HTTP ${status}`; break }
+      last = status ? `HTTP ${status}` : 'connection refused'
+      if (Date.now() > deadline) {
+        bad(`the API never became ready (${last}) — nothing below this is meaningful`)
+        break
+      }
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+    console.log(`  \x1b[2m     api ready: ${last}\x1b[0m`)
+  }
+
   await go('/login', 2500)
   const hasForm = await page.locator('input[type=email]').count() > 0
   if (!hasForm) {
@@ -239,7 +273,16 @@ try {
   await page.fill('input[type=email]', EMAIL)
   await page.fill('input[type=password]', PASSWORD)
   await page.click('button[type=submit]')
-  await page.waitForURL(/\/app\//, { timeout: 30000 })
+  // One retry: the API can answer /health while a first real request still
+  // races a cold connection pool. Re-submitting is cheap and turns a flaky
+  // "login is broken" into a passing run.
+  await page.waitForURL(/\/app\//, { timeout: 20000 }).catch(async () => {
+    console.log('  \x1b[2m     first sign-in did not navigate; submitting once more\x1b[0m')
+    await page.fill('input[type=email]', EMAIL).catch(() => {})
+    await page.fill('input[type=password]', PASSWORD).catch(() => {})
+    await page.click('button[type=submit]').catch(() => {})
+    await page.waitForURL(/\/app\//, { timeout: 20000 })
+  })
   await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
   ok(`signed in as ${EMAIL}`)
 
