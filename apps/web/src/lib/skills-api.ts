@@ -443,3 +443,78 @@ export async function mineSkills(
   if (!result) throw new Error('The scan did not come back')
   return result
 }
+
+
+// ─── §15 — AI chats that outlive the panel ──────────────────────────────────
+
+export interface AiChatThread {
+  id: string
+  title: string
+  skillId: string | null
+  updatedAt: string
+  messageCount: number
+}
+
+export interface AiChatMessage {
+  id: string
+  threadId: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+const chatBase = (workspaceId: string) => `/workspaces/${workspaceId}/ai-chats`
+
+export const aiChatKeys = {
+  list: (workspaceId: string) => ['ai-chats', workspaceId] as const,
+  one: (workspaceId: string, id: string) => ['ai-chats', workspaceId, id] as const,
+}
+
+export function useAiChatThreads(workspaceId: string) {
+  return useQuery({
+    queryKey: aiChatKeys.list(workspaceId),
+    queryFn: () => api<AiChatThread[]>(chatBase(workspaceId)),
+    enabled: !!workspaceId,
+  })
+}
+
+export function useAiChatThread(workspaceId: string, threadId: string | null) {
+  return useQuery({
+    queryKey: aiChatKeys.one(workspaceId, threadId ?? ''),
+    queryFn: () =>
+      api<AiChatThread & { messages: AiChatMessage[] }>(`${chatBase(workspaceId)}/${threadId}`),
+    enabled: !!workspaceId && !!threadId,
+  })
+}
+
+/**
+ * Appending is fire-and-forget from the panel's point of view: the message is
+ * already on screen, and blocking the conversation on a write nobody is waiting
+ * for would make the assistant feel slower than it is. The list is refreshed
+ * afterwards so the sidebar picks up the title when one arrives.
+ */
+export function useAiChatActions(workspaceId: string) {
+  const qc = useQueryClient()
+  const refresh = () => qc.invalidateQueries({ queryKey: ['ai-chats', workspaceId] })
+  return {
+    create: (skillId?: string) =>
+      api<AiChatThread>(chatBase(workspaceId), { method: 'POST', body: { skillId } }).then((t) => {
+        refresh()
+        return t
+      }),
+    append: (threadId: string, role: 'user' | 'assistant', content: string) =>
+      api<{ message: AiChatMessage; title?: string }>(
+        `${chatBase(workspaceId)}/${threadId}/messages`,
+        { method: 'POST', body: { role, content } },
+      ).then((r) => {
+        // Only when a title actually arrived: refreshing on every turn would
+        // reorder the sidebar mid-conversation for no visible gain.
+        if (r?.title) refresh()
+        return r
+      }),
+    rename: (threadId: string, title: string) =>
+      api(`${chatBase(workspaceId)}/${threadId}`, { method: 'PATCH', body: { title } }).then(refresh),
+    remove: (threadId: string) =>
+      api(`${chatBase(workspaceId)}/${threadId}`, { method: 'DELETE' }).then(refresh),
+  }
+}

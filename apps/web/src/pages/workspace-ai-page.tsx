@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
-import { useSkill } from '../lib/skills-api'
+import { useSkill, useAiChatActions } from '../lib/skills-api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
@@ -117,7 +117,7 @@ function writingModeLabelKey(mode: string): TranslationKey {
 export function AiPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/ai' })
-  const { prompt, skillId } = useSearch({ from: '/app/$workspaceId/ai' })
+  const { prompt, skillId, thread: threadFromUrl } = useSearch({ from: '/app/$workspaceId/ai' })
   const [activeTab, setActiveTab] = useState<'chat' | 'knowledge' | 'commands' | 'generate' | 'notes' | 'writing'>('chat')
 
   // §A2.3 — `?prompt=` is a question handed over from another surface; the chat
@@ -132,6 +132,36 @@ export function AiPage() {
   // Only for the composer chip's label — the server resolves the skill itself,
   // and does the access check while it is there.
   const { data: activeSkill } = useSkill(workspaceId, skillId ?? '')
+
+  // §15 — the conversation is a real thread now, so it survives closing the
+  // panel (frames `296_1817` → `304_1907`). One is opened lazily: creating a
+  // thread for every visit to the AI tab would fill the sidebar with empty
+  // "New Chat" rows nobody started.
+  // The sidebar fetches the list itself; this page only needs to be able to
+  // start one, and a second subscription here would just be another cache to
+  // keep in step.
+  const chat = useAiChatActions(workspaceId)
+  const [threadId, setThreadId] = useState<string | null>(threadFromUrl ?? null)
+  const startingRef = useRef(false)
+
+  // A sidebar click names a different thread; follow it rather than staying on
+  // whichever one this page opened first.
+  useEffect(() => {
+    if (threadFromUrl && threadFromUrl !== threadId) setThreadId(threadFromUrl)
+  }, [threadFromUrl, threadId])
+
+  useEffect(() => {
+    if (threadId || activeTab !== 'chat' || startingRef.current) return
+    startingRef.current = true
+    void chat
+      .create(skillId)
+      .then((thread) => setThreadId(thread.id))
+      .catch(() => {})
+      .finally(() => { startingRef.current = false })
+    // Intentionally not depending on `chat`: it is rebuilt each render, and
+    // depending on it would start a new thread on every one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, activeTab, skillId])
 
   return (
     <div className="h-full flex flex-col">
@@ -188,6 +218,7 @@ export function AiPage() {
             onAskHandled={() => navigate({ search: (prev) => ({ ...prev, prompt: undefined }), replace: true })}
             skillId={skillId}
             skillName={activeSkill?.name}
+            threadId={threadId}
             className="h-full"
           />
         )}

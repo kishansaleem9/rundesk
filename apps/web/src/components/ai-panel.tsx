@@ -17,6 +17,7 @@ import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
+import { useAiChatActions, useAiChatThread } from '../lib/skills-api'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -43,6 +44,14 @@ type AiPanelProps = {
   skillId?: string
   /** Shown on the composer chip, from frame `296_1817`. Display only. */
   skillName?: string
+  /**
+   * §15 — the thread this panel is showing. When set the conversation is
+   * loaded from it and every turn is written back, so closing the panel no
+   * longer discards what was said (frames `296_1817` → `304_1907`).
+   */
+  threadId?: string | null
+  /** Fired when a thread names itself, so the sidebar can show the new title. */
+  onThreadTitled?: (title: string) => void
 }
 
 // Stable catalog-key identifiers; the localized text is both shown and sent
@@ -64,9 +73,16 @@ export function AiPanel({
   className,
   skillId,
   skillName,
+  threadId = null,
+  onThreadTitled,
 }: AiPanelProps) {
   const { t, locale } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
+  const chat = useAiChatActions(workspaceId)
+  const threadQuery = useAiChatThread(workspaceId, threadId)
+  // Which thread the on-screen messages belong to, so switching threads
+  // replaces the conversation instead of appending to it.
+  const loadedThreadRef = useRef<string | null>(null)
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamBuffer, setStreamBuffer] = useState('')
@@ -91,12 +107,40 @@ export function AiPanel({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamBuffer])
 
+  /**
+   * Load a thread's history when it changes.
+   *
+   * Keyed on the thread id rather than the query data: the query refetches, and
+   * re-seeding on every settle would wipe a turn that is still streaming.
+   */
+  useEffect(() => {
+    if (!threadId) {
+      if (loadedThreadRef.current !== null) {
+        loadedThreadRef.current = null
+        setMessages([])
+      }
+      return
+    }
+    if (loadedThreadRef.current === threadId) return
+    const loaded = threadQuery.data
+    if (!loaded || loaded.id !== threadId) return
+    loadedThreadRef.current = threadId
+    setMessages(
+      loaded.messages.map((m) => ({ role: m.role, content: m.content, id: m.id })),
+    )
+  }, [threadId, threadQuery.data])
+
   async function sendMessage(content: string) {
     if (!content.trim() || isStreaming) return
     setInput('')
 
     const userMsg: Message = { role: 'user', content, id: Date.now().toString() }
     setMessages((prev) => [...prev, userMsg])
+    // Written alongside, not awaited: the message is already on screen, and
+    // blocking the answer on a write nobody is waiting for would make the
+    // assistant feel slower than it is. A failed write loses one turn of
+    // history, never the reply.
+    if (threadId) void chat.append(threadId, 'user', content).catch(() => {})
     setIsStreaming(true)
     setStreamBuffer('')
 
@@ -170,6 +214,13 @@ export function AiPanel({
       }
       setMessages((prev) => [...prev, assistantMsg])
       setStreamBuffer('')
+      if (threadId && accumulated.trim()) {
+        void chat
+          .append(threadId, 'assistant', accumulated)
+          // This is the turn that can trigger the rename, per `shouldAutoTitle`.
+          .then((r) => { if (r?.title) onThreadTitled?.(r.title) })
+          .catch(() => {})
+      }
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         setMessages((prev) => [

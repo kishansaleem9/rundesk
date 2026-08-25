@@ -60,6 +60,7 @@ import { ContainerEditDialog, type ContainerEditValues } from './container-edit-
 import { CreateWorkspaceFlow, type WorkspaceDraft } from './create-workspace-flow'
 import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
 import { useTranslation } from '../lib/i18n'
+import { useAiChatThreads } from '../lib/skills-api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { MoveDialog, type MovableKind } from './move-dialog'
@@ -1158,6 +1159,10 @@ export function WorkspaceSidebar() {
                 {featureEnabled(FLAGS.AI) && (
                   <NavLink to={"/app/$workspaceId/skills" as any} params={{ workspaceId }} icon={Gem} label={t('nav.skills')} compact />
                 )}
+                {/* §15 — her "AI Chats" section, frames `296_1817` → `304_1907`:
+                    the conversation that authored a skill is still listed after
+                    the panel is closed. */}
+                {featureEnabled(FLAGS.AI) && <AiChatsSection workspaceId={workspaceId} />}
                 {/* A1.7 — without this row a privately shared list is only
                     reachable by link, since it is hidden from the tree below. */}
                 <NavLink to={"/app/$workspaceId/shared" as any} params={{ workspaceId }} icon={Users} label={t('nav.sharedWithMe')} compact />
@@ -1910,5 +1915,48 @@ function DockLink({
     >
       <Icon className="h-4 w-4" />
     </Link>
+  )
+}
+
+
+/**
+ * §15 — the sidebar's "AI Chats" list.
+ *
+ * Frames `296_1817` → `297_1820` → `304_1907`: a thread starts as "New Chat",
+ * renames itself, and is still here after the panel closes. Empty threads are
+ * hidden — a list of "New Chat" rows nobody said anything in is worse than no
+ * list, and this is exactly what she is looking at when she reopens hers.
+ */
+function AiChatsSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { data: threads = [] } = useAiChatThreads(workspaceId)
+  const withContent = threads.filter((thread) => thread.messageCount > 0).slice(0, 5)
+  if (withContent.length === 0) return null
+
+  return (
+    <div className="pt-1" data-testid="ai-chats-section">
+      <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        {t('nav.aiChats')}
+      </div>
+      {withContent.map((thread) => (
+        <button
+          key={thread.id}
+          data-testid={`ai-chat-${thread.id}`}
+          title={thread.title}
+          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+          onClick={() =>
+            navigate({
+              to: '/app/$workspaceId/ai',
+              params: { workspaceId },
+              search: { thread: thread.id } as never,
+            })
+          }
+        >
+          <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{thread.title}</span>
+        </button>
+      ))}
+    </div>
   )
 }

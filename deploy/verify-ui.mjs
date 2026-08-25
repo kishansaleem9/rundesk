@@ -1433,6 +1433,85 @@ try {
     }
   })
 
+  await section('§15e', 'An AI chat outlives the panel, and names itself', async () => {
+    // Frames 296_1817 → 297_1820 → 304_1907. Before this, the panel held its
+    // messages in React state: closing it discarded the conversation.
+    const thread = await apiPost(`/workspaces/${WS}/ai-chats`, {})
+    if (!thread?.id) {
+      bad('could not start an AI chat')
+      return
+    }
+    chk(thread.title === 'New Chat', 'a new chat starts as "New Chat"', `started as "${thread.title}"`)
+
+    await apiPost(`/workspaces/${WS}/ai-chats/${thread.id}/messages`, {
+      role: 'user',
+      content: 'Help me create a skill',
+    })
+    const midway = await apiGet(`/workspaces/${WS}/ai-chats/${thread.id}`)
+    chk(
+      midway?.title === 'New Chat',
+      'and stays that way until there is an exchange to name',
+      `renamed from a single message: "${midway?.title}"`,
+    )
+
+    const second = await apiPost(`/workspaces/${WS}/ai-chats/${thread.id}/messages`, {
+      role: 'assistant',
+      content: 'Skills are reusable playbooks that teach the assistant how you work.',
+    })
+    const named = await apiGet(`/workspaces/${WS}/ai-chats/${thread.id}`)
+    chk(
+      named?.title && named.title !== 'New Chat',
+      `then names itself — "${named?.title}"`,
+      'the chat never got a name',
+    )
+    void second
+
+    // The thing the frames are actually about: it is still there afterwards.
+    const listed = (await apiGet(`/workspaces/${WS}/ai-chats`)) ?? []
+    const row = listed.find((x) => x.id === thread.id)
+    chk(!!row, 'and is listed in the sidebar', 'the chat was not listed')
+    chk(row?.messageCount === 2, 'with its message count', `count was ${row?.messageCount}`)
+    chk((named?.messages ?? []).length === 2, 'and reopens with the conversation intact', `got ${(named?.messages ?? []).length} message(s)`)
+
+    // A name someone chose is never replaced.
+    await fetch(`${API}/workspaces/${WS}/ai-chats/${thread.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'My planning notes' }),
+    }).catch(() => null)
+    await apiPost(`/workspaces/${WS}/ai-chats/${thread.id}/messages`, { role: 'user', content: 'something else' })
+    await apiPost(`/workspaces/${WS}/ai-chats/${thread.id}/messages`, { role: 'assistant', content: 'noted' })
+    const afterRename = await apiGet(`/workspaces/${WS}/ai-chats/${thread.id}`)
+    chk(
+      afterRename?.title === 'My planning notes',
+      'a name you chose survives what is said after it',
+      `your title was replaced with "${afterRename?.title}"`,
+    )
+
+    // It shows up in the sidebar for real, not just in the API.
+    await go(`/app/${WS}`, 4000)
+    const section = page.locator('[data-testid="ai-chats-section"]')
+    chk(
+      (await section.count()) > 0,
+      'the sidebar carries an AI Chats section',
+      'no AI Chats section in the sidebar',
+    )
+    if ((await section.count()) > 0) {
+      chk(
+        (await page.locator(`[data-testid="ai-chat-${thread.id}"]`).count()) > 0,
+        'and the chat is in it',
+        'the chat was not listed in the sidebar',
+      )
+    }
+
+    await fetch(`${API}/workspaces/${WS}/ai-chats/${thread.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => null)
+    const gone = await apiRead(`/workspaces/${WS}/ai-chats/${thread.id}`)
+    chk(gone.status === 404, 'and the check cleans up after itself', `the chat survived deletion (${gone.status})`)
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)

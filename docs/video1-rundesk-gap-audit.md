@@ -478,8 +478,8 @@ Workspace"), per-user **install** so Enabled means what the hub means, **Skills 
 the tasks and docs you actually made, and carries the lines that suggested each result), and
 **team discovery** ("skills created across your workspace" — a plain query, not a model call).
 
-**Still open:** persisted auto-named chat threads, per-message actions (create task / save to
-doc / regenerate / thumbs), and the model picker.
+**Still open:** per-message actions (create task / save to doc / regenerate / thumbs) and the
+model picker.
 
 ### 2.8 SyncUp — calls inside the app — `[19:16–21:15]` · size: very large
 
@@ -812,7 +812,7 @@ One row per finding, 15 sections, produced by reading all 139 frames against the
 | ✅ | large | AI-authored skill creation in chat, with an approve-before-create gate — **built** | Ask the assistant "Help me create a skill", have it explain what skills are, recommend specific ones grounded in your actual workspace, then propose a |
 | ✅ | medium | Skill Memory — per-skill context that accumulates from conversation — **built** | "Yeh MEMORY hai — yeh hum jo bhi baat karenge woh STORE karega apne andar." Everything you tell a skill is retained by that skill, so it never has to  |
 | ✅ | large | Skill Connections — bind a skill to external systems — **built** | "Aur yeh CONNECTIONS hai — agar main is ko build karoongi to main is ko kisi bhi system mein CONNECT kar sakti hoon." A skill can be wired to any conn |
-|  | medium | Persisted, auto-named AI chat threads in the sidebar | The chat that authored the skill starts as "New Chat", renames itself to "Skill Definition and Ideas", and stays in the sidebar's AI Chats list after  |
+| ✅ | medium | Persisted, auto-named AI chat threads in the sidebar — **built** | The chat that authored the skill starts as "New Chat", renames itself to "Skill Definition and Ideas", and stays in the sidebar's AI Chats list after  |
 | ✅ | small | Answer-aware follow-up chips ("Follow ups") — **built** | Under every assistant answer, a "Follow ups" label and clickable next-step chips generated from that answer — e.g. "Create a Personal Task Organizer s |
 | ✅ | small | Visible reasoning trace while the assistant works — **built** | A "Pondering" status with the retrieval steps streaming beneath it — "Checking what you're working on", "Checking the latest Skills basics" — before t |
 |  | medium | Per-message actions beyond copy (create task, save to doc, regenerate, thumbs up/down) | The six-icon row under each assistant answer: copy, create task, save to doc, regenerate, thumbs up, thumbs down. |

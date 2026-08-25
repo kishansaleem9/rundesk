@@ -5166,6 +5166,8 @@ export const en = {
   'skills.discover.eyebrow': 'For your team',
   'skills.discover.cardBody': 'Discover skills created across your workspace.',
   'skills.discover.run': 'Scan my workspace',
+
+  'nav.aiChats': 'AI Chats',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10290,6 +10292,8 @@ export const es: Record<TranslationKey, string> = {
   'skills.discover.cardBody': 'Descubre habilidades creadas en tu espacio de trabajo.',
   'skills.discover.run': 'Explorar mi espacio',
 
+  'nav.aiChats': 'Chats de IA',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15412,6 +15416,8 @@ export const ar: Record<TranslationKey, string> = {
   'skills.discover.cardBody': 'اكتشف المهارات التي أُنشئت في مساحة عملك.',
   'skills.discover.run': 'افحص مساحة عملي',
 
+  'nav.aiChats': 'محادثات الذكاء الاصطناعي',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20378,6 +20384,8 @@ export const ur: Record<TranslationKey, string> = {
   'skills.discover.eyebrow': 'آپ کی ٹیم کے لیے',
   'skills.discover.cardBody': 'اپنے ورک اسپیس میں بنی ہوئی اسکلز دریافت کریں۔',
   'skills.discover.run': 'میرا ورک اسپیس اسکین کریں',
+
+  'nav.aiChats': 'AI چیٹس',
 
 }
 
