@@ -242,21 +242,42 @@ try {
   {
     // Bounded by env so the stub-driven isolation test (which points at a dead
     // port on purpose) does not sit here for a minute per run.
-    const deadline = Date.now() + Number(process.env.API_READY_MS ?? 60000)
+    const budget = Number(process.env.API_READY_MS ?? 90000)
+    const deadline = Date.now() + budget
     let last = 'no response'
+    let attempts = 0
+    if (budget > 0) {
+      process.stdout.write(`  \x1b[2m     waiting for ${API}/health \x1b[0m`)
+    }
     for (;;) {
-      const status = await fetch(`${API}/health`, { method: 'GET' })
+      attempts++
+      const status = await fetch(`${API}/health`, {
+        method: 'GET',
+        // WITHOUT THIS THE WHOLE RUN HANGS FOREVER. A connection that is
+        // accepted and then never answered — nginx up, Nest still booting —
+        // leaves fetch awaiting with no timeout of its own, so the deadline
+        // below is never even evaluated. On 25 Aug that looked exactly like a
+        // frozen check: no output, no error, no end.
+        signal: AbortSignal.timeout(5000),
+      })
         .then((r) => r.status)
         .catch(() => 0)
       if (status && status < 500) { last = `HTTP ${status}`; break }
-      last = status ? `HTTP ${status}` : 'connection refused'
+      last = status ? `HTTP ${status}` : 'no answer yet'
       if (Date.now() > deadline) {
-        bad(`the API never became ready (${last}) — nothing below this is meaningful`)
+        if (budget > 0) console.log('')
+        bad(`the API never became ready after ${attempts} attempt(s) (${last}) — nothing below this is meaningful`)
+        console.log('  \x1b[2m     try: docker logs rundesk-api --tail 50\x1b[0m')
         break
       }
+      // A dot per attempt, so waiting never looks like hanging. Silence and a
+      // hang are indistinguishable from the outside, which is the whole reason
+      // this was reported as "it's stuck".
+      process.stdout.write('.')
       await new Promise((r) => setTimeout(r, 1000))
     }
-    console.log(`  \x1b[2m     api ready: ${last}\x1b[0m`)
+    if (budget > 0) console.log('')
+    console.log(`  \x1b[2m     api ready: ${last} (${attempts} attempt(s))\x1b[0m`)
   }
 
   await go('/login', 2500)
