@@ -56,7 +56,7 @@ function captureStream() {
     if (Array.isArray(system)) return String((system[0] as { text?: string })?.text ?? '')
     return String(system ?? '')
   }
-  return { service, res, written, systemText }
+  return { service, res, written, systemText, model: () => captured.model }
 }
 
 const MESSAGES = [{ role: 'user' as const, content: 'draft the handover note' }]
@@ -118,6 +118,24 @@ describe('§15 a skill reaches the model', () => {
     const { service, res, systemText } = captureStream()
     await service.chatStream(MESSAGES, CONTEXT, res as never, {}, '   ')
     assert.match(systemText(), /^You are Rundesk AI, an intelligent assistant/)
+  })
+
+  it('sends the model the picker chose', async () => {
+    // §15 — a picker that does not change the model is worse than no picker,
+    // and nothing on screen would show the difference.
+    const fast = captureStream()
+    await fast.service.chatStream(MESSAGES, CONTEXT, fast.res as never, {}, undefined, 'fast')
+    assert.equal(fast.model(), 'claude-haiku-4-5')
+
+    const deep = captureStream()
+    await deep.service.chatStream(MESSAGES, CONTEXT, deep.res as never, {}, undefined, 'deep')
+    assert.equal(deep.model(), 'claude-sonnet-4-6')
+  })
+
+  it('keeps the old model when nobody picks one', async () => {
+    const { service, res, model } = captureStream()
+    await service.chatStream(MESSAGES, CONTEXT, res as never, {})
+    assert.equal(model(), 'claude-sonnet-4-6', 'adding a picker changed the default answer')
   })
 
   it('still streams the answer through', async () => {

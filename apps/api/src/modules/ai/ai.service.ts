@@ -15,6 +15,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'driz
 import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { modelForTier } from './model-tiers'
 import {
   fallbackProposal,
   noPatternsFound,
@@ -1058,9 +1059,16 @@ Focus on the key goals, current status, and any blockers.`,
      * it is, and the skill's own boundary sentence is the last word.
      */
     skillPrompt?: string,
+    /**
+     * §15 — the composer's model picker. Omitted or unrecognised resolves to
+     * the tier chat already used, so nothing changes for a caller that does not
+     * pass one.
+     */
+    tier?: string,
   ): Promise<void> {
     // Enforce rate limits before we hijack the reply for streaming.
     await this.assertWithinRateLimit(ctx)
+    const model = modelForTier(tier)
 
     const intro = skillPrompt?.trim()
       ? skillPrompt.trim()
@@ -1088,7 +1096,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
 
     try {
       const stream = this.claude.messages.stream({
-        model: 'claude-sonnet-4-6',
+        model,
         max_tokens: 2048,
         // Cache the (large, repeated) system context across turns.
         system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
@@ -1103,7 +1111,9 @@ Current date: ${new Date().toISOString().split('T')[0]}`
       const final = await stream.finalMessage().catch(() => null)
       void this.recordUsage(
         'chat',
-        'claude-sonnet-4-6',
+        // The model actually used. Hardcoding the old one here would make the
+        // usage table quietly wrong the moment anyone picked Fast.
+        model,
         ctx,
         final?.usage?.input_tokens ?? 0,
         final?.usage?.output_tokens ?? 0,

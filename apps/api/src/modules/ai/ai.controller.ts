@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, Http
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
+import { MODEL_TIERS } from './model-tiers'
 import { BriefingService } from './briefing.service'
 import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -25,6 +26,12 @@ export class AiController {
     private readonly briefings: BriefingService,
     private readonly skills: SkillsService,
   ) {}
+
+  @Get('models')
+  @ApiOperation({ summary: '§15 — the tiers the composer offers' })
+  models() {
+    return MODEL_TIERS
+  }
 
   @Get('status')
   @ApiOperation({ summary: 'Check if AI features are available' })
@@ -236,6 +243,8 @@ export class AiController {
       currentView?: string
       /** §15 — answer as this skill. Ignored without a workspaceId. */
       skillId?: string
+      /** §15 — 'fast' | 'deep'; anything else falls back to the default. */
+      tier?: string
     },
     @Res() res: any,
   ) {
@@ -281,6 +290,7 @@ export class AiController {
       res as any,
       { userId: user.id, workspaceId: body.workspaceId },
       skillPrompt,
+      body.tier,
     )
   }
 

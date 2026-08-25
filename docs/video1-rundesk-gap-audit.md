@@ -478,7 +478,11 @@ Workspace"), per-user **install** so Enabled means what the hub means, **Skills 
 the tasks and docs you actually made, and carries the lines that suggested each result), and
 **team discovery** ("skills created across your workspace" — a plain query, not a model call).
 
-**Still open:** the model picker.
+**All twelve Skills findings are now built.** The nearest thing left is a
+different product: ClickUp's **Autopilot / Super Agents**, the layer that acts on
+triggers. Rundesk already has most of its machinery in `ai-command.ts` — a bounded
+tool set, a pure planner, `executeActions` — behind the same propose→confirm gate a
+skill uses. That is a scoping conversation, not a gap in this section.
 
 ### 2.8 SyncUp — calls inside the app — `[19:16–21:15]` · size: very large
 
@@ -815,7 +819,7 @@ One row per finding, 15 sections, produced by reading all 139 frames against the
 | ✅ | small | Answer-aware follow-up chips ("Follow ups") — **built** | Under every assistant answer, a "Follow ups" label and clickable next-step chips generated from that answer — e.g. "Create a Personal Task Organizer s |
 | ✅ | small | Visible reasoning trace while the assistant works — **built** | A "Pondering" status with the retrieval steps streaming beneath it — "Checking what you're working on", "Checking the latest Skills basics" — before t |
 | ✅ | medium | Per-message actions beyond copy (create task, save to doc, regenerate, thumbs up/down) — **built** | The six-icon row under each assistant answer: copy, create task, save to doc, regenerate, thumbs up, thumbs down. |
-|  | medium | Composer scope chip and model picker | The composer carries a "Skills" context chip (scoping the conversation to the surface you are on) and a model selector reading "Max ▾", plus a "+" att |
+| ✅ | medium | Composer scope chip and model picker — **built** | The composer carries a "Skills" context chip (scoping the conversation to the surface you are on) and a model selector reading "Max ▾", plus a "+" att |
 
 ### Meetings & calls  ·  15 findings
 

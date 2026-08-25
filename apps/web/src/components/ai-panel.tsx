@@ -91,6 +91,15 @@ export function AiPanel({
   // replaces the conversation instead of appending to it.
   const loadedThreadRef = useRef<string | null>(null)
   const [input, setInput] = useState('')
+  // §15 — her composer's "Max ▾", frames `296_1817` / `301_1836`. Remembered
+  // per person: whichever trade you prefer, you prefer it next time too.
+  const [tier, setTier] = useState<string>(() => {
+    try {
+      return localStorage.getItem('rundesk.aiTier') ?? 'deep'
+    } catch {
+      return 'deep'
+    }
+  })
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamBuffer, setStreamBuffer] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -102,6 +111,15 @@ export function AiPanel({
     locale,
     onResult: (transcript) =>
       setInput((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript)),
+  })
+
+  // The tiers come from the server so the labels and the models they resolve
+  // to have one home.
+  const { data: modelTiers = [] } = useQuery({
+    queryKey: ['ai-models'],
+    queryFn: () => api<Array<{ id: string; label: string; hint: string }>>('/ai/models'),
+    staleTime: Infinity,
+    retry: false,
   })
 
   const statusQuery = useQuery({
@@ -196,6 +214,7 @@ export function AiPanel({
           // §15 — omitted entirely when absent, so a normal chat turn is
           // byte-identical to what it was before skills existed.
           ...(skillId ? { skillId } : {}),
+          tier,
         }),
         signal: controller.signal,
       })
@@ -412,15 +431,41 @@ export function AiPanel({
             decoration: it is the only thing on screen that says this answer is
             coming from a skill rather than the generic assistant, and it must
             stay visible while the reply streams. */}
-        {skillId && (
-          <div
-            className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-foreground"
-            data-testid="ai-skill-chip"
+        <div className="mb-2 flex items-center gap-2">
+          {skillId && (
+            <div
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-foreground"
+              data-testid="ai-skill-chip"
+            >
+              <Gem className="h-3 w-3 text-primary" />
+              <span className="truncate max-w-[14rem]">{skillName ?? t('skills.title')}</span>
+            </div>
+          )}
+          {/* Her model selector. Two real tiers, not a menu of aliases — and it
+              is disabled mid-answer, because changing it then would look like
+              it applied to the reply already streaming. */}
+          <select
+            value={tier}
+            data-testid="ai-model-tier"
+            disabled={isStreaming}
+            title={modelTiers.find((m) => m.id === tier)?.hint ?? ''}
+            onChange={(e) => {
+              setTier(e.target.value)
+              try {
+                localStorage.setItem('rundesk.aiTier', e.target.value)
+              } catch {
+                // A browser refusing storage is not a reason to refuse the choice.
+              }
+            }}
+            className="ml-auto rounded-full border border-border/70 bg-transparent px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
-            <Gem className="h-3 w-3 text-primary" />
-            <span className="truncate max-w-[14rem]">{skillName ?? t('skills.title')}</span>
-          </div>
-        )}
+            {modelTiers.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
         {/* relative z-50 lifts the composer above the fixed support-widget launcher
             (bottom-6 right-6 z-40), which otherwise intercepts clicks on the Send button. */}
         <div className="relative z-50 flex gap-2">
