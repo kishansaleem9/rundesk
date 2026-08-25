@@ -472,9 +472,14 @@ is the set *this person installed* — otherwise three tabs over one library are
 authorship and none of use. `skill_installs` (migration `0104`) fixes that; `skills.enabled`
 keeps its real meaning as the author's kill-switch over their own skill for everyone.
 
-**Still open:** Skills Miner and team-wide discovery (the two "scan my workspace" cards are
-the only starters not yet wired), persisted auto-named chat threads, per-message actions
-(create task / save to doc / regenerate / thumbs), and the model picker.
+**Built since:** the **slash command** (`/brand-voice draft the release note` — ClickUp's
+primary invocation path: "the /Slash Command for AI Skills appears for everyone in the
+Workspace"), per-user **install** so Enabled means what the hub means, **Skills Miner** (reads
+the tasks and docs you actually made, and carries the lines that suggested each result), and
+**team discovery** ("skills created across your workspace" — a plain query, not a model call).
+
+**Still open:** persisted auto-named chat threads, per-message actions (create task / save to
+doc / regenerate / thumbs), and the model picker.
 
 ### 2.8 SyncUp — calls inside the app — `[19:16–21:15]` · size: very large
 
@@ -803,7 +808,7 @@ One row per finding, 15 sections, produced by reading all 139 frames against the
 | ✅ | large | Skills: a library of named, reusable AI playbooks (page, schema, API, nav) — **built** | "Ab yeh jo SKILL wali cheez hai na, yeh ek ClickUp ka NEW FEATURE hai — is ka matlab yeh hai ke aap jo kaam karte ho woh aap ka AGENT kar sakta hai; a |
 | ✅ | medium | Skills empty state and starter carousel on the hub — **built** | The hub's first screen when you own nothing: a centred "Skills teach Brain how you work" empty state and a row of starter cards — Skills Miner, For yo |
 | ✅ | medium | Prebuilt skill templates: Delegate Like Me, Brand Voice, Triage Tasks Like Me — **built** | Coloured template cards that create a skill by interviewing you: "Delegate Like Me — Assigns and hands off work the way you would"; "Brand Voice — Int |
-|  | large | Skills Miner — turn repeat work into skills automatically | "Skills Miner / Turn repeat work into skills — Scan your tasks, docs, and chats to surface workflows worth saving" behind a "Find my Skills" button; p |
+| ✅ | large | Skills Miner — turn repeat work into skills automatically — **built** | "Skills Miner / Turn repeat work into skills — Scan your tasks, docs, and chats to surface workflows worth saving" behind a "Find my Skills" button; p |
 | ✅ | large | AI-authored skill creation in chat, with an approve-before-create gate — **built** | Ask the assistant "Help me create a skill", have it explain what skills are, recommend specific ones grounded in your actual workspace, then propose a |
 | ✅ | medium | Skill Memory — per-skill context that accumulates from conversation — **built** | "Yeh MEMORY hai — yeh hum jo bhi baat karenge woh STORE karega apne andar." Everything you tell a skill is retained by that skill, so it never has to  |
 | ✅ | large | Skill Connections — bind a skill to external systems — **built** | "Aur yeh CONNECTIONS hai — agar main is ko build karoongi to main is ko kisi bhi system mein CONNECT kar sakti hoon." A skill can be wired to any conn |

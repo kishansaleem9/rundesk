@@ -5151,6 +5151,21 @@ export const en = {
   'skills.installed': 'Installed',
   'skills.uninstall': 'Remove from my skills',
   'skills.tab.enabledHint': 'The skills you have installed',
+
+  // §15 — the two functional starter cards: Skills Miner and team discovery.
+  'skills.miner.title': 'Skills Miner',
+  'skills.miner.body': 'I\'ll read the tasks and docs you have actually made and look for a workflow you repeat often enough to be worth saving. Nothing is created until you approve it.',
+  'skills.miner.run': 'Find my Skills',
+  'skills.discover.title': 'Discover team skills',
+  'skills.discover.body': 'Skills your colleagues published that you have not picked up yet.',
+  'skills.discover.empty': 'Nothing new — you already have everything your workspace has shared.',
+  'skills.discover.usedBy': 'Used by {{count}}',
+
+  'skills.miner.cardTitle': 'Turn repeat work into skills',
+  'skills.miner.cardBody': 'Scan your tasks and docs to surface workflows worth saving.',
+  'skills.discover.eyebrow': 'For your team',
+  'skills.discover.cardBody': 'Discover skills created across your workspace.',
+  'skills.discover.run': 'Scan my workspace',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10260,6 +10275,21 @@ export const es: Record<TranslationKey, string> = {
   'skills.uninstall': 'Quitar de mis habilidades',
   'skills.tab.enabledHint': 'Las habilidades que has instalado',
 
+  // §15 — the two functional starter cards: Skills Miner and team discovery.
+  'skills.miner.title': 'Buscador de habilidades',
+  'skills.miner.body': 'Leeré las tareas y los documentos que has creado y buscaré un flujo de trabajo que repitas lo suficiente como para merecer una habilidad. No se crea nada hasta que lo apruebes.',
+  'skills.miner.run': 'Buscar mis habilidades',
+  'skills.discover.title': 'Descubrir habilidades del equipo',
+  'skills.discover.body': 'Habilidades que tus colegas han publicado y que todavía no has añadido.',
+  'skills.discover.empty': 'Nada nuevo: ya tienes todo lo que se ha compartido en tu espacio de trabajo.',
+  'skills.discover.usedBy': 'La usan {{count}}',
+
+  'skills.miner.cardTitle': 'Convierte el trabajo repetido en habilidades',
+  'skills.miner.cardBody': 'Revisa tus tareas y documentos para encontrar flujos que merezca la pena guardar.',
+  'skills.discover.eyebrow': 'Para tu equipo',
+  'skills.discover.cardBody': 'Descubre habilidades creadas en tu espacio de trabajo.',
+  'skills.discover.run': 'Explorar mi espacio',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15367,6 +15397,21 @@ export const ar: Record<TranslationKey, string> = {
   'skills.uninstall': 'إزالة من مهاراتي',
   'skills.tab.enabledHint': 'المهارات التي ثبَّتها',
 
+  // §15 — the two functional starter cards: Skills Miner and team discovery.
+  'skills.miner.title': 'مُنقِّب المهارات',
+  'skills.miner.body': 'سأقرأ المهام والمستندات التي أنشأتها فعليًا وأبحث عن سير عمل تكرره بما يكفي ليستحق مهارة. لا يُنشأ شيء حتى توافق عليه.',
+  'skills.miner.run': 'ابحث عن مهاراتي',
+  'skills.discover.title': 'اكتشف مهارات الفريق',
+  'skills.discover.body': 'مهارات نشرها زملاؤك ولم تضِفها بعد.',
+  'skills.discover.empty': 'لا جديد — لديك بالفعل كل ما شاركته مساحة عملك.',
+  'skills.discover.usedBy': 'يستخدمها {{count}}',
+
+  'skills.miner.cardTitle': 'حوِّل العمل المتكرر إلى مهارات',
+  'skills.miner.cardBody': 'افحص مهامك ومستنداتك لإظهار سير العمل الذي يستحق الحفظ.',
+  'skills.discover.eyebrow': 'لفريقك',
+  'skills.discover.cardBody': 'اكتشف المهارات التي أُنشئت في مساحة عملك.',
+  'skills.discover.run': 'افحص مساحة عملي',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20318,6 +20363,21 @@ export const ur: Record<TranslationKey, string> = {
   'skills.installed': 'انسٹال شدہ',
   'skills.uninstall': 'میری اسکلز سے ہٹائیں',
   'skills.tab.enabledHint': 'وہ اسکلز جو آپ نے انسٹال کی ہیں',
+
+  // §15 — the two functional starter cards: Skills Miner and team discovery.
+  'skills.miner.title': 'اسکلز مائنر',
+  'skills.miner.body': 'میں وہ ٹاسکس اور دستاویزات پڑھوں گا جو آپ نے واقعی بنائے ہیں، اور ایسا کام ڈھونڈوں گا جو آپ اتنی بار دہراتے ہیں کہ اسکل بنانے کے قابل ہو۔ آپ کی منظوری تک کچھ نہیں بنے گا۔',
+  'skills.miner.run': 'میری اسکلز ڈھونڈیں',
+  'skills.discover.title': 'ٹیم کی اسکلز دریافت کریں',
+  'skills.discover.body': 'وہ اسکلز جو آپ کے ساتھیوں نے شیئر کیں اور آپ نے ابھی نہیں لیں۔',
+  'skills.discover.empty': 'کچھ نیا نہیں — جو کچھ ورک اسپیس میں شیئر ہوا، وہ سب آپ کے پاس ہے۔',
+  'skills.discover.usedBy': '{{count}} استعمال کر رہے ہیں',
+
+  'skills.miner.cardTitle': 'بار بار کے کام کو اسکل بنائیں',
+  'skills.miner.cardBody': 'اپنے ٹاسکس اور دستاویزات دیکھ کر ایسے کام ڈھونڈیں جو محفوظ کرنے کے قابل ہوں۔',
+  'skills.discover.eyebrow': 'آپ کی ٹیم کے لیے',
+  'skills.discover.cardBody': 'اپنے ورک اسپیس میں بنی ہوئی اسکلز دریافت کریں۔',
+  'skills.discover.run': 'میرا ورک اسپیس اسکین کریں',
 
 }
 

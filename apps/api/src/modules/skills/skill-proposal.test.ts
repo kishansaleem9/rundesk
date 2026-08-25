@@ -3,6 +3,8 @@ import { describe, it } from 'node:test'
 import {
   APPROVAL_PROMPT,
   fallbackProposal,
+  noPatternsFound,
+  parseMinedSkills,
   parseSkillProposal,
   renderProposal,
 } from './skill-proposal'
@@ -127,5 +129,80 @@ describe('§15 no model configured', () => {
   it('falls back to a name rather than an empty one', () => {
     assert.equal(fallbackProposal('   ').name, 'New Skill')
     assert.equal(fallbackProposal('skill').name, 'New Skill')
+  })
+})
+
+
+describe('§15 Skills Miner — "surface workflows worth saving"', () => {
+  const mined = (over: Record<string, unknown> = {}) => ({
+    name: 'Weekly Client Update',
+    description: 'Writes the Friday client note',
+    instructions: 'You write my Friday client update.',
+    memories: ['Clients want progress first, blockers second'],
+    rationale: 'You created a client update task every Friday for eight weeks.',
+    evidence: ['Client update — week 12', 'Client update — week 13', 'Client update — week 14'],
+    followUps: ['Draft this week from my open tasks'],
+    ...over,
+  })
+
+  it('reads a list, or a { skills: [...] } wrapper', () => {
+    assert.equal(parseMinedSkills([mined()]).length, 1)
+    assert.equal(parseMinedSkills({ skills: [mined()] }).length, 1)
+    assert.equal(parseMinedSkills(JSON.stringify([mined()])).length, 1)
+  })
+
+  it('keeps the evidence verbatim, because that is the claim', () => {
+    // The card says "we scanned your work and found this". The lines are what
+    // let someone check that, so they travel with the proposal.
+    const [skill] = parseMinedSkills([mined()])
+    assert.deepEqual(skill.evidence, [
+      'Client update — week 12',
+      'Client update — week 13',
+      'Client update — week 14',
+    ])
+  })
+
+  it('drops a suggestion with no evidence', () => {
+    // Otherwise it is a guess wearing a miner's hat: presented as something
+    // found in your work, with nothing behind it.
+    assert.equal(parseMinedSkills([mined({ evidence: [] })]).length, 0)
+    assert.equal(parseMinedSkills([mined({ evidence: undefined })]).length, 0)
+  })
+
+  it('drops a suggestion that would create an empty skill', () => {
+    assert.equal(parseMinedSkills([mined({ instructions: '' })]).length, 0)
+    assert.equal(parseMinedSkills([mined({ name: '  ' })]).length, 0)
+  })
+
+  it('keeps the good ones when one in the batch is broken', () => {
+    const out = parseMinedSkills([mined({ instructions: '' }), mined({ name: 'Sprint Recap' })])
+    assert.equal(out.length, 1)
+    assert.equal(out[0].name, 'Sprint Recap')
+  })
+
+  it('is bounded — five skills, six lines of evidence each', () => {
+    const many = Array.from({ length: 12 }, (_v, i) => mined({ name: `Skill ${i}` }))
+    assert.equal(parseMinedSkills(many).length, 5)
+    const wordy = parseMinedSkills([
+      mined({ evidence: Array.from({ length: 20 }, (_v, i) => `line ${i}`) }),
+    ])
+    assert.equal(wordy[0].evidence.length, 6)
+  })
+
+  it('returns nothing rather than throwing on junk', () => {
+    assert.deepEqual(parseMinedSkills('not json'), [])
+    assert.deepEqual(parseMinedSkills(null), [])
+    assert.deepEqual(parseMinedSkills({ skills: 'nope' }), [])
+  })
+
+  it('says what it read when it found nothing', () => {
+    // "No results" and "the button is broken" look identical unless the empty
+    // answer says what it looked at.
+    const message = noPatternsFound([
+      { label: 'Reading the tasks you set up', finding: '3 in the last 90 days' },
+      { label: 'Reading the docs you wrote', finding: '0' },
+    ])
+    assert.match(message, /3 in the last 90 days/)
+    assert.match(message, /did not find a workflow repeated often enough/)
   })
 })

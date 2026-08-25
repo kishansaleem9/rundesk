@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { Button, Input, Badge, cn, toast } from '@rundesk/ui'
-import { Gem, Plus, Search, Sparkles, UserCheck, CheckCircle2, Loader2, Check, Download } from 'lucide-react'
+import { Gem, Plus, Search, Sparkles, UserCheck, CheckCircle2, Loader2, Check, Download, Users } from 'lucide-react'
 import { SkillAuthorPanel } from '../components/skill-author-panel'
+import { SkillDiscoveryPanel } from '../components/skill-discovery-panel'
 import { useTranslation } from '../lib/i18n'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { useAuthStore } from '../store/auth'
@@ -53,6 +54,10 @@ export function SkillsPage() {
   // Frame `t1122`: the hub reflows to two-thirds beside the panel rather than
   // being covered by it — you keep watching the library while it drafts.
   const [authoring, setAuthoring] = useState(false)
+  // §15 — the two functional starter cards. One side panel at a time: they are
+  // two answers to the same question and stacking them would leave the hub, the
+  // thing you are choosing from, with no room.
+  const [discovering, setDiscovering] = useState<'mine' | 'team' | null>(null)
 
   const skillsQuery = useSkills(workspaceId, tab)
   const { data: counts } = useSkillCounts(workspaceId)
@@ -116,7 +121,10 @@ export function SkillsPage() {
         <Button
           variant="outline"
           data-testid="build-with-ai"
-          onClick={() => setAuthoring(true)}
+          onClick={() => {
+            setDiscovering(null)
+            setAuthoring(true)
+          }}
         >
           <Sparkles className="h-4 w-4 mr-1.5" />
           {t('skills.author.build')}
@@ -141,6 +149,35 @@ export function SkillsPage() {
           — a scroll container gets to the same cards with fewer moving parts. */}
       {templates.length > 0 && (
         <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1" data-testid="skill-starters">
+          {/* Frame `285_1743` puts these two first, before the archetypes: they
+              are how you find out WHICH skill to make, which comes before
+              making one. */}
+          <StarterCard
+            testid="skill-starter-miner"
+            icon={Search}
+            eyebrow={t('skills.miner.title')}
+            title={t('skills.miner.cardTitle')}
+            body={t('skills.miner.cardBody')}
+            action={t('skills.miner.run')}
+            actionIcon={Search}
+            onClick={() => {
+              setAuthoring(false)
+              setDiscovering('mine')
+            }}
+          />
+          <StarterCard
+            testid="skill-starter-team"
+            icon={Users}
+            eyebrow={t('skills.discover.eyebrow')}
+            title={t('skills.discover.title')}
+            body={t('skills.discover.cardBody')}
+            action={t('skills.discover.run')}
+            actionIcon={Search}
+            onClick={() => {
+              setAuthoring(false)
+              setDiscovering('team')
+            }}
+          />
           {templates.map((template) => {
             const Icon = TONE_ICON[template.tone]
             return (
@@ -241,6 +278,14 @@ export function SkillsPage() {
         <SkillAuthorPanel
           workspaceId={workspaceId}
           onClose={() => setAuthoring(false)}
+          className="w-full max-w-md shrink-0 fixed inset-y-0 right-0 z-40 md:static md:z-auto"
+        />
+      )}
+      {discovering && (
+        <SkillDiscoveryPanel
+          workspaceId={workspaceId}
+          mode={discovering}
+          onClose={() => setDiscovering(null)}
           className="w-full max-w-md shrink-0 fixed inset-y-0 right-0 z-40 md:static md:z-auto"
         />
       )}
@@ -383,6 +428,50 @@ function SkillsEmptyState({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">{t('skills.author.nothingSaved')}</p>
+    </div>
+  )
+}
+
+
+/**
+ * The neutral starter cards, frame `285_1743`: an eyebrow, a title, a line of
+ * body, and a full-width outlined action. Shared so the two functional cards
+ * sit in the same row as the archetypes without being a second design.
+ */
+function StarterCard({
+  testid,
+  icon: Icon,
+  eyebrow,
+  title,
+  body,
+  action,
+  actionIcon: ActionIcon,
+  onClick,
+}: {
+  testid: string
+  icon: typeof Gem
+  eyebrow: string
+  title: string
+  body: string
+  action: string
+  actionIcon: typeof Gem
+  onClick: () => void
+}) {
+  return (
+    <div
+      className="shrink-0 w-64 rounded-xl border border-border/70 bg-card p-4 flex flex-col gap-2"
+      data-testid={testid}
+    >
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {eyebrow}
+      </div>
+      <div className="font-medium leading-tight">{title}</div>
+      <p className="text-xs text-muted-foreground flex-1">{body}</p>
+      <Button size="sm" variant="outline" className="w-full mt-1" onClick={onClick}>
+        <ActionIcon className="h-3.5 w-3.5 mr-1" />
+        {action}
+      </Button>
     </div>
   )
 }

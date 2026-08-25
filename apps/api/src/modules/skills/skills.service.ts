@@ -5,12 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, ne, notExists, sql } from 'drizzle-orm'
 import {
   skillConnections,
   skillInstalls,
   skillMemories,
   skills,
+  users,
   workspaceIntegrationConnections,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -212,6 +213,65 @@ export class SkillsService {
     // Memories and connections cascade at the database, so this is one delete.
     await this.db.delete(skills).where(eq(skills.id, id))
     return { ok: true }
+  }
+
+  /**
+   * §15 — "For your team / Discover team skills / Discover skills created
+   * across your workspace" (frame `285_1743`).
+   *
+   * No model involved: this is a real question with a real answer. What a
+   * colleague published and you have not picked up is a database query, and
+   * asking a model to describe it would be slower, dearer and less true.
+   *
+   * Ordered by how many people already use it, because on a hub full of
+   * strangers' skills that is the only signal a newcomer has.
+   */
+  async discover(workspaceId: string, userId: string) {
+    const installs = this.db.$with('installs').as(
+      this.db
+        .select({
+          skillId: skillInstalls.skillId,
+          installs: sql<number>`count(*)::int`.as('installs'),
+        })
+        .from(skillInstalls)
+        .groupBy(skillInstalls.skillId),
+    )
+
+    return this.db
+      .with(installs)
+      .select({
+        id: skills.id,
+        name: skills.name,
+        description: skills.description,
+        archetype: skills.archetype,
+        createdById: skills.createdById,
+        authorName: users.displayName,
+        installs: sql<number>`coalesce(${installs.installs}, 0)::int`,
+      })
+      .from(skills)
+      .leftJoin(installs, eq(installs.skillId, skills.id))
+      .leftJoin(users, eq(users.id, skills.createdById))
+      .where(
+        and(
+          eq(skills.workspaceId, workspaceId),
+          // Published by someone else, still switched on, and not already
+          // yours — those three are what makes it a discovery rather than a
+          // list of things you are already looking at.
+          eq(skills.visibility, 'workspace'),
+          eq(skills.enabled, true),
+          ne(skills.createdById, userId),
+          notExists(
+            this.db
+              .select({ one: sql`1` })
+              .from(skillInstalls)
+              .where(
+                and(eq(skillInstalls.skillId, skills.id), eq(skillInstalls.userId, userId)),
+              ),
+          ),
+        ),
+      )
+      .orderBy(desc(sql`coalesce(${installs.installs}, 0)`), skills.name)
+      .limit(50)
   }
 
   // ─── Installing ───────────────────────────────────────────────────────────

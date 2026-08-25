@@ -411,6 +411,46 @@ export class AiController {
     }
   }
 
+  @Post('skills/mine')
+  @ApiOperation({
+    summary: '§15 Skills Miner — scan real work for repeated workflows (SSE; writes nothing)',
+  })
+  async mineSkills(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string },
+    @Res() res: any,
+  ) {
+    if (!body.workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+
+    // Streamed for the same reason as the drafter: the scans are the claim, so
+    // they arrive before the conclusion rather than alongside it.
+    const reply = res as any
+    if (typeof reply.hijack === 'function') reply.hijack()
+    const raw = reply.raw ?? reply
+    raw.setHeader('Content-Type', 'text/event-stream')
+    raw.setHeader('Cache-Control', 'no-cache')
+    raw.setHeader('Connection', 'keep-alive')
+    raw.flushHeaders?.()
+
+    try {
+      const result = await this.ai.mineSkills(
+        body.workspaceId,
+        user.id,
+        { userId: user.id, workspaceId: body.workspaceId },
+        (step) => raw.write(`data: ${JSON.stringify({ step })}\n\n`),
+      )
+      raw.write(`data: ${JSON.stringify(result)}\n\n`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not scan your work'
+      raw.write(`data: ${JSON.stringify({ error: message })}\n\n`)
+    } finally {
+      raw.write('data: [DONE]\n\n')
+      raw.end()
+    }
+  }
+
   @Post('command')
   @ApiOperation({ summary: 'Plan a natural-language command via tool use (preview, nothing mutates)' })
   async command(@CurrentUser() user: any, @Body() body: { workspaceId?: string; message?: string }) {

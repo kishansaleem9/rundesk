@@ -17,8 +17,11 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import {
   fallbackProposal,
+  noPatternsFound,
+  parseMinedSkills,
   parseSkillProposal,
   renderProposal,
+  type MinedSkill,
   type ProposalStep,
   type SkillProposal,
 } from '../skills/skill-proposal'
@@ -2148,6 +2151,116 @@ Skills they already have: ${owned.length ? owned.join(', ') : 'none'}.`,
     // never to a half-populated skill, which would look authored and be empty.
     const proposal = parseSkillProposal(text, steps) ?? fallbackProposal(request, steps)
     return { proposal, message: renderProposal(proposal) }
+  }
+
+  /**
+   * §15 Skills Miner — "Turn repeat work into skills / Scan your tasks, docs,
+   * and chats to surface workflows worth saving" (frame `285_1743`).
+   *
+   * The scans are real and their counts are reported, because the card's whole
+   * claim is that it read YOUR work. A miner that asked a model to imagine
+   * plausible skills would produce something that looked identical and meant
+   * nothing, and nobody could tell from the outside which they had.
+   *
+   * Nothing is written. Each suggestion is an ordinary proposal, approved on
+   * the same gate as one you asked for by name.
+   */
+  async mineSkills(
+    workspaceId: string,
+    userId: string,
+    ctx: AiCtx = {},
+    onStep?: (step: ProposalStep) => void,
+  ): Promise<{ skills: MinedSkill[]; message: string }> {
+    const steps: ProposalStep[] = []
+    const step = (v: ProposalStep) => {
+      steps.push(v)
+      onStep?.(v)
+    }
+
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+    const [myTasks, myDocs, existing] = await Promise.all([
+      // Tasks this person created — what they repeatedly set up is the
+      // strongest signal of a workflow they run.
+      this.db
+        .select({ title: tasks.title })
+        .from(tasks)
+        .where(and(eq(tasks.createdById, userId), gte(tasks.createdAt, since)))
+        .orderBy(desc(tasks.createdAt))
+        .limit(120),
+      this.db
+        .select({ title: docs.title })
+        .from(docs)
+        .where(and(eq(docs.workspaceId, workspaceId), eq(docs.createdById, userId)))
+        .orderBy(desc(docs.createdAt))
+        .limit(60),
+      this.db
+        .select({ name: skills.name })
+        .from(skills)
+        .where(and(eq(skills.workspaceId, workspaceId), eq(skills.createdById, userId)))
+        .limit(20),
+    ])
+
+    step({ label: 'Reading the tasks you set up', finding: `${myTasks.length} in the last 90 days` })
+    step({ label: 'Reading the docs you wrote', finding: `${myDocs.length}` })
+    const owned = existing.map((r) => r.name)
+    step({
+      label: 'Checking what you have already turned into a skill',
+      finding: owned.length ? owned.join(', ') : 'nothing yet',
+    })
+
+    // Too little to find repetition in. Saying so beats asking a model to find
+    // a pattern in four task titles and dressing up whatever it returns.
+    if (myTasks.length + myDocs.length < 8 || !this.isAvailable()) {
+      return { skills: [], message: noPatternsFound(steps) }
+    }
+
+    const response = await this.complete('skill.mine', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2400,
+      system: `You find REPEATED workflows in someone's real work and turn them into reusable skills for the Rundesk project management app.
+
+A skill is a named playbook — a persona plus instructions — that shapes how the
+assistant answers when someone invokes it. It does not act on its own, so never
+write instructions that assume it can.
+
+Only propose a skill for a pattern you can actually SEE repeated in the lines
+below. Quote the lines that show it in "evidence" — exactly as they appear, not
+paraphrased. If nothing is repeated often enough to be worth saving, return an
+empty array; that is a good answer, not a failure. Never propose something they
+already have.
+
+Reply with ONLY a JSON array of at most 5 objects:
+[{
+  "name": "Title Case, like a product a person would spot in a list",
+  "description": "one line",
+  "instructions": "the playbook, second person, addressed to the assistant",
+  "memories": ["what this pattern shows about how they work"],
+  "rationale": "the repetition you saw, in one or two sentences",
+  "evidence": ["the actual lines that show it, verbatim"],
+  "followUps": ["things THE USER would say next, in their voice, never questions to them"]
+}]`,
+      messages: [
+        {
+          role: 'user',
+          content: `Tasks they created (newest first):
+${myTasks.map((t) => `- ${t.title}`).join('\n') || '(none)'}
+
+Docs they wrote:
+${myDocs.map((d) => `- ${d.title}`).join('\n') || '(none)'}
+
+Skills they already have: ${owned.length ? owned.join(', ') : 'none'}.`,
+        },
+      ],
+    })
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text : ''
+    const mined = parseMinedSkills(text, steps)
+    return {
+      skills: mined,
+      message: mined.length
+        ? `I read ${myTasks.length} task(s) and ${myDocs.length} doc(s) you made, and found ${mined.length} workflow(s) worth saving.`
+        : noPatternsFound(steps),
+    }
   }
 
   async command(workspaceId: string, message: string, ctx: AiCtx = {}): Promise<CommandPlan> {

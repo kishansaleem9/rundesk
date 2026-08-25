@@ -294,6 +294,68 @@ async function main() {
     ACTING_AS = ME
   }
 
+  console.log('\n▶ team discovery — "skills created across your workspace"')
+  {
+    // THEM publishes one; ME should discover it, then stop discovering it once
+    // installed. Each of the four conditions is checked separately, because a
+    // discovery list that is wrong is a list nobody can tell is wrong.
+    ACTING_AS = THEM
+    const theirs = (await call('POST', `/workspaces/${WS}/skills`, {
+      name: `Their Shared Skill ${Date.now()}`,
+      instructions: 'You do it their way.',
+      visibility: 'workspace',
+    })).data
+    ACTING_AS = ME
+
+    const found = (await call('GET', `/workspaces/${WS}/skills/discover`)).data ?? []
+    chk(found.some((s) => s.id === theirs.id), "a colleague's published skill is discoverable", 'a published skill was not discoverable')
+    chk(
+      !found.some((s) => s.id === skill.id),
+      'and your own is not — you are not discovering yourself',
+      'your own skill appeared in discovery',
+    )
+    chk(
+      found.find((s) => s.id === theirs.id)?.authorName !== undefined,
+      'it says who wrote it',
+      'discovery did not name the author',
+    )
+
+    await call('POST', `/workspaces/${WS}/skills/${theirs.id}/install`)
+    const afterInstall = (await call('GET', `/workspaces/${WS}/skills/discover`)).data ?? []
+    chk(
+      !afterInstall.some((s) => s.id === theirs.id),
+      'installing it takes it out of discovery',
+      'an installed skill is still offered as a discovery',
+    )
+    chk(
+      ((await call('GET', `/workspaces/${WS}/skills?tab=enabled`)).data ?? []).some((s) => s.id === theirs.id),
+      'and puts it in your Enabled tab',
+      "a colleague's installed skill did not reach the Enabled tab",
+    )
+
+    await call('DELETE', `/workspaces/${WS}/skills/${theirs.id}/install`)
+    ACTING_AS = THEM
+    await call('PATCH', `/workspaces/${WS}/skills/${theirs.id}`, { enabled: false })
+    ACTING_AS = ME
+    chk(
+      !((await call('GET', `/workspaces/${WS}/skills/discover`)).data ?? []).some((s) => s.id === theirs.id),
+      'a skill its author switched off stops being offered around',
+      'a disabled skill is still being recommended to colleagues',
+    )
+
+    ACTING_AS = THEM
+    await call('PATCH', `/workspaces/${WS}/skills/${theirs.id}`, { visibility: 'private' })
+    ACTING_AS = ME
+    chk(
+      !((await call('GET', `/workspaces/${WS}/skills/discover`)).data ?? []).some((s) => s.id === theirs.id),
+      'and so does one they unpublished',
+      'an unpublished skill is still discoverable',
+    )
+    ACTING_AS = THEM
+    await call('DELETE', `/workspaces/${WS}/skills/${theirs.id}`)
+    ACTING_AS = ME
+  }
+
   console.log('\n▶ templates')
   const titles = ((await call('GET', `/workspaces/${WS}/skills/templates`)).data ?? []).map((x) => x.title)
   chk(['Delegate Like Me','Brand Voice','Triage Tasks Like Me'].every((n) => titles.includes(n)), 'the hub is served her three starter templates', `got ${JSON.stringify(titles)}`)

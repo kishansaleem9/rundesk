@@ -75,6 +75,12 @@ export class SkillsController {
     return this.svc.createFromProposal(workspaceId, user.id, body)
   }
 
+  @Get('discover')
+  @ApiOperation({ summary: '§15 — "Discover skills created across your workspace"' })
+  discover(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.svc.discover(workspaceId, user.id)
+  }
+
   @Get('installed')
   @ApiOperation({ summary: '§15 — ids of the skills the caller has installed' })
   installed(@Param('workspaceId') workspaceId: string, @CurrentUser() user: CurrentUserPayload) {

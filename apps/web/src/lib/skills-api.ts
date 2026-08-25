@@ -348,3 +348,98 @@ export function useSkillCommands(workspaceId: string) {
     enabled: !!workspaceId,
   })
 }
+
+
+// ─── §15 Skills Miner and team discovery — the two functional starter cards ──
+
+export interface MinedSkill extends SkillProposal {
+  /** The lines from your own work that suggested this. Never invented. */
+  evidence: string[]
+}
+
+export interface DiscoverableSkill {
+  id: string
+  name: string
+  description: string | null
+  archetype: Skill['archetype']
+  createdById: string
+  authorName: string | null
+  /** How many colleagues already use it — the only signal a newcomer has. */
+  installs: number
+}
+
+/**
+ * "Discover skills created across your workspace."
+ *
+ * A plain query, not a model call: what a colleague published and you have not
+ * picked up is a fact, and asking a model to describe it would be slower and
+ * less true.
+ */
+export function useDiscoverableSkills(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['skills', workspaceId, 'discover'],
+    queryFn: () => api<DiscoverableSkill[]>(`${base(workspaceId)}/discover`),
+    enabled: enabled && !!workspaceId,
+  })
+}
+
+/**
+ * "Skills Miner / Turn repeat work into skills."
+ *
+ * Streams the scans before the findings, same as the drafter: the card's claim
+ * is that it read your work, so what it read arrives first.
+ */
+export async function mineSkills(
+  workspaceId: string,
+  handlers: { onStep?: (step: ProposalStep) => void; signal?: AbortSignal } = {},
+): Promise<{ skills: MinedSkill[]; message: string }> {
+  const token = useAuthStore.getState().accessToken
+  const res = await fetch('/api/v1/ai/skills/mine', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ workspaceId }),
+    signal: handlers.signal,
+  })
+  if (!res.ok || !res.body) {
+    const reason = await res
+      .clone()
+      .json()
+      .then((b: { message?: string; error?: string }) => b?.message ?? b?.error)
+      .catch(() => undefined)
+    throw new Error(reason || 'Could not scan your work')
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: { skills: MinedSkill[]; message: string } | null = null
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    // Same buffering rule as proposeSkill: an event split across two chunks
+    // must not be dropped.
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const payload = line.slice(6)
+      if (payload === '[DONE]') continue
+      let parsed: Record<string, unknown>
+      try {
+        parsed = JSON.parse(payload)
+      } catch {
+        continue
+      }
+      if (parsed.error) throw new Error(String(parsed.error))
+      if (parsed.step) handlers.onStep?.(parsed.step as ProposalStep)
+      if (Array.isArray(parsed.skills)) {
+        result = parsed as unknown as { skills: MinedSkill[]; message: string }
+      }
+    }
+  }
+
+  if (!result) throw new Error('The scan did not come back')
+  return result
+}

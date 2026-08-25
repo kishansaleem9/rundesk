@@ -1341,6 +1341,98 @@ try {
     }
   })
 
+  await section('§15d', 'The two functional starter cards do something', async () => {
+    // Frame `285_1743`: "Skills Miner / Turn repeat work into skills → Find my
+    // Skills" and "For your team / Discover team skills → Scan my workspace".
+    // Both rendered and did nothing until now.
+    await go(`/app/${WS}/skills`, 4000)
+    chk(
+      (await page.locator('[data-testid="skill-starter-miner"]').count()) > 0,
+      'the Skills Miner card is on the carousel',
+      'no Skills Miner card',
+    )
+    chk(
+      (await page.locator('[data-testid="skill-starter-team"]').count()) > 0,
+      'so is the team-discovery card',
+      'no team-discovery card',
+    )
+
+    const team = page.locator('[data-testid="skill-starter-team"] button')
+    if ((await team.count()) > 0) {
+      await team.click()
+      await page.waitForTimeout(900)
+      chk(
+        (await page.locator('[data-testid="skill-discovery-team"]').count()) > 0,
+        '"Scan my workspace" opens the discovery panel',
+        'the team card did nothing',
+      )
+      // Either a list or an honest empty state — never a blank panel.
+      const listed = await page.locator('[data-testid="skill-discover-list"]').count()
+      const empty = await page.locator('[data-testid="skill-discover-empty"]').count()
+      chk(listed + empty > 0, `it answers (${listed ? 'a list' : 'nothing to pick up'})`, 'the panel rendered blank')
+      await page.locator('[data-testid="skill-discovery-close"]').click().catch(() => {})
+      await page.waitForTimeout(400)
+    }
+
+    const miner = page.locator('[data-testid="skill-starter-miner"] button')
+    if ((await miner.count()) > 0) {
+      await miner.click()
+      await page.waitForTimeout(900)
+      chk(
+        (await page.locator('[data-testid="skill-discovery-mine"]').count()) > 0,
+        '"Find my Skills" opens the miner',
+        'the miner card did nothing',
+      )
+      chk(
+        (await page.locator('[data-testid="skill-miner-run"]').count()) > 0,
+        'and offers to scan',
+        'no scan control',
+      )
+    }
+
+    // The scan itself, through the real endpoint. Nothing must be written by
+    // looking — that is the same rule as the drafter and worth its own check.
+    const before = ((await apiGet(`/workspaces/${WS}/skills?tab=all`)) ?? []).length
+    const res = await fetch(`${API}/ai/skills/mine`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId: WS }),
+    }).catch(() => null)
+    if (!res || !res.ok) {
+      chk(
+        !!res && [402, 403, 503].includes(res.status),
+        `mining is gated on this instance (${res?.status})`,
+        `the mine endpoint failed with ${res?.status}`,
+      )
+    } else {
+      const body = await res.text().catch(() => '')
+      const events = body
+        .split('\n')
+        .filter((l) => l.startsWith('data: ') && l.slice(6) !== '[DONE]')
+        .map((l) => { try { return JSON.parse(l.slice(6)) } catch { return null } })
+        .filter(Boolean)
+      const steps = events.filter((e) => e.step)
+      const result = events.find((e) => Array.isArray(e.skills))
+      chk(steps.length >= 3, `it says what it read (${steps.length} scan(s))`, 'the miner reported no scans')
+      chk(!!result, 'and comes back with an answer', 'the miner never returned a result')
+      // Every suggestion must carry the lines that produced it: the card's
+      // claim is that it read your work, and evidence is what backs that.
+      const unevidenced = (result?.skills ?? []).filter((s) => !(s.evidence?.length > 0))
+      chk(unevidenced.length === 0, 'every suggestion carries its evidence', `${unevidenced.length} suggestion(s) had none`)
+      // An empty result must SAY it read something, or "nothing found" and
+      // "the button is broken" look identical.
+      if ((result?.skills ?? []).length === 0) {
+        chk(
+          typeof result?.message === 'string' && result.message.length > 20,
+          'and an empty scan explains itself rather than going quiet',
+          'the miner found nothing and said nothing',
+        )
+      }
+      const after = ((await apiGet(`/workspaces/${WS}/skills?tab=all`)) ?? []).length
+      chk(after === before, 'and scanning wrote nothing', `the scan created ${after - before} skill(s)`)
+    }
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)

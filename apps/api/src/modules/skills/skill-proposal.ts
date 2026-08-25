@@ -191,3 +191,71 @@ function titleCase(value: string): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ')
 }
+
+
+// ─── Skills Miner ───────────────────────────────────────────────────────────
+
+/**
+ * §15 — "Skills Miner / Turn repeat work into skills / Scan your tasks, docs,
+ * and chats to surface workflows worth saving" (frame `285_1743`).
+ *
+ * A mined skill is a proposal like any other — nothing is written until it is
+ * approved — but it carries the evidence that suggested it, because "we found a
+ * pattern" is only worth reading if you can see the pattern.
+ */
+export interface MinedSkill extends SkillProposal {
+  /** The actual titles/messages that suggested this. Never invented. */
+  evidence: string[]
+}
+
+const MAX_MINED = 5
+const MAX_EVIDENCE = 6
+
+/**
+ * Parse a mining run into proposals.
+ *
+ * Each one goes through `parseSkillProposal`, so a suggestion missing a name or
+ * instructions is dropped rather than surfacing as an approvable card that
+ * would create an empty skill. Returning fewer is the honest outcome; returning
+ * a broken one is not.
+ */
+export function parseMinedSkills(raw: unknown, steps: ProposalStep[] = []): MinedSkill[] {
+  const source = typeof raw === 'string' ? safeJson(raw) : raw
+  const list = Array.isArray(source)
+    ? source
+    : Array.isArray((source as { skills?: unknown } | null)?.skills)
+      ? ((source as { skills: unknown[] }).skills)
+      : []
+
+  const out: MinedSkill[] = []
+  for (const item of list) {
+    const proposal = parseSkillProposal(item, steps)
+    if (!proposal) continue
+    const evidence = strings((item as { evidence?: unknown })?.evidence, MAX_EVIDENCE, 200)
+    // A proposal with no evidence is a guess wearing a miner's hat: the card
+    // says "we scanned your work and found this", and without the lines that
+    // suggested it there is nothing to check that claim against.
+    if (evidence.length === 0) continue
+    out.push({ ...proposal, evidence })
+    if (out.length >= MAX_MINED) break
+  }
+  return out
+}
+
+/**
+ * What the miner says when it found nothing.
+ *
+ * Deliberately not an error and not an empty list with no explanation: a person
+ * who clicks "Find my Skills" on a quiet workspace should be told that it read
+ * their work and there was not enough repetition yet, which is a different
+ * thing from the button being broken.
+ */
+export function noPatternsFound(scanned: ProposalStep[]): string {
+  const counts = scanned
+    .map((s) => s.finding)
+    .filter(Boolean)
+    .join(', ')
+  return counts
+    ? `I read ${counts} and did not find a workflow repeated often enough to be worth saving yet. Skills earn their keep on work you do again and again — come back once a pattern has had time to form, or write one from scratch.`
+    : 'There was not enough here to read yet.'
+}
