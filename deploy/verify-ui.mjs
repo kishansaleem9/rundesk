@@ -792,20 +792,36 @@ try {
       `searching folders/lists/spaces answered ${res.status}`,
     )
     /*
-     * …and narrowing *to* a folder, which is the half the frame pass caught.
-     * A folder id that cannot exist is the point: if the filter is applied the
-     * result is empty, and if it is ignored the query answers with whatever
-     * matched "a" — so a non-empty result here is the failure, not the pass.
+     * …and narrowing *to* a folder, the half the frame pass caught.
+     *
+     * `types=task` is load-bearing, and its absence is why the first version of
+     * this failed against a correct server. folderId reaches a task through
+     * list → project → folderId, so it constrains the task branch and nothing
+     * else; searchExtras still answers with the people, channels, messages and
+     * containers whose names contain "a", and it never sees the filter. Five
+     * hits was the right answer to the question I actually asked.
+     *
+     * Scoped to tasks, an impossible folder must match nothing — so a non-empty
+     * result here really does mean folderId was ignored.
      */
     const scoped = await apiRead(
-      `/search/${WS}?q=a&folderId=00000000-0000-0000-0000-000000000000&limit=5`,
+      `/search/${WS}?q=a&types=task&folderId=00000000-0000-0000-0000-000000000000&limit=5`,
     )
     chk(
       scoped.status === 200 && Array.isArray(scoped.data) && scoped.data.length === 0,
-      'and scopes to a folder — an unknown one matches nothing, so the filter applied',
+      'and scopes tasks to a folder — an unknown one matches no task, so the filter applied',
       `answered ${scoped.status} with ${
         Array.isArray(scoped.data) ? scoped.data.length : '?'
-      } hit(s); anything non-empty means folderId was ignored`,
+      } task hit(s); a task from a folder that does not exist means folderId was ignored`,
+    )
+    // The control for the line above: same query without the folder does find
+    // tasks, so an empty result there is the filter working rather than the
+    // workspace simply having no task matching "a".
+    const unscoped = await apiRead(`/search/${WS}?q=a&types=task&limit=5`)
+    chk(
+      unscoped.status === 200 && Array.isArray(unscoped.data) && unscoped.data.length > 0,
+      `and there were ${Array.isArray(unscoped.data) ? unscoped.data.length : 0} task(s) to exclude`,
+      'no tasks match "a" at all, so the check above proves nothing either way',
     )
   })
 
