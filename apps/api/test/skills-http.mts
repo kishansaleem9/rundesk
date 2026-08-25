@@ -42,6 +42,8 @@ import passport from 'passport'
 import { DatabaseModule } from '../dist/apps/api/src/common/database/database.module.js'
 import { SkillsModule } from '../dist/apps/api/src/modules/skills/skills.module.js'
 import { SkillsService } from '../dist/apps/api/src/modules/skills/skills.service.js'
+import { AiService } from '../dist/apps/api/src/modules/ai/ai.service.js'
+import { DB_TOKEN } from '../dist/apps/api/src/common/database/database.module.js'
 
 const ME = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const THEM = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -144,6 +146,48 @@ async function main() {
   chk(((await call('GET', `/workspaces/${WS}/skills?tab=enabled`)).data ?? []).length === 0, 'a disabled skill leaves the Enabled tab', 'a disabled skill is still listed as enabled')
   chk(((await call('GET', `/workspaces/${WS}/skills?tab=all`)).data ?? []).length === 1, 'but stays in All Skills', 'the disabled skill vanished entirely')
   chk(await svc.buildInvocationContext(WS, ME, skill.id).then(() => false).catch(() => true), 'and cannot be invoked', 'a disabled skill was still invocable')
+
+  console.log('\n▶ drafting a skill — the lookups are real [18:33]')
+  {
+    // AiService constructed against the REAL database with no API key, which is
+    // the path an instance without ANTHROPIC_API_KEY actually takes. Everything
+    // below the model call is exercised: the three lookups, the order they are
+    // emitted in, and the rendered proposal.
+    const ai = new AiService({ get: () => undefined }, app.get(DB_TOKEN), {})
+    const emitted = []
+    const { proposal, message } = await ai.proposeSkill(
+      WS, ME, 'create a personal task organizer skill', {}, (step) => emitted.push(step),
+    )
+    chk(emitted.length === 3, `it reports three lookups (${emitted.length})`, `emitted ${emitted.length} steps`)
+    chk(
+      emitted[0]?.label === "Checking what you're working on",
+      'starting with what you are working on',
+      `first step was "${emitted[0]?.label}"`,
+    )
+    chk(
+      emitted.some((s) => /item\(s\) on your personal list/.test(s.finding ?? '')),
+      'and each one carries what it actually found',
+      `no step reported a finding: ${JSON.stringify(emitted)}`,
+    )
+    chk(
+      emitted.find((s) => s.label === 'Checking the skills you already have')?.finding !== undefined,
+      'including the skills you already own',
+      'the existing-skills lookup reported nothing',
+    )
+    chk(proposal.steps.length === 3, 'the proposal carries the same steps', `carried ${proposal.steps.length}`)
+    chk(
+      message.endsWith("Approve this approach and I'll create it, or tell me one tweak you want first."),
+      'and it ends on her question',
+      `message ended: ...${message.slice(-60)}`,
+    )
+    chk(
+      /no model is configured/i.test(proposal.rationale),
+      'saying plainly that no model read the workspace',
+      'the keyless draft implied grounding it did not have',
+    )
+    const countBefore = ((await call('GET', `/workspaces/${WS}/skills?tab=all`)).data ?? []).length
+    chk(countBefore === 1, 'and asking wrote nothing', `asking changed the skill count to ${countBefore}`)
+  }
 
   console.log('\n▶ approving a drafted skill — [18:17]-[18:42], frame t1146')
   // The write half of the gate. The proposal round-trips through the browser,
