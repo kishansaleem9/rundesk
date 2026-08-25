@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import { useAuthStore } from '../store/auth'
 
 /**
  * §15 Skills — the client half.
@@ -190,6 +191,101 @@ export function useRemoveSkillConnection(workspaceId: string, id: string) {
   return useMutation({
     mutationFn: (rowId: string) =>
       api(`${base(workspaceId)}/${id}/connections/${rowId}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+  })
+}
+
+// ─── §15 — the AI drafting a skill for you, [18:17]–[18:42] ─────────────────
+
+/** A lookup the server actually performed, reported as it finished. */
+export interface ProposalStep {
+  label: string
+  finding?: string
+}
+
+export interface SkillProposal {
+  name: string
+  description: string
+  instructions: string
+  memories: string[]
+  rationale: string
+  steps: ProposalStep[]
+  followUps: string[]
+}
+
+/**
+ * Ask for a draft. Nothing is written — the reply is a proposal to approve.
+ *
+ * Server-sent events rather than one response, because the steps arrive before
+ * the answer does and that ordering is the whole point of showing them: you see
+ * what it read, and *then* what it concluded.
+ */
+export async function proposeSkill(
+  workspaceId: string,
+  request: string,
+  handlers: { onStep?: (step: ProposalStep) => void; signal?: AbortSignal } = {},
+): Promise<{ proposal: SkillProposal; message: string }> {
+  const token = useAuthStore.getState().accessToken
+  const res = await fetch('/api/v1/ai/skills/propose', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ workspaceId, request }),
+    signal: handlers.signal,
+  })
+  if (!res.ok || !res.body) {
+    const reason = await res
+      .clone()
+      .json()
+      .then((b: { message?: string; error?: string }) => b?.message ?? b?.error)
+      .catch(() => undefined)
+    throw new Error(reason || 'Could not draft a skill')
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let result: { proposal: SkillProposal; message: string } | null = null
+
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    // Chunk boundaries fall anywhere, so hold the tail until it completes —
+    // splitting on every read drops any event that straddles two chunks.
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const payload = line.slice(6)
+      if (payload === '[DONE]') continue
+      let parsed: Record<string, unknown>
+      try {
+        parsed = JSON.parse(payload)
+      } catch {
+        continue
+      }
+      if (parsed.error) throw new Error(String(parsed.error))
+      if (parsed.step) handlers.onStep?.(parsed.step as ProposalStep)
+      if (parsed.proposal) result = parsed as unknown as { proposal: SkillProposal; message: string }
+    }
+  }
+
+  if (!result) throw new Error('The draft did not come back')
+  return result
+}
+
+/**
+ * The approval — "Approve this approach and I'll create it" (frame `t1146`).
+ * One call, so a skill is never created without the memory it was approved with.
+ */
+export function useCreateSkillFromProposal(workspaceId: string) {
+  const invalidate = useSkillInvalidator(workspaceId)
+  return useMutation({
+    mutationFn: (proposal: Pick<SkillProposal, 'name' | 'description' | 'instructions' | 'memories'>) =>
+      api<Skill & { memoriesCreated: number }>(`${base(workspaceId)}/from-proposal`, {
+        method: 'POST',
+        body: proposal,
+      }),
     onSuccess: invalidate,
   })
 }

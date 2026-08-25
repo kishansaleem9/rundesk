@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { Button, Input, Badge, cn, toast } from '@rundesk/ui'
 import { Gem, Plus, Search, Sparkles, UserCheck, CheckCircle2, Loader2 } from 'lucide-react'
+import { SkillAuthorPanel } from '../components/skill-author-panel'
 import { useTranslation } from '../lib/i18n'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { useAuthStore } from '../store/auth'
@@ -47,6 +48,9 @@ export function SkillsPage() {
 
   const [tab, setTab] = useState<SkillTab>('all')
   const [query, setQuery] = useState('')
+  // Frame `t1122`: the hub reflows to two-thirds beside the panel rather than
+  // being covered by it — you keep watching the library while it drafts.
+  const [authoring, setAuthoring] = useState(false)
 
   const skillsQuery = useSkills(workspaceId, tab)
   const { data: counts } = useSkillCounts(workspaceId)
@@ -94,7 +98,8 @@ export function SkillsPage() {
   ]
 
   return (
-    <div className="p-6 space-y-6" data-testid="skills-page">
+    <div className="h-full flex min-h-0">
+      <div className="flex-1 min-w-0 overflow-y-auto p-6 space-y-6" data-testid="skills-page">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
@@ -103,6 +108,15 @@ export function SkillsPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-xl">{t('skills.subtitle')}</p>
         </div>
+        <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          data-testid="build-with-ai"
+          onClick={() => setAuthoring(true)}
+        >
+          <Sparkles className="h-4 w-4 mr-1.5" />
+          {t('skills.author.build')}
+        </Button>
         <Button
           data-testid="new-skill"
           onClick={() => startFrom(templates.find((x) => x.archetype === 'scratch') ?? templates[0])}
@@ -115,6 +129,7 @@ export function SkillsPage() {
           )}
           {t('skills.new')}
         </Button>
+        </div>
       </header>
 
       {/* Starter carousel. Horizontal scroll rather than paging chevrons: the
@@ -194,6 +209,7 @@ export function SkillsPage() {
           searching={query.trim().length > 0}
           query={query.trim()}
           onCreate={() => startFrom(templates.find((x) => x.archetype === 'scratch') ?? templates[0])}
+          onBuildWithAi={() => setAuthoring(true)}
           creating={create.isPending}
         />
       ) : (
@@ -208,6 +224,14 @@ export function SkillsPage() {
       <p className="text-xs text-muted-foreground pt-2 border-t border-border/40">
         {t('skills.boundary')}
       </p>
+      </div>
+      {authoring && (
+        <SkillAuthorPanel
+          workspaceId={workspaceId}
+          onClose={() => setAuthoring(false)}
+          className="w-full max-w-md shrink-0 fixed inset-y-0 right-0 z-40 md:static md:z-auto"
+        />
+      )}
     </div>
   )
 }
@@ -271,11 +295,13 @@ function SkillsEmptyState({
   searching,
   query,
   onCreate,
+  onBuildWithAi,
   creating,
 }: {
   searching: boolean
   query: string
   onCreate: () => void
+  onBuildWithAi: () => void
   creating: boolean
 }) {
   const { t } = useTranslation()
@@ -293,14 +319,17 @@ function SkillsEmptyState({
       </div>
       <h2 className="text-base font-medium">{t('skills.empty.title')}</h2>
       <p className="text-sm text-muted-foreground max-w-md">{t('skills.empty.body')}</p>
-      <Button variant="outline" onClick={onCreate} disabled={creating} data-testid="skills-empty-create">
-        {creating ? (
-          <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-        ) : (
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button onClick={onBuildWithAi} data-testid="skills-empty-build">
           <Sparkles className="h-4 w-4 mr-1.5" />
-        )}
-        {t('skills.create')}
-      </Button>
+          {t('skills.author.build')}
+        </Button>
+        <Button variant="outline" onClick={onCreate} disabled={creating} data-testid="skills-empty-create">
+          {creating ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Plus className="h-4 w-4 mr-1.5" />}
+          {t('skills.create')}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">{t('skills.author.nothingSaved')}</p>
     </div>
   )
 }

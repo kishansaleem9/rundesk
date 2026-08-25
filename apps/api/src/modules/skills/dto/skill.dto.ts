@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsObject,
@@ -72,6 +74,38 @@ export class UpdateSkillDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean
+}
+
+/**
+ * §15 — what a person approved, coming back from the client.
+ *
+ * The proposal round-trips through the browser, so it is untrusted input like
+ * any other body: bounded here, and then put through the same create path as a
+ * hand-typed skill. `memories` is validated per element — an @IsArray alone
+ * would let anything through inside it.
+ */
+export class ApproveSkillProposalDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  name!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  description?: string
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(20_000)
+  instructions!: string
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @IsString({ each: true })
+  @MaxLength(4_000, { each: true })
+  memories?: string[]
 }
 
 export class AddSkillMemoryDto {

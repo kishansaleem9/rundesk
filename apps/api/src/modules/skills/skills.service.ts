@@ -16,6 +16,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { skillTabFilter, visibleSkillsFilter, type SkillTab } from './skill-visibility'
 import { SKILL_TEMPLATES, skillTemplate } from './skill-templates'
+import type { SkillProposal } from './skill-proposal'
 
 /** How many memories are recalled into a prompt. Newest first. */
 export const MEMORY_RECALL_LIMIT = 40
@@ -115,6 +116,55 @@ export class SkillsService {
       }
       throw err
     }
+  }
+
+  /**
+   * §15 — the approval half of the gate, frame `t1146`: "Approve this approach
+   * and I'll create it."
+   *
+   * One call, because approving is one decision. Creating the skill and then
+   * separately writing its memory would leave a skill that was approved with
+   * memory and shipped without it if the second call failed — and nobody would
+   * see that happen.
+   *
+   * The proposal is treated as untrusted input, not as something the server
+   * said earlier: it round-trips through the client, so it goes through the
+   * same `create` path — the same name check, the same ownership from the
+   * token, the same private default — as anything typed by hand.
+   */
+  async createFromProposal(
+    workspaceId: string,
+    userId: string,
+    proposal: Pick<SkillProposal, 'name' | 'instructions'> & {
+      description?: string
+      memories?: string[]
+    },
+  ) {
+    const skill = await this.create(workspaceId, userId, {
+      name: proposal.name,
+      description: proposal.description,
+      instructions: proposal.instructions,
+      archetype: 'scratch',
+    })
+
+    const memories = (proposal.memories ?? [])
+      .map((m) => m.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+    if (memories.length > 0) {
+      await this.db.insert(skillMemories).values(
+        memories.map((content) => ({
+          skillId: skill.id,
+          workspaceId,
+          authorId: userId,
+          // It came out of a conversation, and saying so is what makes the
+          // memory list legible later.
+          source: 'chat' as const,
+          content,
+        })),
+      )
+    }
+    return { ...skill, memoriesCreated: memories.length }
   }
 
   async update(

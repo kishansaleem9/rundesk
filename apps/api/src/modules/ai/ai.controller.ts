@@ -358,6 +358,59 @@ export class AiController {
     return this.ai.answerHelp(body.question, { userId: user.id })
   }
 
+  @Post('skills/propose')
+  @ApiOperation({
+    summary: '§15 — draft a skill from a sentence (SSE; proposal only, nothing is written)',
+  })
+  async proposeSkill(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string; request?: string },
+    @Res() res: any,
+  ) {
+    if (!body.workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    const request = (body.request ?? '').trim()
+    if (!request) {
+      throw new HttpException('Say what the skill should do', HttpStatus.BAD_REQUEST)
+    }
+
+    // Streamed, because the steps are the point: frame `t1138` shows "Mapping
+    // your task habits" and "Checking task-organizing best practices" arriving
+    // *before* the answer. Collecting them and sending the lot at the end would
+    // render the same words with none of the meaning — the person would learn
+    // what was read only after they had already been shown the conclusion.
+    //
+    // Same Fastify hijack as chatStream: reply.raw is the Node response.
+    const reply = res as any
+    if (typeof reply.hijack === 'function') reply.hijack()
+    const raw = reply.raw ?? reply
+    raw.setHeader('Content-Type', 'text/event-stream')
+    raw.setHeader('Cache-Control', 'no-cache')
+    raw.setHeader('Connection', 'keep-alive')
+    raw.flushHeaders?.()
+
+    try {
+      // Deliberately NOT gated on isAvailable(): the proposer has a real
+      // deterministic draft for an instance with no key, and it says so in its
+      // own rationale rather than pretending it read the workspace.
+      const result = await this.ai.proposeSkill(
+        body.workspaceId,
+        user.id,
+        request,
+        { userId: user.id, workspaceId: body.workspaceId },
+        (step) => raw.write(`data: ${JSON.stringify({ step })}\n\n`),
+      )
+      raw.write(`data: ${JSON.stringify(result)}\n\n`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not draft a skill'
+      raw.write(`data: ${JSON.stringify({ error: message })}\n\n`)
+    } finally {
+      raw.write('data: [DONE]\n\n')
+      raw.end()
+    }
+  }
+
   @Post('command')
   @ApiOperation({ summary: 'Plan a natural-language command via tool use (preview, nothing mutates)' })
   async command(@CurrentUser() user: any, @Body() body: { workspaceId?: string; message?: string }) {

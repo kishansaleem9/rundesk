@@ -5127,6 +5127,24 @@ export const en = {
   'skills.connectionsRemove': 'Disconnect',
   'skills.connectionsPlaceholder': 'Pick a system',
   'skills.useInChat': 'Ask with this skill',
+
+  // §15 — the AI drafting a skill, and the gate before it is saved [18:17]–[18:42].
+  'skills.created': '“{{name}}” created',
+  'skills.author.title': 'Build a skill',
+  'skills.author.intro': 'Tell me what you want it to do. I\'ll look at how you actually work, draft the whole skill, and show it to you before anything is saved.',
+  'skills.author.opener1': 'Create a personal task organizer skill for me',
+  'skills.author.opener2': 'Turn my messages into a reusable communication polisher skill',
+  'skills.author.opener3': 'Find my recurring workflows and recommend the best skill',
+  'skills.author.placeholder': 'What should this skill do?',
+  'skills.author.send': 'Ask',
+  'skills.author.working': 'Working',
+  'skills.author.approve': 'Approve and create',
+  'skills.author.orTweak': 'or tell me one tweak you want first',
+  'skills.author.followUps': 'Follow ups',
+  'skills.author.created': 'Created',
+  'skills.author.open': 'Open it',
+  'skills.author.build': 'Build one with AI',
+  'skills.author.nothingSaved': 'Nothing is saved until you approve it.',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10212,6 +10230,24 @@ export const es: Record<TranslationKey, string> = {
   'skills.connectionsPlaceholder': 'Elige un sistema',
   'skills.useInChat': 'Preguntar con esta habilidad',
 
+  // §15 — the AI drafting a skill, and the gate before it is saved [18:17]–[18:42].
+  'skills.created': '«{{name}}» creada',
+  'skills.author.title': 'Crear una habilidad',
+  'skills.author.intro': 'Dime qué quieres que haga. Miraré cómo trabajas realmente, redactaré la habilidad completa y te la mostraré antes de guardar nada.',
+  'skills.author.opener1': 'Crea una habilidad de organizador de tareas personales',
+  'skills.author.opener2': 'Convierte mis mensajes en una habilidad reutilizable para pulir la comunicación',
+  'skills.author.opener3': 'Encuentra mis flujos de trabajo recurrentes y recomienda la mejor habilidad',
+  'skills.author.placeholder': '¿Qué debería hacer esta habilidad?',
+  'skills.author.send': 'Preguntar',
+  'skills.author.working': 'Trabajando',
+  'skills.author.approve': 'Aprobar y crear',
+  'skills.author.orTweak': 'o dime primero un ajuste que quieras',
+  'skills.author.followUps': 'Siguientes pasos',
+  'skills.author.created': 'Creada',
+  'skills.author.open': 'Abrirla',
+  'skills.author.build': 'Crear una con IA',
+  'skills.author.nothingSaved': 'No se guarda nada hasta que lo apruebes.',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15295,6 +15331,24 @@ export const ar: Record<TranslationKey, string> = {
   'skills.connectionsPlaceholder': 'اختر نظامًا',
   'skills.useInChat': 'اسأل بهذه المهارة',
 
+  // §15 — the AI drafting a skill, and the gate before it is saved [18:17]–[18:42].
+  'skills.created': 'تم إنشاء «{{name}}»',
+  'skills.author.title': 'إنشاء مهارة',
+  'skills.author.intro': 'أخبرني بما تريدها أن تفعله. سأطّلع على طريقة عملك فعليًا، وأصيغ المهارة كاملة، وأعرضها عليك قبل حفظ أي شيء.',
+  'skills.author.opener1': 'أنشئ لي مهارة لتنظيم مهامي الشخصية',
+  'skills.author.opener2': 'حوّل رسائلي إلى مهارة قابلة لإعادة الاستخدام لتحسين التواصل',
+  'skills.author.opener3': 'اعثر على سير عملي المتكرر واقترح أفضل مهارة',
+  'skills.author.placeholder': 'ما الذي ينبغي أن تفعله هذه المهارة؟',
+  'skills.author.send': 'اسأل',
+  'skills.author.working': 'جارٍ العمل',
+  'skills.author.approve': 'الموافقة والإنشاء',
+  'skills.author.orTweak': 'أو أخبرني بتعديل واحد تريده أولًا',
+  'skills.author.followUps': 'خطوات تالية',
+  'skills.author.created': 'تم الإنشاء',
+  'skills.author.open': 'افتحها',
+  'skills.author.build': 'أنشئها بالذكاء الاصطناعي',
+  'skills.author.nothingSaved': 'لا يُحفظ شيء حتى توافق عليه.',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20222,6 +20276,24 @@ export const ur: Record<TranslationKey, string> = {
   'skills.connectionsRemove': 'منقطع کریں',
   'skills.connectionsPlaceholder': 'ایک سسٹم منتخب کریں',
   'skills.useInChat': 'اس اسکل کے ساتھ پوچھیں',
+
+  // §15 — the AI drafting a skill, and the gate before it is saved [18:17]–[18:42].
+  'skills.created': '«{{name}}» بن گئی',
+  'skills.author.title': 'اسکل بنائیں',
+  'skills.author.intro': 'بتائیں یہ کیا کرے۔ میں دیکھوں گا کہ آپ اصل میں کیسے کام کرتے ہیں، پوری اسکل تیار کروں گا، اور کچھ محفوظ کرنے سے پہلے آپ کو دکھاؤں گا۔',
+  'skills.author.opener1': 'میرے لیے ذاتی ٹاسک آرگنائزر اسکل بنائیں',
+  'skills.author.opener2': 'میرے پیغامات کو ایک دوبارہ استعمال ہونے والی کمیونیکیشن پالشر اسکل میں بدلیں',
+  'skills.author.opener3': 'میرے بار بار دہرائے جانے والے کام ڈھونڈیں اور بہترین اسکل تجویز کریں',
+  'skills.author.placeholder': 'یہ اسکل کیا کرے؟',
+  'skills.author.send': 'پوچھیں',
+  'skills.author.working': 'کام جاری ہے',
+  'skills.author.approve': 'منظور کریں اور بنائیں',
+  'skills.author.orTweak': 'یا پہلے کوئی ایک تبدیلی بتا دیں',
+  'skills.author.followUps': 'اگلے اقدامات',
+  'skills.author.created': 'بن گئی',
+  'skills.author.open': 'کھولیں',
+  'skills.author.build': 'AI سے بنوائیں',
+  'skills.author.nothingSaved': 'جب تک آپ منظوری نہ دیں، کچھ محفوظ نہیں ہوتا۔',
 
 }
 

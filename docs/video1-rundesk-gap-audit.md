@@ -436,10 +436,25 @@ every frame is a person asking and the assistant answering, down to the approval
 inventing an authority nobody granted. When it is wanted, it should be granted explicitly, on
 a surface built for it.
 
-**Still open** from the twelve findings below: Skills Miner and team-wide discovery (the two
-"scan my workspace" cards are the only starters not yet wired), AI-authored skill creation in
-chat with its approve-before-create gate, persisted auto-named chat threads, follow-up chips,
-the visible reasoning trace, per-message actions, and the model picker.
+**Corrected 25 Aug 2026, after re-reading the raw transcript and pulling frames directly.**
+The first pass built the starter cards — which she calls EXAMPLES `[18:03]` — and skipped the
+mechanism she actually demonstrates. `[18:17]–[18:42]`: *"main is ko sab cheezein batati
+jaoongi… Pehle to woh apna [data sketch] out karega jo main kaam kar rahi hoon… phir woh meri
+poori ki poori SKILL create karega… main yahan pe likhoongi: 'create a personal task organizer
+skill', to yeh poori ki poori skill ban jayegi."* That is now built: ask in words, it reports
+the lookups it performs, drafts the whole skill grounded in them, and stops on her sentence —
+*"Approve this approach and I'll create it, or tell me one tweak you want first"* — with the
+follow-up chips that change per answer.
+
+**One honest note on the boundary.** `[17:46]` is *"woh aap ka AGENT kar sakta hai; aap
+REPLACE ho sakte ho"* — her spoken framing is more ambitious than what is built. The frames
+support the narrower reading (ClickUp's own flow stops for approval, and no frame shows a
+skill acting alone), but the decision to stop there was ours, not hers, and should be revisited
+with her rather than treated as settled.
+
+**Still open:** Skills Miner and team-wide discovery (the two "scan my workspace" cards are
+the only starters not yet wired), persisted auto-named chat threads, per-message actions
+(create task / save to doc / regenerate / thumbs), and the model picker.
 
 ### 2.8 SyncUp — calls inside the app — `[19:16–21:15]` · size: very large
 
@@ -769,12 +784,12 @@ One row per finding, 15 sections, produced by reading all 139 frames against the
 | ✅ | medium | Skills empty state and starter carousel on the hub — **built** | The hub's first screen when you own nothing: a centred "Skills teach Brain how you work" empty state and a row of starter cards — Skills Miner, For yo |
 | ✅ | medium | Prebuilt skill templates: Delegate Like Me, Brand Voice, Triage Tasks Like Me — **built** | Coloured template cards that create a skill by interviewing you: "Delegate Like Me — Assigns and hands off work the way you would"; "Brand Voice — Int |
 |  | large | Skills Miner — turn repeat work into skills automatically | "Skills Miner / Turn repeat work into skills — Scan your tasks, docs, and chats to surface workflows worth saving" behind a "Find my Skills" button; p |
-| **!** | large | AI-authored skill creation in chat, with an approve-before-create gate | Ask the assistant "Help me create a skill", have it explain what skills are, recommend specific ones grounded in your actual workspace, then propose a |
+| ✅ | large | AI-authored skill creation in chat, with an approve-before-create gate — **built** | Ask the assistant "Help me create a skill", have it explain what skills are, recommend specific ones grounded in your actual workspace, then propose a |
 | ✅ | medium | Skill Memory — per-skill context that accumulates from conversation — **built** | "Yeh MEMORY hai — yeh hum jo bhi baat karenge woh STORE karega apne andar." Everything you tell a skill is retained by that skill, so it never has to  |
 | ✅ | large | Skill Connections — bind a skill to external systems — **built** | "Aur yeh CONNECTIONS hai — agar main is ko build karoongi to main is ko kisi bhi system mein CONNECT kar sakti hoon." A skill can be wired to any conn |
 |  | medium | Persisted, auto-named AI chat threads in the sidebar | The chat that authored the skill starts as "New Chat", renames itself to "Skill Definition and Ideas", and stays in the sidebar's AI Chats list after  |
-|  | small | Answer-aware follow-up chips ("Follow ups") | Under every assistant answer, a "Follow ups" label and clickable next-step chips generated from that answer — e.g. "Create a Personal Task Organizer s |
-|  | small | Visible reasoning trace while the assistant works | A "Pondering" status with the retrieval steps streaming beneath it — "Checking what you're working on", "Checking the latest Skills basics" — before t |
+| ✅ | small | Answer-aware follow-up chips ("Follow ups") — **built** | Under every assistant answer, a "Follow ups" label and clickable next-step chips generated from that answer — e.g. "Create a Personal Task Organizer s |
+| ✅ | small | Visible reasoning trace while the assistant works — **built** | A "Pondering" status with the retrieval steps streaming beneath it — "Checking what you're working on", "Checking the latest Skills basics" — before t |
 |  | medium | Per-message actions beyond copy (create task, save to doc, regenerate, thumbs up/down) | The six-icon row under each assistant answer: copy, create task, save to doc, regenerate, thumbs up, thumbs down. |
 |  | medium | Composer scope chip and model picker | The composer carries a "Skills" context chip (scoping the conversation to the surface you are on) and a model selector reading "Max ▾", plus a "+" att |
 

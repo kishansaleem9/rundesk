@@ -8,6 +8,7 @@ import type { SkillTab } from './skill-visibility'
 import {
   AddSkillConnectionDto,
   AddSkillMemoryDto,
+  ApproveSkillProposalDto,
   CreateSkillDto,
   UpdateSkillDto,
 } from './dto/skill.dto'
@@ -62,6 +63,16 @@ export class SkillsController {
     @Body() body: CreateSkillDto,
   ) {
     return this.svc.create(workspaceId, user.id, body)
+  }
+
+  @Post('from-proposal')
+  @ApiOperation({ summary: "§15 — approve a drafted skill: \"Approve this approach and I'll create it\"" })
+  createFromProposal(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: ApproveSkillProposalDto,
+  ) {
+    return this.svc.createFromProposal(workspaceId, user.id, body)
   }
 
   @Get(':id')

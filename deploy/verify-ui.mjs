@@ -1147,6 +1147,97 @@ try {
     chk(gone.status === 404, 'and the check cleans up after itself', `the skill survived deletion (${gone.status})`)
   })
 
+  await section('§15c', 'A skill can be drafted for you, and nothing is written until you say so', async () => {
+    // [18:17]-[18:42] "main is ko sab cheezein batati jaoongi… phir woh meri
+    // poori ki poori SKILL create karega". The starter cards are her EXAMPLES
+    // [18:03]; this is the mechanism.
+    await go(`/app/${WS}/skills`, 4000)
+    const before = ((await apiGet(`/workspaces/${WS}/skills?tab=all`)) ?? []).length
+
+    const build = page.locator('[data-testid="build-with-ai"]')
+    chk((await build.count()) > 0, 'the hub offers to build one for you', 'no way to ask the AI for a skill')
+    if ((await build.count()) > 0) {
+      await build.click()
+      await page.waitForTimeout(700)
+      chk(
+        (await page.locator('[data-testid="skill-author"]').count()) > 0,
+        'the authoring panel opens beside the hub',
+        'the authoring panel did not open',
+      )
+      chk(
+        (await page.locator('[data-testid="skill-followup"]').count()) >= 3,
+        'with openers to click instead of typing',
+        'no openers offered',
+      )
+      // The hub must stay visible — frame t1122 reflows rather than covering.
+      chk(
+        (await page.locator('[data-testid="skills-page"]').isVisible().catch(() => false)),
+        'and the hub is still on screen beside it',
+        'the panel covered the hub instead of reflowing',
+      )
+    }
+
+    // The proposal itself, through the real endpoint: steps first, then a draft.
+    const sse = await fetch(`${API}/ai/skills/propose`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workspaceId: WS, request: 'create a personal task organizer skill' }),
+    }).catch(() => null)
+    if (!sse || !sse.ok) {
+      // 402/403 means the plan gate refused AI on this workspace — a legitimate
+      // answer, and not the same thing as the drafting being broken.
+      chk(
+        !!sse && [402, 403, 503].includes(sse.status),
+        `AI drafting is gated on this instance (${sse?.status}), so the draft could not be exercised`,
+        `the propose endpoint failed with ${sse?.status}`,
+      )
+    } else {
+      const body = await sse.text().catch(() => '')
+      const events = body
+        .split('\n')
+        .filter((l) => l.startsWith('data: ') && l.slice(6) !== '[DONE]')
+        .map((l) => { try { return JSON.parse(l.slice(6)) } catch { return null } })
+        .filter(Boolean)
+      const steps = events.filter((e) => e.step)
+      const draft = events.find((e) => e.proposal)
+      chk(steps.length >= 3, `it says what it read first (${steps.length} step(s))`, 'no steps were streamed before the answer')
+      chk(
+        steps.findIndex((e) => e.step) < events.findIndex((e) => e.proposal),
+        'and the steps arrive before the conclusion, not after it',
+        'the steps were sent after the proposal, which defeats the point',
+      )
+      chk(!!draft?.proposal?.name && !!draft?.proposal?.instructions, 'a whole skill comes back', 'the draft was missing a name or instructions')
+      chk(
+        typeof draft?.message === 'string' &&
+          draft.message.includes("Approve this approach and I'll create it"),
+        'ending on her question rather than a fait accompli',
+        'the approval gate is missing from the rendered proposal',
+      )
+      const after = ((await apiGet(`/workspaces/${WS}/skills?tab=all`)) ?? []).length
+      chk(after === before, 'and NOTHING was written by asking', `asking created ${after - before} skill(s)`)
+
+      // Now approve it, which is the only thing that writes.
+      const created = await apiPost(`/workspaces/${WS}/skills/from-proposal`, {
+        name: `${draft.proposal.name} ${Date.now()}`,
+        description: draft.proposal.description,
+        instructions: draft.proposal.instructions,
+        memories: draft.proposal.memories ?? [],
+      })
+      chk(!!created?.id, 'approving it does', 'approving the draft did not create a skill')
+      if (created?.id) {
+        chk(
+          created.memoriesCreated === (draft.proposal.memories ?? []).length,
+          'with the memory it was approved with',
+          `expected ${(draft.proposal.memories ?? []).length} memories, got ${created.memoriesCreated}`,
+        )
+        await fetch(`${API}/workspaces/${WS}/skills/${created.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => null)
+      }
+    }
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)

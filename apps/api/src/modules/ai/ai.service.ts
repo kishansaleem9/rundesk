@@ -12,9 +12,16 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings } from '@rundesk/db'
+import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import {
+  fallbackProposal,
+  parseSkillProposal,
+  renderProposal,
+  type ProposalStep,
+  type SkillProposal,
+} from '../skills/skill-proposal'
 import { R2Service } from '../../common/storage/r2.service'
 import { estimateAiCostUsd } from './ai-cost'
 import { TasksService } from '../tasks/tasks.service'
@@ -2018,6 +2025,121 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
    * resolved, and returned as an action to confirm — nothing mutates here.
    * All model calls route through `complete` (rate limit + usage tracking).
    */
+  /**
+   * §15 — draft a whole skill from a sentence, `[18:17]–[18:42]`.
+   *
+   *   "main is ko sab cheezein batati jaoongi… Pehle to woh apna [data sketch]
+   *    out karega jo main kaam kar rahi hoon… phir woh meri poori ki poori
+   *    SKILL create karega."
+   *
+   * Same shape as `command` above and for the same reason: this PROPOSES and
+   * writes nothing. Frame `t1146` ends on "Approve this approach and I'll
+   * create it" — the gate is the feature, not a safety bolt-on, and it is also
+   * the only reason a skill drafted from your real data is safe to draft at all.
+   *
+   * The steps it reports are lookups it actually performed. A "thinking"
+   * animation listing work that did not happen would be theatre, and worse, it
+   * would imply grounding behind a proposal that has none.
+   */
+  async proposeSkill(
+    workspaceId: string,
+    userId: string,
+    request: string,
+    ctx: AiCtx = {},
+    /**
+     * Called as each lookup finishes, so the caller can show the work.
+     *
+     * A step is emitted only once its lookup has actually returned. The
+     * alternative — a client animating a hardcoded list of labels — would look
+     * identical on a good day and lie on a bad one, and it is precisely on the
+     * bad day that someone needs to know what was and was not read.
+     */
+    onStep?: (step: ProposalStep) => void,
+  ): Promise<{ proposal: SkillProposal; message: string }> {
+    const steps: ProposalStep[] = []
+    const step = (s: ProposalStep) => {
+      steps.push(s)
+      onStep?.(s)
+    }
+
+    const [workspaceContext, personal, existing] = await Promise.all([
+      this.buildWorkspaceContext(workspaceId, userId),
+      this.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(personalTasks)
+        .where(and(eq(personalTasks.workspaceId, workspaceId), eq(personalTasks.userId, userId))),
+      this.db
+        .select({ name: skills.name })
+        .from(skills)
+        .where(and(eq(skills.workspaceId, workspaceId), eq(skills.createdById, userId)))
+        .limit(20),
+    ])
+
+    step({
+      label: "Checking what you're working on",
+      finding: workspaceContext.split('\n').find((l) => l.startsWith('Workspace:')) ?? undefined,
+    })
+    const personalCount = personal[0]?.n ?? 0
+    step({
+      label: 'Mapping your task habits',
+      // The number, not an adjective: "mostly empty" is the model's call to make
+      // from a real count, not ours to assert on its behalf.
+      finding: `${personalCount} item(s) on your personal list`,
+    })
+    const owned = existing.map((r) => r.name)
+    step({
+      label: 'Checking the skills you already have',
+      finding: owned.length ? owned.join(', ') : 'none yet',
+    })
+
+    if (!this.isAvailable()) {
+      const proposal = fallbackProposal(request, steps)
+      return { proposal, message: renderProposal(proposal) }
+    }
+
+    const response = await this.complete('skill.propose', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1600,
+      system: `You draft a reusable SKILL for the Rundesk project management app.
+
+A skill is a named playbook — a persona plus instructions — that shapes how the
+assistant answers when someone invokes it. It does NOT act on its own, so never
+write instructions that assume it can take actions unattended.
+
+Ground the draft in the real details below rather than generic advice, and say
+what you grounded it on in one sentence. Prefer the smallest skill that does the
+job: if their workspace shows little activity, propose something simple and say
+why, rather than an elaborate system nobody asked for.
+
+Reply with ONLY a JSON object:
+{
+  "name": "short, in their words, not generic",
+  "description": "one line",
+  "instructions": "the playbook, second person, addressed to the assistant",
+  "memories": ["facts about how this person works, worth keeping"],
+  "rationale": "one or two sentences on what you saw and why this shape",
+  "followUps": ["three next things they might ask, each a full sentence"]
+}`,
+      messages: [
+        {
+          role: 'user',
+          content: `Request: ${request}
+
+${workspaceContext}
+
+Personal list: ${personalCount} item(s).
+Skills they already have: ${owned.length ? owned.join(', ') : 'none'}.`,
+        },
+      ],
+    })
+
+    const text = response.content[0]?.type === 'text' ? response.content[0].text : ''
+    // A draft that cannot be parsed falls back to one built from the request —
+    // never to a half-populated skill, which would look authored and be empty.
+    const proposal = parseSkillProposal(text, steps) ?? fallbackProposal(request, steps)
+    return { proposal, message: renderProposal(proposal) }
+  }
+
   async command(workspaceId: string, message: string, ctx: AiCtx = {}): Promise<CommandPlan> {
     const [workspaceContext, planCtx] = await Promise.all([
       this.buildWorkspaceContext(workspaceId, ctx.userId ?? ''),

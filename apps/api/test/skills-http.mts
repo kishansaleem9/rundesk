@@ -145,6 +145,36 @@ async function main() {
   chk(((await call('GET', `/workspaces/${WS}/skills?tab=all`)).data ?? []).length === 1, 'but stays in All Skills', 'the disabled skill vanished entirely')
   chk(await svc.buildInvocationContext(WS, ME, skill.id).then(() => false).catch(() => true), 'and cannot be invoked', 'a disabled skill was still invocable')
 
+  console.log('\n▶ approving a drafted skill — [18:17]-[18:42], frame t1146')
+  // The write half of the gate. The proposal round-trips through the browser,
+  // so it arrives as untrusted input and must go through the same create path.
+  const approved = await call('POST', `/workspaces/${WS}/skills/from-proposal`, {
+    name: 'Personal Task Organizer',
+    description: 'Captures tasks and clarifies the next action',
+    instructions: 'You organise my work.\n\nCapture, clarify, prioritise.',
+    memories: ['I plan on Mondays', 'Deadlines matter more than effort'],
+    // Not in the DTO — the pipe must strip it rather than let it decide ownership.
+    createdById: THEM,
+  })
+  chk([200,201].includes(approved.status), 'an approved draft becomes a skill', `got ${approved.status}: ${JSON.stringify(approved.data)?.slice(0,160)}`)
+  chk(approved.data?.createdById === ME, 'owned by whoever approved it, not by the body', `createdById was ${approved.data?.createdById}`)
+  chk(approved.data?.memoriesCreated === 2, 'and its memory arrives with it, in one action', `memoriesCreated was ${approved.data?.memoriesCreated}`)
+  const approvedMemories = await call('GET', `/workspaces/${WS}/skills/${approved.data.id}/memories`)
+  chk((approvedMemories.data ?? []).length === 2, 'both memories are readable', `got ${(approvedMemories.data ?? []).length}`)
+  chk(
+    (approvedMemories.data ?? []).every((m) => m.source === 'chat'),
+    'marked as coming from a conversation',
+    'memories from a proposal were not marked as chat-sourced',
+  )
+  const draftPrompt = svc.renderSkillPrompt(await svc.buildInvocationContext(WS, ME, approved.data.id))
+  chk(draftPrompt.includes('I plan on Mondays'), 'and the approved skill answers knowing them', 'approved memories did not reach the prompt')
+  chk(
+    (await call('POST', `/workspaces/${WS}/skills/from-proposal`, { name: 'x', instructions: '' })).status === 400,
+    'a draft with no instructions is refused',
+    'an empty draft was accepted',
+  )
+  await call('DELETE', `/workspaces/${WS}/skills/${approved.data.id}`)
+
   console.log('\n▶ templates')
   const titles = ((await call('GET', `/workspaces/${WS}/skills/templates`)).data ?? []).map((x) => x.title)
   chk(['Delegate Like Me','Brand Voice','Triage Tasks Like Me'].every((n) => titles.includes(n)), 'the hub is served her three starter templates', `got ${JSON.stringify(titles)}`)
