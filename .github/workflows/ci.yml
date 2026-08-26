@@ -5,6 +5,23 @@ on:
   push:
     branches:
       - main
+  # Re-run CI without inventing a commit to hang it off. A run that was
+  # cancelled out of the queue, or a flake, should not need an empty commit in
+  # the history to get another attempt.
+  workflow_dispatch:
+
+# One run per branch at a time.
+#
+# Pushing three times in ten minutes queued three full runs of everything, and
+# the two older ones were building commits nobody was waiting on any more —
+# then sat in the queue holding it up, and were eventually cancelled anyway. The
+# newest commit is the one worth the runners.
+#
+# `main` is exempt: a run there is a record of whether that commit was good, and
+# a later push must not erase the answer for an earlier one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
