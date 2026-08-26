@@ -76,7 +76,9 @@ export class MeetingsService {
       if (!r.meetingId) continue
       const playable = await this.playableRecording(r.storageKey)
       if (!playable) continue
-      byMeeting.set(r.meetingId, [...(byMeeting.get(r.meetingId) ?? []), playable])
+      const list = byMeeting.get(r.meetingId) ?? []
+      list.push(playable)
+      byMeeting.set(r.meetingId, list)
     }
     return byMeeting
   }
@@ -90,11 +92,8 @@ export class MeetingsService {
    * changes meaning. `recordings` is the whole of what was captured, in order,
    * and is empty for a meeting that was never a call.
    */
-  private async withRecordings<T extends { id: string; recordingUrl: string | null }>(
-    rows: T[],
-    segments?: Map<string, string[]>,
-  ) {
-    const bySegment = segments ?? (await this.recordingsFor(rows.map((r) => r.id)))
+  private async withRecordings<T extends { id: string; recordingUrl: string | null }>(rows: T[]) {
+    const bySegment = await this.recordingsFor(rows.map((r) => r.id))
     return Promise.all(
       rows.map(async (r) => ({
         ...r,
