@@ -1,4 +1,5 @@
 import { useCallback, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button, cn } from '@rundesk/ui'
 import { Lock, Loader2 } from 'lucide-react'
 import type { FlagKey } from '@rundesk/feature-flags'
@@ -75,6 +76,7 @@ export function FeatureGateDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const [asking, setAsking] = useState(false)
   const [result, setResult] = useState<GateResult | null>(null)
 
@@ -86,6 +88,18 @@ export function FeatureGateDialog({
         body: { workspaceId },
       })
       setResult({ status: res?.status ?? 'failed', notified: res?.notified ?? 0 })
+      /*
+       * "It has just been turned on — close this and try again" was not true.
+       *
+       * The server saw the feature as enabled, which means this browser is
+       * holding a stale snapshot from before the admin switched it on. Nothing
+       * refreshed that snapshot, so trying again re-opened the identical modal
+       * — forever, until something else happened to refetch. Telling somebody
+       * to retry an action that cannot succeed is worse than saying nothing.
+       */
+      if (res?.status === 'already_enabled') {
+        await qc.invalidateQueries({ queryKey: ['feature-flags', 'resolved'] })
+      }
     } catch {
       // A failed ask must not read as a sent one — the person would stop
       // waiting for an answer that is never coming.

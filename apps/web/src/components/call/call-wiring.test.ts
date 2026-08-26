@@ -205,3 +205,30 @@ describe('§2.8 the minimised call shows something', () => {
     )
   })
 })
+
+
+/**
+ * §2.8 gap 11 — the gate has to refresh the thing it is gating on.
+ *
+ * Guarded by source because the failure is a modal that re-opens: nothing
+ * throws, nothing looks wrong, and the instruction on screen is simply false.
+ */
+describe('§2.8 an already-enabled feature stops being gated', () => {
+  const text = source('components/feature-gate.tsx', 'export function FeatureGateDialog')
+
+  it('refetches the flags when the server says it is already on', () => {
+    // Being told "already enabled" means this browser holds a stale snapshot
+    // from before an admin switched it on. Without a refetch, "close this and
+    // try again" re-opens the identical modal — forever.
+    assert.match(
+      text,
+      /if \(res\?\.status === 'already_enabled'\)/,
+      'nothing notices the answer that means our flags are out of date',
+    )
+    assert.match(
+      text,
+      /invalidateQueries\(\{ queryKey: \['feature-flags', 'resolved'\] \}\)/,
+      'the stale flag snapshot is never refreshed, so retrying cannot work',
+    )
+  })
+})
