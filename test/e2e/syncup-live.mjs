@@ -82,10 +82,33 @@ const check = (ok, label, detail = '') => {
     console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`)
   }
 }
+/*
+ * How many checks a complete run performs.
+ *
+ * "0 failed" is not the same as "it ran". A suite that bails out early — a
+ * selector that silently matched nothing, a page that never loaded, an exit
+ * taken before the interesting half — reports a clean sweep of whatever it
+ * managed to reach, and that reads exactly like success. This run took
+ * thirteen seconds on a CI runner and forty here, which is a difference nobody
+ * should have to squint at a stopwatch to interpret.
+ *
+ * Raise this when checks are added. Failing on the floor is the point: a suite
+ * that quietly shrinks is the most expensive kind of green.
+ */
+const EXPECTED_CHECKS = 25
+
 const done = async (browser, stack) => {
   await browser?.close().catch(() => {})
   stack?.close()
+  const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
+  if (ran < EXPECTED_CHECKS) {
+    console.log(
+      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
+        'so "0 failed" describes the part it reached and nothing else.',
+    )
+    process.exit(1)
+  }
   process.exit(failed === 0 ? 0 : 1)
 }
 
