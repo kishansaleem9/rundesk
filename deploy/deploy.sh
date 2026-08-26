@@ -213,8 +213,14 @@ case "$CMD" in
     ;;
   rebuild)
     ensure_env
-    echo "▶ Pulling latest from git"
-    git pull
+    # release.sh has already put the exact commit on disk, and a bare `git pull`
+    # after that either does nothing or drags in something nobody asked for.
+    if [ "${SKIP_PULL:-0}" = "1" ]; then
+      echo "▶ Deploying the checked-out commit ($(git rev-parse --short HEAD)) — not pulling"
+    else
+      echo "▶ Pulling latest from git"
+      git pull
+    fi
     build_web
     docker compose -f deploy/docker-compose.prod.yml --env-file .env build api
     docker compose -f deploy/docker-compose.prod.yml --env-file .env up -d --force-recreate api
