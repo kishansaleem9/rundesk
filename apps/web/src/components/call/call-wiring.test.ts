@@ -128,6 +128,30 @@ describe('§2.8 the mesh is whole or it is nothing', () => {
     assert.ok(text.includes('outgoingVideoTrack('), 'new connections are back to always adding the camera')
   })
 
+  it('actually STOPS rebuilding a peer once the budget is spent', () => {
+    // MAX_RESETS bounded the reset signal and nothing else: dropPeer ran
+    // either way and the connect effect re-runs on every render, so the peer
+    // was rebuilt immediately and a dead route rebuilt forever. A commit
+    // message of mine called that bounded. It was not.
+    assert.ok(text.includes('gaveUp'), 'nothing records a peer we have stopped trying to reach')
+    assert.match(
+      text,
+      /if \(gaveUp\.current\.has\(peerId\)\) return/,
+      'connectTo rebuilds a peer the budget has already given up on',
+    )
+    assert.match(
+      text,
+      /\} else \{\s*gaveUp\.current\.add\(peerId\)/,
+      'running out of attempts no longer marks the peer as given up',
+    )
+  })
+
+  it('lets somebody who left and rejoined try again', () => {
+    // Otherwise a person who reconnects to fix their connection is refused by
+    // a budget they cannot see and did not know they had spent.
+    assert.match(text, /gaveUp\.current\.delete\(id\)/, 'a rejoining peer stays given up forever')
+  })
+
   it('clears the failed badge when a peer comes back', () => {
     assert.match(
       text,

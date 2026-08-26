@@ -117,6 +117,17 @@ export function useWebRtcCall(options: {
   /** Rebuild attempts per peer, so a genuinely dead route stops looping. */
   const resets = useRef(new Map<string, number>())
 
+  /**
+   * Peers we have stopped trying to reach for this call.
+   *
+   * MAX_RESETS bounded the reset SIGNAL and nothing else: dropPeer ran either
+   * way, and the connect effect re-runs on every render — `peerIds` is rebuilt
+   * inline by the caller — so the peer was reconstructed immediately and a dead
+   * route rebuilt forever. The budget was never a budget. This is what makes it
+   * one.
+   */
+  const gaveUp = useRef(new Set<string>())
+
   /** Tear one peer down. Idempotent: called on leave, on failure, and on unmount. */
   const dropPeer = useCallback((peerId: string) => {
     const pc = connections.current.get(peerId)
@@ -144,6 +155,9 @@ export function useWebRtcCall(options: {
     async (peerId: string) => {
       if (!callId || !localStream) return
       if (connections.current.has(peerId)) return
+      // Out of attempts. The amber badge is already up and is the honest
+      // answer; rebuilding again would just spin.
+      if (gaveUp.current.has(peerId)) return
       const socket = getRealtimeSocket()
       const pc = new RTCPeerConnection({ iceServers: servers })
       connections.current.set(peerId, pc)
@@ -183,6 +197,7 @@ export function useWebRtcCall(options: {
           // may need TURN" badge used to appear once and then stay for the rest
           // of the call, long after the peer was back.
           resets.current.delete(peerId)
+          gaveUp.current.delete(peerId)
           setFailedPeers((prev) => (prev.includes(peerId) ? prev.filter((id) => id !== peerId) : prev))
           return
         }
@@ -201,6 +216,8 @@ export function useWebRtcCall(options: {
         if (canResetPeer(attempts, MAX_RESETS)) {
           resets.current.set(peerId, attempts + 1)
           socket.emit('call.signal', { callId, to: peerId, signal: { kind: 'reset' } })
+        } else {
+          gaveUp.current.add(peerId)
         }
         dropPeer(peerId)
       }
@@ -295,6 +312,15 @@ export function useWebRtcCall(options: {
     for (const id of others) void connectTo(id)
     for (const id of [...connections.current.keys()]) {
       if (!others.includes(id)) dropPeer(id)
+    }
+    // Somebody who left and came back is a new attempt, not a continuation of
+    // the one that failed — otherwise a person who rejoins to fix their
+    // connection is refused by a budget they cannot see.
+    for (const id of [...gaveUp.current]) {
+      if (!others.includes(id)) {
+        gaveUp.current.delete(id)
+        resets.current.delete(id)
+      }
     }
   }, [callId, localStream, peerIds, myUserId, connectTo, dropPeer])
 
