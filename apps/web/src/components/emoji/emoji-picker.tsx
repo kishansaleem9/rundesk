@@ -26,6 +26,7 @@ import {
   rankFrequent,
   readFrequent,
   readSkinTone,
+  searchCustomEmoji,
   searchEmoji,
   writeFrequent,
   writeSkinTone,
@@ -104,19 +105,31 @@ export function EmojiPicker({
   /** A tab press waiting for its section to exist again. */
   const [pendingJump, setPendingJump] = useState<CategoryId | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Read by the search memo, which runs before `showCustom` is computed below.
+  const showCustomRef = useRef(false)
   const sectionRefs = useRef(new Map<CategoryId, HTMLDivElement>())
 
   // The list is its own chunk — nobody pays for 1,900 emoji until they open
   // this. Held after the first load, so opening it again is instant.
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let live = true
-    void loadEmojiCatalog().then((loaded) => {
-      if (live) setCatalog(loaded)
-    })
+    setLoadFailed(false)
+    loadEmojiCatalog().then(
+      (loaded) => {
+        if (live) setCatalog(loaded)
+      },
+      () => {
+        // Said out loud, with a way to try again. A skeleton that never
+        // resolves is indistinguishable from a picker that is simply slow.
+        if (live) setLoadFailed(true)
+      },
+    )
     return () => {
       live = false
     }
-  }, [])
+  }, [attempt])
 
   const byChar = useMemo(() => {
     const map = new Map<string, EmojiEntry>()
@@ -135,6 +148,13 @@ export function EmojiPicker({
   const results = useMemo(
     () => (query.trim() && catalog ? searchEmoji(catalog.all, query) : []),
     [query, catalog],
+  )
+  // Workspace emoji are searchable too. They live outside the Unicode catalog,
+  // so a search that only looked there reported "No emoji matches that" for an
+  // emoji sitting two sections down.
+  const customResults = useMemo(
+    () => (query.trim() && showCustomRef.current ? searchCustomEmoji(customEmoji, query) : []),
+    [query, customEmoji],
   )
 
   // The running count lives in a ref as well as in state: two emoji clicked in
@@ -215,6 +235,20 @@ export function EmojiPicker({
   const handleScroll = () => {
     const container = scrollRef.current
     if (!container) return
+    /*
+     * At the bottom, the LAST section wins.
+     *
+     * A container cannot scroll past its own end, so the final section's
+     * offsetTop is unreachable: jumping to Custom lit it for a frame and then
+     * handleScroll re-elected Flags, leaving the strip claiming you were
+     * somewhere you were not.
+     */
+    const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 2
+    const ids = [...sectionRefs.current.keys()]
+    if (atBottom && ids.length > 0) {
+      setActiveCat(ids[ids.length - 1])
+      return
+    }
     let current: CategoryId = 'frequent'
     for (const [id, el] of sectionRefs.current) {
       if (el.offsetTop <= container.scrollTop + 8) current = id
@@ -228,6 +262,7 @@ export function EmojiPicker({
   }
 
   const showCustom = !!onSelectCustom
+  showCustomRef.current = showCustom
   const tabs = EMOJI_CATEGORIES.filter((c) => c.id !== 'custom' || showCustom)
 
   return (
@@ -310,7 +345,20 @@ export function EmojiPicker({
           they will actually arrive in; a line of text says "something is
           happening somewhere" and then makes the panel jump when it resolves.
         */}
-        {!catalog && (
+        {loadFailed && (
+          <div className="px-1 py-6 text-center" data-testid="emoji-load-failed">
+            <p className="text-[13px] text-muted-foreground">{t('emoji.loadFailed')}</p>
+            <button
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="mt-2 rounded-md border border-border/70 px-2.5 py-1 text-[12px] hover:bg-muted"
+            >
+              {t('common.retry')}
+            </button>
+          </div>
+        )}
+
+        {!catalog && !loadFailed && (
           <div
             className="grid grid-cols-8 gap-0.5"
             data-testid="emoji-loading"
@@ -329,12 +377,30 @@ export function EmojiPicker({
 
         {catalog && query.trim() && (
           <Section id="search" label={t('emoji.results')}>
-            {results.length === 0 ? (
+            {results.length === 0 && customResults.length === 0 ? (
               <p className="px-1 py-2 text-[12px] text-muted-foreground" data-testid="emoji-no-results">
                 {t('emoji.noResults')}
               </p>
             ) : (
-              <Grid entries={results} tone={tone} />
+              <>
+                {customResults.length > 0 && (
+                  <div className="grid grid-cols-8 gap-0.5" data-testid="emoji-search-custom">
+                    {customResults.map((ce) => (
+                      <button
+                        key={ce.id}
+                        type="button"
+                        data-emoji={`:${ce.shortcode}:`}
+                        data-shortcode={ce.shortcode}
+                        title={`:${ce.shortcode}:`}
+                        className="flex h-9 w-9 items-center justify-center rounded hover:bg-muted"
+                      >
+                        <img src={ce.imageUrl} alt={ce.shortcode} loading="lazy" className="h-5 w-5 object-contain" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <Grid entries={results} tone={tone} />
+              </>
             )}
           </Section>
         )}

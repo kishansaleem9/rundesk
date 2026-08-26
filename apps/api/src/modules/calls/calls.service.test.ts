@@ -156,7 +156,12 @@ function fakeDb(
         },
         ]
       }),
-    update: () => node(() => []),
+    // end() claims the call with `UPDATE ... WHERE ended_at IS NULL RETURNING`,
+    // so an update that returns nothing reads as "somebody else ended it" and
+    // the whole ending path is skipped. Whether the claim is exclusive is a
+    // property of Postgres, and calls-http.mts proves it there by ending the
+    // same call twice at once.
+    update: () => node(() => [{ id: 'call1' }]),
     delete: () => node(() => []),
     /*
      * Raw SQL, for the transcript write.
@@ -184,7 +189,35 @@ const realtime = () => ({ emitToWorkspace: mock.fn(), emitToUser: mock.fn() })
  * a row so "was anybody told" is answerable; the default fake records nothing
  * else, and the tests that care build their own.
  */
-const notifier = () => ({ create: mock.fn(async (n: Record<string, unknown>) => ({ id: 'n1', ...n })) })
+const notifier = () => {
+  const create = mock.fn(async (n: Record<string, unknown>) => ({ id: 'n1', ...n }))
+  return {
+    create,
+    // requestFlag and announce() need the delivery, not the row — see
+    // NotificationsService.createWithOutcome.
+    createWithOutcome: mock.fn(async (n: Record<string, unknown>) => ({
+      row: await create(n),
+      delivered: true,
+    })),
+  }
+}
+
+/**
+ * Wait for something that no longer happens on the request path.
+ *
+ * start() stopped awaiting its notification fan-out — in a 150-person channel
+ * the person pressing the button sat through hundreds of sequential round trips
+ * before getting into their own call. So the assertions have to wait for it the
+ * way the world does.
+ */
+async function settle(predicate: () => boolean, ms = 500) {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  return predicate()
+}
 /** §2.8 gap 10 — writes the notes; unavailable unless a test says otherwise. */
 const ai = () => ({
   isAvailable: () => true,
@@ -405,11 +438,14 @@ describe('§2.8 a call announces itself to the channel', () => {
     const n = notifier()
     const svc = makeService({ db, notifications: n })
     const call = await svc.start('ws1', 'me', { channelId: 'ch1' })
+    // The fan-out is no longer awaited by start().
+    await settle(() => n.create.mock.callCount() > 0)
     return { call, inserts, notified: n.create.mock.calls.map((c) => c.arguments[0] as Record<string, any>) }
   }
 
   it('posts a card into the channel, pointing at the call', async () => {
     const { inserts, call } = await startInChannel()
+    await settle(() => inserts.some((i) => i.values?.callId && i.values?.channelId))
     const card = inserts.find((i) => i.values?.callId && i.values?.channelId)
     assert.ok(card, 'the channel got no call card')
     assert.equal(card.values.channelId, 'ch1')
@@ -420,6 +456,7 @@ describe('§2.8 a call announces itself to the channel', () => {
     // A client that knows nothing about call cards — a digest email, a search
     // result — renders `body`. An empty one would show as a blank message.
     const { inserts } = await startInChannel()
+    await settle(() => inserts.some((i) => i.values?.callId && i.values?.channelId))
     const card = inserts.find((i) => i.values?.callId && i.values?.channelId)
     assert.match(String(card?.values.body ?? ''), /Hamda started a SyncUp/)
   })
@@ -510,6 +547,8 @@ describe('§2.8 a call announces itself to the channel', () => {
     const n = notifier()
     const svc = makeService({ db, notifications: n })
     await svc.start('ws1', 'me', {})
+    // Give the fan-out a chance to happen wrongly before asserting it did not.
+    await settle(() => n.create.mock.callCount() > 0, 100)
     assert.equal(n.create.mock.callCount(), 0, 'a channel-less call notified somebody anyway')
     assert.equal(
       inserts.filter((i) => i.values?.channelId).length,

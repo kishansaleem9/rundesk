@@ -191,6 +191,34 @@ export function scoreEmoji(entry: EmojiEntry, query: string): number {
   return 0
 }
 
+/**
+ * Workspace custom emoji matching a query.
+ *
+ * Search only ever looked at the Unicode list, so typing "shipit" in a
+ * workspace that has a `:shipit:` emoji answered "No emoji matches that" —
+ * and because the category sections are unmounted during a search, the Custom
+ * section was not visible either. The emoji looked deleted.
+ */
+export function searchCustomEmoji<T extends { shortcode: string }>(
+  custom: T[],
+  query: string,
+  limit = 12,
+): T[] {
+  const q = query.trim().toLowerCase().replace(/^:|:$/g, '')
+  if (!q) return []
+  const scored = custom
+    .map((c) => {
+      const code = c.shortcode.toLowerCase()
+      if (code === q) return { c, score: 3 }
+      if (code.startsWith(q)) return { c, score: 2 }
+      if (code.includes(q)) return { c, score: 1 }
+      return { c, score: 0 }
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+  return scored.slice(0, limit).map((x) => x.c)
+}
+
 /** The search results, best first, capped so a one-letter query stays usable. */
 export function searchEmoji(all: EmojiEntry[], query: string, limit = 60): EmojiEntry[] {
   const q = query.trim().toLowerCase()
@@ -225,17 +253,31 @@ let catalogPromise: Promise<{ catalog: EmojiCatalog; all: EmojiEntry[] }> | null
  */
 export function loadEmojiCatalog(): Promise<{ catalog: EmojiCatalog; all: EmojiEntry[] }> {
   if (!catalogPromise) {
-    catalogPromise = import('./emoji-data').then(({ EMOJI_BY_CATEGORY }) => {
-      const catalog = {} as EmojiCatalog
-      const all: EmojiEntry[] = []
-      for (const { id } of EMOJI_CATEGORIES) {
-        if (id === 'frequent' || id === 'custom') continue
-        const entries = parseCategory(EMOJI_BY_CATEGORY[id] ?? '')
-        catalog[id] = entries
-        all.push(...entries)
-      }
-      return { catalog, all }
-    })
+    catalogPromise = import('./emoji-data')
+      .catch((error) => {
+        /*
+         * A FAILED load must not be remembered.
+         *
+         * Holding the rejected promise meant one bad fetch — a deploy that
+         * rotated the content-hashed chunk, a moment of no network — poisoned
+         * every later open for the rest of the session: the same rejection
+         * came back instantly, the `.then` never ran, and the picker showed a
+         * pulsing skeleton forever with no retry and nothing said.
+         */
+        catalogPromise = null
+        throw error
+      })
+      .then(({ EMOJI_BY_CATEGORY }) => {
+        const catalog = {} as EmojiCatalog
+        const all: EmojiEntry[] = []
+        for (const { id } of EMOJI_CATEGORIES) {
+          if (id === 'frequent' || id === 'custom') continue
+          const entries = parseCategory(EMOJI_BY_CATEGORY[id] ?? '')
+          catalog[id] = entries
+          all.push(...entries)
+        }
+        return { catalog, all }
+      })
   }
   return catalogPromise
 }

@@ -251,7 +251,7 @@ export class FeatureFlagsService {
     const who = requester.name?.trim() || requester.email || 'Someone'
     let notified = 0
     for (const userId of recipients) {
-      const row = await this.notifications.create({
+      const outcome = await this.notifications.createWithOutcome({
         userId,
         workspaceId,
         actorId: requester.id,
@@ -260,10 +260,20 @@ export class FeatureFlagsService {
         body: `${who} tried to use a feature this workspace has turned off. You can turn "${flagKey}" on in Admin → Features.`,
         target: { entityType: 'feature_flag', entityId: flagKey, url: `/app/admin/features` },
       })
-      // create() returns null when the recipient has muted every channel for
-      // this kind — that is their choice, not a failure, but it does mean they
-      // were not told, and the caller is entitled to know the difference.
-      if (row) notified++
+      /*
+       * DELIVERY, not the row.
+       *
+       * create() returns the in-app row, and that is null for somebody who has
+       * turned in-app off and left email on — a supported combination. Counting
+       * rows therefore counted an admin who got the email as nobody, and told
+       * the requester "nobody was told" while every admin had the mail. It also
+       * meant the once-a-day rule never tripped for them, so they could be
+       * emailed again on every press.
+       *
+       * Muting every channel is still a real zero: that is their choice, and
+       * the caller is entitled to know the difference.
+       */
+      if (outcome?.delivered) notified++
     }
     return { status: 'sent', notified }
   }

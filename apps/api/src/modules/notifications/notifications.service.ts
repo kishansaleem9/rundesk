@@ -188,6 +188,11 @@ type NotificationChannelMatrix = Record<'inApp' | 'web' | 'mobile' | 'email', bo
  * up in a jsonb column straight from the client.
  */
 export const PRIMARY_SELECTABLE_TYPES = [
+  // §2.8 [19:25] — a call starting is exactly the kind of thing somebody
+  // working out of Primary needs to see. Absent from this list it could never
+  // appear there, and the customiser could not offer to turn it on however
+  // good the picker was.
+  'call_started',
   'task_mentioned',
   'doc_mentioned',
   'task_commented',
@@ -213,6 +218,9 @@ export const PRIMARY_SELECTABLE_TYPES = [
 
 /** What Primary shows for someone who has never opened the customiser. */
 export const DEFAULT_PRIMARY_TYPES: string[] = [
+  // ON by default: a call happening now is the most time-sensitive thing the
+  // Inbox carries, and one you cannot act on later.
+  'call_started',
   'task_mentioned',
   'doc_mentioned',
   'task_commented',
@@ -365,7 +373,19 @@ export class NotificationsService {
     }
   }
 
-  async create(data: {
+  /**
+   * Write a notification, and report whether it reached the person AT ALL.
+   *
+   * `create()` returns the in-app row, which is null when a recipient has
+   * turned the in-app channel off and left email on — a supported combination.
+   * Callers that count what they returned therefore counted an admin who got
+   * the email as nobody, and told the requester nothing had been sent while
+   * every admin had the mail.
+   *
+   * The row and the delivery are different facts. This returns both; `create`
+   * keeps returning just the row, so no existing caller changes.
+   */
+  async createWithOutcome(data: {
     userId: string
     workspaceId?: string | null
     actorId?: string | null
@@ -394,8 +414,9 @@ export class NotificationsService {
     const inQuietHours = this.isInQuietHours(prefs, timezone)
     const canWebOrMobile = !inQuietHours
 
+    // Every channel off is the only case where nothing at all happens.
     if (!matrix.inApp && !matrix.web && !matrix.email && !matrix.mobile) {
-      return null
+      return { row: null as any, delivered: false }
     }
 
     const formattedBody = data.body
@@ -450,7 +471,12 @@ export class NotificationsService {
       }).catch(() => undefined)
     }
 
-    return row
+    return { row, delivered: true }
+  }
+
+  /** The row, for the callers that only ever wanted that. */
+  async create(data: Parameters<NotificationsService['createWithOutcome']>[0]) {
+    return (await this.createWithOutcome(data)).row
   }
 
   async getWebPushPublicKey() {

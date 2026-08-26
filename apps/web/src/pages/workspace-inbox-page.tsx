@@ -27,6 +27,7 @@ import {
   SmilePlus,
   Share2,
   KeyRound,
+  Video,
 } from 'lucide-react'
 import { formatDistanceToNowStrict, isToday, isYesterday } from 'date-fns'
 import { api } from '../lib/api'
@@ -114,6 +115,8 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; labelK
   message_reaction: { icon: SmilePlus, color: 'text-pink-500', labelKey: 'inbox.type.reaction' },
   shared_with_me: { icon: Share2, color: 'text-violet-500', labelKey: 'inbox.type.sharedWithMe' },
   access_requested: { icon: KeyRound, color: 'text-amber-600', labelKey: 'inbox.type.accessRequested' },
+  // §2.8 [19:25] — a SyncUp starting in a channel you are in.
+  call_started: { icon: Video, color: 'text-violet-500', labelKey: 'inbox.type.callStarted' },
 }
 
 /**
@@ -223,6 +226,9 @@ function daysUntilDeleted(dismissedAt: string | null | undefined): number | null
 }
 
 const HUMAN_TYPES = new Set([
+  // §2.8 — a person started a call. Mirrors DEFAULT_PRIMARY_TYPES on the
+  // server; the two must agree or the counts differ from the list.
+  'call_started',
   'task_mentioned',
   'doc_mentioned',
   'task_commented',
@@ -257,6 +263,7 @@ export type InboxFilter = 'all' | 'primary'
 
 /** Every type the customiser offers, in the order it shows them. */
 export const PRIMARY_SELECTABLE_TYPES: Array<{ type: string; labelKey: TranslationKey }> = [
+  { type: 'call_started', labelKey: 'inbox.type.callStarted' },
   { type: 'task_mentioned', labelKey: 'inbox.type.mentioned' },
   { type: 'doc_mentioned', labelKey: 'inbox.type.mentioned' },
   { type: 'task_commented', labelKey: 'inbox.type.commented' },

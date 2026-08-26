@@ -6,6 +6,7 @@ import {
   captionsTail,
   isRevisionOf,
   pickRecorderType,
+  capturerFor,
   shouldSendLine,
   streamsToWire,
 } from './call-recording'
@@ -155,5 +156,28 @@ describe('§2.8 somebody who joins mid-recording still ends up in the file', () 
   it('ignores the gaps a peer list has while people connect', () => {
     assert.deepEqual(streamsToWire([null, undefined, stream('a')], new Set()).map((s) => s.id), ['a'])
     assert.deepEqual(streamsToWire([], new Set()), [])
+  })
+})
+
+
+describe('§2.8 who captures the recording', () => {
+  it('is one person, and the same person on every client', () => {
+    // Every client computes this from the same participant list, so exactly
+    // one of them records — N copies of one call is N-1 wasted uploads.
+    const present = ['u-c', 'u-a', 'u-b']
+    assert.equal(capturerFor(present), 'u-a')
+    assert.equal(capturerFor([...present].reverse()), 'u-a', 'two clients disagreed about who records')
+  })
+
+  it('moves when that person leaves', () => {
+    // Pinned to whoever STARTED the call, a host who left mid-recording took
+    // the recording with them: banner still up, transcript still flowing,
+    // nothing being captured.
+    assert.equal(capturerFor(['u-a', 'u-b', 'u-c']), 'u-a')
+    assert.equal(capturerFor(['u-b', 'u-c']), 'u-b', 'nobody picked up the recording after the capturer left')
+  })
+
+  it('is nobody in an empty room', () => {
+    assert.equal(capturerFor([]), null)
   })
 })

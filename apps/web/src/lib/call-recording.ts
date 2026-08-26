@@ -101,6 +101,24 @@ export function captionsTail<T>(lines: T[], max = 3): T[] {
 export const RECORDER_CHUNK_MS = 5000
 
 /**
+ * Who captures the mixed recording.
+ *
+ * Pinning this to whoever STARTED the call meant that when they left
+ * mid-recording, the banner stayed up and the transcript kept flowing while
+ * nothing was being recorded at all — the loudest promise in the product,
+ * quietly broken for the rest of the call.
+ *
+ * Elected from who is actually present, by a rule every client computes
+ * identically from the same participant list, so exactly one person captures
+ * and the job moves the moment that person leaves. Sorted rather than "first
+ * to join" because join order is not something every client agrees on.
+ */
+export function capturerFor(presentUserIds: string[]): string | null {
+  if (presentUserIds.length === 0) return null
+  return [...presentUserIds].sort()[0]
+}
+
+/**
  * How many times speech recognition may restart before giving up.
  *
  * It ends itself after every pause, so restarting is normal and this is

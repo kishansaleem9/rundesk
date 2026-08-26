@@ -84,6 +84,20 @@ export function useCallRecording({
     wired: Map<string, MediaStreamAudioSourceNode>
   } | null>(null)
 
+  /** Take the mix apart. Safe to call when there is none. */
+  const teardownMix = useCallback(() => {
+    for (const node of mixRef.current?.wired.values() ?? []) {
+      try {
+        node.disconnect()
+      } catch {
+        /* already gone */
+      }
+    }
+    mixRef.current = null
+    void audioCtxRef.current?.close().catch(() => {})
+    audioCtxRef.current = null
+  }, [])
+
   /** Connect anything not already in the mix. Safe to call repeatedly. */
   const wirePeers = useCallback(() => {
     const mix = mixRef.current
@@ -167,6 +181,12 @@ export function useCallRecording({
     try {
       recorder = new MediaRecorder(mix, { mimeType: type })
     } catch {
+      // isTypeSupported said yes and the constructor said no — a real
+      // divergence on some Firefox/Android and Safari builds. buildMix has
+      // already opened an AudioContext and wired every microphone into it, and
+      // returning without a cleanup left that graph running for the rest of
+      // the call, holding the mic open for a recorder that does not exist.
+      teardownMix()
       setUnavailable('recorder')
       return
     }
@@ -186,18 +206,9 @@ export function useCallRecording({
       recorderRef.current = null
       // Disconnect before closing: an AudioContext closed with live nodes
       // attached logs in some browsers and leaves the nodes referenced.
-      for (const node of mixRef.current?.wired.values() ?? []) {
-        try {
-          node.disconnect()
-        } catch {
-          /* already gone */
-        }
-      }
-      mixRef.current = null
-      void audioCtxRef.current?.close().catch(() => {})
-      audioCtxRef.current = null
+      teardownMix()
     }
-  }, [recording, captureAudio, buildMix, finishUpload])
+  }, [recording, captureAudio, buildMix, finishUpload, teardownMix])
 
   /*
    * Somebody joined (or their microphone came up) while we were recording.

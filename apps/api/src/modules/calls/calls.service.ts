@@ -8,6 +8,7 @@ import {
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import {
   callParticipants,
+  callRecordings,
   callTranscriptLines,
   calls,
   chatChannelMembers,
@@ -154,6 +155,16 @@ export class CallsService {
       if (existing[0]) return this.join(existing[0].id, userId)
     }
 
+    /*
+     * The read above is not enough on its own.
+     *
+     * Two people pressing Start SyncUp in the same moment both saw nothing
+     * running and both inserted, so the channel got two live calls, two cards,
+     * two notification storms, and a Join that landed in whichever one the
+     * live lookup happened to return. A partial unique index (0111) makes that
+     * impossible; losing the race here means somebody else's call already
+     * exists, which is exactly the call we wanted to be in.
+     */
     const [row] = await this.db
       .insert(calls)
       .values({
@@ -162,7 +173,19 @@ export class CallsService {
         startedById: userId,
         title: input.title?.trim() || null,
       })
+      .onConflictDoNothing()
       .returning()
+
+    if (!row) {
+      const [winner] = await this.db
+        .select()
+        .from(calls)
+        .where(and(eq(calls.channelId, input.channelId!), isNull(calls.endedAt)))
+        .orderBy(desc(calls.startedAt))
+        .limit(1)
+      if (winner) return this.join(winner.id, userId)
+      throw new BadRequestException('Could not start a call here')
+    }
 
     await this.db
       .insert(callParticipants)
@@ -177,11 +200,21 @@ export class CallsService {
       startedById: userId,
     } as never)
 
-    // §2.8 gap 9 — tell the channel. Best-effort: a call that starts is worth
-    // more than an announcement that succeeds, so a failure here must not stop
-    // somebody getting into their own call.
+    /*
+     * §2.8 gap 9 — tell the channel.
+     *
+     * NOT awaited. announce() writes one notification per channel member, and
+     * each of those reads the recipient's preferences and inserts a row — so in
+     * a 150-person channel the person who pressed the button sat through
+     * hundreds of sequential round trips before being let into their own call.
+     * The card and the notifications are for everyone else; they have no
+     * business delaying the caller.
+     *
+     * Still best-effort: a call that starts is worth more than an announcement
+     * that succeeds.
+     */
     if (row.channelId) {
-      await this.announce(row.id, row.channelId, workspaceId, userId).catch(() => {})
+      void this.announce(row.id, row.channelId, workspaceId, userId).catch(() => {})
     }
 
     return { ...row, participants: await this.participantsOf(row.id) }
@@ -295,6 +328,9 @@ export class CallsService {
     this.realtime.emitToWorkspace(call.workspaceId, {
       type: 'call.participant.joined',
       workspaceId: call.workspaceId,
+      // The client scopes its refetch by this; without it every join
+      // re-hydrated every message list in the workspace.
+      channelId: call.channelId,
       callId,
       userId,
     } as never)
@@ -312,6 +348,7 @@ export class CallsService {
     this.realtime.emitToWorkspace(call.workspaceId, {
       type: 'call.participant.left',
       workspaceId: call.workspaceId,
+      channelId: call.channelId,
       callId,
       userId,
     } as never)
@@ -338,7 +375,28 @@ export class CallsService {
     const call = await this.assertCanReach(callId, userId)
     if (call.endedAt) return { ok: true, meetingId: call.meetingId }
 
+    /*
+     * Claim the end BEFORE doing the expensive part.
+     *
+     * `leave()` calls this when the last person out counts nobody remaining,
+     * and two people hanging up together can both count zero. Both then read a
+     * call with ended_at still null and both passed the guard above — so the
+     * call left two meeting records and was billed for two AI-notes
+     * generations. The conditional update is the claim: exactly one caller
+     * gets a row back.
+     */
     const endedAt = new Date()
+    const claimed = await this.db
+      .update(calls)
+      .set({ endedAt })
+      .where(and(eq(calls.id, callId), isNull(calls.endedAt)))
+      .returning({ id: calls.id })
+    if (claimed.length === 0) {
+      // Somebody else got there first. Hand back what they wrote rather than
+      // reporting a failure — the call did end, just not by us.
+      const [settled] = await this.db.select().from(calls).where(eq(calls.id, callId)).limit(1)
+      return { ok: true, meetingId: settled?.meetingId ?? null }
+    }
     const people = await this.participantsOf(callId)
 
     // §2.8 gap 10 — "yeh aap ke khud hi NOTES bana ke dega aur poori ki poori
@@ -375,14 +433,17 @@ export class CallsService {
         .catch(() => undefined)
     }
 
+    // ended_at is already set by the claim above; only the record it left
+    // behind is still to be written.
     await this.db
       .update(calls)
-      .set({ endedAt, meetingId: meeting?.id ?? null })
+      .set({ meetingId: meeting?.id ?? null })
       .where(eq(calls.id, callId))
 
     this.realtime.emitToWorkspace(call.workspaceId, {
       type: 'call.ended',
       workspaceId: call.workspaceId,
+      channelId: call.channelId,
       callId,
       meetingId: meeting?.id ?? null,
     } as never)
@@ -449,6 +510,7 @@ export class CallsService {
     this.realtime.emitToWorkspace(call.workspaceId, {
       type: 'call.recording',
       workspaceId: call.workspaceId,
+      channelId: call.channelId,
       callId,
       recording,
       byUserId: userId,
@@ -642,7 +704,15 @@ export class CallsService {
     return { uploadUrl, storageKey: key }
   }
 
-  /** The upload finished — remember where it landed. */
+  /**
+   * The upload finished — remember where it landed.
+   *
+   * APPENDED, not overwritten. Recording is a toggle, so a call can be
+   * recorded, stopped for a private aside, and recorded again; each stop
+   * produces its own file. Writing a single key meant the second upload
+   * replaced the first and that earlier audio stayed in storage with nothing
+   * pointing at it and nobody aware it existed.
+   */
   async attachRecording(callId: string, userId: string, storageKey: string) {
     const call = await this.assertCanReach(callId, userId)
     if (!storageKey?.startsWith(`calls/${call.workspaceId}/${callId}/`)) {
@@ -650,7 +720,25 @@ export class CallsService {
       // meeting, which is the one mistake here that cannot be undone.
       throw new BadRequestException('That storage key does not belong to this call')
     }
-    await this.db.update(calls).set({ recordingStorageKey: storageKey }).where(eq(calls.id, callId))
+
+    const existing = await this.db
+      .select({ position: callRecordings.position })
+      .from(callRecordings)
+      .where(eq(callRecordings.callId, callId))
+      .orderBy(desc(callRecordings.position))
+      .limit(1)
+    await this.db
+      .insert(callRecordings)
+      .values({ callId, storageKey, position: (existing[0]?.position ?? -1) + 1 })
+      // The same key handed in twice is a retry, not a second segment.
+      .onConflictDoNothing()
+
+    // The first segment is what the call and its meeting point at; later ones
+    // are reachable through the call. Overwriting this would undo the whole
+    // point of keeping them.
+    if (!call.recordingStorageKey) {
+      await this.db.update(calls).set({ recordingStorageKey: storageKey }).where(eq(calls.id, callId))
+    }
 
     /*
      * If the call has already ended, backfill the record it left behind.
@@ -661,7 +749,7 @@ export class CallsService {
      * recorder. Without this the file sits in storage with nothing pointing at
      * it, and the meeting says there was no recording.
      */
-    if (call.meetingId) {
+    if (call.meetingId && !call.recordingStorageKey) {
       await this.db
         .update(meetings)
         .set({ recordingUrl: storageKey })

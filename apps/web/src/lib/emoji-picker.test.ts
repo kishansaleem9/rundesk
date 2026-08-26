@@ -10,6 +10,7 @@ import {
   parseCategory,
   rankFrequent,
   scoreEmoji,
+  searchCustomEmoji,
   searchEmoji,
   stripSkinTone,
   type EmojiEntry,
@@ -184,5 +185,38 @@ describe('§2.8 the generated catalog is the whole library', () => {
     for (const char of DEFAULT_FREQUENT) {
       assert.ok(known.has(char), `default frequent ${char} is not in the catalog`)
     }
+  })
+})
+
+
+describe('§2.8 searching finds workspace emoji too', () => {
+  const custom = [
+    { id: '1', shortcode: 'shipit', imageUrl: 'x' },
+    { id: '2', shortcode: 'ship-fast', imageUrl: 'x' },
+    { id: '3', shortcode: 'party-parrot', imageUrl: 'x' },
+  ]
+
+  it('finds one by its shortcode', () => {
+    // Search only looked at the Unicode list, so a workspace with :shipit:
+    // answered "No emoji matches that" for an emoji two sections down — and
+    // the Custom section is not rendered during a search either, so it looked
+    // deleted.
+    assert.deepEqual(searchCustomEmoji(custom, 'shipit').map((c) => c.id), ['1'])
+  })
+
+  it('ranks an exact shortcode above a prefix above a substring', () => {
+    assert.deepEqual(searchCustomEmoji(custom, 'ship').map((c) => c.id), ['1', '2'])
+  })
+
+  it('ignores the colons people type around a shortcode', () => {
+    assert.deepEqual(searchCustomEmoji(custom, ':shipit:').map((c) => c.id), ['1'])
+  })
+
+  it('finds nothing for an empty query, rather than everything', () => {
+    assert.deepEqual(searchCustomEmoji(custom, '   '), [])
+  })
+
+  it('finds nothing when nothing matches', () => {
+    assert.deepEqual(searchCustomEmoji(custom, 'zzz'), [])
   })
 })

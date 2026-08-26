@@ -19,6 +19,7 @@ import { useTranslation } from '../../lib/i18n'
 import { getRealtimeSocket } from '../../lib/realtime'
 import { useWebRtcCall } from '../../lib/use-webrtc-call'
 import { useCallRecording } from '../../lib/use-call-recording'
+import { capturerFor } from '../../lib/call-recording'
 import { presentIn, type Call } from '../../lib/calls-api'
 import { EmojiPicker } from '../emoji/emoji-picker'
 import { BACKGROUND_TINT, type CallBackground } from './call-prejoin'
@@ -88,17 +89,24 @@ export function CallSurface({
    * §2.8 gap 10 — AI Notes, while the banner is up.
    *
    * Everyone transcribes their own microphone, which is what lets the notes say
-   * who said what. Only the host captures the mixed recording: every
+   * who said what. Exactly one person captures the mixed recording — every
    * participant writing the same call would produce one copy per person, all
    * but one of them wasted.
+   *
+   * Elected from who is PRESENT, not pinned to whoever started the call. Pinned
+   * to the starter, a host who left mid-recording took the recording with them:
+   * the banner stayed up, the transcript kept flowing, and nothing was captured
+   * for the rest of the call. The election re-runs the moment the participant
+   * list changes, so the job simply moves.
    */
+  const capturer = capturerFor(present.map((p) => p.userId))
   const { captions, unavailable: notesUnavailable } = useCallRecording({
     workspaceId: call.workspaceId,
     callId: call.id,
     recording: call.recording,
     localStream,
     peerStreams: peers.map((p) => p.stream),
-    captureAudio: myUserId === call.startedById,
+    captureAudio: myUserId === capturer,
   })
 
   /**

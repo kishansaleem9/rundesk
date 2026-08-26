@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, boolean, index, unique } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, boolean, integer, index, unique } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
@@ -55,6 +55,10 @@ export const calls = pgTable(
     // "Is there a live call in this channel" is the question the channel header
     // asks on every render, so it is the one that gets an index.
     index('idx_calls_channel_live').on(t.channelId, t.endedAt),
+    // At most ONE live call per channel — see 0111. Declared as a plain index
+    // here because drizzle-kit cannot express the partial predicate; the
+    // migration is what creates the unique constraint, and calls-http.mts
+    // proves it holds.
     index('idx_calls_workspace').on(t.workspaceId, t.startedAt),
   ],
 )
@@ -124,6 +128,38 @@ export const callTranscriptLines = pgTable(
     index('call_transcript_lines_call_idx').on(t.callId, t.saidAt),
   ],
 )
+
+/**
+ * §2.8 — one piece of a call's recording.
+ *
+ * Recording is a toggle, so a call can be recorded, stopped for a private
+ * aside, and recorded again. Each stop produces its own file. A single key on
+ * the call meant the second upload overwrote the first and the earlier audio
+ * stayed in storage with nothing pointing at it.
+ *
+ * Append-only. `position` orders them for playback and is not assumed
+ * contiguous: a failed upload leaves a gap, and inventing one would
+ * misrepresent what was actually captured.
+ */
+export const callRecordings = pgTable(
+  'call_recordings',
+  {
+    id:         uuid('id').primaryKey().defaultRandom(),
+    callId:     uuid('call_id').notNull().references(() => calls.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    position:   integer('position').notNull().default(0),
+    createdAt:  timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('call_recordings_call_idx').on(t.callId, t.position),
+    // Handing the same key in twice is a retry, not a second segment.
+    unique('uq_call_recordings_key').on(t.callId, t.storageKey),
+  ],
+)
+
+export const callRecordingsRelations = relations(callRecordings, ({ one }) => ({
+  call: one(calls, { fields: [callRecordings.callId], references: [calls.id] }),
+}))
 
 export const callTranscriptLinesRelations = relations(callTranscriptLines, ({ one }) => ({
   call: one(calls, { fields: [callTranscriptLines.callId], references: [calls.id] }),

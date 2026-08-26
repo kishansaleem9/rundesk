@@ -288,10 +288,13 @@ async function main() {
      * handed this a call that was already recording and the check passed for
      * the wrong reason — the third time that trap has caught me in this file.
      */
+    // Deliberately channel-less. This block only ever runs raw SQL, and since
+    // 0111 a channel may hold at most one live call — inserting a second into
+    // CHANNEL would now violate that index rather than test anything.
     const quietId = rowsOf(
       await db.execute(`
-        INSERT INTO calls (workspace_id, channel_id, started_by_id, recording)
-        VALUES ('${WS}', '${CHANNEL}', '${ME}', false) RETURNING id
+        INSERT INTO calls (workspace_id, started_by_id, recording)
+        VALUES ('${WS}', '${ME}', false) RETURNING id
       `),
     )[0].id
     const wrote = rowsOf(
@@ -394,15 +397,34 @@ async function main() {
   chk(rowsOf(attendees)[0].n >= 2, 'with everyone who was there', `${rowsOf(attendees)[0].n} attendees`)
 
   console.log('\n▶ a recording that lands AFTER the call ended')
-  // The upload only begins when the recorder stops, so it routinely finishes
-  // after end() has already written the meeting — especially on "End for all",
-  // which does both in the same moment. Without a backfill the file sits in
-  // storage with nothing pointing at it.
   {
+    // The upload only begins when the recorder stops, so it routinely finishes
+    // after end() has written the meeting — especially on "End for all", which
+    // does both in the same moment.
     const late = `calls/${WS}/${callId}/recording-late.webm`
     chk((await call('POST', `/workspaces/${WS}/calls/${callId}/recording/attach`, { storageKey: late })).status === 200, 'is still accepted', 'a late upload was refused')
-    const backfilled = rowsOf(await db.execute(`SELECT recording_url FROM meetings WHERE id = '${ended.data?.meetingId}'`))[0]
-    chk(backfilled.recording_url === late, 'and is backfilled onto the meeting record', `the meeting still points at ${backfilled.recording_url}`)
+    const segments = rowsOf(
+      await db.execute(`SELECT storage_key FROM call_recordings WHERE call_id = '${callId}' ORDER BY position`),
+    ).map((r) => r.storage_key)
+    chk(segments.includes(late), 'and is kept as another piece of the recording', 'the late upload was dropped')
+
+    // The meeting keeps pointing at the FIRST piece. Overwriting it with each
+    // late arrival is what orphaned the earlier audio in the first place.
+    const url = rowsOf(await db.execute(`SELECT recording_url FROM meetings WHERE id = '${ended.data?.meetingId}'`))[0].recording_url
+    chk(url === segments[0], 'while the meeting still points at the first', `the meeting points at ${url}, first piece is ${segments[0]}`)
+  }
+
+  console.log('\n▶ a call that ended with no recording, then one arrives')
+  {
+    // The backfill still has to happen when there was nothing to point at.
+    const orphan = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL, title: 'late only' })
+    const id = orphan.data?.id
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording`, { recording: true })
+    const done = await call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
+    const key = `calls/${WS}/${id}/recording-after-the-fact.webm`
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording/attach`, { storageKey: key })
+    const url = rowsOf(await db.execute(`SELECT recording_url FROM meetings WHERE id = '${done.data?.meetingId}'`))[0].recording_url
+    chk(url === key, 'is backfilled onto the meeting record', `the meeting points at ${url}`)
   }
 
   console.log('\n▶ the card, now that the call is over')
@@ -482,6 +504,71 @@ async function main() {
     await db.execute(`UPDATE workspace_members SET role = 'member' WHERE user_id = '${ME}' AND workspace_id = '${WS}'`)
     await db.execute('DELETE FROM feature_flags')
     await call('POST', `/workspaces/${WS}/calls/${off.data?.id}/end`, {})
+  }
+
+  console.log('\n▶ two people pressing Start SyncUp at the same instant')
+  {
+    // The read-then-insert in start() let both requests through, so the channel
+    // got two live calls, two cards and two notification storms. Fired
+    // concurrently — sequential presses always passed, which is why this was
+    // never caught.
+    const both = await Promise.all([
+      call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL }),
+      call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL }),
+    ])
+    // BOTH must succeed. Filtering out failures first made a 500 for the loser
+    // indistinguishable from both landing in one call — which is exactly what
+    // happens without onConflictDoNothing, since the losing insert violates the
+    // unique index. Somebody pressing Start and getting an error is not a fix.
+    chk(
+      both.every((r) => r.status === 200 || r.status === 201),
+      'both requests succeed',
+      `statuses: ${both.map((r) => r.status).join(', ')} — the loser got an error instead of the call`,
+    )
+    const ids = [...new Set(both.map((r) => r.data?.id).filter(Boolean))]
+    chk(ids.length === 1 && both.every((r) => r.data?.id === ids[0]), 'and both land in ONE call', `ids: ${both.map((r) => r.data?.id).join(', ')}`)
+    const live = rowsOf(
+      await db.execute(`SELECT count(*)::int AS n FROM calls WHERE channel_id = '${CHANNEL}' AND ended_at IS NULL`),
+    )[0].n
+    chk(live === 1, 'and the channel has exactly one live call', `${live} live calls in the channel`)
+    await call('POST', `/workspaces/${WS}/calls/${ids[0]}/end`, {})
+  }
+
+  console.log('\n▶ two people hanging up at the same instant')
+  {
+    const shared = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL })
+    const before = rowsOf(await db.execute('SELECT count(*)::int AS n FROM meetings'))[0].n
+    const ends = await Promise.all([
+      call('POST', `/workspaces/${WS}/calls/${shared.data?.id}/end`, {}),
+      call('POST', `/workspaces/${WS}/calls/${shared.data?.id}/end`, {}),
+    ])
+    const after = rowsOf(await db.execute('SELECT count(*)::int AS n FROM meetings'))[0].n
+    chk(after - before === 1, 'leave exactly ONE meeting record', `${after - before} records were written — and each one is a billed AI-notes run`)
+    const meetingIds = [...new Set(ends.map((e) => e.data?.meetingId).filter(Boolean))]
+    chk(meetingIds.length === 1, 'and both callers are told about the same one', `they were told about ${meetingIds.length}`)
+  }
+
+  console.log('\n▶ a recording stopped and restarted')
+  {
+    const seg = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL, title: 'segments' })
+    const id = seg.data?.id
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording`, { recording: true })
+    const one = `calls/${WS}/${id}/recording-1.webm`
+    const two = `calls/${WS}/${id}/recording-2.webm`
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording/attach`, { storageKey: one })
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording/attach`, { storageKey: two })
+    const kept = rowsOf(
+      await db.execute(`SELECT storage_key FROM call_recordings WHERE call_id = '${id}' ORDER BY position`),
+    ).map((r) => r.storage_key)
+    chk(kept.length === 2, 'keeps BOTH pieces', `${kept.length} kept — the earlier audio is orphaned in storage`)
+    chk(kept[0] === one && kept[1] === two, 'in the order they were captured', `got ${kept.join(', ')}`)
+    // Handing the same key in twice is a retry, not a third segment.
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording/attach`, { storageKey: two })
+    const again = rowsOf(await db.execute(`SELECT count(*)::int AS n FROM call_recordings WHERE call_id = '${id}'`))[0].n
+    chk(again === 2, 'and a retry of the same key is not a new piece', `${again} rows after a retry`)
+    const first = rowsOf(await db.execute(`SELECT recording_storage_key FROM calls WHERE id = '${id}'`))[0].recording_storage_key
+    chk(first === one, 'the call still points at the FIRST piece', `it points at ${first}`)
+    await call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
   }
 
   console.log('\n▶ recording a call that has ended')

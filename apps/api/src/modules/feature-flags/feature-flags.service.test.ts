@@ -62,7 +62,12 @@ describe('§2.8 asking an admin to turn a feature on', () => {
 
   const notifier = () => {
     const sent: any[] = []
-    return { sent, create: async (n: any) => (sent.push(n), { id: `n${sent.length}` }) }
+    return {
+      sent,
+      // Delivery, not the row: an admin who has in-app off and email on gets
+      // no row and must still count as told.
+      createWithOutcome: async (n: any) => (sent.push(n), { row: { id: `n${sent.length}` }, delivered: true }),
+    }
   }
 
   it('refuses a flag that does not exist', async () => {
@@ -101,7 +106,8 @@ describe('§2.8 asking an admin to turn a feature on', () => {
 
   it('counts only the admins who were actually told', async () => {
     // create() returns null when the recipient has muted this kind entirely.
-    const muted = { create: async () => null }
+    // Every channel off — the one case where nothing at all happens.
+    const muted = { createWithOutcome: async () => ({ row: null, delivered: false }) }
     const admins = [{ userId: 'admin1' }, { userId: 'admin2' }]
     const svc = new FeatureFlagsService(dbWithSelects([MEMBER, OFF, admins, []]), {} as any, muted as any)
     const out = await svc.requestFlag('ai.meeting_notes' as any, 'ws1', me)

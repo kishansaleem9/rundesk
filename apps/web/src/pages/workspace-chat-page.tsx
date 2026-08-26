@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
-import { Popover, PopoverContent, PopoverTrigger } from '@rundesk/ui'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
 import { ChannelCall } from '../components/call/channel-call'
@@ -672,7 +672,22 @@ export function ChatPage() {
         event.type !== 'call.signal' &&
         event.type !== 'call.reaction'
       ) {
-        qc.invalidateQueries({ queryKey: ['chat-messages'] })
+        /*
+         * Scoped to the channel the call is in.
+         *
+         * Call events go to the whole workspace, so an unscoped invalidation
+         * made every join, leave and recording toggle re-hydrate a hundred
+         * messages for every person online — including people who cannot see
+         * the channel the call is in. A six-person call in a private channel
+         * did that a dozen times to two hundred people.
+         *
+         * Without a channelId there is nothing to scope to, and refetching
+         * everything would be worse than refetching nothing: the card is
+         * refreshed by its own poll a moment later either way.
+         */
+        if (event.channelId) {
+          qc.invalidateQueries({ queryKey: ['chat-messages', event.channelId] })
+        }
       }
     }
     socket.on('event', onEvent)
@@ -2047,25 +2062,38 @@ export function ChatPage() {
                           </button>
                           {/* §2.8 gap 7 — reacting opens the whole library, the
                               same one the composer opens. Six emoji and a link
-                              to a settings screen was the old answer. */}
+                              to a settings screen was the old answer.
+
+                              Portalled, not absolutely positioned. As a child
+                              of the message scroller it was clipped by
+                              `overflow-y-auto` for every message below the top
+                              third — the category strip and most of the grid
+                              simply cut off. The composer's picker never had
+                              this because it goes through Popover, so this one
+                              does now, and gets collision handling with it. */}
                           {reactionPickerFor === m.id && (
-                            <div className="absolute right-0 top-8 z-20 rounded-lg border border-border bg-popover shadow-lg">
-                              <EmojiPicker
-                                onSelect={(emoji) => {
-                                  toggleReactionMutation.mutate({ messageId: m.id, emoji })
-                                  setReactionPickerFor(null)
-                                }}
-                                onSelectCustom={(shortcode) => {
-                                  toggleReactionMutation.mutate({ messageId: m.id, emoji: `:${shortcode}:` })
-                                  setReactionPickerFor(null)
-                                }}
-                                customEmoji={customEmoji}
-                                onAddCustom={() => {
-                                  setEmojiManagerOpen(true)
-                                  setReactionPickerFor(null)
-                                }}
-                              />
-                            </div>
+                            <Popover open onOpenChange={(o) => !o && setReactionPickerFor(null)}>
+                              <PopoverAnchor asChild>
+                                <span className="absolute right-0 top-8 h-0 w-0" aria-hidden />
+                              </PopoverAnchor>
+                              <PopoverContent align="end" side="bottom" className="w-auto p-0">
+                                <EmojiPicker
+                                  onSelect={(emoji) => {
+                                    toggleReactionMutation.mutate({ messageId: m.id, emoji })
+                                    setReactionPickerFor(null)
+                                  }}
+                                  onSelectCustom={(shortcode) => {
+                                    toggleReactionMutation.mutate({ messageId: m.id, emoji: `:${shortcode}:` })
+                                    setReactionPickerFor(null)
+                                  }}
+                                  customEmoji={customEmoji}
+                                  onAddCustom={() => {
+                                    setEmojiManagerOpen(true)
+                                    setReactionPickerFor(null)
+                                  }}
+                                />
+                              </PopoverContent>
+                            </Popover>
                           )}
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
