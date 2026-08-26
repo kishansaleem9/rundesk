@@ -165,27 +165,39 @@ export class CallsService {
      * impossible; losing the race here means somebody else's call already
      * exists, which is exactly the call we wanted to be in.
      */
-    const [row] = await this.db
-      .insert(calls)
-      .values({
-        workspaceId,
-        channelId: input.channelId ?? null,
-        startedById: userId,
-        title: input.title?.trim() || null,
-      })
-      .onConflictDoNothing()
-      .returning()
+    let row: typeof calls.$inferSelect | undefined
+    for (let attempt = 0; attempt < 2 && !row; attempt += 1) {
+      ;[row] = await this.db
+        .insert(calls)
+        .values({
+          workspaceId,
+          channelId: input.channelId ?? null,
+          startedById: userId,
+          title: input.title?.trim() || null,
+        })
+        .onConflictDoNothing()
+        .returning()
+      if (row || !input.channelId) break
 
-    if (!row) {
       const [winner] = await this.db
         .select()
         .from(calls)
-        .where(and(eq(calls.channelId, input.channelId!), isNull(calls.endedAt)))
+        .where(and(eq(calls.channelId, input.channelId), isNull(calls.endedAt)))
         .orderBy(desc(calls.startedAt))
         .limit(1)
       if (winner) return this.join(winner.id, userId)
-      throw new BadRequestException('Could not start a call here')
+
+      /*
+       * Lost the race to a call that has ALREADY ENDED.
+       *
+       * The insert and the read are two statements, so the call we conflicted
+       * with can finish in between — somebody hangs up for everyone, or the
+       * last person out ends it. Nothing holds the index at that point and the
+       * press was perfectly valid, so try once more rather than answering a
+       * legitimate Start with "could not start a call here".
+       */
     }
+    if (!row) throw new BadRequestException('Could not start a call here')
 
     await this.db
       .insert(callParticipants)
@@ -373,30 +385,55 @@ export class CallsService {
    */
   async end(callId: string, userId: string) {
     const call = await this.assertCanReach(callId, userId)
-    if (call.endedAt) return { ok: true, meetingId: call.meetingId }
+    // Ended AND the record is there: nothing left to do.
+    if (call.endedAt && call.meetingId) return { ok: true, meetingId: call.meetingId, pending: false }
 
-    /*
-     * Claim the end BEFORE doing the expensive part.
-     *
-     * `leave()` calls this when the last person out counts nobody remaining,
-     * and two people hanging up together can both count zero. Both then read a
-     * call with ended_at still null and both passed the guard above — so the
-     * call left two meeting records and was billed for two AI-notes
-     * generations. The conditional update is the claim: exactly one caller
-     * gets a row back.
-     */
-    const endedAt = new Date()
-    const claimed = await this.db
-      .update(calls)
-      .set({ endedAt })
-      .where(and(eq(calls.id, callId), isNull(calls.endedAt)))
-      .returning({ id: calls.id })
-    if (claimed.length === 0) {
-      // Somebody else got there first. Hand back what they wrote rather than
-      // reporting a failure — the call did end, just not by us.
-      const [settled] = await this.db.select().from(calls).where(eq(calls.id, callId)).limit(1)
-      return { ok: true, meetingId: settled?.meetingId ?? null }
+    let endedAt = call.endedAt
+    if (!endedAt) {
+      /*
+       * Claim the end BEFORE doing the expensive part.
+       *
+       * `leave()` calls this when the last person out counts nobody remaining,
+       * and two people hanging up together can both count zero. Both then read
+       * a call with ended_at still null and both passed the guard above — so
+       * the call left two meeting records and was billed for two AI-notes
+       * generations. The conditional update is the claim: exactly one caller
+       * gets a row back.
+       */
+      const claimedAt = new Date()
+      const claimed = await this.db
+        .update(calls)
+        .set({ endedAt: claimedAt })
+        .where(and(eq(calls.id, callId), isNull(calls.endedAt)))
+        .returning({ id: calls.id })
+      if (claimed.length === 0) {
+        /*
+         * Somebody else got there first — and is very likely still writing.
+         *
+         * The winner does not set meeting_id until the notes come back, which
+         * is seconds away, so re-reading the row here usually finds NULL. That
+         * is not "no record was kept"; it is "not yet". Reporting it as a null
+         * id had the loser's browser silently skip the confirmation for a
+         * record that was in fact being written, so the state is named:
+         * `pending` means the id is coming, and `call.ended` carries it.
+         */
+        const [settled] = await this.db.select().from(calls).where(eq(calls.id, callId)).limit(1)
+        const meetingId = settled?.meetingId ?? null
+        return { ok: true, meetingId, pending: settled?.endedAt != null && meetingId === null }
+      }
+      endedAt = claimedAt
     }
+    /*
+     * Otherwise: ended_at is set but no record was left behind.
+     *
+     * The claim commits on its own, and everything that produces the record —
+     * the participant read, the transcript, an outbound model call that takes
+     * seconds — runs after it. A crash or a deploy in that window used to end
+     * the call permanently with nothing to show for it: the guard above
+     * returned `{ ok: true, meetingId: null }` forever and the transcript,
+     * notes, attendees and recording were unreachable from Meetings. Ending is
+     * claimed once; WRITING THE RECORD is owed until it exists.
+     */
     const people = await this.participantsOf(callId)
 
     // §2.8 gap 10 — "yeh aap ke khud hi NOTES bana ke dega aur poori ki poori
@@ -422,6 +459,28 @@ export class CallsService {
       })
       .catch(() => null)
 
+    /*
+     * Point the call at the record IMMEDIATELY, before anything else.
+     *
+     * This write is what closes the owed-record loop above, so every statement
+     * that sits between `create` and it is a window in which the record exists
+     * and nothing knows about it. Conditional on meeting_id still being null so
+     * that a second attempt — a recovery that raced another recovery — cannot
+     * repoint the call at a different record; whoever wrote first keeps it.
+     */
+    let meetingId = meeting?.id ?? null
+    if (meetingId) {
+      const [claimedRecord] = await this.db
+        .update(calls)
+        .set({ meetingId })
+        .where(and(eq(calls.id, callId), isNull(calls.meetingId)))
+        .returning({ meetingId: calls.meetingId })
+      if (!claimedRecord) {
+        const [settled] = await this.db.select().from(calls).where(eq(calls.id, callId)).limit(1)
+        meetingId = settled?.meetingId ?? meetingId
+      }
+    }
+
     // The transcript itself is written straight onto the record rather than
     // passed through create(): it is not something a person types, and
     // meetings.create's shape is the one a person fills in.
@@ -433,22 +492,15 @@ export class CallsService {
         .catch(() => undefined)
     }
 
-    // ended_at is already set by the claim above; only the record it left
-    // behind is still to be written.
-    await this.db
-      .update(calls)
-      .set({ meetingId: meeting?.id ?? null })
-      .where(eq(calls.id, callId))
-
     this.realtime.emitToWorkspace(call.workspaceId, {
       type: 'call.ended',
       workspaceId: call.workspaceId,
       channelId: call.channelId,
       callId,
-      meetingId: meeting?.id ?? null,
+      meetingId,
     } as never)
 
-    return { ok: true, meetingId: meeting?.id ?? null }
+    return { ok: true, meetingId, pending: false }
   }
 
   /**
@@ -721,17 +773,37 @@ export class CallsService {
       throw new BadRequestException('That storage key does not belong to this call')
     }
 
-    const existing = await this.db
-      .select({ position: callRecordings.position })
-      .from(callRecordings)
-      .where(eq(callRecordings.callId, callId))
-      .orderBy(desc(callRecordings.position))
-      .limit(1)
-    await this.db
-      .insert(callRecordings)
-      .values({ callId, storageKey, position: (existing[0]?.position ?? -1) + 1 })
-      // The same key handed in twice is a retry, not a second segment.
-      .onConflictDoNothing()
+    /*
+     * The position is worked out INSIDE the insert.
+     *
+     * Reading `max(position)` and then inserting `max + 1` is two statements:
+     * two segments landing together both read the same maximum and both write
+     * it, and "the pieces in order" quietly becomes two pieces claiming to be
+     * the same one. That is the exact read-then-write shape the database
+     * settles for start() and end(); there is no reason for this one to be
+     * different. `uq_call_recordings_position` rejects a tie rather than
+     * storing it, and losing the tie means reading again — the next position
+     * is free by then.
+     *
+     * Order is arrival order, which for a single capturer stopping and
+     * restarting IS capture order. Two capturers overlapping is a different
+     * problem and is not solved by numbering their files.
+     */
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.db.execute(sql`
+          insert into ${callRecordings} (call_id, storage_key, position)
+          select ${callId}, ${storageKey}, coalesce(max(position), -1) + 1
+            from ${callRecordings} where call_id = ${callId}
+          -- The same key handed in twice is a retry, not a second segment.
+          on conflict (call_id, storage_key) do nothing
+        `)
+        break
+      } catch (err) {
+        const code = (err as { code?: string })?.code
+        if (code !== '23505' || attempt >= 4) throw err
+      }
+    }
 
     // The first segment is what the call and its meeting point at; later ones
     // are reachable through the call. Overwriting this would undo the whole

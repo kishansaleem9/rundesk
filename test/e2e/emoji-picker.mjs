@@ -291,6 +291,104 @@ const real = consoleErrors.filter(
 )
 check(real.length === 0, 'no script errors — a failed chunk import would appear here', real.slice(0, 2).join(' | '))
 
+// ---------------------------------------------------------------------------
+console.log('\n7. the chunk does not arrive — and Try again actually tries')
+// ---------------------------------------------------------------------------
+/*
+ * The production failure the unit tests cannot reach.
+ *
+ * Vite rewrites every dynamic import to a preload helper that dispatches
+ * `vite:preloadError` and then, if a listener called preventDefault, SWALLOWS
+ * the error and resolves with `undefined` instead of rejecting. chunk-reload.ts
+ * calls preventDefault unconditionally — it has to, because the router preloads
+ * route chunks on hover and an unhandled throw there takes the page down.
+ *
+ * So a `.catch` on `import()` never ran in the shipped build: the loader was
+ * handed nothing, threw a TypeError from inside its own `.then`, and memoised
+ * that rejection for the session. The picker offered a Try again button that
+ * made no request and could not ever succeed. From source — where the import
+ * is a plain import and rejects properly — everything looked fine.
+ *
+ * Driven here against the BUILT bundle, which is the only place the preload
+ * wrapper exists at all.
+ */
+{
+  const fresh = await ctx.newPage()
+  const asked = []
+  fresh.on('request', (r) => {
+    if (/emoji-data/.test(r.url())) asked.push(r.url())
+  })
+  let blocked = true
+  // Aborted, not 404'd: a dead network is what actually reaches the preload
+  // helper as an error, and this server answers a missing file with the SPA
+  // shell rather than a failure.
+  await fresh.route('**/emoji-data*.js', (r) => (blocked ? r.abort() : r.continue()))
+  await fresh.addInitScript(
+    (entries) => {
+      for (const [k, v] of entries) window.localStorage.setItem(k, v)
+      // The recovery reload stands down for 30s after one attempt, so that it
+      // cannot loop on a broken deploy. Stamped here so the page stays put and
+      // the picker has to cope on its own — which is the case being tested.
+      window.sessionStorage.setItem('rundesk.chunk-reload-at', String(Date.now()))
+    },
+    [['rundesk.auth', JSON.stringify(SESSION)]],
+  )
+  await fresh.goto(`${BASE}/app/${WS}/chat?channel=${CHANNEL}`, { waitUntil: 'networkidle' })
+
+  const freshTrigger = fresh.locator('button[title="Emoji"]').first()
+  await freshTrigger.waitFor({ timeout: 20000 }).catch(() => {})
+  await freshTrigger.click()
+  const failure = fresh.locator('[data-testid="emoji-load-failed"]')
+  await failure.waitFor({ timeout: 15000 }).catch(() => {})
+  check(
+    await failure.isVisible().catch(() => false),
+    'a chunk that never arrives is reported, not spun on forever',
+    `the picker showed no failure state; it asked for the chunk ${asked.length} time(s)`,
+  )
+
+  /*
+   * Trying again in place is IMPOSSIBLE, and this is where that was learned.
+   *
+   * The browser records a failed module in its module map, so a second
+   * `import()` of the same URL returns the recorded failure and makes no
+   * request — even after the network is healthy again. (Checked directly in
+   * this Chromium: two imports of an aborted URL produce exactly one request;
+   * only a different URL fetches again.) So a Try again that re-ran the import
+   * was a second dead button behind the first, no matter what the loader did
+   * with its memo.
+   *
+   * It reloads instead: a fresh document has a fresh module map, and it
+   * re-reads index.html, so it also picks up a chunk whose hash moved in a
+   * deploy — the common way this happens at all.
+   */
+  const beforeRetry = asked.length
+  blocked = false
+  const reloaded = fresh
+    .waitForEvent('load', { timeout: 20000 })
+    .then(() => true)
+    .catch(() => false)
+  await fresh.locator('[data-testid="emoji-retry"]').click()
+  check(await reloaded, 'Try again reloads rather than re-importing a module the browser has already given up on')
+  check(
+    asked.length === beforeRetry,
+    'and does not pretend to re-fetch in the dead document',
+    `${asked.length - beforeRetry} request(s) were made before the reload`,
+  )
+
+  // And the reloaded app, with the chunk reachable again, works.
+  const againTrigger = fresh.locator('button[title="Emoji"]').first()
+  await againTrigger.waitFor({ timeout: 20000 }).catch(() => {})
+  await againTrigger.click()
+  await fresh
+    .locator('[data-testid="emoji-section-people"] button')
+    .first()
+    .waitFor({ timeout: 15000 })
+    .catch(() => {})
+  const recovered = await fresh.locator('[data-testid="emoji-section-people"] button').count()
+  check(recovered > 300, `and the list is there after it (${recovered})`, `only ${recovered} rendered after the reload`)
+  await fresh.close()
+}
+
 await browser.close()
 server.close()
 

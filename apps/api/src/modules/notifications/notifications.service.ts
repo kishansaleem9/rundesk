@@ -423,6 +423,20 @@ export class NotificationsService {
       ? await this.formatMentionBody(data.body)
       : data.body
 
+    /*
+     * §2.2 — DELIVERED means something actually went out.
+     *
+     * Read off the channel matrix alone this was true for anyone with a single
+     * channel switched on, whether or not that channel then fired. Quiet hours
+     * gate email and push separately below, so an admin with in-app off, email
+     * on and DND running got no row, no mail and no push — and was still
+     * counted as told. The requester was then shown "we told them" and refused
+     * a second ask for a message that was never sent.
+     *
+     * Set where each channel actually dispatches, so it cannot drift from them
+     * again.
+     */
+    let delivered = false
     let row: any = null
     if (matrix.inApp || matrix.web || matrix.mobile) {
       ;[row] = await this.db
@@ -437,6 +451,9 @@ export class NotificationsService {
           target: data.target,
         })
         .returning()
+      // A row in the feed is delivery: it is durable and it is read later,
+      // which is exactly what a notification is for.
+      delivered = Boolean(row)
 
       if (matrix.inApp || (matrix.web && canWebOrMobile) || (matrix.mobile && canWebOrMobile)) {
       // Push real-time event for bell/tray/toast listeners even when in-app feed is disabled.
@@ -451,6 +468,7 @@ export class NotificationsService {
     }
 
     if (matrix.email && !inQuietHours) {
+      delivered = true
       // Best-effort email — do not await, never throws
       this.sendEmail({ ...data, body: formattedBody }).catch(() => undefined)
     }
@@ -464,6 +482,7 @@ export class NotificationsService {
     // subscriptions exactly once, a user with BOTH `web` and `mobile` toggled on
     // is never double-delivered to the same subscription (dedupe by design).
     if ((matrix.web || matrix.mobile) && !inQuietHours && !data.deferPush) {
+      delivered = true
       void this.sendWebPush(data.userId, {
         title: data.title,
         body: formattedBody,
@@ -471,7 +490,7 @@ export class NotificationsService {
       }).catch(() => undefined)
     }
 
-    return { row, delivered: true }
+    return { row, delivered }
   }
 
   /** The row, for the callers that only ever wanted that. */

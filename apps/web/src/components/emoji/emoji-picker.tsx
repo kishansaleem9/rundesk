@@ -36,6 +36,7 @@ import {
   type FrequentCounts,
   type SkinTone,
 } from '../../lib/emoji-picker'
+import { reloadForStaleChunks } from '../../lib/chunk-reload'
 
 /**
  * §2.8 gap 7 — the emoji picker, `[20:22-20:28]`.
@@ -350,7 +351,27 @@ export function EmojiPicker({
             <p className="text-[13px] text-muted-foreground">{t('emoji.loadFailed')}</p>
             <button
               type="button"
-              onClick={() => setAttempt((n) => n + 1)}
+              /*
+               * Try again RELOADS, because trying again in place cannot work.
+               *
+               * A dynamic import that fails is recorded as failed in the
+               * browser's module map, and every later import of that same URL
+               * returns the recorded failure without touching the network —
+               * even once the network is healthy again. Verified in Chromium:
+               * a second import of a URL whose first fetch was aborted makes
+               * no request at all. So a button that only re-ran the import was
+               * a button that could never succeed.
+               *
+               * A fresh document has a fresh module map, and it re-reads
+               * index.html, so it also picks up a chunk whose hash moved in a
+               * deploy — which is the common way this happens. Forced past the
+               * automatic-recovery cooldown: that guard is there to stop a
+               * loop, and a person pressing a button is not one.
+               */
+              onClick={() => {
+                if (!reloadForStaleChunks(true)) setAttempt((n) => n + 1)
+              }}
+              data-testid="emoji-retry"
               className="mt-2 rounded-md border border-border/70 px-2.5 py-1 text-[12px] hover:bg-muted"
             >
               {t('common.retry')}

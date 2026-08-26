@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, index, unique } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, boolean, integer, index, unique, uniqueIndex } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
 import { chatChannels } from './chat'
@@ -55,10 +55,21 @@ export const calls = pgTable(
     // "Is there a live call in this channel" is the question the channel header
     // asks on every render, so it is the one that gets an index.
     index('idx_calls_channel_live').on(t.channelId, t.endedAt),
-    // At most ONE live call per channel — see 0111. Declared as a plain index
-    // here because drizzle-kit cannot express the partial predicate; the
-    // migration is what creates the unique constraint, and calls-http.mts
-    // proves it holds.
+    /*
+     * At most ONE live call per channel — see 0111.
+     *
+     * This has to be declared HERE and not only in the migration. A fresh
+     * database is created by `drizzle-kit push` from this file and the whole
+     * migration journal is then marked applied (deploy/deploy.sh
+     * bootstrap_fresh_schema, `pnpm db:setup`), so 0111's SQL never runs on a
+     * new install. An index that lives only in a migration is an index that
+     * every new deployment silently lacks — and start()'s
+     * `onConflictDoNothing` is a no-op without it, which is exactly the race
+     * it was written to close.
+     */
+    uniqueIndex('uq_calls_one_live_per_channel')
+      .on(t.channelId)
+      .where(sql`${t.endedAt} is null and ${t.channelId} is not null`),
     index('idx_calls_workspace').on(t.workspaceId, t.startedAt),
   ],
 )
@@ -154,6 +165,10 @@ export const callRecordings = pgTable(
     index('call_recordings_call_idx').on(t.callId, t.position),
     // Handing the same key in twice is a retry, not a second segment.
     unique('uq_call_recordings_key').on(t.callId, t.storageKey),
+    // And two segments cannot claim the same place in the order — see 0112.
+    // Positions are not assumed contiguous (a failed upload leaves a gap), but
+    // they are assumed to mean something, which requires them to be distinct.
+    unique('uq_call_recordings_position').on(t.callId, t.position),
   ],
 )
 

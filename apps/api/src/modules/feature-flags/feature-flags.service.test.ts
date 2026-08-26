@@ -8,18 +8,29 @@ const chain = (rows: any[]): any => ({
   where: () => chain(rows),
   limit: () => chain(rows),
   then: (res: (v: any) => any, rej: (e: any) => any) => Promise.resolve(rows).then(res, rej),
+  // A drizzle builder is a QueryPromise, so `.catch(...)` is a shape the
+  // service genuinely uses — `insert(...).values(...).catch(...)` here.
+  catch: (rej: (e: any) => any) => Promise.resolve(rows).catch(rej),
 })
 
 /**
  * A db whose selects answer in order. requestFlag runs four of them —
  * membership, flag overrides, admins, a recent ask — and each needs a different
  * answer, which one fixed row set cannot give.
+ *
+ * Inserts are recorded rather than ignored: the ask itself is now written down
+ * (0113), which is what the once-a-day rule reads, so a fake that swallowed it
+ * would let a test pass while the record that rule depends on never happened.
  */
 const dbWithSelects = (queue: any[][]) => {
   let i = 0
-  return {
+  const inserted: any[] = []
+  const db = {
     select: () => chain(queue[i++] ?? []),
-  } as any
+    insert: () => ({ values: (v: any) => (inserted.push(v), chain([])) }),
+    inserted,
+  }
+  return db as any
 }
 
 describe('FeatureFlagsService.setFlag authorization', () => {
@@ -91,8 +102,18 @@ describe('§2.8 asking an admin to turn a feature on', () => {
   it('tells every admin except the person asking', async () => {
     const n = notifier()
     const admins = [{ userId: 'admin1' }, { userId: 'admin2' }, { userId: 'u1' }]
-    const svc = new FeatureFlagsService(dbWithSelects([MEMBER, OFF, admins, []]), {} as any, n as any)
+    const db = dbWithSelects([MEMBER, OFF, admins, []])
+    const svc = new FeatureFlagsService(db, {} as any, n as any)
     const out = await svc.requestFlag('ai.meeting_notes' as any, 'ws1', me)
+    // The ask is written down in its own right. The once-a-day rule reads
+    // THIS, not the notification rows it produced — a workspace whose admins
+    // all take email produces no rows at all, and used to be re-mailed on
+    // every press because the rule had nothing to find.
+    assert.deepEqual(
+      db.inserted.map((r: any) => [r.workspaceId, r.flagKey, r.requesterId]),
+      [['ws1', 'ai.meeting_notes', 'u1']],
+      'the ask itself was never recorded',
+    )
     assert.equal(out.status, 'sent')
     assert.equal(out.notified, 2)
     assert.deepEqual(n.sent.map((x) => x.userId), ['admin1', 'admin2'])
@@ -125,10 +146,12 @@ describe('§2.8 asking an admin to turn a feature on', () => {
     const n = notifier()
     const admins = [{ userId: 'admin1' }]
     const recent = [{ id: 'already-asked' }]
-    const svc = new FeatureFlagsService(dbWithSelects([MEMBER, OFF, admins, recent]), {} as any, n as any)
+    const db = dbWithSelects([MEMBER, OFF, admins, recent])
+    const svc = new FeatureFlagsService(db, {} as any, n as any)
     const out = await svc.requestFlag('ai.meeting_notes' as any, 'ws1', me)
     assert.equal(out.status, 'already_asked')
     assert.equal(n.sent.length, 0, 'a repeat press notified the admin again')
+    assert.equal(db.inserted.length, 0, 'a repeat press was recorded as a fresh ask')
   })
 
   it('falls back to the email when a person has no name set', async () => {

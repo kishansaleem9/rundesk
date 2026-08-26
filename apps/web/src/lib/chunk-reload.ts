@@ -109,9 +109,14 @@ export async function retireStaleWorker(): Promise<void> {
 /**
  * Reload to pick up the current build. Returns whether the reload was actually
  * started, so callers can fall back to showing an error when it wasn't.
+ *
+ * `force` is for a reload somebody ASKED for — a Try again button. The cooldown
+ * exists to stop an automatic recovery looping on a broken deploy; a person
+ * pressing a button is not a loop, and refusing them is just a second dead
+ * button.
  */
-export function reloadForStaleChunks(): boolean {
-  if (!canReloadForStaleChunks()) return false
+export function reloadForStaleChunks(force = false): boolean {
+  if (!force && !canReloadForStaleChunks()) return false
   try {
     window.sessionStorage.setItem(RELOAD_STAMP_KEY, String(Date.now()))
   } catch {

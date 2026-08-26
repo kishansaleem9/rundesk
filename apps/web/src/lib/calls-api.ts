@@ -55,7 +55,11 @@ export function useCallActions(workspaceId: string) {
     leave: (callId: string) =>
       api(`${base(workspaceId)}/${callId}/leave`, { method: 'POST' }).then((r) => (refresh(), r)),
     end: (callId: string) =>
-      api<{ meetingId: string | null }>(`${base(workspaceId)}/${callId}/end`, { method: 'POST' }).then(
+      // `pending` means the id is coming: somebody else won the race to end
+      // this call and is still writing the record.
+      api<{ meetingId: string | null; pending?: boolean }>(`${base(workspaceId)}/${callId}/end`, {
+        method: 'POST',
+      }).then(
         (r) => (refresh(), r),
       ),
     setRecording: (callId: string, recording: boolean) =>

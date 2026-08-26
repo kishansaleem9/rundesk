@@ -100,6 +100,29 @@ const chk = (c, good, bad) =>
  */
 const rowsOf = (r) => (Array.isArray(r) ? r : (r?.rows ?? []))
 
+/**
+ * Wait for something that happens AFTER the response.
+ *
+ * The card and the call_started notifications are written by a fan-out that
+ * start() deliberately does not await — nobody should queue behind hundreds of
+ * sequential notification writes before being let into their own call. Reading
+ * them the instant the POST returns is therefore a race the harness wins on a
+ * warm local database and can lose on a busy one, and a harness whose whole
+ * job is to be the trustworthy signal must not report a bug that is not there.
+ *
+ * Polls rather than sleeps, so the ordinary case costs one round trip. Gives up
+ * and lets the assertion run — a timeout here is a real failure to report, not
+ * something to hide behind a longer wait.
+ */
+const until = async (ready, ms = 4000) => {
+  const deadline = Date.now() + ms
+  for (;;) {
+    if (await ready()) return true
+    if (Date.now() > deadline) return false
+    await new Promise((r) => setTimeout(r, 25))
+  }
+}
+
 /** Read the recording flag straight from the row, not from a response body. */
 let apiRecording = async () => false
 
@@ -127,6 +150,39 @@ async function main() {
   await app.listen(PORT, '127.0.0.1')
 
   const db = app.get(DB_TOKEN)
+
+  /*
+   * The database this runs against must actually carry the constraint.
+   *
+   * Everything below about "two people pressing Start together land in ONE
+   * call" is enforced by a partial unique index, not by the service — with the
+   * index missing, `.onConflictDoNothing()` matches nothing and both inserts
+   * succeed. That failure is silent, so a harness on a database without the
+   * index would report the race closed while it was wide open. Checked here,
+   * before a single check runs, and fatal rather than counted: this is not a
+   * result, it is whether the results mean anything.
+   */
+  {
+    const [idx] = rowsOf(
+      await db.execute(
+        `SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_calls_one_live_per_channel'`,
+      ),
+    )
+    const def: string = idx?.indexdef ?? ''
+    if (!def) {
+      console.error(
+        '\n✗ uq_calls_one_live_per_channel is missing from this database.\n' +
+          '  Rebuild it from the TypeScript schema (drizzle-kit push --force) — the\n' +
+          '  index is declared in packages/db/src/schema/calls.ts.',
+      )
+      process.exit(1)
+    }
+    if (!/ended_at IS NULL/i.test(def)) {
+      console.error(`\n✗ uq_calls_one_live_per_channel does not exclude ended calls: ${def}`)
+      process.exit(1)
+    }
+  }
+
   apiRecording = async (id) =>
     rowsOf(await db.execute(`SELECT recording FROM calls WHERE id = '${id}'`))[0]?.recording === true
   const calls = app.get(CallsService)
@@ -190,6 +246,7 @@ async function main() {
   ACTING_AS = ME
   // This is the query that has never run against Postgres: listMessages
   // hydrating each card with its call's live state.
+  await until(async () => (await chat.listMessages(CHANNEL, ME)).some((m) => m.callId === callId))
   const messages = await chat.listMessages(CHANNEL, ME)
   const card = messages.find((m) => m.callId === callId)
   chk(!!card, 'starting a call posted a card into the channel', 'no call card was written')
@@ -207,6 +264,10 @@ async function main() {
   chk(theirCard?.call?.presentCount === 2, 'while still counting everyone who is', `presentCount was ${theirCard?.call?.presentCount} for a non-participant`)
 
   console.log('\n▶ who was told — the channel, not the workspace')
+  const countTold = async () =>
+    rowsOf(await db.execute(`SELECT count(*)::int AS n FROM notifications WHERE type = 'call_started'`))[0].n
+  // One awaited round trip per member, and none of them on the request path.
+  await until(async () => (await countTold()) >= 2)
   const notified = await db.execute(
     `SELECT user_id, type FROM notifications WHERE type = 'call_started'`,
   )
@@ -546,6 +607,87 @@ async function main() {
     chk(after - before === 1, 'leave exactly ONE meeting record', `${after - before} records were written — and each one is a billed AI-notes run`)
     const meetingIds = [...new Set(ends.map((e) => e.data?.meetingId).filter(Boolean))]
     chk(meetingIds.length === 1, 'and both callers are told about the same one', `they were told about ${meetingIds.length}`)
+    /*
+     * And neither caller is told nothing at all.
+     *
+     * The loser of the claim re-reads the row while the winner is still
+     * generating notes, so meeting_id is usually still NULL there — reported
+     * as a plain null, the loser's browser concluded no record was kept and
+     * said nothing. Every response has to name a state: an id, or `pending`.
+     */
+    chk(
+      ends.every((e) => Boolean(e.data?.meetingId) || e.data?.pending === true),
+      'and neither is told nothing at all',
+      `responses: ${ends.map((e) => JSON.stringify(e.data)).join(' | ')}`,
+    )
+  }
+
+  console.log('\n▶ a call that ended without ever leaving a record')
+  {
+    /*
+     * The claim commits on its own, and everything that WRITES the record runs
+     * after it — including an outbound model call that takes seconds. A crash
+     * or a deploy in that window used to end the call permanently with nothing
+     * to show for it: the guard at the top of end() returned `{ ok: true,
+     * meetingId: null }` forever and the transcript, notes, attendees and
+     * recording were unreachable from Meetings.
+     *
+     * The row is put into that state with SQL rather than by killing the
+     * process, because the state is the point — not how it was reached.
+     */
+    const lost = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL, title: 'interrupted' })
+    const id = lost.data?.id
+    await call('POST', `/workspaces/${WS}/calls/${id}/recording`, { recording: true })
+    await call('POST', `/workspaces/${WS}/calls/${id}/transcript`, { text: 'we agreed to ship on Friday' })
+    await db.execute(`UPDATE calls SET ended_at = now(), meeting_id = NULL WHERE id = '${id}'`)
+
+    const before = rowsOf(await db.execute('SELECT count(*)::int AS n FROM meetings'))[0].n
+    const again = await call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
+    const after = rowsOf(await db.execute('SELECT count(*)::int AS n FROM meetings'))[0].n
+    chk(Boolean(again.data?.meetingId), 'ending it again writes the record that was owed', 'the call stayed ended with nothing to show for it')
+    chk(after - before === 1, 'exactly one record', `${after - before} records were written`)
+    const pointsAt = rowsOf(await db.execute(`SELECT meeting_id FROM calls WHERE id = '${id}'`))[0].meeting_id
+    chk(pointsAt === again.data?.meetingId, 'and the call points at it', `the call points at ${pointsAt}`)
+    const kept = rowsOf(
+      await db.execute(`SELECT transcript FROM meetings WHERE id = '${again.data?.meetingId}'`),
+    )[0].transcript
+    chk(typeof kept === 'string' && kept.includes('Friday'), 'with the transcript it was owed', `transcript came back as ${JSON.stringify(kept)?.slice(0, 80)}`)
+
+    // And now that the record exists, ending it again is the no-op it always was.
+    const third = await call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
+    const settled = rowsOf(await db.execute('SELECT count(*)::int AS n FROM meetings'))[0].n
+    chk(settled === after, 'ending it once more writes nothing further', `${settled - after} extra records`)
+    chk(third.data?.meetingId === again.data?.meetingId, 'and names the same record', `it named ${third.data?.meetingId}`)
+  }
+
+  console.log('\n▶ pressing Start while the call in the way is ending')
+  {
+    /*
+     * start() loses the insert to the live call, then re-reads the channel to
+     * join it — two statements, so the call it lost to can finish in between.
+     * The re-read then comes back empty and the press used to be answered with
+     * 400 "Could not start a call here", with no live call in the channel and
+     * nothing wrong with the press.
+     *
+     * This is a race, so the assertion is the invariant that has to hold under
+     * every interleaving rather than one particular outcome: joining the live
+     * call and starting a fresh one are both right, and an error is not.
+     */
+    const attempts: number[] = []
+    for (let i = 0; i < 6; i += 1) {
+      const live = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL })
+      const [, pressed] = await Promise.all([
+        call('POST', `/workspaces/${WS}/calls/${live.data?.id}/end`, {}),
+        call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL }),
+      ])
+      attempts.push(pressed.status)
+      if (pressed.data?.id) await call('POST', `/workspaces/${WS}/calls/${pressed.data.id}/end`, {})
+    }
+    chk(
+      attempts.every((s) => s === 200 || s === 201),
+      'is never answered with an error',
+      `statuses across six attempts: ${attempts.join(', ')}`,
+    )
   }
 
   console.log('\n▶ a recording stopped and restarted')
@@ -568,7 +710,74 @@ async function main() {
     chk(again === 2, 'and a retry of the same key is not a new piece', `${again} rows after a retry`)
     const first = rowsOf(await db.execute(`SELECT recording_storage_key FROM calls WHERE id = '${id}'`))[0].recording_storage_key
     chk(first === one, 'the call still points at the FIRST piece', `it points at ${first}`)
+
+    /*
+     * Two pieces finishing together.
+     *
+     * The position used to be read in one statement and written in the next,
+     * so two attaches landing together both read the same maximum and both
+     * claimed it — "the pieces in order" became two pieces claiming to be the
+     * same one. Both halves are checked: both requests must SUCCEED (an insert
+     * that raises on the unique index is not a fix), and the two pieces must
+     * end up in different places.
+     */
+    const three = `calls/${WS}/${id}/recording-3.webm`
+    const four = `calls/${WS}/${id}/recording-4.webm`
+    const together = await Promise.all([
+      call('POST', `/workspaces/${WS}/calls/${id}/recording/attach`, { storageKey: three }),
+      call('POST', `/workspaces/${WS}/calls/${id}/recording/attach`, { storageKey: four }),
+    ])
+    chk(
+      together.every((r) => r.status === 200 || r.status === 201),
+      'two pieces landing together both attach',
+      `statuses: ${together.map((r) => r.status).join(', ')}`,
+    )
+    const positions = rowsOf(
+      await db.execute(`SELECT position FROM call_recordings WHERE call_id = '${id}' ORDER BY position`),
+    ).map((r) => r.position)
+    chk(positions.length === 4, 'and all four pieces are kept', `${positions.length} kept: ${positions.join(', ')}`)
+    chk(
+      new Set(positions).size === positions.length,
+      'each in its own place in the order',
+      `positions: ${positions.join(', ')} — two pieces claim the same one`,
+    )
+
     await call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
+
+    /*
+     * §2.8 — and every piece is REACHABLE.
+     *
+     * call_recordings was written and never read: no service selected from it,
+     * no route exposed it, no screen showed it. The meeting still offered the
+     * single key on `meetings.recordingUrl`, so the second and later pieces
+     * were bytes in storage that nothing could get to — the fix for "the first
+     * piece was orphaned" had only changed WHICH piece was orphaned.
+     */
+    const meetingId = rowsOf(await db.execute(`SELECT meeting_id FROM calls WHERE id = '${id}'`))[0].meeting_id
+    const listed = await call('GET', `/workspaces/${WS}/meetings`)
+    const record = (listed.data ?? []).find((m: { id: string }) => m.id === meetingId)
+    chk(Boolean(record), 'the call left a record in Meetings', `no meeting ${meetingId} in the list`)
+    chk(
+      Array.isArray(record?.recordings) && record.recordings.length === 4,
+      'and it offers every piece that was captured',
+      `it offers ${record?.recordings?.length ?? 0} of 4`,
+    )
+    chk(
+      (record?.recordings ?? []).every((u: string) => u.startsWith('https://r2.test/get/')),
+      'each one signed, not a bare storage key',
+      `it handed back ${JSON.stringify(record?.recordings)?.slice(0, 160)}`,
+    )
+    /*
+     * The single link the meetings page has always rendered is signed too.
+     * Only the single-meeting read signed it; the LIST — the one place
+     * recordings are actually browsed — handed out the raw key, which the
+     * browser resolves against the current page and 404s.
+     */
+    chk(
+      typeof record?.recordingUrl === 'string' && record.recordingUrl.startsWith('https://r2.test/get/'),
+      'and so is the single link the list has always shown',
+      `recordingUrl came back as ${JSON.stringify(record?.recordingUrl)}`,
+    )
   }
 
   console.log('\n▶ recording a call that has ended')

@@ -253,31 +253,65 @@ let catalogPromise: Promise<{ catalog: EmojiCatalog; all: EmojiEntry[] }> | null
  */
 export function loadEmojiCatalog(): Promise<{ catalog: EmojiCatalog; all: EmojiEntry[] }> {
   if (!catalogPromise) {
-    catalogPromise = import('./emoji-data')
-      .catch((error) => {
-        /*
-         * A FAILED load must not be remembered.
-         *
-         * Holding the rejected promise meant one bad fetch — a deploy that
-         * rotated the content-hashed chunk, a moment of no network — poisoned
-         * every later open for the rest of the session: the same rejection
-         * came back instantly, the `.then` never ran, and the picker showed a
-         * pulsing skeleton forever with no retry and nothing said.
-         */
-        catalogPromise = null
-        throw error
-      })
-      .then(({ EMOJI_BY_CATEGORY }) => {
-        const catalog = {} as EmojiCatalog
-        const all: EmojiEntry[] = []
-        for (const { id } of EMOJI_CATEGORIES) {
-          if (id === 'frequent' || id === 'custom') continue
-          const entries = parseCategory(EMOJI_BY_CATEGORY[id] ?? '')
-          catalog[id] = entries
-          all.push(...entries)
-        }
-        return { catalog, all }
-      })
+    const pending = import('./emoji-data').then((mod) => {
+      /*
+       * NOTHING is a failure here, not a module.
+       *
+       * Vite rewrites every dynamic import to a preload helper that dispatches
+       * `vite:preloadError` and then — if any listener called preventDefault —
+       * SWALLOWS the error and resolves with `undefined` instead of rejecting.
+       * chunk-reload.ts calls preventDefault unconditionally, because the
+       * router preloads route chunks on hover and an unhandled throw there
+       * takes the page down.
+       *
+       * So in the shipped build a missing chunk never arrives here as a
+       * rejection. It arrives as nothing at all, and destructuring it threw a
+       * TypeError from inside this callback — which read as a bug in the
+       * parser rather than as a chunk that did not load.
+       */
+      if (!mod?.EMOJI_BY_CATEGORY) {
+        // Worded so chunk-reload.ts recognises it as what it is. Without this
+        // the failure arrived as "Cannot destructure property
+        // 'EMOJI_BY_CATEGORY' of 'undefined'", which reads like a bug in the
+        // parser and matches nothing that knows what to do about a chunk.
+        throw new Error('Failed to fetch dynamically imported module: emoji-data')
+      }
+      const catalog = {} as EmojiCatalog
+      const all: EmojiEntry[] = []
+      for (const { id } of EMOJI_CATEGORIES) {
+        if (id === 'frequent' || id === 'custom') continue
+        const entries = parseCategory(mod.EMOJI_BY_CATEGORY[id] ?? '')
+        catalog[id] = entries
+        all.push(...entries)
+      }
+      return { catalog, all }
+    })
+
+    /*
+     * A FAILED load must not be remembered.
+     *
+     * Holding the rejected promise meant one bad fetch — a deploy that rotated
+     * the content-hashed chunk, a moment of no network — poisoned every later
+     * open for the rest of the session: the same rejection came back
+     * instantly, no request was made, and Try again did nothing at all.
+     *
+     * Cleared from the END of the chain rather than from a catch on `import()`
+     * alone: the swallowed-preload case above never rejects the import, so a
+     * catch there would not run. The identity check keeps a late rejection
+     * from clearing a newer attempt that is already in flight.
+     *
+     * This alone does not make a retry work, and it is not meant to. The
+     * browser records a failed module in its module map, so importing the same
+     * URL again returns the recorded failure without a request — verified in
+     * Chromium. Retrying in place is impossible; the picker's Try again
+     * reloads. What this does is stop the failure being remembered by US on
+     * top of that, so a fresh document, a dev server, or any path where the
+     * import can genuinely be retried is free to succeed.
+     */
+    pending.catch(() => {
+      if (catalogPromise === pending) catalogPromise = null
+    })
+    catalogPromise = pending
   }
   return catalogPromise
 }

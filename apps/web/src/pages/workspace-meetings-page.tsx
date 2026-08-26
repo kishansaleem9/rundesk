@@ -241,14 +241,26 @@ function MeetingRow({ meeting, workspaceId }: { meeting: Meeting; workspaceId: s
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {meeting.recordingUrl && (
-            <Button asChild size="sm" variant="ghost">
-              <a href={meeting.recordingUrl} target="_blank" rel="noreferrer">
-                <Video className="h-3.5 w-3.5 mr-1.5" />
-                {t('meetings.recording')}
-              </a>
-            </Button>
-          )}
+          {/*
+            * §2.8 — one link per piece that was actually captured.
+            *
+            * Recording is a toggle: stopping for a private aside and starting
+            * again leaves two files, and for a long time only the first was
+            * ever offered — the rest sat in storage with nothing pointing at
+            * them. When there is one piece this reads exactly as it always did.
+            */}
+          {(meeting.recordings?.length ? meeting.recordings : [meeting.recordingUrl])
+            .filter((url): url is string => Boolean(url))
+            .map((url, i, all) => (
+              <Button asChild size="sm" variant="ghost" key={url}>
+                <a href={url} target="_blank" rel="noreferrer" data-testid="meeting-recording">
+                  <Video className="h-3.5 w-3.5 mr-1.5" />
+                  {all.length > 1
+                    ? t('meetings.recordingPart', { n: i + 1, of: all.length })
+                    : t('meetings.recording')}
+                </a>
+              </Button>
+            ))}
           {meeting.taskId && (
             <Button asChild size="sm" variant="ghost">
               <Link

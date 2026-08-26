@@ -5191,6 +5191,7 @@ export const en = {
   'meetings.search': 'Search meetings',
   'meetings.noNotes': 'No notes kept',
   'meetings.recording': 'Recording',
+  'meetings.recordingPart': 'Recording {{n}} of {{of}}',
   'meetings.openTask': 'Open task',
   'meetings.empty': 'No meetings recorded yet.',
   'meetings.emptyHint': 'Record one from the AI panel’s Meeting notes tab and it will appear here.',
@@ -5254,6 +5255,7 @@ export const en = {
   'call.startedNotification': '{{name}} started a call',
 
   'call.recordKept': 'The call is saved to Meetings',
+  'call.recordComing': 'Saving the call to Meetings…',
 
   // §2.8 gap 7 — the emoji picker [20:22]: search, Frequently Used, the
   // category strip, and a '+' for a custom one.
@@ -10460,6 +10462,7 @@ export const es: Record<TranslationKey, string> = {
   'meetings.search': 'Buscar reuniones',
   'meetings.noNotes': 'Sin notas',
   'meetings.recording': 'Grabación',
+  'meetings.recordingPart': 'Grabación {{n}} de {{of}}',
   'meetings.openTask': 'Abrir tarea',
   'meetings.empty': 'Todavía no hay reuniones registradas.',
   'meetings.emptyHint': 'Registra una desde la pestaña Notas de reunión del panel de IA y aparecerá aquí.',
@@ -10523,6 +10526,7 @@ export const es: Record<TranslationKey, string> = {
   'call.startedNotification': '{{name}} inició una llamada',
 
   'call.recordKept': 'La llamada se guardó en Reuniones',
+  'call.recordComing': 'Guardando la llamada en Reuniones…',
 
   'emoji.pick': 'Elegir un emoji',
   'emoji.search': 'Buscar...',
@@ -15722,6 +15726,7 @@ export const ar: Record<TranslationKey, string> = {
   'meetings.search': 'ابحث في الاجتماعات',
   'meetings.noNotes': 'لا توجد ملاحظات',
   'meetings.recording': 'التسجيل',
+  'meetings.recordingPart': 'التسجيل {{n}} من {{of}}',
   'meetings.openTask': 'فتح المهمة',
   'meetings.empty': 'لا توجد اجتماعات مسجّلة بعد.',
   'meetings.emptyHint': 'سجّل واحدًا من تبويب ملاحظات الاجتماع في لوحة الذكاء الاصطناعي وسيظهر هنا.',
@@ -15785,6 +15790,7 @@ export const ar: Record<TranslationKey, string> = {
   'call.startedNotification': 'بدأ {{name}} مكالمة',
 
   'call.recordKept': 'حُفظت المكالمة في الاجتماعات',
+  'call.recordComing': 'يجري حفظ المكالمة في الاجتماعات…',
 
   'emoji.pick': 'اختر رمزًا تعبيريًا',
   'emoji.search': 'بحث...',
@@ -20829,6 +20835,7 @@ export const ur: Record<TranslationKey, string> = {
   'meetings.search': 'میٹنگز تلاش کریں',
   'meetings.noNotes': 'کوئی نوٹس نہیں',
   'meetings.recording': 'ریکارڈنگ',
+  'meetings.recordingPart': 'ریکارڈنگ {{n}} از {{of}}',
   'meetings.openTask': 'ٹاسک کھولیں',
   'meetings.empty': 'ابھی کوئی میٹنگ ریکارڈ نہیں ہوئی۔',
   'meetings.emptyHint': 'AI پینل کے میٹنگ نوٹس ٹیب سے ایک ریکارڈ کریں، یہاں نظر آ جائے گی۔',
@@ -20892,6 +20899,7 @@ export const ur: Record<TranslationKey, string> = {
   'call.startedNotification': '{{name}} نے کال شروع کی',
 
   'call.recordKept': 'کال میٹنگز میں محفوظ ہو گئی',
+  'call.recordComing': 'کال میٹنگز میں محفوظ ہو رہی ہے…',
 
   'emoji.pick': 'ایموجی منتخب کریں',
   'emoji.search': 'تلاش کریں...',

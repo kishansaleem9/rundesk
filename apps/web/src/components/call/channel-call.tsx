@@ -205,7 +205,18 @@ export function ChannelCall({
     hangUpLocally()
     if (id) {
       const result = await actions.end(id).catch(() => null)
+      /*
+       * `pending` is not the same as "no record".
+       *
+       * Two people hanging up in the same moment means one of them loses the
+       * race to end the call, and the winner does not have a meeting id to
+       * report until the notes come back seconds later. The loser used to be
+       * handed a null id and quietly say nothing at all — for a record that
+       * was in fact being written. Both states are worth a word; only a real
+       * failure stays silent.
+       */
       if (result?.meetingId) toast.success(t('call.recordKept'))
+      else if (result?.pending) toast.success(t('call.recordComing'))
     }
   }
 

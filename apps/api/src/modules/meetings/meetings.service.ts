@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, ne } from 'drizzle-orm'
-import { meetings, meetingAttendees, workspaceMembers, users, tasks, taskAssignees, lists, projects, spaces } from '@rundesk/db'
+import { meetings, meetingAttendees, workspaceMembers, users, tasks, taskAssignees, lists, projects, spaces, calls, callRecordings } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PUBLIC_USER_COLUMNS } from '../../common/permissions/public-user'
@@ -48,6 +48,62 @@ export class MeetingsService {
     return this.r2.getObjectUrl(stored).catch(() => null)
   }
 
+  /**
+   * §2.8 — every piece of a call's recording, playable, per meeting.
+   *
+   * Recording is a toggle: a call can be recorded, stopped for a private aside
+   * and recorded again, and each stop produces its own file. `call_recordings`
+   * has kept all of them since 0111, but nothing ever read that table — the
+   * meeting still showed the single key on `meetings.recordingUrl`, so the
+   * second and later pieces were bytes in storage that no route, no service
+   * and no screen could reach. This is the read the table was made for.
+   *
+   * Reached through the call rather than through the meeting, because that is
+   * the direction the link points (`calls.meeting_id`), and it means a piece
+   * that finishes uploading AFTER the call ended still joins its record with
+   * no backfill of its own.
+   */
+  private async recordingsFor(meetingIds: string[]) {
+    const byMeeting = new Map<string, string[]>()
+    if (!meetingIds.length) return byMeeting
+    const rows = await this.db
+      .select({ meetingId: calls.meetingId, storageKey: callRecordings.storageKey })
+      .from(callRecordings)
+      .innerJoin(calls, eq(calls.id, callRecordings.callId))
+      .where(inArray(calls.meetingId, meetingIds))
+      .orderBy(asc(calls.meetingId), asc(callRecordings.position))
+    for (const r of rows) {
+      if (!r.meetingId) continue
+      const playable = await this.playableRecording(r.storageKey)
+      if (!playable) continue
+      byMeeting.set(r.meetingId, [...(byMeeting.get(r.meetingId) ?? []), playable])
+    }
+    return byMeeting
+  }
+
+  /**
+   * A meeting on its way out: the recording pointer signed, and every piece of
+   * a call recording alongside it.
+   *
+   * `recordingUrl` stays exactly what it was — the one link a meeting has
+   * always had, whether pasted in or captured here — so nothing that reads it
+   * changes meaning. `recordings` is the whole of what was captured, in order,
+   * and is empty for a meeting that was never a call.
+   */
+  private async withRecordings<T extends { id: string; recordingUrl: string | null }>(
+    rows: T[],
+    segments?: Map<string, string[]>,
+  ) {
+    const bySegment = segments ?? (await this.recordingsFor(rows.map((r) => r.id)))
+    return Promise.all(
+      rows.map(async (r) => ({
+        ...r,
+        recordingUrl: await this.playableRecording(r.recordingUrl),
+        recordings: bySegment.get(r.id) ?? [],
+      })),
+    )
+  }
+
   private async assertMember(workspaceId: string, userId: string) {
     const [m] = await this.db
       .select({ role: workspaceMembers.role })
@@ -66,7 +122,8 @@ export class MeetingsService {
       .where(and(eq(meetings.workspaceId, workspaceId), eq(meetings.id, meetingId)))
       .limit(1)
     if (!row) throw new NotFoundException('Meeting not found')
-    return { ...row, recordingUrl: await this.playableRecording(row.recordingUrl) }
+    const [withSegments] = await this.withRecordings([row])
+    return withSegments
   }
 
   private async attendeesFor(meetingIds: string[]) {
@@ -107,7 +164,18 @@ export class MeetingsService {
       .orderBy(desc(meetings.startsAt), desc(meetings.createdAt))
       .limit(200)
     const attendees = await this.attendeesFor(rows.map((r) => r.id))
-    return rows.map((r) => ({ ...r, attendees: attendees.get(r.id) ?? [] }))
+    /*
+     * Signed HERE too, not only in load().
+     *
+     * The meetings page renders its Recording link straight from this list, and
+     * a recording captured in a SyncUp is stored as a bare storage key. Handed
+     * out unsigned it is not a URL at all — the browser resolves it against the
+     * current page and the link 404s. Only the single-meeting read signed it,
+     * so the one place recordings are actually browsed was the one place they
+     * did not work.
+     */
+    const withRecordings = await this.withRecordings(rows)
+    return withRecordings.map((r) => ({ ...r, attendees: attendees.get(r.id) ?? [] }))
   }
 
   /**
@@ -129,7 +197,8 @@ export class MeetingsService {
       .orderBy(asc(meetings.startsAt))
       .limit(10)
     const attendees = await this.attendeesFor(rows.map((r) => r.id))
-    return rows.map((r) => ({ ...r, attendees: attendees.get(r.id) ?? [] }))
+    const withRecordings = await this.withRecordings(rows)
+    return withRecordings.map((r) => ({ ...r, attendees: attendees.get(r.id) ?? [] }))
   }
 
   /**

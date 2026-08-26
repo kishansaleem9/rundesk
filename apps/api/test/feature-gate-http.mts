@@ -1,15 +1,19 @@
 /**
  * §2.8 gap 11 — "Contact your admin", against real Postgres.
  *
- * One query in here is the reason this file exists:
+ * The once-a-day rule is the reason this file exists, and both ways it can be
+ * wrong are silent. If it never matches, every press of the button rings every
+ * admin again. If it matches too much, the first request anybody makes silences
+ * the feature for everyone — nobody is ever told, and the button reports
+ * success while doing nothing.
  *
- *   sql`${notifications.target} ->> 'entityId' = ${flagKey}`
- *
- * That is a raw JSON operator inside a drizzle template, and both ways it can
- * be wrong are silent. If it never matches, the once-a-day rule is a no-op and
- * every press of the button rings every admin again. If it always matches, the
- * first request anybody makes silences the feature for everyone — nobody is
- * ever told, and the button reports success while doing nothing.
+ * It used to be a raw JSON operator inside a drizzle template —
+ * `sql`${notifications.target} ->> 'entityId' = ${flagKey}`` — which this file
+ * was written to pin down. It reads from `feature_flag_requests` now (0113),
+ * because looking for a notification row could never see an ask whose
+ * recipients all take email: the rule simply never tripped for them. Same two
+ * failure modes, so the same checks still earn their place, plus the
+ * email-only workspace that had nothing watching it.
  *
  * Neither shows up in a unit test with a fake database, because the fake is the
  * thing deciding whether the predicate matched.
@@ -62,9 +66,24 @@ async function main() {
 
   const reset = async () => {
     await db.execute('DELETE FROM notifications')
+    // The ask is now recorded in its own right rather than inferred from the
+    // notifications it produced, so it has to be cleared here too — otherwise
+    // every section after the first reads as a repeat press.
+    await db.execute('DELETE FROM feature_flag_requests')
     await db.execute('DELETE FROM feature_flags')
+    // NOT NULL with a default of {} — the merge treats an empty object as
+    // "nothing chosen", which is the same as untouched.
+    await db.execute(`UPDATE users SET notification_preferences = '{}'::jsonb`)
     svc.invalidateCache()
   }
+  /** Set one person's channel matrix for the `activity` events this uses. */
+  const prefer = async (userId, events, channels = {}) =>
+    db.execute(
+      `UPDATE users SET notification_preferences = '${JSON.stringify({
+        events: { activity: events },
+        channels,
+      })}'::jsonb WHERE id = '${userId}'`,
+    )
   const notifications = async () => rowsOf(await db.execute('SELECT * FROM notifications'))
 
   // Two admins to ask, and the requester is deliberately a plain member.
@@ -122,6 +141,62 @@ async function main() {
   console.log('\n▶ a different PERSON asking for the same feature')
   const theirs = await svc.requestFlag(FLAG, WS, { id: THIRD, name: 'Suleman' })
   chk(theirs.status === 'sent', "is not silenced by somebody else's request", `got ${theirs.status}`)
+
+  console.log('\n▶ admins who take email and nothing else')
+  {
+    /*
+     * The configuration the whole "delivery, not rows" change was about, and
+     * the one nothing tested. An admin with in-app off and email on gets the
+     * mail and produces NO notification row — so counting rows called them
+     * nobody, and a once-a-day rule that looked for a row had nothing to find
+     * and let the same press mail them again on every reload.
+     */
+    await reset()
+    await db.execute(
+      `INSERT INTO feature_flags (flag_key, scope, scope_id, workspace_id, enabled) VALUES ('${FLAG}', 'workspace', '${WS}', '${WS}', false)`,
+    )
+    const emailOnly = { inApp: false, web: false, mobile: false, email: true }
+    await prefer(THEM, emailOnly)
+    await prefer(THIRD, emailOnly)
+    svc.invalidateCache()
+
+    const mailed = await svc.requestFlag(FLAG, WS, { id: ME, name: 'Hamda' })
+    chk(mailed.status === 'sent', 'the request is sent', `got ${mailed.status}`)
+    chk(mailed.notified === 2, `and both admins count as told (${mailed.notified})`, `notified ${mailed.notified} — an admin who got the mail was counted as nobody`)
+    chk((await notifications()).length === 0, 'with no in-app row anywhere', 'a row was written for somebody who has in-app off')
+
+    const repeat = await svc.requestFlag(FLAG, WS, { id: ME, name: 'Hamda' })
+    chk(repeat.status === 'already_asked', 'and pressing again the same day is a repeat', `got ${repeat.status} — the once-a-day rule never trips for email-only admins, so every reload mails them again`)
+  }
+
+  console.log('\n▶ an email-only admin inside their quiet hours')
+  {
+    /*
+     * Nothing goes out at all: no row (in-app off), no mail (quiet hours), no
+     * push (web/mobile off). Counting a channel being ENABLED as delivery told
+     * the requester "we told them" and then refused them a second ask — for a
+     * message that was never sent.
+     *
+     * dndStart == dndEnd is the service's own "always" (isInQuietHours), which
+     * keeps this from depending on what time the suite runs.
+     */
+    await reset()
+    await db.execute(
+      `INSERT INTO feature_flags (flag_key, scope, scope_id, workspace_id, enabled) VALUES ('${FLAG}', 'workspace', '${WS}', '${WS}', false)`,
+    )
+    const silent = { inApp: false, web: false, mobile: false, email: true }
+    const allDay = { dndOn: true, dndStart: '09:00', dndEnd: '09:00' }
+    await prefer(THEM, silent, allDay)
+    await prefer(THIRD, silent, allDay)
+    svc.invalidateCache()
+
+    const quiet = await svc.requestFlag(FLAG, WS, { id: ME, name: 'Hamda' })
+    chk(quiet.notified === 0, 'nobody is counted as told', `notified ${quiet.notified} — nothing was sent to either of them`)
+    chk((await notifications()).length === 0, 'and nothing was written either', 'a row appeared for an admin with in-app off')
+    // notified === 0 is what the browser reads to say "we could not reach
+    // anyone" instead of "we told them", and to leave the button pressable.
+    chk(quiet.status === 'sent', 'the request itself still happened', `got ${quiet.status}`)
+  }
 
   console.log('\n▶ input the service must refuse')
   await assertRejects(() => svc.requestFlag('not.a.real.flag', WS, { id: ME }), /Unknown feature/, 'an invented flag is refused')

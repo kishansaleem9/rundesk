@@ -40,6 +40,16 @@ function fakeDb(
     transcript?: Call[]
     /** Make one kind of insert blow up, to reach the guards around it. */
     failInsert?: (values: Record<string, unknown>) => boolean
+    /**
+     * §2.8 — how many inserts lose the unique index before one lands.
+     *
+     * `onConflictDoNothing()` returns NO ROW when it conflicts, which is how
+     * start() learns somebody else got there first. Modelled as a count rather
+     * than a flag because the interesting case is losing the race and then
+     * finding nothing to join: the call that was in the way has since ended,
+     * so the next attempt is free.
+     */
+    conflictingInserts?: number
   } = {},
 ) {
   const store = {
@@ -52,6 +62,7 @@ function fakeDb(
     transcript: seed.transcript ?? [],
   }
   const updates: Array<Record<string, unknown>> = []
+  let conflictsLeft = seed.conflictingInserts ?? 0
   /** Conditional writes that the database allowed through. */
   const executes: boolean[] = []
   const inserts: Array<{ values: Record<string, unknown>; conflict?: unknown }> = []
@@ -146,6 +157,10 @@ function fakeDb(
       node((self) => {
         const values = (self.pendingValues as Record<string, unknown>) ?? {}
         if (seed.failInsert?.(values)) throw new Error('insert failed')
+        if (conflictsLeft > 0) {
+          conflictsLeft -= 1
+          return []
+        }
         return [
         {
           workspaceId: 'ws1',
@@ -362,6 +377,39 @@ describe('§2.8 starting a call', () => {
     const { db } = fakeDb({ calls: [], channels: [{ id: 'ch1', workspaceId: 'other-ws' }] })
     const svc = makeService({ db })
     await assert.rejects(() => svc.start('ws1', 'me', { channelId: 'ch1' }), /not found/i)
+  })
+
+  it('starts the call anyway when the one it lost to has already ended', async () => {
+    /*
+     * Losing the insert means somebody else's call holds the index — but the
+     * read that goes looking for it is a SEPARATE statement, so that call can
+     * finish in between: somebody hangs up for everyone, or the last person
+     * out ends it. The channel is then empty, nothing holds the index, and the
+     * press was perfectly valid. It used to be answered with 400 "Could not
+     * start a call here", which is a broken button and no way to find out why.
+     *
+     * One conflicting insert, and no live call to be found afterwards.
+     */
+    const { db, inserts } = fakeDb({ calls: [], conflictingInserts: 1 })
+    const svc = makeService({ db })
+    const result = await svc.start('ws1', 'me', { channelId: 'ch1' })
+    assert.equal((result as { id: string }).id, 'new-call', 'the press was refused instead of retried')
+    // Keyed on startedById: the card this posts into the channel carries a
+    // channelId too, so counting on that counted the announcement as an
+    // attempt and the number meant nothing.
+    assert.equal(
+      inserts.filter((i) => i.values.startedById === 'me').length,
+      2,
+      'the insert was not attempted a second time',
+    )
+  })
+
+  it('gives up rather than retrying forever', async () => {
+    // Two conflicting inserts with nothing to join is not a race any more; it
+    // is a channel that cannot be started in, and saying so beats spinning.
+    const { db } = fakeDb({ calls: [], conflictingInserts: 2 })
+    const svc = makeService({ db })
+    await assert.rejects(() => svc.start('ws1', 'me', { channelId: 'ch1' }), /could not start/i)
   })
 })
 

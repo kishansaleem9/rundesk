@@ -22,6 +22,15 @@ export interface Meeting {
   provider: 'zoom' | 'google_meet' | 'manual'
   joinUrl: string | null
   recordingUrl: string | null
+  /**
+   * §2.8 — every piece of a SyncUp's recording, playable and in order.
+   *
+   * Recording is a toggle, so one call can leave several files behind.
+   * `recordingUrl` is the single link a meeting has always had; this is all of
+   * what was actually captured, and it is empty for a meeting that was never a
+   * call. Older servers do not send it — read it as possibly absent.
+   */
+  recordings?: string[]
   notes: string | null
   taskId: string | null
   createdById: string | null

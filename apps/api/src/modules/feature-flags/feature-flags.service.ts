@@ -1,6 +1,6 @@
 import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { and, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
-import { featureFlags, notifications, workspaceMembers } from '@rundesk/db'
+import { and, eq, gte, inArray, isNull } from 'drizzle-orm'
+import { featureFlagRequests, featureFlags, workspaceMembers } from '@rundesk/db'
 import { DEFAULT_ENABLED_FLAGS, FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
 import type { Db } from '@rundesk/db'
@@ -230,23 +230,38 @@ export class FeatureFlagsService {
     const recipients = admins.map((a) => a.userId).filter((id) => id !== requester.id)
     if (recipients.length === 0) return { status: 'no_admins', notified: 0 }
 
-    // One ask per person per feature per day. Pressing a button twice is not
-    // two requests, and an admin's bell is not a place to leave a drum roll.
+    /*
+     * One ask per person per feature per day. Pressing a button twice is not
+     * two requests, and an admin's bell is not a place to leave a drum roll.
+     *
+     * Read from the ASKS, not from the notifications they produced. A
+     * notification row is only written for an admin with an in-app channel
+     * switched on, so in a workspace whose admins run email-only there was
+     * never a row to find: the rule never tripped and every reload mailed all
+     * of them again. What the rule is about is the press, so that is what it
+     * now looks at.
+     */
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
     const [recent] = await this.db
-      .select({ id: notifications.id })
-      .from(notifications)
+      .select({ id: featureFlagRequests.id })
+      .from(featureFlagRequests)
       .where(
         and(
-          eq(notifications.workspaceId, workspaceId),
-          eq(notifications.actorId, requester.id),
-          eq(notifications.type, 'access_requested'),
-          gte(notifications.createdAt, since),
-          sql`${notifications.target} ->> 'entityId' = ${flagKey}`,
+          eq(featureFlagRequests.workspaceId, workspaceId),
+          eq(featureFlagRequests.requesterId, requester.id),
+          eq(featureFlagRequests.flagKey, flagKey),
+          gte(featureFlagRequests.createdAt, since),
         ),
       )
       .limit(1)
     if (recent) return { status: 'already_asked', notified: 0 }
+
+    // Recorded BEFORE the fan-out, so a request that dies partway through is
+    // still an ask that happened rather than one that can be repeated at will.
+    await this.db
+      .insert(featureFlagRequests)
+      .values({ workspaceId, flagKey, requesterId: requester.id })
+      .catch(() => undefined)
 
     const who = requester.name?.trim() || requester.email || 'Someone'
     let notified = 0

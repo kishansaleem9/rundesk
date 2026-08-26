@@ -346,6 +346,27 @@ check_sql "meeting_attendees table exists" "SELECT to_regclass('public.meeting_a
 check_sql "the one-row-per-attendee index exists" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_meeting_attendee_user');" "t"
 
+# ─────────────────────────────── §2.8 SyncUp (0108–0111) ──────────────────
+# The one-live-call index is checked here because its absence is SILENT: with
+# it missing, start()'s ON CONFLICT DO NOTHING matches no index and simply
+# inserts, so two people pressing Start SyncUp together get two live calls and
+# nothing anywhere reports a problem. A fresh database is built by `push` from
+# the TypeScript schema and the migration journal is then marked applied, so an
+# index that lives only in 0111's SQL is an index a new deployment never gets.
+say "Migrations 0108–0111 were applied"
+check_sql "calls table exists"                "SELECT to_regclass('public.calls') IS NOT NULL;" "t"
+check_sql "call_transcript_lines table exists" "SELECT to_regclass('public.call_transcript_lines') IS NOT NULL;" "t"
+check_sql "call_recordings table exists"      "SELECT to_regclass('public.call_recordings') IS NOT NULL;" "t"
+check_sql "the one-live-call-per-channel index exists" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_calls_one_live_per_channel');" "t"
+# The predicate matters as much as the name: an index on channel_id WITHOUT
+# 'ended_at IS NULL' would reject a second call in a channel that has already
+# finished one, which is every channel after its first SyncUp.
+check_sql "and it only covers live calls" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_calls_one_live_per_channel' AND indexdef ILIKE '%ended_at IS NULL%');" "t"
+check_sql "one segment per storage key" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_call_recordings_key');" "t"
+
 say "A meeting is a record, not a link"
 MT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
   -H 'Content-Type: application/json' \
