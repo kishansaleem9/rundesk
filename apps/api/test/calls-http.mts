@@ -31,7 +31,10 @@
  *   cd apps/api && pnpm build
  *   DATABASE_URL=... npx tsx test/calls-http.mts
  *
- * Not in CI: there is no Postgres service in the workflow.
+ * Runs in CI too — the `postgres-harnesses` job, against a Postgres service
+ * built the same way. Built with `push` from the TypeScript schema on purpose:
+ * that is how a new deployment is built, so a constraint living only in a
+ * migration is missing here as well rather than quietly present.
  *
  * These checks have been proven to bite. Six defects were reintroduced into
  * the service one at a time and each was caught here, including the one that

@@ -24,6 +24,9 @@
  *
  *   cd apps/api && pnpm build
  *   DATABASE_URL=... npx tsx test/feature-gate-http.mts
+ *
+ * Runs in CI too — the `postgres-harnesses` job. Either order with
+ * calls-http.mts: each resets what it depends on rather than inheriting it.
  */
 import 'reflect-metadata'
 import { Module } from '@nestjs/common'

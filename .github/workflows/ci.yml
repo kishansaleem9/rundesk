@@ -58,6 +58,84 @@ jobs:
       - name: Deployed-UI check survives a section that throws
         run: bash test/deploy/verify-ui-isolation.test.sh
 
+  # The checks that need a real database.
+  #
+  # Every defect these have caught was invisible to the unit suites by
+  # construction: a drizzle query that renders differently than it reads, a
+  # conditional write whose condition only exists in SQL, a constraint the
+  # fresh-install path never created. A fake database cannot fail any of them —
+  # it is the thing deciding the answer.
+  #
+  # The schema is built by `drizzle-kit push` from the TypeScript source, which
+  # is exactly how a new deployment is built, so a constraint that lives only in
+  # a migration is missing here too rather than silently present.
+  postgres-harnesses:
+    name: Postgres harnesses
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rundesk
+          POSTGRES_PASSWORD: rundesk
+          POSTGRES_DB: rundesk_calls
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://rundesk:rundesk@localhost:5432/rundesk_calls
+      JWT_ACCESS_SECRET: ci-access-secret
+      JWT_REFRESH_SECRET: ci-refresh-secret
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.1
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create the schema from the TypeScript source
+        run: pnpm --filter @rundesk/db exec drizzle-kit push --force
+
+      - name: Load the fixtures
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/test/calls-http-fixtures.sql
+
+      # The harnesses import the compiled service, guards and controllers, so
+      # what runs here is what ships rather than a re-compilation of it.
+      - name: Build the API
+        run: pnpm --filter @rundesk/api build
+
+      # §2.8 SyncUp: the call routes, the consent condition that rides with the
+      # transcript write, the one-live-call index, and the record a call leaves.
+      - name: Calls, against real Postgres
+        working-directory: apps/api
+        run: npx tsx test/calls-http.mts
+
+      # §2.2/§2.8 gap 11: "Contact your admin" — who was actually reached, and
+      # the once-a-day rule that has been silently wrong in both directions.
+      - name: The feature gate, against real Postgres
+        if: '!cancelled()'
+        working-directory: apps/api
+        run: npx tsx test/feature-gate-http.mts
+
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest
