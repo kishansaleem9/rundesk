@@ -304,6 +304,64 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     return { ok: true }
   }
 
+  /**
+   * §2.8 SyncUp — WebRTC signalling relay.
+   *
+   * Offers, answers and ICE candidates go peer-to-peer once the handshake is
+   * done; until then they need a courier, and this is it. The server reads
+   * nothing but the address: `to` is the peer, and the payload is opaque.
+   *
+   * The SENDER's identity comes from the socket, never from the body. A client
+   * that could name its own `from` could impersonate a colleague in a call —
+   * offering a stream that appears to come from someone else — and nothing
+   * downstream would question it.
+   */
+  @SubscribeMessage('call.signal')
+  handleCallSignal(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { callId?: string; to?: string; signal?: unknown },
+  ) {
+    const data = client.data as { userId?: string }
+    if (!data?.userId || !body?.callId || !body?.to || !body?.signal) return { ok: false }
+    // Relayed to the named user only, not broadcast: an offer is for one peer,
+    // and fanning it out would have everyone answer the same handshake.
+    this.emitToUser(body.to, {
+      type: 'call.signal',
+      callId: body.callId,
+      from: data.userId,
+      signal: body.signal,
+    } as never)
+    return { ok: true }
+  }
+
+  /**
+   * §2.8 — an in-call reaction, `[20:47]`: "Agar main koi reaction doongi to
+   * woh yahan pe show ho jaata hai."
+   *
+   * Not persisted anywhere. A reaction is a thing that happens and then is
+   * over; writing it down would leave a channel full of thumbs-ups nobody
+   * meant to keep.
+   */
+  @SubscribeMessage('call.reaction')
+  handleCallReaction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { callId?: string; workspaceId?: string; emoji?: string },
+  ) {
+    const data = client.data as { userId?: string }
+    if (!data?.userId || !body?.callId || !body?.workspaceId || !body?.emoji) return { ok: false }
+    // Bounded: an emoji is one or two code points, and a "reaction" carrying a
+    // paragraph is not a reaction.
+    const emoji = String(body.emoji).slice(0, 8)
+    this.emitToWorkspace(body.workspaceId, {
+      type: 'call.reaction',
+      workspaceId: body.workspaceId,
+      callId: body.callId,
+      userId: data.userId,
+      emoji,
+    } as never)
+    return { ok: true }
+  }
+
   // --- Broadcast helpers ----------------------------------------------------
   emitToRoom(room: RoomKey, event: RealtimeEvent) {
     this.server?.to(room).emit('event', event)

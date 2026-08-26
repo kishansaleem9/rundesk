@@ -19,6 +19,7 @@ import { ContainerMembersModule } from './modules/container-members/container-me
 import { ListsModule } from './modules/lists/lists.module'
 import { TasksModule } from './modules/tasks/tasks.module'
 import { MeetingsModule } from './modules/meetings/meetings.module'
+import { CallsModule } from './modules/calls/calls.module'
 import { LabelsModule } from './modules/labels/labels.module'
 import { DocsModule } from './modules/docs/docs.module'
 import { ChatModule } from './modules/chat/chat.module'
@@ -103,6 +104,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     ListsModule,
     TasksModule,
     MeetingsModule,
+    CallsModule,
     LabelsModule,
     DocsModule,
     ChatModule,
