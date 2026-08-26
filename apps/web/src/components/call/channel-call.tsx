@@ -36,8 +36,13 @@ export function ChannelCall({
    * The card cannot do either itself: the pre-join dialog, the media and the
    * live call all live here. It raises the intent, this acts on it and clears
    * it, so pressing Join twice is two joins rather than one stuck flag.
+   *
+   * It carries the call id, and that is not decoration. Leave used to read the
+   * id from local state, which is empty after a page refresh — so the card that
+   * still (correctly) said "You're in the SyncUp" had a Leave button that told
+   * the server nothing, and the person stayed listed as present forever.
    */
-  action?: 'join' | 'leave' | null
+  action?: { kind: 'join' | 'leave'; callId: string } | null
   onActionHandled?: () => void
 }) {
   const { t } = useTranslation()
@@ -178,8 +183,15 @@ export function ChannelCall({
     }
   }
 
-  const leave = async () => {
-    const id = inCall?.id
+  /**
+   * Leave.
+   *
+   * `fallbackId` is what a card supplies. After a page refresh the local
+   * `inCall` is empty while the server still lists the person as present, so
+   * the id has to be able to come from the thing that knows it.
+   */
+  const leave = async (fallbackId?: string) => {
+    const id = inCall?.id ?? fallbackId
     hangUpLocally()
     if (id) await actions.leave(id).catch(() => {})
   }
@@ -197,10 +209,18 @@ export function ChannelCall({
   // is a fresh intent rather than a flag nobody reset.
   useEffect(() => {
     if (!action) return
-    if (action === 'join') {
-      if (!inCall) beginJoin()
+    if (action.kind === 'join') {
+      if (inCall && inCall.id !== action.callId) {
+        // Being in another call is the ordinary state this feature is built
+        // for — minimise one and browse. Doing nothing silently made the
+        // button look broken; switching calls without asking would drop the
+        // one they are actually in.
+        toast(t('call.alreadyInAnother'))
+      } else if (!inCall) {
+        beginJoin()
+      }
     } else {
-      void leave()
+      void leave(action.callId)
     }
     onActionHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -221,6 +221,27 @@ check(
 )
 
 // ---------------------------------------------------------------------------
+console.log('\n4b. the category strip works WHILE searching')
+// ---------------------------------------------------------------------------
+// While a query is typed the category sections are not rendered, so their refs
+// are gone. Looking one up before clearing the query made every tab in the
+// strip dead the moment anybody typed — it returned before it even cleared the
+// search. Nothing moved and nothing said why.
+await page.fill('[data-testid="emoji-search"]', 'cat')
+await page.waitForTimeout(250)
+await page.locator('[data-testid="emoji-tab-food"]').click()
+await page.waitForTimeout(400)
+check(
+  (await page.inputValue('[data-testid="emoji-search"]')) === '',
+  'pressing a tab mid-search clears the search',
+  `the search box still reads ${JSON.stringify(await page.inputValue('[data-testid="emoji-search"]'))}`,
+)
+check(
+  await page.locator('[data-testid="emoji-section-food"]').isVisible().catch(() => false),
+  'and the category it names is on screen',
+)
+
+// ---------------------------------------------------------------------------
 console.log('\n5. picking one puts it in the message')
 // ---------------------------------------------------------------------------
 await page.fill('[data-testid="emoji-search"]', '')

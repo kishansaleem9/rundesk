@@ -5309,6 +5309,7 @@ export const en = {
   // §2.8 gap 10 — half of AI Notes cannot run on every browser; say which.
   'call.noTranscription': 'This browser cannot transcribe — the recording is still being kept',
   'call.noRecorder': 'This browser cannot record audio — notes will come from the transcript only',
+  'call.alreadyInAnother': 'You are already in a call — leave that one first',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10569,6 +10570,7 @@ export const es: Record<TranslationKey, string> = {
   'callCard.recording': 'Grabando',
   'call.noTranscription': 'Este navegador no puede transcribir; la grabación se sigue guardando',
   'call.noRecorder': 'Este navegador no puede grabar audio; las notas vendrán solo de la transcripción',
+  'call.alreadyInAnother': 'Ya estás en una llamada; sal de esa primero',
 
 }
 
@@ -15828,6 +15830,7 @@ export const ar: Record<TranslationKey, string> = {
   'callCard.recording': 'جارٍ التسجيل',
   'call.noTranscription': 'لا يمكن لهذا المتصفح تفريغ الكلام — وما زال التسجيل محفوظًا',
   'call.noRecorder': 'لا يمكن لهذا المتصفح تسجيل الصوت — ستُكتب الملاحظات من النص فقط',
+  'call.alreadyInAnother': 'أنت بالفعل في مكالمة — غادرها أولًا',
 
 }
 
@@ -20932,6 +20935,7 @@ export const ur: Record<TranslationKey, string> = {
   'callCard.recording': 'ریکارڈنگ',
   'call.noTranscription': 'یہ براؤزر ٹرانسکرپشن نہیں کر سکتا — ریکارڈنگ پھر بھی محفوظ ہو رہی ہے',
   'call.noRecorder': 'یہ براؤزر آڈیو ریکارڈ نہیں کر سکتا — نوٹس صرف ٹرانسکرپٹ سے بنیں گے',
+  'call.alreadyInAnother': 'آپ پہلے ہی ایک کال میں ہیں — پہلے اسے چھوڑیں',
 
 }
 

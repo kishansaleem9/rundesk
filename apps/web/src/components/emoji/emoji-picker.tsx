@@ -101,6 +101,8 @@ export function EmojiPicker({
   const [toneOpen, setToneOpen] = useState(false)
   const [counts, setCounts] = useState<FrequentCounts>(() => readFrequent())
   const [activeCat, setActiveCat] = useState<CategoryId>('frequent')
+  /** A tab press waiting for its section to exist again. */
+  const [pendingJump, setPendingJump] = useState<CategoryId | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const sectionRefs = useRef(new Map<CategoryId, HTMLDivElement>())
 
@@ -181,21 +183,32 @@ export function EmojiPicker({
     setToneOpen(false)
   }
 
-  // Jump to a category. Scrolling the container directly rather than calling
-  // scrollIntoView, which would also scroll the page behind the popover.
+  /**
+   * Jump to a category.
+   *
+   * Asked for here, performed in the effect below — because while a search is
+   * running the category sections are not rendered at all, so their refs have
+   * been deleted. Looking the section up first meant every tab in the strip
+   * was dead the moment anybody typed: it returned before it even cleared the
+   * query, so nothing moved and nothing said why.
+   */
   const jumpTo = (id: CategoryId) => {
-    const container = scrollRef.current
-    const section = sectionRefs.current.get(id)
-    if (!container || !section) return
     setQuery('')
-    // Deferred: clearing the query re-renders the sections, and their offsets
-    // are only right once they are back on screen.
-    requestAnimationFrame(() => {
-      const target = sectionRefs.current.get(id)
-      if (target) container.scrollTop = target.offsetTop
-      setActiveCat(id)
-    })
+    setPendingJump(id)
   }
+
+  // The scroll itself, once the sections it needs are back on screen.
+  // Scrolling the container directly rather than scrollIntoView, which would
+  // also scroll the page behind the popover.
+  useEffect(() => {
+    if (!pendingJump || query.trim()) return
+    const container = scrollRef.current
+    const target = sectionRefs.current.get(pendingJump)
+    if (!container || !target) return
+    container.scrollTop = target.offsetTop
+    setActiveCat(pendingJump)
+    setPendingJump(null)
+  }, [pendingJump, query, catalog])
 
   // Which tab is lit follows the scroll, so it never claims you are somewhere
   // you scrolled away from.

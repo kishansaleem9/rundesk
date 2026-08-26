@@ -247,11 +247,15 @@ export function useCallRecording({
           return captionsTail(next, 3)
         })
 
+        // `replacesPrevious` is not cosmetic: without it the server keeps the
+        // half-sentence AND the revision, and the notes are written from a
+        // transcript that says everything twice.
+        //
         // The server refuses these while recording is off, so a line that
         // races the banner coming down is dropped there rather than here.
         void api(`/workspaces/${workspaceId}/calls/${callId}/transcript`, {
           method: 'POST',
-          body: { text },
+          body: { text, replacesPrevious: replaces },
         }).catch(() => undefined)
       }
     }

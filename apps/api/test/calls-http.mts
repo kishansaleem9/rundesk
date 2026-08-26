@@ -239,9 +239,31 @@ async function main() {
   ACTING_AS = ME
   chk((await call('POST', `/workspaces/${WS}/calls/${callId}/transcript`, { text: '   ' })).data?.ok === false, 'a blank line is not', 'whitespace was stored as an utterance')
 
+  console.log('\n▶ a line the browser revises')
+  {
+    // Speech recognition re-emits a final result when it corrects one. Stored
+    // as two lines, the notes report two commitments where there was one.
+    await call('POST', `/workspaces/${WS}/calls/${callId}/transcript`, { text: 'and update' })
+    await call('POST', `/workspaces/${WS}/calls/${callId}/transcript`, {
+      text: 'and update the docs',
+      replacesPrevious: true,
+    })
+    const t = (await call('GET', `/workspaces/${WS}/calls/${callId}/transcript`)).data?.transcript ?? ''
+    chk(t.includes('and update the docs'), 'the revision is stored', `transcript: ${JSON.stringify(t)}`)
+    chk(
+      !/Hamda: and update$/m.test(t),
+      'and the half-sentence it replaced is gone',
+      `the transcript kept both halves: ${JSON.stringify(t)}`,
+    )
+  }
+
   // The join + order that has never run against Postgres.
   const read = await call('GET', `/workspaces/${WS}/calls/${callId}/transcript`)
-  chk(read.data?.transcript === 'Hamda: we should ship the meetings page on Friday\nLeo: I will send the deck', 'the transcript reads back attributed and in order', `got ${JSON.stringify(read.data?.transcript)}`)
+  chk(
+    (read.data?.transcript ?? '').startsWith('Hamda: we should ship the meetings page on Friday\nLeo: I will send the deck'),
+    'the transcript reads back attributed and in order',
+    `got ${JSON.stringify(read.data?.transcript)}`,
+  )
 
   console.log('\n▶ a channel member who never joined the call')
   {

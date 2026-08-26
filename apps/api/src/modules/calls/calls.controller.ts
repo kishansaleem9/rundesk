@@ -91,9 +91,9 @@ export class CallsController {
   transcript(
     @Param('callId') callId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { text?: string },
+    @Body() body: { text?: string; replacesPrevious?: boolean },
   ) {
-    return this.svc.appendTranscript(callId, user.id, body?.text ?? '')
+    return this.svc.appendTranscript(callId, user.id, body?.text ?? '', body?.replacesPrevious === true)
   }
 
   @Get(':callId/transcript')

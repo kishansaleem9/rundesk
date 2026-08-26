@@ -522,6 +522,42 @@ describe('§2.8 nothing is transcribed while the banner is down', () => {
     assert.equal(inserts.filter((i) => i.values?.text).length, 0)
   })
 
+  it('REPLACES the speaker\'s last line when the browser says it is a revision', async () => {
+    // "we should ship" becoming "we should ship on Friday" is one sentence.
+    // Stored as two, the notes report two commitments.
+    const { db, updates, inserts } = fakeDb({
+      calls: [{ ...LIVE_CALL, recording: true }],
+      transcript: [{ id: 'l1', userId: 'me', text: 'we should ship' }],
+    })
+    const out = await makeService({ db }).appendTranscript('call1', 'me', 'we should ship on Friday', true)
+    assert.equal(out.ok, true)
+    assert.ok(
+      updates.some((u) => u.text === 'we should ship on Friday'),
+      'the revision did not replace the partial line',
+    )
+    assert.equal(
+      inserts.filter((i) => i.values?.text).length,
+      0,
+      'the revision was appended as well as replacing — the transcript now says it twice',
+    )
+  })
+
+  it('appends when it is a revision but the speaker has said nothing yet', async () => {
+    const { db, inserts } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }], transcript: [] })
+    await makeService({ db }).appendTranscript('call1', 'me', 'first thing', true)
+    assert.equal(inserts.filter((i) => i.values?.text).length, 1, 'a first line was lost')
+  })
+
+  it('appends, not replaces, when the browser does not say it is a revision', async () => {
+    const { db, updates, inserts } = fakeDb({
+      calls: [{ ...LIVE_CALL, recording: true }],
+      transcript: [{ id: 'l1', userId: 'me', text: 'we should ship' }],
+    })
+    await makeService({ db }).appendTranscript('call1', 'me', 'and update the docs')
+    assert.equal(inserts.filter((i) => i.values?.text).length, 1)
+    assert.equal(updates.some((u) => u.text), false, 'a new sentence overwrote the previous one')
+  })
+
   it('caps a line, so one client cannot post a novel', async () => {
     const { db, inserts } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
     const svc = makeService({ db })

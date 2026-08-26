@@ -272,7 +272,7 @@ export function ChatPage() {
    * lives in the message list. Rather than lifting the whole call into this
    * page, the card raises an intent and ChannelCall acts on it and clears it.
    */
-  const [callAction, setCallAction] = useState<'join' | 'leave' | null>(null)
+  const [callAction, setCallAction] = useState<{ kind: 'join' | 'leave'; callId: string } | null>(null)
   // Right-click context menu (Plan §6.10) anchored at the cursor for a message.
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null)
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
@@ -2013,8 +2013,8 @@ export function ChatPage() {
                           {m.call ? (
                             <CallCard
                               call={m.call}
-                              onJoin={() => setCallAction('join')}
-                              onLeave={() => setCallAction('leave')}
+                              onJoin={() => setCallAction({ kind: 'join', callId: m.call!.id })}
+                              onLeave={() => setCallAction({ kind: 'leave', callId: m.call!.id })}
                             />
                           ) : (
                             m.body && <ChatMessageBody text={m.body} namesById={namesById} customEmoji={emojiByCode} />

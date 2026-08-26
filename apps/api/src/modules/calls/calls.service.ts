@@ -460,13 +460,46 @@ export class CallsService {
    * kept while the banner is down. A client that keeps talking after recording
    * stops gets a quiet no, not a silent yes.
    */
-  async appendTranscript(callId: string, userId: string, text: string) {
+  async appendTranscript(
+    callId: string,
+    userId: string,
+    text: string,
+    replacesPrevious = false,
+  ) {
     const call = await this.assertCanReach(callId, userId)
     if (call.endedAt) return { ok: false as const, reason: 'ended' as const }
     if (!call.recording) return { ok: false as const, reason: 'not_recording' as const }
 
     const line = text.trim().slice(0, MAX_TRANSCRIPT_LINE)
     if (!line) return { ok: false as const, reason: 'empty' as const }
+
+    /*
+     * Speech recognition revises itself: "we should ship" becomes "we should
+     * ship on Friday" as a second final result. The browser knows which of
+     * those is a revision and was already replacing it on screen — but posted
+     * both, so the stored transcript kept the half-sentence AND the whole one.
+     * The notes are written from that, and a model reading both faithfully
+     * reports two commitments where somebody made one.
+     *
+     * Scoped to THIS speaker's last line. Replacing the most recent line
+     * outright would let one person's correction overwrite whatever somebody
+     * else said in between.
+     */
+    if (replacesPrevious) {
+      const [previous] = await this.db
+        .select({ id: callTranscriptLines.id })
+        .from(callTranscriptLines)
+        .where(and(eq(callTranscriptLines.callId, callId), eq(callTranscriptLines.userId, userId)))
+        .orderBy(desc(callTranscriptLines.saidAt))
+        .limit(1)
+      if (previous) {
+        await this.db
+          .update(callTranscriptLines)
+          .set({ text: line })
+          .where(eq(callTranscriptLines.id, previous.id))
+        return { ok: true as const }
+      }
+    }
 
     await this.db.insert(callTranscriptLines).values({ callId, userId, text: line })
     return { ok: true as const }
