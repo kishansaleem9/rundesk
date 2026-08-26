@@ -128,6 +128,16 @@ export function useWebRtcCall(options: {
    */
   const gaveUp = useRef(new Set<string>())
 
+  /**
+   * Peers who have signalled us but are not on the roster yet.
+   *
+   * Signalling is immediate and the participant list is polled, so these two
+   * views of "who is in this call" disagree for a beat on every join. That beat
+   * is long enough to tear down a connection mid-negotiation, so a peer stays
+   * here until the roster catches up and can speak for them.
+   */
+  const negotiating = useRef(new Set<string>())
+
   /** Tear one peer down. Idempotent: called on leave, on failure, and on unmount. */
   const dropPeer = useCallback((peerId: string) => {
     const pc = connections.current.get(peerId)
@@ -276,6 +286,24 @@ export function useWebRtcCall(options: {
 
       let pc = connections.current.get(peerId)
       if (!pc && signal.kind === 'offer') {
+        /*
+         * An offer IS proof that they are in the call.
+         *
+         * The roster this hook reconciles against is a polled view, and
+         * signalling is immediate — so an offer routinely arrives BEFORE the
+         * participant list mentions the person who sent it. Building the
+         * connection to answer on and leaving it at that meant the very next
+         * render tore it down again: `others` did not contain them yet, so the
+         * reconciliation below read a half-negotiated peer as somebody who had
+         * left.
+         *
+         * The two ends then deadlocked, invisibly. We rebuilt once the roster
+         * caught up, but by then we were the answerer, waiting for an offer
+         * that would never come again — while the far end sat in
+         * `have-local-offer` with nothing to tell it anything was wrong. Both
+         * sides looked healthy; the call simply never connected.
+         */
+        negotiating.current.add(peerId)
         await connectTo(peerId)
         pc = connections.current.get(peerId)
       }
@@ -309,9 +337,14 @@ export function useWebRtcCall(options: {
     const others = peerIds.filter((id) => id !== myUserId)
     // Everyone, not a slice: see MESH_LIMIT above. A partial mesh made the
     // call's shape depend on which client you asked.
+    // Once the roster names somebody, it speaks for them again.
+    for (const id of others) negotiating.current.delete(id)
     for (const id of others) void connectTo(id)
     for (const id of [...connections.current.keys()]) {
-      if (!others.includes(id)) dropPeer(id)
+      // Not on the roster AND not mid-negotiation. Without the second half
+      // this drops the connection built to answer an offer that arrived before
+      // the roster did — see the offer branch above.
+      if (!others.includes(id) && !negotiating.current.has(id)) dropPeer(id)
     }
     // Somebody who left and came back is a new attempt, not a continuation of
     // the one that failed — otherwise a person who rejoins to fix their

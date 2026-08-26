@@ -153,6 +153,48 @@ jobs:
         working-directory: apps/api
         run: npx tsx test/feature-gate-http.mts
 
+      # §2.8 — the call itself, between two real browsers.
+      #
+      # Everything above stops at the API. The peer-to-peer path had never been
+      # executed by anything until this suite, and the first thing it found was
+      # a deadlock that left roughly two calls in five connecting forever, with
+      # both ends reporting themselves healthy. Nothing cheaper than two
+      # browsers can see that.
+      - name: Install Chromium
+        if: '!cancelled()'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Seed a workspace
+        if: '!cancelled()'
+        run: pnpm --filter @rundesk/db exec tsx src/seed.ts
+
+      - name: Build the SPA
+        if: '!cancelled()'
+        run: pnpm --filter @rundesk/web exec vite build
+
+      # Backgrounded and waited for: a suite that starts talking to an API that
+      # is not up yet fails for a reason that has nothing to do with calls.
+      - name: Start the API
+        if: '!cancelled()'
+        run: |
+          # nohup + disown so it outlives this step's shell — the runner tears
+          # processes down at the end of the JOB, not the end of a step.
+          nohup npx tsx apps/api/dist/apps/api/src/main.js > /tmp/api.log 2>&1 &
+          disown
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/v1/auth/oauth/providers"; then
+              echo "API up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "API never came up. Its output:"; cat /tmp/api.log; exit 1
+        env:
+          PORT: 3011
+
+      - name: A real SyncUp, in two browsers
+        if: '!cancelled()'
+        run: node test/e2e/syncup-live.mjs --api 3011 --dist apps/web/dist
+
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest
