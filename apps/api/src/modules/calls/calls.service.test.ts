@@ -405,9 +405,10 @@ describe('§2.8 starting a call', () => {
   })
 
   it('gives up rather than retrying forever', async () => {
-    // Two conflicting inserts with nothing to join is not a race any more; it
-    // is a channel that cannot be started in, and saying so beats spinning.
-    const { db } = fakeDb({ calls: [], conflictingInserts: 2 })
+    // Conflicting on every attempt with nothing to join is not a race any
+    // more; it is a channel that cannot be started in, and saying so beats
+    // spinning.
+    const { db } = fakeDb({ calls: [], conflictingInserts: 3 })
     const svc = makeService({ db })
     await assert.rejects(() => svc.start('ws1', 'me', { channelId: 'ch1' }), /could not start/i)
   })

@@ -146,27 +146,48 @@ export class CallsService {
       if (!channel || channel.workspaceId !== workspaceId) {
         throw new NotFoundException('Channel not found')
       }
-      const existing = await this.db
-        .select()
-        .from(calls)
-        .where(and(eq(calls.channelId, input.channelId), isNull(calls.endedAt)))
-        .orderBy(desc(calls.startedAt))
-        .limit(1)
-      if (existing[0]) return this.join(existing[0].id, userId)
     }
 
     /*
-     * The read above is not enough on its own.
+     * Join the one that is running, or start one — and keep trying while the
+     * answer keeps changing underneath.
      *
-     * Two people pressing Start SyncUp in the same moment both saw nothing
-     * running and both inserted, so the channel got two live calls, two cards,
-     * two notification storms, and a Join that landed in whichever one the
-     * live lookup happened to return. A partial unique index (0111) makes that
-     * impossible; losing the race here means somebody else's call already
-     * exists, which is exactly the call we wanted to be in.
+     * Every step here is its own statement, so the state can move between any
+     * two of them:
+     *
+     *   - Read "nothing is running" and insert: two people pressing Start in
+     *     the same moment both saw nothing and both inserted, so the channel
+     *     got two live calls, two cards, two notification storms and a Join
+     *     that landed in whichever one the lookup happened to return. The
+     *     partial unique index (0111) makes that impossible; losing the insert
+     *     means somebody else's call exists, which is the call we wanted.
+     *
+     *   - Read "this one is running" and join it: that call can END in
+     *     between — somebody hangs up for everyone, or the last person out
+     *     ends it — and join() rightly refuses an ended call. Refusing the
+     *     PRESS for that reason is wrong: the person asked for a call in this
+     *     channel and there is now none, so start one.
+     *
+     * Both are the same shape, so both are handled the same way: go round
+     * again. Bounded, because a channel where this never settles is a channel
+     * to report rather than to spin on.
      */
     let row: typeof calls.$inferSelect | undefined
-    for (let attempt = 0; attempt < 2 && !row; attempt += 1) {
+    for (let attempt = 0; attempt < 3 && !row; attempt += 1) {
+      if (input.channelId) {
+        const [live] = await this.db
+          .select()
+          .from(calls)
+          .where(and(eq(calls.channelId, input.channelId), isNull(calls.endedAt)))
+          .orderBy(desc(calls.startedAt))
+          .limit(1)
+        if (live) {
+          const joined = await this.joinIfLive(live.id, userId)
+          if (joined) return joined
+          continue
+        }
+      }
+
       ;[row] = await this.db
         .insert(calls)
         .values({
@@ -177,25 +198,6 @@ export class CallsService {
         })
         .onConflictDoNothing()
         .returning()
-      if (row || !input.channelId) break
-
-      const [winner] = await this.db
-        .select()
-        .from(calls)
-        .where(and(eq(calls.channelId, input.channelId), isNull(calls.endedAt)))
-        .orderBy(desc(calls.startedAt))
-        .limit(1)
-      if (winner) return this.join(winner.id, userId)
-
-      /*
-       * Lost the race to a call that has ALREADY ENDED.
-       *
-       * The insert and the read are two statements, so the call we conflicted
-       * with can finish in between — somebody hangs up for everyone, or the
-       * last person out ends it. Nothing holds the index at that point and the
-       * press was perfectly valid, so try once more rather than answering a
-       * legitimate Start with "could not start a call here".
-       */
     }
     if (!row) throw new BadRequestException('Could not start a call here')
 
@@ -314,6 +316,24 @@ export class CallsService {
           },
         })
         .catch(() => null)
+    }
+  }
+
+  /**
+   * Join, unless it ended in the moment since somebody read that it had not.
+   *
+   * Only for start(), which reads the live call and then joins it as two
+   * separate statements. `null` means "there is nothing running here after
+   * all" — go and start one — and every other failure is still the caller's
+   * answer. join()'s one BadRequest is the ended call; not being able to reach
+   * it at all comes back as NotFound or Forbidden and is not swallowed here.
+   */
+  private async joinIfLive(callId: string, userId: string) {
+    try {
+      return await this.join(callId, userId)
+    } catch (err) {
+      if (err instanceof BadRequestException) return null
+      throw err
     }
   }
 

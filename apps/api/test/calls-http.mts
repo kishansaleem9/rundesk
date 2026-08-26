@@ -742,6 +742,49 @@ async function main() {
       `positions: ${positions.join(', ')} — two pieces claim the same one`,
     )
 
+    /*
+     * The tie itself, forced rather than hoped for.
+     *
+     * Two attaches landing together only collide inside a window measured in
+     * microseconds, so the check above can pass without ever having a
+     * collision to survive. This makes one: a second connection holds an
+     * UNCOMMITTED row at the next free position, so the attach cannot see it,
+     * computes the same position and blocks on the unique index. Releasing the
+     * holder turns that block into a duplicate-key error — which is exactly
+     * what the retry exists for, and the only thing standing between it and a
+     * 500 on a perfectly ordinary upload.
+     */
+    let release = () => {}
+    const held = new Promise((r) => (release = r))
+    const nextFree = Math.max(...positions) + 1
+    const holding = db
+      .transaction(async (tx) => {
+        await tx.execute(
+          `INSERT INTO call_recordings (call_id, storage_key, position) VALUES ('${id}', 'held', ${nextFree})`,
+        )
+        await held
+      })
+      .catch(() => undefined)
+    const five = `calls/${WS}/${id}/recording-5.webm`
+    const racing = call('POST', `/workspaces/${WS}/calls/${id}/recording/attach`, { storageKey: five })
+    await new Promise((r) => setTimeout(r, 400))
+    release()
+    await holding
+    const raced = await racing
+    chk(
+      raced.status === 200 || raced.status === 201,
+      'a piece that loses the position outright still attaches',
+      `it came back ${raced.status} — the upload is in storage and the row is not`,
+    )
+    const after = rowsOf(
+      await db.execute(`SELECT storage_key, position FROM call_recordings WHERE call_id = '${id}' ORDER BY position`),
+    )
+    chk(
+      after.some((r) => r.storage_key === five && r.position === nextFree + 1),
+      'and takes the next place rather than fighting for the taken one',
+      `rows: ${after.map((r) => `${r.position}:${r.storage_key.split('/').pop()}`).join(', ')}`,
+    )
+
     await call('POST', `/workspaces/${WS}/calls/${id}/end`, {})
 
     /*
@@ -757,10 +800,18 @@ async function main() {
     const listed = await call('GET', `/workspaces/${WS}/meetings`)
     const record = (listed.data ?? []).find((m: { id: string }) => m.id === meetingId)
     chk(Boolean(record), 'the call left a record in Meetings', `no meeting ${meetingId} in the list`)
+    // Counted from the table rather than written down: the checks above add
+    // pieces deliberately, and a number typed in here would go stale the next
+    // time one is added and then quietly be adjusted to match whatever the
+    // code did.
+    const captured = rowsOf(
+      await db.execute(`SELECT count(*)::int AS n FROM call_recordings WHERE call_id = '${id}'`),
+    )[0].n
+    chk(captured > 1, `the call has ${captured} pieces to offer`, 'the segment checks above left nothing to reach')
     chk(
-      Array.isArray(record?.recordings) && record.recordings.length === 4,
+      Array.isArray(record?.recordings) && record.recordings.length === captured,
       'and it offers every piece that was captured',
-      `it offers ${record?.recordings?.length ?? 0} of 4`,
+      `it offers ${record?.recordings?.length ?? 0} of ${captured}`,
     )
     chk(
       (record?.recordings ?? []).every((u: string) => u.startsWith('https://r2.test/get/')),
