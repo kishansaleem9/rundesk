@@ -59,9 +59,29 @@ export function callHasEnded(state: {
   liveId: string | null
   /** Whether that query has actually answered yet. */
   settled: boolean
+  /** When that answer was received. */
+  answeredAt?: number
+  /** When we joined. An answer older than this predates the call. */
+  joinedAt?: number
 }): boolean {
   if (!state.inCallId) return false
   if (!state.settled) return false
+  /*
+   * An answer from BEFORE we joined proves nothing about now.
+   *
+   * This is not hypothetical, it is the ordinary path. The "is there a call in
+   * the channel I am looking at" query and the "what is happening in the call I
+   * am in" query share a cache key whenever those are the same channel — which
+   * is almost always. Before the call existed that key held a perfectly
+   * successful `null`, and React Query serves that cached value the instant the
+   * second query mounts, with isSuccess already true, while it refetches in the
+   * background.
+   *
+   * So the moment somebody started a call, this saw "settled, and there is no
+   * live call here" and hung them up on themselves. Guarding on `undefined`
+   * does not help: the value is not undefined, it is a stale success.
+   */
+  if (state.joinedAt != null && (state.answeredAt ?? 0) < state.joinedAt) return false
   return state.liveId !== state.inCallId
 }
 

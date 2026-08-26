@@ -255,6 +255,20 @@ async function main() {
   chk((await call('POST', `/workspaces/${WS}/calls/${callId}/recording/upload-url`, { contentType: 'audio/webm' })).status === 400, 'with no storage configured it says so plainly', 'an upload URL was issued with no storage')
   r2Configured = true
 
+  console.log('\n▶ uploading AFTER recording stops — the only order the client can use')
+  // This is the check the first version of this harness got wrong. It asked for
+  // an upload URL while recording was still on, which the browser can never do:
+  // MediaRecorder only produces a file when it stops, and the only thing that
+  // stops it is recording being switched off. Asking in the realistic order
+  // showed the endpoint refusing every recording ever made.
+  await call('POST', `/workspaces/${WS}/calls/${callId}/recording`, { recording: false })
+  const afterStop = await call('POST', `/workspaces/${WS}/calls/${callId}/recording/upload-url`, {
+    contentType: 'audio/webm',
+  })
+  chk(afterStop.status === 200, 'is still allowed once the banner comes down', `it was refused with ${afterStop.status} — every recording would be silently lost`)
+  chk((await call('POST', `/workspaces/${WS}/calls/${callId}/recording/attach`, { storageKey: afterStop.data?.storageKey })).status === 200, 'and the file can be handed in', 'the finished recording could not be attached')
+
+
   console.log('\n▶ ending it — the record it leaves behind')
   const ended = await call('POST', `/workspaces/${WS}/calls/${callId}/end`, {})
   chk(!!ended.data?.meetingId, 'ending leaves a meeting record', `no record: ${JSON.stringify(ended.data)}`)
@@ -264,12 +278,27 @@ async function main() {
   const m = rowsOf(meeting)[0]
   chk(String(m.transcript ?? '').includes('Hamda: we should ship'), 'the record carries the transcript', `transcript was ${JSON.stringify(String(m.transcript ?? '').slice(0, 80))}`)
   chk(String(m.notes ?? '').includes('## Summary'), 'and the notes', `notes were ${JSON.stringify(String(m.notes ?? '').slice(0, 80))}`)
-  chk(String(m.recording_url ?? '').includes(callId), 'and points at the recording', `recording_url was ${m.recording_url}`)
+  // The KEY, not a signed URL — a signed R2 URL lasts fifteen minutes, so one
+  // written into this column is dead before the notes are read once.
+  chk(String(m.recording_url ?? '').startsWith(`calls/${WS}/${callId}/`), 'and points at the recording by durable key', `recording_url was ${m.recording_url}`)
+  chk(!String(m.recording_url ?? '').includes('://'), 'not a signed URL that expires', `recording_url is a URL: ${m.recording_url}`)
 
   const attendees = await db.execute(
     `SELECT count(*)::int AS n FROM meeting_attendees WHERE meeting_id = '${ended.data?.meetingId}'`,
   )
   chk(rowsOf(attendees)[0].n >= 2, 'with everyone who was there', `${rowsOf(attendees)[0].n} attendees`)
+
+  console.log('\n▶ a recording that lands AFTER the call ended')
+  // The upload only begins when the recorder stops, so it routinely finishes
+  // after end() has already written the meeting — especially on "End for all",
+  // which does both in the same moment. Without a backfill the file sits in
+  // storage with nothing pointing at it.
+  {
+    const late = `calls/${WS}/${callId}/recording-late.webm`
+    chk((await call('POST', `/workspaces/${WS}/calls/${callId}/recording/attach`, { storageKey: late })).status === 200, 'is still accepted', 'a late upload was refused')
+    const backfilled = rowsOf(await db.execute(`SELECT recording_url FROM meetings WHERE id = '${ended.data?.meetingId}'`))[0]
+    chk(backfilled.recording_url === late, 'and is backfilled onto the meeting record', `the meeting still points at ${backfilled.recording_url}`)
+  }
 
   console.log('\n▶ the card, now that the call is over')
   const after = await chat.listMessages(CHANNEL, ME)
@@ -295,6 +324,22 @@ async function main() {
   chk(String(m2.transcript ?? '').includes('something was said'), 'keeping the transcript', 'the transcript was lost when no model was configured')
   chk(m2.notes === null, 'with no notes rather than empty ones', `notes were ${JSON.stringify(m2.notes)}`)
   aiAvailable = true
+
+  console.log('\n▶ a call that was never recorded at all')
+  {
+    // start() JOINS a call already running in the channel, so this has to run
+    // where none is — otherwise it silently inherits the recorded one and the
+    // check passes for the wrong reason. Asserting the id makes that
+    // impossible rather than merely unlikely.
+    const fresh = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL })
+    chk(fresh.data?.id !== callId, 'is genuinely a new call', 'it joined the recorded one — this check would prove nothing')
+    chk(
+      (await call('POST', `/workspaces/${WS}/calls/${fresh.data?.id}/recording/upload-url`, { contentType: 'audio/webm' })).status === 400,
+      'and is refused an upload URL',
+      'a call nobody recorded could still hand in a recording',
+    )
+    await call('POST', `/workspaces/${WS}/calls/${fresh.data?.id}/end`, {})
+  }
 
   console.log('\n▶ recording a call that has ended')
   chk((await call('POST', `/workspaces/${WS}/calls/${callId}/recording`, { recording: true })).status === 400, 'is refused', 'an ended call could be put back into recording')

@@ -333,9 +333,10 @@ export class CallsService {
     // a second write that might not happen.
     const transcript = await this.transcriptFor(callId).catch(() => '')
     const notes = transcript ? await this.notesFrom(transcript, call.workspaceId, userId) : null
-    const recordingUrl = call.recordingStorageKey
-      ? await this.r2.getObjectUrl(call.recordingStorageKey).catch(() => null)
-      : null
+    // The KEY, not a signed URL. A signed R2 URL lasts fifteen minutes, so
+    // writing one into a permanent column produces a recording link that is
+    // dead before anybody opens the notes. Meetings signs it on the way out.
+    const recordingUrl = call.recordingStorageKey ?? null
 
     const meeting = await this.meetings
       .create(call.workspaceId, userId, {
@@ -500,7 +501,21 @@ export class CallsService {
    */
   async recordingUploadUrl(callId: string, userId: string, contentType: string) {
     const call = await this.assertCanReach(callId, userId)
-    if (!call.recording) throw new BadRequestException('This call is not being recorded')
+    /*
+     * "Has this call ever been recorded", not "is it recording right now".
+     *
+     * The browser cannot upload until MediaRecorder has stopped, and the only
+     * thing that stops it is recording being switched off — so by the time the
+     * upload asks for a URL, `recording` is ALWAYS false. Requiring it here
+     * meant every recording was refused at the last step and silently thrown
+     * away, which is the worst possible way for this to fail: the banner was
+     * up, everyone consented, and the file went nowhere.
+     *
+     * `recordingStartedAt` is the honest gate. It is set when recording starts
+     * and never cleared, so it says "this call produced a recording, and you
+     * may hand it in" — which is exactly the permission being asked for.
+     */
+    if (!call.recordingStartedAt) throw new BadRequestException('This call was never recorded')
     if (!this.r2.configured) throw new BadRequestException('Storage is not configured')
     const type = contentType || 'audio/webm'
     if (!type.startsWith('audio/') && !type.startsWith('video/')) {
@@ -520,6 +535,23 @@ export class CallsService {
       throw new BadRequestException('That storage key does not belong to this call')
     }
     await this.db.update(calls).set({ recordingStorageKey: storageKey }).where(eq(calls.id, callId))
+
+    /*
+     * If the call has already ended, backfill the record it left behind.
+     *
+     * The upload only starts once the recorder stops, so it routinely lands
+     * AFTER end() has written the meeting — especially when somebody hangs up
+     * for everyone, which ends the call in the same moment it stops the
+     * recorder. Without this the file sits in storage with nothing pointing at
+     * it, and the meeting says there was no recording.
+     */
+    if (call.meetingId) {
+      await this.db
+        .update(meetings)
+        .set({ recordingUrl: storageKey })
+        .where(eq(meetings.id, call.meetingId))
+        .catch(() => undefined)
+    }
     return { ok: true }
   }
 }

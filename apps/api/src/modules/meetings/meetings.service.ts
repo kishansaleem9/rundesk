@@ -6,6 +6,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { PUBLIC_USER_COLUMNS } from '../../common/permissions/public-user'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { AiService } from '../ai/ai.service'
+import { R2Service } from '../../common/storage/r2.service'
 import { TasksService } from '../tasks/tasks.service'
 
 const MAX_TITLE = 300
@@ -24,7 +25,28 @@ export class MeetingsService {
     @Inject(DB_TOKEN) private db: Db,
     private readonly ai: AiService,
     private readonly tasksService: TasksService,
+    private readonly r2: R2Service,
   ) {}
+
+  /**
+   * §2.8 gap 10 — turn a stored recording pointer into something playable.
+   *
+   * `recordingUrl` holds two different things and always has: a URL somebody
+   * pasted in (a Zoom link, a Drive file), and — since calls started leaving
+   * recordings behind — a storage key for a file we hold ourselves.
+   *
+   * They are safely told apart because a storage key has no scheme. That
+   * matters because signing is not optional here: R2 signed URLs last fifteen
+   * minutes, so a signed URL written into this column is a dead link before
+   * the meeting notes have been read once. The key is what is durable; the URL
+   * is made fresh on the way out, exactly as chat attachments already do.
+   */
+  private async playableRecording(stored: string | null): Promise<string | null> {
+    if (!stored) return null
+    if (stored.includes('://')) return stored
+    if (!this.r2.configured) return stored
+    return this.r2.getObjectUrl(stored).catch(() => null)
+  }
 
   private async assertMember(workspaceId: string, userId: string) {
     const [m] = await this.db
@@ -44,7 +66,7 @@ export class MeetingsService {
       .where(and(eq(meetings.workspaceId, workspaceId), eq(meetings.id, meetingId)))
       .limit(1)
     if (!row) throw new NotFoundException('Meeting not found')
-    return row
+    return { ...row, recordingUrl: await this.playableRecording(row.recordingUrl) }
   }
 
   private async attendeesFor(meetingIds: string[]) {

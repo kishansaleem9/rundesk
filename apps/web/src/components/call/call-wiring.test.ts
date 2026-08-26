@@ -65,6 +65,19 @@ describe('§2.8 leaving the page leaves the call', () => {
     )
   })
 
+  it('tells callHasEnded how old the answer is', () => {
+    // The two live-call queries share a cache key, so the joined query is
+    // served the pre-call `null` the instant it mounts — already isSuccess.
+    // Without the timing, starting a SyncUp hangs itself up on the first
+    // render. A correct callHasEnded is worth nothing if this stops feeding it.
+    assert.ok(text.includes('joinedAt: joinedAt.current'), 'the ended check is no longer given the join time')
+    assert.ok(text.includes('answeredAt: joinedQuery.dataUpdatedAt'), 'the ended check is no longer given the answer time')
+    assert.ok(
+      /joinedAt\.current = Date\.now\(\)/.test(text),
+      'nothing stamps the moment of joining, so the guard compares against 0 and never fires',
+    )
+  })
+
   it('watches the call it is IN, not only the channel on screen', () => {
     assert.ok(
       text.includes("useLiveCall(workspaceId, inCall?.channelId ?? null)"),

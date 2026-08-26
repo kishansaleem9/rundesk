@@ -90,6 +90,35 @@ describe('§2.8 noticing the call ended under us', () => {
   it('is silent when we are not in a call at all', () => {
     assert.equal(callHasEnded({ inCallId: null, liveId: null, settled: true }), false)
   })
+
+  it('IGNORES an answer that predates the call — the one that hung people up', () => {
+    // The two live-call queries share a cache key whenever you are in a call in
+    // the channel you are looking at, which is nearly always. Before the call
+    // existed that key held a successful `null`, and React Query serves it the
+    // instant the second query mounts — isSuccess already true — while it
+    // refetches. So starting a SyncUp hung itself up on the first render.
+    assert.equal(
+      callHasEnded({ inCallId: 'call-1', liveId: null, settled: true, answeredAt: 900, joinedAt: 1000 }),
+      false,
+      'a pre-join answer was treated as proof the call had ended',
+    )
+  })
+
+  it('believes an answer from after the call started', () => {
+    assert.equal(
+      callHasEnded({ inCallId: 'call-1', liveId: null, settled: true, answeredAt: 1200, joinedAt: 1000 }),
+      true,
+    )
+    assert.equal(
+      callHasEnded({ inCallId: 'call-1', liveId: 'call-1', settled: true, answeredAt: 1200, joinedAt: 1000 }),
+      false,
+    )
+  })
+
+  it('still works when the caller supplies no timing at all', () => {
+    // The guard must not become the thing that stops a real end being noticed.
+    assert.equal(callHasEnded({ inCallId: 'call-1', liveId: null, settled: true }), true)
+  })
 })
 
 describe('§2.8 the large-call warning counts peers', () => {

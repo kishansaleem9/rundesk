@@ -52,6 +52,11 @@ export function ChannelCall({
   const [inCall, setInCall] = useState<Call | null>(null)
   const [consentOpen, setConsentOpen] = useState(false)
   const [recordingBusy, setRecordingBusy] = useState(false)
+  /**
+   * When we joined. Any query answer older than this predates the call and
+   * cannot be evidence that it has ended — see callHasEnded.
+   */
+  const joinedAt = useRef(0)
 
   /**
    * Two questions, two queries.
@@ -105,12 +110,14 @@ export function ChannelCall({
         inCallId: inCall.id,
         liveId: joined?.id ?? null,
         settled: joinedQuery.isSuccess,
+        answeredAt: joinedQuery.dataUpdatedAt,
+        joinedAt: joinedAt.current,
       })
     ) {
       hangUpLocally()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joinedQuery.data, joinedQuery.isSuccess, inCall?.id])
+  }, [joinedQuery.data, joinedQuery.isSuccess, joinedQuery.dataUpdatedAt, inCall?.id])
 
   const hangUpLocally = () => {
     // Stop the tracks BEFORE clearing state. Dropping the reference first
@@ -157,6 +164,9 @@ export function ChannelCall({
       // start() joins the call already running here, so two people pressing
       // together land in the same one.
       const call = live ? await actions.join(live.id) : await actions.start({ channelId })
+      // Stamped BEFORE the state that starts the watcher, so the first render
+      // with a call in hand already knows how old an answer has to be to count.
+      joinedAt.current = Date.now()
       setStream(media)
       setBackground(chosen)
       setInCall(call)

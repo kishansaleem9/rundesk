@@ -612,24 +612,44 @@ describe('§2.8 the notes are written from what was said', () => {
 })
 
 describe('§2.8 the recording goes straight to storage', () => {
+  /**
+   * A call that HAS been recorded — which is not the same as one recording
+   * right now, and the difference lost every recording ever made.
+   *
+   * The browser cannot upload until MediaRecorder stops, and the only thing
+   * that stops it is recording being switched off. So by the time the upload
+   * asks for a URL, `recording` is ALWAYS false. `recordingStartedAt` is what
+   * actually says "this call produced a file, and you may hand it in".
+   */
+  const RECORDED = { ...LIVE_CALL, recording: true, recordingStartedAt: new Date() }
+
   it('hands back a URL to PUT to, and a key under this call', async () => {
     // The media never passes through the API, in a call or on its way out.
-    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const { db } = fakeDb({ calls: [{ ...RECORDED }] })
     const out = await makeService({ db }).recordingUploadUrl('call1', 'me', 'audio/webm')
     assert.match(out.storageKey, /^calls\/ws1\/call1\//)
     assert.ok(out.uploadUrl.includes(out.storageKey))
   })
 
-  it('refuses to hand out a URL for a call nobody announced', async () => {
-    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, recording: false }] })
+  it('refuses a call nobody ever recorded', async () => {
+    // Never announced, so there is no file and no consent behind one.
+    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, recording: false, recordingStartedAt: null }] })
     await assert.rejects(
       () => makeService({ db }).recordingUploadUrl('call1', 'me', 'audio/webm'),
-      /not being recorded/i,
+      /never recorded/i,
     )
   })
 
+  it('ALLOWS one whose recording has just been stopped', async () => {
+    // The only order the browser can actually use. Requiring `recording` here
+    // refused every finished recording at the last step and dropped it.
+    const { db } = fakeDb({ calls: [{ ...RECORDED, recording: false }] })
+    const out = await makeService({ db }).recordingUploadUrl('call1', 'me', 'audio/webm')
+    assert.ok(out.uploadUrl, 'a finished recording could not be handed in')
+  })
+
   it('refuses a content type that is not media', async () => {
-    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const { db } = fakeDb({ calls: [{ ...RECORDED }] })
     await assert.rejects(
       () => makeService({ db }).recordingUploadUrl('call1', 'me', 'application/zip'),
       /audio or video/i,
@@ -637,7 +657,7 @@ describe('§2.8 the recording goes straight to storage', () => {
   })
 
   it('says so plainly when storage is not configured', async () => {
-    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const { db } = fakeDb({ calls: [{ ...RECORDED }] })
     await assert.rejects(
       () =>
         makeService({ db, r2: { ...storage(), configured: false } }).recordingUploadUrl(
@@ -652,7 +672,7 @@ describe('§2.8 the recording goes straight to storage', () => {
   it('refuses a key belonging to a different call', async () => {
     // The one mistake here that cannot be undone: attaching somebody else's
     // recording to this meeting.
-    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const { db } = fakeDb({ calls: [{ ...RECORDED }] })
     await assert.rejects(
       () => makeService({ db }).attachRecording('call1', 'me', 'calls/ws1/some-other-call/rec.webm'),
       /does not belong/i,
@@ -660,7 +680,7 @@ describe('§2.8 the recording goes straight to storage', () => {
   })
 
   it('accepts a key from this call', async () => {
-    const { db, updates } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const { db, updates } = fakeDb({ calls: [{ ...RECORDED }] })
     await makeService({ db }).attachRecording('call1', 'me', 'calls/ws1/call1/recording-1.webm')
     assert.ok(
       updates.some((u) => u.recordingStorageKey === 'calls/ws1/call1/recording-1.webm'),
