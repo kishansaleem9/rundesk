@@ -444,15 +444,16 @@ export class CallsService {
       endedAt = claimedAt
     }
     /*
-     * Otherwise: ended_at is set but no record was left behind.
+     * From here the record is OWED — whether the end was just claimed above or
+     * was claimed by an attempt that died before writing it.
      *
      * The claim commits on its own, and everything that produces the record —
      * the participant read, the transcript, an outbound model call that takes
      * seconds — runs after it. A crash or a deploy in that window used to end
-     * the call permanently with nothing to show for it: the guard above
+     * the call permanently with nothing to show for it: the guard at the top
      * returned `{ ok: true, meetingId: null }` forever and the transcript,
      * notes, attendees and recording were unreachable from Meetings. Ending is
-     * claimed once; WRITING THE RECORD is owed until it exists.
+     * claimed once; writing the record is owed until it exists.
      */
     const people = await this.participantsOf(callId)
 
