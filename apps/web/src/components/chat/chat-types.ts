@@ -49,6 +49,24 @@ export type ChatMessage = {
     users?: Array<{ id: string; name: string }>
   }>
   attachments?: ChatAttachment[]
+  /**
+   * §2.8 gap 9 — set when this message is a call card rather than text.
+   *
+   * Live state, not a snapshot: the card is read an hour later by somebody who
+   * may or may not be in that call, and has to say the right one of three
+   * things without the message being rewritten.
+   */
+  callId?: string | null
+  call?: {
+    id: string
+    startedAt: string
+    endedAt: string | null
+    recording: boolean
+    startedById: string
+    joinedCount: number
+    presentCount: number
+    youArePresent: boolean
+  } | null
 }
 
 // Message edit history (Plan §6.3): prior versions newest-first plus the live one.

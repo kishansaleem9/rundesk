@@ -167,6 +167,8 @@ type NotificationType =
   | 'message_reaction'
   | 'shared_with_me'
   | 'access_requested'
+  // §2.8 [19:25] — "aap ko notification aa raha hoga ke CALL ka option aaya".
+  | 'call_started'
 
 type NotificationEventKey =
   | 'mention'
@@ -1069,7 +1071,11 @@ export class NotificationsService {
       case 'doc_mentioned':
       case 'doc_commented':
         return 'doc'
+      // §2.8 [19:25] — a call starting in a channel is chat activity, and rides
+      // the chat channel deliberately: somebody who has muted a channel's
+      // messages has not asked to be called from it either.
       case 'chat_message':
+      case 'call_started':
         return 'chat'
       // §7.11 — the daily AI briefing rides the general activity channel so a
       // user who mutes activity also mutes their briefing.

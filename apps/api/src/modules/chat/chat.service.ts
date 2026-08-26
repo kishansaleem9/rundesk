@@ -20,6 +20,9 @@ import {
   objectShares,
   workspaceGroups,
   workspaceGroupMembers,
+  // §2.8 gap 9 — a message can be a call card, and a card renders live state.
+  calls,
+  callParticipants,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -80,6 +83,26 @@ export function normalizeSaveTags(tags: unknown): string[] {
     .map((t) => (typeof t === 'string' ? t.trim().toLowerCase() : ''))
     .filter((t) => t.length > 0 && t.length <= 32)
   return [...new Set(cleaned)].slice(0, 20)
+}
+
+/**
+ * §2.8 gap 9 — the live state a call card renders from.
+ *
+ * Sent alongside the message rather than fetched per card: a channel can hold
+ * a dozen of these, and a dozen requests to draw a scrollback is not a design.
+ */
+interface ChatCallCard {
+  id: string
+  startedAt: string
+  endedAt: string | null
+  recording: boolean
+  startedById: string
+  /** Everyone who was ever in it — "1 person joined". */
+  joinedCount: number
+  /** Everyone still in it. */
+  presentCount: number
+  /** Whether the person reading this is one of them. */
+  youArePresent: boolean
 }
 
 @Injectable()
@@ -1305,6 +1328,8 @@ export class ChatService {
         authorAvatarUrl: users.avatarUrl,
         // §12 — where this was forwarded from, if it was.
         forwardedFromId: chatMessages.forwardedFromId,
+        // §2.8 gap 9 — set when this message IS a call card.
+        callId: chatMessages.callId,
       })
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
@@ -1432,6 +1457,52 @@ export class ChatService {
       }
     }
 
+    /*
+     * §2.8 gap 9 — hydrate the call behind each card.
+     *
+     * The card is not a snapshot of the moment the call started: it has to say
+     * "You're in the SyncUp", "Join the SyncUp" or "SyncUp Ended · lasted 45s"
+     * depending on what is true NOW, an hour later, for whoever is reading. So
+     * it carries live state rather than frozen text, and the reader's own
+     * presence is resolved here — the client cannot be trusted to know whether
+     * a `leftAt` it has not refetched is still null.
+     */
+    const callIds = [...new Set(ordered.map((m) => m.callId).filter(Boolean))] as string[]
+    const callById = new Map<string, ChatCallCard>()
+    if (callIds.length > 0) {
+      const callRows = await this.db
+        .select({
+          id: calls.id,
+          startedAt: calls.startedAt,
+          endedAt: calls.endedAt,
+          recording: calls.recording,
+          startedById: calls.startedById,
+        })
+        .from(calls)
+        .where(inArray(calls.id, callIds))
+      const participantRows = await this.db
+        .select({
+          callId: callParticipants.callId,
+          userId: callParticipants.userId,
+          leftAt: callParticipants.leftAt,
+        })
+        .from(callParticipants)
+        .where(inArray(callParticipants.callId, callIds))
+      for (const call of callRows) {
+        const mine = participantRows.filter((p) => p.callId === call.id)
+        callById.set(call.id, {
+          ...call,
+          startedAt: call.startedAt.toISOString(),
+          endedAt: call.endedAt ? call.endedAt.toISOString() : null,
+          // Everyone who was ever in it — "1 person joined" is a fact about the
+          // whole call, not about who happens to be there as you read this.
+          joinedCount: new Set(mine.map((p) => p.userId)).size,
+          presentCount: mine.filter((p) => !p.leftAt).length,
+          youArePresent: mine.some((p) => p.userId === userId && !p.leftAt),
+        })
+      }
+    }
+
     return ordered.map((message) => {
       const byEmoji = grouped.get(message.id)
       const reactions =
@@ -1459,6 +1530,10 @@ export class ChatService {
         replyCount: stats?.replyCount ?? 0,
         lastReplyAt: stats?.lastReplyAt ?? null,
         deliveryStatus,
+        // §2.8 gap 9 — null on an ordinary message; the card's live state on a
+        // call card. Null on a card whose call has been deleted, too, which is
+        // why the message keeps its plain-words body.
+        call: message.callId ? callById.get(message.callId) ?? null : null,
       }
     })
   }

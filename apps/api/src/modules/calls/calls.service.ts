@@ -11,6 +11,7 @@ import {
   calls,
   chatChannelMembers,
   chatChannels,
+  chatMessages,
   users,
   workspaceMembers,
 } from '@rundesk/db'
@@ -18,6 +19,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { MeetingsService } from '../meetings/meetings.service'
+import { NotificationsService } from '../notifications/notifications.service'
 
 /**
  * §2.8 SyncUp — the call itself.
@@ -33,6 +35,7 @@ export class CallsService {
     @Inject(DB_TOKEN) private db: Db,
     private realtime: RealtimeGateway,
     private meetings: MeetingsService,
+    private notifications: NotificationsService,
   ) {}
 
   private async assertMember(workspaceId: string, userId: string) {
@@ -156,7 +159,89 @@ export class CallsService {
       startedById: userId,
     } as never)
 
+    // §2.8 gap 9 — tell the channel. Best-effort: a call that starts is worth
+    // more than an announcement that succeeds, so a failure here must not stop
+    // somebody getting into their own call.
+    if (row.channelId) {
+      await this.announce(row.id, row.channelId, workspaceId, userId).catch(() => {})
+    }
+
     return { ...row, participants: await this.participantsOf(row.id) }
+  }
+
+  /**
+   * §2.8 gap 9 — a call nobody is told about is a call nobody joins.
+   *
+   *   `[19:25]` "aap ko notification aa raha hoga ke CALL ka option aaya… aap
+   *   chaho to wahan se direct call join ho jaoge"
+   *
+   * Two things, because they answer two different questions. The card in the
+   * channel is for the person who scrolls back an hour later and wants to know
+   * what happened; the notification is for the person who is not looking at
+   * this channel at all, which is everybody, most of the time.
+   */
+  private async announce(
+    callId: string,
+    channelId: string,
+    workspaceId: string,
+    starterId: string,
+  ) {
+    const [starter] = await this.db
+      .select({ name: users.displayName, email: users.email })
+      .from(users)
+      .where(eq(users.id, starterId))
+      .limit(1)
+    const who = starter?.name?.trim() || starter?.email || 'Someone'
+
+    // The card. `body` carries the same sentence in plain words, so a client
+    // that does not know about call cards — an email digest, a search result —
+    // still reads as something rather than as an empty message.
+    const [message] = await this.db
+      .insert(chatMessages)
+      .values({ channelId, authorId: starterId, callId, body: `${who} started a SyncUp` })
+      .returning()
+
+    this.realtime.emitToWorkspace(workspaceId, {
+      type: 'chat.message.created',
+      workspaceId,
+      channelId,
+      message: { ...message, authorName: who, reactions: [] },
+    } as never)
+
+    // The notification, to the channel's members — not the workspace's. Being
+    // told about a call in a channel you are not in is noise, and the members
+    // table is what "in" means.
+    const members = await this.db
+      .select({ userId: chatChannelMembers.userId })
+      .from(chatChannelMembers)
+      .where(eq(chatChannelMembers.channelId, channelId))
+
+    const [channel] = await this.db
+      .select({ name: chatChannels.name })
+      .from(chatChannels)
+      .where(eq(chatChannels.id, channelId))
+      .limit(1)
+
+    for (const member of members) {
+      if (member.userId === starterId) continue
+      await this.notifications
+        .create({
+          userId: member.userId,
+          workspaceId,
+          actorId: starterId,
+          type: 'call_started',
+          title: `${who} started a call`,
+          body: channel?.name ? `In #${channel.name}` : undefined,
+          // Straight to the channel, where the Join button is. A notification
+          // you have to go looking from is not the "direct join" she describes.
+          target: {
+            entityType: 'call',
+            entityId: callId,
+            url: `/app/${workspaceId}/chat?channel=${channelId}`,
+          },
+        })
+        .catch(() => null)
+    }
   }
 
   async join(callId: string, userId: string) {

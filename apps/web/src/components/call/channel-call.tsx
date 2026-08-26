@@ -23,11 +23,22 @@ export function ChannelCall({
   channelId,
   canRecord,
   onInvite,
+  action,
+  onActionHandled,
 }: {
   workspaceId: string
   channelId: string | null
   canRecord: boolean
   onInvite: () => void
+  /**
+   * §2.8 gap 9 — a call card in the message list asking to join or leave.
+   *
+   * The card cannot do either itself: the pre-join dialog, the media and the
+   * live call all live here. It raises the intent, this acts on it and clears
+   * it, so pressing Join twice is two joins rather than one stuck flag.
+   */
+  action?: 'join' | 'leave' | null
+  onActionHandled?: () => void
 }) {
   const { t } = useTranslation()
   const me = useAuthStore((s) => s.user)
@@ -171,6 +182,19 @@ export function ChannelCall({
       if (result?.meetingId) toast.success(t('call.recordKept'))
     }
   }
+
+  // §2.8 gap 9 — act on a card's Join/Leave, then clear it so the next press
+  // is a fresh intent rather than a flag nobody reset.
+  useEffect(() => {
+    if (!action) return
+    if (action === 'join') {
+      if (!inCall) beginJoin()
+    } else {
+      void leave()
+    }
+    onActionHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [action])
 
   const toggleRecording = async () => {
     if (!inCall) return

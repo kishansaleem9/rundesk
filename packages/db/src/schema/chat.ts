@@ -3,6 +3,11 @@ import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { spaces } from './spaces'
 import { users } from './users'
+// §2.8 gap 9 — chat and calls reference each other (a channel has calls; a
+// message announces one). Both sides are thunked `() => …` references, which
+// drizzle resolves after both modules have finished evaluating, so the cycle
+// is fine — an eager reference on either side would not be.
+import { calls } from './calls'
 
 export const chatChannels = pgTable('chat_channels', {
   id:          uuid('id').primaryKey().defaultRandom(),
@@ -66,6 +71,19 @@ export const chatMessages = pgTable('chat_messages', {
    * thing it pointed at is gone.
    */
   forwardedFromId: uuid('forwarded_from_id').references((): AnyPgColumn => chatMessages.id, { onDelete: 'set null' }),
+  /**
+   * §2.8 gap 9 — the call this message announces, which makes it a call card
+   * rather than a line of text.
+   *
+   * One nullable reference rather than a message-kind enum: there is exactly
+   * one kind of non-text message today, and a column that answers "which call?"
+   * answers "is this a card?" for free.
+   *
+   * SET NULL, like forwardedFromId above and for the same reason: deleting the
+   * call must not delete the message that announced it. The channel should
+   * still read "Hamda started a SyncUp" afterwards.
+   */
+  callId:          uuid('call_id').references(() => calls.id, { onDelete: 'set null' }),
   body:            text('body').notNull(),
   mentions:        jsonb('mentions').$type<Array<{ userId: string }>>(),
   editedAt:        timestamp('edited_at', { withTimezone: true }),

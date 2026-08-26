@@ -5294,6 +5294,19 @@ export const en = {
   'gate.failed': 'Could not reach your admins. Try again in a moment.',
   'gate.aiNotetaker': 'AI Notetaker',
   'gate.aiNotetakerBlurb': 'Automatic meeting notes connected to docs and tasks.',
+
+  // §2.8 gap 9 — the call card in the channel [19:25-19:57, 21:10].
+  'callCard.youAreIn': 'You\u2019re in the SyncUp',
+  'callCard.join': 'Join the SyncUp',
+  'callCard.ended': 'SyncUp Ended',
+  'callCard.waitForTeam': 'Wait for your team to join!',
+  'callCard.inWithOthers': '{{count}} other people are here',
+  'callCard.nobodyIn': 'No one is in the call',
+  'callCard.peopleIn': '{{count}} in the call',
+  'callCard.endedDetail': 'Lasted {{duration}} \u00b7 {{count}} joined',
+  'callCard.joinButton': 'Join',
+  'callCard.leaveButton': 'Leave',
+  'callCard.recording': 'Recording',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10542,6 +10555,18 @@ export const es: Record<TranslationKey, string> = {
   'gate.aiNotetaker': 'Notas con IA',
   'gate.aiNotetakerBlurb': 'Notas de reunión automáticas conectadas a documentos y tareas.',
 
+  'callCard.youAreIn': 'Estás en el SyncUp',
+  'callCard.join': 'Unirse al SyncUp',
+  'callCard.ended': 'SyncUp finalizado',
+  'callCard.waitForTeam': '¡Espera a que se una tu equipo!',
+  'callCard.inWithOthers': 'Hay {{count}} personas más aquí',
+  'callCard.nobodyIn': 'No hay nadie en la llamada',
+  'callCard.peopleIn': '{{count}} en la llamada',
+  'callCard.endedDetail': 'Duró {{duration}} \u00b7 se unieron {{count}}',
+  'callCard.joinButton': 'Unirse',
+  'callCard.leaveButton': 'Salir',
+  'callCard.recording': 'Grabando',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15788,6 +15813,18 @@ export const ar: Record<TranslationKey, string> = {
   'gate.aiNotetaker': 'مدوّن الملاحظات بالذكاء الاصطناعي',
   'gate.aiNotetakerBlurb': 'ملاحظات اجتماعات تلقائية مرتبطة بالمستندات والمهام.',
 
+  'callCard.youAreIn': 'أنت في مكالمة SyncUp',
+  'callCard.join': 'انضم إلى SyncUp',
+  'callCard.ended': 'انتهت مكالمة SyncUp',
+  'callCard.waitForTeam': 'انتظر انضمام فريقك!',
+  'callCard.inWithOthers': 'يوجد {{count}} أشخاص آخرين هنا',
+  'callCard.nobodyIn': 'لا أحد في المكالمة',
+  'callCard.peopleIn': '{{count}} في المكالمة',
+  'callCard.endedDetail': 'استمرت {{duration}} \u00b7 انضم {{count}}',
+  'callCard.joinButton': 'انضمام',
+  'callCard.leaveButton': 'مغادرة',
+  'callCard.recording': 'جارٍ التسجيل',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20878,6 +20915,18 @@ export const ur: Record<TranslationKey, string> = {
   'gate.failed': 'آپ کے ایڈمنز تک نہیں پہنچا جا سکا۔ تھوڑی دیر بعد کوشش کریں۔',
   'gate.aiNotetaker': 'AI نوٹ ٹیکر',
   'gate.aiNotetakerBlurb': 'خودکار میٹنگ نوٹس جو دستاویزات اور ٹاسکس سے جڑے ہوں۔',
+
+  'callCard.youAreIn': 'آپ SyncUp میں ہیں',
+  'callCard.join': 'SyncUp میں شامل ہوں',
+  'callCard.ended': 'SyncUp ختم ہو گئی',
+  'callCard.waitForTeam': 'اپنی ٹیم کے شامل ہونے کا انتظار کریں!',
+  'callCard.inWithOthers': '{{count}} اور لوگ یہاں ہیں',
+  'callCard.nobodyIn': 'کال میں کوئی نہیں ہے',
+  'callCard.peopleIn': 'کال میں {{count}}',
+  'callCard.endedDetail': '{{duration}} چلی \u00b7 {{count}} شامل ہوئے',
+  'callCard.joinButton': 'شامل ہوں',
+  'callCard.leaveButton': 'چھوڑیں',
+  'callCard.recording': 'ریکارڈنگ',
 
 }
 

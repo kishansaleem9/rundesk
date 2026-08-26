@@ -1675,6 +1675,69 @@ try {
     }
   })
 
+  await section('§2.8e', 'A call announces itself to the channel', async () => {
+    // [19:25] "aap ko notification aa raha hoga ke CALL ka option aaya… aap
+    // chaho to wahan se direct call join ho jaoge". A call nobody is told
+    // about is a call nobody joins.
+    const channels = (await apiGet(`/workspaces/${WS}/chat/channels`)) ?? []
+    const channel = channels.find((c) => !c.isDm)
+    if (!channel) {
+      ok('no non-DM channel on this account, so a call could not be announced')
+    } else {
+      const call = await apiPost(`/workspaces/${WS}/calls`, { channelId: channel.id })
+      if (!call?.id) {
+        bad('could not start a call through the API')
+      } else {
+        // The card. Polled, because the announcement is deliberately
+        // best-effort and runs after the call row is returned.
+        const card = await until(async () => {
+          const msgs = (await apiGet(`/chat/channels/${channel.id}/messages?limit=50`)) ?? []
+          return msgs.find((m) => m.callId === call.id) ?? null
+        }, 8000)
+        chk(!!card, 'starting a call posts a card into the channel', 'no call card appeared')
+
+        if (card) {
+          chk(
+            !!card.call && card.call.id === call.id,
+            'the card carries the call’s live state',
+            'the card has no call state, so it cannot say which of the three things it is',
+          )
+          chk(
+            card.call?.youArePresent === true,
+            'and knows the reader is in it',
+            'the card does not know the reader is in the call',
+          )
+          chk(
+            typeof card.body === 'string' && card.body.length > 0,
+            'with readable words for clients that do not draw cards',
+            'the card message has an empty body',
+          )
+
+          // After it ends, the same card must say so — the state is live, not
+          // frozen at the moment it was posted.
+          await apiPost(`/workspaces/${WS}/calls/${call.id}/end`, {})
+          const ended = await until(async () => {
+            const msgs = (await apiGet(`/chat/channels/${channel.id}/messages?limit=50`)) ?? []
+            const again = msgs.find((m) => m.id === card.id)
+            return again?.call?.endedAt ? again : null
+          }, 8000)
+          chk(
+            !!ended,
+            'and the same card reports the call as ended afterwards',
+            'the card still shows a live call after it ended — its Join button would drop people into a closed room',
+          )
+          chk(
+            (ended?.call?.joinedCount ?? 0) >= 1,
+            `saying how many joined (${ended?.call?.joinedCount ?? 0})`,
+            'the ended card lost the headcount',
+          )
+        } else {
+          await apiPost(`/workspaces/${WS}/calls/${call.id}/end`, {})
+        }
+      }
+    }
+  })
+
   await section('§2.8c', 'The emoji picker is the whole library, searchable', async () => {
     // [20:22] "poori ki poori emoji icons ki list". Rundesk's picker was twelve
     // hard-coded emoji. The list itself loads as its own chunk on first open,

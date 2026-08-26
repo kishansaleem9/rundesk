@@ -110,6 +110,10 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'access_requested',
   // §A2.11 — self-served "send me a test" from the delivery-preferences panel.
   'test_notification',
+  // §2.8 [19:25] — "aap ko notification aa raha hoga ke CALL ka option aaya…
+  // aap chaho to wahan se direct call join ho jaoge". A SyncUp starting in a
+  // channel, delivered to that channel's members with a way in.
+  'call_started',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

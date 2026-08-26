@@ -10,6 +10,7 @@ import { AddPeopleDialog } from '../components/chat/add-people-dialog'
 import { SharePanel } from '../components/share-panel'
 import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
 import { EmojiPicker } from '../components/emoji/emoji-picker'
+import { CallCard } from '../components/call/call-card'
 import { useSkillCommands } from '../lib/skills-api'
 import {
   formatDateDivider,
@@ -137,6 +138,24 @@ type Message = {
     sizeBytes: number
     url: string
   }>
+  /**
+   * §2.8 gap 9 — set when this message is a call card rather than text.
+   *
+   * Live state rather than a snapshot: the card is read long after the call
+   * started, by somebody who may or may not be in it, and has to say the right
+   * one of three things without the message being rewritten.
+   */
+  callId?: string | null
+  call?: {
+    id: string
+    startedAt: string
+    endedAt: string | null
+    recording: boolean
+    startedById: string
+    joinedCount: number
+    presentCount: number
+    youArePresent: boolean
+  } | null
 }
 
 /** A task the mention picker can reference (§A3.6) — carries the ids the chat
@@ -246,6 +265,14 @@ export function ChatPage() {
   const [showSearchPanel, setShowSearchPanel] = useState(false)
   const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
+  /**
+   * §2.8 gap 9 — a call card's Join/Leave, handed to the call component.
+   *
+   * The pre-join dialog and the live call live inside ChannelCall; the card
+   * lives in the message list. Rather than lifting the whole call into this
+   * page, the card raises an intent and ChannelCall acts on it and clears it.
+   */
+  const [callAction, setCallAction] = useState<'join' | 'leave' | null>(null)
   // Right-click context menu (Plan §6.10) anchored at the cursor for a message.
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null)
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
@@ -630,6 +657,22 @@ export function ChatPage() {
         qc.invalidateQueries({ queryKey: ['chat-messages', event.channelId] })
         // The thread panel holds its own copy of the replies (§A3.2).
         qc.invalidateQueries({ queryKey: ['chat-thread'] })
+      }
+      /*
+       * §2.8 gap 9 — a call card reads live, so it has to be refetched when the
+       * call changes under it. Without this the card that said "Join the
+       * SyncUp" goes on saying it after the call has ended, and its button
+       * drops people into a room that closed twenty minutes ago.
+       *
+       * Signalling and reactions are excluded deliberately: those fire many
+       * times a second during a call and none of them change the card.
+       */
+      if (
+        event.type.startsWith('call.') &&
+        event.type !== 'call.signal' &&
+        event.type !== 'call.reaction'
+      ) {
+        qc.invalidateQueries({ queryKey: ['chat-messages'] })
       }
     }
     socket.on('event', onEvent)
@@ -1270,6 +1313,8 @@ export function ChatPage() {
               // offered where inviting people already is: to whoever can manage
               // this channel's membership.
               canRecord={!!selectedChannel && !selectedChannel.isDm}
+              action={callAction}
+              onActionHandled={() => setCallAction(null)}
               onInvite={() => setAddPeopleOpen(true)}
             />
           }
@@ -1958,7 +2003,22 @@ export function ChatPage() {
                               )}
                             </div>
                           )}
-                          {m.body && <ChatMessageBody text={m.body} namesById={namesById} customEmoji={emojiByCode} />}
+                          {/*
+                            §2.8 gap 9 — a message that points at a call renders
+                            as the card. The plain-words body stays underneath
+                            nothing: it exists for clients that do not know what
+                            a call card is (a digest email, a search result), so
+                            showing both here would say it twice.
+                          */}
+                          {m.call ? (
+                            <CallCard
+                              call={m.call}
+                              onJoin={() => setCallAction('join')}
+                              onLeave={() => setCallAction('leave')}
+                            />
+                          ) : (
+                            m.body && <ChatMessageBody text={m.body} namesById={namesById} customEmoji={emojiByCode} />
+                          )}
                           {m.editedAt && (
                             <button
                               type="button"
