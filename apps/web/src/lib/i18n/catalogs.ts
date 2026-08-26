@@ -5253,6 +5253,33 @@ export const en = {
   'call.startedNotification': '{{name}} started a call',
 
   'call.recordKept': 'The call is saved to Meetings',
+
+  // §2.8 gap 7 — the emoji picker [20:22]: search, Frequently Used, the
+  // category strip, and a '+' for a custom one.
+  'emoji.pick': 'Pick an emoji',
+  'emoji.search': 'Search...',
+  'emoji.noResults': 'No emoji matches that.',
+  'emoji.results': 'Results',
+  'emoji.loading': 'Loading emoji…',
+  'emoji.skinTone': 'Skin tone',
+  'emoji.addCustom': 'Add a custom emoji',
+  'emoji.customEmpty': 'This workspace has no custom emoji yet.',
+  'emoji.frequent': 'Frequently Used',
+  'emoji.people': 'Smiles & People',
+  'emoji.nature': 'Animals & Nature',
+  'emoji.food': 'Food & Drink',
+  'emoji.activity': 'Activities',
+  'emoji.travel': 'Travel & Places',
+  'emoji.objects': 'Objects',
+  'emoji.symbols': 'Symbols',
+  'emoji.flags': 'Flags',
+  'emoji.custom': 'Custom',
+  'emoji.tone.default': 'Default',
+  'emoji.tone.light': 'Light',
+  'emoji.tone.mediumLight': 'Medium-light',
+  'emoji.tone.medium': 'Medium',
+  'emoji.tone.mediumDark': 'Medium-dark',
+  'emoji.tone.dark': 'Dark',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10464,6 +10491,31 @@ export const es: Record<TranslationKey, string> = {
 
   'call.recordKept': 'La llamada se guardó en Reuniones',
 
+  'emoji.pick': 'Elegir un emoji',
+  'emoji.search': 'Buscar...',
+  'emoji.noResults': 'Ningún emoji coincide con eso.',
+  'emoji.results': 'Resultados',
+  'emoji.loading': 'Cargando emojis…',
+  'emoji.skinTone': 'Tono de piel',
+  'emoji.addCustom': 'Añadir un emoji personalizado',
+  'emoji.customEmpty': 'Este espacio de trabajo aún no tiene emojis personalizados.',
+  'emoji.frequent': 'Usados con frecuencia',
+  'emoji.people': 'Caras y personas',
+  'emoji.nature': 'Animales y naturaleza',
+  'emoji.food': 'Comida y bebida',
+  'emoji.activity': 'Actividades',
+  'emoji.travel': 'Viajes y lugares',
+  'emoji.objects': 'Objetos',
+  'emoji.symbols': 'Símbolos',
+  'emoji.flags': 'Banderas',
+  'emoji.custom': 'Personalizados',
+  'emoji.tone.default': 'Predeterminado',
+  'emoji.tone.light': 'Claro',
+  'emoji.tone.mediumLight': 'Claro medio',
+  'emoji.tone.medium': 'Medio',
+  'emoji.tone.mediumDark': 'Oscuro medio',
+  'emoji.tone.dark': 'Oscuro',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15673,6 +15725,31 @@ export const ar: Record<TranslationKey, string> = {
 
   'call.recordKept': 'حُفظت المكالمة في الاجتماعات',
 
+  'emoji.pick': 'اختر رمزًا تعبيريًا',
+  'emoji.search': 'بحث...',
+  'emoji.noResults': 'لا يوجد رمز تعبيري مطابق.',
+  'emoji.results': 'النتائج',
+  'emoji.loading': 'جارٍ تحميل الرموز التعبيرية…',
+  'emoji.skinTone': 'لون البشرة',
+  'emoji.addCustom': 'إضافة رمز تعبيري مخصص',
+  'emoji.customEmpty': 'لا توجد رموز تعبيرية مخصصة في مساحة العمل هذه بعد.',
+  'emoji.frequent': 'الأكثر استخدامًا',
+  'emoji.people': 'الوجوه والأشخاص',
+  'emoji.nature': 'الحيوانات والطبيعة',
+  'emoji.food': 'الطعام والشراب',
+  'emoji.activity': 'الأنشطة',
+  'emoji.travel': 'السفر والأماكن',
+  'emoji.objects': 'الأشياء',
+  'emoji.symbols': 'الرموز',
+  'emoji.flags': 'الأعلام',
+  'emoji.custom': 'مخصص',
+  'emoji.tone.default': 'افتراضي',
+  'emoji.tone.light': 'فاتح',
+  'emoji.tone.mediumLight': 'فاتح متوسط',
+  'emoji.tone.medium': 'متوسط',
+  'emoji.tone.mediumDark': 'داكن متوسط',
+  'emoji.tone.dark': 'داكن',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20726,6 +20803,31 @@ export const ur: Record<TranslationKey, string> = {
   'call.startedNotification': '{{name}} نے کال شروع کی',
 
   'call.recordKept': 'کال میٹنگز میں محفوظ ہو گئی',
+
+  'emoji.pick': 'ایموجی منتخب کریں',
+  'emoji.search': 'تلاش کریں...',
+  'emoji.noResults': 'اس سے کوئی ایموجی نہیں ملتی۔',
+  'emoji.results': 'نتائج',
+  'emoji.loading': 'ایموجی لوڈ ہو رہی ہیں…',
+  'emoji.skinTone': 'جلد کا رنگ',
+  'emoji.addCustom': 'اپنی مرضی کی ایموجی شامل کریں',
+  'emoji.customEmpty': 'اس ورک اسپیس میں ابھی کوئی کسٹم ایموجی نہیں ہے۔',
+  'emoji.frequent': 'اکثر استعمال ہونے والی',
+  'emoji.people': 'چہرے اور لوگ',
+  'emoji.nature': 'جانور اور فطرت',
+  'emoji.food': 'کھانا اور مشروبات',
+  'emoji.activity': 'سرگرمیاں',
+  'emoji.travel': 'سفر اور مقامات',
+  'emoji.objects': 'اشیاء',
+  'emoji.symbols': 'علامات',
+  'emoji.flags': 'جھنڈے',
+  'emoji.custom': 'کسٹم',
+  'emoji.tone.default': 'ڈیفالٹ',
+  'emoji.tone.light': 'ہلکا',
+  'emoji.tone.mediumLight': 'ہلکا درمیانہ',
+  'emoji.tone.medium': 'درمیانہ',
+  'emoji.tone.mediumDark': 'گہرا درمیانہ',
+  'emoji.tone.dark': 'گہرا',
 
 }
 

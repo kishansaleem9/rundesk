@@ -1675,6 +1675,75 @@ try {
     }
   })
 
+  await section('§2.8c', 'The emoji picker is the whole library, searchable', async () => {
+    // [20:22] "poori ki poori emoji icons ki list". Rundesk's picker was twelve
+    // hard-coded emoji. The list itself loads as its own chunk on first open,
+    // so this also proves that chunk actually arrives on the deployed build —
+    // a dynamic import that 404s looks exactly like an empty picker.
+    const channels = (await apiGet(`/workspaces/${WS}/chat/channels`)) ?? []
+    const channel = channels[0]
+    if (!channel) {
+      ok('no channel on this account, so the composer could not be opened')
+    } else {
+      await go(`/app/${WS}/chat?channel=${channel.id}`, 4500)
+      // The composer's emoji button is the one whose popover carries the picker.
+      await page.locator('button[title*="moji" i]').first().click({ timeout: 5000 }).catch(() => {})
+      const picker = page.locator('[data-testid="emoji-picker"]')
+      const opened = await picker.count()
+      chk(opened > 0, 'the composer opens an emoji picker', 'the emoji button opened nothing')
+
+      if (opened > 0) {
+        chk(
+          (await page.locator('[data-testid="emoji-search"]').count()) > 0,
+          'with a Search field',
+          'the picker has no search field',
+        )
+        chk(
+          (await page.locator('[data-testid="emoji-tone"]').count()) > 0,
+          'a skin-tone control',
+          'no skin-tone control',
+        )
+        chk(
+          (await page.locator('[data-testid="emoji-add-custom"]').count()) > 0,
+          'and a + for a custom one',
+          'no + to add a custom emoji',
+        )
+        const tabs = await page.locator('[data-testid="emoji-tabs"] button').count()
+        chk(tabs >= 9, `a category strip of ${tabs}`, `only ${tabs} category tabs`)
+        chk(
+          (await page.locator('[data-testid="emoji-section-frequent"]').count()) > 0,
+          'Frequently Used at the top',
+          'no Frequently Used section',
+        )
+
+        // The list arrived. Twelve was the old picker; the People section alone
+        // is in the hundreds.
+        await page.waitForSelector('[data-testid="emoji-section-people"] button', { timeout: 8000 }).catch(() => {})
+        const people = await page.locator('[data-testid="emoji-section-people"] button').count()
+        chk(people > 300, `and ${people} emoji under Smiles & People`, `only ${people} — the emoji chunk did not load`)
+
+        // Search, on the deployed build, over the real list.
+        await page.fill('[data-testid="emoji-search"]', 'tada')
+        await page.waitForTimeout(250)
+        const hit = await page.locator('[data-testid="emoji-scroll"] button[data-emoji]').first().textContent().catch(() => '')
+        chk(
+          (hit ?? '').includes('🎉'),
+          'searching "tada" finds 🎉 — a word Unicode never uses',
+          `searching "tada" gave ${hit || 'nothing'}`,
+        )
+
+        await page.fill('[data-testid="emoji-search"]', 'zzzqqq')
+        await page.waitForTimeout(250)
+        chk(
+          (await page.locator('[data-testid="emoji-no-results"]').count()) > 0,
+          'and says so when nothing matches',
+          'a search with no matches showed no message',
+        )
+        await page.keyboard.press('Escape').catch(() => {})
+      }
+    }
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)

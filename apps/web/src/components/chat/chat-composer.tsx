@@ -6,6 +6,7 @@ import { useTranslation, type TranslationKey } from '../../lib/i18n'
 import { formatMentionsPlain } from '../../lib/mentions'
 import type { ChatAttachment, ChatMessage } from './chat-types'
 import { InlineSkeleton } from '../loading-skeletons'
+import { EmojiPicker } from '../emoji/emoji-picker'
 
 /** Human-readable file size for attachment chips (e.g. "1.2 MB"). */
 function formatBytes(bytes: number): string {
@@ -32,8 +33,6 @@ const AI_MODE_KEY: Record<'improve' | 'shorten' | 'expand' | 'professional', Tra
   expand: 'chat.aiExpand',
   professional: 'chat.aiProfessional',
 }
-
-const COMMON_EMOJIS = ['😀', '👍', '🎉', '❤️', '🙏', '🔥', '✅', '👀', '🚀', '😂', '🙌', '💯']
 
 /**
  * A workspace custom emoji (Plan §6.3). Same shape the reaction picker's
@@ -64,6 +63,7 @@ function ComposerBox({
   enableSlashCommands,
   skillCommands = [],
   customEmoji,
+  onManageEmoji,
   leadingTools,
 }: {
   value: string
@@ -92,6 +92,11 @@ function ComposerBox({
   // Shown below the standard grid; clicking inserts the `:shortcode:` token that
   // the message body renderer substitutes back into the emoji image.
   customEmoji?: ComposerCustomEmoji[]
+  /**
+   * §2.8 gap 7 — the picker's `+`. The composer does not own the custom-emoji
+   * manager, so adding one is handed back to the page that does.
+   */
+  onManageEmoji?: () => void
   // Insert row (§A3.5) — task / doc / action-item controls supplied by the page,
   // which owns the workspace queries those pickers need.
   leadingTools?: ReactNode
@@ -375,39 +380,23 @@ function ComposerBox({
                 <Smile className="h-4 w-4" />
               </button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-auto max-w-[248px] p-2">
-              <div className="grid grid-cols-6 gap-1">
-                {COMMON_EMOJIS.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    className="h-8 w-8 rounded-md text-lg hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
-                    onClick={() => handleEmoji(emoji)}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-              {customEmoji && customEmoji.length > 0 && (
-                <div className="mt-2 border-t border-border/60 pt-2">
-                  <div className="px-0.5 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {t('chat.customEmoji')}
-                  </div>
-                  <div className="grid max-h-32 grid-cols-6 gap-1 overflow-y-auto">
-                    {customEmoji.map((ce) => (
-                      <button
-                        key={ce.id}
-                        type="button"
-                        title={`:${ce.shortcode}:`}
-                        className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-black/[0.05] dark:hover:bg-white/[0.06]"
-                        onClick={() => handleCustomEmoji(ce.shortcode)}
-                      >
-                        <img src={ce.imageUrl} alt={ce.shortcode} loading="lazy" className="h-5 w-5 object-contain" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+            {/* §2.8 gap 7 — the whole library, not the twelve that used to live
+                here. Same component the reaction picker and the in-call
+                reactions use. */}
+            <PopoverContent align="start" className="w-auto p-0">
+              <EmojiPicker
+                onSelect={handleEmoji}
+                onSelectCustom={handleCustomEmoji}
+                customEmoji={customEmoji}
+                onAddCustom={
+                  onManageEmoji
+                    ? () => {
+                        setEmojiOpen(false)
+                        onManageEmoji()
+                      }
+                    : undefined
+                }
+              />
             </PopoverContent>
           </Popover>
           <ToolBtn icon={Bold} title={t('chat.bold')} disabled={disabled} onClick={() => wrapSelection('**', 'bold')} />
@@ -570,6 +559,7 @@ export function ChatComposer({
   onRemoveAttachment,
   uploading,
   customEmoji,
+  onManageEmoji,
   leadingTools,
 }: {
   /** §15 — installed skills, each typable as /slug in the command menu. */
@@ -590,6 +580,7 @@ export function ChatComposer({
   uploading?: boolean
   workspaceId?: string
   customEmoji?: ComposerCustomEmoji[]
+  onManageEmoji?: () => void
   leadingTools?: ReactNode
 }) {
   const { t } = useTranslation()
@@ -626,6 +617,7 @@ export function ChatComposer({
         onRemoveAttachment={onRemoveAttachment}
         uploading={uploading}
         customEmoji={customEmoji}
+        onManageEmoji={onManageEmoji}
         leadingTools={leadingTools}
         enableSlashCommands
         skillCommands={skillCommands}
@@ -652,6 +644,7 @@ export function ThreadReplyComposer({
   disabled,
   sending,
   customEmoji,
+  onManageEmoji,
 }: {
   value: string
   onChange: (value: string) => void
@@ -659,6 +652,7 @@ export function ThreadReplyComposer({
   disabled: boolean
   sending: boolean
   customEmoji?: ComposerCustomEmoji[]
+  onManageEmoji?: () => void
   workspaceId?: string
 }) {
   const { t } = useTranslation()
@@ -673,6 +667,7 @@ export function ThreadReplyComposer({
       placeholder={t('chat.replyInThread')}
       sendLabel={t('chat.reply')}
       customEmoji={customEmoji}
+      onManageEmoji={onManageEmoji}
       // §A3.2 — replies run the same /task and /remind commands as the channel
       // composer, so the thread isn't a second-class place to work.
       enableSlashCommands

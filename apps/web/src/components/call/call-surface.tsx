@@ -19,11 +19,11 @@ import { useTranslation } from '../../lib/i18n'
 import { getRealtimeSocket } from '../../lib/realtime'
 import { useWebRtcCall } from '../../lib/use-webrtc-call'
 import { presentIn, type Call } from '../../lib/calls-api'
+import { EmojiPicker } from '../emoji/emoji-picker'
 import { BACKGROUND_TINT, type CallBackground } from './call-prejoin'
 
 /** How long a reaction stays on screen. Long enough to see, short enough to pass. */
 const REACTION_MS = 3000
-const QUICK_REACTIONS = ['👍', '✅', '🔥', '😊', '👏', '🎉']
 
 interface FloatingReaction {
   id: number
@@ -324,20 +324,21 @@ export function CallSurface({
           <Ctl on={showReactions} onClick={() => setShowReactions((v) => !v)} testid="call-react" title={t('call.react')}>
             <Smile className="h-4 w-4" />
           </Ctl>
+          {/*
+            §2.8 gap 7 — the same picker the chat composer opens, which is what
+            the reference shows floating over the tiles mid-call. Frequently
+            Used is the first section, so the one-tap 👍 is still one tap.
+
+            No custom emoji here: a workspace emoji is an image, and the float
+            overlay below renders the character it is given, so a custom one
+            would drift up the screen as the literal text ":shipit:".
+          */}
           {showReactions && (
             <div
-              className="absolute bottom-12 left-1/2 -translate-x-1/2 flex gap-1 rounded-full border border-white/15 bg-card px-2 py-1.5"
+              className="absolute bottom-12 left-1/2 -translate-x-1/2 rounded-xl border border-white/15 bg-popover shadow-lg"
               data-testid="call-reaction-picker"
             >
-              {QUICK_REACTIONS.map((emoji) => (
-                <button
-                  key={emoji}
-                  onClick={() => sendReaction(emoji)}
-                  className="text-lg hover:scale-125 transition-transform"
-                >
-                  {emoji}
-                </button>
-              ))}
+              <EmojiPicker onSelect={sendReaction} autoFocus={false} />
             </div>
           )}
         </div>

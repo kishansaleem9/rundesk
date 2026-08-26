@@ -9,6 +9,7 @@ import { ChannelCall } from '../components/call/channel-call'
 import { AddPeopleDialog } from '../components/chat/add-people-dialog'
 import { SharePanel } from '../components/share-panel'
 import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
+import { EmojiPicker } from '../components/emoji/emoji-picker'
 import { useSkillCommands } from '../lib/skills-api'
 import {
   formatDateDivider,
@@ -1984,47 +1985,26 @@ export function ChatPage() {
                           >
                             <Smile className="h-3 w-3" />
                           </button>
+                          {/* §2.8 gap 7 — reacting opens the whole library, the
+                              same one the composer opens. Six emoji and a link
+                              to a settings screen was the old answer. */}
                           {reactionPickerFor === m.id && (
-                            <div className="absolute right-0 top-8 z-20 w-56 rounded-lg border border-border bg-card shadow-lg p-1.5">
-                              <div className="flex items-center gap-1 flex-wrap">
-                                {['😀', '🔥', '❤️', '👏', '👍', '🎉'].map((emoji) => (
-                                  <button
-                                    key={emoji}
-                                    type="button"
-                                    className="h-7 w-7 rounded hover:bg-muted text-sm"
-                                    onClick={() => {
-                                      toggleReactionMutation.mutate({ messageId: m.id, emoji })
-                                      setReactionPickerFor(null)
-                                    }}
-                                  >
-                                    {emoji}
-                                  </button>
-                                ))}
-                                {customEmoji.map((ce) => (
-                                  <button
-                                    key={ce.id}
-                                    type="button"
-                                    title={`:${ce.shortcode}:`}
-                                    className="h-7 w-7 rounded hover:bg-muted flex items-center justify-center"
-                                    onClick={() => {
-                                      toggleReactionMutation.mutate({ messageId: m.id, emoji: `:${ce.shortcode}:` })
-                                      setReactionPickerFor(null)
-                                    }}
-                                  >
-                                    <img src={ce.imageUrl} alt={ce.shortcode} className="h-5 w-5 object-contain" />
-                                  </button>
-                                ))}
-                              </div>
-                              <button
-                                type="button"
-                                className="mt-1 w-full text-left text-[11px] text-muted-foreground hover:text-foreground"
-                                onClick={() => {
+                            <div className="absolute right-0 top-8 z-20 rounded-lg border border-border bg-popover shadow-lg">
+                              <EmojiPicker
+                                onSelect={(emoji) => {
+                                  toggleReactionMutation.mutate({ messageId: m.id, emoji })
+                                  setReactionPickerFor(null)
+                                }}
+                                onSelectCustom={(shortcode) => {
+                                  toggleReactionMutation.mutate({ messageId: m.id, emoji: `:${shortcode}:` })
+                                  setReactionPickerFor(null)
+                                }}
+                                customEmoji={customEmoji}
+                                onAddCustom={() => {
                                   setEmojiManagerOpen(true)
                                   setReactionPickerFor(null)
                                 }}
-                              >
-                                ＋ {t('chat.addCustomEmoji')}
-                              </button>
+                              />
                             </div>
                           )}
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
@@ -2330,6 +2310,7 @@ export function ChatPage() {
           onRemoveAttachment={(id) => setPendingAttachments((prev) => prev.filter((a) => a.id !== id))}
           uploading={uploadingFiles}
           customEmoji={customEmoji}
+          onManageEmoji={() => setEmojiManagerOpen(true)}
           leadingTools={
             <>
               {/* Insert row (§A3.5): drop a task or doc reference into the draft.
@@ -2568,6 +2549,7 @@ export function ChatPage() {
             pending={sendMutation.isPending}
             namesById={namesById}
             customEmoji={customEmoji}
+            onManageEmoji={() => setEmojiManagerOpen(true)}
             emojiByCode={emojiByCode}
           />
         )}
@@ -3311,6 +3293,7 @@ function ThreadPanel({
   pending,
   namesById,
   customEmoji,
+  onManageEmoji,
   emojiByCode,
 }: {
   workspaceId: string
@@ -3326,6 +3309,7 @@ function ThreadPanel({
   pending: boolean
   namesById: Record<string, string>
   customEmoji?: CustomEmoji[]
+  onManageEmoji?: () => void
   emojiByCode: Map<string, string>
 }) {
   const [draft, setDraft] = useState('')
@@ -3370,7 +3354,9 @@ function ThreadPanel({
 
   const quickReact = (message: Message) => (
     <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100">
-      {['👍', '🎉', '❤️'].map((emoji) => (
+      {/* The three she names at [20:24] — "👍 ✅ 🔥" — as the emoji themselves,
+          not icons standing in for them. The picker beside them is the rest. */}
+      {['👍', '✅', '🔥'].map((emoji) => (
         <button
           key={`${message.id}-quick-${emoji}`}
           type="button"
@@ -3455,6 +3441,7 @@ function ThreadPanel({
           disabled={false}
           sending={pending}
           customEmoji={customEmoji}
+          onManageEmoji={onManageEmoji}
         />
         <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
           <input
