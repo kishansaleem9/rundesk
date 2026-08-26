@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Badge, cn, toast } from '@rundesk/ui'
 import { Video, Circle, AlertTriangle } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
@@ -6,6 +6,7 @@ import { getRealtimeSocket } from '../../lib/realtime'
 import { useAuthStore } from '../../store/auth'
 import { FLAGS } from '@rundesk/feature-flags'
 import { presentIn, useCallActions, useLiveCall, type Call } from '../../lib/calls-api'
+import { callHasEnded } from '../../lib/call-lifecycle'
 import { useFeatureGate } from '../feature-gate'
 import { CallPreJoin, type CallBackground } from './call-prejoin'
 import { CallSurface } from './call-surface'
@@ -31,7 +32,6 @@ export function ChannelCall({
   const { t } = useTranslation()
   const me = useAuthStore((s) => s.user)
   const actions = useCallActions(workspaceId)
-  const { data: live, refetch } = useLiveCall(workspaceId, channelId)
   const { requireFeature, gateDialog } = useFeatureGate(workspaceId)
 
   const [joining, setJoining] = useState(false)
@@ -42,30 +42,64 @@ export function ChannelCall({
   const [consentOpen, setConsentOpen] = useState(false)
   const [recordingBusy, setRecordingBusy] = useState(false)
 
+  /**
+   * Two questions, two queries.
+   *
+   *   - "Is there a call in the channel I am LOOKING at?" — drives the header
+   *     button.
+   *   - "What is happening in the call I am IN?" — drives the participants
+   *     panel, the recording banner, and who we open peer connections to.
+   *
+   * They used to be one query keyed on the selected channel, so switching
+   * channels mid-call froze the second one: anybody who joined after the switch
+   * never appeared, and the two of you might or might not connect depending on
+   * how your ids happened to sort. When the two channels are the same, these
+   * share a cache key and there is only one request.
+   */
+  const hereQuery = useLiveCall(workspaceId, channelId)
+  const joinedQuery = useLiveCall(workspaceId, inCall?.channelId ?? null)
+  const live = hereQuery.data
+
   // Someone else starting, joining, leaving or recording refreshes the call.
   useEffect(() => {
     const socket = getRealtimeSocket()
     const onEvent = (event: { type?: string; callId?: string }) => {
       if (!event?.type?.startsWith('call.')) return
       if (event.type === 'call.signal' || event.type === 'call.reaction') return
-      void refetch()
+      void hereQuery.refetch()
+      void joinedQuery.refetch()
     }
     socket.on('event', onEvent)
     return () => {
       socket.off('event', onEvent)
     }
-  }, [refetch])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hereQuery.refetch, joinedQuery.refetch])
 
   // Keep the live copy fresh while in the call, so the participants panel and
   // the recording banner reflect what is actually true, not what was true when
   // we joined.
   useEffect(() => {
-    if (!inCall || !live) return
-    if (live.id === inCall.id) setInCall(live)
-    // The call ended under us — the host hung up for everyone.
-    if (!live || live.endedAt) hangUpLocally()
+    if (!inCall) return
+    const joined = joinedQuery.data
+    if (joined?.id === inCall.id) {
+      setInCall(joined)
+      return
+    }
+    // `undefined` means the query has not answered yet — which is the state one
+    // render after joining, and hanging up there would end the call the instant
+    // it started. Only a settled answer counts.
+    if (
+      callHasEnded({
+        inCallId: inCall.id,
+        liveId: joined?.id ?? null,
+        settled: joinedQuery.isSuccess,
+      })
+    ) {
+      hangUpLocally()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live])
+  }, [joinedQuery.data, joinedQuery.isSuccess, inCall?.id])
 
   const hangUpLocally = () => {
     // Stop the tracks BEFORE clearing state. Dropping the reference first
@@ -75,6 +109,33 @@ export function ChannelCall({
     setInCall(null)
     setPrejoin(false)
   }
+
+  /**
+   * Leaving because the page went away.
+   *
+   * The chat page is a lazy route, so clicking through to a task unmounts this
+   * whole component. Without this the camera light stayed on with no UI left to
+   * turn it off, and the server went on listing the person as present — so
+   * everybody else kept a frozen tile of them and a peer connection to a page
+   * that no longer existed.
+   *
+   * Kept in a ref because the cleanup must run once, on unmount, and see the
+   * latest call rather than whatever was current when it was registered.
+   */
+  const onUnmount = useRef<{ stream: MediaStream | null; callId: string | null; leave: (id: string) => Promise<unknown> }>({
+    stream: null,
+    callId: null,
+    leave: async () => {},
+  })
+  onUnmount.current = { stream, callId: inCall?.id ?? null, leave: actions.leave }
+  useEffect(
+    () => () => {
+      const { stream: open, callId, leave } = onUnmount.current
+      open?.getTracks().forEach((tr) => tr.stop())
+      if (callId) void leave(callId).catch(() => {})
+    },
+    [],
+  )
 
   const beginJoin = () => setPrejoin(true)
 

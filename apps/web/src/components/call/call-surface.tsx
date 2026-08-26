@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Badge, cn } from '@rundesk/ui'
 import {
   Mic,
@@ -83,9 +83,21 @@ export function CallSurface({
     localStream,
   })
 
-  useEffect(() => {
-    if (localRef.current && localStream) localRef.current.srcObject = localStream
-  }, [localStream])
+  /**
+   * The minimised dock's own preview.
+   *
+   * A callback ref, not an effect: that <video> only exists while minimised, so
+   * on mount there was nothing to attach to and the effect's `[localStream]`
+   * deps never changed afterwards. The corner tile was black for the whole
+   * call, and expanding and re-minimising did not fix it.
+   */
+  const attachLocal = useCallback(
+    (el: HTMLVideoElement | null) => {
+      localRef.current = el
+      if (el && localStream) el.srcObject = localStream
+    },
+    [localStream],
+  )
 
   // Reactions from everyone else, cleared on a timer.
   useEffect(() => {
@@ -177,7 +189,7 @@ export function CallSurface({
         data-testid="call-minimised"
       >
         <div className="relative aspect-video bg-black">
-          <video ref={localRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+          <video ref={attachLocal} autoPlay playsInline muted className="h-full w-full object-cover" />
           {call.recording && (
             <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-full bg-red-600/90 px-1.5 py-0.5 text-[10px] text-white">
               <Circle className="h-2 w-2 fill-current" />

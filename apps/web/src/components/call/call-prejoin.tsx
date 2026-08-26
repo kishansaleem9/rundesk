@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, cn } from '@rundesk/ui'
 import { Mic, MicOff, Video, VideoOff, Loader2, AlertTriangle } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
+import { takeStream } from '../../lib/call-lifecycle'
 
 /**
  * §2.8 — the pre-join dialog, `[19:40]`.
@@ -61,12 +62,17 @@ export function CallPreJoin({
   const [camOn, setCamOn] = useState(true)
   const [background, setBackground] = useState<CallBackground>('none')
   const [error, setError] = useState('')
+  // Whether there is a preview to hand over. State, not the ref: reading a ref
+  // during render does not re-render, so the Join button only ever un-greyed
+  // when something else happened to cause one.
+  const [ready, setReady] = useState(false)
 
   // Acquire the preview, and re-acquire it when a different device is picked.
   useEffect(() => {
     let cancelled = false
     const acquire = async () => {
       setError('')
+      setReady(false)
       try {
         // Stop the previous stream FIRST. Holding two camera handles keeps the
         // light on after switching and, on some machines, fails the second
@@ -81,6 +87,7 @@ export function CallPreJoin({
           return
         }
         streamRef.current = stream
+        setReady(true)
         if (videoRef.current) videoRef.current.srcObject = stream
 
         // Labels are blank until permission is granted, so the list is only
@@ -113,12 +120,26 @@ export function CallPreJoin({
   }, [micId, camId, t])
 
   // Whatever happens, do not leave the camera running.
+  //
+  // This only ever stops a PREVIEW. Joining hands the stream to the call and
+  // nulls the ref first — without that handover this cleanup killed the very
+  // stream it had just passed on, because pressing Join unmounts this dialog in
+  // the same commit that mounts the call. The camera light went out, every
+  // track was already 'ended' by the time addTrack saw it, and both people sat
+  // looking at a connected call with nothing in it and no error anywhere.
   useEffect(
     () => () => {
       streamRef.current?.getTracks().forEach((tr) => tr.stop())
     },
     [],
   )
+
+  /** Hand the preview over. After this the call owns it, and we stop nothing. */
+  const handOff = () => {
+    const stream = takeStream(streamRef)
+    if (!stream) return
+    onJoin(stream, background)
+  }
 
   const toggleMic = () => {
     const next = !micOn
@@ -247,8 +268,8 @@ export function CallPreJoin({
           </Button>
           <Button
             data-testid="call-prejoin-join"
-            disabled={joining || !streamRef.current}
-            onClick={() => streamRef.current && onJoin(streamRef.current, background)}
+            disabled={joining || !ready}
+            onClick={handOff}
           >
             {joining && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {t('call.join')}
