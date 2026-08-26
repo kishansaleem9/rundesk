@@ -18,6 +18,7 @@ import { usePresence, presenceDotClass } from '../../lib/use-presence'
 import { useTranslation } from '../../lib/i18n'
 
 export function ChatHeader({
+  callControl,
   channel,
   workspaceId,
   memberCount,
@@ -42,6 +43,8 @@ export function ChatHeader({
   onArchiveChannel,
   onShareChannel,
 }: {
+  /** §2.8 — the SyncUp control, rendered by the page that owns the call. */
+  callControl?: React.ReactNode
   channel: ChatChannel | null
   workspaceId?: string
   memberCount: number
@@ -128,6 +131,9 @@ export function ChatHeader({
       </div>
 
       <div className="flex items-center gap-0.5 shrink-0">
+        {/* §2.8 — "Start SyncUp" sits first among the header actions, where she
+            reaches for it [19:40]. */}
+        {callControl && <div className="mr-1.5">{callControl}</div>}
         {!channel?.isDm && onAddPeople && (
           <button
             type="button"

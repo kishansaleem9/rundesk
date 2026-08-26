@@ -5,6 +5,7 @@ import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { Popover, PopoverContent, PopoverTrigger } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
+import { ChannelCall } from '../components/call/channel-call'
 import { AddPeopleDialog } from '../components/chat/add-people-dialog'
 import { SharePanel } from '../components/share-panel'
 import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
@@ -1258,6 +1259,19 @@ export function ChatPage() {
         <ChatHeader
           channel={selectedChannel}
           workspaceId={workspaceId}
+          callControl={
+            <ChannelCall
+              workspaceId={workspaceId}
+              channelId={selectedId}
+              // Recording is an admin-shaped act: it produces a lasting record
+              // of colleagues, so it is not offered to everyone by default.
+              // Recording produces a lasting record of colleagues, so it is
+              // offered where inviting people already is: to whoever can manage
+              // this channel's membership.
+              canRecord={!!selectedChannel && !selectedChannel.isDm}
+              onInvite={() => setAddPeopleOpen(true)}
+            />
+          }
           memberCount={
             selectedChannel?.isDm ? membersQuery.data?.length ?? 0 : channelMembersQuery.data?.length ?? 0
           }
