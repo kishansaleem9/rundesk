@@ -32,6 +32,12 @@
  *   DATABASE_URL=... npx tsx test/calls-http.mts
  *
  * Not in CI: there is no Postgres service in the workflow.
+ *
+ * These checks have been proven to bite. Six defects were reintroduced into
+ * the service one at a time and each was caught here, including the one that
+ * matters most: deleting the `!call.recording` guard in appendTranscript —
+ * which is the whole consent story — fails three of them, and the transcript
+ * comes back containing the line that says "this must not be stored".
  */
 import 'reflect-metadata'
 import { Module, ValidationPipe } from '@nestjs/common'
