@@ -94,7 +94,14 @@ export const chatMessages = pgTable('chat_messages', {
   // shape and the UI can show "message was deleted"; body is blanked on delete.
   deletedAt:       timestamp('deleted_at', { withTimezone: true }),
   createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => ({
+  // §2.8 gap 9 — finding a channel's call cards, and resolving a card back to
+  // its call. Declared here as well as in the migration: a database built by
+  // `drizzle-kit push` reads only this file, and an index that exists on
+  // migrated instances but not on fresh ones is the kind of difference that
+  // shows up as "it's slow on staging" months later.
+  byCall: index('chat_messages_call_idx').on(t.callId),
+}))
 
 // Chat message edit history (Plan §6.3). Each time a message is edited we
 // snapshot the PRIOR body here so earlier versions survive the in-place edit.
