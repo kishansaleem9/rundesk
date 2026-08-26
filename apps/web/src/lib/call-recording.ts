@@ -102,3 +102,42 @@ export const RECORDER_CHUNK_MS = 5000
 
 /** Below this, the "recording" is a header and no audio. */
 export const MIN_RECORDING_BYTES = 1024
+
+/** The shape of a stream this module cares about — a browser one, or a fake. */
+export interface AudibleStream {
+  id: string
+  getAudioTracks(): unknown[]
+}
+
+/**
+ * Which streams still need wiring into the mix.
+ *
+ * The recorder is built once, from whoever is in the call at that instant, and
+ * is deliberately NOT restarted when somebody joins — restarting it would chop
+ * the recording into a new file every time the door opened. But that left
+ * anyone who joined after recording started silent in the file: their voice is
+ * in the transcript, because their own browser transcribes it, so the notes
+ * read as though they were there while the audio says they never spoke.
+ *
+ * So the mix is grown instead of rebuilt: each new stream is connected to the
+ * same destination the recorder is already writing from.
+ *
+ * A stream with no audio track is skipped rather than remembered — a peer whose
+ * microphone arrives a moment after their video should be picked up on the next
+ * pass, not written off.
+ */
+export function streamsToWire<T extends AudibleStream>(
+  streams: Array<T | null | undefined>,
+  alreadyWired: ReadonlySet<string>,
+): T[] {
+  const out: T[] = []
+  const seen = new Set<string>()
+  for (const stream of streams) {
+    if (!stream) continue
+    if (alreadyWired.has(stream.id) || seen.has(stream.id)) continue
+    if (stream.getAudioTracks().length === 0) continue
+    seen.add(stream.id)
+    out.push(stream)
+  }
+  return out
+}

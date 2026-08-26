@@ -7,6 +7,7 @@ import {
   isRevisionOf,
   pickRecorderType,
   shouldSendLine,
+  streamsToWire,
 } from './call-recording'
 
 /**
@@ -66,25 +67,51 @@ export function useCallRecording({
   const peersRef = useRef<MediaStream[]>(peerStreams)
   peersRef.current = peerStreams
 
+  /**
+   * The live mix.
+   *
+   * Held open for the whole recording rather than built and forgotten, because
+   * people join a call after it has started and have to end up in the file.
+   * `wired` keys by MediaStream.id so the same stream is never connected twice,
+   * and the source nodes are KEPT: a MediaStreamAudioSourceNode with nothing
+   * referencing it can be collected, and the peer it carried goes silent with
+   * no error to say why.
+   */
+  const mixRef = useRef<{
+    ctx: AudioContext
+    destination: MediaStreamAudioDestinationNode
+    wired: Map<string, MediaStreamAudioSourceNode>
+  } | null>(null)
+
+  /** Connect anything not already in the mix. Safe to call repeatedly. */
+  const wirePeers = useCallback(() => {
+    const mix = mixRef.current
+    if (!mix) return
+    for (const stream of streamsToWire([localStream, ...peersRef.current], new Set(mix.wired.keys()))) {
+      try {
+        const node = mix.ctx.createMediaStreamSource(stream)
+        node.connect(mix.destination)
+        mix.wired.set(stream.id, node)
+      } catch {
+        // Not connectable yet. Left unwired deliberately so the next pass
+        // retries it, rather than marked done and silent for the whole call.
+      }
+    }
+  }, [localStream])
+
   /** Everyone's audio, mixed into one track MediaRecorder can write. */
   const buildMix = useCallback((): MediaStream | null => {
-    const sources = [localStream, ...peersRef.current].filter(
+    const audible = [localStream, ...peersRef.current].filter(
       (s): s is MediaStream => !!s && s.getAudioTracks().length > 0,
     )
-    if (sources.length === 0) return null
+    if (audible.length === 0) return null
     const ctx = new AudioContext()
     audioCtxRef.current = ctx
     const destination = ctx.createMediaStreamDestination()
-    for (const source of sources) {
-      try {
-        ctx.createMediaStreamSource(source).connect(destination)
-      } catch {
-        // A stream with no live audio track. Skipping it is right: it
-        // contributes silence either way, and throwing would lose the mix.
-      }
-    }
+    mixRef.current = { ctx, destination, wired: new Map() }
+    wirePeers()
     return destination.stream
-  }, [localStream])
+  }, [localStream, wirePeers])
 
   /** Upload what was captured, and tell the server where it landed. */
   const finishUpload = useCallback(
@@ -156,10 +183,33 @@ export function useCallRecording({
       recorder.onstop = () => void finishUpload(type)
       if (recorder.state !== 'inactive') recorder.stop()
       recorderRef.current = null
+      // Disconnect before closing: an AudioContext closed with live nodes
+      // attached logs in some browsers and leaves the nodes referenced.
+      for (const node of mixRef.current?.wired.values() ?? []) {
+        try {
+          node.disconnect()
+        } catch {
+          /* already gone */
+        }
+      }
+      mixRef.current = null
       void audioCtxRef.current?.close().catch(() => {})
       audioCtxRef.current = null
     }
   }, [recording, captureAudio, buildMix, finishUpload])
+
+  /*
+   * Somebody joined (or their microphone came up) while we were recording.
+   *
+   * Deliberately a SEPARATE effect from the recorder above, keyed on the peer
+   * list. Putting peerStreams in the recorder's dependencies would tear the
+   * recorder down and start a new file every time the door opened, and only
+   * the last of those files would ever be uploaded.
+   */
+  useEffect(() => {
+    if (!recording || !captureAudio) return
+    wirePeers()
+  }, [recording, captureAudio, peerStreams, wirePeers])
 
   // ─── the transcript ───────────────────────────────────────────────────────
   useEffect(() => {

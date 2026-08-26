@@ -7,6 +7,7 @@ import {
   isRevisionOf,
   pickRecorderType,
   shouldSendLine,
+  streamsToWire,
 } from './call-recording'
 
 /**
@@ -108,5 +109,51 @@ describe('§2.8 an empty recording is not uploaded', () => {
     // an unplayable recording to the meeting record, which reads as a bug in
     // playback rather than as a call nobody spoke on.
     assert.ok(MIN_RECORDING_BYTES >= 512, `${MIN_RECORDING_BYTES} is not a meaningful floor`)
+  })
+})
+
+describe('§2.8 somebody who joins mid-recording still ends up in the file', () => {
+  const stream = (id: string, audio = 1) => ({ id, getAudioTracks: () => Array(audio).fill(0) })
+
+  it('wires a stream nobody has wired yet', () => {
+    assert.deepEqual(
+      streamsToWire([stream('a'), stream('b')], new Set()).map((s) => s.id),
+      ['a', 'b'],
+    )
+  })
+
+  it('does NOT wire the same stream twice', () => {
+    // Connecting a stream to the destination a second time doubles its volume
+    // and is the obvious bug when the peer list re-renders, which it does
+    // constantly during a call.
+    assert.deepEqual(
+      streamsToWire([stream('a'), stream('b')], new Set(['a'])).map((s) => s.id),
+      ['b'],
+    )
+  })
+
+  it('deduplicates within a single pass', () => {
+    assert.deepEqual(
+      streamsToWire([stream('a'), stream('a')], new Set()).map((s) => s.id),
+      ['a'],
+    )
+  })
+
+  it('skips a stream with no audio, and comes back for it later', () => {
+    // A peer's video can arrive before their microphone. Marking them done now
+    // would leave them silent for the whole call; leaving them unwired means
+    // the next pass picks them up.
+    const silent = stream('a', 0)
+    assert.deepEqual(streamsToWire([silent], new Set()), [])
+    assert.deepEqual(
+      streamsToWire([stream('a', 1)], new Set()).map((s) => s.id),
+      ['a'],
+      'a peer whose microphone came up later was never wired',
+    )
+  })
+
+  it('ignores the gaps a peer list has while people connect', () => {
+    assert.deepEqual(streamsToWire([null, undefined, stream('a')], new Set()).map((s) => s.id), ['a'])
+    assert.deepEqual(streamsToWire([], new Set()), [])
   })
 })
