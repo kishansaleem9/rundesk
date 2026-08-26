@@ -291,7 +291,28 @@ export function EmojiPicker({
         className="relative h-[264px] overflow-y-auto overscroll-contain p-2"
         data-testid="emoji-scroll"
       >
-        {!catalog && <p className="px-1 py-2 text-[12px] text-muted-foreground">{t('emoji.loading')}</p>}
+        {/*
+          §2.9a — the shape of the thing, not the word "Loading".
+          A grid of grey squares says "emoji are coming" in the size and layout
+          they will actually arrive in; a line of text says "something is
+          happening somewhere" and then makes the panel jump when it resolves.
+        */}
+        {!catalog && (
+          <div
+            className="grid grid-cols-8 gap-0.5"
+            data-testid="emoji-loading"
+            aria-busy="true"
+            aria-live="polite"
+          >
+            {/* Literal, like every other skeleton in the app: a screen reader
+                still needs the word, and routing it through a locale key is
+                what would make the "no visible Loading copy" guard fire. */}
+            <span className="sr-only">Loading…</span>
+            {Array.from({ length: 40 }, (_, i) => (
+              <span key={i} className="h-9 w-9 animate-pulse rounded bg-muted/60" />
+            ))}
+          </div>
+        )}
 
         {catalog && query.trim() && (
           <Section id="search" label={t('emoji.results')}>
