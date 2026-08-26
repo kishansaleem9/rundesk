@@ -4,7 +4,9 @@ import { Video, Circle, AlertTriangle } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
 import { getRealtimeSocket } from '../../lib/realtime'
 import { useAuthStore } from '../../store/auth'
+import { FLAGS } from '@rundesk/feature-flags'
 import { presentIn, useCallActions, useLiveCall, type Call } from '../../lib/calls-api'
+import { useFeatureGate } from '../feature-gate'
 import { CallPreJoin, type CallBackground } from './call-prejoin'
 import { CallSurface } from './call-surface'
 
@@ -30,6 +32,7 @@ export function ChannelCall({
   const me = useAuthStore((s) => s.user)
   const actions = useCallActions(workspaceId)
   const { data: live, refetch } = useLiveCall(workspaceId, channelId)
+  const { requireFeature, gateDialog } = useFeatureGate(workspaceId)
 
   const [joining, setJoining] = useState(false)
   const [prejoin, setPrejoin] = useState(false)
@@ -110,6 +113,20 @@ export function ChannelCall({
 
   const toggleRecording = async () => {
     if (!inCall) return
+    // §2.8 gap 11 — recording "back end se on karna parta hai" [20:45]. If the
+    // workspace has this switched off, say so and offer to ask, rather than
+    // letting the button do nothing. Checked before the consent gate: there is
+    // no point asking everyone's permission for something that cannot happen.
+    if (
+      !inCall.recording &&
+      !requireFeature({
+        flag: FLAGS.AI_MEETING_NOTES,
+        name: t('gate.aiNotetaker'),
+        blurb: t('gate.aiNotetakerBlurb'),
+      })
+    ) {
+      return
+    }
     // Stopping needs no gate — only starting does, because only starting is
     // the thing people must be told about.
     if (inCall.recording) {
@@ -221,6 +238,11 @@ export function ChannelCall({
           </div>
         </div>
       )}
+
+      {/* §2.8 gap 11 — the "Unlock AI Notetaker" modal, when the workspace has
+          this switched off. Rendered here rather than inside the call surface
+          so it survives minimising. */}
+      {gateDialog}
     </>
   )
 }

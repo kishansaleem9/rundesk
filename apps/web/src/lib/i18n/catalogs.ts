@@ -5280,6 +5280,20 @@ export const en = {
   'emoji.tone.medium': 'Medium',
   'emoji.tone.mediumDark': 'Medium-dark',
   'emoji.tone.dark': 'Dark',
+
+  // §2.8 gap 11 — a feature the workspace has switched off explains itself
+  // instead of simply not being there [20:45].
+  'gate.unlock': 'Unlock {{feature}}',
+  'gate.contactBody': 'Contact your admin to turn on {{feature}} for your Workspace.',
+  'gate.contact': 'Contact your admin',
+  'gate.sent': 'Your workspace admins have been asked.',
+  'gate.sentButSilent': 'Your admins have muted this kind of notice, so nobody was told. Reach them another way.',
+  'gate.alreadyAsked': 'You already asked today — it is sitting in their Inbox.',
+  'gate.noAdmins': 'This workspace has no other admin to ask.',
+  'gate.nowOn': 'It has just been turned on — close this and try again.',
+  'gate.failed': 'Could not reach your admins. Try again in a moment.',
+  'gate.aiNotetaker': 'AI Notetaker',
+  'gate.aiNotetakerBlurb': 'Automatic meeting notes connected to docs and tasks.',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10516,6 +10530,18 @@ export const es: Record<TranslationKey, string> = {
   'emoji.tone.mediumDark': 'Oscuro medio',
   'emoji.tone.dark': 'Oscuro',
 
+  'gate.unlock': 'Desbloquear {{feature}}',
+  'gate.contactBody': 'Pide a tu administrador que active {{feature}} en tu espacio de trabajo.',
+  'gate.contact': 'Contactar al administrador',
+  'gate.sent': 'Se avisó a los administradores de tu espacio de trabajo.',
+  'gate.sentButSilent': 'Tus administradores silenciaron este tipo de aviso, así que nadie fue notificado. Contáctalos de otra forma.',
+  'gate.alreadyAsked': 'Ya lo pediste hoy — está en su bandeja de entrada.',
+  'gate.noAdmins': 'Este espacio de trabajo no tiene otro administrador al que preguntar.',
+  'gate.nowOn': 'Se acaba de activar — cierra esto e inténtalo de nuevo.',
+  'gate.failed': 'No se pudo contactar a tus administradores. Inténtalo en un momento.',
+  'gate.aiNotetaker': 'Notas con IA',
+  'gate.aiNotetakerBlurb': 'Notas de reunión automáticas conectadas a documentos y tareas.',
+
 }
 
 /** Arabic — complete coverage; drives RTL layout. */
@@ -15750,6 +15776,18 @@ export const ar: Record<TranslationKey, string> = {
   'emoji.tone.mediumDark': 'داكن متوسط',
   'emoji.tone.dark': 'داكن',
 
+  'gate.unlock': 'تفعيل {{feature}}',
+  'gate.contactBody': 'اطلب من المسؤول تفعيل {{feature}} في مساحة العمل.',
+  'gate.contact': 'تواصل مع المسؤول',
+  'gate.sent': 'تم إبلاغ مسؤولي مساحة العمل.',
+  'gate.sentButSilent': 'كتم المسؤولون هذا النوع من الإشعارات، لذا لم يصل أحدًا. تواصل معهم بطريقة أخرى.',
+  'gate.alreadyAsked': 'لقد طلبت ذلك اليوم بالفعل — الطلب في صندوق الوارد لديهم.',
+  'gate.noAdmins': 'لا يوجد مسؤول آخر في مساحة العمل هذه لسؤاله.',
+  'gate.nowOn': 'تم تفعيلها للتو — أغلق هذه النافذة وحاول مرة أخرى.',
+  'gate.failed': 'تعذّر الوصول إلى المسؤولين. حاول بعد قليل.',
+  'gate.aiNotetaker': 'مدوّن الملاحظات بالذكاء الاصطناعي',
+  'gate.aiNotetakerBlurb': 'ملاحظات اجتماعات تلقائية مرتبطة بالمستندات والمهام.',
+
 }
 
 /** Urdu (Perso-Arabic script, RTL) — complete coverage; drives RTL layout. */
@@ -20828,6 +20866,18 @@ export const ur: Record<TranslationKey, string> = {
   'emoji.tone.medium': 'درمیانہ',
   'emoji.tone.mediumDark': 'گہرا درمیانہ',
   'emoji.tone.dark': 'گہرا',
+
+  'gate.unlock': '{{feature}} کھولیں',
+  'gate.contactBody': 'اپنے ورک اسپیس میں {{feature}} آن کرنے کے لیے اپنے ایڈمن سے رابطہ کریں۔',
+  'gate.contact': 'ایڈمن سے رابطہ کریں',
+  'gate.sent': 'آپ کے ورک اسپیس ایڈمنز کو بتا دیا گیا ہے۔',
+  'gate.sentButSilent': 'آپ کے ایڈمنز نے اس قسم کی اطلاع خاموش کر رکھی ہے، اس لیے کسی تک نہیں پہنچی۔ کسی اور طریقے سے رابطہ کریں۔',
+  'gate.alreadyAsked': 'آپ آج پہلے ہی درخواست کر چکے ہیں — وہ ان کے ان باکس میں ہے۔',
+  'gate.noAdmins': 'اس ورک اسپیس میں پوچھنے کے لیے کوئی دوسرا ایڈمن نہیں ہے۔',
+  'gate.nowOn': 'یہ ابھی آن ہو گئی ہے — اسے بند کر کے دوبارہ کوشش کریں۔',
+  'gate.failed': 'آپ کے ایڈمنز تک نہیں پہنچا جا سکا۔ تھوڑی دیر بعد کوشش کریں۔',
+  'gate.aiNotetaker': 'AI نوٹ ٹیکر',
+  'gate.aiNotetakerBlurb': 'خودکار میٹنگ نوٹس جو دستاویزات اور ٹاسکس سے جڑے ہوں۔',
 
 }
 

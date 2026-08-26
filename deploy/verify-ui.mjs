@@ -1744,6 +1744,58 @@ try {
     }
   })
 
+  await section('§2.8d', 'A switched-off feature explains itself', async () => {
+    // [20:45] recording "back end se on karna parta hai". The gap was that a
+    // gated feature did not render at all — no modal, no reason, nothing to
+    // press. "Contact your admin" is now a request that lands somewhere.
+    const post = (path, body) =>
+      fetch(`${API}${path}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body ?? {}),
+      })
+        .then(async (r) => ({ status: r.status, data: (await r.json().catch(() => null))?.data }))
+        .catch(() => ({ status: 0, data: null }))
+
+    const bogus = await post('/feature-flags/request/not.a.real.flag', { workspaceId: WS })
+    chk(
+      bogus.status === 400,
+      'asking for a feature that does not exist is refused',
+      `an unknown flag came back ${bogus.status}`,
+    )
+
+    const asked = await post('/feature-flags/request/ai.meeting_notes', { workspaceId: WS })
+    chk(asked.status === 200, 'the request endpoint answers', `it came back ${asked.status}`)
+    const status = asked.data?.status
+    chk(
+      ['sent', 'already_enabled', 'already_asked', 'no_admins'].includes(status),
+      `and says what happened (${status})`,
+      `it did not say what happened: ${JSON.stringify(asked.data)}`,
+    )
+
+    // The two outcomes that matter are told apart. On an instance where the
+    // flag is on there is nothing to ask for, and saying "we told your admins"
+    // would send somebody waiting for an answer that is never coming.
+    if (status === 'already_enabled') {
+      chk(asked.data?.notified === 0, 'and asks nobody for something already on', 'it notified admins anyway')
+    } else if (status === 'sent') {
+      chk(
+        typeof asked.data?.notified === 'number',
+        `and counts who was actually told (${asked.data?.notified})`,
+        'a send with no count',
+      )
+      // Pressing twice is one request, not two.
+      const again = await post('/feature-flags/request/ai.meeting_notes', { workspaceId: WS })
+      chk(
+        again.data?.status === 'already_asked',
+        'and a second press the same day sends nothing more',
+        `a repeat press came back ${again.data?.status}`,
+      )
+    } else {
+      ok(`nothing to ask for on this instance (${status})`)
+    }
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)

@@ -1,11 +1,12 @@
-import { Injectable, Inject, ForbiddenException } from '@nestjs/common'
-import { and, eq, isNull } from 'drizzle-orm'
-import { featureFlags, workspaceMembers } from '@rundesk/db'
-import { DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
+import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
+import { and, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
+import { featureFlags, notifications, workspaceMembers } from '@rundesk/db'
+import { DEFAULT_ENABLED_FLAGS, FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { NotificationsService } from '../notifications/notifications.service'
 
 const CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
 
@@ -17,6 +18,7 @@ export class FeatureFlagsService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private readonly security: SecurityService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async isEnabled(flagKey: FlagKey, ctx: Partial<FlagResolutionContext>): Promise<boolean> {
@@ -175,6 +177,95 @@ export class FeatureFlagsService {
       description: `Feature flag "${flagKey}" set to ${enabled ? 'on' : 'off'} (${scope})`,
       metadata: { flagKey, enabled, scope, scopeId: scopeId ?? null },
     })
+  }
+
+  /**
+   * §2.8 gap 11 — "Contact your admin", made into something that happens.
+   *
+   *   `[20:45]` recording "back end se on karna parta hai" — the capability is
+   *   off until an admin turns it on, and the person who wants it is not that
+   *   admin.
+   *
+   * The modal that explains this ends in a button. A button that opens a mail
+   * client is a button that does nothing on a machine with no mail client set
+   * up, so this asks the admins directly, in the app they are already in.
+   *
+   * Returns what actually happened rather than a bare 200: whether the flag was
+   * already on (nothing to ask for), whether this person had already asked
+   * today, and how many admins were told.
+   */
+  async requestFlag(
+    flagKey: FlagKey,
+    workspaceId: string,
+    requester: { id: string; name?: string | null; email?: string | null },
+  ): Promise<{ status: 'sent' | 'already_enabled' | 'already_asked' | 'no_admins'; notified: number }> {
+    if (!(Object.values(FLAGS) as string[]).includes(flagKey)) {
+      throw new BadRequestException(`Unknown feature "${flagKey}"`)
+    }
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, requester.id)))
+      .limit(1)
+    if (!membership) throw new ForbiddenException('Not a member of this workspace')
+
+    // Asking for something you already have would send an admin chasing a
+    // toggle that is already on.
+    const resolved = await this.resolveForContext({
+      userId: requester.id,
+      workspaceId,
+      role: membership.role,
+    })
+    if (resolved[flagKey] === true) return { status: 'already_enabled', notified: 0 }
+
+    const admins = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+        ),
+      )
+    const recipients = admins.map((a) => a.userId).filter((id) => id !== requester.id)
+    if (recipients.length === 0) return { status: 'no_admins', notified: 0 }
+
+    // One ask per person per feature per day. Pressing a button twice is not
+    // two requests, and an admin's bell is not a place to leave a drum roll.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const [recent] = await this.db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.workspaceId, workspaceId),
+          eq(notifications.actorId, requester.id),
+          eq(notifications.type, 'access_requested'),
+          gte(notifications.createdAt, since),
+          sql`${notifications.target} ->> 'entityId' = ${flagKey}`,
+        ),
+      )
+      .limit(1)
+    if (recent) return { status: 'already_asked', notified: 0 }
+
+    const who = requester.name?.trim() || requester.email || 'Someone'
+    let notified = 0
+    for (const userId of recipients) {
+      const row = await this.notifications.create({
+        userId,
+        workspaceId,
+        actorId: requester.id,
+        type: 'access_requested',
+        title: `${who} asked for ${flagKey}`,
+        body: `${who} tried to use a feature this workspace has turned off. You can turn "${flagKey}" on in Admin → Features.`,
+        target: { entityType: 'feature_flag', entityId: flagKey, url: `/app/admin/features` },
+      })
+      // create() returns null when the recipient has muted every channel for
+      // this kind — that is their choice, not a failure, but it does mean they
+      // were not told, and the caller is entitled to know the difference.
+      if (row) notified++
+    }
+    return { status: 'sent', notified }
   }
 
   async listOverrides(workspaceId?: string | null) {
