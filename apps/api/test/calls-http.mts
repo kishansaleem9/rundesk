@@ -239,6 +239,16 @@ async function main() {
   ACTING_AS = ME
   chk((await call('POST', `/workspaces/${WS}/calls/${callId}/transcript`, { text: '   ' })).data?.ok === false, 'a blank line is not', 'whitespace was stored as an utterance')
 
+  console.log('\n▶ the cap, read back from the row')
+  {
+    await call('POST', `/workspaces/${WS}/calls/${callId}/transcript`, { text: 'y'.repeat(9000) })
+    const longest = rowsOf(
+      await db.execute(`SELECT max(length(text))::int AS n FROM call_transcript_lines WHERE call_id = '${callId}'`),
+    )[0].n
+    chk(longest === 2000, `one utterance is capped at 2000 (${longest})`, `a line of ${longest} characters was stored`)
+    await db.execute(`DELETE FROM call_transcript_lines WHERE length(text) = 2000`)
+  }
+
   console.log('\n▶ a line the browser revises')
   {
     // Speech recognition re-emits a final result when it corrects one. Stored
@@ -264,6 +274,57 @@ async function main() {
     'the transcript reads back attributed and in order',
     `got ${JSON.stringify(read.data?.transcript)}`,
   )
+
+  console.log('\n▶ the consent condition rides WITH the write')
+  {
+    /*
+     * The pre-check and the insert are separate round-trips, so the statement
+     * itself carries `recording = true and ended_at is null`. Proven by running
+     * exactly that statement against a call whose banner is down — no
+     * application code involved in the decision at all.
+     *
+     * The call row is inserted DIRECTLY rather than through start(), which
+     * joins whatever is already live in the channel. Going through start()
+     * handed this a call that was already recording and the check passed for
+     * the wrong reason — the third time that trap has caught me in this file.
+     */
+    const quietId = rowsOf(
+      await db.execute(`
+        INSERT INTO calls (workspace_id, channel_id, started_by_id, recording)
+        VALUES ('${WS}', '${CHANNEL}', '${ME}', false) RETURNING id
+      `),
+    )[0].id
+    const wrote = rowsOf(
+      await db.execute(`
+        insert into call_transcript_lines (call_id, user_id, text)
+        select '${quietId}', '${ME}', 'said with the banner down'
+        where exists (
+          select 1 from calls c
+          where c.id = '${quietId}' and c.recording = true and c.ended_at is null
+        )
+        returning id
+      `),
+    )
+    chk(wrote.length === 0, 'the database refuses a line when the call is not recording', 'the conditional write kept a line anyway')
+
+    // And keeps one when it is — so the check above is not passing merely
+    // because the statement is broken in both directions.
+    await db.execute(`UPDATE calls SET recording = true WHERE id = '${quietId}'`)
+    const kept = rowsOf(
+      await db.execute(`
+        insert into call_transcript_lines (call_id, user_id, text)
+        select '${quietId}', '${ME}', 'said with the banner up'
+        where exists (
+          select 1 from calls c
+          where c.id = '${quietId}' and c.recording = true and c.ended_at is null
+        )
+        returning id
+      `),
+    )
+    chk(kept.length === 1, 'and keeps one when it is', 'the conditional write refuses everything')
+    await db.execute(`DELETE FROM call_transcript_lines WHERE call_id = '${quietId}'`)
+    await db.execute(`DELETE FROM calls WHERE id = '${quietId}'`)
+  }
 
   console.log('\n▶ a channel member who never joined the call')
   {

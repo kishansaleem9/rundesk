@@ -495,23 +495,49 @@ export class CallsService {
      * outright would let one person's correction overwrite whatever somebody
      * else said in between.
      */
+    /*
+     * The banner is re-checked BY THE WRITE, not before it.
+     *
+     * Reading `recording` and then inserting are two round-trips, and somebody
+     * pressing stop in between meant a line spoken after the banner came down
+     * was still kept. Small window, but this is the one guarantee the whole
+     * consent story rests on, and "probably not kept" is not the promise made
+     * to the room. So the condition rides along with the write and the
+     * database decides.
+     */
     if (replacesPrevious) {
-      const [previous] = await this.db
-        .select({ id: callTranscriptLines.id })
-        .from(callTranscriptLines)
-        .where(and(eq(callTranscriptLines.callId, callId), eq(callTranscriptLines.userId, userId)))
-        .orderBy(desc(callTranscriptLines.saidAt))
-        .limit(1)
-      if (previous) {
-        await this.db
-          .update(callTranscriptLines)
-          .set({ text: line })
-          .where(eq(callTranscriptLines.id, previous.id))
+      const revised = await this.db.execute(sql`
+        update ${callTranscriptLines} set text = ${line}
+        where id = (
+          select l.id from ${callTranscriptLines} l
+          where l.call_id = ${callId} and l.user_id = ${userId}
+          order by l.said_at desc limit 1
+        )
+        and exists (
+          select 1 from ${calls} c
+          where c.id = ${callId} and c.recording = true and c.ended_at is null
+        )
+        returning id
+      `)
+      if ((Array.isArray(revised) ? revised : (revised as { rows?: unknown[] }).rows ?? []).length > 0) {
         return { ok: true as const }
       }
+      // Nothing to revise (this speaker's first line) falls through to an
+      // insert; a revision refused because recording stopped is caught by the
+      // same condition on that insert.
     }
 
-    await this.db.insert(callTranscriptLines).values({ callId, userId, text: line })
+    const written = await this.db.execute(sql`
+      insert into ${callTranscriptLines} (call_id, user_id, text)
+      select ${callId}, ${userId}, ${line}
+      where exists (
+        select 1 from ${calls} c
+        where c.id = ${callId} and c.recording = true and c.ended_at is null
+      )
+      returning id
+    `)
+    const rows = Array.isArray(written) ? written : (written as { rows?: unknown[] }).rows ?? []
+    if (rows.length === 0) return { ok: false as const, reason: 'not_recording' as const }
     return { ok: true as const }
   }
 

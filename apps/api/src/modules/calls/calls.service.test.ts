@@ -9,6 +9,8 @@ import {
   users as usersTable,
   workspaceMembers,
 } from '@rundesk/db'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { CallsService } from './calls.service'
 
 /**
@@ -50,6 +52,8 @@ function fakeDb(
     transcript: seed.transcript ?? [],
   }
   const updates: Array<Record<string, unknown>> = []
+  /** Conditional writes that the database allowed through. */
+  const executes: boolean[] = []
   const inserts: Array<{ values: Record<string, unknown>; conflict?: unknown }> = []
 
   // Dispatch on the TABLE, not on the projection.
@@ -154,8 +158,24 @@ function fakeDb(
       }),
     update: () => node(() => []),
     delete: () => node(() => []),
+    /*
+     * Raw SQL, for the transcript write.
+     *
+     * That statement carries its own `recording = true and ended_at is null`
+     * condition so the DATABASE decides whether a line may be kept, rather
+     * than a read a few milliseconds earlier. A fake cannot prove the SQL is
+     * right — it would only be proving itself — so this models the RULE and
+     * calls-http.mts proves the statement against real Postgres.
+     */
+    execute: async () => {
+      const call = store.calls[0]
+      const allowed = !!call && call.recording === true && !call.endedAt
+      if (!allowed) return []
+      executes.push(true)
+      return [{ id: `row-${executes.length}` }]
+    },
   }
-  return { db, store, updates, inserts, setNextSelect: (rows: unknown[]) => (nextSelect = rows) }
+  return { db, store, updates, inserts, executes, setNextSelect: (rows: unknown[]) => (nextSelect = rows) }
 }
 
 const realtime = () => ({ emitToWorkspace: mock.fn(), emitToUser: mock.fn() })
@@ -511,13 +531,26 @@ describe('§2.8 a call announces itself to the channel', () => {
  */
 describe('§2.8 nothing is transcribed while the banner is down', () => {
   it('keeps a line when recording is on', async () => {
-    const { db, inserts } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
-    const svc = makeService({ db })
-    const out = await svc.appendTranscript('call1', 'me', 'we should ship on Friday')
+    const { db, executes } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const out = await makeService({ db }).appendTranscript('call1', 'me', 'we should ship on Friday')
     assert.equal(out.ok, true)
-    const line = inserts.find((i) => i.values?.text)
-    assert.equal(line?.values.text, 'we should ship on Friday')
-    assert.equal(line?.values.userId, 'me', 'the line lost who said it')
+    assert.equal(executes.length, 1, 'nothing was written')
+  })
+
+  it('is refused by the WRITE when recording stops mid-flight', async () => {
+    // The pre-check and the insert are two round-trips. Somebody pressing stop
+    // in between must not leave the line behind — so the condition rides with
+    // the write. Simulated here by a call that reads as recording and is not.
+    const { db, store, executes } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const svc = makeService({ db })
+    // Between the read and the write, the banner comes down.
+    const original = svc.appendTranscript.bind(svc)
+    store.calls[0].recording = true
+    const promise = original('call1', 'me', 'said after the banner dropped')
+    store.calls[0].recording = false
+    const out = await promise
+    assert.equal(out.ok, false, 'a line survived the banner coming down')
+    assert.equal(executes.length, 0, 'it was written anyway')
   })
 
   it('refuses when recording is OFF — the whole consent story', async () => {
@@ -549,44 +582,25 @@ describe('§2.8 nothing is transcribed while the banner is down', () => {
   it('REPLACES the speaker\'s last line when the browser says it is a revision', async () => {
     // "we should ship" becoming "we should ship on Friday" is one sentence.
     // Stored as two, the notes report two commitments.
-    const { db, updates, inserts } = fakeDb({
+    const { db, executes } = fakeDb({
       calls: [{ ...LIVE_CALL, recording: true }],
       transcript: [{ id: 'l1', userId: 'me', text: 'we should ship' }],
     })
     const out = await makeService({ db }).appendTranscript('call1', 'me', 'we should ship on Friday', true)
     assert.equal(out.ok, true)
-    assert.ok(
-      updates.some((u) => u.text === 'we should ship on Friday'),
-      'the revision did not replace the partial line',
-    )
-    assert.equal(
-      inserts.filter((i) => i.values?.text).length,
-      0,
-      'the revision was appended as well as replacing — the transcript now says it twice',
-    )
-  })
-
-  it('appends when it is a revision but the speaker has said nothing yet', async () => {
-    const { db, inserts } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }], transcript: [] })
-    await makeService({ db }).appendTranscript('call1', 'me', 'first thing', true)
-    assert.equal(inserts.filter((i) => i.values?.text).length, 1, 'a first line was lost')
-  })
-
-  it('appends, not replaces, when the browser does not say it is a revision', async () => {
-    const { db, updates, inserts } = fakeDb({
-      calls: [{ ...LIVE_CALL, recording: true }],
-      transcript: [{ id: 'l1', userId: 'me', text: 'we should ship' }],
-    })
-    await makeService({ db }).appendTranscript('call1', 'me', 'and update the docs')
-    assert.equal(inserts.filter((i) => i.values?.text).length, 1)
-    assert.equal(updates.some((u) => u.text), false, 'a new sentence overwrote the previous one')
+    // WHICH row it replaced is a property of the SQL, so calls-http.mts proves
+    // that against Postgres. What matters here is that it is one write.
+    assert.equal(executes.length, 1, 'a revision produced more than one write')
   })
 
   it('caps a line, so one client cannot post a novel', async () => {
-    const { db, inserts } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
-    const svc = makeService({ db })
-    await svc.appendTranscript('call1', 'me', 'x'.repeat(9000))
-    assert.equal(String(inserts.find((i) => i.values?.text)?.values.text).length, 2000)
+    // The cap itself is asserted against Postgres, where the stored text can
+    // be read back; here it is enough that an oversized line is accepted
+    // rather than rejected or thrown.
+    const { db, executes } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const out = await makeService({ db }).appendTranscript('call1', 'me', 'x'.repeat(9000))
+    assert.equal(out.ok, true)
+    assert.equal(executes.length, 1)
   })
 })
 
@@ -845,5 +859,50 @@ describe('§2.8 only people who were in the call can read what was said', () => 
     })
     const out = await makeService({ db }).liveTranscript('call1', 'me')
     assert.match(out.transcript, /we should ship on Friday/)
+  })
+})
+
+
+/**
+ * §2.8 — the consent condition, guarded where a fake cannot reach.
+ *
+ * calls-http.mts proves the STATEMENT against Postgres by running it directly:
+ * with the banner down it writes nothing, with the banner up it writes one
+ * row. What that cannot prove is that the service still uses it — deleting the
+ * condition from the service passed every check in both files, because neither
+ * was looking at the service's own SQL.
+ *
+ * A guarantee split across two files needs something holding the halves
+ * together.
+ */
+describe('§2.8 the transcript write carries its own consent check', () => {
+  // __dirname, not import.meta: this package compiles to CommonJS, and
+  // import.meta is a type error there even though tsx runs it happily.
+  const source = readFileSync(join(__dirname, 'calls.service.ts'), 'utf8')
+
+  it('conditions the INSERT on the call still recording', () => {
+    const insert = source.slice(source.indexOf('insert into ${callTranscriptLines}'))
+    assert.match(
+      insert.slice(0, 400),
+      /c\.recording = true and c\.ended_at is null/,
+      'the insert no longer re-checks the banner — a line spoken after stop would be kept',
+    )
+  })
+
+  it('conditions the revision UPDATE too', () => {
+    const update = source.slice(source.indexOf('update ${callTranscriptLines}'))
+    assert.match(
+      update.slice(0, 500),
+      /c\.recording = true and c\.ended_at is null/,
+      'a revision can still land after the banner comes down',
+    )
+  })
+
+  it('reports a refused write rather than claiming success', () => {
+    assert.match(
+      source,
+      /if \(rows\.length === 0\) return \{ ok: false as const, reason: 'not_recording' as const \}/,
+      'a write the database refused is being reported as ok',
+    )
   })
 })
