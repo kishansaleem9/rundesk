@@ -106,3 +106,12 @@ jobs:
       - name: video1 fast items
         if: '!cancelled()'
         run: node test/e2e/video1-fast-items.mjs
+
+      # §2.8 gap 7. The emoji list is a separate 34 kB chunk fetched by a
+      # dynamic import the first time the picker opens. If that chunk goes
+      # missing from a build, every unit test still passes — the module
+      # resolves fine from source — and the picker shows its skeleton forever.
+      # Deleting the chunk from the served dist fails eight checks here.
+      - name: The emoji picker loads its list
+        if: '!cancelled()'
+        run: node test/e2e/emoji-picker.mjs
