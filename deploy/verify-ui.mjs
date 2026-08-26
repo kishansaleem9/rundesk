@@ -1600,6 +1600,81 @@ try {
     }
   })
 
+  await section('§2.8b', 'A SyncUp can be started, and leaves a record', async () => {
+    // [19:40] "Start SyncUp — Jump on a voice call". The media is peer-to-peer,
+    // so a single browser cannot exercise the connection itself; what IS
+    // checkable here is the lifecycle everyone shares — who is in, whether it
+    // is being recorded, and what it leaves behind.
+    const channels = (await apiGet(`/workspaces/${WS}/chat/channels`)) ?? []
+    const channel = channels.find((c) => !c.isDm)
+    if (!channel) {
+      ok('no non-DM channel on this account, so a call could not be started here')
+    } else {
+      await go(`/app/${WS}/chat?channel=${channel.id}`, 4500)
+      const control = page.locator('[data-testid="call-start-button"], [data-testid="call-join-button"]')
+      chk((await control.count()) > 0, 'the channel header offers SyncUp', 'no call control in the channel header')
+
+      const call = await apiPost(`/workspaces/${WS}/calls`, { channelId: channel.id })
+      if (!call?.id) {
+        bad('could not start a call through the API')
+      } else {
+        chk(call.endedAt === null, 'a started call is live', `the call came back ended`)
+        chk(
+          (call.participants ?? []).some((p) => !p.leftAt),
+          'with whoever started it already in it',
+          'the starter was not a participant',
+        )
+        // Recording is OFF until somebody turns it on, and turning it on is
+        // what the consent gate is in front of.
+        chk(call.recording === false, 'and not recording', 'a new call started out recording')
+
+        // Pressing start again in the same channel must JOIN, not fork.
+        const second = await apiPost(`/workspaces/${WS}/calls`, { channelId: channel.id })
+        chk(
+          second?.id === call.id,
+          'starting again in the same channel joins the one running',
+          `a second call was created (${second?.id})`,
+        )
+
+        const live = await apiGet(`/workspaces/${WS}/calls/live?channelId=${channel.id}`)
+        chk(live?.id === call.id, 'and the channel reports it as live', 'the live lookup did not find it')
+
+        // Recording marks everyone present, so "was I recorded" has an answer.
+        const rec = await apiPost(`/workspaces/${WS}/calls/${call.id}/recording`, { recording: true })
+        if (rec) {
+          const recording = await apiGet(`/workspaces/${WS}/calls/live?channelId=${channel.id}`)
+          chk(recording?.recording === true, 'recording can be turned on', 'recording did not turn on')
+          chk(
+            (recording?.participants ?? []).every((p) => p.leftAt || p.wasRecorded),
+            'and marks everyone who was in the room',
+            'somebody in the call was not marked as recorded',
+          )
+          await apiPost(`/workspaces/${WS}/calls/${call.id}/recording`, { recording: false })
+        }
+
+        // Ending leaves a meeting record — the thing that makes a call
+        // findable next week rather than gone the moment it stops.
+        const ended = await apiPost(`/workspaces/${WS}/calls/${call.id}/end`, {})
+        chk(!!ended?.meetingId, 'ending it leaves a meeting record behind', 'the call left no record')
+        const afterEnd = await apiGet(`/workspaces/${WS}/calls/live?channelId=${channel.id}`)
+        chk(!afterEnd, 'and the channel stops offering a dead call', 'the ended call is still reported live')
+
+        if (ended?.meetingId) {
+          const meetings = (await apiGet(`/workspaces/${WS}/meetings`)) ?? []
+          chk(
+            meetings.some((m) => m.id === ended.meetingId),
+            'which shows up on the Meetings page',
+            'the record was not on the meetings list',
+          )
+          await fetch(`${API}/workspaces/${WS}/meetings/${ended.meetingId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null)
+        }
+      }
+    }
+  })
+
   await section('HEALTH', 'Nothing is actually broken', async () => {
     if (noted.length) {
       console.log(`  \x1b[2mnote\x1b[0m ${noted.length} request(s) not counted — other hosts, dev-only sockets,`)
