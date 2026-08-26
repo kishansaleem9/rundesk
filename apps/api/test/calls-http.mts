@@ -55,6 +55,7 @@ import { R2Service } from '../dist/apps/api/src/common/storage/r2.service.js'
 // @Global(), but only once it is in the graph — without it ChatModule's
 // SearchModule cannot resolve FeatureFlagGuard's FeatureFlagsService.
 import { FeatureFlagsModule } from '../dist/apps/api/src/modules/feature-flags/feature-flags.module.js'
+import { FeatureFlagsService } from '../dist/apps/api/src/modules/feature-flags/feature-flags.service.js'
 
 const ME = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const THEM = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -99,6 +100,9 @@ const chk = (c, good, bad) =>
  */
 const rowsOf = (r) => (Array.isArray(r) ? r : (r?.rows ?? []))
 
+/** Read the recording flag straight from the row, not from a response body. */
+let apiRecording = async () => false
+
 const call = async (method, p, body) => {
   const res = await fetch(`http://127.0.0.1:${PORT}${p}`, {
     method,
@@ -123,8 +127,11 @@ async function main() {
   await app.listen(PORT, '127.0.0.1')
 
   const db = app.get(DB_TOKEN)
+  apiRecording = async (id) =>
+    rowsOf(await db.execute(`SELECT recording FROM calls WHERE id = '${id}'`))[0]?.recording === true
   const calls = app.get(CallsService)
   const chat = app.get(ChatService)
+  const flagsSvc = app.get(FeatureFlagsService)
 
   // Start from a known-empty state. A leftover live call would make start()
   // join it instead of creating one, and every count below would be off by
@@ -137,6 +144,11 @@ async function main() {
   await db.execute('DELETE FROM meeting_attendees')
   await db.execute('DELETE FROM meetings')
   await db.execute('DELETE FROM calls')
+  // Feature flags too. feature-gate-http.mts runs against this same database
+  // and leaves ai.meeting_notes switched OFF — which, now that the entitlement
+  // is enforced server-side, made every recording check in this file fail. A
+  // harness that depends on what another harness left behind is not a harness.
+  await db.execute('DELETE FROM feature_flags')
 
   // The two services with no credentials here. Stubbed rather than left
   // unconfigured so BOTH branches are reachable on purpose.
@@ -230,6 +242,16 @@ async function main() {
   // The join + order that has never run against Postgres.
   const read = await call('GET', `/workspaces/${WS}/calls/${callId}/transcript`)
   chk(read.data?.transcript === 'Hamda: we should ship the meetings page on Friday\nLeo: I will send the deck', 'the transcript reads back attributed and in order', `got ${JSON.stringify(read.data?.transcript)}`)
+
+  console.log('\n▶ a channel member who never joined the call')
+  {
+    // The consent story is that everyone IN the call is told it is being
+    // recorded. THIRD is in the channel and was never told anything.
+    ACTING_AS = THIRD
+    const peek = await call('GET', `/workspaces/${WS}/calls/${callId}/transcript`)
+    chk(peek.status === 403, 'cannot read what is being said', `a bystander read the live transcript (${peek.status})`)
+    ACTING_AS = ME
+  }
 
   console.log('\n▶ a stranger to the channel')
   // assertCanReach resolves through channel membership. Everyone in the
@@ -339,6 +361,44 @@ async function main() {
       'a call nobody recorded could still hand in a recording',
     )
     await call('POST', `/workspaces/${WS}/calls/${fresh.data?.id}/end`, {})
+  }
+
+  console.log('\n▶ the entitlement, enforced on the server and not just the browser')
+  {
+    // Must run where NO call is live. start() joins one that is, and the call
+    // running earlier in this file is already recording — so setRecording
+    // early-returns "already on" and never reaches the gate at all. That is
+    // exactly how the first version of this check passed for the wrong reason.
+    const off = await call('POST', `/workspaces/${WS}/calls`, { channelId: CHANNEL, title: 'gated' })
+    chk(off.data?.id !== callId, 'is a fresh call, not the recorded one', 'it joined a live call — this check would prove nothing')
+    chk((await apiRecording(off.data?.id)) === false, 'and is not already recording', 'the fresh call was already recording')
+
+    /*
+     * Switched off through setFlag — the path an admin actually takes.
+     *
+     * FeatureFlagsService caches resolved flags for five minutes per
+     * user+workspace, and setFlag is what invalidates that cache. Writing the
+     * row straight to the table changes the database and tells nothing.
+     *
+     * Worth knowing beyond this test: that invalidation is in-process, so on a
+     * multi-instance deployment the other instances keep serving the old value
+     * until the TTL expires. Pre-existing behaviour of every flag in the
+     * system, not something this feature introduced.
+     */
+    await db.execute(`UPDATE workspace_members SET role = 'workspace_admin' WHERE user_id = '${ME}' AND workspace_id = '${WS}'`)
+    await flagsSvc.setFlag('ai.meeting_notes', false, 'workspace', WS, WS, { id: ME, role: 'workspace_admin' })
+
+    const refused = await call('POST', `/workspaces/${WS}/calls/${off.data?.id}/recording`, { recording: true })
+    chk(refused.status === 403, 'recording is refused when the workspace has AI Notes off', `it was allowed (${refused.status}) — the gate is browser-only`)
+    chk((await apiRecording(off.data?.id)) === false, 'and the call is genuinely not recording', 'the flag was written despite the refusal')
+
+    await flagsSvc.setFlag('ai.meeting_notes', true, 'workspace', WS, WS, { id: ME, role: 'workspace_admin' })
+    const allowedAgain = await call('POST', `/workspaces/${WS}/calls/${off.data?.id}/recording`, { recording: true })
+    chk(allowedAgain.status === 200, 'and allowed again once an admin turns it back on', `still refused: ${allowedAgain.status}`)
+
+    await db.execute(`UPDATE workspace_members SET role = 'member' WHERE user_id = '${ME}' AND workspace_id = '${WS}'`)
+    await db.execute('DELETE FROM feature_flags')
+    await call('POST', `/workspaces/${WS}/calls/${off.data?.id}/end`, {})
   }
 
   console.log('\n▶ recording a call that has ended')

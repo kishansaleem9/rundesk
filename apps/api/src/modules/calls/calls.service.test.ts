@@ -170,6 +170,9 @@ const ai = () => ({
   isAvailable: () => true,
   notesFromTranscript: mock.fn(async (t: string) => `## Summary\nNotes from: ${t.slice(0, 40)}`),
 })
+/** §2.8 gap 11 — the entitlement, enforced server-side. On unless a test says otherwise. */
+const flags = (enabled = true) => ({ isEnabled: mock.fn(async () => enabled) })
+
 /** Storage. `configured: false` is the default an instance without R2 has. */
 const storage = () => ({
   configured: true,
@@ -191,6 +194,7 @@ function makeService(over: {
   notifications?: unknown
   ai?: unknown
   r2?: unknown
+  flags?: unknown
 }) {
   return new CallsService(
     over.db as never,
@@ -199,6 +203,7 @@ function makeService(over: {
     (over.notifications ?? notifier()) as never,
     (over.ai ?? ai()) as never,
     (over.r2 ?? storage()) as never,
+    (over.flags ?? flags()) as never,
   )
 }
 // Typed with the real signature so `arguments[2]` — the body the service
@@ -704,5 +709,81 @@ describe('§2.8 the recording goes straight to storage', () => {
     const m = meetings()
     await makeService({ db, meetings: m }).end('call1', 'me')
     assert.equal((m.create.mock.calls[0]?.arguments[2] as Record<string, unknown>).recordingUrl, null)
+  })
+})
+
+/**
+ * §2.8 — two gates that existed only in the browser, which is to say did not
+ * exist. Both were found by an adversarial pass over this code.
+ */
+describe('§2.8 the entitlement is enforced on the server', () => {
+  it('refuses to start recording when the workspace has AI Notes off', async () => {
+    // The "Unlock AI Notetaker" modal was the whole enforcement. Anything
+    // holding a token could turn recording on anyway, and the workspace would
+    // record calls and be billed for notes it had declined.
+    const { db } = fakeDb({ calls: [{ ...LIVE_CALL }] })
+    await assert.rejects(
+      () => makeService({ db, flags: flags(false) }).setRecording('call1', 'me', true),
+      /turned off for this workspace/i,
+    )
+  })
+
+  it('does not write the flag or announce anything when it refuses', async () => {
+    const { db, updates } = fakeDb({ calls: [{ ...LIVE_CALL }] })
+    const rt = realtime()
+    await makeService({ db, realtime: rt, flags: flags(false) })
+      .setRecording('call1', 'me', true)
+      .catch(() => null)
+    assert.equal(updates.some((u) => u.recording === true), false, 'recording was switched on anyway')
+    assert.equal(rt.emitToWorkspace.mock.callCount(), 0, 'a recording banner was announced for a refused recording')
+  })
+
+  it('still allows STOPPING a recording when the feature is off', async () => {
+    // A workspace that disables the feature mid-call must still be able to stop
+    // the recording already running. Refusing here would trap it on.
+    const { db } = fakeDb({ calls: [{ ...LIVE_CALL, recording: true }] })
+    const out = await makeService({ db, flags: flags(false) }).setRecording('call1', 'me', false)
+    assert.equal(out.recording, false)
+  })
+
+  it('allows it when the feature is on', async () => {
+    const { db } = fakeDb({ calls: [{ ...LIVE_CALL }] })
+    const out = await makeService({ db, flags: flags(true) }).setRecording('call1', 'me', true)
+    assert.equal(out.recording, true)
+  })
+})
+
+describe('§2.8 only people who were in the call can read what was said', () => {
+  const said = [{ text: 'we should ship on Friday', saidAt: new Date(), name: 'Hamda', email: 'h@x' }]
+
+  it('refuses somebody who is in the channel but never joined', async () => {
+    // The consent story is that everyone IN the call is told it is being
+    // recorded. Somebody sitting in the channel was never told anything, and
+    // could read verbatim what was being said, live.
+    const { db } = fakeDb({ calls: [{ ...LIVE_CALL }], participants: [], transcript: said })
+    await assert.rejects(
+      () => makeService({ db }).liveTranscript('call1', 'lurker'),
+      /were in the call/i,
+    )
+  })
+
+  it('allows somebody who is in it', async () => {
+    const { db } = fakeDb({
+      calls: [{ ...LIVE_CALL }],
+      participants: [{ id: 'p1', userId: 'me', leftAt: null }],
+      transcript: said,
+    })
+    const out = await makeService({ db }).liveTranscript('call1', 'me')
+    assert.match(out.transcript, /we should ship on Friday/)
+  })
+
+  it('allows somebody who has left — they were there, and heard the banner', async () => {
+    const { db } = fakeDb({
+      calls: [{ ...LIVE_CALL }],
+      participants: [{ id: 'p1', userId: 'me', leftAt: new Date() }],
+      transcript: said,
+    })
+    const out = await makeService({ db }).liveTranscript('call1', 'me')
+    assert.match(out.transcript, /we should ship on Friday/)
   })
 })

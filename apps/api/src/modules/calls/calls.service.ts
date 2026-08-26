@@ -23,6 +23,8 @@ import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { MeetingsService } from '../meetings/meetings.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { AiService } from '../ai/ai.service'
+import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
+import { FLAGS } from '@rundesk/feature-flags'
 import { R2Service } from '../../common/storage/r2.service'
 
 /**
@@ -50,17 +52,19 @@ export class CallsService {
     private notifications: NotificationsService,
     private ai: AiService,
     private r2: R2Service,
+    private flags: FeatureFlagsService,
   ) {}
 
   private async assertMember(workspaceId: string, userId: string) {
     const [m] = await this.db
-      .select({ id: workspaceMembers.id })
+      .select({ id: workspaceMembers.id, role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(
         and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)),
       )
       .limit(1)
     if (!m) throw new ForbiddenException('Not a member of this workspace')
+    return m
   }
 
   /**
@@ -391,6 +395,31 @@ export class CallsService {
     if (call.endedAt) throw new BadRequestException('That call has ended')
     if (call.recording === recording) return { ok: true, recording }
 
+    /*
+     * §2.8 gap 11 — the entitlement, enforced HERE and not only in the browser.
+     *
+     * The "Unlock AI Notetaker" gate lived entirely in the UI, which means it
+     * was a suggestion: anything holding a token could turn recording on in a
+     * workspace that had switched AI Notes off, and the workspace would record
+     * calls and be billed for notes it had declined. A gate that only the
+     * honest client respects is not a gate.
+     *
+     * Only on the way ON. Stopping a recording must never be refused — a
+     * workspace that disables the feature mid-call has to be able to stop the
+     * one already running.
+     */
+    if (recording) {
+      const member = await this.assertMember(call.workspaceId, userId)
+      const allowed = await this.flags.isEnabled(FLAGS.AI_MEETING_NOTES, {
+        userId,
+        workspaceId: call.workspaceId,
+        role: member.role,
+      })
+      if (!allowed) {
+        throw new ForbiddenException('AI Notes is turned off for this workspace')
+      }
+    }
+
     const now = new Date()
     await this.db
       .update(calls)
@@ -468,9 +497,27 @@ export class CallsService {
       .join('\n')
   }
 
-  /** What the caller may read back while the call is still running. */
+  /**
+   * What the caller may read back while the call is still running.
+   *
+   * Being in the CHANNEL is not enough. The consent story is that everyone in
+   * the call is told it is being recorded — and somebody sitting in the channel
+   * who never joined was never told anything, yet could read verbatim what was
+   * being said, live. That is eavesdropping with extra steps.
+   *
+   * Having LEFT is fine: they were there, they saw the banner, and the words
+   * are as much theirs as anyone's.
+   */
   async liveTranscript(callId: string, userId: string) {
     await this.assertCanReach(callId, userId)
+    const [wasThere] = await this.db
+      .select({ id: callParticipants.id })
+      .from(callParticipants)
+      .where(and(eq(callParticipants.callId, callId), eq(callParticipants.userId, userId)))
+      .limit(1)
+    if (!wasThere) {
+      throw new ForbiddenException('Only people who were in the call can read what was said')
+    }
     return { transcript: await this.transcriptFor(callId) }
   }
 
