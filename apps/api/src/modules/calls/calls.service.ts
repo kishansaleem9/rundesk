@@ -8,10 +8,12 @@ import {
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import {
   callParticipants,
+  callTranscriptLines,
   calls,
   chatChannelMembers,
   chatChannels,
   chatMessages,
+  meetings,
   users,
   workspaceMembers,
 } from '@rundesk/db'
@@ -20,6 +22,16 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { MeetingsService } from '../meetings/meetings.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { AiService } from '../ai/ai.service'
+import { R2Service } from '../../common/storage/r2.service'
+
+/**
+ * §2.8 gap 10 — one utterance, capped.
+ *
+ * Speech recognition emits a phrase at a time; anything approaching this length
+ * is a client sending something that is not a transcript.
+ */
+const MAX_TRANSCRIPT_LINE = 2000
 
 /**
  * §2.8 SyncUp — the call itself.
@@ -36,6 +48,8 @@ export class CallsService {
     private realtime: RealtimeGateway,
     private meetings: MeetingsService,
     private notifications: NotificationsService,
+    private ai: AiService,
+    private r2: R2Service,
   ) {}
 
   private async assertMember(workspaceId: string, userId: string) {
@@ -313,6 +327,16 @@ export class CallsService {
     const endedAt = new Date()
     const people = await this.participantsOf(callId)
 
+    // §2.8 gap 10 — "yeh aap ke khud hi NOTES bana ke dega aur poori ki poori
+    // RECORDING bhi karega". Both are gathered before the meeting is written,
+    // so the record arrives complete rather than being filled in afterwards by
+    // a second write that might not happen.
+    const transcript = await this.transcriptFor(callId).catch(() => '')
+    const notes = transcript ? await this.notesFrom(transcript, call.workspaceId, userId) : null
+    const recordingUrl = call.recordingStorageKey
+      ? await this.r2.getObjectUrl(call.recordingStorageKey).catch(() => null)
+      : null
+
     const meeting = await this.meetings
       .create(call.workspaceId, userId, {
         title: call.title?.trim() || `Call in ${new Date(call.startedAt).toLocaleDateString()}`,
@@ -320,8 +344,21 @@ export class CallsService {
         endsAt: endedAt.toISOString(),
         provider: 'manual',
         attendeeIds: people.map((p) => p.userId),
+        notes,
+        recordingUrl,
       })
       .catch(() => null)
+
+    // The transcript itself is written straight onto the record rather than
+    // passed through create(): it is not something a person types, and
+    // meetings.create's shape is the one a person fills in.
+    if (meeting?.id && transcript) {
+      await this.db
+        .update(meetings)
+        .set({ transcript })
+        .where(eq(meetings.id, meeting.id))
+        .catch(() => undefined)
+    }
 
     await this.db
       .update(calls)
@@ -378,5 +415,111 @@ export class CallsService {
     } as never)
 
     return { ok: true, recording }
+  }
+
+  /**
+   * §2.8 gap 10 — one line of what somebody said.
+   *
+   * Each participant's own browser transcribes their own microphone, which is
+   * why the speaker is known rather than guessed: a mixed audio track gives one
+   * stream of words with nobody's name on it, and "somebody said they would
+   * send the deck" is not a note worth having.
+   *
+   * Refused unless recording is ON. That is the whole consent story: the banner
+   * everyone can see is what makes it lawful to keep any of this, so nothing is
+   * kept while the banner is down. A client that keeps talking after recording
+   * stops gets a quiet no, not a silent yes.
+   */
+  async appendTranscript(callId: string, userId: string, text: string) {
+    const call = await this.assertCanReach(callId, userId)
+    if (call.endedAt) return { ok: false as const, reason: 'ended' as const }
+    if (!call.recording) return { ok: false as const, reason: 'not_recording' as const }
+
+    const line = text.trim().slice(0, MAX_TRANSCRIPT_LINE)
+    if (!line) return { ok: false as const, reason: 'empty' as const }
+
+    await this.db.insert(callTranscriptLines).values({ callId, userId, text: line })
+    return { ok: true as const }
+  }
+
+  /**
+   * The whole call, as words, attributed and in order.
+   *
+   * Names are resolved here rather than stored on each line: people rename
+   * themselves, and a transcript that says who someone WAS in March is a
+   * transcript nobody can search in June.
+   */
+  async transcriptFor(callId: string): Promise<string> {
+    const lines = await this.db
+      .select({
+        text: callTranscriptLines.text,
+        saidAt: callTranscriptLines.saidAt,
+        name: users.displayName,
+        email: users.email,
+      })
+      .from(callTranscriptLines)
+      .innerJoin(users, eq(users.id, callTranscriptLines.userId))
+      .where(eq(callTranscriptLines.callId, callId))
+      .orderBy(callTranscriptLines.saidAt)
+    if (lines.length === 0) return ''
+    return lines
+      .map((l) => `${l.name?.trim() || l.email || 'Someone'}: ${l.text}`)
+      .join('\n')
+  }
+
+  /** What the caller may read back while the call is still running. */
+  async liveTranscript(callId: string, userId: string) {
+    await this.assertCanReach(callId, userId)
+    return { transcript: await this.transcriptFor(callId) }
+  }
+
+  /**
+   * Turn the transcript into notes.
+   *
+   * Returns null rather than throwing when no model is configured: a call that
+   * ends must leave its record, its attendees and its recording behind whether
+   * or not the AI half of this is available on the instance. A meeting with a
+   * transcript and no notes is still a meeting; a call that refused to end
+   * because a model was missing is a disaster.
+   */
+  private async notesFrom(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+  ): Promise<string | null> {
+    if (!this.ai.isAvailable()) return null
+    return this.ai.notesFromTranscript(transcript, { userId, workspaceId }).catch(() => null)
+  }
+
+  /**
+   * §2.8 gap 10 — where to PUT the recording.
+   *
+   * The media never passes through the server during the call, and it does not
+   * start to now: the browser uploads the file straight to storage with a
+   * pre-signed URL, and only the key comes back here.
+   */
+  async recordingUploadUrl(callId: string, userId: string, contentType: string) {
+    const call = await this.assertCanReach(callId, userId)
+    if (!call.recording) throw new BadRequestException('This call is not being recorded')
+    if (!this.r2.configured) throw new BadRequestException('Storage is not configured')
+    const type = contentType || 'audio/webm'
+    if (!type.startsWith('audio/') && !type.startsWith('video/')) {
+      throw new BadRequestException('A recording must be audio or video')
+    }
+    const key = `calls/${call.workspaceId}/${callId}/recording-${Date.now()}.webm`
+    const uploadUrl = await this.r2.presignPutObject(key, type, { uploadedby: userId })
+    return { uploadUrl, storageKey: key }
+  }
+
+  /** The upload finished — remember where it landed. */
+  async attachRecording(callId: string, userId: string, storageKey: string) {
+    const call = await this.assertCanReach(callId, userId)
+    if (!storageKey?.startsWith(`calls/${call.workspaceId}/${callId}/`)) {
+      // A key from another call would attach somebody else's recording to this
+      // meeting, which is the one mistake here that cannot be undone.
+      throw new BadRequestException('That storage key does not belong to this call')
+    }
+    await this.db.update(calls).set({ recordingStorageKey: storageKey }).where(eq(calls.id, callId))
+    return { ok: true }
   }
 }

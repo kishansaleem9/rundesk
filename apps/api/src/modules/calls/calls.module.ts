@@ -4,6 +4,8 @@ import { CallsController } from './calls.controller'
 import { RealtimeModule } from '../realtime/realtime.module'
 import { MeetingsModule } from '../meetings/meetings.module'
 import { NotificationsModule } from '../notifications/notifications.module'
+import { AiModule } from '../ai/ai.module'
+import { StorageModule } from '../../common/storage/storage.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 
 @Module({
@@ -11,7 +13,10 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
   // than a second, parallel history of its own. NotificationsModule so §2.8
   // gap 9's "a call started, here is the way in" reaches people who are not
   // looking at the channel.
-  imports: [RealtimeModule, MeetingsModule, NotificationsModule],
+  // §2.8 gap 10 — AiModule writes the notes from the transcript; StorageModule
+  // hands the browser a pre-signed URL so the recording never passes through
+  // the API on its way to storage.
+  imports: [RealtimeModule, MeetingsModule, NotificationsModule, AiModule, StorageModule],
   providers: [CallsService, WorkspaceMemberGuard],
   controllers: [CallsController],
   exports: [CallsService],

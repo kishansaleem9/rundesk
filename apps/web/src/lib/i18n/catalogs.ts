@@ -5307,6 +5307,9 @@ export const en = {
   'callCard.joinButton': 'Join',
   'callCard.leaveButton': 'Leave',
   'callCard.recording': 'Recording',
+  // §2.8 gap 10 — half of AI Notes cannot run on every browser; say which.
+  'call.noTranscription': 'This browser cannot transcribe — the recording is still being kept',
+  'call.noRecorder': 'This browser cannot record audio — notes will come from the transcript only',
 } as const
 
 export type TranslationKey = keyof typeof en
@@ -10566,6 +10569,8 @@ export const es: Record<TranslationKey, string> = {
   'callCard.joinButton': 'Unirse',
   'callCard.leaveButton': 'Salir',
   'callCard.recording': 'Grabando',
+  'call.noTranscription': 'Este navegador no puede transcribir; la grabación se sigue guardando',
+  'call.noRecorder': 'Este navegador no puede grabar audio; las notas vendrán solo de la transcripción',
 
 }
 
@@ -15824,6 +15829,8 @@ export const ar: Record<TranslationKey, string> = {
   'callCard.joinButton': 'انضمام',
   'callCard.leaveButton': 'مغادرة',
   'callCard.recording': 'جارٍ التسجيل',
+  'call.noTranscription': 'لا يمكن لهذا المتصفح تفريغ الكلام — وما زال التسجيل محفوظًا',
+  'call.noRecorder': 'لا يمكن لهذا المتصفح تسجيل الصوت — ستُكتب الملاحظات من النص فقط',
 
 }
 
@@ -20927,6 +20934,8 @@ export const ur: Record<TranslationKey, string> = {
   'callCard.joinButton': 'شامل ہوں',
   'callCard.leaveButton': 'چھوڑیں',
   'callCard.recording': 'ریکارڈنگ',
+  'call.noTranscription': 'یہ براؤزر ٹرانسکرپشن نہیں کر سکتا — ریکارڈنگ پھر بھی محفوظ ہو رہی ہے',
+  'call.noRecorder': 'یہ براؤزر آڈیو ریکارڈ نہیں کر سکتا — نوٹس صرف ٹرانسکرپٹ سے بنیں گے',
 
 }
 

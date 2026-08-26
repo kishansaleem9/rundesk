@@ -771,6 +771,13 @@
       "when": 1900000089017,
       "tag": "0109_chat_call_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1900000089018,
+      "tag": "0110_call_transcripts",
+      "breakpoints": true
     }
   ]
 }

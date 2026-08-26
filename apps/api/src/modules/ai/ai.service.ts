@@ -981,6 +981,56 @@ Respond ONLY with a valid JSON array.`,
     return JSON.parse(jsonMatch[0])
   }
 
+  /**
+   * §2.8 gap 10 — write the meeting notes from what was said.
+   *
+   *   `[20:42]` "main record karoongi aur yeh aap ke khud hi NOTES bana ke
+   *   dega aur poori ki poori RECORDING bhi karega — poori call hi ki."
+   *
+   * The transcript arrives attributed ("Hamda: ...") because each person's own
+   * browser transcribes their own microphone, so the model can say who owns
+   * what — which is the difference between notes and a wall of text.
+   *
+   * Prose, not JSON: this goes into `meetings.notes`, which a person reads.
+   * Action items are extracted separately by the extractor that already
+   * exists, from these same notes.
+   */
+  async notesFromTranscript(transcript: string, ctx: AiCtx = {}): Promise<string> {
+    const response = await this.complete('meeting.transcript', ctx, {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system: `You write the notes for a meeting from its transcript.
+
+The transcript is live speech-to-text, so it is messy: false starts, filler,
+mis-heard words, and people talking over each other. Read past that.
+
+Write in Markdown, in this order, and leave out any section there is nothing
+real to put in — an empty "Decisions" heading is worse than no heading:
+
+## Summary
+Two or three sentences on what this call was actually about.
+
+## Decisions
+What was settled, one per line.
+
+## Action items
+"- **Name** — what they said they would do (by when, if a time was said)"
+
+## Open questions
+What was raised and not resolved.
+
+Rules that matter:
+- Attribute by the names in the transcript. Never invent a name.
+- Only write what was said. If the call was short or inconclusive, say so in
+  the summary and stop — do not pad it into something that sounds productive.
+- Speech-to-text mangles names and jargon. If a word is clearly garbled but
+  recoverable from context, use the sensible reading; if it is not, leave it
+  out rather than guessing at a commitment somebody did not make.`,
+      messages: [{ role: 'user', content: `Transcript:\n\n${transcript}` }],
+    })
+    return response.content[0].type === 'text' ? response.content[0].text.trim() : ''
+  }
+
   // ─── Auto-priority detection ──────────────────────────────────────────────
   async suggestPriority(title: string, description?: string, ctx: AiCtx = {}): Promise<{
     priority: 'urgent' | 'high' | 'normal' | 'low'

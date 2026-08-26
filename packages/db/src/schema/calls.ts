@@ -41,6 +41,14 @@ export const calls = pgTable(
     recordingStartedAt: timestamp('recording_started_at', { withTimezone: true }),
     /** The record this call left behind, filled when it ends. */
     meetingId:   uuid('meeting_id').references(() => meetings.id, { onDelete: 'set null' }),
+    /**
+     * §2.8 gap 10 — where the recording lives while the call is still running.
+     *
+     * `meetings.recordingUrl` is the permanent home, but the meeting record
+     * does not exist until the call ends, and an upload that finished before
+     * then must not be homeless.
+     */
+    recordingStorageKey: text('recording_storage_key'),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -85,4 +93,39 @@ export const callsRelations = relations(calls, ({ one, many }) => ({
 export const callParticipantsRelations = relations(callParticipants, ({ one }) => ({
   call: one(calls, { fields: [callParticipants.callId], references: [calls.id] }),
   user: one(users, { fields: [callParticipants.userId], references: [users.id] }),
+}))
+
+/**
+ * §2.8 gap 10 — the call's transcript, one utterance at a time.
+ *
+ *   "main record karoongi aur yeh aap ke khud hi NOTES bana ke dega"
+ *   `[20:42]`
+ *
+ * A line per utterance, attributed to whoever said it. Attribution is the whole
+ * reason this is a table rather than a text column on the call: "Hamda said
+ * she would send the deck" is a useful note and "somebody said they would send
+ * the deck" is not.
+ *
+ * Written live, so a call that crashes halfway still leaves the half it heard —
+ * and so the notes at the end are written from something real rather than from
+ * a recording nobody has transcribed yet.
+ */
+export const callTranscriptLines = pgTable(
+  'call_transcript_lines',
+  {
+    id:     uuid('id').primaryKey().defaultRandom(),
+    callId: uuid('call_id').notNull().references(() => calls.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    text:   text('text').notNull(),
+    saidAt: timestamp('said_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The only way this is ever read: everything for one call, in order.
+    index('call_transcript_lines_call_idx').on(t.callId, t.saidAt),
+  ],
+)
+
+export const callTranscriptLinesRelations = relations(callTranscriptLines, ({ one }) => ({
+  call: one(calls, { fields: [callTranscriptLines.callId], references: [calls.id] }),
+  user: one(users, { fields: [callTranscriptLines.userId], references: [users.id] }),
 }))

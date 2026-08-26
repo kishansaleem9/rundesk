@@ -68,4 +68,49 @@ export class CallsController {
   ) {
     return this.svc.setRecording(callId, user.id, body?.recording === true)
   }
+
+  /**
+   * §2.8 gap 10 — the transcript, as it is being said.
+   *
+   * Over HTTP rather than the socket, unlike signalling: a line of speech is
+   * something that must be KEPT, and a fire-and-forget socket emit gives the
+   * client no way to know whether it landed. It is also the surface that
+   * refuses to record while the banner is down, which is not a decision to make
+   * on a channel with no reply.
+   */
+  @Post(':callId/transcript')
+  @ApiOperation({ summary: '§2.8 — append one line of what was said (only while recording)' })
+  transcript(
+    @Param('callId') callId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { text?: string },
+  ) {
+    return this.svc.appendTranscript(callId, user.id, body?.text ?? '')
+  }
+
+  @Get(':callId/transcript')
+  @ApiOperation({ summary: '§2.8 — the call so far, attributed' })
+  readTranscript(@Param('callId') callId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.svc.liveTranscript(callId, user.id)
+  }
+
+  @Post(':callId/recording/upload-url')
+  @ApiOperation({ summary: '§2.8 — where to PUT the recording; the media never passes through here' })
+  recordingUploadUrl(
+    @Param('callId') callId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { contentType?: string },
+  ) {
+    return this.svc.recordingUploadUrl(callId, user.id, body?.contentType ?? 'audio/webm')
+  }
+
+  @Post(':callId/recording/attach')
+  @ApiOperation({ summary: '§2.8 — the upload finished; remember where it landed' })
+  attachRecording(
+    @Param('callId') callId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { storageKey?: string },
+  ) {
+    return this.svc.attachRecording(callId, user.id, body?.storageKey ?? '')
+  }
 }

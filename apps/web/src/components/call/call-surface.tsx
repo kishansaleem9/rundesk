@@ -18,6 +18,7 @@ import {
 import { useTranslation } from '../../lib/i18n'
 import { getRealtimeSocket } from '../../lib/realtime'
 import { useWebRtcCall } from '../../lib/use-webrtc-call'
+import { useCallRecording } from '../../lib/use-call-recording'
 import { presentIn, type Call } from '../../lib/calls-api'
 import { EmojiPicker } from '../emoji/emoji-picker'
 import { BACKGROUND_TINT, type CallBackground } from './call-prejoin'
@@ -81,6 +82,23 @@ export function CallSurface({
     myUserId,
     peerIds: present.map((p) => p.userId),
     localStream,
+  })
+
+  /*
+   * §2.8 gap 10 — AI Notes, while the banner is up.
+   *
+   * Everyone transcribes their own microphone, which is what lets the notes say
+   * who said what. Only the host captures the mixed recording: every
+   * participant writing the same call would produce one copy per person, all
+   * but one of them wasted.
+   */
+  const { captions, unavailable: notesUnavailable } = useCallRecording({
+    workspaceId: call.workspaceId,
+    callId: call.id,
+    recording: call.recording,
+    localStream,
+    peerStreams: peers.map((p) => p.stream),
+    captureAudio: myUserId === call.startedById,
   })
 
   /**
@@ -249,6 +267,16 @@ export function CallSurface({
               {hasTurn ? t('call.someoneUnreachable') : t('call.needsTurn')}
             </Badge>
           )}
+          {/* §2.8 gap 10 — say when half of AI Notes cannot run here rather
+              than leaving a recording banner over a browser that is writing
+              nothing. Safari has no speech recognition; some builds have no
+              MediaRecorder container we can write. */}
+          {call.recording && notesUnavailable && (
+            <Badge variant="outline" className="text-[10px] text-amber-300" data-testid="call-notes-limited">
+              <AlertTriangle className="h-3 w-3 mr-1" />
+              {notesUnavailable === 'speech' ? t('call.noTranscription') : t('call.noRecorder')}
+            </Badge>
+          )}
           <button onClick={() => setMinimised(true)} title={t('call.minimise')} data-testid="call-minimise" className="p-1 text-white/70 hover:text-white">
             <Minimize2 className="h-4 w-4" />
           </button>
@@ -289,6 +317,28 @@ export function CallSurface({
             </span>
           ))}
         </div>
+
+        {/*
+          §2.8 gap 10 — live captions.
+          The visible proof that the notes are being written from something
+          real. A recording banner with nothing happening under it is the kind
+          of promise people stop believing.
+        */}
+        {call.recording && captions.length > 0 && (
+          <div
+            className="pointer-events-none absolute bottom-3 left-1/2 w-[min(680px,90%)] -translate-x-1/2 space-y-1"
+            data-testid="call-captions"
+          >
+            {captions.map((line) => (
+              <p
+                key={line.id}
+                className="rounded-lg bg-black/70 px-3 py-1.5 text-center text-[13px] leading-snug text-white/90"
+              >
+                {line.text}
+              </p>
+            ))}
+          </div>
+        )}
 
         {showPeople && (
           <aside

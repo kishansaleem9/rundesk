@@ -1807,6 +1807,111 @@ try {
     }
   })
 
+  await section('§2.8f', 'AI Notes: what is said is kept, and only while it is announced', async () => {
+    // [20:42] "main record karoongi aur yeh aap ke khud hi NOTES bana ke dega
+    // aur poori ki poori RECORDING bhi karega — poori call hi ki."
+    //
+    // The consent rule is the one that matters and cannot be checked by
+    // looking: nothing may be transcribed while the recording banner is down.
+    const channels = (await apiGet(`/workspaces/${WS}/chat/channels`)) ?? []
+    const channel = channels.find((c) => !c.isDm)
+    if (!channel) {
+      ok('no non-DM channel on this account, so a recorded call could not be run')
+    } else {
+      const call = await apiPost(`/workspaces/${WS}/calls`, { channelId: channel.id })
+      if (!call?.id) {
+        bad('could not start a call through the API')
+      } else {
+        const post = (path, body) =>
+          fetch(`${API}${path}`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body ?? {}),
+          })
+            .then(async (r) => ({ status: r.status, data: (await r.json().catch(() => null))?.data }))
+            .catch(() => ({ status: 0, data: null }))
+
+        // Recording is OFF. Nothing may be kept.
+        const refused = await post(`/workspaces/${WS}/calls/${call.id}/transcript`, {
+          text: 'this must not be stored',
+        })
+        chk(
+          refused.data?.ok === false && refused.data?.reason === 'not_recording',
+          'a line sent while recording is off is refused',
+          `it was accepted: ${JSON.stringify(refused.data)}`,
+        )
+
+        // Turn it on — which announces itself — and now it is kept.
+        await apiPost(`/workspaces/${WS}/calls/${call.id}/recording`, { recording: true })
+        const kept = await post(`/workspaces/${WS}/calls/${call.id}/transcript`, {
+          text: 'we should ship the meetings page on Friday',
+        })
+        chk(kept.data?.ok === true, 'and kept once the banner is up', `it was refused: ${JSON.stringify(kept.data)}`)
+
+        const read = await apiGet(`/workspaces/${WS}/calls/${call.id}/transcript`)
+        chk(
+          typeof read?.transcript === 'string' && read.transcript.includes('ship the meetings page'),
+          'the transcript reads back',
+          'the line was accepted but is not in the transcript',
+        )
+        chk(
+          /^[^:\n]+: /.test(read?.transcript ?? ''),
+          'attributed to whoever said it',
+          `the transcript has no speaker: ${JSON.stringify((read?.transcript ?? '').slice(0, 80))}`,
+        )
+
+        // The recording's upload URL is handed out, and the media never comes
+        // through the API on its way to storage.
+        const upload = await post(`/workspaces/${WS}/calls/${call.id}/recording/upload-url`, {
+          contentType: 'audio/webm',
+        })
+        if (upload.status === 200) {
+          chk(
+            typeof upload.data?.uploadUrl === 'string' && upload.data.uploadUrl.startsWith('http'),
+            'a pre-signed upload URL is issued for the recording',
+            'no upload URL came back',
+          )
+          chk(
+            String(upload.data?.storageKey ?? '').startsWith(`calls/${WS}/${call.id}/`),
+            'under a key scoped to this call',
+            `the key is not scoped to the call: ${upload.data?.storageKey}`,
+          )
+          const foreign = await post(`/workspaces/${WS}/calls/${call.id}/recording/attach`, {
+            storageKey: `calls/${WS}/00000000-0000-0000-0000-000000000000/rec.webm`,
+          })
+          chk(
+            foreign.status === 400,
+            'and a key from another call is refused',
+            `attaching a foreign recording came back ${foreign.status}`,
+          )
+        } else {
+          ok('R2 storage is not configured on this instance, so the upload URL could not be issued')
+        }
+
+        // Ending writes the record: transcript, and notes if a model is here.
+        const ended = await apiPost(`/workspaces/${WS}/calls/${call.id}/end`, {})
+        chk(!!ended?.meetingId, 'ending the call leaves a meeting record', 'the call left no record')
+        if (ended?.meetingId) {
+          const meeting = await apiGet(`/workspaces/${WS}/meetings/${ended.meetingId}`)
+          chk(
+            typeof meeting?.transcript === 'string' && meeting.transcript.includes('ship the meetings page'),
+            'carrying the transcript',
+            'the meeting record lost the transcript',
+          )
+          if (meeting?.notes) {
+            chk(meeting.notes.length > 0, 'and notes written from it', 'the notes are empty')
+          } else {
+            ok('no model configured on this instance, so the notes were not written (the record still stands)')
+          }
+          await fetch(`${API}/workspaces/${WS}/meetings/${ended.meetingId}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null)
+        }
+      }
+    }
+  })
+
   await section('§2.8d', 'A switched-off feature explains itself', async () => {
     // [20:45] recording "back end se on karna parta hai". The gap was that a
     // gated feature did not render at all — no modal, no reason, nothing to
