@@ -81,7 +81,10 @@ const call = async (method, p, body) => {
 }
 
 async function main() {
-  const app = await NestFactory.create(Harness, new FastifyAdapter({ logger: false }), { logger: false })
+  // Errors stay visible: with `logger: false` a bootstrap failure prints
+  // nothing at all and the process just exits 1, which is indistinguishable
+  // from a broken harness.
+  const app = await NestFactory.create(Harness, new FastifyAdapter({ logger: false }), { logger: ['error'] })
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }))
   await app.listen(PORT, '127.0.0.1')
   // Start from a known-empty state — a leftover row from an aborted run would

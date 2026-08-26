@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -32,6 +32,9 @@ export class CallsController {
     return this.svc.liveInChannel(channelId, user.id)
   }
 
+  // The one POST here that can genuinely create something, so the one that
+  // keeps 201. Every other route below acts on a call that already exists, and
+  // 201 there claims a resource was created at a URI it never returns.
   @Post()
   @ApiOperation({ summary: 'Start a call — or join the one already running here' })
   start(
@@ -43,21 +46,25 @@ export class CallsController {
   }
 
   @Post(':callId/join')
+  @HttpCode(HttpStatus.OK)
   join(@Param('callId') callId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.svc.join(callId, user.id)
   }
 
   @Post(':callId/leave')
+  @HttpCode(HttpStatus.OK)
   leave(@Param('callId') callId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.svc.leave(callId, user.id)
   }
 
   @Post(':callId/end')
+  @HttpCode(HttpStatus.OK)
   end(@Param('callId') callId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.svc.end(callId, user.id)
   }
 
   @Post(':callId/recording')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: '§2.8 — start/stop recording; everyone in the call is told in the same breath',
   })
@@ -79,6 +86,7 @@ export class CallsController {
    * on a channel with no reply.
    */
   @Post(':callId/transcript')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '§2.8 — append one line of what was said (only while recording)' })
   transcript(
     @Param('callId') callId: string,
@@ -95,6 +103,7 @@ export class CallsController {
   }
 
   @Post(':callId/recording/upload-url')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '§2.8 — where to PUT the recording; the media never passes through here' })
   recordingUploadUrl(
     @Param('callId') callId: string,
@@ -105,6 +114,7 @@ export class CallsController {
   }
 
   @Post(':callId/recording/attach')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '§2.8 — the upload finished; remember where it landed' })
   attachRecording(
     @Param('callId') callId: string,
