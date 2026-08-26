@@ -176,10 +176,14 @@ jobs:
       # is not up yet fails for a reason that has nothing to do with calls.
       - name: Start the API
         if: '!cancelled()'
+        # From apps/api, like every other step here: tsx is a dependency of that
+        # package, so `npx tsx` from the repo root is "tsx: not found" — which
+        # presents as an API that never comes up rather than as a missing tool.
+        working-directory: apps/api
         run: |
           # nohup + disown so it outlives this step's shell — the runner tears
           # processes down at the end of the JOB, not the end of a step.
-          nohup npx tsx apps/api/dist/apps/api/src/main.js > /tmp/api.log 2>&1 &
+          nohup npx tsx dist/apps/api/src/main.js > /tmp/api.log 2>&1 &
           disown
           for i in $(seq 1 60); do
             if curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/v1/auth/oauth/providers"; then
