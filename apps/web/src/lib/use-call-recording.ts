@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import {
+  MAX_SPEECH_RESTARTS,
   MIN_RECORDING_BYTES,
   RECORDER_CHUNK_MS,
   captionsTail,
@@ -260,19 +261,57 @@ export function useCallRecording({
       }
     }
 
-    // Chrome ends recognition on its own after a pause. Restarting is what
-    // makes this last a whole call rather than the first sentence of one.
-    recognition.onend = () => {
-      if (stopped) return
-      try {
-        recognition.start()
-      } catch {
-        // Already starting. The next onend will try again.
+    /*
+     * Chrome ends recognition on its own after a pause, so restarting is what
+     * makes this last a whole call rather than the first sentence of one.
+     *
+     * But restarting UNCONDITIONALLY is a hot loop. When the failure is
+     * permanent — microphone permission revoked, the service unreachable —
+     * onend fires immediately after every start, and the page spins at full
+     * tilt for the rest of the call with nothing on screen to say why. So
+     * terminal errors stop it and say so, and everything else backs off
+     * instead of hammering.
+     */
+    let restarts = 0
+    let restartTimer: ReturnType<typeof setTimeout> | undefined
+
+    recognition.onerror = (event) => {
+      // 'no-speech' and 'aborted' are ordinary — somebody paused. These two
+      // are not: they will not fix themselves by being tried again.
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        stopped = true
+        setUnavailable((prev) => prev ?? 'speech')
       }
     }
-    recognition.onerror = () => {
-      // 'no-speech' and 'aborted' are ordinary; onend restarts either way.
+
+    recognition.onend = () => {
+      if (stopped) return
+      if (restarts >= MAX_SPEECH_RESTARTS) {
+        // Out of patience rather than out of control. The recording is still
+        // being kept; it is the transcript half that has given up.
+        setUnavailable((prev) => prev ?? 'speech')
+        return
+      }
+      // A clean end after real speech is the common case and should resume at
+      // once; a burst of ends in a row is a failure and should not.
+      const delay = restarts === 0 ? 0 : Math.min(2000, 250 * 2 ** (restarts - 1))
+      restarts++
+      restartTimer = setTimeout(() => {
+        if (stopped) return
+        try {
+          recognition.start()
+        } catch {
+          // Already starting. The next onend will try again.
+        }
+      }, delay)
     }
+
+    // Any successful result means the service is working — forgive the count,
+    // so a long call with occasional hiccups is not slowly starved.
+    const clearBackoff = () => {
+      restarts = 0
+    }
+    recognition.addEventListener('result', clearBackoff)
 
     try {
       recognition.start()
@@ -283,6 +322,8 @@ export function useCallRecording({
     return () => {
       stopped = true
       recognitionRef.current = null
+      if (restartTimer) clearTimeout(restartTimer)
+      recognition.removeEventListener('result', clearBackoff)
       try {
         recognition.stop()
       } catch {

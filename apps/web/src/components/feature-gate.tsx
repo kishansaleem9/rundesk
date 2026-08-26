@@ -34,7 +34,7 @@ export interface GatedFeature {
  * `gateDialog` somewhere in the tree.
  */
 export function useFeatureGate(workspaceId?: string | null) {
-  const { featureEnabled, isLoading } = useResolvedFlags(workspaceId)
+  const { flags, featureEnabled, isLoading } = useResolvedFlags(workspaceId)
   const [gated, setGated] = useState<GatedFeature | null>(null)
 
   const requireFeature = useCallback(
@@ -43,10 +43,19 @@ export function useFeatureGate(workspaceId?: string | null) {
       setGated(feature)
       return false
     },
-    // featureEnabled is rebuilt each render from the query result; depending on
-    // the flags themselves keeps this stable between refetches.
+    /*
+     * `flags`, not `isLoading`.
+     *
+     * featureEnabled is rebuilt every render out of `flags`, so a callback
+     * memoised on isLoading closes over whichever one existed when loading
+     * last flipped — and isLoading flips exactly once. Every refetch after
+     * that changed the flags and not this, so the gate kept a snapshot from
+     * the first load for the entire life of the mount. An earlier version of
+     * this comment called that "stable", which it is, in the way a stopped
+     * clock is.
+     */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isLoading, workspaceId],
+    [flags, workspaceId],
   )
 
   const gateDialog: ReactNode = gated ? (

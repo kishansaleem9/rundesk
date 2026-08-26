@@ -374,7 +374,12 @@ describe('§2.8 a call announces itself to the channel', () => {
   } = {}) => {
     const { db, inserts } = fakeDb({
       calls: [],
-      channelMembers: over.members ?? [{ userId: 'me' }, { userId: 'them' }, { userId: 'third' }],
+      channelMembers:
+        over.members ?? [
+          { userId: 'me', level: 'all' },
+          { userId: 'them', level: 'all' },
+          { userId: 'third', level: 'all' },
+        ],
       users: over.users,
     })
     const n = notifier()
@@ -410,6 +415,25 @@ describe('§2.8 a call announces itself to the channel', () => {
     assert.equal(notified[0].actorId, 'me')
   })
 
+  it('does not ring somebody who muted the channel', async () => {
+    // Chat already honours notificationLevel for every message. A call
+    // ignoring it means the one thing that also sends a web push is the one
+    // thing that overrides being silenced.
+    const { notified } = await startInChannel({
+      members: [
+        { userId: 'me', level: 'all' },
+        { userId: 'them', level: 'all' },
+        { userId: 'muted', level: 'none' },
+        { userId: 'mentions-only', level: 'mentions' },
+      ],
+    })
+    assert.deepEqual(
+      notified.map((n) => n.userId),
+      ['them'],
+      'a muted or mentions-only member was rung about a call',
+    )
+  })
+
   it('links straight to the channel, where the Join button is', async () => {
     // "wahan se direct call join ho jaoge" — a notification you have to go
     // looking from is not a direct join.
@@ -436,7 +460,7 @@ describe('§2.8 a call announces itself to the channel', () => {
     // guard around announce() and a test built on one passes either way.
     const { db } = fakeDb({
       calls: [],
-      channelMembers: [{ userId: 'them' }],
+      channelMembers: [{ userId: 'them', level: 'all' }],
       // The CARD specifically: the calls row carries a channelId too, and
       // failing that one broke the call itself rather than the announcement.
       failInsert: (v) => !!v.channelId && !!v.authorId,
@@ -448,7 +472,7 @@ describe('§2.8 a call announces itself to the channel', () => {
   })
 
   it('starts the call even when nobody can be notified', async () => {
-    const { db } = fakeDb({ calls: [], channelMembers: [{ userId: 'them' }] })
+    const { db } = fakeDb({ calls: [], channelMembers: [{ userId: 'them', level: 'all' }] })
     const exploding = {
       create: mock.fn(async () => {
         throw new Error('notifications are down')
@@ -462,7 +486,7 @@ describe('§2.8 a call announces itself to the channel', () => {
   it('says nothing for a call with no channel', async () => {
     // A workspace-level call has no channel to post into and no membership to
     // notify — announcing it would mean picking somebody arbitrarily.
-    const { db, inserts } = fakeDb({ calls: [], channelMembers: [{ userId: 'them' }] })
+    const { db, inserts } = fakeDb({ calls: [], channelMembers: [{ userId: 'them', level: 'all' }] })
     const n = notifier()
     const svc = makeService({ db, notifications: n })
     await svc.start('ws1', 'me', {})

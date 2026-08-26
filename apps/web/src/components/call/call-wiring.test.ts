@@ -38,6 +38,17 @@ describe('§2.8 the pre-join dialog gives its stream away', () => {
     )
   })
 
+  it('takes the preview back when the join fails', () => {
+    // Handing it over unconditionally left the dialog open with an empty ref:
+    // the Join button looked enabled, pressed to no effect, and the camera it
+    // had let go of ran on with no owner to stop it.
+    assert.match(
+      text,
+      /if \(joined === false\) streamRef\.current = stream/,
+      'a failed join no longer returns the preview — Join goes inert and the camera is orphaned',
+    )
+  })
+
   it('still stops the preview on unmount', () => {
     // The fix must not have been "delete the cleanup": abandoning the preview
     // leaves the camera light on when somebody cancels.
@@ -122,6 +133,37 @@ describe('§2.8 the mesh is whole or it is nothing', () => {
       text,
       /connectionState === 'connected'/,
       'nothing clears failedPeers — the TURN warning stays up for the rest of the call',
+    )
+  })
+})
+
+describe('§2.8 AI Notes does not spin when it cannot work', () => {
+  const text = source('lib/use-call-recording.ts', 'export function useCallRecording')
+
+  it('stops rather than hammering when the microphone is refused', () => {
+    // A permanent failure ends recognition the instant it starts, so an
+    // unconditional restart is a hot loop for the length of the call with
+    // nothing on screen to explain it.
+    assert.match(text, /'not-allowed'/, 'a revoked microphone no longer stops the restart loop')
+    // The COMPARISON, not the identifier. Checking that the name merely
+    // appears passed with the ceiling replaced by `if (false)`, because the
+    // import line still mentioned it.
+    assert.match(
+      text,
+      /restarts >= MAX_SPEECH_RESTARTS/,
+      'the restart loop has no ceiling — a permanent failure spins for the whole call',
+    )
+    assert.match(text, /Math\.min\(2000, 250 \* 2 \*\* \(restarts - 1\)\)/, 'restarts no longer back off')
+  })
+
+  it('clears its restart timer on the way out', () => {
+    assert.match(text, /if \(restartTimer\) clearTimeout\(restartTimer\)/, 'a pending restart outlives the call')
+  })
+
+  it('tells the server which lines are revisions', () => {
+    assert.ok(
+      text.includes('replacesPrevious: replaces'),
+      'revisions are posted as new lines again — the transcript will say everything twice',
     )
   })
 })

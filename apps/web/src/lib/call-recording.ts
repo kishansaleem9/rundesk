@@ -100,6 +100,16 @@ export function captionsTail<T>(lines: T[], max = 3): T[] {
  */
 export const RECORDER_CHUNK_MS = 5000
 
+/**
+ * How many times speech recognition may restart before giving up.
+ *
+ * It ends itself after every pause, so restarting is normal and this is
+ * deliberately generous. It exists for the case where the failure is permanent
+ * and every start ends instantly: without a ceiling that is a hot loop running
+ * for the length of the call with nothing on screen to explain it.
+ */
+export const MAX_SPEECH_RESTARTS = 40
+
 /** Below this, the "recording" is a header and no audio. */
 export const MIN_RECORDING_BYTES = 1024
 

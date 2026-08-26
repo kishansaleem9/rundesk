@@ -43,7 +43,8 @@ export function CallPreJoin({
   joining,
   peopleAlreadyIn,
 }: {
-  onJoin: (stream: MediaStream, background: CallBackground) => void
+  /** Resolves false when the join did not happen, so the preview comes back. */
+  onJoin: (stream: MediaStream, background: CallBackground) => void | boolean | Promise<void | boolean>
   onCancel: () => void
   joining: boolean
   peopleAlreadyIn: number
@@ -134,11 +135,20 @@ export function CallPreJoin({
     [],
   )
 
-  /** Hand the preview over. After this the call owns it, and we stop nothing. */
-  const handOff = () => {
+  /**
+   * Hand the preview over. After this the call owns it, and we stop nothing.
+   *
+   * Unless the join fails — the channel was deleted, the server said no — in
+   * which case we take it back. Handing it over unconditionally left the
+   * dialog still open with an empty ref: the Join button looked enabled,
+   * pressed to no effect because there was nothing left to hand over, and the
+   * camera it had let go of was running with no owner to stop it.
+   */
+  const handOff = async () => {
     const stream = takeStream(streamRef)
     if (!stream) return
-    onJoin(stream, background)
+    const joined = await onJoin(stream, background)
+    if (joined === false) streamRef.current = stream
   }
 
   const toggleMic = () => {
@@ -269,7 +279,7 @@ export function CallPreJoin({
           <Button
             data-testid="call-prejoin-join"
             disabled={joining || !ready}
-            onClick={handOff}
+            onClick={() => void handOff()}
           >
             {joining && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {t('call.join')}

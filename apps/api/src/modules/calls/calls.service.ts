@@ -226,11 +226,20 @@ export class CallsService {
       message: { ...message, authorName: who, reactions: [] },
     } as never)
 
-    // The notification, to the channel's members — not the workspace's. Being
-    // told about a call in a channel you are not in is noise, and the members
-    // table is what "in" means.
+    /*
+     * The notification, to the channel's members — not the workspace's. Being
+     * told about a call in a channel you are not in is noise, and the members
+     * table is what "in" means.
+     *
+     * And only those who have not muted it. Chat already honours
+     * notificationLevel for every message; a call ignoring it meant somebody
+     * who had deliberately silenced a channel still got rung — and got a web
+     * push — which is a louder version of exactly what they asked not to have.
+     * 'mentions' is a no as well: a call starting is channel activity, not
+     * somebody saying your name.
+     */
     const members = await this.db
-      .select({ userId: chatChannelMembers.userId })
+      .select({ userId: chatChannelMembers.userId, level: chatChannelMembers.notificationLevel })
       .from(chatChannelMembers)
       .where(eq(chatChannelMembers.channelId, channelId))
 
@@ -242,6 +251,7 @@ export class CallsService {
 
     for (const member of members) {
       if (member.userId === starterId) continue
+      if (member.level !== 'all') continue
       await this.notifications
         .create({
           userId: member.userId,

@@ -163,7 +163,7 @@ export function ChannelCall({
   const beginJoin = () => setPrejoin(true)
 
   const confirmJoin = async (media: MediaStream, chosen: CallBackground) => {
-    if (!channelId) return
+    if (!channelId) return false
     setJoining(true)
     try {
       // start() joins the call already running here, so two people pressing
@@ -176,8 +176,12 @@ export function ChannelCall({
       setBackground(chosen)
       setInCall(call)
       setPrejoin(false)
+      return true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('call.deviceError'))
+      // Reported rather than swallowed: the pre-join dialog is still open and
+      // has to take its camera back, or its Join button is inert from here on.
+      return false
     } finally {
       setJoining(false)
     }
