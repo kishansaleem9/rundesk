@@ -92,8 +92,17 @@ jobs:
 
       # Holds each response the app waits on and looks at the screen while it
       # is outstanding. None of these are visible unless something is slow.
+      #
+      # `!cancelled()` on this and the next one so a failure in an earlier suite
+      # does not HIDE the later ones. It did: one broken assertion in the
+      # loading-states suite skipped the 90-check video1 suite for six
+      # consecutive commits, and the run reported "failure" either way — so
+      # there was no way to tell from CI whether those 90 checks still passed.
+      # A skipped suite is not a passing suite, and it should not look like one.
       - name: Loading states are never blank
+        if: '!cancelled()'
         run: node test/e2e/loading-states.mjs
 
       - name: video1 fast items
+        if: '!cancelled()'
         run: node test/e2e/video1-fast-items.mjs
