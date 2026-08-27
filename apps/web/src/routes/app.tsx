@@ -9,6 +9,9 @@ import {
 } from '../components/loading-skeletons'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
 import { AppTopbar } from '../components/app-topbar'
+// §G06 [05:43] — the person panel overlays whatever page you are on, so it is
+// mounted once in the shell rather than per page.
+import { PersonPanel } from '../components/person-panel'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
 import { SupportWidget } from '../components/support-widget'
 import { NewBuildAvailable } from '../components/new-build-available'
@@ -146,6 +149,7 @@ function AppShell() {
           </Suspense>
         </aside>
       ) : null}
+      <PersonPanel />
       {cmdOpen ? (
         <Suspense fallback={<CommandPaletteSkeleton />}>
           <CommandPalette

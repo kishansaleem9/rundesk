@@ -65,6 +65,7 @@ import type { TranslationKey } from '../lib/i18n/catalogs'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { useSidebarStore } from '../store/sidebar'
+import { openPersonPanel } from '../store/person-panel'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
 import { ChatAttachmentList } from '../components/chat/chat-attachments'
 import { InlineSkeleton } from '../components/loading-skeletons'
@@ -230,36 +231,6 @@ function defaultReminderWhen(from: Date = new Date()): string {
 
 type CustomEmoji = { id: string; shortcode: string; imageUrl: string; createdById?: string | null }
 
-type MemberProfileStats = {
-  recentMessages: Message[]
-  recentReplies: Message[]
-  totalMessages: number
-}
-
-type ProfileTask = {
-  id: string
-  title: string
-  status: string
-  priority: string
-  dueDate: string | null
-  updatedAt: string
-  listId: string
-  listName: string
-  projectId: string
-  projectName: string
-  spaceId: string
-  spaceName: string
-}
-
-type MemberActivityItem = {
-  id: string
-  channelId: string
-  channelName: string
-  body: string
-  parentMessageId?: string | null
-  createdAt: string
-}
-
 export function ChatPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/chat' })
@@ -305,7 +276,6 @@ export function ChatPage() {
   // Workspace file library (§6.8) + full message search (§6.11) side panels.
   const [showFilesPanel, setShowFilesPanel] = useState(false)
   const [showSearchPanel, setShowSearchPanel] = useState(false)
-  const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null)
   /**
    * §2.8 gap 9 — a call card's Join/Leave, handed to the call component.
@@ -325,7 +295,6 @@ export function ChatPage() {
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
   const [newEmojiCode, setNewEmojiCode] = useState('')
   const [newEmojiUrl, setNewEmojiUrl] = useState('')
-  const [profileTab, setProfileTab] = useState<'activity' | 'tasks' | 'comments'>('activity')
   const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
   /**
    * §G11 [15:36] — which message's Assign picker is open.
@@ -674,36 +643,6 @@ export function ChatPage() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t('chat.couldNotAddMember')),
   })
 
-  const selectedProfile = useMemo(
-    () => (membersQuery.data ?? []).find((m) => m.userId === profileUserId) ?? null,
-    [membersQuery.data, profileUserId],
-  )
-  const profileTasksQuery = useQuery({
-    queryKey: ['profile-member-tasks', workspaceId, profileUserId],
-    queryFn: () => api<ProfileTask[]>(`/tasks/workspace/${workspaceId}/members/${profileUserId}`),
-    enabled: !!workspaceId && !!profileUserId,
-  })
-  const profileActivityQuery = useQuery({
-    queryKey: ['profile-member-activity', workspaceId, profileUserId],
-    queryFn: () => api<MemberActivityItem[]>(`/workspaces/${workspaceId}/chat/members/${profileUserId}/activity?limit=40`),
-    enabled: !!workspaceId && !!profileUserId,
-  })
-  const profileStats = useMemo<MemberProfileStats>(() => {
-    const activity = profileActivityQuery.data ?? []
-    const asMessages: Message[] = activity.map((item) => ({
-      id: item.id,
-      channelId: item.channelId,
-      authorId: profileUserId ?? '',
-      body: item.body,
-      parentMessageId: item.parentMessageId ?? null,
-      createdAt: item.createdAt,
-    }))
-    return {
-      recentMessages: asMessages.filter((m) => !m.parentMessageId).slice(0, 8),
-      recentReplies: asMessages.filter((m) => !!m.parentMessageId).slice(0, 8),
-      totalMessages: asMessages.length,
-    }
-  }, [profileActivityQuery.data, profileUserId])
 
   useEffect(() => {
     const socket = getRealtimeSocket()
@@ -1410,27 +1349,6 @@ export function ChatPage() {
     if (alsoSendToChannel) sendMutation.mutate({ body: trimmed })
   }
 
-  const openThreadFromActivity = async (entry: Message) => {
-    const parentId = entry.parentMessageId ?? entry.id
-    const targetChannelId = entry.channelId
-    setSelectedId(targetChannelId)
-    setReplyTo(null)
-    setHighlightedMessageId(entry.id)
-
-    try {
-      const thread = await api<{ parent: Message; replies: Message[] }>(`/chat/messages/${parentId}/thread`)
-      qc.setQueryData<Message[] | undefined>(['chat-messages', targetChannelId], (prev) => {
-        const list = prev ?? []
-        const incoming = [thread.parent, ...thread.replies]
-        const byId = new Map(list.map((m) => [m.id, m]))
-        for (const msg of incoming) byId.set(msg.id, msg)
-        return [...byId.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      })
-    } catch {
-      // If fetch fails we still switch channel and try opening thread context.
-    }
-    setThreadParentId(parentId)
-  }
 
   useEffect(() => { setDmTab('chat') }, [selectedId])
 
@@ -2219,10 +2137,10 @@ export function ChatPage() {
                         <button
                           type="button"
                           className="h-9 w-9 rounded-full bg-gradient-to-br from-violet-500 to-indigo-600 text-white text-[11px] font-bold flex items-center justify-center hover:brightness-110"
-                          onClick={() => {
-                            setProfileUserId(m.authorId)
-                            setProfileTab('activity')
-                          }}
+                          // §G06 [05:43] — one profile panel, everywhere. The
+                          // card this used to open is `hidden xl:flex`, so
+                          // below 1280px clicking a name did nothing at all.
+                          onClick={() => openPersonPanel(m.authorId)}
                         >
                           {(m.authorName ?? '?')[0]?.toUpperCase()}
                         </button>
@@ -2234,10 +2152,7 @@ export function ChatPage() {
                           <button
                             type="button"
                             className={cn('text-[14px] font-semibold hover:underline', mine ? 'text-violet-600 dark:text-violet-300' : 'text-foreground')}
-                            onClick={() => {
-                              setProfileUserId(m.authorId)
-                              setProfileTab('activity')
-                            }}
+                            onClick={() => openPersonPanel(m.authorId)}
                           >
                             {m.authorName ?? t('chat.unknownUser')}
                           </button>
@@ -3167,31 +3082,11 @@ export function ChatPage() {
             emojiByCode={emojiByCode}
           />
         )}
-        {selectedProfile && (
-          <ProfilePanel
-            member={selectedProfile}
-            stats={profileStats}
-            tasks={profileTasksQuery.data ?? []}
-            tab={profileTab}
-            onChangeTab={setProfileTab}
-            onMention={() => setInput((prev) => `${prev ? `${prev} ` : ''}<@${selectedProfile.userId}> `)}
-            onStartDm={() => createDmMutation.mutate(selectedProfile.userId)}
-            onOpenActivity={(entry) => void openThreadFromActivity(entry)}
-            onOpenTask={(task) =>
-              navigate({
-                to: '/app/$workspaceId/$spaceId/$projectId/$listId',
-                params: {
-                  workspaceId,
-                  spaceId: task.spaceId,
-                  projectId: task.projectId,
-                  listId: task.listId,
-                },
-                search: { task: task.id } as any,
-              })
-            }
-            onClose={() => setProfileUserId(null)}
-          />
-        )}
+        {/* §G06 [05:43] — the member card that used to live here is gone.
+            It was `hidden xl:flex`, so below 1280px clicking a name did
+            nothing at all, and it was reachable from exactly one place.
+            <PersonPanel> in the app shell replaced it: same information,
+            more of it, at every width, from everywhere a name appears. */}
         {showPinnedPanel && (
           <PinnedPanel
             messages={pinnedMessages}
@@ -4110,168 +4005,6 @@ function ThreadPanel({
   )
 }
 
-function ProfilePanel({
-  member,
-  stats,
-  tasks,
-  tab,
-  onChangeTab,
-  onMention,
-  onStartDm,
-  onOpenActivity,
-  onOpenTask,
-  onClose,
-}: {
-  member: WorkspaceMember
-  stats: MemberProfileStats
-  tasks: ProfileTask[]
-  tab: 'activity' | 'tasks' | 'comments'
-  onChangeTab: (tab: 'activity' | 'tasks' | 'comments') => void
-  onMention: () => void
-  onStartDm: () => void
-  onOpenActivity: (entry: Message) => void
-  onOpenTask: (task: ProfileTask) => void
-  onClose: () => void
-}) {
-  const { t, tCount } = useTranslation()
-  return (
-    <aside className="hidden xl:flex w-[320px] border-l border-border bg-card/80 flex-col animate-in slide-in-from-right-4 duration-200">
-      <div className="h-12 border-b border-border px-3 flex items-center justify-between">
-        <div className="text-sm font-semibold">{t('chat.profile')}</div>
-        <button
-          className="h-7 w-7 rounded hover:bg-muted text-muted-foreground flex items-center justify-center"
-          onClick={onClose}
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-      <div className="p-4 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="h-12 w-12 rounded-lg bg-brand-300 text-foreground font-semibold flex items-center justify-center">
-            {(member.displayName || member.email)[0]?.toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold truncate">{member.displayName || member.email}</div>
-            <div className="text-xs text-muted-foreground truncate">{member.email}</div>
-          </div>
-        </div>
-        <div className="rounded-lg border border-border/70 bg-background px-3 py-2">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('chat.status')}</div>
-          <div className="mt-1 text-sm text-foreground flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            {t('chat.online')}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">{tCount('chat.messagesInContext', stats.totalMessages)}</div>
-        </div>
-        <div className="flex gap-2">
-          {/*
-            * §G11 [15:36] — this one says what it does.
-            *
-            * It was labelled "Assign" and appended `<@id>` to the composer,
-            * which is the same lie the message toolbar's Assign told and is
-            * fixed there by actually assigning. Here there is nothing TO
-            * assign: you are looking at a person, not at a piece of work, and
-            * inventing a subject ("assign them… what?") would be guessing at a
-            * feature nobody asked for. So the label matches the behaviour. The
-            * person panel itself is `05:35–06:35` and is its own piece of work.
-            */}
-          <Button size="sm" className="flex-1" data-testid="profile-mention" onClick={onMention}>
-            {t('chat.mention')}
-          </Button>
-          <Button size="sm" variant="secondary" className="flex-1" onClick={onStartDm}>
-            {t('chat.message')}
-          </Button>
-        </div>
-        <div className="rounded-lg border border-border/70 bg-background">
-          <div className="border-b border-border/70 p-1 flex items-center gap-1">
-            {([
-              ['activity', t('chat.tabActivity')],
-              ['tasks', t('chat.tabTasks')],
-              ['comments', t('chat.tabComments')],
-            ] as const).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => onChangeTab(id)}
-                className={cn(
-                  'px-2.5 py-1 text-xs rounded',
-                  tab === id ? 'bg-accent/15 text-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="p-3 text-xs text-muted-foreground">
-            {tab === 'activity' && (
-              <div className="space-y-1.5">
-                {stats.recentMessages.length === 0 ? (
-                  <div>{t('chat.noRecentActivity')}</div>
-                ) : (
-                  stats.recentMessages.slice(0, 4).map((message) => (
-                    <button
-                      key={`act-${message.id}`}
-                      type="button"
-                      onClick={() => onOpenActivity(message)}
-                      className="w-full text-left rounded border border-border/60 px-2 py-1.5 text-foreground/90 hover:bg-muted/40"
-                    >
-                      {message.body.slice(0, 90)}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-            {tab === 'tasks' && (
-              <div className="space-y-1.5">
-                {tasks.length === 0 ? (
-                  <div>{t('chat.noAssignedTasks')}</div>
-                ) : (
-                  tasks.slice(0, 6).map((task) => (
-                    <button
-                      key={task.id}
-                      type="button"
-                      onClick={() => onOpenTask(task)}
-                      className="w-full text-left rounded border border-border/60 px-2 py-1.5 text-foreground/90 hover:bg-muted/40"
-                    >
-                      <div className="text-xs font-medium truncate">{task.title}</div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                        {task.spaceName} / {task.projectName} / {task.listName}
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-            {tab === 'comments' && (
-              <div className="space-y-1.5">
-                {stats.recentReplies.length === 0 ? (
-                  <div>{t('chat.noThreadReplies')}</div>
-                ) : (
-                  stats.recentReplies.slice(0, 4).map((reply) => (
-                    <button
-                      key={`reply-${reply.id}`}
-                      type="button"
-                      onClick={() => onOpenActivity(reply)}
-                      className="w-full text-left rounded border border-border/60 px-2 py-1.5 text-foreground/90 hover:bg-muted/40"
-                    >
-                      {reply.body.slice(0, 90)}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-/**
- * Insert row picker (§A3.5): search the workspace's tasks and docs and drop a
- * reference into the draft. A task is inserted as its in-app URL because the
- * message renderer already unfurls that into a task card.
- */
 function InsertReferencePicker({
   workspaceId,
   onInsertTask,

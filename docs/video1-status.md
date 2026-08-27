@@ -14,16 +14,15 @@ than none, because it gets quoted.
 - **Frames** — `video1-frame-audit-raw.json`, 15 groups, **157 discrete gaps**
 - **Verified on** `https://rundesk.theaura.agency` — 295 checks across
   `verify-ui.mjs` (186), `verify-release.sh` (72), `syncup-live.mjs` (33),
-  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 110
-  and four suites are new — `chat-message-actions.mjs` (25), `task-depth.mjs`
-  (23), `panel-collapse.mjs` (13) and `settings-depth.mjs` (19); all five are
-  pending the next deploy.
+  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 121
+  and five suites are new — `chat-message-actions.mjs` (25), `task-depth.mjs`
+  (23), `panel-collapse.mjs` (13), `settings-depth.mjs` (19) and
+  `person-panel.mjs` (19); all six are pending the next deploy.
 
-**Seven of the 157 remain open, and they are two pieces of work:**
+**One of the 157 remains open:**
 
 | # | Gap | `[time]` |
 |---|---|---|
-| 36, 37, 38, 40, 41, 42 | The **person profile panel** — the panel itself, local time, Priorities, the activity feed, a calendar, the org chart | `05:35–06:35` |
 | 33 | **AI Agents** — a separate product from Skills, which we did build | `04:44` |
 
 > **On the count.** An earlier header here read "139 of 157 closed, 18 open"
@@ -43,27 +42,44 @@ and when.*
 
 Ranked by how long she spent on them and how visible the absence is.
 
-### 1. The profile page is not the page she showed — `05:35–06:35`, frames `087`–`092`
+### 1. The person profile panel — **closed 27 Aug**
 
-A full minute on one panel, and six of the 157 gaps live here (#36, 37, 38, 40,
-41, 42).
+A full minute on one panel, and six of the 157 gaps lived here (#36, 37, 38,
+40, 41, 42).
 
 > "Yeh meri PROFILE hai; yeh mujhe show karti hai ke meri ACTIVITY kya hai, meri
 > EMAIL kya hai, mera TIME ZONE kya chal raha hai, main kis ki TEAM MEMBER hoon
 > … meri PRIORITIES kya hain … COMMENTS … CALENDAR … aur yahan mujhe
 > ORGANIZATION CHART show ho jayega"
 
-The frames show a ~460px panel that **overlays whatever page you are on** and
-answers *who is this person and what are they working on*.
+`app-profile-page.tsx` is an account-settings form — password, sessions, 2FA,
+danger zone. Same word, different page, and a full-page navigation that loses
+your place. It is now called **Account settings**, and the panel she described
+is a separate thing that overlays whatever page you are on.
 
-Ours (`app-profile-page.tsx`) is an **account-settings form** — password,
-sessions, 2FA, bio, danger zone. Same word, different page.
+Most of this was not missing so much as unreachable *by person*:
 
-Partly covered: Home already has Assigned to me / Today+overdue / Personal list,
-which is the task half. Missing: the panel itself, a person's **local time**
-(`users.timezone` is stored and used server-side for quiet hours but never
-rendered as a clock), **Priorities**, the **comments/activity feed**, a person's
-**calendar**, and the **org chart** — which exists nowhere in the codebase.
+- **#36 the panel.** 460px, over any page, at **any width**. The nearest thing
+  before was a card in the chat page that opened only by clicking a message
+  author and was `hidden xl:flex` — it did not exist below 1280px, so on a 13"
+  laptop clicking a name did nothing. That card is gone; this replaced it,
+  everywhere a name appears.
+- **#37 local time.** `users.timezone` was stored and used server-side for
+  quiet hours, and the roster read did not select it. One column, and now a
+  live clock in *their* zone — "Asia/Karachi" is a fact about configuration,
+  "5:28 pm" is the one you wanted.
+- **#38 Priorities.** New, and the only part of that panel that is a decision
+  rather than a derivation. A priority points at a task or is a line you typed,
+  ordered by hand, ticked off rather than deleted. Not cleared at midnight:
+  "today's" is what it is for, not a retention policy.
+- **#40 the org chart**, as *this person's* reporting line — manager above,
+  reports below, each opening their own panel. "No manager" renders as an
+  answer. The full tree is still in Workspace Settings, where it belongs.
+- **#41 a calendar** for the person: their dated tasks and the meetings they
+  are in, merged into one list by time. Google/Outlook sync already writes into
+  those tables, so a synced calendar appears here for free.
+- **#42 activity, by actor** — queryable by task, by project and workspace-wide
+  before this, and never by who did it. With the search box the frames show.
 
 ### 2. Task creation — **closed 27 Aug**
 
@@ -232,6 +248,12 @@ rather than the diff:
 | 27 Aug | #49 timed mute | 30m / 1h / 2h / 8h; the record still arrives, only the interruption is held |
 | 27 Aug | #54 high contrast | one class on `<html>`, tokens redefined under it; colours only, nothing moves |
 | 27 Aug | #56 Help books a call | a support ticket of kind `call` with offered times — no invented availability |
+| 27 Aug | #36 person profile panel | 460px over any page, at any width; replaced a chat card that did not render below 1280px |
+| 27 Aug | #37 local time | `users.timezone` reaches the client at last, as a live clock in their zone |
+| 27 Aug | #38 Priorities | a hand-ordered daily shortlist — a task or a typed line; the one thing on that panel that is a decision |
+| 27 Aug | #40 org chart on a person | manager above, reports below, each opening their own panel; "No manager" is an answer |
+| 27 Aug | #41 person calendar | their dated tasks and their meetings, merged by time |
+| 27 Aug | #42 activity by actor | the axis the activity log never had |
 
 ---
 

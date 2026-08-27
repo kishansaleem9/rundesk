@@ -49,6 +49,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { useAuthStore } from '../store/auth'
+import { openPersonPanel } from '../store/person-panel'
 import { useThemeStore } from '../store/theme'
 import { applyBrandColor } from '../lib/branding'
 import { canInstall, onInstallabilityChange, promptInstall, watchForInstallPrompt } from '../lib/pwa-install'
@@ -1304,9 +1305,31 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
           {muted ? t('topbar.unmuteNotifications') : t('topbar.muteNotifications')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
+        {/*
+          * §G06 [05:35] — two different pages, and they were both called
+          * "Profile".
+          *
+          * The one below is account settings — password, sessions, 2FA, danger
+          * zone. The one she walked through is a panel answering "who is this
+          * person and what are they working on". Naming them apart is the
+          * smallest part of the fix and the one that stops the confusion.
+          */}
+        {workspaceId && user?.id && (
+          <DropdownMenuItem
+            data-testid="menu-my-profile"
+            // No preventDefault: the other items in this menu use it to stay
+            // open for a second press, and that keeps Radix's focus trap
+            // mounted — which meant the panel opened underneath a menu still
+            // holding the keyboard, and its inputs silently took no typing.
+            onSelect={() => openPersonPanel(user.id)}
+          >
+            <UserIcon className="h-4 w-4 text-muted-foreground" />
+            {t('topbar.myProfile')}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onSelect={() => navigate({ to: '/app/profile' })}>
-          <UserIcon className="h-4 w-4 text-muted-foreground" />
-          {t('topbar.profile')}
+          <SettingsIcon className="h-4 w-4 text-muted-foreground" />
+          {t('topbar.accountSettings')}
         </DropdownMenuItem>
         {workspaceId && (
           <DropdownMenuItem

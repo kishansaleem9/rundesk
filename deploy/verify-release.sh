@@ -667,6 +667,54 @@ EMPTY=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/supp
   && ok "and a call with no times offered is refused" \
   || bad "a call with no times was accepted -> $EMPTY"
 
+# ───────────── §G06 [05:35–06:35] the person profile panel (0118) ─────────
+# The panel itself is a browser concern and checked there. What has to be true
+# here is that the reads behind it answer — and that priorities, the only new
+# data, are readable by a colleague and writable only by their owner.
+say "A person's profile can be read (0118)"
+check_sql "user_priorities table exists (0118)" \
+  "SELECT to_regclass('public.user_priorities') IS NOT NULL;" "t"
+check_sql "and a task cannot be a priority twice" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='user_priorities_unique_task');" "t"
+# Partial, so typed lines may repeat — "chase the invoice" twice in a week is
+# somebody doing it twice, not a duplicate.
+check_sql "only for the rows that point at a task" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='user_priorities_unique_task' AND indexdef ILIKE '%task_id IS NOT NULL%');" "t"
+
+PROF=$(curl -fsS --max-time 20 "$API/workspaces/$WS/people/$ME" -H "$AUTH" 2>/dev/null || true)
+printf '%s' "$PROF" | grep -q '"person"' \
+  && ok "a profile answers" \
+  || bad "profile -> $(printf '%s' "$PROF" | head -c 140)"
+# §G06 [05:46] — the column the roster read never selected, so no surface could
+# show a colleague's local time even though the app knew it.
+printf '%s' "$PROF" | grep -q '"timezone"' \
+  && ok "carrying the timezone a local clock needs" \
+  || bad "the profile does not carry a timezone"
+printf '%s' "$PROF" | grep -q '"reporting"' \
+  && ok "and the person's own reporting line" \
+  || bad "the profile does not carry a reporting line"
+curl -fsS --max-time 20 "$API/workspaces/$WS/people/$ME/activity" -H "$AUTH" 2>/dev/null | grep -q '"data"' \
+  && ok "activity can be asked for by WHO did it" \
+  || bad "activity-by-actor did not answer"
+curl -fsS --max-time 20 "$API/workspaces/$WS/people/$ME/calendar" -H "$AUTH" 2>/dev/null | grep -q '"meetings"' \
+  && ok "and a person has a calendar" \
+  || bad "the person calendar did not answer"
+
+PR=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/priorities" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"title":"deploy check priority"}' 2>/dev/null || true)
+PRID=$(printf '%s' "$PR" | jget id)
+if [ -n "$PRID" ]; then
+  ok "a typed line can be a priority — no task required"
+  NOTHING=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/workspaces/$WS/priorities" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{}' 2>/dev/null || true)
+  [ "$NOTHING" = "400" ] \
+    && ok "but a priority about nothing is refused" \
+    || bad "an empty priority was accepted -> $NOTHING"
+  curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/priorities/$PRID" -H "$AUTH" >/dev/null 2>&1 || true
+else
+  bad "priority -> $(printf '%s' "$PR" | head -c 140)"
+fi
+
 say "A meeting is a record, not a link"
 MT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
   -H 'Content-Type: application/json' \
