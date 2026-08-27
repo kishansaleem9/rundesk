@@ -22,6 +22,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge, Button, Input, Popover, PopoverContent, PopoverTrigger, cn, toast } from '@rundesk/ui'
 import { Tag, Plus, X, Check } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { InlineSkeleton } from './loading-skeletons'
 import { useTranslation } from '../lib/i18n'
 
 export type TaskLabel = { id: string; name: string; color: string }
@@ -223,11 +224,10 @@ export function TaskTags({
               </button>
             )}
 
-            {allQuery.isLoading && (
-              <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-                {t('tags.loading')}
-              </div>
-            )}
+            {/* §2.9a — a skeleton, not the word "Loading". The app answers
+                every wait with the shape of what is coming; a suite enforces
+                it, and this box was the one place that said it out loud. */}
+            {allQuery.isLoading && <InlineSkeleton />}
 
             {!allQuery.isLoading && matches.length === 0 && !trimmed && (
               <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
