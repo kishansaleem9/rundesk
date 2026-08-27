@@ -8,7 +8,8 @@
  *
  *   BASE=http://127.0.0.1:5173 WS=<workspace-id> node test/e2e/video-regression.mjs
  */
-import { chromium } from 'playwright'
+import { resolveChromium } from './lib/playwright.mjs'
+const chromium = await resolveChromium()
 
 const BASE = process.env.BASE ?? 'http://127.0.0.1:5173'
 const WS = process.env.WS ?? 'f47622b5-fc76-47d0-82d4-3b68c00bbaed'

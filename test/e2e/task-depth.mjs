@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 36
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -420,6 +420,51 @@ try {
   }
 
   await A(`/tasks/${datedId}`, { method: 'DELETE' })
+
+  /*
+   * A task in the bin is not an editable task.
+   *
+   * The third video1 pass deleted a task and then kept writing to it: PATCH
+   * answered 200 and a comment answered 201, on a row no list, no search and
+   * no deep link would show you. Deleting is a soft delete and every read path
+   * filtered on it; the write paths never did.
+   *
+   * Checked here rather than in a unit test because the whole question is what
+   * the real controller, guards and service do with a real archived row — the
+   * gate is shared by some thirty write paths and opted out of by exactly two,
+   * and getting that backwards is silent in both directions.
+   */
+  const binned = await A('/tasks', { method: 'POST', body: { listId, title: `bin probe ${Date.now()}` } })
+  const binnedId = binned.data?.id
+  check(Boolean(binnedId), 'a task to throw away')
+
+  const liveEdit = await A(`/tasks/${binnedId}`, { method: 'PATCH', body: { title: 'edited while alive' } })
+  check(liveEdit.status < 300, 'edits fine while it is alive', `PATCH → ${liveEdit.status}`)
+
+  await A(`/tasks/${binnedId}`, { method: 'DELETE' })
+  const binnedEdit = await A(`/tasks/${binnedId}`, { method: 'PATCH', body: { title: 'edited from the bin' } })
+  check(binnedEdit.status === 409, 'and refuses edits once it is in the bin', `PATCH → ${binnedEdit.status}`)
+
+  const binnedComment = await A(`/tasks/${binnedId}/comments`, { method: 'POST', body: { body: 'from the bin' } })
+  check(binnedComment.status === 409, 'and refuses comments too', `POST → ${binnedComment.status}`)
+
+  // The refusal has to be a refusal, not a 409 over a write that landed.
+  const stillNamed = await A(`/tasks/${binnedId}`)
+  check(
+    !String(stillNamed.data?.title ?? '').includes('edited from the bin'),
+    'and wrote nothing while refusing',
+    stillNamed.data?.title,
+  )
+
+  // The two operations that exist FOR binned tasks must be untouched.
+  const restored = await A(`/tasks/${binnedId}/restore`, { method: 'POST' })
+  check(restored.status < 300, 'restore still works on a binned task', `POST → ${restored.status}`)
+  const afterRestore = await A(`/tasks/${binnedId}`, { method: 'PATCH', body: { title: 'edited after restore' } })
+  check(afterRestore.status < 300, 'and it edits again once restored', `PATCH → ${afterRestore.status}`)
+
+  await A(`/tasks/${binnedId}`, { method: 'DELETE' })
+  const reDelete = await A(`/tasks/${binnedId}`, { method: 'DELETE' })
+  check(reDelete.status < 300, 'deleting an already-binned task is not an error', `DELETE → ${reDelete.status}`)
 
   await done(browser, stack)
 } catch (err) {

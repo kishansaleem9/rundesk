@@ -1,7 +1,13 @@
 /** A3.9 — the DM Chat / Calendar / Tasks tab strip, live in the browser. */
-import { chromium } from 'playwright'
+import { resolveChromium } from './lib/playwright.mjs'
+const chromium = await resolveChromium()
 const WS = 'f47622b5-fc76-47d0-82d4-3b68c00bbaed'
-const B = 'http://127.0.0.1:5173'
+// Overridable like ui-sweep and video-regression: these two hardcoded a
+// dev port and the production verify user, so they could only ever run in
+// one place. Same defaults as before — nothing changes for an existing run.
+const B = (process.env.BASE ?? 'http://127.0.0.1:5173').replace(/\/$/, '')
+const EMAIL = process.env.E2E_EMAIL ?? 'verify@rundesk.internal'
+const PASSWORD = process.env.E2E_PASSWORD ?? 'Verify@123!'
 const r = []
 const ok = (m) => { r.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { r.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
@@ -11,8 +17,8 @@ const br = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-11
 const p = await (await br.newContext({ viewport: { width: 1600, height: 1000 } })).newPage()
 try {
   await p.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
-  await p.fill('input[type=email]', 'verify@rundesk.internal')
-  await p.fill('input[type=password]', 'Verify@123!')
+  await p.fill('input[type=email]', EMAIL)
+  await p.fill('input[type=password]', PASSWORD)
   await p.click('button[type=submit]')
   await p.waitForURL(/\/app\//, { timeout: 25000 })
   await p.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})

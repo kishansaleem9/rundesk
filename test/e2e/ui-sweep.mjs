@@ -6,7 +6,8 @@
  * this drives the select — an earlier version clicked a button that did not
  * exist and silently proved nothing.
  */
-import { chromium } from 'playwright'
+import { resolveChromium } from './lib/playwright.mjs'
+const chromium = await resolveChromium()
 
 // Overridable, because a suite pinned to one seeded fixture stops running the
 // moment that fixture is rebuilt — which is not the same as passing.

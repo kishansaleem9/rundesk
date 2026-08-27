@@ -435,9 +435,69 @@ That is the shape a check has to have to be worth running.
 |---|---|
 | `task-dates.test.ts` — the losing cases, in five timezones | 9 |
 | `call-wiring.test.ts` — enumerate, offer, carry, apply | 24 (5 new) |
-| `task-depth.mjs` — a time typed in the sheet, stored as that instant | 28 (5 new) |
+| `task-depth.mjs` — a time typed in the sheet, stored as that instant; and a binned task refusing writes | 36 (13 new) |
 | `syncup-live.mjs` — a speaker offered beside the mic and camera | 30 (2 new) |
 
 The two call checks are conditional on the browser having routable outputs, and
 say so out loud when it does not — a run that never checked is not a run that
 passed.
+
+---
+
+## The two the third pass left open (27 Aug)
+
+Both were named as loose ends rather than fixed at the time. Both are closed now.
+
+### A task in the bin was still writable
+
+The third pass found this and recorded it honestly as narrow: `PATCH /tasks/:id`
+answered 200 and `POST /tasks/:id/comments` answered 201 on a task in the bin,
+but no UI path reaches such a task and the deep link will not open it.
+
+Narrow is not the same as harmless, and the shape of who is left is the reason.
+Deleting is a soft delete — `isArchived` — and every *read* path filtered on it
+while the write paths never did. So the only callers who could still write were
+the ones holding an id from before the delete: a stale tab, a queued request, an
+integration, a script. That is exactly the population that cannot see the bin,
+which is what makes a silent 200 the wrong answer — the write appears to
+succeed, and then the row is purged out from under it thirty days later along
+with whatever was written to it.
+
+`assertTaskWriteAccess` now reads `isArchived` and refuses, and the two
+operations that exist *for* binned tasks — restore, and delete — opt out
+explicitly. `createComment` has no write gate at all by design (commenting is
+open to any member who can see the task), so it carries the check directly.
+
+**409, not 404.** The task is really there and the caller may well be entitled
+to it; what is wrong is its state, and "restore it before editing" is something
+they can act on. A 404 would say the opposite of what is true.
+
+Eight checks in `task-depth.mjs` cover it, and half of them are the ones that
+would catch an over-correction: a live task still edits and still takes
+comments, restore still works, a restored task edits again, and deleting an
+already-binned task is still not an error.
+
+### Four suites that could not run anywhere
+
+`ui-sweep`, `video-regression`, `a39-dm-tabs` and `a61-meeting-record` imported
+playwright as a bare specifier while their siblings searched several known
+locations. The difference is invisible until the package is not in the repo's
+own `node_modules`, at which point half the suites run and half die on module
+resolution — and `NODE_PATH` does not help, because it has no effect on ESM
+bare-specifier resolution.
+
+The search now lives once, in `test/e2e/lib/playwright.mjs`, and those four use
+it. Two of them additionally hardcoded the production verify user and a dev
+port, so they could only ever run in one place; they now take the same `BASE` /
+`E2E_EMAIL` / `E2E_PASSWORD` overrides their siblings already took, with the
+previous values as defaults.
+
+Measured rather than asserted: `ui-sweep` went from dying on import to 14
+passed / 9 failed — **the same 14/9 as the parent commit**, so the failures are
+this machine's unseeded workspace and not the change. `video-regression` went
+from 0 to 26 passed, and the other two from 0 to running.
+
+Those nine, and `video-regression`'s four, are still unverified rather than
+fixed: they want a seeded workspace or a run against the deployed instance.
+None of the four is in CI, which is the honest reason nobody noticed they had
+stopped being runnable.

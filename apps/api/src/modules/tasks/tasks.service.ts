@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { eq, and, asc, desc, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import {
@@ -442,18 +442,53 @@ export class TasksService {
     return entry
   }
 
+  /**
+   * A task in the bin is not an editable task.
+   *
+   * Found by the third video1 pass, which deleted a task and then kept writing
+   * to it: `PATCH /tasks/:id` answered 200 and `POST /tasks/:id/comments`
+   * answered 201, on a row that no list, no search and no deep link would show
+   * you. Deleting is a soft delete — `isArchived` — and every *read* path
+   * filtered on it. The write paths never did.
+   *
+   * The exposure was never a UI one: nothing in the app can reach a binned
+   * task, so this is a stale tab, a queued request, a script, an integration
+   * holding an id from before the delete. That is exactly the population that
+   * cannot see the bin, which is what makes silence the wrong answer — the
+   * edit appears to succeed, and then the row is purged out from under it
+   * thirty days later along with whatever was written.
+   *
+   * 409 rather than 404: the task is really there and the caller may well be
+   * entitled to it. What is wrong is its state, and "restore it first" is a
+   * thing they can actually do.
+   */
+  private assertNotInBin(isArchived: boolean | null | undefined) {
+    if (isArchived) {
+      throw new ConflictException('This task is in the bin. Restore it before editing.')
+    }
+  }
+
   private async getListIdOrThrow(taskId: string): Promise<string> {
     const [row] = await this.db.select({ listId: tasks.listId }).from(tasks).where(eq(tasks.id, taskId))
     if (!row) throw new NotFoundException('Task not found')
     return row.listId
   }
 
-  private async assertTaskWriteAccess(taskId: string, actorId: string) {
+  /**
+   * @param opts.allowArchived — for the two operations whose whole purpose is a
+   *   task already in the bin. Everything else is refused; see assertNotInBin.
+   */
+  private async assertTaskWriteAccess(
+    taskId: string,
+    actorId: string,
+    opts: { allowArchived?: boolean } = {},
+  ) {
     const [ctx] = await this.db
       .select({
         taskId: tasks.id,
         listId: tasks.listId,
         createdById: tasks.createdById,
+        isArchived: tasks.isArchived,
         workspaceId: spaces.workspaceId,
       })
       .from(tasks)
@@ -463,6 +498,7 @@ export class TasksService {
       .where(eq(tasks.id, taskId))
       .limit(1)
     if (!ctx) throw new NotFoundException('Task not found')
+    if (!opts.allowArchived) this.assertNotInBin(ctx.isArchived)
 
     const [membership] = await this.db
       .select({ role: workspaceMembers.role })
@@ -2713,7 +2749,8 @@ export class TasksService {
   }
 
   async deleteTask(taskId: string, actorId: string, ipAddress?: string) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    // allowArchived: deleting something already binned is a no-op, not a 409.
+    await this.assertTaskWriteAccess(taskId, actorId, { allowArchived: true })
     // Managers can only delete within their own spaces (§3.3). Layered after the
     // general write-access check so admins/members keep their existing rights.
     await this.assertManagerDeleteScope(taskId, actorId)
@@ -2753,7 +2790,8 @@ export class TasksService {
 
   /** Restore an archived (soft-deleted) task (Plan §13.4). */
   async restoreTask(taskId: string, actorId: string) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    // allowArchived: this is the one operation that exists for binned tasks.
+    await this.assertTaskWriteAccess(taskId, actorId, { allowArchived: true })
     // §3.3 — restore is the inverse of delete, so a manager must be scoped to
     // their own spaces here too; otherwise they could un-archive a task outside
     // their space that they were correctly blocked from deleting.
@@ -2973,6 +3011,15 @@ export class TasksService {
 
   async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {
     if (!body.trim()) throw new BadRequestException('Comment body cannot be empty')
+    // No assertTaskWriteAccess here by design — commenting is open to any
+    // member who can see the task — so the bin check has to be made directly.
+    const [target] = await this.db
+      .select({ isArchived: tasks.isArchived })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!target) throw new NotFoundException('Task not found')
+    this.assertNotInBin(target.isArchived)
     const extracted = this.extractMentionIds(body).map((userId) => ({ userId, offset: 0, length: 0 }))
     const finalMentions = mentions && mentions.length > 0 ? mentions : extracted
     const [comment] = await this.db
