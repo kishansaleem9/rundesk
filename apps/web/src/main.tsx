@@ -117,6 +117,11 @@ function useSessionHydration() {
         if (me.theme && THEME_VALUES.includes(me.theme as Theme)) {
           useThemeStore.getState().hydrateTheme(me.theme as Theme)
         }
+        // §G06 [07:03] — and the same for high contrast. Null means never
+        // chosen, so a browser that already has it on keeps it.
+        if (typeof me.highContrast === 'boolean') {
+          useThemeStore.getState().hydrateHighContrast(me.highContrast)
+        }
       })
       .catch(() => {
         /* api() already attempted a refresh and cleared the store on failure */

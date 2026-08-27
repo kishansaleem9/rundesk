@@ -890,7 +890,13 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
   // belong, rather than two levels deep in personal settings.
   const meQuery = useQuery({
     queryKey: ['users', 'me'],
-    queryFn: () => api<{ presenceStatus?: 'online' | 'away' | 'busy' | 'offline' | null }>('/users/me'),
+    queryFn: () =>
+      api<{
+        presenceStatus?: 'online' | 'away' | 'busy' | 'offline' | null
+        statusEmoji?: string | null
+        statusText?: string | null
+        statusExpiresAt?: string | null
+      }>('/users/me'),
     staleTime: 60_000,
   })
   const prefsQuery = useQuery({
@@ -907,6 +913,69 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
       qc.invalidateQueries({ queryKey: ['presence'] })
     },
   })
+
+  /*
+   * §G06 [06:42] — "main yahan se apna status set kar sakti hoon ke main is
+   * time kya kar rahi hoon."
+   *
+   * The four presence dots above answer "may I interrupt you". They cannot
+   * answer "I am on a thirty-minute break" — and nothing about them expires,
+   * so a stale Busy outlives its reason by days. This is the sentence.
+   */
+  const [statusOpen, setStatusOpen] = useState(false)
+  const [statusEmoji, setStatusEmoji] = useState('')
+  const [statusText, setStatusText] = useState('')
+  const [statusMinutes, setStatusMinutes] = useState<number | null>(null)
+
+  const setCustomStatus = useMutation({
+    mutationFn: (input: { emoji: string | null; text: string | null; minutes: number | null }) =>
+      api('/presence/me/status', {
+        method: 'PUT',
+        body: {
+          emoji: input.emoji,
+          text: input.text,
+          // The duration is turned into a moment here rather than sent as
+          // minutes, because the server takes an instant — and computing it
+          // from the picked preset keeps "30 minutes" meaning thirty minutes
+          // from when they pressed it.
+          expiresAt: input.minutes ? new Date(Date.now() + input.minutes * 60_000).toISOString() : null,
+        },
+      }),
+    onSuccess: () => {
+      setStatusOpen(false)
+      qc.invalidateQueries({ queryKey: ['users', 'me'] })
+      qc.invalidateQueries({ queryKey: ['presence'] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  /**
+   * §G06 [06:53] — mute FOR a length of time.
+   *
+   * The old row flipped `dndOn` and left it flipped, so muting for a meeting
+   * muted you for days. That switch is still here for "mute until I say
+   * otherwise"; this is the submenu the frames show a "›" for.
+   */
+  const muteFor = useMutation({
+    mutationFn: (minutes: number | null) =>
+      api<{ mutedUntil: string | null }>('/notifications/mute', { method: 'POST', body: { minutes } }),
+    onSuccess: (data) => {
+      toast.success(
+        data?.mutedUntil
+          ? t('topbar.mutedUntil', { time: new Date(data.mutedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })
+          : t('topbar.notificationsUnmuted'),
+      )
+      qc.invalidateQueries({ queryKey: ['notification-mute'] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  const muteQuery = useQuery({
+    queryKey: ['notification-mute'],
+    queryFn: () => api<{ mutedUntil: string | null }>('/notifications/mute'),
+    staleTime: 30_000,
+  })
+  const mutedUntil = muteQuery.data?.mutedUntil ?? null
 
   /*
    * "Download app" only where the browser will actually do something.
@@ -932,6 +1001,19 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
   })
 
   const presence = meQuery.data?.presenceStatus ?? null
+  /*
+   * §G06 — an expired status is not a status, on this side too.
+   *
+   * The server drops it on read; this menu holds a cached `me` for a minute,
+   * so without the same rule the composer would offer to edit a status that
+   * everybody else has already stopped seeing.
+   */
+  const liveStatus = (() => {
+    const me = meQuery.data
+    if (!me?.statusEmoji && !me?.statusText) return null
+    if (me.statusExpiresAt && new Date(me.statusExpiresAt).getTime() <= Date.now()) return null
+    return { emoji: me.statusEmoji ?? '', text: me.statusText ?? '' }
+  })()
   const muted = prefsQuery.data?.channels?.dndOn ?? false
 
   async function handleSignOut() {
@@ -999,6 +1081,131 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
               </button>
             ))}
           </div>
+
+          {/*
+            * §G06 [06:42] — "SET STATUS ka matlab yeh hota hai ke main BREAK pe
+            * jaa rahi hoon… mere team member ko nahi pata."
+            *
+            * The dots above say whether to interrupt. This says what is
+            * happening, which is the thing a teammate who missed the group
+            * message actually needs, and it stops being true on its own.
+            */}
+          <div className="mt-2 border-t border-border/60 pt-2">
+            {!statusOpen ? (
+              <button
+                type="button"
+                data-testid="menu-set-status"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setStatusEmoji(liveStatus?.emoji ?? '')
+                  setStatusText(liveStatus?.text ?? '')
+                  setStatusMinutes(null)
+                  setStatusOpen(true)
+                }}
+                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+              >
+                {liveStatus ? (
+                  <>
+                    <span aria-hidden>{liveStatus.emoji || '💬'}</span>
+                    <span className="truncate" data-testid="menu-status-current">{liveStatus.text}</span>
+                  </>
+                ) : (
+                  <>
+                    <span aria-hidden>💬</span>
+                    {t('topbar.setStatus')}
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="space-y-1.5" data-testid="status-composer">
+                <div className="flex gap-1">
+                  <input
+                    value={statusEmoji}
+                    onChange={(e) => setStatusEmoji(e.target.value)}
+                    placeholder="💬"
+                    aria-label={t('topbar.statusEmoji')}
+                    data-testid="status-emoji"
+                    className="h-7 w-9 rounded border border-border bg-background text-center text-sm"
+                  />
+                  <input
+                    autoFocus
+                    value={statusText}
+                    onChange={(e) => setStatusText(e.target.value)}
+                    maxLength={120}
+                    placeholder={t('topbar.statusPlaceholder')}
+                    data-testid="status-text"
+                    className="h-7 flex-1 rounded border border-border bg-background px-2 text-xs"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        setCustomStatus.mutate({
+                          emoji: statusEmoji || null,
+                          text: statusText || null,
+                          minutes: statusMinutes,
+                        })
+                      }
+                    }}
+                  />
+                </div>
+                {/* "30 minutes" is her example. Never is the honest default:
+                    a duration nobody picked should not be invented for them. */}
+                <div className="grid grid-cols-4 gap-1">
+                  {([null, 30, 60, 240] as const).map((minutes) => (
+                    <button
+                      key={String(minutes)}
+                      type="button"
+                      data-testid={`status-for-${minutes ?? 'never'}`}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        setStatusMinutes(minutes)
+                      }}
+                      className={cn(
+                        'rounded-md px-1 py-1 text-[11px] transition-colors',
+                        statusMinutes === minutes
+                          ? 'bg-accent/15 text-foreground font-medium'
+                          : 'text-muted-foreground hover:bg-accent/10',
+                      )}
+                    >
+                      {minutes === null
+                        ? t('topbar.statusNoExpiry')
+                        : minutes < 60
+                          ? t('topbar.muteMinutes', { n: minutes })
+                          : t('topbar.muteHours', { n: minutes / 60 })}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    data-testid="status-save"
+                    disabled={setCustomStatus.isPending}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      setCustomStatus.mutate({
+                        emoji: statusEmoji || null,
+                        text: statusText || null,
+                        minutes: statusMinutes,
+                      })
+                    }}
+                    className="flex-1 rounded-md bg-accent/15 px-2 py-1 text-[11px] font-medium text-foreground hover:bg-accent/25 disabled:opacity-50"
+                  >
+                    {t('common.save')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="status-clear"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      setCustomStatus.mutate({ emoji: null, text: null, minutes: null })
+                    }}
+                    className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent/10"
+                  >
+                    {t('topbar.statusClear')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         {/*
           §6 [07:48] — "Jab apni profile pe click karti hoon, yahan pe TOOLS
@@ -1044,6 +1251,54 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
           </div>
         </div>
         <DropdownMenuSeparator />
+        {/*
+          * §G06 [06:53] — mute FOR a length of time.
+          *
+          * The row below it still flips the permanent switch, because "mute
+          * until I say otherwise" is a real answer. What was missing is the
+          * common one: mute for this meeting. Rendered as durations rather
+          * than a "›" submenu because a dropdown inside a dropdown is a
+          * hover-trap on touch, and four buttons cost one row.
+          */}
+        <div className="px-2 py-1.5">
+          <div className="px-1 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            {mutedUntil
+              ? t('topbar.mutedUntil', {
+                  time: new Date(mutedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                })
+              : t('topbar.muteFor')}
+          </div>
+          <div className="grid grid-cols-4 gap-1">
+            {([30, 60, 120, 480] as const).map((minutes) => (
+              <button
+                key={minutes}
+                type="button"
+                data-testid={`menu-mute-${minutes}`}
+                disabled={muteFor.isPending}
+                onClick={(e) => {
+                  e.preventDefault()
+                  muteFor.mutate(minutes)
+                }}
+                className="rounded-md px-1 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground disabled:opacity-50"
+              >
+                {minutes < 60 ? t('topbar.muteMinutes', { n: minutes }) : t('topbar.muteHours', { n: minutes / 60 })}
+              </button>
+            ))}
+          </div>
+          {mutedUntil && (
+            <button
+              type="button"
+              data-testid="menu-mute-clear"
+              onClick={(e) => {
+                e.preventDefault()
+                muteFor.mutate(null)
+              }}
+              className="mt-1 w-full rounded-md px-1 py-1 text-[11px] text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+            >
+              {t('topbar.muteClear')}
+            </button>
+          )}
+        </div>
         <DropdownMenuItem onSelect={(e) => { e.preventDefault(); toggleMute.mutate(!muted) }}>
           {muted ? <BellOff className="h-4 w-4 text-muted-foreground" /> : <Bell className="h-4 w-4 text-muted-foreground" />}
           {muted ? t('topbar.unmuteNotifications') : t('topbar.muteNotifications')}

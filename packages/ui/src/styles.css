@@ -139,6 +139,66 @@
     --ring: 268 80% 60%;
   }
 
+  /* ===================================================================== *
+   * §G06 [07:03] — High contrast, for increased accessibility.
+   *
+   * "Turn on and off high contrast text and borders." Nothing existed at any
+   * layer before this — a case-insensitive grep for "contrast" across apps/
+   * returned nothing.
+   *
+   * Done by redefining the tokens under one class on <html> rather than by
+   * teaching components a second palette. Every colour in this app already
+   * comes from a CSS variable, so one selector reaches all of them and no
+   * component can be forgotten.
+   *
+   * What actually changes: text goes to full black or white against the
+   * background, muted text stops being muted (it is the text that fails WCAG
+   * first), and borders become visible rather than suggested. Layout is
+   * untouched — a contrast mode that moves things is a different screen, and
+   * somebody who needs contrast should not also have to relearn the app.
+   * ===================================================================== */
+  .high-contrast {
+    --foreground: 0 0% 0%;
+    --card-foreground: 0 0% 0%;
+    --popover-foreground: 0 0% 0%;
+    --secondary-foreground: 0 0% 0%;
+    /* Muted text is where contrast fails first, so it stops being muted. */
+    --muted-foreground: 0 0% 15%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 0 0% 0%;
+    --background: 0 0% 100%;
+    --card: 0 0% 100%;
+    --popover: 0 0% 100%;
+    --muted: 0 0% 94%;
+  }
+
+  .high-contrast.dark,
+  .dark .high-contrast {
+    --foreground: 0 0% 100%;
+    --card-foreground: 0 0% 100%;
+    --popover-foreground: 0 0% 100%;
+    --secondary-foreground: 0 0% 100%;
+    --muted-foreground: 0 0% 88%;
+    --border: 0 0% 78%;
+    --input: 0 0% 78%;
+    --ring: 0 0% 100%;
+    --background: 0 0% 4%;
+    --card: 0 0% 7%;
+    --popover: 0 0% 7%;
+    --muted: 0 0% 14%;
+  }
+
+  /* Borders become visible rather than suggested, and focus becomes
+     unmissable — the two things a low-contrast theme hides best. */
+  .high-contrast * {
+    border-color: hsl(var(--border));
+  }
+  .high-contrast :focus-visible {
+    outline: 3px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
   * {
     @apply border-border;
   }

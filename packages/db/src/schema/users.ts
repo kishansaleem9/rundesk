@@ -52,6 +52,50 @@ export const users = pgTable('users', {
   // the user's stated intent ('online' | 'away' | 'busy' | 'offline') and wins
   // over the derived status everywhere presence is read.
   presenceStatus: text('presence_status').$type<'online' | 'away' | 'busy' | 'offline'>(),
+  /**
+   * §G06 [06:42] — what you are actually doing, in your own words.
+   *
+   * "SET STATUS ka matlab yeh hota hai ke main BREAK pe jaa rahi hoon… mere
+   * team member ko nahi pata ke main break pe jaa rahi hoon; agar unhon ne
+   * group mein message nahi dekha, to main yahan se apna status set kar sakti
+   * hoon ke main is time kya kar rahi hoon."
+   *
+   * `presenceStatus` above is the availability half and cannot carry this:
+   * "away" does not say it is a thirty-minute break, and nothing about it
+   * expires, so a stale "Busy" outlives the reason for it by days. These three
+   * columns are the other half — an emoji, a sentence, and a moment it stops
+   * being true.
+   */
+  statusEmoji:   text('status_emoji'),
+  statusText:    text('status_text'),
+  /**
+   * When the status stops being true. Null means "until I clear it".
+   *
+   * Expiry is enforced on READ rather than by a sweeper: a job that clears
+   * statuses is a job that can be down, and a status that outlives its reason
+   * is exactly the failure this column exists to prevent. Past this moment
+   * every reader simply ignores the row.
+   */
+  statusExpiresAt: timestamp('status_expires_at', { withTimezone: true }),
+  /**
+   * §G06 [06:53] — muted until a moment, not muted forever.
+   *
+   * The row in the frames carries a "›" — mute for a length of time. Ours was
+   * a switch that stayed flipped until somebody remembered to flip it back, so
+   * muting for one meeting muted you for days. Null means no timed mute; the
+   * scheduled quiet hours in `notificationPreferences` are a separate thing and
+   * still apply.
+   */
+  dndUntil:      timestamp('dnd_until', { withTimezone: true }),
+  /**
+   * §G06 [07:03] — high-contrast text and borders.
+   *
+   * Nothing existed at any layer. Kept beside `theme` because it is the same
+   * kind of choice — how the app should look for this person, wherever they
+   * sign in — and null means never chosen rather than "off", so the default can
+   * change without overwriting anybody's answer.
+   */
+  highContrast:  boolean('high_contrast'),
   // UI language (Plan §13 i18n). BCP-47 short code; the web app localizes +
   // sets text direction (RTL for ar/he/fa) from this.
   locale:        text('locale').notNull().default('en'),

@@ -135,6 +135,8 @@ export class UsersService {
       sidebarCollapsed?: boolean
       /** §1.3 [10:13] — the second-level panels, collapsed per surface. */
       panelsCollapsed?: Record<string, boolean>
+      /** §G06 [07:03] — high-contrast text and borders. */
+      highContrast?: boolean
     },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
@@ -183,6 +185,9 @@ export class UsersService {
       }
       patch.topbarPinned = [...new Set(patch.topbarPinned)]
     }
+    if (patch.highContrast !== undefined && typeof patch.highContrast !== 'boolean') {
+      throw new BadRequestException('highContrast must be a boolean')
+    }
     if (patch.sidebarCollapsed !== undefined && typeof patch.sidebarCollapsed !== 'boolean') {
       // A jsonb column would swallow anything; this one is a boolean and should
       // say so rather than storing whatever arrived.
@@ -222,7 +227,7 @@ export class UsersService {
     // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
     // super-admin. Only copy the fields a user is allowed to change themselves.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed', 'panelsCollapsed'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed', 'panelsCollapsed', 'highContrast'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db

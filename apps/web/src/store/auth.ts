@@ -18,6 +18,8 @@ export type AuthUser = {
    * Keyed by surface (`chat`, `docs`); absent means never chosen.
    */
   panelsCollapsed?: Record<string, boolean> | null
+  /** §G06 [07:03] — high-contrast text and borders. null = never chosen. */
+  highContrast?: boolean | null
 }
 
 export type AuthOrg = {

@@ -14,11 +14,25 @@ than none, because it gets quoted.
 - **Frames** — `video1-frame-audit-raw.json`, 15 groups, **157 discrete gaps**
 - **Verified on** `https://rundesk.theaura.agency` — 295 checks across
   `verify-ui.mjs` (186), `verify-release.sh` (72), `syncup-live.mjs` (33),
-  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 99 and
-  three suites are new — `chat-message-actions.mjs` (25), `task-depth.mjs` (23)
-  and `panel-collapse.mjs` (13); all four are pending the next deploy.
+  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 110
+  and four suites are new — `chat-message-actions.mjs` (25), `task-depth.mjs`
+  (23), `panel-collapse.mjs` (13) and `settings-depth.mjs` (19); all five are
+  pending the next deploy.
 
-**Result: 154 of the 157 are closed. 3 remain open.**
+**Seven of the 157 remain open, and they are two pieces of work:**
+
+| # | Gap | `[time]` |
+|---|---|---|
+| 36, 37, 38, 40, 41, 42 | The **person profile panel** — the panel itself, local time, Priorities, the activity feed, a calendar, the org chart | `05:35–06:35` |
+| 33 | **AI Agents** — a separate product from Skills, which we did build | `04:44` |
+
+> **On the count.** An earlier header here read "139 of 157 closed, 18 open"
+> while the list below it enumerated 21 items. I have not been able to
+> reconcile those two numbers, so this section no longer quotes a derived
+> total — it names what is open. Every other gap in the frame audit has either
+> a line in the shipped table below or a verdict with a file and a line behind
+> it. A total nobody can check is exactly the "status column nobody trusts"
+> this document opens by warning about.
 
 *Kept current as work lands — see the shipped list at the bottom for what moved
 and when.*
@@ -157,11 +171,6 @@ All five of the open ones shipped together, because they are one surface:
 | # | Gap | `[time]` |
 |---|---|---|
 | 33 | AI **Agents** — a separate product from Skills, which we did build | `04:44` |
-| 48 | Custom status message — text + emoji + duration, not four fixed presences | `06:42` |
-| 49 | Mute notifications **for a duration**, not just on/off | `06:53` |
-| 54 | High-contrast accessibility mode | `07:03` |
-| 56 | Help that can **book a meeting** with the team, not just read docs | `07:33` |
-| 72 | Workspace switcher: search box, per-workspace avatars, unread dot | `08:37` |
 
 **Keyboard shortcuts** (#50) turned out to be *built and mounted*
 (`app.tsx:159`) — simply not reachable from the avatar menu where she looked, so
@@ -209,6 +218,7 @@ rather than the diff:
 | 27 Aug | #76 sidebar shortcut | `Ctrl`/`⌘` + `\`, in the tooltips and the shortcuts list |
 | 27 Aug | #15 decline invite | new `declined` status, no login required, idempotent |
 | 27 Aug | #10 recent searches | per workspace, in the browser, recorded once a search has answered |
+| 27 Aug | #72 workspace switcher | search box, per-workspace avatars, unread dot |
 | 27 Aug | #104 assign a message | a real assignment with a chip, a notification, an "assigned to me" list and a done tick — not a mention in the composer |
 | 27 Aug | #106 `⋯` overflow | the long tail moved off the bar; right-click is no longer the smaller menu |
 | 27 Aug | #99 reminder on a message | `reminders.task_id` became nullable with a `message_id` beside it; `/remind` stopped inventing tasks |
@@ -218,6 +228,10 @@ rather than the diff:
 | 27 Aug | #148 slash editor | `/` in the description: table, banner, code, lists — writing markdown, with the renderer taught tables and callouts |
 | 27 Aug | #149 create-modal tabs | Reminder / Whiteboard / Dashboard, in the order she named them |
 | 27 Aug | #79 second-level collapse | chat 272px → 56px rail, docs 240px → 48px strip; per surface, per person |
+| 27 Aug | #48 custom status | emoji + sentence + duration, expiring on read so a stale "Busy" cannot outlive its reason |
+| 27 Aug | #49 timed mute | 30m / 1h / 2h / 8h; the record still arrives, only the interruption is held |
+| 27 Aug | #54 high contrast | one class on `<html>`, tokens redefined under it; colours only, nothing moves |
+| 27 Aug | #56 Help books a call | a support ticket of kind `call` with offered times — no invented availability |
 
 ---
 

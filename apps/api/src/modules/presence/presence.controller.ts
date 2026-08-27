@@ -38,4 +38,20 @@ export class PresenceMeController {
   ) {
     return this.presence.setManualStatus(user.id, body?.status ?? null)
   }
+
+  /**
+   * §G06 [06:42] — the words that go with the dot.
+   *
+   * Separate from the availability above because they are separate answers:
+   * "busy" is whether to interrupt, "🕌 Namaz break, back in 30" is what is
+   * happening. Sending both empty clears the status.
+   */
+  @Put('me/status')
+  @ApiOperation({ summary: 'Set or clear your own custom status (emoji + text + expiry)' })
+  setCustomStatus(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { emoji?: string | null; text?: string | null; expiresAt?: string | null },
+  ) {
+    return this.presence.setCustomStatus(user.id, body ?? {})
+  }
 }

@@ -21,9 +21,157 @@ import {
   Sparkles,
   Loader2,
   ArrowRight,
+  CalendarClock,
+  Plus,
+  X,
 } from 'lucide-react'
+import { toast } from '@rundesk/ui'
 import { useTranslation } from '../lib/i18n'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
+import { useAuthStore } from '../store/auth'
+
+/** An hour from now, as `datetime-local` wants it: local wall time, no zone. */
+function defaultSlot(offsetHours: number): string {
+  const at = new Date(Date.now() + offsetHours * 60 * 60 * 1000)
+  at.setMinutes(0, 0, 0)
+  return new Date(at.getTime() - at.getTimezoneOffset() * 60 * 1000).toISOString().slice(0, 16)
+}
+
+/**
+ * §G06 [07:30] — "main ClickUp ki team se DIRECT COMMUNICATION bhi kar sakti
+ * hoon, kyunke main MEETING SCHEDULE bhi start kar sakti hoon."
+ *
+ * Help had two of the three routes she named — read the docs, or open a ticket
+ * — and the third was a `mailto:`. This is the third.
+ *
+ * It offers times rather than showing slots, and says so. We do not model the
+ * support team's availability, and a picker that hands out slots nobody has
+ * published is a booking that cannot be kept: better to ask when suits you and
+ * have a person confirm, which is also what happens after a "booking" anyway.
+ */
+function BookCallCard() {
+  const { t } = useTranslation()
+  const workspaces = useAuthStore((s) => s.workspaces)
+  const workspaceId = workspaces?.[0]?.id
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const [slots, setSlots] = useState<string[]>([defaultSlot(24)])
+  const [sent, setSent] = useState(false)
+
+  const request = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>('/support/tickets', {
+        method: 'POST',
+        body: {
+          workspaceId,
+          subject: reason.trim() || t('help.bookCallDefaultSubject'),
+          body: reason.trim(),
+          kind: 'call',
+          requestedSlots: slots.map((s) => new Date(s).toISOString()),
+        },
+      }),
+    onSuccess: () => {
+      setSent(true)
+      setOpen(false)
+      toast.success(t('help.bookCallSent'))
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  // No workspace, no ticket queue to land in. Saying so beats a button that
+  // fails on press.
+  if (!workspaceId) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <CalendarClock className="h-4 w-4 text-accent" />
+          {t('help.bookCallTitle')}
+        </CardTitle>
+        <CardDescription>{t('help.bookCallDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {sent ? (
+          <p className="text-sm text-muted-foreground" data-testid="book-call-sent">
+            {t('help.bookCallConfirmed')}
+          </p>
+        ) : !open ? (
+          <Button data-testid="book-call-open" onClick={() => setOpen(true)}>
+            <CalendarClock className="h-4 w-4" />
+            {t('help.bookCallCta')}
+          </Button>
+        ) : (
+          <div className="space-y-3" data-testid="book-call-form">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">{t('help.bookCallReason')}</label>
+              <Input
+                autoFocus
+                value={reason}
+                data-testid="book-call-reason"
+                placeholder={t('help.bookCallReasonPlaceholder')}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">{t('help.bookCallWhen')}</label>
+              {slots.map((slot, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input
+                    type="datetime-local"
+                    value={slot}
+                    data-testid={`book-call-slot-${i}`}
+                    onChange={(e) =>
+                      setSlots((prev) => prev.map((s, idx) => (idx === i ? e.target.value : s)))
+                    }
+                    className="h-9 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+                  />
+                  {slots.length > 1 && (
+                    <button
+                      type="button"
+                      aria-label={t('help.bookCallRemoveSlot')}
+                      onClick={() => setSlots((prev) => prev.filter((_, idx) => idx !== i))}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {/* Three is the cap the server takes seriously; beyond that it is
+                  not "when suits you", it is a calendar dump. */}
+              {slots.length < 3 && (
+                <button
+                  type="button"
+                  data-testid="book-call-add-slot"
+                  onClick={() => setSlots((prev) => [...prev, defaultSlot(24 * (prev.length + 1))])}
+                  className="flex items-center gap-1 text-xs text-accent hover:underline"
+                >
+                  <Plus className="h-3 w-3" />
+                  {t('help.bookCallAddSlot')}
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">{t('help.bookCallNotBooked')}</p>
+            <div className="flex gap-2">
+              <Button
+                data-testid="book-call-submit"
+                disabled={request.isPending || slots.length === 0}
+                onClick={() => request.mutate()}
+              >
+                {request.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
+                {t('help.bookCallSubmit')}
+              </Button>
+              <Button variant="outline" onClick={() => setOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 const SUPPORT_EMAIL = 'support@theaura.agency'
 
@@ -301,6 +449,11 @@ export function HelpPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* §G06 [07:30] — the third route she named: talk to a person. */}
+            <div className="mt-4">
+              <BookCallCard />
+            </div>
           </section>
         </div>
       </div>

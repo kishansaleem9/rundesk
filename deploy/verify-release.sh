@@ -613,6 +613,60 @@ DBID=$(printf '%s' "$DB" | jget id)
 [ -n "$WBID" ] && curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/canvases/$WBID" -H "$AUTH" >/dev/null 2>&1
 [ -n "$DBID" ] && curl -fsS --max-time 20 -X DELETE "$API/dashboards/$DBID" -H "$AUTH" >/dev/null 2>&1
 
+# ────────── §G06 [06:42–07:39] status, timed mute, contrast, call ────────
+# Four columns and one enum-ish field, all added in 0117. Each fails silently
+# rather than loudly without the migration: the status endpoint 500s on a
+# column that is not there, and the timed mute simply never suppresses.
+say "The settings menu can do what she walked through (0117)"
+check_sql "users.status_text exists (0117)" \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='status_text');" "t"
+check_sql "users.status_expires_at exists — a status that ends" \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='status_expires_at');" "t"
+check_sql "users.dnd_until exists — a mute that ends" \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='dnd_until');" "t"
+check_sql "users.high_contrast exists" \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='high_contrast');" "t"
+check_sql "support_tickets.kind exists — a ticket can be a call" \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='support_tickets' AND column_name='kind');" "t"
+
+ST=$(curl -fsS --max-time 20 -X PUT "$API/presence/me/status" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d '{"emoji":"☕","text":"deploy check","expiresAt":"'"$(date -u -d '+30 minutes' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+30M +%Y-%m-%dT%H:%M:%SZ)"'"}' 2>/dev/null || true)
+printf '%s' "$ST" | grep -q 'deploy check' \
+  && ok "a custom status can be set" \
+  || bad "status -> $(printf '%s' "$ST" | head -c 140)"
+# Teammates are the audience; a status only the author can see is nothing.
+curl -fsS --max-time 20 "$API/workspaces/$WS/presence" -H "$AUTH" 2>/dev/null | grep -q 'deploy check' \
+  && ok "and teammates reading presence see it" \
+  || bad "the status did not reach the workspace presence read"
+curl -fsS --max-time 20 -X PUT "$API/presence/me/status" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"emoji":null,"text":null}' >/dev/null 2>&1 || true
+
+MU=$(curl -fsS --max-time 20 -X POST "$API/notifications/mute" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"minutes":30}' 2>/dev/null || true)
+printf '%s' "$MU" | grep -q 'mutedUntil' \
+  && ok "notifications can be muted for a duration" \
+  || bad "mute -> $(printf '%s' "$MU" | head -c 140)"
+FOREVER=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/notifications/mute" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"minutes":43200}' 2>/dev/null || true)
+[ "$FOREVER" = "400" ] \
+  && ok "but not for a month — that is a preference, not a mute" \
+  || bad "a month-long mute was accepted -> $FOREVER"
+curl -fsS --max-time 20 -X POST "$API/notifications/mute" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"minutes":null}' >/dev/null 2>&1 || true
+
+CALL=$(curl -fsS --max-time 20 -X POST "$API/support/tickets" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d '{"workspaceId":"'"$WS"'","subject":"deploy check call","kind":"call","requestedSlots":["'"$(date -u -d '+2 days' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+2d +%Y-%m-%dT%H:%M:%SZ)"'"]}' 2>/dev/null || true)
+printf '%s' "$CALL" | grep -q '"kind":"call"' \
+  && ok "Help can ask the team for a call" \
+  || bad "call request -> $(printf '%s' "$CALL" | head -c 140)"
+EMPTY=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/support/tickets" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"workspaceId":"'"$WS"'","subject":"no times","kind":"call","requestedSlots":[]}' 2>/dev/null || true)
+[ "$EMPTY" = "400" ] \
+  && ok "and a call with no times offered is refused" \
+  || bad "a call with no times was accepted -> $EMPTY"
+
 say "A meeting is a record, not a link"
 MT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
   -H 'Content-Type: application/json' \

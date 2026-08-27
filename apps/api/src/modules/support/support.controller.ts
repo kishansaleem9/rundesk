@@ -38,7 +38,15 @@ export class SupportController {
   @ApiOperation({ summary: 'Create a support ticket (auto-sets SLA due dates from priority)' })
   createTicket(
     @CurrentUser() user: Actor,
-    @Body() body: { workspaceId?: string; subject?: string; body?: string; priority?: string },
+    @Body() body: {
+      workspaceId?: string
+      subject?: string
+      body?: string
+      priority?: string
+      /** §G06 [07:30] — 'call' turns this into a request to talk to a person. */
+      kind?: string
+      requestedSlots?: string[]
+    },
   ) {
     return this.support.createTicket(user, body)
   }

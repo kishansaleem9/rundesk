@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common'
+import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common'
 import { eq, and, isNull, isNotNull, or, desc, sql, inArray, gte, gt, lte } from 'drizzle-orm'
 import { notifications, users, webPushSubscriptions } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -413,10 +413,19 @@ export class NotificationsService {
      */
     deferPush?: boolean
   }) {
-    const { prefs, timezone } = await this.getUserNotificationContext(data.userId)
+    const { prefs, timezone, dndUntil } = await this.getUserNotificationContext(data.userId)
     const eventKey = this.mapTypeToEventKey(data.type)
     const matrix = prefs.events[eventKey]
-    const inQuietHours = this.isInQuietHours(prefs, timezone)
+    /*
+     * §G06 [06:53] — a timed mute suppresses the interrupting channels.
+     *
+     * Same effect as quiet hours and deliberately so: the notification is
+     * still written, so the Inbox has it when they come back, and only the
+     * things that buzz are held. Muting for a meeting should not cost you the
+     * record of what happened during it.
+     */
+    const inQuietHours =
+      this.isInQuietHours(prefs, timezone) || NotificationsService.isTimedMuteActive(dndUntil)
     const canWebOrMobile = !inQuietHours
 
     // Every channel off is the only case where nothing at all happens.
@@ -541,6 +550,48 @@ export class NotificationsService {
       .delete(webPushSubscriptions)
       .where(and(eq(webPushSubscriptions.userId, userId), eq(webPushSubscriptions.endpoint, endpoint)))
     return { ok: true }
+  }
+
+  /**
+   * §G06 [06:53] — mute for N minutes, or clear it.
+   *
+   * A duration rather than a moment, because a duration is what somebody
+   * picking "for 1 hour" means, and letting the client compute the timestamp
+   * puts the answer at the mercy of a wrong clock.
+   */
+  async setTimedMute(userId: string, minutes: number | null) {
+    if (minutes === null || minutes === 0) {
+      await this.db.update(users).set({ dndUntil: null }).where(eq(users.id, userId))
+      return { mutedUntil: null }
+    }
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      throw new BadRequestException('minutes must be a positive number, 0, or null')
+    }
+    // A week. Past that it is not "mute for a while", it is a preference, and
+    // the channel switches in Preferences are where that belongs.
+    const MAX_MINUTES = 7 * 24 * 60
+    if (minutes > MAX_MINUTES) {
+      throw new BadRequestException('Mute for at most a week — beyond that, switch the channel off')
+    }
+    const until = new Date(Date.now() + minutes * 60_000)
+    await this.db.update(users).set({ dndUntil: until }).where(eq(users.id, userId))
+    return { mutedUntil: until.toISOString() }
+  }
+
+  /** The caller's timed mute, or null once it has run out. */
+  async getTimedMute(userId: string) {
+    const [row] = await this.db
+      .select({ dndUntil: users.dndUntil })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+    // Expired reads as absent — the row is left alone rather than swept, so a
+    // read never has to write.
+    return {
+      mutedUntil: NotificationsService.isTimedMuteActive(row?.dndUntil)
+        ? (row!.dndUntil as Date).toISOString()
+        : null,
+    }
   }
 
   async getPreferences(userId: string): Promise<NotificationPreferences> {
@@ -836,9 +887,12 @@ export class NotificationsService {
    * quiet hours still suppress push/email.
    */
   async sendTest(userId: string, workspaceId?: string | null) {
-    const { prefs, timezone } = await this.getUserNotificationContext(userId)
+    const { prefs, timezone, dndUntil } = await this.getUserNotificationContext(userId)
     const matrix = prefs.events[this.mapTypeToEventKey('test_notification')]
-    const inQuietHours = this.isInQuietHours(prefs, timezone)
+    // The test send has to report the truth, including "you are muted until
+    // 3pm" — that is the whole point of pressing it.
+    const inQuietHours =
+      this.isInQuietHours(prefs, timezone) || NotificationsService.isTimedMuteActive(dndUntil)
 
     const row = await this.create({
       userId,
@@ -1232,11 +1286,15 @@ export class NotificationsService {
   private async getUserNotificationContext(userId: string): Promise<{
     prefs: NotificationPreferences
     timezone: string
+    dndUntil: Date | null
   }> {
     const [row] = await this.db
       .select({
         notificationPreferences: users.notificationPreferences,
         timezone: users.timezone,
+        // §G06 [06:53] — "muted until 3pm" is a different fact from the
+        // scheduled quiet hours in the prefs blob, and both can be true.
+        dndUntil: users.dndUntil,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -1245,7 +1303,22 @@ export class NotificationsService {
     return {
       prefs: this.mergePreferences(DEFAULT_NOTIFICATION_PREFERENCES, saved),
       timezone: row?.timezone || 'UTC',
+      dndUntil: row?.dndUntil ?? null,
     }
+  }
+
+  /**
+   * §G06 [06:53] — muted until a moment, and not a minute longer.
+   *
+   * Read rather than swept, for the same reason a custom status expires on
+   * read: a job that un-mutes people is a job that can be down, and staying
+   * muted past the meeting is the exact failure this replaced.
+   */
+  static isTimedMuteActive(dndUntil: Date | string | null | undefined, now: Date = new Date()): boolean {
+    if (!dndUntil) return false
+    const until = dndUntil instanceof Date ? dndUntil : new Date(dndUntil)
+    if (Number.isNaN(until.getTime())) return false
+    return until.getTime() > now.getTime()
   }
 
   private isInQuietHours(prefs: NotificationPreferences, timezone: string): boolean {

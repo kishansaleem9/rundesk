@@ -75,6 +75,77 @@ export class PresenceService {
   }
 
   /**
+   * §G06 [06:42] — a status that has expired is not a status.
+   *
+   * Enforced on read, everywhere, rather than by a sweeper. A job that clears
+   * statuses is a job that can be down, and a status outliving its reason —
+   * "Busy" three days after the meeting — is exactly what this feature exists
+   * to prevent. Past the moment, every reader sees nothing.
+   */
+  static liveStatus(
+    row: { statusEmoji?: string | null; statusText?: string | null; statusExpiresAt?: Date | string | null },
+    now: Date = new Date(),
+  ): { emoji: string | null; text: string | null; expiresAt: string | null } | null {
+    if (!row?.statusEmoji && !row?.statusText) return null
+    if (row.statusExpiresAt) {
+      const until = row.statusExpiresAt instanceof Date ? row.statusExpiresAt : new Date(row.statusExpiresAt)
+      if (!Number.isNaN(until.getTime()) && until.getTime() <= now.getTime()) return null
+    }
+    return {
+      emoji: row.statusEmoji ?? null,
+      text: row.statusText ?? null,
+      expiresAt: row.statusExpiresAt
+        ? (row.statusExpiresAt instanceof Date ? row.statusExpiresAt : new Date(row.statusExpiresAt)).toISOString()
+        : null,
+    }
+  }
+
+  /**
+   * §G06 [06:42] — set the caller's custom status.
+   *
+   * "main yahan se apna status set kar sakti hoon ke main is time kya kar rahi
+   * hoon." Emoji and text are both optional; clearing both clears the status,
+   * which is what the Clear button does rather than needing a second endpoint.
+   */
+  async setCustomStatus(
+    userId: string,
+    input: { emoji?: string | null; text?: string | null; expiresAt?: string | Date | null },
+  ) {
+    const emoji = input.emoji?.trim() || null
+    const text = input.text?.trim() || null
+
+    // Long enough for "In a meeting until 3, ping me if urgent", short enough
+    // that a status cannot be used as a paragraph in somebody's sidebar.
+    if (text && text.length > 120) throw new BadRequestException('A status is at most 120 characters')
+    // One grapheme. Anything longer is a sentence in the emoji slot, which
+    // breaks every place this renders in a 16px square.
+    if (emoji && [...emoji].length > 2) throw new BadRequestException('Pick a single emoji')
+
+    let expiresAt: Date | null = null
+    if (input.expiresAt) {
+      expiresAt = input.expiresAt instanceof Date ? input.expiresAt : new Date(input.expiresAt)
+      if (Number.isNaN(expiresAt.getTime())) throw new BadRequestException('expiresAt must be a valid date/time')
+      if (expiresAt.getTime() <= Date.now()) {
+        throw new BadRequestException('A status that has already expired is not a status')
+      }
+    }
+    // Clearing the words clears the clock with them, so a later status does not
+    // inherit the expiry of the one before it.
+    if (!emoji && !text) expiresAt = null
+
+    const [row] = await this.db
+      .update(users)
+      .set({ statusEmoji: emoji, statusText: text, statusExpiresAt: expiresAt })
+      .where(eq(users.id, userId))
+      .returning({
+        statusEmoji: users.statusEmoji,
+        statusText: users.statusText,
+        statusExpiresAt: users.statusExpiresAt,
+      })
+    return { status: PresenceService.liveStatus(row ?? {}) }
+  }
+
+  /**
    * Presence for every member of a workspace (requires the caller to be a
    * member). Returns each member's raw lastSeenAt plus the derived status.
    */
@@ -87,7 +158,17 @@ export class PresenceService {
     if (!membership) throw new ForbiddenException('Workspace membership required')
 
     const rows = await this.db
-      .select({ userId: users.id, lastSeenAt: users.lastSeenAt, presenceStatus: users.presenceStatus })
+      .select({
+        userId: users.id,
+        lastSeenAt: users.lastSeenAt,
+        presenceStatus: users.presenceStatus,
+        // §G06 [06:42] — the words, alongside the dot. Read here rather than
+        // fetched separately: "away" and "on a 30-minute break" are the same
+        // glance, and two round trips guarantees they disagree for a moment.
+        statusEmoji: users.statusEmoji,
+        statusText: users.statusText,
+        statusExpiresAt: users.statusExpiresAt,
+      })
       .from(workspaceMembers)
       .innerJoin(users, eq(users.id, workspaceMembers.userId))
       .where(eq(workspaceMembers.workspaceId, workspaceId))
@@ -97,6 +178,7 @@ export class PresenceService {
       lastSeenAt: r.lastSeenAt,
       manual: r.presenceStatus ?? null,
       status: PresenceService.resolveStatus(r.presenceStatus, r.lastSeenAt, now),
+      customStatus: PresenceService.liveStatus(r, now),
     }))
   }
 

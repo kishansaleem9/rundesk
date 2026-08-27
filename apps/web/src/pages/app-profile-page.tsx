@@ -452,6 +452,8 @@ function ThemeSelector() {
   const { t } = useTranslation()
   const theme = useThemeStore((s) => s.theme)
   const setTheme = useThemeStore((s) => s.setTheme)
+  const highContrast = useThemeStore((s) => s.highContrast)
+  const setHighContrast = useThemeStore((s) => s.setHighContrast)
   return (
     <div className="space-y-1.5 pt-1">
       <Label>{t('profile.theme')}</Label>
@@ -476,6 +478,28 @@ function ThemeSelector() {
           )
         })}
       </div>
+
+      {/*
+        * §G06 [07:03] — "High Contrast for increased accessibility."
+        *
+        * Beside the theme because it is the same question asked twice, and
+        * because somebody looking for it will look here. It changes colours
+        * only: a contrast mode that moves things is a different screen, and
+        * needing contrast should not also mean relearning the app.
+        */}
+      <label className="mt-3 flex items-start gap-3 rounded-md border border-border px-3 py-2.5 cursor-pointer hover:bg-muted/40">
+        <input
+          type="checkbox"
+          data-testid="high-contrast-toggle"
+          checked={highContrast}
+          onChange={(e) => setHighContrast(e.target.checked)}
+          className="mt-0.5 h-4 w-4 accent-[hsl(var(--accent))]"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm text-foreground">{t('profile.highContrast')}</span>
+          <span className="block text-xs text-muted-foreground">{t('profile.highContrastDesc')}</span>
+        </span>
+      </label>
     </div>
   )
 }

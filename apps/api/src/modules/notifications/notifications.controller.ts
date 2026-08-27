@@ -79,6 +79,30 @@ export class NotificationsController {
     return this.notifications.updatePreferences(user.id, body)
   }
 
+  /**
+   * §G06 [06:53] — mute for a length of time.
+   *
+   * "NOTIFICATIONS, Mute ka option hai" — the row in the frames carries a "›",
+   * i.e. a submenu of durations. Ours was a switch that stayed flipped until
+   * somebody remembered to flip it back, so muting for one meeting muted you
+   * for days.
+   *
+   * `minutes: null` (or 0) clears it. The scheduled quiet hours in preferences
+   * are a separate control and are untouched by this.
+   */
+  @Post('mute')
+  muteFor(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { minutes?: number | null },
+  ) {
+    return this.notifications.setTimedMute(user.id, body?.minutes ?? null)
+  }
+
+  @Get('mute')
+  getMute(@CurrentUser() user: CurrentUserPayload) {
+    return this.notifications.getTimedMute(user.id)
+  }
+
   @Get('web-push/public-key')
   webPushPublicKey() {
     return this.notifications.getWebPushPublicKey()

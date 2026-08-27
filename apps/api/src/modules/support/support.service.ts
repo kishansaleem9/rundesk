@@ -86,7 +86,16 @@ export class SupportService {
    */
   async createTicket(
     actor: Actor,
-    input: { workspaceId?: string; subject?: string; body?: string; priority?: string },
+    input: {
+      workspaceId?: string
+      subject?: string
+      body?: string
+      priority?: string
+      /** §G06 [07:30] — 'call' when this is a request to talk to a person. */
+      kind?: string
+      /** Times the requester offered, ISO-8601. */
+      requestedSlots?: string[]
+    },
   ) {
     const workspaceId = input?.workspaceId
     const subject = trimStr(input?.subject)
@@ -94,6 +103,32 @@ export class SupportService {
 
     if (!workspaceId) throw new BadRequestException('workspaceId is required')
     if (!subject) throw new BadRequestException('subject is required')
+
+    /*
+     * §G06 [07:30] — "main meeting schedule bhi start kar sakti hoon".
+     *
+     * A call request is a ticket with a kind and some times, not a booking
+     * system: it lands in the queue the team already works and inherits the
+     * SLA clocks already on this table. Nothing is confirmed until somebody
+     * answers, which is honest — we do not model the team's availability, and
+     * a form that hands out slots nobody published is a promise it cannot keep.
+     */
+    const kind = input?.kind === 'call' ? ('call' as const) : ('question' as const)
+    let requestedSlots: string[] | null = null
+    if (kind === 'call') {
+      const raw = Array.isArray(input?.requestedSlots) ? input.requestedSlots : []
+      const parsed = raw
+        .filter((v) => typeof v === 'string')
+        .map((v) => new Date(v))
+        .filter((d) => !Number.isNaN(d.getTime()) && d.getTime() > Date.now())
+        .slice(0, 5)
+      if (parsed.length === 0) {
+        throw new BadRequestException('Offer at least one future time for the call')
+      }
+      // Sorted and de-duped so the team reads a tidy list rather than a log of
+      // the requester changing their mind in the picker.
+      requestedSlots = [...new Set(parsed.map((d) => d.toISOString()))].sort()
+    }
 
     await this.assertWorkspaceMember(actor, workspaceId)
 
@@ -112,6 +147,8 @@ export class SupportService {
         createdById: actor.id,
         subject,
         body,
+        kind,
+        requestedSlots,
         status: 'open',
         priority,
         firstResponseDueAt,

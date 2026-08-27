@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, boolean, index } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, uuid, integer, boolean, jsonb, index } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { workspaces } from './workspaces'
 import { users } from './users'
@@ -51,6 +51,24 @@ export const supportTickets = pgTable(
     createdById:        uuid('created_by_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     subject:            text('subject').notNull(),
     body:               text('body').notNull().default(''),
+    /**
+     * §G06 [07:30] — "main meeting schedule bhi start kar sakti hoon".
+     *
+     * Help had two of the three routes she named: read the docs, or open a
+     * ticket. The third — talk to a person, at a time — went to a `mailto:`.
+     *
+     * A ticket with a kind rather than a separate booking system. The request
+     * then lands in the queue the team already works, inherits the SLA clock
+     * that is already on this table, and can be answered in the thread that is
+     * already there. A scheduler of our own would need availability we do not
+     * model, and inventing slots nobody has published is how a "booking" ends
+     * up being a form that promises a time it cannot keep.
+     */
+    kind:               text('kind').$type<'question' | 'call'>().notNull().default('question'),
+    /** Times the requester offered, ISO-8601. Only meaningful for kind 'call'. */
+    requestedSlots:     jsonb('requested_slots').$type<string[] | null>(),
+    /** Set when the team confirms one of them. Until then, nothing is booked. */
+    scheduledAt:        timestamp('scheduled_at', { withTimezone: true }),
     // 'open' | 'pending' | 'resolved' | 'closed'
     status:             text('status').notNull().default('open'),
     // 'low' | 'normal' | 'high' | 'urgent'
