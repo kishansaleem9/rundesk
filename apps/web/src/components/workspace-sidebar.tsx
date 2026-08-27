@@ -69,6 +69,10 @@ import { SharePanel, type ShareObjectType } from './share-panel'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS, type FlagKey } from '@rundesk/feature-flags'
 import { ListSkeleton } from './loading-skeletons'
+/** Shown in the toggle's tooltip so the chord is discoverable, not folklore. */
+const SIDEBAR_CHORD =
+  typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘ \\' : 'Ctrl \\'
+
 
 function isUuidLike(value: string | undefined): value is string {
   if (!value) return false
@@ -254,6 +258,35 @@ export function WorkspaceSidebar() {
   const [openSwitcher, setOpenSwitcher] = useState(false)
   const collapsed = useSidebarStore((state) => state.collapsed)
   const toggleCollapsed = useSidebarStore((state) => state.toggle)
+
+  /*
+   * §1.3 — Ctrl/⌘ + \ collapses the sidebar.
+   *
+   * "kyunke yeh SPACE leta hai, aur jab hum kaam kar rahe hote hain to it's
+   * kind of frustrating" `[10:46]`. Somebody reclaiming the width mid-task is
+   * doing it *because* they are mid-task, and making them find a button with
+   * the mouse is the part that interrupts. Same chord every editor uses for
+   * the same thing.
+   *
+   * Not while typing: `\` is a character, and a sidebar that collapses because
+   * somebody wrote a Windows path into a task title is worse than no shortcut.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== '\\' || !(event.metaKey || event.ctrlKey)) return
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      toggleCollapsed()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toggleCollapsed])
   const [spacesExpanded, setSpacesExpanded] = useState(true)
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
   const [browseExpanded, setBrowseExpanded] = useState(true)
@@ -777,7 +810,7 @@ export function WorkspaceSidebar() {
                 <PanelLeftOpen className="h-4 w-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">{t('nav.expandSidebar')}</TooltipContent>
+            <TooltipContent side="right">{t('nav.expandSidebar')} · {SIDEBAR_CHORD}</TooltipContent>
           </Tooltip>
         </div>
         {/* min-h-0 is what makes overflow-y-auto real here: without it the flex
@@ -850,7 +883,7 @@ export function WorkspaceSidebar() {
             aria-label={t('nav.collapseSidebar')}
             aria-expanded
             data-testid="sidebar-toggle"
-            title={t('nav.collapseSidebar')}
+            title={`${t('nav.collapseSidebar')} · ${SIDEBAR_CHORD}`}
             className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/10 hover:text-foreground transition-colors"
           >
             <PanelLeftClose className="h-4 w-4" />

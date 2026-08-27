@@ -17,6 +17,7 @@ const GROUPS: Array<{ titleKey: TranslationKey; items: Shortcut[] }> = [
     titleKey: 'shortcuts.section.navigation',
     items: [
       { keys: ['⌘', 'K'], descKey: 'shortcuts.openCommandPalette' },
+      { keys: ['⌘', '\\'], descKey: 'shortcuts.toggleSidebar' },
       { keys: ['?'], descKey: 'shortcuts.showOverlay' },
       { keys: ['G', 'D'], descKey: 'shortcuts.goToDashboard' },
       { keys: ['G', 'I'], descKey: 'shortcuts.goToInbox' },
@@ -78,8 +79,21 @@ export function ShortcutsOverlay() {
         setOpen((prev) => !prev)
       }
     }
+    /*
+     * `?` is not a way to find this.
+     *
+     * The list existed and was mounted, and the only way in was a keystroke you
+     * had to already know about — which is a list of shortcuts nobody who needs
+     * one can reach. `[07:16]` she opens it from the profile menu, so the menu
+     * needs a way to say "open" without owning this component's state.
+     */
+    const onAsked = () => setOpen(true)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('rundesk:show-shortcuts', onAsked)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('rundesk:show-shortcuts', onAsked)
+    }
   }, [])
 
   return (

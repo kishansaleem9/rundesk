@@ -53,6 +53,8 @@ function AcceptInvite() {
   const { token } = Route.useSearch()
   const [loading, setLoading] = useState(true)
   const [claiming, setClaiming] = useState(false)
+  const [declining, setDeclining] = useState(false)
+  const [declined, setDeclined] = useState(false)
   const [invite, setInvite] = useState<InvitePreview | null>(null)
   
   const [fullName, setFullName] = useState('')
@@ -81,6 +83,28 @@ function AcceptInvite() {
 
     fetchPreview()
   }, [token, navigate])
+
+  /**
+   * Decline, and say so plainly.
+   *
+   * No login required — the person declining is exactly the person who is not
+   * about to make an account — and the screen then STAYS on a declined state
+   * rather than bouncing to a login they never wanted. Idempotent server-side,
+   * so pressing it twice is somebody making sure, not an error.
+   */
+  async function handleDecline() {
+    if (!token) return
+    setDeclining(true)
+    try {
+      await api('/invitations/decline', { method: 'POST', body: { token } })
+      setDeclined(true)
+      toast.success(t('acceptInvite.declinedToast'))
+    } catch (err: any) {
+      toast.error(t('acceptInvite.declineFailed'), { description: err?.message })
+    } finally {
+      setDeclining(false)
+    }
+  }
 
   async function handleClaim() {
     if (!invite?.requiresAccountCreation && !isAuthenticated()) {
@@ -128,6 +152,35 @@ function AcceptInvite() {
   }
 
   if (!invite) return null
+
+  /*
+   * Declined stays on screen.
+   *
+   * The alternative — bouncing to the login page — sends somebody who just
+   * said "I don't want this" to a form asking them to sign in, which reads as
+   * the app ignoring them. This says the answer was received, and leaves the
+   * door open, because people decline invitations by accident.
+   */
+  if (declined) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-background">
+        <div className="bg-aurora pointer-events-none absolute inset-0" />
+        <header className="relative z-10 flex items-center justify-center p-8">
+          <LogoWordmark gradient />
+        </header>
+        <main className="relative z-10 mx-auto flex max-w-md flex-col gap-6 px-6 pb-20 pt-4">
+          <div className="card-glass space-y-4 p-8 text-center" data-testid="invite-declined">
+            <h1 className="font-display text-2xl font-semibold tracking-tight">
+              {t('acceptInvite.declinedTitle')}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {t('acceptInvite.declinedBody', { org: invite.orgName })}
+            </p>
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background">
@@ -224,6 +277,24 @@ function AcceptInvite() {
               </>
             )}
           </Button>
+
+          {/*
+            * Saying no is an answer — `[00:18]`.
+            *
+            * Without this the only ways out of an invitation you did not want
+            * were to accept it or to close the tab, which leaves it pending in
+            * the sender's list forever and tells them nothing. Quiet by
+            * design: it is the secondary action, not a second call to action.
+            */}
+          <button
+            type="button"
+            data-testid="invite-decline"
+            onClick={handleDecline}
+            disabled={declining || claiming}
+            className="w-full text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50"
+          >
+            {declining ? t('acceptInvite.declining') : t('acceptInvite.declineButton')}
+          </button>
         </motion.div>
 
         <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">

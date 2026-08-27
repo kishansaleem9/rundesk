@@ -2,11 +2,7 @@ import { useEffect, useState } from 'react'
 import { Download, X, WifiOff } from 'lucide-react'
 import { Button } from '@rundesk/ui'
 import { useTranslation } from '../lib/i18n'
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
-}
+import { canInstall, onInstallabilityChange, promptInstall, watchForInstallPrompt } from '../lib/pwa-install'
 
 const DISMISS_STORAGE_KEY = 'rundesk.pwa.installDismissedAt'
 const DISMISS_DURATION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -18,46 +14,46 @@ const DISMISS_DURATION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
  */
 export function PwaInstallPrompt() {
   const { t } = useTranslation()
-  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
+  // Installability now lives in lib/pwa-install so the profile menu can offer
+  // it too; this banner is one of two surfaces reading the same single-use
+  // event rather than the only one that ever sees it.
+  const [installable, setInstallable] = useState(canInstall)
+  const [snoozed, setSnoozed] = useState(
+    () => Date.now() - Number(localStorage.getItem(DISMISS_STORAGE_KEY) ?? '0') < DISMISS_DURATION_MS,
+  )
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
 
   useEffect(() => {
-    function handleBeforeInstall(e: Event) {
-      e.preventDefault()
-      const dismissedAt = Number(localStorage.getItem(DISMISS_STORAGE_KEY) ?? '0')
-      if (Date.now() - dismissedAt < DISMISS_DURATION_MS) return
-      setInstallEvent(e as BeforeInstallPromptEvent)
-    }
+    watchForInstallPrompt()
+    const stop = onInstallabilityChange(() => setInstallable(canInstall()))
     function handleOnline() {
       setIsOnline(true)
     }
     function handleOffline() {
       setIsOnline(false)
     }
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstall)
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
     return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstall)
+      stop()
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
   }, [])
 
+  const installEvent = installable && !snoozed ? true : null
+
   async function install() {
-    if (!installEvent) return
-    await installEvent.prompt()
-    const { outcome } = await installEvent.userChoice
+    const outcome = await promptInstall()
     if (outcome === 'dismissed') {
       localStorage.setItem(DISMISS_STORAGE_KEY, String(Date.now()))
+      setSnoozed(true)
     }
-    setInstallEvent(null)
   }
 
   function dismiss() {
     localStorage.setItem(DISMISS_STORAGE_KEY, String(Date.now()))
-    setInstallEvent(null)
+    setSnoozed(true)
   }
 
   return (

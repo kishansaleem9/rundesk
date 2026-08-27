@@ -177,6 +177,40 @@ export class InvitationsService {
     return { ok: true }
   }
 
+  /**
+   * The person invited says no — `[00:18]`.
+   *
+   * By token and unauthenticated on purpose: somebody declining an invitation
+   * is precisely somebody who is not going to make an account first, and a
+   * Decline that demanded a login would be a Decline nobody could press.
+   *
+   * Idempotent. A second press of a link somebody already declined is a person
+   * making sure, not an error, and it must not read as one.
+   */
+  async decline(token: string) {
+    const [invite] = await this.db
+      .select()
+      .from(invitations)
+      .where(eq(invitations.token, token))
+      .limit(1)
+
+    if (!invite) throw new NotFoundException('Invitation not found')
+    if (invite.status === 'declined') return { ok: true, status: 'declined' as const }
+    // Anything already resolved stays as it is: declining an invitation that
+    // was accepted would silently undo a membership, and declining one the
+    // sender revoked would overwrite their record of why it ended.
+    if (invite.status !== 'pending') {
+      throw new GoneException('This invitation has already been used or revoked')
+    }
+
+    await this.db
+      .update(invitations)
+      .set({ status: 'declined' })
+      .where(eq(invitations.id, invite.id))
+
+    return { ok: true, status: 'declined' as const }
+  }
+
   async preview(token: string) {
     const [invite] = await this.db
       .select({

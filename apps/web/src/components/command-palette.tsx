@@ -36,6 +36,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { forgetSearch, recentSearches, rememberSearch } from '../lib/recent-searches'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type SearchHit = { id: string; entityType: string; title: string; content: string; url: string }
@@ -138,6 +139,9 @@ export function CommandPalette({
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')
   const [creatorFilter, setCreatorFilter] = useState<string>('')
   const [includeArchived, setIncludeArchived] = useState(false)
+  // Read when the palette opens rather than on every render: this is
+  // localStorage, and the list only changes when a search is actually run.
+  const [recents, setRecents] = useState<string[]>([])
   const [dueAfter, setDueAfter] = useState<string>('')
   const [dueBefore, setDueBefore] = useState<string>('')
   // §2 [04:00] — "last created date kya thi — dates ke lehaz par".
@@ -356,6 +360,26 @@ export function CommandPalette({
       return api<SearchHit[]>(`/search/${workspaceId}?${params.toString()}`)
     },
   })
+
+  /*
+   * Remember a query only once it has ANSWERED.
+   *
+   * Recording on keystroke fills the list with prefixes of one word — "in",
+   * "inv", "invo" — which is a worse list than none. Waiting for the search to
+   * settle means what is remembered is what somebody actually asked.
+   */
+  useEffect(() => {
+    if (!open || commandMode || searchQuery.isPending) return
+    if (!searchQuery.isSuccess) return
+    rememberSearch(workspaceId, query)
+  }, [open, commandMode, searchQuery.isPending, searchQuery.isSuccess, workspaceId, query])
+
+  // Refreshed as the palette opens: this is localStorage, not state anything
+  // else writes to while it is on screen.
+  useEffect(() => {
+    if (open) setRecents(recentSearches(workspaceId))
+  }, [open, workspaceId])
+
 
   const createTask = useMutation({
     mutationFn: async () => {
@@ -832,6 +856,45 @@ export function CommandPalette({
           </FilterGroup>
         )}
       </div>
+      {/*
+        * Recent searches — only with an empty box.
+        *
+        * `[01:24]` a search that found nothing is usually followed by the same
+        * search spelled differently, and retyping it from memory is the part
+        * that wastes the minute. Hidden the moment somebody types, because by
+        * then they have moved on from the list and it is just noise above the
+        * results they asked for.
+        */}
+      {!commandMode && !query.trim() && recents.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 -mt-1" data-testid="palette-recents">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 mr-0.5">
+            {t('palette.recent')}
+          </span>
+          {recents.map((r) => (
+            <span key={r} className="inline-flex items-center rounded-full border border-border/70 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setQuery(r)}
+                className="pl-2 pr-1 py-0.5 text-muted-foreground hover:text-foreground"
+              >
+                {r}
+              </button>
+              <button
+                type="button"
+                aria-label={t('palette.forgetRecent', { query: r })}
+                onClick={() => {
+                  forgetSearch(workspaceId, r)
+                  setRecents(recentSearches(workspaceId))
+                }}
+                className="px-1 py-0.5 text-muted-foreground/60 hover:text-red-500"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {(((savedQuery.data?.length ?? 0) > 0) || hasFilter || query.trim()) && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 -mt-1">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 mr-0.5">

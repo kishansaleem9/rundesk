@@ -383,6 +383,37 @@ check_sql "feature_flag_requests table exists (0113)" \
 check_sql "and the lookup it is read by is indexed" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='feature_flag_requests_recent_idx');" "t"
 
+# ─────────────────────────── §G01 [00:18] declining an invite ─────────────
+# Declining is the RECIPIENT saying no, and it is deliberately not the same
+# status as `revoked` (the sender cancelling). It also must not require an
+# account: whoever is declining is precisely the person who was never going to
+# make one.
+say "An invitation can be declined"
+INV=$(curl -fsS --max-time 20 -X POST "$API/invitations" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"decline-check-$$@rundesk.invalid\",\"workspaceId\":\"$WS\",\"role\":\"member\"}" 2>/dev/null || true)
+ITOK=$(printf '%s' "$INV" | jget token)
+if [ -n "$ITOK" ]; then
+  ok "an invitation can be raised to decline"
+  # No Authorization header on purpose.
+  DEC=$(curl -fsS --max-time 20 -X POST "$API/invitations/decline" \
+    -H 'Content-Type: application/json' -d "{\"token\":\"$ITOK\"}" 2>/dev/null || true)
+  printf '%s' "$DEC" | grep -q 'declined' \
+    && ok "and declined without signing in" \
+    || bad "decline -> $(printf '%s' "$DEC" | head -c 140)"
+  AGAIN=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/invitations/decline" \
+    -H 'Content-Type: application/json' -d "{\"token\":\"$ITOK\"}" 2>/dev/null || true)
+  [ "$AGAIN" = "200" ] \
+    && ok "declining twice is somebody making sure, not an error" \
+    || bad "second decline -> $AGAIN"
+  GONE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$API/invitations/preview?token=$ITOK" 2>/dev/null || true)
+  [ "$GONE" = "410" ] \
+    && ok "and a declined invitation can no longer be claimed" \
+    || bad "preview after decline -> $GONE (expected 410)"
+else
+  bad "could not create an invitation to decline -> $(printf '%s' "$INV" | head -c 140)"
+fi
+
 say "A meeting is a record, not a link"
 MT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
   -H 'Content-Type: application/json' \

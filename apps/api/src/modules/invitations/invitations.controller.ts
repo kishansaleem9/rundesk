@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Inject, NotFoundException, ForbiddenException, HttpCode, HttpStatus } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { OrganizationAdminGuard } from '../auth/guards/organization-admin.guard'
@@ -130,6 +130,13 @@ export class InvitationsController {
     return this.invitationsService.listPendingForWorkspace(workspaceId)
   }
 
+
+  @Post('decline')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Decline an invitation — the recipient says no' })
+  async decline(@Body() dto: { token: string }) {
+    return this.invitationsService.decline(dto?.token)
+  }
 
   @Get('preview')
   @ApiOperation({ summary: 'Preview an invitation before claiming' })

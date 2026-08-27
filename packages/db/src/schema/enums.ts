@@ -30,8 +30,17 @@ export const orgRoleEnum = pgEnum('org_role', [
 export const invitationStatusEnum = pgEnum('invitation_status', [
   'pending',
   'accepted',
+  // The SENDER cancelled it.
   'revoked',
   'expired',
+  /*
+   * The RECIPIENT said no — `[00:18]` "Decline".
+   *
+   * Deliberately not folded into `revoked`. "I withdrew this invitation" and
+   * "they turned it down" are different facts about different people, and an
+   * admin looking at why somebody never joined is owed the difference.
+   */
+  'declined',
 ])
 
 export const taskPriorityEnum = pgEnum('task_priority', [

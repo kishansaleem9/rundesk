@@ -11,6 +11,8 @@ import {
   LogOut,
   User as UserIcon,
   HelpCircle,
+  Keyboard,
+  Download,
   Settings as SettingsIcon,
   Moon,
   Sun,
@@ -49,6 +51,7 @@ import {
 import { useAuthStore } from '../store/auth'
 import { useThemeStore } from '../store/theme'
 import { applyBrandColor } from '../lib/branding'
+import { canInstall, onInstallabilityChange, promptInstall, watchForInstallPrompt } from '../lib/pwa-install'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
@@ -899,6 +902,20 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
     },
   })
 
+  /*
+   * "Download app" only where the browser will actually do something.
+   *
+   * `[07:28]` it sits in her profile menu. Ours is a PWA, so the honest version
+   * is an install offer — and only where one exists: no iOS browser fires
+   * `beforeinstallprompt`, nor does an app that is already installed. An entry
+   * that silently does nothing is worse than no entry at all.
+   */
+  const [installable, setInstallable] = useState(canInstall)
+  useEffect(() => {
+    watchForInstallPrompt()
+    return onInstallabilityChange(() => setInstallable(canInstall()))
+  }, [])
+
   const toggleMute = useMutation({
     mutationFn: (dndOn: boolean) =>
       api('/notifications/preferences', { method: 'POST', body: { channels: { dndOn } } }),
@@ -1038,6 +1055,25 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
           >
             <SettingsIcon className="h-4 w-4 text-muted-foreground" />
             {t('topbar.workspaceSettings')}
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem
+          data-testid="menu-shortcuts"
+          onSelect={() => window.dispatchEvent(new Event('rundesk:show-shortcuts'))}
+        >
+          <Keyboard className="h-4 w-4 text-muted-foreground" />
+          {t('topbar.keyboardShortcuts')}
+        </DropdownMenuItem>
+        {installable && (
+          <DropdownMenuItem
+            data-testid="menu-install-app"
+            onSelect={(e) => {
+              e.preventDefault()
+              void promptInstall()
+            }}
+          >
+            <Download className="h-4 w-4 text-muted-foreground" />
+            {t('topbar.installApp')}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onSelect={() => navigate({ to: '/app/help' })}>
