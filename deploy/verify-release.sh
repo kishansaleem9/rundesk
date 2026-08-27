@@ -346,14 +346,19 @@ check_sql "meeting_attendees table exists" "SELECT to_regclass('public.meeting_a
 check_sql "the one-row-per-attendee index exists" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_meeting_attendee_user');" "t"
 
-# ─────────────────────────────── §2.8 SyncUp (0108–0111) ──────────────────
+# ─────────────────────────────── §2.8 SyncUp (0108–0113) ──────────────────
 # The one-live-call index is checked here because its absence is SILENT: with
 # it missing, start()'s ON CONFLICT DO NOTHING matches no index and simply
 # inserts, so two people pressing Start SyncUp together get two live calls and
 # nothing anywhere reports a problem. A fresh database is built by `push` from
 # the TypeScript schema and the migration journal is then marked applied, so an
 # index that lives only in 0111's SQL is an index a new deployment never gets.
-say "Migrations 0108–0111 were applied"
+#
+# Every migration in this release is named below. The first version of this
+# block stopped at 0111 and then 0112 and 0113 were written, so a release went
+# out carrying two migrations this script did not look for — which is precisely
+# the thing it exists to notice. Add the check WITH the migration.
+say "Migrations 0108–0113 were applied"
 check_sql "calls table exists"                "SELECT to_regclass('public.calls') IS NOT NULL;" "t"
 check_sql "call_transcript_lines table exists" "SELECT to_regclass('public.call_transcript_lines') IS NOT NULL;" "t"
 check_sql "call_recordings table exists"      "SELECT to_regclass('public.call_recordings') IS NOT NULL;" "t"
@@ -366,6 +371,17 @@ check_sql "and it only covers live calls" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_calls_one_live_per_channel' AND indexdef ILIKE '%ended_at IS NULL%');" "t"
 check_sql "one segment per storage key" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_call_recordings_key');" "t"
+# 0112 — without this a tie in the read-then-write for `position` is stored
+# rather than rejected, and "the pieces in order" quietly becomes two pieces
+# claiming to be the same one.
+check_sql "one segment per place in the order (0112)" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='uq_call_recordings_position');" "t"
+# 0113 — the once-a-day rule for "Contact your admin" reads this table. Missing,
+# the rule finds nothing and every press mails every admin again.
+check_sql "feature_flag_requests table exists (0113)" \
+  "SELECT to_regclass('public.feature_flag_requests') IS NOT NULL;" "t"
+check_sql "and the lookup it is read by is indexed" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='feature_flag_requests_recent_idx');" "t"
 
 say "A meeting is a record, not a link"
 MT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
