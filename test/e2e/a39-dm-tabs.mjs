@@ -1,19 +1,60 @@
 /** A3.9 — the DM Chat / Calendar / Tasks tab strip, live in the browser. */
+import path from 'node:path'
 import { resolveChromium } from './lib/playwright.mjs'
+import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureShared } from './lib/fixture.mjs'
+import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
-const WS = 'f47622b5-fc76-47d0-82d4-3b68c00bbaed'
-// Overridable like ui-sweep and video-regression: these two hardcoded a
-// dev port and the production verify user, so they could only ever run in
-// one place. Same defaults as before — nothing changes for an existing run.
-const B = (process.env.BASE ?? 'http://127.0.0.1:5173').replace(/\/$/, '')
+
+const argOf = (name, fallback) => {
+  const i = process.argv.indexOf(name)
+  return i === -1 ? fallback : process.argv[i + 1]
+}
+
 const EMAIL = process.env.E2E_EMAIL ?? 'verify@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Verify@123!'
+
+/*
+ * Serve the app, find a workspace, and make sure the DM this reads actually
+ * exists. All three were hardcoded — a dev server on 5173, one workspace's
+ * UUID, and a colleague called "Colleague" — which is why this could only ever
+ * run against one machine, and why it was never in CI.
+ */
+const REPO = path.resolve(import.meta.dirname, '../..')
+let DM_NAME = process.env.E2E_DM_NAME ?? 'Colleague'
+const SHARED_TASK = 'A39 open task for the pair'
+const SHARED_MEETING = 'A39 Sprint sync with colleague'
+let stack = null
+let B = (process.env.BASE ?? '').replace(/\/$/, '')
+if (!B) {
+  stack = await startLocalStack({
+    dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')),
+    apiPort: Number(argOf('--api', process.env.E2E_API_PORT ?? 3011)),
+  })
+  B = stack.base
+}
+let WS = process.env.E2E_WS
+{
+  const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
+  const api = apiClient(`${B}/api/v1`, auth.accessToken)
+  WS = WS ?? (await pickWorkspace(api)).id
+  const fixture = await ensureSweepFixture(api, WS)
+  const dm = await ensureDm(api, WS, auth.user?.id ?? auth.id)
+  if (dm?.name) DM_NAME = dm.name
+  // The two rows the Calendar and Tasks tabs are supposed to surface.
+  if (dm?.peer?.userId) {
+    await ensureShared(api, WS, fixture.listId, auth.user?.id ?? auth.id, dm.peer.userId, {
+      taskTitle: SHARED_TASK,
+      meetingTitle: SHARED_MEETING,
+    })
+  }
+  console.log(`\x1b[2m  workspace ${WS}${dm ? `, DM with ${DM_NAME}` : ''}\x1b[0m`)
+}
 const r = []
 const ok = (m) => { r.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { r.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, g, b) => (c ? ok(g) : bad(b))
 
-const br = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] })
+const br = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] })
 const p = await (await br.newContext({ viewport: { width: 1600, height: 1000 } })).newPage()
 try {
   await p.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
@@ -36,7 +77,7 @@ try {
   console.log('\n▶ opening the DM')
   // The row is an avatar plus a label, so anchor on the label text and click
   // the row it sits in.
-  const dm = p.getByText('Colleague', { exact: true }).first()
+  const dm = p.getByText(DM_NAME, { exact: true }).first()
   chk(await dm.count() > 0, 'the DM is listed in the sidebar', 'the DM is not in the sidebar')
   await dm.click()
   await p.waitForTimeout(2500)
@@ -58,7 +99,7 @@ try {
   await p.waitForTimeout(2200)
   let body = await p.locator('main, body').first().innerText()
   chk(/Meetings with/i.test(body), 'Calendar names whose meetings these are', `no heading: ${body.slice(0, 120)}`)
-  chk(/A39 Sprint sync with colleague/.test(body), 'the meeting both attended is listed',
+  chk(body.includes(SHARED_MEETING), 'the meeting both attended is listed',
     'the shared meeting is not on screen')
   chk(!/A39 Solo planning/.test(body), 'the meeting only one attended is absent',
     'a solo meeting leaked into the shared calendar')
@@ -72,7 +113,7 @@ try {
   await p.waitForTimeout(2200)
   body = await p.locator('main, body').first().innerText()
   chk(/Open tasks with/i.test(body), 'Tasks names whose tasks these are', `no heading: ${body.slice(0, 120)}`)
-  chk(/A39 open task for the pair/.test(body), 'the shared open task is listed', 'the shared task is missing')
+  chk(body.includes(SHARED_TASK), 'the shared open task is listed', 'the shared task is missing')
   chk(!/A39 finished task/.test(body), 'a closed task is not listed under "open tasks"',
     'a closed task showed under Open tasks')
 
@@ -115,4 +156,5 @@ try {
 } finally { await br.close() }
 const f = r.filter((x) => !x).length
 console.log(`\n${r.length - f} passed, ${f} failed`)
+await stack?.close?.()
 process.exit(f ? 1 : 0)

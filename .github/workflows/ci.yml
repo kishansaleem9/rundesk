@@ -227,6 +227,49 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/person-panel.mjs --api 3011 --dist apps/web/dist
 
+      # The four suites that used to be unrunnable anywhere but one laptop.
+      #
+      # Each hardcoded some combination of a dev server on :5173, one
+      # workspace's UUID, and a colleague called "Colleague" — so pointed at a
+      # freshly seeded database they swept an empty shell and failed for
+      # reasons that had nothing to do with the UI. They now serve the built
+      # dist themselves, discover a workspace, and create the little they need
+      # (tasks across statuses and priorities, a DM, a shared task and
+      # meeting) before reading it back.
+      #
+      # Being out of CI is why three of them had gone stale against shipped
+      # decisions: two asserted an Inbox "Other" chip §2.2 removed, one wanted
+      # "Mark all read" where §2.5 put "Clear all", and one looked for the
+      # language switcher in the top bar §1.5 cleared.
+      #
+      # E2E_EMAIL is set because their defaults name the production verify
+      # user, which no seeded database has. admin + org-admin are both seeded,
+      # and the pair matters: some checks need somebody else to act on you.
+      - name: UI sweep — every surface, in a browser
+        if: '!cancelled()'
+        run: node test/e2e/ui-sweep.mjs --api 3011 --dist apps/web/dist
+
+      - name: The video1 regression sweep
+        if: '!cancelled()'
+        run: node test/e2e/video-regression.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      - name: The DM tab strip (A3.9)
+        if: '!cancelled()'
+        run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      - name: The meeting record survives the page (A6.1/A6.2)
+        if: '!cancelled()'
+        run: node test/e2e/a61-meeting-record.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest

@@ -8,14 +8,65 @@
  *
  *   BASE=http://127.0.0.1:5173 WS=<workspace-id> node test/e2e/video-regression.mjs
  */
+import path from 'node:path'
 import { resolveChromium } from './lib/playwright.mjs'
+import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureNotification } from './lib/fixture.mjs'
+import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
 
-const BASE = process.env.BASE ?? 'http://127.0.0.1:5173'
-const WS = process.env.WS ?? 'f47622b5-fc76-47d0-82d4-3b68c00bbaed'
+const argOf = (name, fallback) => {
+  const i = process.argv.indexOf(name)
+  return i === -1 ? fallback : process.argv[i + 1]
+}
+
 const EMAIL = process.env.E2E_EMAIL ?? 'verify@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Verify@123!'
 const CHROME = process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
+
+/*
+ * Serve the app and find a workspace, rather than assume both.
+ *
+ * BASE and WS were a dev server that had to already be running and the UUID of
+ * one particular workspace, which is why this could only ever run on one
+ * machine — and why it was not in CI. Given neither, it now serves the built
+ * dist itself and takes the first workspace its login can see, making sure
+ * that workspace has something in it first: most of what this suite reads is a
+ * list view, and an empty list fails almost every check for reasons that have
+ * nothing to do with the UI.
+ */
+const REPO = path.resolve(import.meta.dirname, '../..')
+/** Who the DM in the sidebar is with — 'Colleague' was one workspace's person. */
+let DM_NAME = process.env.E2E_DM_NAME ?? 'Colleague'
+/** Whether an inbox notification could be arranged; null means "could not". */
+let NOTIFIED = null
+let stack = null
+let BASE = (process.env.BASE ?? '').replace(/\/$/, '')
+if (!BASE) {
+  stack = await startLocalStack({
+    dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')),
+    apiPort: Number(argOf('--api', process.env.E2E_API_PORT ?? 3011)),
+  })
+  BASE = stack.base
+}
+let WS = process.env.WS
+if (!WS) {
+  const auth = await login(`${BASE}/api/v1`, EMAIL, PASSWORD)
+  const api = apiClient(`${BASE}/api/v1`, auth.accessToken)
+  WS = (await pickWorkspace(api)).id
+  const myId = auth.user?.id ?? auth.id
+  const fixture = await ensureSweepFixture(api, WS)
+  // A3.9 reads the DM tab strip, which needs a conversation to exist.
+  const dm = await ensureDm(api, WS, myId)
+  if (dm?.name) DM_NAME = dm.name
+  // A2.6 reads "Clear all", which only renders when there is something to clear.
+  NOTIFIED = await ensureNotification(api, `${BASE}/api/v1`, WS, myId, fixture.listId)
+  console.log(
+    `\x1b[2m  discovered workspace ${WS}` +
+      (fixture.created ? `, created ${fixture.created} task(s)` : '') +
+      (dm ? `, ensured a DM with ${DM_NAME}` : '') +
+      (NOTIFIED ? ', ensured a notification' : '') + `\x1b[0m`,
+  )
+}
 
 const results = []
 let REF = '—'
@@ -183,11 +234,29 @@ try {
   ref('A2.6', 'Inbox: All / Primary / Other, and Later / Cleared')
   await go(`/app/${WS}/inbox`, 3500)
   const inbox = await seen()
-  for (const state of ['Later', 'Cleared', 'Primary', 'Other']) {
+  for (const state of ['Later', 'Cleared', 'Primary']) {
     chk(new RegExp(`\\b${state}\\b`, 'i').test(inbox), `${state} is reachable`, `${state} is not on the inbox`)
   }
+  /*
+   * §2.2 — Other is gone on her instruction ("yeh mujhe NAHI CHAHIYE humari
+   * list mein"), so its absence is the assertion now. This suite listed it
+   * among the buckets that must be reachable, and went on failing for the
+   * shipped behaviour the whole time it was out of CI.
+   */
+  chk(!/\bOther\b/i.test(inbox), 'and Other is gone (§2.2)', 'Other is back on the inbox')
 
-  chk(/Mark all read/i.test(inbox), 'the inbox can be cleared in one move', 'no mark-all-read')
+  /*
+   * §2.5 — the one-move action is "Clear all", not "Mark all read": clearing
+   * is what she asked for, and the row carries a retention clock afterwards.
+   * The old copy never existed after that change landed.
+   */
+  if (NOTIFIED) {
+    chk(/Clear all/i.test(inbox), 'the inbox can be cleared in one move', 'no Clear all')
+  } else {
+    // Said out loud, not skipped silently: the control is correctly absent on
+    // an empty inbox, so with nothing to clear this check cannot be answered.
+    console.log('  \x1b[2mSKIP  no notification could be arranged — "Clear all" not checked\x1b[0m')
+  }
 
   ref('A2.9', 'Replies get their own route, with unread against read')
   await go(`/app/${WS}/replies`, 3500)
@@ -249,7 +318,7 @@ try {
   ref('A3.9', 'A DM gets Chat / Calendar / Tasks; a channel does not')
   const strip = () => page.locator('button[aria-pressed]').filter({ hasText: /^(Chat|Calendar|Tasks)$/ })
   chk(await strip().count() === 0, 'a channel has no tab strip', 'a channel showed DM tabs')
-  const dmRow = page.getByText('Colleague', { exact: true }).first()
+  const dmRow = page.getByText(DM_NAME, { exact: true }).first()
   if (await dmRow.count()) {
     await dmRow.click()
     await page.waitForTimeout(2500)
@@ -288,8 +357,22 @@ try {
   await page.getByRole('button', { name: 'Trash', exact: true }).click().catch(() => {})
   await page.waitForTimeout(3000)
   const trash = await seen()
-  chk(/Restore/i.test(trash) || /empty/i.test(trash),
-    'trash offers restore (or says it is empty)', `the trash tab reads: ${trash.slice(0, 140)}`)
+  /*
+   * A4.6 is "what it was, where it was, and who deleted it" — so the columns
+   * are the claim, and they render whether or not anything is in there.
+   *
+   * This used to look for the word "Restore" or the word "empty", and found
+   * neither on a working screen: Restore lives inside the row's ⋯ menu, and
+   * the empty state reads "Nothing in the trash." It then printed the first
+   * 140 characters of the page, which are all sidebar, so the failure looked
+   * like the tab had not opened at all.
+   */
+  chk(/Deleted on/i.test(trash) && /Deleted by/i.test(trash),
+    'trash says what was deleted and who deleted it', `no deleted-on/by columns: ${trash.slice(0, 200)}`)
+  chk(/deleted forever after \d+ days/i.test(trash),
+    'and how long it keeps things', 'the retention notice is missing')
+  chk(/Nothing in the trash/i.test(trash) || /\bRestore\b/i.test(trash) || /⋯|More/i.test(trash),
+    'with rows to act on, or an honest empty state', `the trash tab reads: ${trash.slice(0, 200)}`)
 
   ref('A4.11', 'Reports-to is set where members are managed')
   await go(`/app/${WS}/settings`, 3500)
@@ -370,4 +453,5 @@ if (failed.length) {
   console.log('═'.repeat(66))
 }
 console.log(`\n\x1b[1m${results.length - failed.length} passed, ${failed.length} failed\x1b[0m`)
+await stack?.close?.()
 process.exit(failed.length ? 1 : 0)

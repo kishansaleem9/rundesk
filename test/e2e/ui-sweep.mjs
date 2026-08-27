@@ -6,17 +6,70 @@
  * this drives the select — an earlier version clicked a button that did not
  * exist and silently proved nothing.
  */
+import path from 'node:path'
 import { resolveChromium } from './lib/playwright.mjs'
+import { apiClient, login, pickWorkspace, ensureSweepFixture } from './lib/fixture.mjs'
+import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
 
-// Overridable, because a suite pinned to one seeded fixture stops running the
-// moment that fixture is rebuilt — which is not the same as passing.
-const WS = process.env.E2E_WS ?? '076d6b60-6cc7-428f-b27d-b6bec49e92db'
-const LIST_PATH = process.env.E2E_LIST_PATH
-  ?? 'a78ef365-3f18-41a4-8dfc-6ef8b5923dbb/d049d372-eb2a-4d8d-af7d-483a8d3a52c3/410988e8-a84a-45f8-84b1-793d9d409a7d'
-const B = process.env.BASE ?? 'http://127.0.0.1:5173'
+const argOf = (name, fallback) => {
+  const i = process.argv.indexOf(name)
+  return i === -1 ? fallback : process.argv[i + 1]
+}
+
 const EMAIL = process.env.E2E_EMAIL ?? 'org-admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'OrgAdmin@123!'
+
+/*
+ * Serve the app, rather than assume somebody else is.
+ *
+ * This used to hardcode `http://127.0.0.1:5173` — a dev server that has to
+ * already be running — which is half of why the suite was never in CI. The
+ * newer suites start their own static server with `startLocalStack`, which
+ * also proxies the socket upgrade; without that proxy the page cannot open a
+ * realtime connection and the console-health section fails on connection
+ * errors that say nothing about the UI.
+ *
+ * BASE still wins, for a run against a real deployment.
+ */
+const REPO = path.resolve(import.meta.dirname, '../..')
+let stack = null
+let B = (process.env.BASE ?? '').replace(/\/$/, '')
+if (!B) {
+  stack = await startLocalStack({
+    dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')),
+    apiPort: Number(argOf('--api', process.env.E2E_API_PORT ?? 3011)),
+  })
+  B = stack.base
+}
+const API = process.env.E2E_API ?? `${B}/api/v1`
+
+/*
+ * Where to sweep.
+ *
+ * Told, or worked out. Given E2E_WS this points where it is pointed and
+ * touches nothing — that is the mode a run against a real deployment uses.
+ * Given nothing, it signs in over the API, takes the first workspace it can
+ * see, and makes sure the list it is about to sweep actually has tasks in it.
+ *
+ * That second mode is the reason this suite can be in CI at all. Against a
+ * freshly seeded database the old hardcoded UUIDs addressed a workspace that
+ * does not exist, so every check ran against an empty grid and failed for
+ * reasons that had nothing to do with the UI.
+ */
+let WS = process.env.E2E_WS
+let LIST_PATH = process.env.E2E_LIST_PATH
+if (!WS || !LIST_PATH) {
+  const auth = await login(API, EMAIL, PASSWORD)
+  const api = apiClient(API, auth.accessToken)
+  WS = WS ?? (await pickWorkspace(api)).id
+  const fixture = await ensureSweepFixture(api, WS)
+  LIST_PATH = LIST_PATH ?? fixture.listPath
+  console.log(
+    `\x1b[2m  discovered workspace ${WS}\x1b[0m` +
+      (fixture.created ? `\x1b[2m, created ${fixture.created} task(s) to sweep\x1b[0m` : ''),
+  )
+}
 
 const results = []
 let section = ''
@@ -176,15 +229,33 @@ try {
     } else {
       check(true, `it lists the workspace fields (${before.length})`, '')
     }
-    // Search against a term this workspace actually has; a term that matches
-    // nothing narrows to zero and would "pass" for the wrong reason.
-    // A prefix every field shares narrows nothing; pick a term from one field
-    // that the others do not contain.
-    const distinctive = before.find((f) => {
-      const t = f.trim().slice(-4).toLowerCase()
-      return t.length === 4 && before.filter((o) => o.toLowerCase().includes(t)).length < before.length
-    })
-    const term = (distinctive ?? before.find((f) => f.length > 4) ?? '').trim().slice(-4)
+    /*
+     * Search against a term this workspace actually has: one that matches
+     * nothing narrows to zero and would "pass" for the wrong reason, and one
+     * every field shares narrows nothing and fails for the wrong reason.
+     *
+     * The old version took the last four characters, which is precisely the
+     * shared half of the two names it seeds — `SweepAlpha<tag>` and
+     * `SweepBeta<tag>` end identically — so it searched the one substring
+     * guaranteed not to discriminate. Scan for a term that really does appear
+     * in exactly one field instead of hoping a fixed slice does.
+     */
+    const distinctiveTerm = () => {
+      for (const field of before) {
+        const f = field.trim()
+        for (let len = 4; len <= Math.min(f.length, 12); len++) {
+          for (let i = 0; i + len <= f.length; i++) {
+            const cand = f.slice(i, i + len).toLowerCase()
+            if (!/^[a-z0-9]+$/.test(cand)) continue
+            if (before.filter((o) => o.toLowerCase().includes(cand)).length === 1) return cand
+          }
+        }
+      }
+      return ''
+    }
+    const term = distinctiveTerm()
+    check(term.length > 0, `found a term unique to one field ("${term}")`,
+      `no term distinguishes these fields: ${JSON.stringify(before)}`)
     await searchBox.fill(term)
     await page.waitForTimeout(800)
     const after = await page.locator('label:visible').allInnerTexts()
@@ -321,8 +392,35 @@ try {
     await palette.getByRole('button', { name: 'Filters', exact: true }).click()
     await page.waitForTimeout(1200)
     const chips = await palette.locator('button:visible').allInnerTexts()
-    for (const ty of ['Tasks', 'Docs', 'Files', 'Comments', 'Channels', 'Messages', 'People']) {
-      check(chips.includes(ty), `the ${ty} type chip is offered`, `no ${ty} chip: ${JSON.stringify(chips.slice(0, 14))}`)
+    /*
+     * §2 [02:01] — "yeh 3 DOTS dekh rahe hain? … to folders yahan pe appear ho
+     * jayega." The bar carries the everyday types and the rest live behind the
+     * ⋯, promoted into it when chosen. This used to demand all seven in the
+     * bar, which is the older UI: it failed on Comments, Channels and Messages
+     * for being exactly where they were deliberately put.
+     *
+     * So the question is reachability, not position — the everyday four are in
+     * the bar, and the others are one ⋯ away.
+     */
+    for (const ty of ['Tasks', 'Docs', 'Files', 'People']) {
+      check(chips.includes(ty), `the ${ty} type chip is on the bar`, `no ${ty} chip: ${JSON.stringify(chips.slice(0, 14))}`)
+    }
+    const more = palette.locator('[data-testid=palette-more-types]')
+    check(await more.count() > 0, 'and a ⋯ for the rest', 'no overflow control for the other types')
+    if (await more.count()) {
+      await more.click()
+      await page.waitForTimeout(900)
+      for (const ty of ['comment', 'channel', 'message']) {
+        const entry = palette.locator(`[data-testid=palette-add-type-${ty}]`)
+        check(await entry.count() > 0, `${ty} is reachable from the ⋯`, `${ty} is offered nowhere`)
+      }
+      // Promoting one has to actually put it on the bar, or the ⋯ is a menu
+      // that leads nowhere — which is the failure this section exists to catch.
+      await palette.locator('[data-testid=palette-add-type-comment]').first().click().catch(() => {})
+      await page.waitForTimeout(1200)
+      const promoted = await palette.locator('button:visible').allInnerTexts()
+      check(promoted.includes('Comments'), 'and choosing one promotes it onto the bar',
+        `Comments never appeared: ${JSON.stringify(promoted.slice(0, 14))}`)
     }
     for (const so of ['Relevance', 'Last updated', 'Last created']) {
       check(chips.includes(so), `the "${so}" sort chip is offered`, `no "${so}" chip`)
@@ -353,7 +451,7 @@ try {
   }
 
   // ═══════════════════════════════════════ Inbox ═══════════════════════
-  say('10. Inbox: triage buckets and the Primary/Other split')
+  say('10. Inbox: triage buckets, and Other being gone')
   await page.goto(`${B}/app/${WS}/inbox`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2600)
   for (const b of ['Inbox', 'Later', 'Cleared']) {
@@ -364,9 +462,20 @@ try {
     const txt = await page.getByRole('button', { name: new RegExp(`^${l}\\s*\\d+$`) }).innerText()
     return parseInt(txt.replace(/\D+/g, ''), 10)
   }
-  const [cA, cP, cO] = [await chipNum('All'), await chipNum('Primary'), await chipNum('Other')]
-  check(cP + cO === cA, `Primary + Other partitions All exactly (${cP} + ${cO} = ${cA})`,
-    `${cP} + ${cO} != ${cA}`)
+  /*
+   * §2.2 — Other is gone, on her instruction: "yeh mujhe NAHI CHAHIYE humari
+   * list mein, kyunke yahan bhi same 'All' wale hi hain."
+   *
+   * This used to assert that Primary + Other partitioned All, and then hung
+   * for thirty seconds waiting for a chip that had been deliberately removed.
+   * Out of CI, nobody saw it go stale — a suite asserting the opposite of a
+   * decision the client made and we shipped. Inverted, so it now guards the
+   * removal instead of the thing removed.
+   */
+  const otherChip = page.getByRole('button', { name: /^Other\s*\d*$/ })
+  check(await otherChip.count() === 0, 'the Other chip is gone (§2.2)', 'Other is back on the Inbox')
+  const [cA, cP] = [await chipNum('All'), await chipNum('Primary')]
+  check(cP <= cA, `Primary is a subset of All (${cP} <= ${cA})`, `${cP} > ${cA}`)
   await page.getByRole('button', { name: /^Primary/ }).click()
   await page.waitForTimeout(1200)
   check(/filter=primary/.test(page.url()), 'the filter is in the URL', `URL: ${page.url()}`)
@@ -503,10 +612,22 @@ try {
   }
 
   say('16. i18n: the app switches language without breaking')
+  /*
+   * §1.5 — the switcher used to be in the top bar, which she asked to have
+   * cleared: it now lives in Preferences → Language & Region, the way ClickUp
+   * keeps it. This section still looked for it beside the work schedule and
+   * hung thirty seconds on a control that had moved two releases ago.
+   *
+   * Switch it where it lives, then go and read the strings where they render.
+   */
+  const setLanguage = async (label) => {
+    await page.goto(`${B}/app/profile`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2000)
+    await page.getByLabel('Language').selectOption({ label })
+    await page.waitForTimeout(1500)
+  }
+  await setLanguage('Español')
   await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
-  const lang = page.getByLabel('Language')
-  await lang.selectOption({ label: 'Español' })
   await page.waitForTimeout(2000)
   const es = await page.locator('body').innerText()
   check(/Días laborables|Horario laboral/.test(es),
@@ -514,12 +635,13 @@ try {
     `Spanish body did not show translated schedule strings: ${es.slice(0, 160)}`)
   check(!/\{\{|\{name\}|\{count\}/.test(es), 'no untranslated placeholders leak through',
     'a raw {{placeholder}} rendered on screen')
-  await page.getByLabel('Language').selectOption({ label: 'العربية' })
+  await setLanguage('العربية')
+  await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2000)
   const ar = await page.locator('body').innerText()
   check(/أيام العمل|جدول العمل/.test(ar), 'and in Arabic', `Arabic body: ${ar.slice(0, 120)}`)
   check(!/\{\{|\{name\}/.test(ar), 'no placeholders in Arabic either', 'a raw placeholder rendered in Arabic')
-  await page.getByLabel('Language').selectOption({ label: 'English' })
+  await setLanguage('English')
   await page.waitForTimeout(1500)
 
   say('16b. Teardown — leave the workspace as we found it')
@@ -577,4 +699,5 @@ if (failed.length) {
 const p = results.filter(([s]) => s === 'PASS').length
 const sk = results.filter(([s]) => s === 'SKIP').length
 console.log(`\n\x1b[1m${p} passed, ${failed.length} failed, ${sk} skipped\x1b[0m`)
+await stack?.close?.()
 process.exit(failed.length ? 1 : 0)

@@ -497,7 +497,64 @@ passed / 9 failed — **the same 14/9 as the parent commit**, so the failures ar
 this machine's unseeded workspace and not the change. `video-regression` went
 from 0 to 26 passed, and the other two from 0 to running.
 
-Those nine, and `video-regression`'s four, are still unverified rather than
-fixed: they want a seeded workspace or a run against the deployed instance.
-None of the four is in CI, which is the honest reason nobody noticed they had
-stopped being runnable.
+Those nine, and `video-regression`'s four, were still unverified rather than
+fixed at that point — see below.
+
+---
+
+## The four are in CI now (27 Aug)
+
+Making them *run* was half the job; the other half was that none of them could
+pass against a database anybody else has. Each hardcoded some mixture of a dev
+server on `:5173`, one workspace's UUID, and a colleague literally called
+"Colleague". Pointed at a freshly seeded database they swept an empty shell —
+"Title vanished: []" is what a grid with no rows looks like from outside — and
+failed for reasons that had nothing to do with the UI.
+
+They now serve the built dist themselves through `startLocalStack` (the same
+helper the newer suites use, which also proxies the socket upgrade — without it
+the page cannot open a realtime connection and the console-health check fails
+on errors that say nothing about the product), discover a workspace, and create
+the little they need before reading it back. `test/e2e/lib/fixture.mjs` states
+that minimum rather than assuming it: tasks spread across the statuses the list
+actually has and across priorities, some assigned and some not, a DM, a task
+and a meeting the two people share, and — where a second account can be
+borrowed — one notification, because "Clear all" only renders when there is
+something to clear.
+
+`E2E_WS` / `E2E_LIST_PATH` / `BASE` still win, so a run against a real
+deployment points where it is pointed and creates nothing.
+
+### What being out of CI had cost
+
+Three of them had quietly gone stale against decisions we shipped, and were
+failing for the correct behaviour:
+
+| Asserted | Reality |
+|---|---|
+| The Inbox "Other" chip is present (twice) | §2.2 removed it on her instruction |
+| "Mark all read" | §2.5 made it "Clear all", with a retention clock |
+| The language switcher sits by the work schedule | §1.5 moved it to Preferences → Language & Region |
+| All seven type chips are on the palette bar | §2 [02:01] put the non-everyday ones behind the ⋯ |
+| Trash shows the words "Restore" or "empty" | Restore is inside the row's ⋯; the empty state reads "Nothing in the trash." |
+
+Each is now inverted or re-aimed at what the product actually does, so they
+guard those decisions instead of contradicting them. One was a plain bug in the
+suite: the fields-picker search seeded `SweepAlpha<tag>` and `SweepBeta<tag>`
+and then searched the last four characters — the one substring guaranteed not
+to discriminate.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| `ui-sweep` | died on import | **107 passed, 0 failed** |
+| `video-regression` | died on import | **71 passed, 0 failed** |
+| `a39-dm-tabs` | died on import | **19 passed, 0 failed** |
+| `a61-meeting-record` | died on import | **12 passed, 0 failed** |
+
+209 checks, run twice against a database built the way CI builds one — `push`
+from the TypeScript schema, then `seed.ts` — once pristine and once again on
+top of itself, because a suite that only passes on a clean database fails every
+re-run. The other nine harness suites were re-run alongside them and are
+unchanged.

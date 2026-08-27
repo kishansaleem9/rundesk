@@ -1,13 +1,45 @@
 /** A6.1/A6.2 — the meeting record: it must survive the page. */
+import path from 'node:path'
 import { resolveChromium } from './lib/playwright.mjs'
+import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm } from './lib/fixture.mjs'
+import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
-const WS = 'f47622b5-fc76-47d0-82d4-3b68c00bbaed'
-// Overridable like ui-sweep and video-regression: these two hardcoded a
-// dev port and the production verify user, so they could only ever run in
-// one place. Same defaults as before — nothing changes for an existing run.
-const B = (process.env.BASE ?? 'http://127.0.0.1:5173').replace(/\/$/, '')
+
+const argOf = (name, fallback) => {
+  const i = process.argv.indexOf(name)
+  return i === -1 ? fallback : process.argv[i + 1]
+}
+
 const EMAIL = process.env.E2E_EMAIL ?? 'verify@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Verify@123!'
+
+/*
+ * Serve the app, find a workspace, and make sure the DM this reads actually
+ * exists. All three were hardcoded — a dev server on 5173, one workspace's
+ * UUID, and a colleague called "Colleague" — which is why this could only ever
+ * run against one machine, and why it was never in CI.
+ */
+const REPO = path.resolve(import.meta.dirname, '../..')
+let DM_NAME = process.env.E2E_DM_NAME ?? 'Colleague'
+let stack = null
+let B = (process.env.BASE ?? '').replace(/\/$/, '')
+if (!B) {
+  stack = await startLocalStack({
+    dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')),
+    apiPort: Number(argOf('--api', process.env.E2E_API_PORT ?? 3011)),
+  })
+  B = stack.base
+}
+let WS = process.env.E2E_WS
+{
+  const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
+  const api = apiClient(`${B}/api/v1`, auth.accessToken)
+  WS = WS ?? (await pickWorkspace(api)).id
+  await ensureSweepFixture(api, WS)
+  const dm = await ensureDm(api, WS, auth.user?.id ?? auth.id)
+  if (dm?.name) DM_NAME = dm.name
+  console.log(`\x1b[2m  workspace ${WS}${dm ? `, DM with ${DM_NAME}` : ''}\x1b[0m`)
+}
 const r = []
 const ok = (m) => { r.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { r.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
@@ -15,7 +47,7 @@ const chk = (c, g, b) => (c ? ok(g) : bad(b))
 const TITLE = `A61 retro ${Date.now().toString(36)}`
 const NOTES = 'Ali will write the migration by Thursday. Sara reviews the export path on Friday.'
 
-const br = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] })
+const br = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] })
 const p = await (await br.newContext({ viewport: { width: 1600, height: 1100 } })).newPage()
 try {
   await p.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
@@ -43,7 +75,7 @@ try {
   await p.getByPlaceholder('Weekly sync').fill(TITLE)
   await p.locator('input[type=datetime-local]').fill('2026-08-04T09:30')
   await p.getByPlaceholder('https://…').fill('https://example.com/rec/a61.mp4')
-  const chip = p.locator('button[aria-pressed]').filter({ hasText: /Colleague/ }).first()
+  const chip = p.locator('button[aria-pressed]').filter({ hasText: new RegExp(DM_NAME) }).first()
   chk(await chip.count() > 0, 'workspace members are offered as attendees', 'no attendee chips')
   await chip.click()
   chk(await chip.getAttribute('aria-pressed') === 'true', 'an attendee can be picked', 'the chip did not toggle on')
@@ -72,7 +104,7 @@ try {
     'reopening it brings the notes back', 'the notes did not come back')
   const reopened = await p.locator('body').innerText()
   chk(/Open recording/.test(reopened), 'the recording link comes back too', 'the recording link is gone')
-  const chip2 = p.locator('button[aria-pressed]').filter({ hasText: /Colleague/ }).first()
+  const chip2 = p.locator('button[aria-pressed]').filter({ hasText: new RegExp(DM_NAME) }).first()
   chk(await chip2.getAttribute('aria-pressed') === 'true', 'the attendee list comes back',
     'the attendee was not remembered')
 
@@ -88,4 +120,5 @@ try {
 } finally { await br.close() }
 const f = r.filter((x) => !x).length
 console.log(`\n${r.length - f} passed, ${f} failed`)
+await stack?.close?.()
 process.exit(f ? 1 : 0)
