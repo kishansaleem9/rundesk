@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn } from '@rundesk/ui'
-import { CheckSquare, ClipboardList, Folder, FolderOpen, FileText, Layers, Upload, X } from 'lucide-react'
+import { CheckSquare, ClipboardList, Folder, FolderOpen, FileText, Layers, Upload, X, Clock, PenTool, LayoutDashboard } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
@@ -12,18 +12,38 @@ type Project = { id: string; name: string }
 type List = { id: string; name: string }
 type TaskType = { id: string; name: string; isDefault?: boolean }
 
-type Mode = 'task' | 'list' | 'folder' | 'project' | 'space' | 'doc'
+type Mode =
+  | 'task'
+  | 'list'
+  | 'folder'
+  | 'project'
+  | 'space'
+  | 'doc'
+  | 'reminder'
+  | 'whiteboard'
+  | 'dashboard'
 
-// The `value` is the persisted Mode identifier; `labelKey` references an i18n
-// catalog entry resolved at render time. A1.9 adds List and Folder: both were
-// creatable only by first navigating to the page that owns them.
+/*
+ * The `value` is the persisted Mode identifier; `labelKey` references an i18n
+ * catalog entry resolved at render time. A1.9 adds List and Folder: both were
+ * creatable only by first navigating to the page that owns them.
+ *
+ * §G15 [21:36] — "jab task banate hain to pehle task, uske baad woh DOCUMENT ka
+ * poochta hai, phir REMINDER ka, phir WHITEBOARD ka, phir DASHBOARD ka." The
+ * last three are the order she named them in, and all three already existed as
+ * whole features — reachable only by first navigating to the page that owns
+ * them, which is the same complaint List and Folder answered.
+ */
 const MODE_TABS = [
   { value: 'task', icon: CheckSquare, labelKey: 'quickCreate.tab.task' },
+  { value: 'doc', icon: FileText, labelKey: 'quickCreate.tab.doc' },
+  { value: 'reminder', icon: Clock, labelKey: 'quickCreate.tab.reminder' },
+  { value: 'whiteboard', icon: PenTool, labelKey: 'quickCreate.tab.whiteboard' },
+  { value: 'dashboard', icon: LayoutDashboard, labelKey: 'quickCreate.tab.dashboard' },
   { value: 'list', icon: ClipboardList, labelKey: 'quickCreate.tab.list' },
   { value: 'folder', icon: Folder, labelKey: 'quickCreate.tab.folder' },
   { value: 'project', icon: FolderOpen, labelKey: 'quickCreate.tab.project' },
   { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space' },
-  { value: 'doc', icon: FileText, labelKey: 'quickCreate.tab.doc' },
 ] as const
 
 export function QuickCreateModal({ onClose }: { onClose: () => void }) {
@@ -60,6 +80,9 @@ export function QuickCreateModal({ onClose }: { onClose: () => void }) {
         {mode === 'project' && <ProjectForm workspaceId={workspaceId} onClose={onClose} />}
         {mode === 'space' && <SpaceForm workspaceId={workspaceId} onClose={onClose} />}
         {mode === 'doc' && <DocForm workspaceId={workspaceId} onClose={onClose} />}
+        {mode === 'reminder' && <ReminderForm workspaceId={workspaceId} onClose={onClose} />}
+        {mode === 'whiteboard' && <WhiteboardForm workspaceId={workspaceId} onClose={onClose} />}
+        {mode === 'dashboard' && <DashboardForm workspaceId={workspaceId} onClose={onClose} />}
         <Footer workspaceId={workspaceId} onClose={onClose} />
       </Card>
     </Backdrop>
@@ -121,6 +144,9 @@ function ModeTab({
   const active = mode === value
   return (
     <button
+      type="button"
+      data-testid={`create-tab-${value}`}
+      aria-pressed={active}
       onClick={() => setMode(value)}
       className={cn(
         'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
@@ -420,6 +446,167 @@ function DocForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =>
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" disabled={create.isPending}>{t('quickCreate.createDoc')}</Button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * §G15 [21:36] — "phir REMINDER ka".
+ *
+ * A reminder made here is about nothing in particular, which is the normal
+ * case for one: you are creating it, not annotating something that already
+ * exists. That was impossible until `reminders.task_id` became nullable — the
+ * old code path had to invent a task to hold the text, and refused outright in
+ * a workspace with no list.
+ */
+function ReminderForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [note, setNote] = useState('')
+  // An hour out, in the reader's own clock: `datetime-local` takes wall time
+  // with no zone, so `toISOString()` here would silently show UTC.
+  const [when, setWhen] = useState(() => {
+    const soon = new Date(Date.now() + 60 * 60 * 1000)
+    return new Date(soon.getTime() - soon.getTimezoneOffset() * 60 * 1000).toISOString().slice(0, 16)
+  })
+
+  const create = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/reminders`, {
+        method: 'POST',
+        body: { remindAt: new Date(when).toISOString(), note },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reminders', workspaceId] })
+      onClose()
+    },
+  })
+
+  return (
+    <form
+      className="px-5 py-4 space-y-3"
+      data-testid="quick-create-reminder"
+      onSubmit={(e) => {
+        e.preventDefault()
+        create.mutate()
+      }}
+    >
+      <Input
+        autoFocus
+        data-testid="reminder-note"
+        placeholder={t('quickCreate.reminderNotePlaceholder')}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <label className="block text-[12px] text-muted-foreground">
+        {t('quickCreate.reminderWhen')}
+        <input
+          type="datetime-local"
+          data-testid="reminder-when"
+          value={when}
+          onChange={(e) => setWhen(e.target.value)}
+          className="mt-0.5 h-9 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
+        />
+      </label>
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="submit" size="sm" disabled={!note.trim() || !when || create.isPending}>
+          {t('quickCreate.createReminder')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+/** §G15 [21:36] — "phir WHITEBOARD ka". A canvas of type `whiteboard`. */
+function WhiteboardForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [title, setTitle] = useState('')
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>(`/workspaces/${workspaceId}/canvases`, {
+        method: 'POST',
+        body: { type: 'whiteboard', title: title.trim() || t('quickCreate.untitled'), data: { items: [] } },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workspace-canvases', workspaceId, 'whiteboard'] })
+      onClose()
+      navigate({ to: '/app/$workspaceId/whiteboards', params: { workspaceId } })
+    },
+  })
+
+  return (
+    <form
+      className="px-5 py-4 space-y-3"
+      data-testid="quick-create-whiteboard"
+      onSubmit={(e) => {
+        e.preventDefault()
+        create.mutate()
+      }}
+    >
+      <Input
+        autoFocus
+        data-testid="whiteboard-title"
+        placeholder={t('quickCreate.whiteboardTitlePlaceholder')}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="submit" size="sm" disabled={create.isPending}>{t('quickCreate.createWhiteboard')}</Button>
+      </div>
+    </form>
+  )
+}
+
+/**
+ * §G15 [21:36] — "phir DASHBOARD ka".
+ *
+ * An empty layout, deliberately. Guessing at cards somebody has not asked for
+ * means their first act on a new dashboard is deleting things.
+ */
+function DashboardForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [name, setName] = useState('')
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>(`/dashboards`, {
+        method: 'POST',
+        body: { workspaceId, name: name.trim() || t('quickCreate.untitled'), layout: [] },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] })
+      onClose()
+      navigate({ to: '/app/$workspaceId/dashboard', params: { workspaceId } })
+    },
+  })
+
+  return (
+    <form
+      className="px-5 py-4 space-y-3"
+      data-testid="quick-create-dashboard"
+      onSubmit={(e) => {
+        e.preventDefault()
+        create.mutate()
+      }}
+    >
+      <Input
+        autoFocus
+        data-testid="dashboard-name"
+        placeholder={t('quickCreate.dashboardNamePlaceholder')}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="submit" size="sm" disabled={create.isPending}>{t('quickCreate.createDashboard')}</Button>
       </div>
     </form>
   )

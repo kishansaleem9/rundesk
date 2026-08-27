@@ -48,6 +48,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
+import { TaskTags } from './task-tags'
 import { SharePanel } from './share-panel'
 import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
@@ -867,16 +868,14 @@ export function TaskDetailSheet({
                 >
                   {PRIORITY_LABEL_KEYS[detailQuery.data.priority] ? t(PRIORITY_LABEL_KEYS[detailQuery.data.priority]) : detailQuery.data.priority}
                 </Badge>
-                {detailQuery.data.labels?.map((l) => (
-                  <Badge
-                    key={l.id}
-                    variant="outline"
-                    className="border-transparent text-white"
-                    style={{ backgroundColor: l.color }}
-                  >
-                    {l.name}
-                  </Badge>
-                ))}
+                {/* §G15 [23:16] — the badges were here already; the way to put
+                    one on the task was not. Everything behind it shipped long
+                    ago and nothing in the web app ever called it. */}
+                <TaskTags
+                  taskId={detailQuery.data.id}
+                  workspaceId={workspaceId}
+                  labels={detailQuery.data.labels ?? []}
+                />
               </div>
             </SheetHeader>
 
@@ -1114,6 +1113,10 @@ function OverviewPanel({
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const [editingDescription, setEditingDescription] = useState(false)
+  // §G15 [22:28] — the slash menu on the description, and what has been typed
+  // after the slash to narrow it.
+  const [slashOpen, setSlashOpen] = useState(false)
+  const [slashFilter, setSlashFilter] = useState('')
   const [descriptionDraft, setDescriptionDraft] = useState('')
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
   // Streamed AI task summary (Plan §7.5): null = closed, '' = streaming started.
@@ -1168,6 +1171,68 @@ function OverviewPanel({
     if (kind === 'ol') return linePrefix('1. ')
     if (kind === 'quote') return linePrefix('> ')
   }
+
+  /**
+   * §G15 [22:28] — "main SLASH click karoongi, phir table bana loon, banners
+   * rakhoon … jis tarah document ko aap design karte hain, exactly wohi same
+   * feature hai."
+   *
+   * The description stores markdown, and Docs stores tiptap HTML. Rather than
+   * migrate every existing task description into a different editor to get one
+   * menu, the menu writes markdown — and the renderer learned tables and
+   * callouts to receive it. Same gesture, same blocks, no rewrite of data
+   * people already have.
+   */
+  const DESCRIPTION_BLOCKS = [
+    { id: 'h2', labelKey: 'taskDetail.slash.heading', md: '## ' },
+    { id: 'bullet', labelKey: 'taskDetail.slash.bulletList', md: '- ' },
+    { id: 'numbered', labelKey: 'taskDetail.slash.numberedList', md: '1. ' },
+    { id: 'todo', labelKey: 'taskDetail.slash.todoList', md: '- [ ] ' },
+    { id: 'quote', labelKey: 'taskDetail.slash.quote', md: '> ' },
+    { id: 'code', labelKey: 'taskDetail.slash.code', md: '```\n\n```\n' },
+    { id: 'table', labelKey: 'taskDetail.slash.table', md: '| Column | Column |\n| --- | --- |\n|  |  |\n' },
+    { id: 'divider', labelKey: 'taskDetail.slash.divider', md: '---\n' },
+    { id: 'banner', labelKey: 'taskDetail.slash.banner', md: ':::note\n\n:::\n' },
+    { id: 'warning', labelKey: 'taskDetail.slash.warning', md: ':::warn\n\n:::\n' },
+  ] as const
+
+  /**
+   * Replace the `/query` the caret sits in with a block.
+   *
+   * The slash and everything typed after it is what the person is replacing —
+   * leaving it behind would put `/tab` above their new table.
+   */
+  const insertDescriptionBlock = (md: string) => {
+    const el = descriptionRef.current
+    const text = descriptionDraft
+    const caret = el?.selectionStart ?? text.length
+    const lineStart = text.lastIndexOf('\n', caret - 1) + 1
+    const before = text.slice(lineStart, caret)
+    const slashAt = before.lastIndexOf('/')
+    const from = slashAt === -1 ? caret : lineStart + slashAt
+
+    // Blocks need their own line. Starting one mid-sentence produces markdown
+    // that renders as the sentence with some punctuation in it.
+    const needsBreak = from > 0 && text[from - 1] !== '\n'
+    const insert = (needsBreak ? '\n' : '') + md
+    const next = text.slice(0, from) + insert + text.slice(caret)
+    setDescriptionDraft(next)
+    setSlashOpen(false)
+    setSlashFilter('')
+
+    requestAnimationFrame(() => {
+      el?.focus()
+      // Land inside the block, not after it: a fenced code block and a banner
+      // both want the caret on the empty line in the middle.
+      const firstBreak = insert.indexOf('\n\n')
+      const caretAt = firstBreak === -1 ? from + insert.length : from + firstBreak + 1
+      el?.setSelectionRange(caretAt, caretAt)
+    })
+  }
+
+  const slashChoices = DESCRIPTION_BLOCKS.filter((b) =>
+    t(b.labelKey as TranslationKey).toLowerCase().includes(slashFilter.toLowerCase()),
+  )
 
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
@@ -1446,24 +1511,94 @@ function OverviewPanel({
                 </button>
               ))}
             </div>
-            <MentionTextarea
-              autoFocus
-              rows={5}
-              value={descriptionDraft}
-              onChange={setDescriptionDraft}
-              members={membersQuery.data ?? []}
-              textareaRef={descriptionRef}
-              onBlur={commitDescription}
-              disabled={updateDescription.isPending}
-              placeholder={t('taskDetail.descriptionPlaceholder')}
-              className="text-sm leading-relaxed font-mono"
-            />
-            <p className="mt-1 text-[11px] text-muted-foreground">{t('taskDetail.markdownHint')}</p>
+            <div className="relative">
+              <MentionTextarea
+                autoFocus
+                rows={5}
+                value={descriptionDraft}
+                onChange={(next) => {
+                  setDescriptionDraft(next)
+                  /*
+                   * §G15 [22:28] — "/" opens the block menu.
+                   *
+                   * Only at the start of a line or after a space, so a URL, a
+                   * date, or "and/or" does not open a menu in the middle of a
+                   * sentence. Read from the value rather than the keystroke
+                   * because a paste is not a keypress and a menu that opens on
+                   * pasted text is a menu that opens at random.
+                   */
+                  const el = descriptionRef.current
+                  const caret = el?.selectionStart ?? next.length
+                  const lineStart = next.lastIndexOf('\n', caret - 1) + 1
+                  const before = next.slice(lineStart, caret)
+                  const match = /(?:^|\s)\/([a-z]*)$/i.exec(before)
+                  if (match) {
+                    setSlashOpen(true)
+                    setSlashFilter(match[1])
+                  } else {
+                    setSlashOpen(false)
+                    setSlashFilter('')
+                  }
+                }}
+                members={membersQuery.data ?? []}
+                textareaRef={descriptionRef}
+                onBlur={() => {
+                  // Clicking a menu item blurs the textarea before the click
+                  // lands. Committing here would save the draft and close the
+                  // editor out from under the block being inserted.
+                  if (slashOpen) return
+                  commitDescription()
+                }}
+                onKeyDown={(e) => {
+                  if (!slashOpen) return
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setSlashOpen(false)
+                    setSlashFilter('')
+                    return
+                  }
+                  if (e.key === 'Enter' && slashChoices.length > 0) {
+                    e.preventDefault()
+                    insertDescriptionBlock(slashChoices[0].md)
+                  }
+                }}
+                disabled={updateDescription.isPending}
+                placeholder={t('taskDetail.descriptionPlaceholder')}
+                className="text-sm leading-relaxed font-mono"
+              />
+              {slashOpen && slashChoices.length > 0 && (
+                <div
+                  data-testid="description-slash-menu"
+                  className="absolute left-0 top-full z-30 mt-1 w-56 rounded-lg border border-border bg-card p-1 shadow-lg"
+                >
+                  <div className="px-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {t('taskDetail.slash.title')}
+                  </div>
+                  <div className="max-h-56 overflow-y-auto">
+                    {slashChoices.map((block) => (
+                      <button
+                        key={block.id}
+                        type="button"
+                        data-testid={`description-slash-${block.id}`}
+                        // The click has to land before the blur commits.
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => insertDescriptionBlock(block.md)}
+                        className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                      >
+                        {t(block.labelKey as TranslationKey)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">{t('taskDetail.slashHint')}</p>
           </div>
         ) : detail.description?.trim() ? (
           <div
             role="button"
             tabIndex={0}
+            data-testid="description-open"
             onClick={() => {
               setDescriptionDraft(detail.description ?? '')
               setEditingDescription(true)
@@ -1482,6 +1617,7 @@ function OverviewPanel({
         ) : (
           <button
             type="button"
+            data-testid="description-open"
             onClick={() => {
               setDescriptionDraft('')
               setEditingDescription(true)

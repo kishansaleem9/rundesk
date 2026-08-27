@@ -501,7 +501,13 @@ function QuickCreateButton() {
   const { t } = useTranslation()
   return (
     <>
-      <Button variant="gradient" size="sm" className="h-9 gap-1.5" onClick={() => setOpen(true)}>
+      <Button
+        variant="gradient"
+        size="sm"
+        data-testid="quick-create-open"
+        className="h-9 gap-1.5"
+        onClick={() => setOpen(true)}
+      >
         <Plus className="h-4 w-4" />
         <span>{t('topbar.new')}</span>
       </Button>

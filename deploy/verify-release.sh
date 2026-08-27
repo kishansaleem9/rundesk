@@ -518,6 +518,76 @@ else
   bad "could not create a channel for the assign check -> $(printf '%s' "$CHN" | head -c 140)"
 fi
 
+# ─────────────── §G15 [23:16] a tag that can reach a task ────────────────
+# The endpoints below all existed before this release and all returned 200.
+# What did not exist was any caller: no component in the web app touched
+# `/labels/` outside Workspace Settings, so tags were write-only and could
+# never reach a task. These check the two things that are new — an idempotent
+# create, because "type and press Enter" hits the same name constantly, and the
+# round trip onto a task.
+say "A tag can be created and put on a task"
+TAG_NAME="release-check-$$"
+TAG=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/labels" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d "{\"name\":\"$TAG_NAME\",\"color\":\"#7c3aed\"}" 2>/dev/null || true)
+TAGID=$(printf '%s' "$TAG" | jget id)
+if [ -n "$TAGID" ]; then
+  ok "a tag can be created"
+  # Same name again. Before this release the unique index made it a 500, which
+  # is what somebody tagging a second task with a tag they already made gets.
+  AGAIN_TAG=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/labels" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d "{\"name\":\"$TAG_NAME\",\"color\":\"#2563eb\"}" 2>/dev/null || true)
+  [ "$(printf '%s' "$AGAIN_TAG" | jget id)" = "$TAGID" ] \
+    && ok "and creating it again hands back the same tag" \
+    || bad "second create -> $(printf '%s' "$AGAIN_TAG" | head -c 140)"
+  UPPER=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/labels" -H "$AUTH" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$(printf '%s' "$TAG_NAME" | tr '[:lower:]' '[:upper:]')\",\"color\":\"#059669\"}" 2>/dev/null || true)
+  [ "$(printf '%s' "$UPPER" | jget id)" = "$TAGID" ] \
+    && ok "ignoring case, so the list is not a spelling test" \
+    || bad "upper-case create made a second tag -> $(printf '%s' "$UPPER" | head -c 140)"
+  if [ -n "$TID" ]; then
+    ATT=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/tasks/$TID/labels/$TAGID" -H "$AUTH" 2>/dev/null || true)
+    [ "$ATT" = "201" ] || [ "$ATT" = "200" ] \
+      && ok "and it can be put on a task" \
+      || bad "attach -> $ATT"
+    curl -fsS --max-time 20 "$API/tasks/$TID" -H "$AUTH" 2>/dev/null | grep -q "$TAGID" \
+      && ok "and the task carries it back" \
+      || bad "the task does not report the tag it was given"
+    curl -fsS --max-time 20 -X DELETE "$API/tasks/$TID/labels/$TAGID" -H "$AUTH" >/dev/null 2>&1 || true
+  else
+    bad "no task available to tag"
+  fi
+  curl -fsS --max-time 20 -X DELETE "$API/labels/$TAGID" -H "$AUTH" >/dev/null 2>&1 || true
+else
+  bad "could not create a tag -> $(printf '%s' "$TAG" | head -c 140)"
+fi
+
+# ─────────── §G15 [21:36] the create modal's three new subjects ───────────
+# A reminder with no task is the one that could not exist before 0115.
+say "Reminder, whiteboard and dashboard can be created"
+R_WHEN=$(date -u -d '+2 hours' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+2H +%Y-%m-%dT%H:%M:%SZ)
+SR=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/reminders" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d "{\"remindAt\":\"$R_WHEN\",\"note\":\"deploy check\"}" 2>/dev/null || true)
+printf '%s' "$SR" | jget id | grep -q . \
+  && ok "a reminder needs no task to exist" \
+  || bad "standalone reminder -> $(printf '%s' "$SR" | head -c 140)"
+WB=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/canvases" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"whiteboard","title":"deploy check board","data":{"items":[]}}' 2>/dev/null || true)
+WBID=$(printf '%s' "$WB" | jget id)
+[ -n "$WBID" ] \
+  && ok "a whiteboard can be created from anywhere" \
+  || bad "whiteboard -> $(printf '%s' "$WB" | head -c 140)"
+DB=$(curl -fsS --max-time 20 -X POST "$API/dashboards" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d "{\"workspaceId\":\"$WS\",\"name\":\"deploy check dashboard\",\"layout\":[]}" 2>/dev/null || true)
+DBID=$(printf '%s' "$DB" | jget id)
+[ -n "$DBID" ] \
+  && ok "and so can a dashboard" \
+  || bad "dashboard -> $(printf '%s' "$DB" | head -c 140)"
+[ -n "$WBID" ] && curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/canvases/$WBID" -H "$AUTH" >/dev/null 2>&1
+[ -n "$DBID" ] && curl -fsS --max-time 20 -X DELETE "$API/dashboards/$DBID" -H "$AUTH" >/dev/null 2>&1
+
 say "A meeting is a record, not a link"
 MT=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/meetings" -H "$AUTH" \
   -H 'Content-Type: application/json' \

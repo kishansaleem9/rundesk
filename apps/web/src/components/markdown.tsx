@@ -111,8 +111,37 @@ export function hasBlockMarkdown(text: string): boolean {
     if (/^[-*]\s+/.test(line)) return true
     if (/^\d+\.\s+/.test(line)) return true
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) return true
+    // §G15 [22:28] — a table and a callout are blocks too. Without these the
+    // cheap inline path renders a table as a row of literal pipes.
+    if (/^\|.*\|$/.test(line)) return true
+    if (/^:::/.test(line)) return true
   }
   return false
+}
+
+/** A GFM delimiter row: `| --- | :--- | ---: |`. Exported for its test. */
+export const TABLE_DIVIDER = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/
+
+/**
+ * True when these two lines begin a table.
+ *
+ * A pipe alone is not enough. "ship it | or don't" is a sentence, and turning
+ * it into a one-column table is a worse failure than leaving it as text — so a
+ * table needs a header row AND a delimiter row under it, which is also what
+ * GFM requires.
+ */
+export function startsTable(line: string, next: string | undefined): boolean {
+  return /\|/.test(line) && next !== undefined && TABLE_DIVIDER.test(next.trim())
+}
+
+/** Split one `| a | b |` row into its cells, tolerating missing outer pipes. */
+export function tableCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim())
 }
 
 /**
@@ -149,6 +178,97 @@ export function renderMarkdownBlocks(source: string, inline: InlineRenderer = pa
     // Blank line
     if (line.trim() === '') {
       i++
+      continue
+    }
+
+    /*
+     * §G15 [22:28] — a callout, which is what she calls a BANNER.
+     *
+     * `:::note` … `:::`, the fenced-directive spelling used by MDX and most
+     * markdown toolchains, so a description written here still reads as
+     * intended anywhere it is pasted. Four tones; anything else is a note,
+     * because an unrecognised word should not swallow the block.
+     */
+    const callout = /^:::\s*(note|info|tip|warn|warning|danger|error)?\s*$/i.exec(line.trim())
+    if (callout) {
+      const buf: string[] = []
+      i++
+      while (i < lines.length && lines[i].trim() !== ':::') {
+        buf.push(lines[i])
+        i++
+      }
+      i++ // closing fence
+      const tone = (callout[1] ?? 'note').toLowerCase()
+      const styles =
+        tone === 'warn' || tone === 'warning'
+          ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+          : tone === 'danger' || tone === 'error'
+            ? 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300'
+            : tone === 'tip'
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+              : 'border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+      const calloutKey = key++
+      blocks.push(
+        <div key={calloutKey} className={`my-2 rounded-md border px-3 py-2 text-sm ${styles}`}>
+          {/* Rendered line by line so a multi-line banner keeps its breaks;
+              joining with a space turned every banner into one paragraph. */}
+          {buf.map((b, idx) => (
+            <div key={idx}>{inline(b, `cal${calloutKey}-${idx}`)}</div>
+          ))}
+        </div>,
+      )
+      continue
+    }
+
+    /*
+     * §G15 [22:28] — "phir TABLE bana loon".
+     *
+     * GFM pipe tables. The header row is only a table if the NEXT line is a
+     * delimiter — otherwise a sentence containing a pipe would become a
+     * one-column table, which is a worse failure than leaving it as text.
+     */
+    if (startsTable(line, lines[i + 1])) {
+      const header = tableCells(line)
+      i += 2
+      const rows: string[][] = []
+      while (i < lines.length && lines[i].trim() !== '' && /\|/.test(lines[i])) {
+        rows.push(tableCells(lines[i]))
+        i++
+      }
+      const tableKey = key++
+      blocks.push(
+        // Scrolls inside itself: a wide table must not make the whole sheet
+        // scroll sideways.
+        <div key={tableKey} className="my-2 overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                {header.map((h, idx) => (
+                  <th
+                    key={idx}
+                    className="border border-border bg-muted/50 px-2 py-1 text-left font-medium"
+                  >
+                    {inline(h, `th${tableKey}-${idx}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rIdx) => (
+                <tr key={rIdx}>
+                  {/* Padded to the header's width: a short row otherwise
+                      collapses the grid and the columns stop lining up. */}
+                  {header.map((_, cIdx) => (
+                    <td key={cIdx} className="border border-border px-2 py-1 align-top">
+                      {inline(row[cIdx] ?? '', `td${tableKey}-${rIdx}-${cIdx}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
       continue
     }
 

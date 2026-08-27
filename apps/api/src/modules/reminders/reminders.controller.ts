@@ -25,13 +25,24 @@ export class RemindersController {
     return this.reminders.listForTask(taskId, user.id)
   }
 
+  /**
+   * A reminder about a task, or about nothing in particular.
+   *
+   * §G15 [21:36] — "phir REMINDER ka" is one of the things the create modal is
+   * supposed to offer, and there is nothing to attach a reminder to at that
+   * moment: you are creating it, not annotating something. Since 0115 the
+   * subject is optional, so a bare `{ remindAt, note }` is a whole reminder.
+   */
   @Post('reminders')
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { taskId: string; remindAt: string; note?: string },
+    @Body() body: { taskId?: string; remindAt: string; note?: string },
   ) {
-    return this.reminders.create(workspaceId, user.id, body.taskId, body.remindAt, body.note)
+    if (body.taskId) {
+      return this.reminders.create(workspaceId, user.id, body.taskId, body.remindAt, body.note)
+    }
+    return this.reminders.createStandalone(workspaceId, user.id, body.remindAt, body.note ?? '')
   }
 
   @Delete('reminders/:id')

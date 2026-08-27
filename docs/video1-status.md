@@ -14,10 +14,11 @@ than none, because it gets quoted.
 - **Frames** — `video1-frame-audit-raw.json`, 15 groups, **157 discrete gaps**
 - **Verified on** `https://rundesk.theaura.agency` — 295 checks across
   `verify-ui.mjs` (186), `verify-release.sh` (72), `syncup-live.mjs` (33),
-  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 87
-  and `chat-message-actions.mjs` (25) is new; both are pending the next deploy.
+  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 95 and
+  two suites are new — `chat-message-actions.mjs` (25) and `task-depth.mjs`
+  (23); all three are pending the next deploy.
 
-**Result: 150 of the 157 are closed. 7 remain open, and they cluster.**
+**Result: 153 of the 157 are closed. 4 remain open, and they cluster.**
 
 *Kept current as work lands — see the shipped list at the bottom for what moved
 and when.*
@@ -50,27 +51,52 @@ which is the task half. Missing: the panel itself, a person's **local time**
 rendered as a clock), **Priorities**, the **comments/activity feed**, a person's
 **calendar**, and the **org chart** — which exists nowhere in the codebase.
 
-### 2. Task creation is much shallower than the flow she walked — `21:36–23:31`
+### 2. Task creation — **closed 27 Aug**
 
 > "jab task banate hain to pehle task ke baad woh DOCUMENT ka poochta hai, phir
 > REMINDER ka, phir WHITEBOARD ka, phir DASHBOARD ka"
 
-Our quick-create modal offers **task / doc / list**. Reminder, Whiteboard and
-Dashboard are not there (#149).
+**#149** — the quick-create modal now opens on Task / Doc / **Reminder /
+Whiteboard / Dashboard**, in the order she named them, then List / Folder /
+Project / Space. All three were whole features reachable only by first
+navigating to the page that owns them. The Reminder tab is only possible
+because 0115 made a reminder's subject optional: you are creating one, not
+annotating something that already exists.
 
 > "main SLASH click karoongi, phir table bana loon, banners rakhoon … jis tarah
 > document ko aap design karte hain, exactly wohi same feature hai"
 
-The slash-command editor exists in **docs** and **chat** — not in the task
-description (#148). `task-detail-sheet.tsx` has no tiptap editor at all.
+**#148** — `/` in the task description opens a block menu: heading, three kinds
+of list, quote, code, **table**, divider, **banner** and warning banner.
 
-Everything else in that stretch is built: space → list, private at creation,
-view choice, assign, **start/due with times**, priority, estimate, dependencies
-(own tab), subtasks, checklist.
+The description stores markdown and Docs stores tiptap HTML. Rather than
+migrate every existing description into a different editor to get one menu, the
+menu writes markdown — and the renderer learned GFM tables and `:::note`
+callouts to receive it. A table is only a table when a delimiter row follows the
+header, so "ship it | or don't" stays a sentence.
 
-One naming mismatch worth a decision (#147): she says **TAGS**; we ship
-**labels**. Same behaviour — type, press enter, it exists. Different word in
-every screen and string.
+**#147 was not a naming mismatch** — see the correction below. Tags could not
+reach a task at all. There is now a tag box on the task sheet: type to filter,
+press Enter to create what does not exist, click a badge's × to take it off.
+The create endpoint became idempotent and case-insensitive, because
+type-and-Enter hits the same name constantly and the unique index made the
+second time a 500.
+
+Everything else in that stretch was already built: space → list, private at
+creation, view choice, assign, **start/due with times**, priority, estimate,
+dependencies (own tab), subtasks, checklist.
+
+> **Correction, 27 Aug.** An earlier version of this section called #147 a
+> naming mismatch — "she says TAGS, we ship labels, same behaviour". That was
+> wrong, and wrong in the direction that matters: the behaviour does not exist.
+> The backend is complete (`labels`, `task_label_assignments`, `POST`/`DELETE
+> /tasks/:taskId/labels/:labelId`) and `task-detail-sheet.tsx:870` renders the
+> badges — but **no component in the web app ever calls those endpoints**.
+> Grep `/labels/` across `apps/web/src` and the only hits are the rename and
+> delete in Workspace Settings. Tags are write-only from a settings screen and
+> can never reach a task. The frame audit had this right and flagged it
+> `explicitly_flagged_missing`; I read the schema, saw a working feature, and
+> did not check who called it.
 
 ### 3. The "double navigation" complaint is only half addressed — `10:13`
 
@@ -181,6 +207,9 @@ rather than the diff:
 | 27 Aug | #99 reminder on a message | `reminders.task_id` became nullable with a `message_id` beside it; `/remind` stopped inventing tasks |
 | 27 Aug | #116 per-thread mute/follow | `chat_thread_follows`; beats the channel setting both ways, `@mention` still gets through |
 | 27 Aug | #107 empty-channel cards | Add people / Track tasks / Add a doc / Start a SyncUp — Slack import deliberately omitted |
+| 27 Aug | #147 tags on a task | the endpoints shipped long ago and nothing ever called them; now a type-and-Enter box, and an idempotent create |
+| 27 Aug | #148 slash editor | `/` in the description: table, banner, code, lists — writing markdown, with the renderer taught tables and callouts |
+| 27 Aug | #149 create-modal tabs | Reminder / Whiteboard / Dashboard, in the order she named them |
 
 ---
 
