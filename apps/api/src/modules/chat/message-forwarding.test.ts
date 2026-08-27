@@ -112,8 +112,24 @@ describe('§12 a saved message opens where its actions are', () => {
     // The claim the row is making on chat's behalf. If these ever move, the
     // affordance above becomes a promise the destination does not keep.
     assert.match(chat, /setEditingBody\(m\.body\)/, 'no edit on a chat message')
-    assert.match(chat, /createTaskFromMessage/, 'no assign on a chat message')
-    assert.match(chat, /setThreadParentId\(parentId\)/, 'no thread to open')
+    // §G11 [15:36] — assign is now its own thing, beside create-task rather
+    // than standing in for it. Either satisfies the row's promise; requiring
+    // only the old one would have failed the day the real assignment landed.
+    assert.match(chat, /assignMessageMutation|createTaskFromMessage/, 'no assign on a chat message')
+    /*
+     * The thread, asserted through the saved panel's own handler.
+     *
+     * This used to look for `setThreadParentId(parentId)`, a string inside a
+     * helper that no longer exists — and it was the wrong anchor even while it
+     * passed: a bare /setThreadParentId/ also matches the close handler
+     * `setThreadParentId(null)`, which would have kept this green while the
+     * feature was gone. What the Later row actually promises is that opening a
+     * saved message lands you in its thread, wherever that thread lives, so
+     * that is what this reads: the panel's handler, switching channel first.
+     */
+    const savedOpen = /onOpenThread=\{\(id, channelId\) => \{([\s\S]{0,400}?)\}\}/.exec(chat)?.[1] ?? ''
+    assert.match(savedOpen, /setSelectedId\(channelId\)/, 'a saved message in another channel does not switch to it')
+    assert.match(savedOpen, /setThreadParentId\(id\)/, 'no thread to open')
   })
 })
 

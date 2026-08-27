@@ -199,6 +199,34 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/syncup-live.mjs --api 3011 --dist apps/web/dist
 
+      # The suites written for the video1 gap work. They live here rather than
+      # in browser-suites because each one drives the real API against real
+      # Postgres — a stubbed run would decide its own answers, and every one of
+      # these gaps was a case where the parts existed and nothing joined them
+      # up, which is exactly what a stub cannot see.
+      #
+      # `!cancelled()` on each, so one failure reports its own name instead of
+      # hiding the four behind it.
+      - name: Chat message actions
+        if: '!cancelled()'
+        run: node test/e2e/chat-message-actions.mjs --api 3011 --dist apps/web/dist
+
+      - name: Task creation depth
+        if: '!cancelled()'
+        run: node test/e2e/task-depth.mjs --api 3011 --dist apps/web/dist
+
+      - name: The second-level panel collapses
+        if: '!cancelled()'
+        run: node test/e2e/panel-collapse.mjs --api 3011 --dist apps/web/dist
+
+      - name: Status, timed mute, contrast, booking a call
+        if: '!cancelled()'
+        run: node test/e2e/settings-depth.mjs --api 3011 --dist apps/web/dist
+
+      - name: The person profile panel
+        if: '!cancelled()'
+        run: node test/e2e/person-panel.mjs --api 3011 --dist apps/web/dist
+
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest
