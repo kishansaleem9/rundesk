@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, FolderPlus, Hash, Lock, MessageSquarePlus, MoreHorizontal, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react'
+import { Archive, ArchiveRestore, Check, ChevronDown, ChevronRight, FolderPlus, Hash, Lock, MessageSquarePlus, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react'
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Input, cn } from '@rundesk/ui'
 import type { ChatChannel, ChatChannelGroup, ChatMember, ChatSpace } from './chat-types'
 import { initials } from './chat-utils'
@@ -45,6 +45,8 @@ export function ChatSidebar({
   onToggleGroupCollapsed,
   onAssignChannelToGroup,
   onRemoveChannelFromGroup,
+  isCollapsed,
+  onToggleCollapsed,
 }: {
   channels: ChatChannel[]
   dmChannels: ChatChannel[]
@@ -83,6 +85,9 @@ export function ChatSidebar({
   onToggleGroupCollapsed: (groupId: string, isCollapsed: boolean) => void
   onAssignChannelToGroup: (groupId: string, channelId: string) => void
   onRemoveChannelFromGroup: (groupId: string, channelId: string) => void
+  /** §1.3 [10:13] — the channel list collapsed to a rail of icons. */
+  isCollapsed: boolean
+  onToggleCollapsed: () => void
 }) {
   const { statusOf } = usePresence(workspaceId)
   const { t, tCount } = useTranslation()
@@ -155,10 +160,95 @@ export function ChatSidebar({
       <Hash className="h-4 w-4 shrink-0 opacity-70" />
     )
 
+  /*
+   * §1.3 [10:13] — collapsed, this is a rail of channel icons.
+   *
+   * "agar main is ko off karoon to mujhe bas ICONS show hon — kyunke yeh SPACE
+   * leta hai." That was said about the outer sidebar and it is the same answer
+   * here, on the screen where the cost is actually paid: /chat stacked 288px of
+   * workspace sidebar against 272px of channel list, and collapsing only the
+   * outer one left the worse half of the problem in place.
+   *
+   * A rail rather than nothing at all. Hiding the list entirely means every
+   * channel switch costs an expand and a re-collapse, which is how a collapse
+   * control ends up unused.
+   */
+  if (isCollapsed) {
+    const railChannels = [...channels, ...dmChannels]
+    return (
+      <aside
+        data-testid="chat-panel-rail"
+        data-collapsed="true"
+        className="hidden md:flex w-[56px] shrink-0 flex-col items-center border-r border-border/80 bg-[#fbfbfc] py-2 dark:bg-[#16181d]"
+      >
+        <button
+          type="button"
+          data-testid="chat-panel-expand"
+          title={t('chat.expandPanel')}
+          aria-label={t('chat.expandPanel')}
+          onClick={onToggleCollapsed}
+          className="mb-2 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]"
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+        </button>
+        <div className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+          {railChannels.map((c) => {
+            const unread = c.unreadCount ?? 0
+            const label = c.isDm ? c.dmLabel ?? c.dmPeerName ?? t('chat.directMessage') : `#${c.name}`
+            return (
+              <button
+                key={`rail-${c.id}`}
+                type="button"
+                title={unread > 0 ? `${label} · ${unread}` : label}
+                aria-label={label}
+                onClick={() => onSelectChannel(c.id)}
+                className={cn(
+                  'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[12px] font-medium',
+                  selectedId === c.id
+                    ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                    : 'text-muted-foreground hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]',
+                )}
+              >
+                {c.icon ? (
+                  <span className="text-[13px] leading-none">{c.icon}</span>
+                ) : c.isDm ? (
+                  initials(c.dmLabel ?? c.dmPeerName ?? '?')
+                ) : (
+                  <Hash className="h-4 w-4" />
+                )}
+                {/* A dot, not a number: at 36px a count of 12 is unreadable,
+                    and "there is something here" is the whole job. */}
+                {unread > 0 && (
+                  <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-violet-500" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      </aside>
+    )
+  }
+
   return (
-    <aside className="hidden md:flex w-[272px] shrink-0 flex-col border-r border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]">
+    <aside
+      data-testid="chat-panel"
+      data-collapsed="false"
+      className="hidden md:flex w-[272px] shrink-0 flex-col border-r border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]"
+    >
       <div className="shrink-0 border-b border-border/80 px-3 py-3 space-y-2.5">
-        <h2 className="text-[15px] font-semibold text-foreground tracking-tight">{t('chat.title')}</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-[15px] font-semibold text-foreground tracking-tight">{t('chat.title')}</h2>
+          <button
+            type="button"
+            data-testid="chat-panel-collapse"
+            title={t('chat.collapsePanel')}
+            aria-label={t('chat.collapsePanel')}
+            onClick={onToggleCollapsed}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input

@@ -14,11 +14,11 @@ than none, because it gets quoted.
 - **Frames** — `video1-frame-audit-raw.json`, 15 groups, **157 discrete gaps**
 - **Verified on** `https://rundesk.theaura.agency` — 295 checks across
   `verify-ui.mjs` (186), `verify-release.sh` (72), `syncup-live.mjs` (33),
-  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 95 and
-  two suites are new — `chat-message-actions.mjs` (25) and `task-depth.mjs`
-  (23); all three are pending the next deploy.
+  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 99 and
+  three suites are new — `chat-message-actions.mjs` (25), `task-depth.mjs` (23)
+  and `panel-collapse.mjs` (13); all four are pending the next deploy.
 
-**Result: 153 of the 157 are closed. 4 remain open, and they cluster.**
+**Result: 154 of the 157 are closed. 3 remain open.**
 
 *Kept current as work lands — see the shipped list at the bottom for what moved
 and when.*
@@ -98,18 +98,25 @@ dependencies (own tab), subtasks, checklist.
 > `explicitly_flagged_missing`; I read the schema, saw a working feature, and
 > did not check who called it.
 
-### 3. The "double navigation" complaint is only half addressed — `10:13`
+### 3. "Double navigation" — **closed 27 Aug**
 
 > "yeh DOUBLE NAVIGATION rakhi hui hai … kyunke yeh SPACE leta hai, aur jab hum
 > kaam kar rahe hote hain to it's kind of frustrating"
 
-The **workspace sidebar** collapses to icons — shipped and verified live
-(288px → 72px, dock survives, state persists per user).
+The **workspace sidebar** collapses to icons — shipped earlier and verified
+live (288px → 72px, dock survives, state persists per user), with `Ctrl`/`⌘` +
+`\` since.
 
-But the second-level panel — the Chat channel list, the Docs tree — does not
-collapse (#79). That column is where the double-navigation cost actually falls,
-and it is still there. The keyboard shortcut she'd expect (`Ctrl + \`) is also
-shipped since (see below).
+**#79** — the second-level panel now collapses too, which is where the cost
+actually fell. Chat's channel list goes 272px → a 56px rail of channel icons
+with unread dots; the docs tree goes 240px → a 48px strip. A rail rather than
+nothing, because hiding the list entirely makes every channel switch cost an
+expand and a re-collapse, which is how a collapse control ends up unused.
+
+Stored on the person, not the browser — `users.panels_collapsed`, one jsonb
+keyed by surface, so collapsing the channel list says nothing about the docs
+tree. Verified by signing a second browser context in and watching it open
+collapsed.
 
 ### 4. Chat message actions — **closed 27 Aug**
 
@@ -210,6 +217,7 @@ rather than the diff:
 | 27 Aug | #147 tags on a task | the endpoints shipped long ago and nothing ever called them; now a type-and-Enter box, and an idempotent create |
 | 27 Aug | #148 slash editor | `/` in the description: table, banner, code, lists — writing markdown, with the renderer taught tables and callouts |
 | 27 Aug | #149 create-modal tabs | Reminder / Whiteboard / Dashboard, in the order she named them |
+| 27 Aug | #79 second-level collapse | chat 272px → 56px rail, docs 240px → 48px strip; per surface, per person |
 
 ---
 

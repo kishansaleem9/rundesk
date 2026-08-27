@@ -1,0 +1,18 @@
+-- §1.3 [10:13] — the second-level panels remember whether they are collapsed.
+--
+-- "yeh DOUBLE NAVIGATION rakhi hui hai… kyunke yeh SPACE leta hai."
+--
+-- The outer sidebar's collapse shipped already, and it was half the answer: on
+-- /chat we stack a 288px sidebar against a 272px channel list, and on /docs
+-- against a 240px tree. Collapsing the outer column leaves the screen she was
+-- pointing at still carrying two of them.
+--
+-- One jsonb keyed by surface rather than a boolean column per panel. These are
+-- the same choice repeated per surface and the list of surfaces grows; a column
+-- and a migration each is how a preferences table ends up with forty columns
+-- nobody can name.
+--
+-- Nullable, like sidebar_collapsed: null means never chosen, so an account that
+-- has not touched an arrow keeps the expanded default rather than inheriting
+-- somebody else's false.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "panels_collapsed" jsonb;

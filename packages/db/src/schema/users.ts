@@ -107,6 +107,26 @@ export const users = pgTable('users', {
    * rail at the right width before React is running.
    */
   sidebarCollapsed: boolean('sidebar_collapsed'),
+  /**
+   * §1.3 [10:13] — the SECOND-level panels, collapsed per surface.
+   *
+   * "yeh DOUBLE NAVIGATION rakhi hui hai… kyunke yeh SPACE leta hai." The
+   * outer sidebar collapsing was only half of it: on /chat we stack a 288px
+   * sidebar against a 272px channel list, and on /docs against a 240px tree.
+   * Collapsing the outer one leaves the screen she was actually complaining
+   * about still carrying two columns of chrome.
+   *
+   * One jsonb rather than a boolean column per panel. These are the same kind
+   * of choice repeated per surface, and the list of surfaces grows — a column
+   * and a migration for each is how a preferences table becomes forty columns
+   * nobody can name. Keyed by surface (`chat`, `docs`) because collapsing the
+   * channel list is not a statement about the docs tree.
+   *
+   * Nullable, like sidebarCollapsed and for the same reason: null means never
+   * chosen, so an account that has not touched an arrow keeps the expanded
+   * default rather than inheriting somebody else's false.
+   */
+  panelsCollapsed: jsonb('panels_collapsed').$type<Record<string, boolean> | null>(),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

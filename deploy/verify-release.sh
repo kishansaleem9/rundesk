@@ -562,6 +562,31 @@ else
   bad "could not create a tag -> $(printf '%s' "$TAG" | head -c 140)"
 fi
 
+# ───────── §1.3 [10:13] the second-level panel remembers (0116) ──────────
+# The collapse itself is a browser concern and is checked there. What has to be
+# true HERE is that the preference survives the round trip — a panel that
+# collapses and forgets is the complaint she made, not the fix. Validation is
+# checked too: this is a jsonb column fed from a request body.
+say "The second-level panels remember their collapse"
+check_sql "users.panels_collapsed exists (0116)" \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='panels_collapsed');" "t"
+PC=$(curl -fsS --max-time 20 -X PATCH "$API/users/me" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"panelsCollapsed":{"chat":true,"docs":false}}' 2>/dev/null || true)
+printf '%s' "$PC" | grep -q '"chat":true' \
+  && ok "a collapsed panel can be saved" \
+  || bad "panelsCollapsed -> $(printf '%s' "$PC" | head -c 140)"
+curl -fsS --max-time 20 "$API/users/me" -H "$AUTH" 2>/dev/null | grep -q '"chat":true' \
+  && ok "and survives a fresh read, so it follows the person" \
+  || bad "panelsCollapsed did not survive a re-read"
+JUNK=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/users/me" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"panelsCollapsed":{"chat":true,"evil":"payload"}}' 2>/dev/null || true)
+[ "$JUNK" = "400" ] \
+  && ok "an unknown panel key is refused, not stored" \
+  || bad "arbitrary jsonb accepted onto a user row -> $JUNK"
+# Leave the deploy-check account as it was found.
+curl -fsS --max-time 20 -X PATCH "$API/users/me" -H "$AUTH" \
+  -H 'Content-Type: application/json' -d '{"panelsCollapsed":{}}' >/dev/null 2>&1 || true
+
 # ─────────── §G15 [21:36] the create modal's three new subjects ───────────
 # A reminder with no task is the one that could not exist before 0115.
 say "Reminder, whiteboard and dashboard can be created"

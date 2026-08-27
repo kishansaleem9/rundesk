@@ -13,6 +13,11 @@ export type AuthUser = {
   topbarPinned?: string[] | null
   /** §1.3 — the sidebar collapse. null = never chosen. */
   sidebarCollapsed?: boolean | null
+  /**
+   * §1.3 [10:13] — the second-level panels, collapsed per surface.
+   * Keyed by surface (`chat`, `docs`); absent means never chosen.
+   */
+  panelsCollapsed?: Record<string, boolean> | null
 }
 
 export type AuthOrg = {

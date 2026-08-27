@@ -70,6 +70,20 @@ export type TopbarItem = (typeof TOPBAR_ITEMS)[number]
  */
 export const DEFAULT_PINNED: TopbarItem[] = ['create', 'timer', 'theme']
 
+/**
+ * §1.3 [10:13] — the surfaces whose SECOND-level panel can be collapsed.
+ *
+ * "yeh DOUBLE NAVIGATION rakhi hui hai… kyunke yeh SPACE leta hai." Chat's
+ * channel list and Docs' tree are the two columns that stack against the
+ * workspace sidebar and make her point.
+ *
+ * A whitelist rather than "whatever the client sends", for the same reason
+ * TOPBAR_ITEMS is one: `panels_collapsed` is jsonb, and an unchecked object
+ * from a request body is a place to park arbitrary data on a user's row.
+ */
+export const COLLAPSIBLE_PANELS = ['chat', 'docs'] as const
+export type CollapsiblePanel = (typeof COLLAPSIBLE_PANELS)[number]
+
 /** Image content types accepted for avatar uploads, mapped to a file extension. */
 const AVATAR_CONTENT_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -119,6 +133,8 @@ export class UsersService {
       topbarPinned?: string[]
       /** §1.3 — the sidebar collapse, as a preference of the person. */
       sidebarCollapsed?: boolean
+      /** §1.3 [10:13] — the second-level panels, collapsed per surface. */
+      panelsCollapsed?: Record<string, boolean>
     },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
@@ -172,12 +188,41 @@ export class UsersService {
       // say so rather than storing whatever arrived.
       throw new BadRequestException('sidebarCollapsed must be a boolean')
     }
+    if (patch.panelsCollapsed !== undefined) {
+      /*
+       * §1.3 [10:13] — same reasoning as topbarHidden two blocks up.
+       *
+       * This IS a jsonb column fed straight from the client, so an unvalidated
+       * object is a place to park arbitrary data on a user row. Keys are
+       * checked against the surfaces that have a panel, and values must be
+       * booleans — an object rebuilt from the whitelist rather than the one
+       * that arrived, so nothing rides along in it.
+       */
+      const value = patch.panelsCollapsed
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new BadRequestException('panelsCollapsed must be an object')
+      }
+      const unknown = Object.keys(value).filter((k) => !COLLAPSIBLE_PANELS.includes(k as CollapsiblePanel))
+      if (unknown.length > 0) {
+        throw new BadRequestException(`Unknown panel(s): ${unknown.join(', ')}`)
+      }
+      const clean: Record<string, boolean> = {}
+      for (const key of COLLAPSIBLE_PANELS) {
+        if (value[key] !== undefined) {
+          if (typeof value[key] !== 'boolean') {
+            throw new BadRequestException(`panelsCollapsed.${key} must be a boolean`)
+          }
+          clean[key] = value[key]
+        }
+      }
+      patch.panelsCollapsed = clean
+    }
     // SECURITY: whitelist the self-editable profile columns. Spreading the raw
     // body let a caller mass-assign any users column — most critically `role`,
     // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
     // super-admin. Only copy the fields a user is allowed to change themselves.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed', 'panelsCollapsed'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db

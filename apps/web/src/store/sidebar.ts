@@ -20,12 +20,33 @@ import { persist, createJSONStorage } from 'zustand/middleware'
  * uses. Waiting for /users/me to answer that would mean the sidebar visibly
  * jumping on every cold load, which is the §2.9a complaint in miniature.
  */
+/**
+ * §1.3 [10:13] — the surfaces whose SECOND-level panel collapses.
+ *
+ * Mirrors COLLAPSIBLE_PANELS on the server, which rejects anything else: this
+ * ends up in a jsonb column, so the two lists disagreeing means a preference
+ * that silently fails to save.
+ */
+export type CollapsiblePanel = 'chat' | 'docs'
+
 export type SidebarState = {
   collapsed: boolean
   setCollapsed: (collapsed: boolean) => void
   toggle: () => void
   /** Apply the server's value without writing it back. */
   hydrateCollapsed: (collapsed: boolean) => void
+
+  /**
+   * §1.3 [10:13] — "yeh DOUBLE NAVIGATION rakhi hui hai… kyunke yeh SPACE leta
+   * hai." Whether each second-level panel is collapsed.
+   *
+   * Per surface, because collapsing the chat channel list is not a statement
+   * about the docs tree. Absent means never chosen, which reads as expanded.
+   */
+  panels: Partial<Record<CollapsiblePanel, boolean>>
+  isPanelCollapsed: (panel: CollapsiblePanel) => boolean
+  togglePanel: (panel: CollapsiblePanel) => void
+  hydratePanels: (panels: Partial<Record<CollapsiblePanel, boolean>>) => void
 }
 
 /**
@@ -36,6 +57,12 @@ export type SidebarState = {
 let persistRemote: ((collapsed: boolean) => void) | null = null
 export function setSidebarPersister(fn: (collapsed: boolean) => void) {
   persistRemote = fn
+}
+
+/** The same arrangement for the second-level panels (§1.3 [10:13]). */
+let persistPanelsRemote: ((panels: Partial<Record<CollapsiblePanel, boolean>>) => void) | null = null
+export function setPanelsPersister(fn: (panels: Partial<Record<CollapsiblePanel, boolean>>) => void) {
+  persistPanelsRemote = fn
 }
 
 export const SIDEBAR_STORAGE_KEY = 'rundesk.sidebar'
@@ -55,11 +82,22 @@ export const useSidebarStore = create<SidebarState>()(
       },
       // No write-back: this is the server telling us, not us telling it.
       hydrateCollapsed: (collapsed) => set({ collapsed }),
+
+      panels: {},
+      // Absent means never chosen, which reads as expanded — the same rule the
+      // outer sidebar's nullable column follows.
+      isPanelCollapsed: (panel) => get().panels[panel] === true,
+      togglePanel: (panel) => {
+        const next = { ...get().panels, [panel]: !get().panels[panel] }
+        set({ panels: next })
+        persistPanelsRemote?.(next)
+      },
+      hydratePanels: (panels) => set({ panels }),
     }),
     {
       name: SIDEBAR_STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ collapsed: s.collapsed }),
+      partialize: (s) => ({ collapsed: s.collapsed, panels: s.panels }),
     },
   ),
 )

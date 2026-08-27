@@ -14,7 +14,7 @@ import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
 import { useCustomDomainBootstrap } from './lib/custom-domain'
 import { installChunkReloadHandlers } from './lib/chunk-reload'
-import { useSidebarStore, setSidebarPersister } from './store/sidebar'
+import { useSidebarStore, setSidebarPersister, setPanelsPersister } from './store/sidebar'
 import { RoutePending } from './components/loading-skeletons'
 
 const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
@@ -35,6 +35,16 @@ installChunkReloadHandlers()
 setSidebarPersister((collapsed) => {
   if (!useAuthStore.getState().isAuthenticated()) return
   void api('/users/me', { method: 'PATCH', body: { sidebarCollapsed: collapsed } }).catch(
+    () => undefined,
+  )
+})
+
+// §1.3 [10:13] — and the same for the second-level panels, for the same reason:
+// "yeh DOUBLE NAVIGATION rakhi hui hai" is a complaint about the screen, not
+// about one browser.
+setPanelsPersister((panels) => {
+  if (!useAuthStore.getState().isAuthenticated()) return
+  void api('/users/me', { method: 'PATCH', body: { panelsCollapsed: panels } }).catch(
     () => undefined,
   )
 })
@@ -97,6 +107,11 @@ function useSessionHydration() {
         // (and therefore the boot skeleton's guess) alone.
         if (typeof me.sidebarCollapsed === 'boolean') {
           useSidebarStore.getState().hydrateCollapsed(me.sidebarCollapsed)
+        }
+        // §1.3 [10:13] — same rule for the second-level panels: null means
+        // never chosen, so leave whatever this browser already had.
+        if (me.panelsCollapsed && typeof me.panelsCollapsed === 'object') {
+          useSidebarStore.getState().hydratePanels(me.panelsCollapsed)
         }
         // Cross-device theme (Plan §13.1): the server preference wins on load.
         if (me.theme && THEME_VALUES.includes(me.theme as Theme)) {

@@ -64,6 +64,7 @@ import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n/catalogs'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
+import { useSidebarStore } from '../store/sidebar'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
 import { ChatAttachmentList } from '../components/chat/chat-attachments'
 import { InlineSkeleton } from '../components/loading-skeletons'
@@ -316,6 +317,9 @@ export function ChatPage() {
   const [callAction, setCallAction] = useState<
     { kind: 'join' | 'leave'; callId: string } | { kind: 'start' } | null
   >(null)
+  // §1.3 [10:13] — the second-level panel's own collapse, remembered per person.
+  const chatPanelCollapsed = useSidebarStore((s) => s.panels.chat === true)
+  const togglePanel = useSidebarStore((s) => s.togglePanel)
   // Right-click context menu (Plan §6.10) anchored at the cursor for a message.
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null)
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
@@ -1439,6 +1443,11 @@ export function ChatPage() {
   return (
     <div className="h-full flex bg-background">
       <ChatSidebar
+        // §1.3 [10:13] — the channel list collapses too, on the screen where
+        // "double navigation" actually costs the space she was complaining
+        // about: 288px of sidebar against 272px of this.
+        isCollapsed={chatPanelCollapsed}
+        onToggleCollapsed={() => togglePanel('chat')}
         channels={publicChannels}
         dmChannels={dmChannels}
         workspaceId={workspaceId}

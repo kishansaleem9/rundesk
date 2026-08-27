@@ -40,7 +40,11 @@ import {
   Table as TableIcon,
   Trash2,
   Underline,
+  // §1.3 [10:13] — the tree's own collapse control.
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
+import { useSidebarStore } from '../store/sidebar'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -115,6 +119,9 @@ type DocComment = {
 export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
+  // §1.3 [10:13] — the page tree collapses too, and remembers per person.
+  const treeCollapsed = useSidebarStore((s) => s.panels.docs === true)
+  const togglePanel = useSidebarStore((s) => s.togglePanel)
   // Honor a ?doc=<id> deep link (e.g. from global search) by preselecting it.
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -558,28 +565,82 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   return (
     <Card
       variant="glass"
+      /*
+       * §1.3 [10:13] — the tree collapses to a strip.
+       *
+       * "yeh DOUBLE NAVIGATION rakhi hui hai… kyunke yeh SPACE leta hai." On
+       * /docs this column stacks against the 288px workspace sidebar, and with
+       * comments and history both open the editor was down to whatever was
+       * left of the screen after 1128px of chrome. 48px is enough for the
+       * control that brings it back and nothing else — unlike chat, a document
+       * tree has no icon that means anything at that width.
+       */
       className={`grid grid-cols-1 ${
-        commentsOpen && historyOpen
-          ? 'md:grid-cols-[240px_1fr_300px_300px]'
-          : commentsOpen || historyOpen
-            ? 'md:grid-cols-[240px_1fr_300px]'
-            : 'md:grid-cols-[240px_1fr]'
+        treeCollapsed
+          ? commentsOpen && historyOpen
+            ? 'md:grid-cols-[48px_1fr_300px_300px]'
+            : commentsOpen || historyOpen
+              ? 'md:grid-cols-[48px_1fr_300px]'
+              : 'md:grid-cols-[48px_1fr]'
+          : commentsOpen && historyOpen
+            ? 'md:grid-cols-[240px_1fr_300px_300px]'
+            : commentsOpen || historyOpen
+              ? 'md:grid-cols-[240px_1fr_300px]'
+              : 'md:grid-cols-[240px_1fr]'
       } gap-0 h-[640px] overflow-hidden p-0`}
     >
       {/* Sidebar */}
-      <div className="border-b md:border-b-0 md:border-r border-border/60 bg-card/30 flex flex-col">
+      {treeCollapsed ? (
+        <div
+          data-testid="docs-tree-rail"
+          data-collapsed="true"
+          className="hidden md:flex border-b md:border-b-0 md:border-r border-border/60 bg-card/30 flex-col items-center py-3"
+        >
+          <button
+            type="button"
+            data-testid="docs-tree-expand"
+            title={t('docs.expandTree')}
+            aria-label={t('docs.expandTree')}
+            onClick={() => togglePanel('docs')}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-card/60 hover:text-foreground"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+          {/* Vertical, because 48px of horizontal is not a word. It says what
+              the strip is, so the arrow is not the only clue. */}
+          <span
+            className="mt-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+            style={{ writingMode: 'vertical-rl' }}
+          >
+            {t('docs.pages')}
+          </span>
+        </div>
+      ) : (
+      <div data-testid="docs-tree" data-collapsed="false" className="border-b md:border-b-0 md:border-r border-border/60 bg-card/30 flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
           <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
             {t('docs.pages')}
           </span>
-          <button
-            type="button"
-            onClick={() => setPane((p) => (p === 'index' ? 'editor' : 'index'))}
-            title={pane === 'index' ? t('docs.backToEditor') : t('docs.openIndex')}
-            className={`p-1 rounded ${pane === 'index' ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            <Rows3 className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => setPane((p) => (p === 'index' ? 'editor' : 'index'))}
+              title={pane === 'index' ? t('docs.backToEditor') : t('docs.openIndex')}
+              className={`p-1 rounded ${pane === 'index' ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <Rows3 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-testid="docs-tree-collapse"
+              title={t('docs.collapseTree')}
+              aria-label={t('docs.collapseTree')}
+              onClick={() => togglePanel('docs')}
+              className="p-1 rounded text-muted-foreground hover:text-foreground"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* A5.6 — All / My / Shared with me / Archived, with counts. */}
@@ -656,6 +717,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
           </div>
         </div>
       </div>
+      )}
 
       <DocTemplatesDialog
         open={templatesOpen}
