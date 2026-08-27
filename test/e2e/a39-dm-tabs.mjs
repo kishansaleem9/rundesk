@@ -1,6 +1,6 @@
 /** A3.9 — the DM Chat / Calendar / Tasks tab strip, live in the browser. */
 import path from 'node:path'
-import { resolveChromium } from './lib/playwright.mjs'
+import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureShared } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
@@ -54,7 +54,7 @@ const ok = (m) => { r.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { r.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, g, b) => (c ? ok(g) : bad(b))
 
-const br = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] })
+const br = await chromium.launch(launchOptions())
 const p = await (await br.newContext({ viewport: { width: 1600, height: 1000 } })).newPage()
 try {
   await p.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })

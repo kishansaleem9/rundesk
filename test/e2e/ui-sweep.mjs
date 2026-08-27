@@ -7,7 +7,7 @@
  * exist and silently proved nothing.
  */
 import path from 'node:path'
-import { resolveChromium } from './lib/playwright.mjs'
+import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
@@ -106,10 +106,7 @@ const openAnyTask = async () => {
   await page.waitForTimeout(2000)
 }
 
-const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-  args: ['--no-sandbox'],
-})
+const browser = await chromium.launch(launchOptions())
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
 await ctx.route('**/*', (r) => (/127\.0\.0\.1|localhost/.test(r.request().url()) ? r.continue() : r.abort()))
 const page = await ctx.newPage()

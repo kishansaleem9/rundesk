@@ -1,6 +1,6 @@
 /** A6.1/A6.2 — the meeting record: it must survive the page. */
 import path from 'node:path'
-import { resolveChromium } from './lib/playwright.mjs'
+import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
@@ -47,7 +47,7 @@ const chk = (c, g, b) => (c ? ok(g) : bad(b))
 const TITLE = `A61 retro ${Date.now().toString(36)}`
 const NOTES = 'Ali will write the migration by Thursday. Sara reviews the export path on Friday.'
 
-const br = await chromium.launch({ executablePath: process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] })
+const br = await chromium.launch(launchOptions())
 const p = await (await br.newContext({ viewport: { width: 1600, height: 1100 } })).newPage()
 try {
   await p.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })

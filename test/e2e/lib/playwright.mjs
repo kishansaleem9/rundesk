@@ -87,3 +87,22 @@ export const CHROME =
   process.env.CHROME ||
   process.env.CHROMIUM_PATH ||
   '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
+
+/**
+ * Launch options that work on a developer's machine AND on a CI runner.
+ *
+ * The default above is one particular sandbox's unpacked Chromium. Passing it
+ * as `executablePath` unconditionally is what broke all four of these suites
+ * the first time they ran in CI: playwright installs its own browser there, at
+ * a path with a different build number, and a hardcoded one fails with
+ * "executable doesn't exist" before a single check runs.
+ *
+ * So it is offered, not insisted on — present it only when it is really there,
+ * and otherwise say nothing and let playwright use the browser it installed.
+ */
+export function launchOptions(extraArgs = []) {
+  return {
+    ...(fs.existsSync(CHROME) ? { executablePath: CHROME } : {}),
+    args: ['--no-sandbox', '--disable-dev-shm-usage', ...extraArgs],
+  }
+}

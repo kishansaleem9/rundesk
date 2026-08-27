@@ -9,7 +9,7 @@
  *   BASE=http://127.0.0.1:5173 WS=<workspace-id> node test/e2e/video-regression.mjs
  */
 import path from 'node:path'
-import { resolveChromium } from './lib/playwright.mjs'
+import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureNotification } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 const chromium = await resolveChromium()
@@ -21,7 +21,6 @@ const argOf = (name, fallback) => {
 
 const EMAIL = process.env.E2E_EMAIL ?? 'verify@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Verify@123!'
-const CHROME = process.env.CHROME ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
 
 /*
  * Serve the app and find a workspace, rather than assume both.
@@ -76,7 +75,7 @@ const chk = (c, g, b) => (c ? ok(g) : bad(b))
 const ref = (r, what) => { REF = r; console.log(`\n\x1b[1;36m▶ ${r}\x1b[0m  ${what}`) }
 const area = (n) => console.log(`\n\x1b[1;35m${'═'.repeat(66)}\n  ${n}\n${'═'.repeat(66)}\x1b[0m`)
 
-const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox'] })
+const browser = await chromium.launch(launchOptions())
 const page = await (await browser.newContext({ viewport: { width: 1600, height: 1100 } })).newPage()
 
 /** Text of the page as a user would read it. */
