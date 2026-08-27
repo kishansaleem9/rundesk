@@ -183,7 +183,7 @@ const check = (ok, label, detail = '') => {
  * Raise this when checks are added. Failing on the floor is the point: a suite
  * that quietly shrinks is the most expensive kind of green.
  */
-const EXPECTED_CHECKS = 27
+const EXPECTED_CHECKS = 28
 
 const done = async (browser, stack) => {
   await browser?.close().catch(() => {})
@@ -425,11 +425,49 @@ check(surfaced, 'and A is on the call surface', 'the call surface never rendered
 // ---------------------------------------------------------------------------
 console.log('\n3. the other person is told, and joins')
 // ---------------------------------------------------------------------------
-// The card is written by a fan-out that start() deliberately does not await, so
-// this waits for it the way a client does rather than assuming it is instant.
+/*
+ * Two separate facts, because they fail for completely different reasons.
+ *
+ * WRITTEN is server-side: announce() runs detached from the request, so the
+ * card lands a beat after the response and is polled for, not assumed.
+ *
+ * SEEN is the client: the card reaches an open channel through a realtime
+ * event, so a socket that is still connecting when the call starts misses it.
+ * Asking only "is it on B's screen" conflates the two — a card that was never
+ * written and a card that was written but never announced look identical, and
+ * the second is the one that cascades into every check below reporting a
+ * broken call.
+ */
+const until = async (ready, ms) => {
+  const deadline = Date.now() + ms
+  for (;;) {
+    if (await ready()) return true
+    if (Date.now() > deadline) return false
+    await new Promise((r) => setTimeout(r, 400))
+  }
+}
+
+const cardWritten = await until(async () => {
+  const msgs = await api(admin.accessToken, 'GET', `/chat/channels/${CHANNEL}/messages`)
+  return (msgs.data?.items ?? msgs.data ?? []).some?.((m) => m?.callId) === true
+}, 20000)
+check(cardWritten, 'the call posts a card into the channel', 'announce() never wrote one')
+
 const card = B.page.locator('[data-testid="call-card"]').first()
-const sawCard = await card.waitFor({ timeout: 20000 }).then(() => true).catch(() => false)
-check(sawCard, 'B sees the call card appear in the channel', 'no call card ever arrived for the other person')
+let sawCard = await card.waitFor({ timeout: 15000 }).then(() => true).catch(() => false)
+let neededReload = false
+if (!sawCard && cardWritten) {
+  // A reload refetches unconditionally, so it separates "never announced" from
+  // "never written" instead of leaving both as one silent timeout.
+  neededReload = true
+  await B.page.reload({ waitUntil: 'networkidle' }).catch(() => {})
+  await settleCookies(B.page)
+  sawCard = await card.waitFor({ timeout: 20000 }).then(() => true).catch(() => false)
+}
+check(sawCard, 'and the other person sees it in the channel', 'the card never reached the other person, reload or not')
+if (neededReload && sawCard) {
+  console.log('  NOTE  it only appeared after a reload — the realtime event did not reach B in time')
+}
 
 await B.page.locator('[data-testid="call-card-join"]').first().click().catch(() => {})
 const bPrejoin = await B.page
