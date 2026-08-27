@@ -13,7 +13,7 @@ than none, because it gets quoted.
 - **Transcript** — `6941a270-video1___Roman_Urdu.txt`, 24:05
 - **Frames** — `video1-frame-audit-raw.json`, 15 groups, **157 discrete gaps**
 - **Verified on** `https://rundesk.theaura.agency`, 27 Aug, against the
-  deployed instance — **448 checks, 0 failed**:
+  deployed instance — **452 checks, 0 failed**:
 
   | | checks |
   |---|---|
@@ -316,7 +316,7 @@ Two limits worth stating plainly.
 found; it does not re-watch the video for asks that audit missed.
 
 **"Shipped" means live, and checked there.** Every row in the shipped table was
-driven against the deployed instance, not only against a laptop — the 448
+driven against the deployed instance, not only against a laptop — the 452
 figure at the top is that run. Two edges are worth knowing. The R2 upload check
 only ever runs on production, because CI has no object storage and says `SKIP`
 rather than passing. And `verify-email.sh` proves SMTP accepted the message,
