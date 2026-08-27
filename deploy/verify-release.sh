@@ -426,9 +426,23 @@ printf '%s' "$UBW" | grep -q '"data"' \
   && ok "the per-workspace unread map answers" \
   || bad "unread-by-workspace -> $(printf '%s' "$UBW" | head -c 140)"
 TOTAL=$(curl -fsS --max-time 20 "$API/notifications/unread-count" -H "$AUTH" 2>/dev/null | jget count)
-SUMMED=$(printf '%s' "$UBW" | grep -oE '[0-9]+' | awk '{s+=$1} END {print s+0}')
-if [ -n "$TOTAL" ] && [ "$SUMMED" -le "$TOTAL" ] 2>/dev/null; then
-  ok "and never exceeds the bell's own total ($SUMMED <= $TOTAL)"
+# The COUNTS, not every digit in the payload.
+#
+# This read `grep -oE '[0-9]+'` and summed everything it found — including the
+# digits inside each workspace UUID, so one workspace with 537 unread summed to
+# 31,355. It passed on an earlier release only because the map was empty then:
+# no entries, no digits, sum zero. A check that passes because there is nothing
+# to check is the failure mode this whole file exists to avoid.
+#
+# The shape is {"data":{"<uuid>":537},...}, and a UUID contains no colon, so a
+# colon followed by digits is a count and nothing else.
+SUMMED=$(printf '%s' "$UBW" | grep -oE ':[0-9]+' | tr -d ':' | awk '{s+=$1} END {print s+0}')
+ENTRIES=$(printf '%s' "$UBW" | grep -oE ':[0-9]+' | wc -l | tr -d ' ')
+if [ "${ENTRIES:-0}" -eq 0 ] 2>/dev/null; then
+  # Said out loud rather than counted as a pass: nothing was compared.
+  ok "SKIP nothing unread anywhere, so there is no split to compare (not checked)"
+elif [ -n "$TOTAL" ] && [ "$SUMMED" -le "$TOTAL" ] 2>/dev/null; then
+  ok "and never exceeds the bell's own total ($SUMMED <= $TOTAL across $ENTRIES workspace(s))"
 else
   bad "the split ($SUMMED) exceeds the bell total ($TOTAL) — they disagree on what unread means"
 fi
@@ -545,17 +559,31 @@ if [ -n "$TAGID" ]; then
   [ "$(printf '%s' "$UPPER" | jget id)" = "$TAGID" ] \
     && ok "ignoring case, so the list is not a spelling test" \
     || bad "upper-case create made a second tag -> $(printf '%s' "$UPPER" | head -c 140)"
-  if [ -n "$TID" ]; then
-    ATT=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/tasks/$TID/labels/$TAGID" -H "$AUTH" 2>/dev/null || true)
-    [ "$ATT" = "201" ] || [ "$ATT" = "200" ] \
+  # A task of this check's own.
+  #
+  # This used `$TID`, which is a TASK TYPE id — and one deleted two hundred
+  # lines earlier at that. Attaching a label to a dead task-type UUID is a 404,
+  # correctly, and the check reported it as the tag feature being broken. The
+  # tag round trip needs a task, so it makes one.
+  TAG_TASK=""
+  if [ -n "$LID" ]; then
+    TAG_TASK=$(curl -fsS --max-time 20 -X POST "$API/tasks" -H "$AUTH" \
+      -H 'Content-Type: application/json' \
+      -d "{\"listId\":\"$LID\",\"title\":\"deploy check — tag me\"}" 2>/dev/null | jget id || true)
+  fi
+  if [ -n "$TAG_TASK" ]; then
+    ok "a task exists to tag"
+    ATT=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/tasks/$TAG_TASK/labels/$TAGID" -H "$AUTH" 2>/dev/null || true)
+    { [ "$ATT" = "201" ] || [ "$ATT" = "200" ]; } \
       && ok "and it can be put on a task" \
       || bad "attach -> $ATT"
-    curl -fsS --max-time 20 "$API/tasks/$TID" -H "$AUTH" 2>/dev/null | grep -q "$TAGID" \
+    curl -fsS --max-time 20 "$API/tasks/$TAG_TASK" -H "$AUTH" 2>/dev/null | grep -q "$TAGID" \
       && ok "and the task carries it back" \
       || bad "the task does not report the tag it was given"
-    curl -fsS --max-time 20 -X DELETE "$API/tasks/$TID/labels/$TAGID" -H "$AUTH" >/dev/null 2>&1 || true
+    curl -fsS --max-time 20 -X DELETE "$API/tasks/$TAG_TASK/labels/$TAGID" -H "$AUTH" >/dev/null 2>&1 || true
+    curl -fsS --max-time 20 -X DELETE "$API/tasks/$TAG_TASK" -H "$AUTH" >/dev/null 2>&1 || true
   else
-    bad "no task available to tag"
+    bad "no list available to create a task to tag"
   fi
   curl -fsS --max-time 20 -X DELETE "$API/labels/$TAGID" -H "$AUTH" >/dev/null 2>&1 || true
 else
