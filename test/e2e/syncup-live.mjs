@@ -65,7 +65,33 @@ const BASE = (process.env.BASE ?? argOf('--base', '')).replace(/\/$/, '')
 const REMOTE = BASE.length > 0
 const HOST = REMOTE ? new URL(BASE).hostname : ''
 const IS_LOOPBACK = REMOTE && /^(127\.|localhost$|\[?::1)/.test(HOST)
-const API_PORT = Number(process.env.API_HOST_PORT ?? argOf('--api', 3011))
+
+/** The deployed .env, for the port the API container is published on. */
+const fromEnvFile = (key) => {
+  try {
+    const txt = fs.readFileSync(path.join(REPO, '.env'), 'utf8')
+    return new RegExp(`^${key}=(.*)$`, 'm').exec(txt)?.[1].trim().replace(/^["']|["']$/g, '') || null
+  } catch {
+    return null
+  }
+}
+
+/*
+ * Where this script's own fetches go — NOT where the browser goes.
+ *
+ * The browser talks to the origin, through nginx and TLS, because that is what
+ * a person does. These calls go straight at the API container, which needs no
+ * vhost and no certificate, exactly as verify-release.sh and verify-ui.mjs do.
+ *
+ * The default differs by mode and that matters: 3011 is a local dev port, 3010
+ * is what deploy publishes. Defaulting a deployed run to the dev port is how
+ * this first failed on a real box — ECONNREFUSED, reported as a bare `fetch
+ * failed` stack with nothing pointing at the port.
+ */
+const API_PORT =
+  Number(process.env.API_HOST_PORT) ||
+  Number(argOf('--api', '')) ||
+  (REMOTE ? Number(fromEnvFile('API_HOST_PORT')) || 3010 : 3011)
 const DIST = path.resolve(REPO, argOf('--dist', 'apps/web/dist'))
 
 /*
@@ -216,6 +242,25 @@ const api = async (token, method, p, body) => {
 }
 
 console.log('\n0. a workspace with two people and a channel')
+/*
+ * Reach the API before asking it anything.
+ *
+ * Without this a wrong port surfaces as an undici `TypeError: fetch failed`
+ * with a stack through node internals and no mention of the port it tried —
+ * which is a diagnosis nobody should have to make twice.
+ */
+const reachable = await fetch(`${stack.apiBase}/api/v1/health`)
+  .then((r) => r.ok || r.status < 500)
+  .catch(() => false)
+if (!reachable) {
+  console.error(
+    `\n\x1b[31m✗ no API answering on ${stack.apiBase}\x1b[0m\n` +
+      `  The browser drives ${stack.base}; these checks call the API directly.\n` +
+      '  Point them at it with API_HOST_PORT=<port> (deploy publishes 3010).\n' +
+      '  Exiting 2 rather than reporting on a call that was never made.',
+  )
+  process.exit(2)
+}
 const login = await api(null, 'POST', '/auth/login', ADMIN)
 check(login.status === 200 || login.status === 201, 'the API is up and the seed account works', `login -> ${login.status}`)
 if (login.status >= 400) await done(null, stack)
