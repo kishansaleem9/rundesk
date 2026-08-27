@@ -35,39 +35,101 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
-const { chromium } = (() => {
-  for (const id of ['playwright', '@playwright/test', 'playwright-core']) {
-    try {
-      return require_(id)
-    } catch {
-      /* next */
-    }
-  }
-  throw new Error('playwright is not installed — run pnpm install at the repo root')
-})()
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
   return i === -1 ? fallback : process.argv[i + 1]
 }
-const API_PORT = Number(argOf('--api', 3011))
+
+/*
+ * Two ways to run, and the difference is what is being asked.
+ *
+ * Without BASE this builds the whole stack itself — a static server over
+ * apps/web/dist and a proxy to a local API — which is the right shape for CI
+ * and for a laptop.
+ *
+ * With BASE it drives a DEPLOYED instance. That answers a different question:
+ * not "does this code work" but "does it work THERE", over that nginx, that
+ * TLS, that database. The peer connection is the reason to care — a mesh call
+ * is the one part of this product whose failure modes are mostly environmental.
+ *
+ *   BASE=https://rundesk.theaura.agency node test/e2e/syncup-live.mjs
+ */
+const BASE = (process.env.BASE ?? argOf('--base', '')).replace(/\/$/, '')
+const REMOTE = BASE.length > 0
+const HOST = REMOTE ? new URL(BASE).hostname : ''
+const IS_LOOPBACK = REMOTE && /^(127\.|localhost$|\[?::1)/.test(HOST)
+const API_PORT = Number(process.env.API_HOST_PORT ?? argOf('--api', 3011))
 const DIST = path.resolve(REPO, argOf('--dist', 'apps/web/dist'))
 
-const CHROME = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
+/*
+ * Playwright, wherever it lives.
+ *
+ * `npm i playwright` inside this pnpm workspace fails on the `link:` protocol
+ * the internal packages use, so on a server it is installed OUTSIDE the repo —
+ * and ESM ignores NODE_PATH, so a bare import cannot see it there. Same search
+ * deploy/verify-ui.mjs does, for the same reason.
+ */
+const PW_DIRS = [
+  process.env.PLAYWRIGHT_DIR,
+  '/opt/rundesk-pw/node_modules',
+  `${process.env.HOME ?? '/root'}/.rundesk-pw/node_modules`,
+  '/usr/lib/node_modules',
+].filter(Boolean)
+
+let chromium
+for (const id of ['playwright', '@playwright/test', 'playwright-core']) {
+  try {
+    ;({ chromium } = require_(id))
+  } catch {
+    /* next */
+  }
+  if (chromium) break
+}
+if (!chromium) {
+  for (const dir of PW_DIRS) {
+    for (const entry of ['playwright/index.mjs', 'playwright/index.js']) {
+      const file = `${dir}/${entry}`
+      if (!fs.existsSync(file)) continue
+      try {
+        ;({ chromium } = await import(pathToFileURL(file).href))
+      } catch {
+        /* try the next candidate */
+      }
+      if (chromium) break
+    }
+    if (chromium) break
+  }
+}
+if (!chromium) {
+  console.error(
+    '\x1b[31m✗ playwright is not installed anywhere this script can see.\x1b[0m\n' +
+      `  Searched: ${PW_DIRS.join(', ')}\n` +
+      '  Set PLAYWRIGHT_DIR to the node_modules holding it.\n' +
+      '  Exiting 2 rather than reporting a call nobody made.',
+  )
+  process.exit(2)
+}
+
+const CHROME = process.env.CHROME || process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome'
 const LAUNCH = {
   ...(fs.existsSync(CHROME) ? { executablePath: CHROME } : {}),
   args: [
     '--no-sandbox',
+    '--disable-dev-shm-usage',
     // A real capture device without a camera. The stream is decodable, so a
     // painted frame is evidence about media, not about markup.
     '--use-fake-device-for-media-stream',
     '--use-fake-ui-for-media-stream',
     '--autoplay-policy=no-user-gesture-required',
+    // Reach the instance on the box rather than going out to DNS and back.
+    ...(REMOTE && !IS_LOOPBACK ? [`--host-resolver-rules=MAP ${HOST} 127.0.0.1`] : []),
   ],
 }
 
@@ -95,7 +157,7 @@ const check = (ok, label, detail = '') => {
  * Raise this when checks are added. Failing on the floor is the point: a suite
  * that quietly shrinks is the most expensive kind of green.
  */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 27
 
 const done = async (browser, stack) => {
   await browser?.close().catch(() => {})
@@ -112,13 +174,36 @@ const done = async (browser, stack) => {
   process.exit(failed === 0 ? 0 : 1)
 }
 
-const ADMIN = { email: 'admin@rundesk.internal', password: 'Admin@123!' }
-const OTHER = { email: 'org-admin@rundesk.internal', password: 'OrgAdmin@123!' }
+/*
+ * Two accounts, because one browser cannot call itself.
+ *
+ * Defaulted to the seeded pair and overridable, since a deployed instance may
+ * have rotated either. Both must be real: a run that cannot sign in as two
+ * different people has nothing to say about a call between two people, so it
+ * stops rather than reporting on whatever half it managed.
+ */
+const ADMIN = {
+  email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
+  password: process.env.RUNDESK_PASSWORD ?? 'Admin@123!',
+}
+const OTHER = {
+  email: process.env.RUNDESK_EMAIL2 ?? 'org-admin@rundesk.internal',
+  password: process.env.RUNDESK_PASSWORD2 ?? 'OrgAdmin@123!',
+}
 
-const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
+// Remote: drive the deployed origin, and talk to its API the way the box does.
+// Local: build the stack here.
+const stack = REMOTE
+  ? { base: BASE, apiBase: IS_LOOPBACK ? BASE : `http://127.0.0.1:${API_PORT}`, close: () => {} }
+  : await (async () => {
+      const s = await startLocalStack({ dist: DIST, apiPort: API_PORT })
+      return { ...s, apiBase: s.base }
+    })()
+
+console.log(`  driving ${stack.base}${REMOTE && !IS_LOOPBACK ? `  (${HOST} pinned to 127.0.0.1)` : ''}`)
 
 const api = async (token, method, p, body) => {
-  const res = await fetch(`${stack.base}/api/v1${p}`, {
+  const res = await fetch(`${stack.apiBase}/api/v1${p}`, {
     method,
     headers: {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -135,7 +220,14 @@ const login = await api(null, 'POST', '/auth/login', ADMIN)
 check(login.status === 200 || login.status === 201, 'the API is up and the seed account works', `login -> ${login.status}`)
 if (login.status >= 400) await done(null, stack)
 const admin = login.data
-const other = (await api(null, 'POST', '/auth/login', OTHER)).data
+const secondLogin = await api(null, 'POST', '/auth/login', OTHER)
+check(
+  secondLogin.status === 200 || secondLogin.status === 201,
+  `and so does the second account (${OTHER.email})`,
+  `login -> ${secondLogin.status}. Set RUNDESK_EMAIL2 / RUNDESK_PASSWORD2 to a real second member of the same workspace — a call needs two people.`,
+)
+if (secondLogin.status >= 400) await done(null, stack)
+const other = secondLogin.data
 const WS = admin.workspaces?.[0]?.id
 check(!!WS, 'both are in a workspace', `workspaces: ${JSON.stringify(admin.workspaces)?.slice(0, 120)}`)
 
@@ -462,5 +554,29 @@ const realErrors = [...A.errors, ...B.errors].filter(
   (e) => !/ERR_CONNECTION_RESET|favicon|manifest|socket\.io|Failed to load resource/i.test(e),
 )
 check(realErrors.length === 0, 'no script errors on either side', realErrors.slice(0, 3).join(' | '))
+
+// ---------------------------------------------------------------------------
+console.log('\n7. putting the workspace back')
+// ---------------------------------------------------------------------------
+/*
+ * This runs against real workspaces, and a check that leaves litter behind is
+ * a check people stop running. The call ends itself; the channel and the
+ * meeting record it left do not, so they are taken back here.
+ *
+ * Chat has no delete — archiving is the strongest thing it offers, and it is
+ * what takes the channel out of everybody's sidebar.
+ */
+let tidied = 0
+if (record?.id) {
+  const gone = await api(admin.accessToken, 'DELETE', `/workspaces/${WS}/meetings/${record.id}`)
+  if (gone.status < 400) tidied += 1
+}
+const archived = await api(admin.accessToken, 'POST', `/chat/channels/${CHANNEL}/archive`)
+if (archived.status < 400) tidied += 1
+check(
+  tidied === 2,
+  'the channel and the meeting record it made are cleared away',
+  `${tidied}/2 cleaned up — check the workspace for a stray syncup-live-* channel`,
+)
 
 await done(browser, stack)
