@@ -32,8 +32,12 @@ const isApi = (url) => url.startsWith('/api') || url.startsWith('/socket.io') ||
  * @param {object} opts
  * @param {string} opts.dist   built SPA directory
  * @param {number} opts.apiPort port the Nest process is listening on
+ * @param {number} [opts.port]  port to bind; 0 (the default) takes a free one.
+ *   The older suites in here hardcode `http://127.0.0.1:5173`, which is the
+ *   Vite dev server's port. Serving the BUILT bundle there lets them run
+ *   against a real API without each of them learning a new address.
  */
-export async function startLocalStack({ dist, apiPort }) {
+export async function startLocalStack({ dist, apiPort, port: bindPort = 0 }) {
   const server = http.createServer((req, res) => {
     if (isApi(req.url)) {
       const upstream = http.request(
@@ -84,7 +88,7 @@ export async function startLocalStack({ dist, apiPort }) {
     socket.on('error', () => upstream.destroy())
   })
 
-  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  await new Promise((r) => server.listen(bindPort, '127.0.0.1', r))
   const port = server.address().port
   return { server, base: `http://127.0.0.1:${port}`, close: () => server.close() }
 }

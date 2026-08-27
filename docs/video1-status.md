@@ -14,9 +14,10 @@ than none, because it gets quoted.
 - **Frames** — `video1-frame-audit-raw.json`, 15 groups, **157 discrete gaps**
 - **Verified on** `https://rundesk.theaura.agency` — 295 checks across
   `verify-ui.mjs` (186), `verify-release.sh` (72), `syncup-live.mjs` (33),
-  `verify-email.sh` (4)
+  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 87
+  and `chat-message-actions.mjs` (25) is new; both are pending the next deploy.
 
-**Result: 139 of the 157 are closed. 18 remain open, and they cluster.**
+**Result: 150 of the 157 are closed. 7 remain open, and they cluster.**
 
 *Kept current as work lands — see the shipped list at the bottom for what moved
 and when.*
@@ -84,16 +85,37 @@ collapse (#79). That column is where the double-navigation cost actually falls,
 and it is still there. The keyboard shortcut she'd expect (`Ctrl + \`) is also
 shipped since (see below).
 
-### 4. Chat message actions stop short of what the frames show — `13:59–15:47`
+### 4. Chat message actions — **closed 27 Aug**
 
-Built: the full emoji library, reply-into-thread, forward **with provenance**,
-save → surfaces in Later, copy link, mark unread.
+Built already: the full emoji library, reply-into-thread, forward **with
+provenance**, save → surfaces in Later, copy link, mark unread.
 
-Open: **"Assign" on a message does not assign anything** (#104) — the control
-exists in the frames and she names it; there is no assignment behind it. Also
-missing: a reminder on a saved message (#99), the `⋯` overflow on the message
-toolbar (#106), per-thread mute/follow (#116), and onboarding cards on an empty
-channel (#107).
+All five of the open ones shipped together, because they are one surface:
+
+- **#104 "Assign" now assigns.** It used to append `<@id>` to the composer —
+  a mention, not an assignment: nobody was asked, nothing was tracked, nothing
+  said so afterwards. There is now a `chat_message_assignments` row, a chip on
+  the message, a notification to the assignee, an "assigned to me" list, and a
+  tick that marks it done. Deliberately **not** a task: creating a task is the
+  button next to it, and it moves the work away from the thread that explains
+  it.
+- **#106 the bar ends in `⋯`.** It showed up to twelve icons with a
+  three-item menu hidden behind right-click — the crowded surface in front of
+  everyone, the short one behind a gesture nobody tries.
+- **#99 a reminder can hang off a message.** This needed schema:
+  `reminders.task_id` was `NOT NULL`, so a reminder could only be about a task.
+  It is nullable now, with a `message_id` beside it and a CHECK that at most one
+  is set. `/remind in 2 hours call Ali` no longer invents a task to hold its own
+  text — which also means it works in a workspace that has no list yet.
+- **#116 one thread can be muted or followed.** Muting was channel-wide, which
+  is the wrong size: silencing a channel to escape one thread also silences what
+  you are there for. The per-thread answer wins in both directions — muted beats
+  a channel set to *all*, following beats a channel set to *none* — and a direct
+  `@mention` still reaches you either way.
+- **#107 an empty channel offers something to do.** Add people, Track tasks,
+  Add a doc, Start a SyncUp; a DM gets Calendar and SyncUp. **"Import from
+  Slack" is in the frames and is not here** — no Slack import exists anywhere
+  in this codebase, and a card that opens nothing is worse than an absent one.
 
 ---
 
@@ -154,6 +176,11 @@ rather than the diff:
 | 27 Aug | #76 sidebar shortcut | `Ctrl`/`⌘` + `\`, in the tooltips and the shortcuts list |
 | 27 Aug | #15 decline invite | new `declined` status, no login required, idempotent |
 | 27 Aug | #10 recent searches | per workspace, in the browser, recorded once a search has answered |
+| 27 Aug | #104 assign a message | a real assignment with a chip, a notification, an "assigned to me" list and a done tick — not a mention in the composer |
+| 27 Aug | #106 `⋯` overflow | the long tail moved off the bar; right-click is no longer the smaller menu |
+| 27 Aug | #99 reminder on a message | `reminders.task_id` became nullable with a `message_id` beside it; `/remind` stopped inventing tasks |
+| 27 Aug | #116 per-thread mute/follow | `chat_thread_follows`; beats the channel setting both ways, `@mention` still gets through |
+| 27 Aug | #107 empty-channel cards | Add people / Track tasks / Add a doc / Start a SyncUp — Slack import deliberately omitted |
 
 ---
 

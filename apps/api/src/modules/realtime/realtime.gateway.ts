@@ -83,6 +83,10 @@ export type RealtimeEvent =
   | { type: 'chat.message.created'; workspaceId: string; channelId: string; message: unknown }
   | { type: 'chat.message.updated'; workspaceId: string; channelId: string; messageId: string; patch: Record<string, unknown> }
   | { type: 'chat.message.deleted'; workspaceId: string; channelId: string; messageId: string }
+  // §G11 [15:36] — an assignment appeared on, or came off, a message. Carries
+  // only ids: everyone in the channel refetches, and who a message is assigned
+  // to is the same fact for all of them.
+  | { type: 'chat.message.assigned'; workspaceId: string; channelId: string; messageId: string }
   | { type: 'chat.reaction.toggled'; workspaceId: string; channelId: string; messageId: string }
   // Canvas collaboration events
   | { type: 'canvas.created'; workspaceId: string; canvas: unknown; actorId?: string }

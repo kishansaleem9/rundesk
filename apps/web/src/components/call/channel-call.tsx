@@ -42,7 +42,16 @@ export function ChannelCall({
    * still (correctly) said "You're in the SyncUp" had a Leave button that told
    * the server nothing, and the person stayed listed as present forever.
    */
-  action?: { kind: 'join' | 'leave'; callId: string } | null
+  /**
+   * An intent raised from elsewhere in the page — a call card's Join/Leave, or
+   * the empty-channel "Start SyncUp" card (§G11 [14:16]).
+   *
+   * `start` carries no callId because there is no call yet. It could have been
+   * spelled `join` with a placeholder — the id happens to be unread on that
+   * path — but a caller passing a fake id and relying on nobody looking at it
+   * is one refactor away from a bug nobody can find.
+   */
+  action?: { kind: 'join' | 'leave'; callId: string } | { kind: 'start' } | null
   onActionHandled?: () => void
 }) {
   const { t } = useTranslation()
@@ -224,7 +233,11 @@ export function ChannelCall({
   // is a fresh intent rather than a flag nobody reset.
   useEffect(() => {
     if (!action) return
-    if (action.kind === 'join') {
+    if (action.kind === 'start') {
+      // Already in one is already the answer.
+      if (!inCall) beginJoin()
+      else toast(t('call.alreadyInAnother'))
+    } else if (action.kind === 'join') {
       if (inCall && inCall.id !== action.callId) {
         // Being in another call is the ordinary state this feature is built
         // for — minimise one and browse. Doing nothing silently made the

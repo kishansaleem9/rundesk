@@ -198,6 +198,82 @@ export const chatMessageSavesRelations = relations(chatMessageSaves, ({ one }) =
   user:    one(users,        { fields: [chatMessageSaves.userId], references: [users.id] }),
 }))
 
+/**
+ * §G11 [15:36] — "aap us ko ASSIGN bhi kar sakte ho".
+ *
+ * An assigned message is an action item on the message itself, not a task made
+ * from it. The distinction is the whole point: creating a task moves the work
+ * somewhere else and leaves the conversation behind, while assigning says
+ * "this line, you, please" and stays in the thread where the context is. We
+ * already had the first; the button labelled Assign did neither and appended a
+ * mention token to the composer.
+ *
+ * Resolvable rather than deletable. "I did that" and "that was never mine" are
+ * different answers, and an assignment that vanishes on completion takes the
+ * record of who did it with it.
+ */
+export const chatMessageAssignments = pgTable(
+  'chat_message_assignments',
+  {
+    id:           uuid('id').primaryKey().defaultRandom(),
+    messageId:    uuid('message_id').notNull().references((): AnyPgColumn => chatMessages.id, { onDelete: 'cascade' }),
+    assigneeId:   uuid('assignee_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    assignedById: uuid('assigned_by_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Optional deadline, same shape as the one on the create-task drawer. */
+    dueAt:        timestamp('due_at', { withTimezone: true }),
+    /** Stamped when the assignee (or the assigner) marks it done. */
+    resolvedAt:   timestamp('resolved_at', { withTimezone: true }),
+    resolvedById: uuid('resolved_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // One live assignment per person per message. Assigning the same line to
+    // the same person twice is somebody pressing again, not a second job.
+    uniqAssignee: uniqueIndex('chat_message_assignments_unique').on(t.messageId, t.assigneeId),
+    // "What is assigned to me" — the read that makes the feature worth having.
+    byAssignee: index('chat_message_assignments_assignee_idx').on(t.assigneeId, t.resolvedAt),
+  }),
+)
+
+export const chatMessageAssignmentsRelations = relations(chatMessageAssignments, ({ one }) => ({
+  message:  one(chatMessages, { fields: [chatMessageAssignments.messageId], references: [chatMessages.id] }),
+  assignee: one(users,        { fields: [chatMessageAssignments.assigneeId], references: [users.id] }),
+  assigner: one(users,        { fields: [chatMessageAssignments.assignedById], references: [users.id] }),
+}))
+
+/**
+ * §G12 [17:13] — mute or follow one thread, without leaving the channel.
+ *
+ * Muting was channel-wide only, which is too blunt to be the answer she asked
+ * for: silencing the channel to escape one loud thread also silences the
+ * messages you are there for. Following is the same control pointed the other
+ * way — stay on a thread you did not reply to.
+ *
+ * Only the exceptions live here. The default — you hear about a thread you
+ * started or replied to — is still derived, so an untouched thread costs no
+ * rows, and a row means somebody deliberately changed their mind about one.
+ */
+export const chatThreadFollows = pgTable(
+  'chat_thread_follows',
+  {
+    id:              uuid('id').primaryKey().defaultRandom(),
+    /** The thread's parent message — a thread has no id of its own. */
+    parentMessageId: uuid('parent_message_id').notNull().references((): AnyPgColumn => chatMessages.id, { onDelete: 'cascade' }),
+    userId:          uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    /** 'following' overrides silence; 'muted' overrides participation. */
+    state:           text('state').$type<'following' | 'muted'>().notNull(),
+    createdAt:       timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqFollow: uniqueIndex('chat_thread_follows_unique').on(t.parentMessageId, t.userId),
+  }),
+)
+
+export const chatThreadFollowsRelations = relations(chatThreadFollows, ({ one }) => ({
+  parent: one(chatMessages, { fields: [chatThreadFollows.parentMessageId], references: [chatMessages.id] }),
+  user:   one(users,        { fields: [chatThreadFollows.userId], references: [users.id] }),
+}))
+
 // User-named channel groups for the chat rail (§A3.4). Per-user: the same
 // shared channels get a personal arrangement, so renaming or reordering a
 // bucket never touches anyone else's sidebar.

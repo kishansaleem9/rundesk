@@ -49,6 +49,15 @@ import {
   ArrowDown,
   Info,
   Upload,
+  MoreHorizontal,
+  Clock,
+  BellOff,
+  Bell,
+  CheckCircle2,
+  Circle,
+  Calendar,
+  Video,
+  UserRound,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -125,6 +134,24 @@ type Message = {
   deliveryStatus?: 'sent' | 'delivered' | 'seen' | null
   // Saved-message tags (Plan §6.7) — present on rows from the Saved list.
   tags?: string[]
+  /**
+   * §G11 [15:36] — who has been asked to act on this message.
+   *
+   * On the message rather than behind the menu that created it: an assignment
+   * you can only find by re-opening the control that made it is the same as
+   * not having one.
+   */
+  assignments?: Array<{
+    id: string
+    assigneeId: string
+    assigneeName?: string | null
+    assigneeAvatarUrl?: string | null
+    assignedById?: string | null
+    dueAt?: string | null
+    resolvedAt?: string | null
+  }>
+  /** §G12 [17:13] — the reader's own stance on this thread, or null. */
+  threadFollowState?: 'following' | 'muted' | null
   reactions?: Array<{
     emoji: string
     count: number
@@ -185,6 +212,20 @@ type PendingChatAttachment = {
 
 /** Hard cap on a single chat attachment (Plan §6.8) — mirrors the API limit. */
 const MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
+
+/**
+ * §G11 [15:19] — what a reminder field starts on: an hour from now, local.
+ *
+ * `datetime-local` wants "YYYY-MM-DDTHH:mm" with no zone and no seconds, in
+ * the reader's own clock — so `toISOString()` is exactly wrong here, and quietly
+ * so: it renders, it just shows a time in UTC. Subtracting the offset first
+ * makes the slice come out local.
+ */
+function defaultReminderWhen(from: Date = new Date()): string {
+  const inAnHour = new Date(from.getTime() + 60 * 60 * 1000)
+  const local = new Date(inAnHour.getTime() - inAnHour.getTimezoneOffset() * 60 * 1000)
+  return local.toISOString().slice(0, 16)
+}
 
 type CustomEmoji = { id: string; shortcode: string; imageUrl: string; createdById?: string | null }
 
@@ -272,7 +313,9 @@ export function ChatPage() {
    * lives in the message list. Rather than lifting the whole call into this
    * page, the card raises an intent and ChannelCall acts on it and clears it.
    */
-  const [callAction, setCallAction] = useState<{ kind: 'join' | 'leave'; callId: string } | null>(null)
+  const [callAction, setCallAction] = useState<
+    { kind: 'join' | 'leave'; callId: string } | { kind: 'start' } | null
+  >(null)
   // Right-click context menu (Plan §6.10) anchored at the cursor for a message.
   const [messageMenu, setMessageMenu] = useState<{ message: Message; x: number; y: number } | null>(null)
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
@@ -280,6 +323,19 @@ export function ChatPage() {
   const [newEmojiUrl, setNewEmojiUrl] = useState('')
   const [profileTab, setProfileTab] = useState<'activity' | 'tasks' | 'comments'>('activity')
   const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
+  /**
+   * §G11 [15:36] — which message's Assign picker is open.
+   *
+   * The old Assign button appended `<@id>` to the composer, which is a mention,
+   * not an assignment: nobody is asked, nothing is tracked, and nothing says it
+   * later. This one opens a list of the people who can actually see the
+   * conversation.
+   */
+  const [assignPickerFor, setAssignPickerFor] = useState<string | null>(null)
+  /** §G11 [15:19] — "Set reminder" on a message, with the chosen moment. */
+  const [remindDraft, setRemindDraft] = useState<{ message: Message; when: string; note: string } | null>(null)
+  /** §G11 [14:16] — which message's `⋯` overflow is open. */
+  const [overflowFor, setOverflowFor] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [channelSearch, setChannelSearch] = useState('')
   // Channel info panel + its topic field (§A3.7).
@@ -551,6 +607,43 @@ export function ChatPage() {
     for (const reply of repliesByParent.get(threadParentId) ?? []) byId.set(reply.id, reply)
     return [...byId.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
   }, [threadParentId, threadQuery.data, repliesByParent])
+  /**
+   * §G11 [15:36] — who can be assigned a message in this conversation.
+   *
+   * Exactly who the server will accept, which is who can READ the channel —
+   * not who has a membership row. Those differ, and the difference is the
+   * common case: a public channel is readable by the whole workspace, and
+   * plenty of people read one without ever pressing Join. Offering only the
+   * joined list there would hide most of the team behind a distinction they
+   * have never seen.
+   *
+   * A private channel narrows to its members, and a DM to the people in it,
+   * because that is where the two sets genuinely diverge: assigning somebody
+   * who cannot open the channel would notify them with a quote from it and a
+   * link to a screen that refuses them. The server rejects that, and offering
+   * it would be an invitation to the refusal.
+   */
+  const assignCandidates = useMemo(() => {
+    if (selectedChannel?.isDm) {
+      const peers = selectedChannel.dmPeers?.length
+        ? selectedChannel.dmPeers.map((p) => ({
+            userId: p.userId,
+            displayName: p.displayName ?? '',
+            email: '',
+          }))
+        : selectedChannel.dmPeerId
+          ? [{ userId: selectedChannel.dmPeerId, displayName: selectedChannel.dmPeerName ?? '', email: '' }]
+          : []
+      const withMe = me?.id
+        ? [{ userId: me.id, displayName: me.displayName ?? '', email: me.email ?? '' }, ...peers]
+        : peers
+      // De-dupe: a DM's peer list may already include the reader.
+      return [...new Map(withMe.map((p) => [p.userId, p])).values()]
+    }
+    if (selectedChannel?.isPrivate) return channelMembersQuery.data ?? []
+    return membersQuery.data ?? []
+  }, [selectedChannel, channelMembersQuery.data, membersQuery.data, me])
+
   const namesById = useMemo(
     () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
     [membersQuery.data],
@@ -998,6 +1091,82 @@ export function ChatPage() {
     onSuccess: () => {
       setTaskDraft(null)
       toast.success(t('chat.taskCreatedFromMessage'))
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  /**
+   * §G11 [15:36] — assign the message, for real this time.
+   *
+   * Deliberately separate from createTaskFromMessage, which is a different
+   * promise sitting one button along: that one makes a task somewhere else,
+   * this one asks one person about this line and leaves both where they are.
+   */
+  const assignMessageMutation = useMutation({
+    mutationFn: ({ messageId, assigneeId, dueAt }: { messageId: string; assigneeId: string; dueAt?: string }) =>
+      api(`/chat/messages/${messageId}/assign`, {
+        method: 'POST',
+        body: { assigneeId, dueAt: dueAt || undefined },
+      }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+      qc.invalidateQueries({ queryKey: ['chat-assigned-to-me', workspaceId] })
+      setAssignPickerFor(null)
+      toast.success(t('chat.assignedToast', { name: namesById[vars.assigneeId] ?? t('chat.unknownUser') }))
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  const unassignMessageMutation = useMutation({
+    mutationFn: ({ messageId, assigneeId }: { messageId: string; assigneeId: string }) =>
+      api(`/chat/messages/${messageId}/assign/${assigneeId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+      qc.invalidateQueries({ queryKey: ['chat-assigned-to-me', workspaceId] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  /** Done, or not done after all — the same control both ways. */
+  const resolveAssignmentMutation = useMutation({
+    mutationFn: ({ messageId, assigneeId, resolved }: { messageId: string; assigneeId: string; resolved: boolean }) =>
+      api(`/chat/messages/${messageId}/assign/${assigneeId}`, { method: 'PATCH', body: { resolved } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+      qc.invalidateQueries({ queryKey: ['chat-assigned-to-me', workspaceId] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  /** §G11 [15:19] — a reminder that points at the message, not at a stand-in task. */
+  const remindAboutMessageMutation = useMutation({
+    mutationFn: ({ messageId, remindAt, note }: { messageId: string; remindAt: string; note?: string }) =>
+      api(`/chat/messages/${messageId}/remind`, { method: 'POST', body: { remindAt, note: note || undefined } }),
+    onSuccess: () => {
+      setRemindDraft(null)
+      toast.success(t('chat.reminderSetToast'))
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  /**
+   * §G12 [17:13] — mute or follow one thread.
+   *
+   * `null` is a real value here, not an absence: it puts you back on the
+   * default rather than freezing today's answer to what the default means.
+   */
+  const threadFollowMutation = useMutation({
+    mutationFn: ({ messageId, state }: { messageId: string; state: 'following' | 'muted' | null }) =>
+      api(`/chat/messages/${messageId}/thread-follow`, { method: 'PUT', body: { state } }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['chat-messages', selectedId] })
+      toast.success(
+        vars.state === 'muted'
+          ? t('chat.threadMutedToast')
+          : vars.state === 'following'
+            ? t('chat.threadFollowedToast')
+            : t('chat.threadDefaultToast'),
+      )
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
   })
@@ -1744,6 +1913,74 @@ export function ChatPage() {
           </div>
         )}
 
+        {/*
+          * §G11 [15:19] — "Set reminder" on a message.
+          *
+          * The reminder points at the message, so when it fires it takes you
+          * back to the line you wanted to remember. Before this it could not
+          * exist: `reminders.task_id` was NOT NULL, so a reminder could only be
+          * about a task, and the /remind command had to invent one.
+          */}
+        {remindDraft && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setRemindDraft(null)}
+          >
+            <Card className="w-full max-w-md p-4" data-testid="remind-dialog" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">{t('chat.setReminder')}</h3>
+                <button className="text-muted-foreground hover:text-foreground" onClick={() => setRemindDraft(null)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="mb-3 line-clamp-3 rounded border border-border/70 bg-muted/30 px-2 py-1.5 text-[12px] text-muted-foreground">
+                {remindDraft.message.body}
+              </p>
+              <div className="space-y-3">
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.remindMeAt')}
+                  <input
+                    type="datetime-local"
+                    data-testid="remind-when"
+                    value={remindDraft.when}
+                    onChange={(e) => setRemindDraft((prev) => (prev ? { ...prev, when: e.target.value } : prev))}
+                    className="mt-0.5 h-8 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.reminderNote')}
+                  <input
+                    value={remindDraft.note}
+                    placeholder={t('chat.reminderNotePlaceholder')}
+                    onChange={(e) => setRemindDraft((prev) => (prev ? { ...prev, note: e.target.value } : prev))}
+                    className="mt-0.5 h-8 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
+                  />
+                </label>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setRemindDraft(null)}>
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  size="sm"
+                  data-testid="remind-confirm"
+                  disabled={!remindDraft.when || remindAboutMessageMutation.isPending}
+                  onClick={() =>
+                    remindAboutMessageMutation.mutate({
+                      messageId: remindDraft.message.id,
+                      // The field is local wall-clock; the API wants an instant.
+                      remindAt: new Date(remindDraft.when).toISOString(),
+                      note: remindDraft.note,
+                    })
+                  }
+                >
+                  {remindAboutMessageMutation.isPending ? t('common.saving') : t('chat.setReminder')}
+                </Button>
+              </div>
+            </Card>
+          </div>
+        )}
+
         {editHistoryFor && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -1845,6 +2082,74 @@ export function ChatPage() {
               <p className="text-[14px] text-muted-foreground leading-relaxed">
                 {t('chat.conversationStart')}
               </p>
+              {/*
+                * §G11 [14:16] — an empty channel offers something to do.
+                *
+                * A headline and a sentence tell somebody the room is empty,
+                * which they can see. These are the four things people actually
+                * open a new channel to do, each landing on the surface that
+                * already does it. A DM gets the two that make sense in one:
+                * there is nobody to add and no channel to track tasks against.
+                *
+                * "Import from Slack" is in the frames and is NOT here: no
+                * Slack import exists anywhere in this codebase, and a card
+                * that opens nothing is worse than a card that is absent.
+                */}
+              <div className="mt-6 grid w-full grid-cols-2 gap-2" data-testid="channel-empty-actions">
+                {!selectedChannel?.isDm && (
+                  <button
+                    type="button"
+                    data-testid="empty-add-people"
+                    className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left text-[12px] font-medium transition-colors hover:border-violet-500/50 hover:bg-muted/50"
+                    onClick={() => setAddPeopleOpen(true)}
+                  >
+                    <UserPlus className="h-4 w-4 shrink-0 text-violet-500" />
+                    {t('chat.emptyAddPeople')}
+                  </button>
+                )}
+                {!selectedChannel?.isDm && (
+                  <button
+                    type="button"
+                    data-testid="empty-track-tasks"
+                    className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left text-[12px] font-medium transition-colors hover:border-violet-500/50 hover:bg-muted/50"
+                    // Home, not a /tasks route — there isn't one. Home is where
+                    // "Assigned to me" and today's work already live.
+                    onClick={() => navigate({ to: '/app/$workspaceId', params: { workspaceId } })}
+                  >
+                    <ListTodo className="h-4 w-4 shrink-0 text-violet-500" />
+                    {t('chat.emptyTrackTasks')}
+                  </button>
+                )}
+                {selectedChannel?.isDm && (
+                  <button
+                    type="button"
+                    data-testid="empty-view-calendar"
+                    className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left text-[12px] font-medium transition-colors hover:border-violet-500/50 hover:bg-muted/50"
+                    onClick={() => setDmTab('calendar')}
+                  >
+                    <Calendar className="h-4 w-4 shrink-0 text-violet-500" />
+                    {t('chat.emptyViewCalendar')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid="empty-add-doc"
+                  className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left text-[12px] font-medium transition-colors hover:border-violet-500/50 hover:bg-muted/50"
+                  onClick={() => navigate({ to: '/app/$workspaceId/docs', params: { workspaceId } })}
+                >
+                  <FileText className="h-4 w-4 shrink-0 text-violet-500" />
+                  {t('chat.emptyAddDoc')}
+                </button>
+                <button
+                  type="button"
+                  data-testid="empty-start-syncup"
+                  className="flex items-center gap-2 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left text-[12px] font-medium transition-colors hover:border-violet-500/50 hover:bg-muted/50"
+                  onClick={() => setCallAction({ kind: 'start' })}
+                >
+                  <Video className="h-4 w-4 shrink-0 text-violet-500" />
+                  {t('chat.emptyStartSyncup')}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-0 max-w-3xl mx-auto">
@@ -2095,31 +2400,14 @@ export function ChatPage() {
                               </PopoverContent>
                             </Popover>
                           )}
+                          {/* §G11 [14:16] — the bar ends in `⋯`.
+                              It used to show up to twelve icons at once, with a
+                              right-click menu holding three of them. That put
+                              the crowded surface in front of everyone and the
+                              short one behind a gesture nobody tries. What
+                              stays inline is what gets used on almost every
+                              message; the tail moved into the overflow. */}
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
-                          <button
-                            type="button"
-                            title={t('chat.askAi')}
-                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
-                            onClick={() => setInput((prev) => `${prev ? `${prev}\n` : ''}/ai summarize: ${m.body.slice(0, 120)}`)}
-                          >
-                            <Sparkles className="h-3 w-3" />
-                          </button>
-                          <button
-                            type="button"
-                            title={t('chat.createTaskFromMessage')}
-                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
-                            onClick={() => setTaskDraft({ message: m, assigneeId: '', dueAt: '' })}
-                          >
-                            <ListTodo className="h-3 w-3" />
-                          </button>
-                          <button
-                            type="button"
-                            title={t('chat.markUnreadFromHere')}
-                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
-                            onClick={() => markUnreadMutation.mutate({ channelId: m.channelId, messageId: m.id })}
-                          >
-                            <MailOpen className="h-3 w-3" />
-                          </button>
                           <button
                             type="button"
                             title={t('chat.like')}
@@ -2133,7 +2421,6 @@ export function ChatPage() {
                           >
                             <ThumbsUp className="h-3 w-3" />
                           </button>
-                          <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
                             type="button"
                             title={t('chat.reply')}
@@ -2145,40 +2432,65 @@ export function ChatPage() {
                           >
                             <Reply className="h-3 w-3" />
                           </button>
+                          {/* §G11 [15:36] — Assign. Now assigns.
+                              The old one appended `<@id>` to the composer,
+                              which is a mention: nobody is asked, nothing is
+                              tracked, and nothing says so afterwards. */}
                           <button
                             type="button"
-                            title={t('chat.forward')}
-                            className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
-                            onClick={() => setForwardPickerFor((prev) => (prev === m.id ? null : m.id))}
+                            data-testid={`message-assign-${m.id}`}
+                            title={t('chat.assignMessage')}
+                            className={cn(
+                              'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center',
+                              m.assignments?.some((a) => !a.resolvedAt)
+                                ? 'text-violet-600 dark:text-violet-300'
+                                : 'text-muted-foreground hover:text-foreground',
+                            )}
+                            onClick={() => setAssignPickerFor((prev) => (prev === m.id ? null : m.id))}
                           >
-                            <Forward className="h-3 w-3" />
+                            <UserPlus className="h-3 w-3" />
                           </button>
-                          {forwardPickerFor === m.id && (
-                            <div className="absolute right-0 top-8 z-20 w-60 rounded-lg border border-border bg-card shadow-lg p-1.5 space-y-1">
-                              <div className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.forwardTo')}</div>
-                              {[...publicChannels, ...dmChannels].slice(0, 10).map((channel) => (
-                                <button
-                                  key={`fwd-${m.id}-${channel.id}`}
-                                  type="button"
-                                  className="w-full text-left rounded px-2 py-1.5 text-xs hover:bg-muted"
-                                  onClick={() =>
-                                    forwardMutation.mutate({
-                                      channelId: channel.id,
-                                      // No "Forwarded message:" prefix any more —
-                                      // the message says so itself now, and the
-                                      // prefix became part of the text the moment
-                                      // anyone forwarded it onward again.
-                                      body: m.body,
-                                      sourceId: m.id,
+                          {assignPickerFor === m.id && (
+                            <Popover open onOpenChange={(o) => !o && setAssignPickerFor(null)}>
+                              <PopoverAnchor asChild>
+                                <span className="absolute right-0 top-8 h-0 w-0" aria-hidden />
+                              </PopoverAnchor>
+                              <PopoverContent align="end" side="bottom" className="w-60 p-1.5">
+                                <div className="px-1 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                  {t('chat.assignMessageTo')}
+                                </div>
+                                <div className="max-h-56 overflow-y-auto space-y-0.5">
+                                  {assignCandidates.length === 0 ? (
+                                    <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+                                      {t('chat.noOneToAssign')}
+                                    </div>
+                                  ) : (
+                                    assignCandidates.map((person) => {
+                                      const already = m.assignments?.find((a) => a.assigneeId === person.userId)
+                                      return (
+                                        <button
+                                          key={`assign-${m.id}-${person.userId}`}
+                                          type="button"
+                                          data-testid={`assign-option-${person.userId}`}
+                                          disabled={assignMessageMutation.isPending}
+                                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-50"
+                                          onClick={() =>
+                                            already
+                                              ? unassignMessageMutation.mutate({ messageId: m.id, assigneeId: person.userId })
+                                              : assignMessageMutation.mutate({ messageId: m.id, assigneeId: person.userId })
+                                          }
+                                        >
+                                          <UserRound className="h-3.5 w-3.5 text-muted-foreground" />
+                                          <span className="flex-1 truncate">{person.displayName || person.email}</span>
+                                          {already && <Check className="h-3.5 w-3.5 text-violet-500" />}
+                                        </button>
+                                      )
                                     })
-                                  }
-                                >
-                                  {channel.isDm ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage') : `#${channel.name}`}
-                                </button>
-                              ))}
-                            </div>
+                                  )}
+                                </div>
+                              </PopoverContent>
+                            </Popover>
                           )}
-                          <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
                             type="button"
                             title={savedIds.has(m.id) ? t('chat.removeFromSaved') : t('chat.saveMessage')}
@@ -2191,59 +2503,261 @@ export function ChatPage() {
                           >
                             <Bookmark className="h-3 w-3" />
                           </button>
+                          <span className="mx-0.5 h-4 w-px bg-border/70" />
                           <button
                             type="button"
-                            title={m.pinnedAt ? t('chat.unpinFromChannel') : t('chat.pinToChannel')}
-                            disabled={setPinnedMutation.isPending}
-                            className={cn(
-                              'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center disabled:opacity-50',
-                              m.pinnedAt ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground hover:text-foreground',
-                            )}
-                            onClick={() =>
-                              setPinnedMutation.mutate({ messageId: m.id, pinned: !m.pinnedAt })
-                            }
-                          >
-                            {m.pinnedAt ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
-                          </button>
-                          <button
-                            type="button"
-                            title={t('chat.assignOpenProfile')}
+                            data-testid={`message-overflow-${m.id}`}
+                            title={t('chat.moreActions')}
                             className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
-                            onClick={() =>
-                              setInput((prev) => `${prev ? `${prev} ` : ''}<@${m.authorId}> `)
-                            }
+                            onClick={() => setOverflowFor((prev) => (prev === m.id ? null : m.id))}
                           >
-                            <UserPlus className="h-3 w-3" />
+                            <MoreHorizontal className="h-3 w-3" />
                           </button>
-                          {mine && (
-                            <>
-                              <span className="mx-0.5 h-4 w-px bg-border/70" />
-                              <button
-                                type="button"
-                                title={t('chat.editMessage')}
-                                className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center"
-                                onClick={() => {
-                                  setEditingMessageId(m.id)
-                                  setEditingBody(m.body)
-                                }}
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
-                              <button
-                                type="button"
-                                title={t('chat.deleteMessage')}
-                                disabled={deleteMessageMutation.isPending}
-                                className="h-[22px] w-[22px] rounded text-muted-foreground hover:text-red-500 hover:bg-red-500/10 flex items-center justify-center disabled:opacity-50"
-                                onClick={() => {
-                                  if (window.confirm(t('chat.deleteMessageConfirm'))) deleteMessageMutation.mutate(m.id)
-                                }}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </>
+                          {overflowFor === m.id && (
+                            <Popover open onOpenChange={(o) => !o && setOverflowFor(null)}>
+                              <PopoverAnchor asChild>
+                                <span className="absolute right-0 top-8 h-0 w-0" aria-hidden />
+                              </PopoverAnchor>
+                              <PopoverContent align="end" side="bottom" className="w-56 p-1" data-testid="message-overflow-menu">
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                  onClick={() => {
+                                    setInput((prev) => `${prev ? `${prev}\n` : ''}/ai summarize: ${m.body.slice(0, 120)}`)
+                                    setOverflowFor(null)
+                                  }}
+                                >
+                                  <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {t('chat.askAi')}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                  onClick={() => {
+                                    setTaskDraft({ message: m, assigneeId: '', dueAt: '' })
+                                    setOverflowFor(null)
+                                  }}
+                                >
+                                  <ListTodo className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {t('chat.createTaskFromMessage')}
+                                </button>
+                                {/* §G11 [15:19] — "Set reminder", on the message
+                                    itself. It used to be impossible: a reminder
+                                    could only hang off a task. */}
+                                <button
+                                  type="button"
+                                  data-testid={`message-remind-${m.id}`}
+                                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                  onClick={() => {
+                                    setRemindDraft({ message: m, when: defaultReminderWhen(), note: '' })
+                                    setOverflowFor(null)
+                                  }}
+                                >
+                                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {t('chat.setReminder')}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                  onClick={() => {
+                                    markUnreadMutation.mutate({ channelId: m.channelId, messageId: m.id })
+                                    setOverflowFor(null)
+                                  }}
+                                >
+                                  <MailOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {t('chat.markUnreadFromHere')}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                  onClick={() => {
+                                    setForwardPickerFor(m.id)
+                                    setOverflowFor(null)
+                                  }}
+                                >
+                                  <Forward className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {t('chat.forward')}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={setPinnedMutation.isPending}
+                                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-50"
+                                  onClick={() => {
+                                    setPinnedMutation.mutate({ messageId: m.id, pinned: !m.pinnedAt })
+                                    setOverflowFor(null)
+                                  }}
+                                >
+                                  {m.pinnedAt ? (
+                                    <PinOff className="h-3.5 w-3.5 text-muted-foreground" />
+                                  ) : (
+                                    <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+                                  )}
+                                  {m.pinnedAt ? t('chat.unpinFromChannel') : t('chat.pinToChannel')}
+                                </button>
+                                {/* §G12 [17:13] — mute or follow this one thread.
+                                    Offered once a thread exists: there is
+                                    nothing to be noisy about before that. */}
+                                {replyCount > 0 && (
+                                  <>
+                                    <div className="my-1 h-px bg-border/70" />
+                                    <button
+                                      type="button"
+                                      data-testid={`thread-mute-${m.id}`}
+                                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                      onClick={() => {
+                                        threadFollowMutation.mutate({
+                                          messageId: m.id,
+                                          state: m.threadFollowState === 'muted' ? null : 'muted',
+                                        })
+                                        setOverflowFor(null)
+                                      }}
+                                    >
+                                      <BellOff
+                                        className={cn(
+                                          'h-3.5 w-3.5',
+                                          m.threadFollowState === 'muted' ? 'text-violet-500' : 'text-muted-foreground',
+                                        )}
+                                      />
+                                      {m.threadFollowState === 'muted' ? t('chat.unmuteThread') : t('chat.muteThread')}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      data-testid={`thread-follow-${m.id}`}
+                                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                      onClick={() => {
+                                        threadFollowMutation.mutate({
+                                          messageId: m.id,
+                                          state: m.threadFollowState === 'following' ? null : 'following',
+                                        })
+                                        setOverflowFor(null)
+                                      }}
+                                    >
+                                      <Bell
+                                        className={cn(
+                                          'h-3.5 w-3.5',
+                                          m.threadFollowState === 'following' ? 'text-violet-500' : 'text-muted-foreground',
+                                        )}
+                                      />
+                                      {m.threadFollowState === 'following' ? t('chat.unfollowThread') : t('chat.followThread')}
+                                    </button>
+                                  </>
+                                )}
+                                {mine && (
+                                  <>
+                                    <div className="my-1 h-px bg-border/70" />
+                                    <button
+                                      type="button"
+                                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                      onClick={() => {
+                                        setEditingMessageId(m.id)
+                                        setEditingBody(m.body)
+                                        setOverflowFor(null)
+                                      }}
+                                    >
+                                      <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                                      {t('chat.editMessage')}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={deleteMessageMutation.isPending}
+                                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+                                      onClick={() => {
+                                        if (window.confirm(t('chat.deleteMessageConfirm'))) deleteMessageMutation.mutate(m.id)
+                                        setOverflowFor(null)
+                                      }}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      {t('chat.deleteMessage')}
+                                    </button>
+                                  </>
+                                )}
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                          {forwardPickerFor === m.id && (
+                            <div className="absolute right-0 top-8 z-20 w-60 rounded-lg border border-border bg-card shadow-lg p-1.5 space-y-1">
+                              <div className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.forwardTo')}</div>
+                              {[...publicChannels, ...dmChannels].slice(0, 10).map((channel) => (
+                                <button
+                                  key={`fwd-${m.id}-${channel.id}`}
+                                  type="button"
+                                  className="w-full text-left rounded px-2 py-1.5 text-xs hover:bg-muted"
+                                  onClick={() =>
+                                    forwardMutation.mutate({
+                                      // No "Forwarded message:" prefix any more —
+                                      // the message says so itself now, and the
+                                      // prefix became part of the text the moment
+                                      // anyone forwarded it onward again.
+                                      channelId: channel.id,
+                                      body: m.body,
+                                      sourceId: m.id,
+                                    })
+                                  }
+                                >
+                                  {channel.isDm ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage') : `#${channel.name}`}
+                                </button>
+                              ))}
+                            </div>
                           )}
                         </div>
                       </div>
+                      )}
+                      {/* §G11 [15:36] — the assignment, on the message.
+                          Anyone in the channel can see who was asked; only the
+                          assignee or whoever asked would think to press the
+                          tick, and both are allowed to. */}
+                      {!!m.assignments?.length && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1" data-testid={`message-assignments-${m.id}`}>
+                          {m.assignments.map((a) => (
+                            <span
+                              key={a.id}
+                              className={cn(
+                                'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]',
+                                a.resolvedAt
+                                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
+                                  : 'border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300',
+                              )}
+                            >
+                              <button
+                                type="button"
+                                title={a.resolvedAt ? t('chat.reopenAssignment') : t('chat.markAssignmentDone')}
+                                data-testid={`assignment-resolve-${a.assigneeId}`}
+                                disabled={resolveAssignmentMutation.isPending}
+                                className="disabled:opacity-50"
+                                onClick={() =>
+                                  resolveAssignmentMutation.mutate({
+                                    messageId: m.id,
+                                    assigneeId: a.assigneeId,
+                                    resolved: !a.resolvedAt,
+                                  })
+                                }
+                              >
+                                {a.resolvedAt ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                              </button>
+                              <span>
+                                {t('chat.assignedTo', {
+                                  name:
+                                    a.assigneeId === me?.id
+                                      ? t('chat.you')
+                                      : a.assigneeName || namesById[a.assigneeId] || t('chat.unknownUser'),
+                                })}
+                              </span>
+                              {a.dueAt && (
+                                <span className="opacity-80">· {new Date(a.dueAt).toLocaleDateString()}</span>
+                              )}
+                              <button
+                                type="button"
+                                title={t('chat.removeAssignment')}
+                                className="opacity-60 hover:opacity-100"
+                                onClick={() =>
+                                  unassignMessageMutation.mutate({ messageId: m.id, assigneeId: a.assigneeId })
+                                }
+                              >
+                                <X className="h-2.5 w-2.5" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
                       )}
                       {!!m.reactions?.length && (
                         <div className="mt-1 flex items-center gap-1 flex-wrap">
@@ -2634,6 +3148,9 @@ export function ChatPage() {
             onMarkUnread={(messageId) =>
               markUnreadMutation.mutate({ channelId: threadParent.channelId, messageId })
             }
+            onSetFollowState={(state) =>
+              threadFollowMutation.mutate({ messageId: threadParent.id, state })
+            }
             pending={sendMutation.isPending}
             namesById={namesById}
             customEmoji={customEmoji}
@@ -2648,7 +3165,7 @@ export function ChatPage() {
             tasks={profileTasksQuery.data ?? []}
             tab={profileTab}
             onChangeTab={setProfileTab}
-            onAssign={() => setInput((prev) => `${prev ? `${prev} ` : ''}<@${selectedProfile.userId}> `)}
+            onMention={() => setInput((prev) => `${prev ? `${prev} ` : ''}<@${selectedProfile.userId}> `)}
             onStartDm={() => createDmMutation.mutate(selectedProfile.userId)}
             onOpenActivity={(entry) => void openThreadFromActivity(entry)}
             onOpenTask={(task) =>
@@ -3378,6 +3895,7 @@ function ThreadPanel({
   onReply,
   onToggleReaction,
   onMarkUnread,
+  onSetFollowState,
   pending,
   namesById,
   customEmoji,
@@ -3394,6 +3912,8 @@ function ThreadPanel({
   onReply: (body: string, alsoSendToChannel: boolean) => void
   onToggleReaction: (messageId: string, emoji: string) => void
   onMarkUnread: (messageId: string) => void
+  /** §G12 [17:13] — mute or follow this thread, or clear back to the default. */
+  onSetFollowState: (state: 'following' | 'muted' | null) => void
   pending: boolean
   namesById: Record<string, string>
   customEmoji?: CustomEmoji[]
@@ -3475,13 +3995,49 @@ function ThreadPanel({
             {tCount('chat.threadFollowers', followers.length)}
           </div>
         </div>
-        <button
-          type="button"
-          className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-          onClick={onClose}
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-0.5">
+          {/*
+            * §G12 [17:13] — the bell and the bookmark she pointed at, here in
+            * the thread header (frames 277/282).
+            *
+            * Channel-wide mute was the only control before this, and it is the
+            * wrong size: silencing a channel to escape one noisy thread also
+            * silences the messages you are in it for. Pressing the lit one
+            * again clears back to the default rather than flipping to the
+            * opposite — "not muted" and "followed" are different answers.
+            */}
+          <button
+            type="button"
+            data-testid="thread-panel-mute"
+            title={parent.threadFollowState === 'muted' ? t('chat.unmuteThread') : t('chat.muteThread')}
+            className={cn(
+              'h-8 w-8 rounded-md flex items-center justify-center hover:bg-black/[0.04] dark:hover:bg-white/[0.06]',
+              parent.threadFollowState === 'muted' ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground',
+            )}
+            onClick={() => onSetFollowState(parent.threadFollowState === 'muted' ? null : 'muted')}
+          >
+            <BellOff className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            data-testid="thread-panel-follow"
+            title={parent.threadFollowState === 'following' ? t('chat.unfollowThread') : t('chat.followThread')}
+            className={cn(
+              'h-8 w-8 rounded-md flex items-center justify-center hover:bg-black/[0.04] dark:hover:bg-white/[0.06]',
+              parent.threadFollowState === 'following' ? 'text-violet-600 dark:text-violet-300' : 'text-muted-foreground',
+            )}
+            onClick={() => onSetFollowState(parent.threadFollowState === 'following' ? null : 'following')}
+          >
+            <Bell className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white dark:bg-[#0f1114]">
         <div className="group/msg rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
@@ -3551,7 +4107,7 @@ function ProfilePanel({
   tasks,
   tab,
   onChangeTab,
-  onAssign,
+  onMention,
   onStartDm,
   onOpenActivity,
   onOpenTask,
@@ -3562,7 +4118,7 @@ function ProfilePanel({
   tasks: ProfileTask[]
   tab: 'activity' | 'tasks' | 'comments'
   onChangeTab: (tab: 'activity' | 'tasks' | 'comments') => void
-  onAssign: () => void
+  onMention: () => void
   onStartDm: () => void
   onOpenActivity: (entry: Message) => void
   onOpenTask: (task: ProfileTask) => void
@@ -3599,8 +4155,19 @@ function ProfilePanel({
           <div className="mt-1 text-xs text-muted-foreground">{tCount('chat.messagesInContext', stats.totalMessages)}</div>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" className="flex-1" onClick={onAssign}>
-            {t('chat.assign')}
+          {/*
+            * §G11 [15:36] — this one says what it does.
+            *
+            * It was labelled "Assign" and appended `<@id>` to the composer,
+            * which is the same lie the message toolbar's Assign told and is
+            * fixed there by actually assigning. Here there is nothing TO
+            * assign: you are looking at a person, not at a piece of work, and
+            * inventing a subject ("assign them… what?") would be guessing at a
+            * feature nobody asked for. So the label matches the behaviour. The
+            * person panel itself is `05:35–06:35` and is its own piece of work.
+            */}
+          <Button size="sm" className="flex-1" data-testid="profile-mention" onClick={onMention}>
+            {t('chat.mention')}
           </Button>
           <Button size="sm" variant="secondary" className="flex-1" onClick={onStartDm}>
             {t('chat.message')}

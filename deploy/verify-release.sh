@@ -383,6 +383,39 @@ check_sql "feature_flag_requests table exists (0113)" \
 check_sql "and the lookup it is read by is indexed" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='feature_flag_requests_recent_idx');" "t"
 
+# ──────────────── §G11/§G12 message actions (0114–0115) ───────────────────
+# Added WITH the migration, per the lesson two blocks up.
+#
+# Each of these fails silently rather than loudly if the migration is missed,
+# which is the only reason they are worth a check. A missing assignments table
+# turns Assign into a 500 the moment somebody presses it; a task_id that is
+# still NOT NULL makes every message reminder and every /remind fail with a
+# constraint error nobody can read; and the two enum labels are what the Inbox
+# files these under, so without them the notification insert itself throws.
+say "Message actions are on this release (0114–0115)"
+check_sql "an invitation can be declined (0114)" \
+  "SELECT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='invitation_status' AND e.enumlabel='declined');" "t"
+check_sql "chat_message_assignments table exists (0115)" \
+  "SELECT to_regclass('public.chat_message_assignments') IS NOT NULL;" "t"
+check_sql "one live assignment per person per message" \
+  "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='chat_message_assignments_unique');" "t"
+check_sql "chat_thread_follows table exists (0115)" \
+  "SELECT to_regclass('public.chat_thread_follows') IS NOT NULL;" "t"
+# A reminder can now be about a message, or about nothing. If task_id is still
+# NOT NULL here, the column check passes on a fresh `push` database and fails on
+# a migrated one — which is exactly the split this whole block exists to catch.
+check_sql "a reminder no longer requires a task" \
+  "SELECT is_nullable FROM information_schema.columns WHERE table_name='reminders' AND column_name='task_id';" "YES"
+check_sql "and can point at a message instead" \
+  "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='reminders' AND column_name='message_id');" "t"
+# Nullable on both sides is not the same as unconstrained.
+check_sql "but never at both at once" \
+  "SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='reminders_one_subject');" "t"
+check_sql "the message_assigned notification kind exists" \
+  "SELECT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='notification_type' AND e.enumlabel='message_assigned');" "t"
+check_sql "the message_reminder notification kind exists" \
+  "SELECT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='notification_type' AND e.enumlabel='message_reminder');" "t"
+
 # ────────────────── §G08 [08:37] unread, split by workspace ───────────────
 # The switcher's dot. Checked against the bell's own total as well as for its
 # own sake: two counts of "unread" that disagree are worse than one, and the
@@ -429,6 +462,60 @@ if [ -n "$ITOK" ]; then
     || bad "preview after decline -> $GONE (expected 410)"
 else
   bad "could not create an invitation to decline -> $(printf '%s' "$INV" | head -c 140)"
+fi
+
+# ────────────── §G11 [15:36]/[15:19] assign and remind, for real ──────────
+# The table checks above prove the migration ran. They cannot tell the
+# difference between a working feature and four routes returning 500, which is
+# what "Assign" was before this release: a button that appended a mention to
+# the composer and told nobody anything.
+say "A message can be assigned, and remembered"
+CHN=$(curl -fsS --max-time 20 -X POST "$API/workspaces/$WS/chat/channels" -H "$AUTH" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"release-check-$$\",\"description\":\"deploy check\"}" 2>/dev/null || true)
+CHID=$(printf '%s' "$CHN" | jget id)
+if [ -n "$CHID" ]; then
+  MSG=$(curl -fsS --max-time 20 -X POST "$API/chat/channels/$CHID/messages" -H "$AUTH" \
+    -H 'Content-Type: application/json' -d '{"body":"deploy check: assign me"}' 2>/dev/null || true)
+  MSGID=$(printf '%s' "$MSG" | jget id)
+  if [ -n "$MSGID" ]; then
+    ok "a message can be posted to assign"
+    ASG=$(curl -fsS --max-time 20 -X POST "$API/chat/messages/$MSGID/assign" -H "$AUTH" \
+      -H 'Content-Type: application/json' -d "{\"assigneeId\":\"$ME\"}" 2>/dev/null || true)
+    printf '%s' "$ASG" | grep -q "$ME" \
+      && ok "and assigned to somebody" \
+      || bad "assign -> $(printf '%s' "$ASG" | head -c 140)"
+    MINE=$(curl -fsS --max-time 20 "$API/workspaces/$WS/chat/assigned-to-me" -H "$AUTH" 2>/dev/null || true)
+    printf '%s' "$MINE" | grep -q "$MSGID" \
+      && ok "and it reaches the assignee's own list" \
+      || bad "assigned-to-me -> $(printf '%s' "$MINE" | head -c 140)"
+    # Resolved, not deleted: who did it is a fact worth keeping.
+    RES=$(curl -fsS --max-time 20 -X PATCH "$API/chat/messages/$MSGID/assign/$ME" -H "$AUTH" \
+      -H 'Content-Type: application/json' -d '{"resolved":true}' 2>/dev/null || true)
+    printf '%s' "$RES" | grep -q 'resolvedAt' \
+      && ok "and can be marked done" \
+      || bad "resolve -> $(printf '%s' "$RES" | head -c 140)"
+    # The reminder that could not exist before 0115: no task behind it.
+    WHEN=$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v+1H +%Y-%m-%dT%H:%M:%SZ)
+    REM=$(curl -fsS --max-time 20 -X POST "$API/chat/messages/$MSGID/remind" -H "$AUTH" \
+      -H 'Content-Type: application/json' -d "{\"remindAt\":\"$WHEN\",\"note\":\"deploy check\"}" 2>/dev/null || true)
+    printf '%s' "$REM" | grep -q "$MSGID" \
+      && ok "a reminder can hang off the message itself" \
+      || bad "message reminder -> $(printf '%s' "$REM" | head -c 140)"
+    # §G12 — the per-thread stance persists and reads back.
+    curl -fsS --max-time 20 -X PUT "$API/chat/messages/$MSGID/thread-follow" -H "$AUTH" \
+      -H 'Content-Type: application/json' -d '{"state":"muted"}' >/dev/null 2>&1 || true
+    TF=$(curl -fsS --max-time 20 "$API/chat/messages/$MSGID/thread-follow" -H "$AUTH" 2>/dev/null || true)
+    printf '%s' "$TF" | grep -q 'muted' \
+      && ok "a single thread can be muted, and stays muted" \
+      || bad "thread-follow -> $(printf '%s' "$TF" | head -c 140)"
+  else
+    bad "could not post a message to assign -> $(printf '%s' "$MSG" | head -c 140)"
+  fi
+  # Leave the instance as it was found.
+  curl -fsS --max-time 20 -X POST "$API/chat/channels/$CHID/archive" -H "$AUTH" >/dev/null 2>&1 || true
+else
+  bad "could not create a channel for the assign check -> $(printf '%s' "$CHN" | head -c 140)"
 fi
 
 say "A meeting is a record, not a link"

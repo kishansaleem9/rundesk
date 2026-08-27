@@ -123,6 +123,13 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // aap chaho to wahan se direct call join ho jaoge". A SyncUp starting in a
   // channel, delivered to that channel's members with a way in.
   'call_started',
+  // §G11 [15:36] — a chat message assigned to you as an action item. Distinct
+  // from task_assigned: nothing was created, and the thing you are being asked
+  // about is a line in a conversation, so the link has to land on the message.
+  'message_assigned',
+  // §G11 [15:19] — a reminder you set on a saved message coming due. It reads
+  // as task_due_soon only if you squint, and clicking it must open the message.
+  'message_reminder',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

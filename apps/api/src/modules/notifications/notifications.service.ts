@@ -169,6 +169,11 @@ type NotificationType =
   | 'access_requested'
   // §2.8 [19:25] — "aap ko notification aa raha hoga ke CALL ka option aaya".
   | 'call_started'
+  // §G11 [15:36] — a chat message assigned to you as an action item. Not
+  // task_assigned: nothing was created, and the link has to open the message.
+  | 'message_assigned'
+  // §G11 [15:19] — a reminder you set on a message coming due.
+  | 'message_reminder'
 
 type NotificationEventKey =
   | 'mention'
@@ -1137,12 +1142,18 @@ export class NotificationsService {
     switch (type) {
       case 'task_mentioned':
         return 'mention'
+      // §G11 [15:36] — being asked to act on a message is being assigned
+      // something. Somebody who muted "assigned" meant both.
       case 'task_assigned':
+      case 'message_assigned':
         return 'assigned'
       case 'task_commented':
         return 'comment'
+      // §G11 [15:19] — a reminder you set yourself is a deadline arriving,
+      // whatever it is about, so it rides the same channel as a due date.
       case 'task_due_soon':
       case 'task_overdue':
+      case 'message_reminder':
         return 'due'
       // A task becoming blocked is a workflow/state change — route it with
       // status notifications so muting status also mutes blocked alerts.

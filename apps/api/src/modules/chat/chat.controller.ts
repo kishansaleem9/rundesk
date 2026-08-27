@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Patch, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -448,5 +448,69 @@ export class ChatController {
     @Body() body: { tags?: string[] },
   ) {
     return this.chat.updateSavedTags(messageId, user.id, body.tags)
+  }
+
+  // §G11 [15:36] — assign a message to somebody as an action item.
+  @Post('chat/messages/:messageId/assign')
+  assign(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { assigneeId: string; dueAt?: string | null },
+  ) {
+    return this.chat.assignMessage(messageId, user.id, body.assigneeId, body.dueAt ?? null)
+  }
+
+  @Delete('chat/messages/:messageId/assign/:assigneeId')
+  unassign(
+    @Param('messageId') messageId: string,
+    @Param('assigneeId') assigneeId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.chat.unassignMessage(messageId, user.id, assigneeId)
+  }
+
+  /** Mark an assignment done, or re-open it. */
+  @Patch('chat/messages/:messageId/assign/:assigneeId')
+  resolveAssignment(
+    @Param('messageId') messageId: string,
+    @Param('assigneeId') assigneeId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { resolved?: boolean },
+  ) {
+    return this.chat.resolveMessageAssignment(messageId, user.id, assigneeId, body.resolved !== false)
+  }
+
+  /** Everything still assigned to the caller across this workspace. */
+  @Get('workspaces/:workspaceId/chat/assigned-to-me')
+  assignedToMe(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.chat.listMyAssignments(workspaceId, user.id)
+  }
+
+  // §G12 [17:13] — follow or mute one thread without leaving the channel.
+  @Get('chat/messages/:messageId/thread-follow')
+  getThreadFollow(@Param('messageId') messageId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.chat.getThreadFollow(messageId, user.id)
+  }
+
+  @Put('chat/messages/:messageId/thread-follow')
+  setThreadFollow(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { state: 'following' | 'muted' | null },
+  ) {
+    return this.chat.setThreadFollow(messageId, user.id, body.state ?? null)
+  }
+
+  // §G11 [15:19] — "Set reminder" on a message you saved.
+  @Post('chat/messages/:messageId/remind')
+  remind(
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { remindAt: string; note?: string },
+  ) {
+    return this.chat.remindAboutMessage(messageId, user.id, body.remindAt, body.note)
   }
 }

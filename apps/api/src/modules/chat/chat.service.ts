@@ -10,6 +10,9 @@ import {
   chatMessageReactions,
   chatMessageEdits,
   chatMessageSaves,
+  // §G11/§G12 — assigning a message, and muting or following one thread.
+  chatMessageAssignments,
+  chatThreadFollows,
   chatCustomEmoji,
   workspaceMembers,
   spaces,
@@ -1503,6 +1506,53 @@ export class ChatService {
       }
     }
 
+    /*
+     * §G11 [15:36] — who this message is assigned to, and whether it is done.
+     *
+     * Hydrated with the messages rather than fetched per message on hover: an
+     * assignment has to be visible on the message itself, otherwise it is a
+     * fact you can only discover by opening the menu that created it, which is
+     * the same as not having it.
+     */
+    const assignmentRows = await this.db
+      .select({
+        id: chatMessageAssignments.id,
+        messageId: chatMessageAssignments.messageId,
+        assigneeId: chatMessageAssignments.assigneeId,
+        assignedById: chatMessageAssignments.assignedById,
+        dueAt: chatMessageAssignments.dueAt,
+        resolvedAt: chatMessageAssignments.resolvedAt,
+        assigneeName: users.displayName,
+        assigneeAvatarUrl: users.avatarUrl,
+      })
+      .from(chatMessageAssignments)
+      .leftJoin(users, eq(users.id, chatMessageAssignments.assigneeId))
+      .where(inArray(chatMessageAssignments.messageId, messageIds))
+    const assignmentsByMessage = new Map<string, typeof assignmentRows>()
+    for (const a of assignmentRows) {
+      const list = assignmentsByMessage.get(a.messageId) ?? []
+      list.push(a)
+      assignmentsByMessage.set(a.messageId, list)
+    }
+
+    /*
+     * §G12 [17:13] — the reader's own stance on each thread.
+     *
+     * Only rows for threads on this page, and only this reader's: "muted" is a
+     * private decision, and showing the bell struck through on somebody else's
+     * screen would leak it.
+     */
+    const followRows = await this.db
+      .select({ parentMessageId: chatThreadFollows.parentMessageId, state: chatThreadFollows.state })
+      .from(chatThreadFollows)
+      .where(
+        and(
+          eq(chatThreadFollows.userId, userId),
+          inArray(chatThreadFollows.parentMessageId, messageIds),
+        ),
+      )
+    const followByParent = new Map(followRows.map((r) => [r.parentMessageId, r.state]))
+
     return ordered.map((message) => {
       const byEmoji = grouped.get(message.id)
       const reactions =
@@ -1534,6 +1584,18 @@ export class ChatService {
         // call card. Null on a card whose call has been deleted, too, which is
         // why the message keeps its plain-words body.
         call: message.callId ? callById.get(message.callId) ?? null : null,
+        // §G11 — empty on a message nobody has been asked to act on.
+        assignments: (assignmentsByMessage.get(message.id) ?? []).map((a) => ({
+          id: a.id,
+          assigneeId: a.assigneeId,
+          assigneeName: a.assigneeName,
+          assigneeAvatarUrl: a.assigneeAvatarUrl,
+          assignedById: a.assignedById,
+          dueAt: a.dueAt,
+          resolvedAt: a.resolvedAt,
+        })),
+        // §G12 — 'following' | 'muted' | null, meaning "I have not said".
+        threadFollowState: followByParent.get(message.id) ?? null,
       }
     })
   }
@@ -1619,7 +1681,27 @@ export class ChatService {
       users: [...usersForEmoji].map((id) => ({ id, name: reactorNameById.get(id) ?? 'teammate' })),
     }))
 
-    return { ...row, reactions }
+    /*
+     * §G12 — the reader's stance, same field name listMessages uses.
+     *
+     * The thread panel prefers the message from the loaded page and falls back
+     * to this one when the parent has scrolled out of it. If only one of the
+     * two carried the stance, the bell would light up or not depending on how
+     * far you had scrolled, which is the sort of bug that gets filed as
+     * "sometimes it forgets".
+     */
+    const [stance] = await this.db
+      .select({ state: chatThreadFollows.state })
+      .from(chatThreadFollows)
+      .where(
+        and(
+          eq(chatThreadFollows.parentMessageId, row.parentMessageId ?? row.id),
+          eq(chatThreadFollows.userId, userId),
+        ),
+      )
+      .limit(1)
+
+    return { ...row, reactions, threadFollowState: stance?.state ?? null }
   }
 
   async getThread(messageId: string, userId: string, limit = 100) {
@@ -1772,6 +1854,27 @@ export class ChatService {
     const levelByUser = new Map(levelRows.map((r) => [r.userId, r.level]))
     const channelMemberIds = levelRows.map((r) => r.userId)
 
+    /*
+     * §G12 [17:13] — per-thread mute and follow, which override the channel.
+     *
+     * "10 groups mein se ek thread bohot noisy hai" — silencing the channel to
+     * escape one thread also silences the messages you are there for, so the
+     * more specific answer wins over the channel-wide one in BOTH directions:
+     * muted beats level 'all', and following beats level 'none'.
+     *
+     * Only for replies. A root message is not in a thread yet, so there is
+     * nothing about it anybody can have muted.
+     */
+    const threadRootId = data.parentMessageId ?? null
+    const threadStanceByUser = new Map<string, 'following' | 'muted'>()
+    if (threadRootId) {
+      const stanceRows = await this.db
+        .select({ userId: chatThreadFollows.userId, state: chatThreadFollows.state })
+        .from(chatThreadFollows)
+        .where(eq(chatThreadFollows.parentMessageId, threadRootId))
+      for (const s of stanceRows) threadStanceByUser.set(s.userId, s.state)
+    }
+
     // Broadcast mentions @here / @channel (Plan §6.9): fan a mention-level ping
     // out to (present) channel members, respecting each member's DND + level.
     const special = this.extractSpecialMentions(body)
@@ -1823,8 +1926,14 @@ export class ChatService {
     const notifiedIds = new Set([...mentionTargets, data.authorId])
     for (const userId of channelMemberIds) {
       if (notifiedIds.has(userId)) continue
-      // Only 'all' members hear non-mention messages; 'mentions'/'none' opt out.
-      if ((levelByUser.get(userId) ?? 'all') !== 'all') continue
+      const stance = threadStanceByUser.get(userId)
+      // Muted this thread — the one case where a level of 'all' is not the
+      // last word. A direct @mention still reaches them: that loop ran above,
+      // deliberately, because you cannot hide from being named.
+      if (stance === 'muted') continue
+      // Following this thread — heard even at 'mentions' or 'none', which is
+      // the point of asking to follow a thread inside a channel you muted.
+      if (stance !== 'following' && (levelByUser.get(userId) ?? 'all') !== 'all') continue
       void this.notifications.create({
         userId,
         workspaceId: channel.workspaceId,
@@ -1965,9 +2074,9 @@ export class ChatService {
 
   /**
    * Run a leading slash command from the composer (Plan §6.3). `/task <text>`
-   * creates a task from the text; `/remind <when> <text>` schedules a reminder
-   * (backed by a task, since reminders are task-scoped here). Either way a
-   * confirmation message is posted to the channel instead of the literal command.
+   * creates a task from the text; `/remind <when> <text>` schedules a reminder.
+   * Either way a confirmation message is posted to the channel instead of the
+   * literal command.
    */
   async runCommand(channelId: string, userId: string, command: string, text: string) {
     const channel = await this.assertChannelAccess(channelId, userId)
@@ -1991,20 +2100,23 @@ export class ChatService {
     if (cmd === 'remind') {
       const { when, note, phrase } = this.parseReminderWhen(trimmed)
       if (!note) throw new BadRequestException('Usage: /remind <when> <what> (e.g. /remind in 2 hours review the PR)')
-      const listId = await this.resolveDefaultList(channel.workspaceId)
-      if (!listId) throw new BadRequestException('No list is available to attach a reminder to yet — create a space, project and list first.')
       const title = note.split('\n')[0].slice(0, 200)
-      // Back the reminder with a task carrying its text, then schedule via the
-      // existing reminders service (no schema/service changes to reminders).
-      const task = await this.tasks.createTask({ listId, title, description: note, createdById: userId })
-      if (!task) throw new BadRequestException('Could not create the reminder task')
-      const reminder = await this.reminders.create(channel.workspaceId, userId, task.id, when, note)
+      /*
+       * §G11 [15:19] — no longer backed by an invented task.
+       *
+       * It used to create one to hold the text, because `reminders.task_id` was
+       * NOT NULL. That put a phantom task in somebody's list for every
+       * egg-timer they set, and refused outright in a workspace with no list —
+       * an odd prerequisite for "remind me in two hours". The subject is
+       * optional now, so the reminder simply carries its own note.
+       */
+      const reminder = await this.reminders.createStandalone(channel.workspaceId, userId, when, note)
       const message = await this.postMessage({
         channelId,
         authorId: userId,
         body: `⏰ **Reminder set** (${phrase}) — ${title}`,
       })
-      return { kind: 'remind' as const, reminder, task, message }
+      return { kind: 'remind' as const, reminder, message }
     }
 
     // §15 — a skill's slash command. ClickUp: "The /Slash Command for AI Skills
@@ -2210,6 +2322,270 @@ export class ChatService {
       .delete(chatMessageSaves)
       .where(and(eq(chatMessageSaves.messageId, messageId), eq(chatMessageSaves.userId, userId)))
     return { messageId, saved }
+  }
+
+  /**
+   * §G11 [15:36] — assign a message to somebody as an action item.
+   *
+   * "aap us ko ASSIGN bhi kar sakte ho." Deliberately *not* a task: creating a
+   * task is a different button that already works, and it moves the work away
+   * from the conversation that explains it. This asks one person about one line
+   * and leaves both where they are.
+   *
+   * The assignee must be able to read the channel. Assigning a private
+   * conversation to somebody who is not in it would notify them with a body
+   * quote and a link they cannot open — a leak with a "you can't see this"
+   * screen at the end of it.
+   */
+  async assignMessage(
+    messageId: string,
+    actorId: string,
+    assigneeId: string,
+    dueAt?: string | Date | null,
+  ) {
+    if (!assigneeId) throw new BadRequestException('assigneeId is required')
+    const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!message) throw new NotFoundException('Message not found')
+    const channel = await this.assertChannelAccess(message.channelId, actorId)
+    await this.assertChannelAccess(message.channelId, assigneeId).catch(() => {
+      throw new BadRequestException('That person cannot see this conversation')
+    })
+
+    let due: Date | null = null
+    if (dueAt) {
+      due = dueAt instanceof Date ? dueAt : new Date(dueAt)
+      if (Number.isNaN(due.getTime())) throw new BadRequestException('dueAt must be a valid date')
+    }
+
+    // Pressing Assign on somebody who already has it re-opens it and updates
+    // the date, rather than failing on the unique index. "Assign again" is what
+    // a person means by pressing it twice, and it is also how a due date is
+    // changed without an edit control of its own.
+    const [row] = await this.db
+      .insert(chatMessageAssignments)
+      .values({ messageId, assigneeId, assignedById: actorId, dueAt: due })
+      .onConflictDoUpdate({
+        target: [chatMessageAssignments.messageId, chatMessageAssignments.assigneeId],
+        set: { dueAt: due, assignedById: actorId, resolvedAt: null, resolvedById: null },
+      })
+      .returning()
+
+    const [assignee] = await this.db
+      .select({ displayName: users.displayName, avatarUrl: users.avatarUrl })
+      .from(users)
+      .where(eq(users.id, assigneeId))
+    const [actor] = await this.db
+      .select({ displayName: users.displayName })
+      .from(users)
+      .where(eq(users.id, actorId))
+
+    // Assigning yourself something is a note to self, not a notification.
+    if (assigneeId !== actorId) {
+      void this.notifications.create({
+        userId: assigneeId,
+        workspaceId: channel.workspaceId,
+        actorId,
+        type: 'message_assigned',
+        title: `${actor?.displayName ?? 'A teammate'} assigned you a message in ${channel.isDm ? 'a direct message' : `#${channel.name}`}`,
+        body: message.body.slice(0, 180),
+        target: {
+          entityType: 'chat_message',
+          entityId: message.id,
+          url: `/app/${channel.workspaceId}/chat?channel=${message.channelId}&message=${message.id}`,
+        },
+        emailContext: { taskTitle: `#${channel.name}`, commentSnippet: message.body.slice(0, 180) },
+      })
+    }
+
+    // Everyone in the channel sees the badge appear without a refetch.
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.message.assigned',
+      workspaceId: channel.workspaceId,
+      channelId: message.channelId,
+      messageId: message.id,
+    })
+
+    return {
+      ...row,
+      assigneeName: assignee?.displayName ?? null,
+      assigneeAvatarUrl: assignee?.avatarUrl ?? null,
+    }
+  }
+
+  /** Take an assignment back off somebody. Idempotent. */
+  async unassignMessage(messageId: string, actorId: string, assigneeId: string) {
+    const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!message) throw new NotFoundException('Message not found')
+    const channel = await this.assertChannelAccess(message.channelId, actorId)
+    await this.db
+      .delete(chatMessageAssignments)
+      .where(
+        and(
+          eq(chatMessageAssignments.messageId, messageId),
+          eq(chatMessageAssignments.assigneeId, assigneeId),
+        ),
+      )
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.message.assigned',
+      workspaceId: channel.workspaceId,
+      channelId: message.channelId,
+      messageId: message.id,
+    })
+    return { messageId, assigneeId, assigned: false }
+  }
+
+  /**
+   * Mark an assignment done, or re-open it.
+   *
+   * Resolving stamps rather than deletes: "I did that" and "that was never
+   * mine" are different answers, and an assignment that disappears on
+   * completion takes the record of who did it with it. Either the assignee or
+   * whoever asked can resolve — the assigner watching it land is as common as
+   * the assignee reporting it.
+   */
+  async resolveMessageAssignment(
+    messageId: string,
+    actorId: string,
+    assigneeId: string,
+    resolved: boolean,
+  ) {
+    const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!message) throw new NotFoundException('Message not found')
+    const channel = await this.assertChannelAccess(message.channelId, actorId)
+    const [row] = await this.db
+      .update(chatMessageAssignments)
+      .set(
+        resolved
+          ? { resolvedAt: new Date(), resolvedById: actorId }
+          : { resolvedAt: null, resolvedById: null },
+      )
+      .where(
+        and(
+          eq(chatMessageAssignments.messageId, messageId),
+          eq(chatMessageAssignments.assigneeId, assigneeId),
+        ),
+      )
+      .returning()
+    if (!row) throw new NotFoundException('Assignment not found')
+    this.realtime.emitToWorkspace(channel.workspaceId, {
+      type: 'chat.message.assigned',
+      workspaceId: channel.workspaceId,
+      channelId: message.channelId,
+      messageId: message.id,
+    })
+    return row
+  }
+
+  /**
+   * Everything still assigned to the caller in this workspace, oldest first.
+   *
+   * Oldest first on purpose: an action item nobody has picked up in a week is
+   * the one worth surfacing, and newest-first buries exactly that row.
+   */
+  async listMyAssignments(workspaceId: string, userId: string) {
+    return this.db
+      .select({
+        id: chatMessageAssignments.id,
+        messageId: chatMessageAssignments.messageId,
+        channelId: chatMessages.channelId,
+        channelName: chatChannels.name,
+        isDm: chatChannels.isDm,
+        body: chatMessages.body,
+        authorId: chatMessages.authorId,
+        authorName: users.displayName,
+        assignedById: chatMessageAssignments.assignedById,
+        dueAt: chatMessageAssignments.dueAt,
+        resolvedAt: chatMessageAssignments.resolvedAt,
+        createdAt: chatMessageAssignments.createdAt,
+      })
+      .from(chatMessageAssignments)
+      .innerJoin(chatMessages, eq(chatMessages.id, chatMessageAssignments.messageId))
+      .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+      .leftJoin(users, eq(users.id, chatMessages.authorId))
+      .where(
+        and(
+          eq(chatMessageAssignments.assigneeId, userId),
+          eq(chatChannels.workspaceId, workspaceId),
+          isNull(chatMessageAssignments.resolvedAt),
+        ),
+      )
+      .orderBy(asc(chatMessageAssignments.createdAt))
+  }
+
+  /**
+   * §G12 [17:13] — follow or mute one thread.
+   *
+   * Three states, and `null` is one of them: not having said is different from
+   * having said "normal", because what "normal" means depends on whether you
+   * ever replied. Clearing the row puts you back on the default rather than
+   * freezing today's answer to it.
+   */
+  async setThreadFollow(
+    parentMessageId: string,
+    userId: string,
+    state: 'following' | 'muted' | null,
+  ) {
+    const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, parentMessageId))
+    if (!message) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(message.channelId, userId)
+    // A thread is named by its root. Muting a reply means muting its thread,
+    // which is what somebody right-clicking the reply meant.
+    const rootId = message.parentMessageId ?? message.id
+
+    if (state === null) {
+      await this.db
+        .delete(chatThreadFollows)
+        .where(
+          and(eq(chatThreadFollows.parentMessageId, rootId), eq(chatThreadFollows.userId, userId)),
+        )
+      return { parentMessageId: rootId, state: null }
+    }
+    if (state !== 'following' && state !== 'muted') {
+      throw new BadRequestException("state must be 'following', 'muted' or null")
+    }
+    await this.db
+      .insert(chatThreadFollows)
+      .values({ parentMessageId: rootId, userId, state })
+      .onConflictDoUpdate({
+        target: [chatThreadFollows.parentMessageId, chatThreadFollows.userId],
+        set: { state },
+      })
+    return { parentMessageId: rootId, state }
+  }
+
+  /** The caller's stance on one thread: 'following' | 'muted' | null. */
+  async getThreadFollow(parentMessageId: string, userId: string) {
+    const [message] = await this.db
+      .select({ id: chatMessages.id, channelId: chatMessages.channelId, parentMessageId: chatMessages.parentMessageId })
+      .from(chatMessages)
+      .where(eq(chatMessages.id, parentMessageId))
+    if (!message) throw new NotFoundException('Message not found')
+    await this.assertChannelAccess(message.channelId, userId)
+    const rootId = message.parentMessageId ?? message.id
+    const [row] = await this.db
+      .select({ state: chatThreadFollows.state })
+      .from(chatThreadFollows)
+      .where(and(eq(chatThreadFollows.parentMessageId, rootId), eq(chatThreadFollows.userId, userId)))
+      .limit(1)
+    return { parentMessageId: rootId, state: row?.state ?? null }
+  }
+
+  /**
+   * §G11 [15:19] — "Set reminder" on a saved message.
+   *
+   * The reminder points at the message, so the notification lands you back on
+   * the line you wanted to remember rather than on a task invented to hold it.
+   */
+  async remindAboutMessage(
+    messageId: string,
+    userId: string,
+    remindAt: string | Date,
+    note?: string,
+  ) {
+    const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
+    if (!message) throw new NotFoundException('Message not found')
+    const channel = await this.assertChannelAccess(message.channelId, userId)
+    return this.reminders.createForMessage(channel.workspaceId, userId, messageId, remindAt, note)
   }
 
   /** Replace the tags on an already-saved message (Plan §6.7). */
