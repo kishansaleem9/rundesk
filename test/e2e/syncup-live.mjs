@@ -401,6 +401,35 @@ const previewLive = await A.page
   .catch(() => false)
 check(previewLive, 'with the camera actually running in the preview', 'the preview never produced a frame')
 
+/*
+ * §2.8 [19:46] — "aur yahan SPEAKER ka option hai."
+ *
+ * The re-audit found a pre-join offering a microphone and a camera and nothing
+ * for output. Checked here rather than in a unit test because the picker is
+ * deliberately conditional: it appears only where the browser can act on the
+ * choice, so the question worth asking on a real release is "does the browser
+ * running this have routable outputs, and if so is it being offered them" —
+ * which needs the browser, not the source.
+ */
+const routable = await A.page.evaluate(async () => {
+  const supported = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype
+  if (!supported) return 0
+  return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput').length
+})
+if (routable > 0) {
+  const speaker = A.page.locator('[data-testid="call-prejoin-speaker-select"]')
+  const hasSpeaker = await speaker.isVisible().catch(() => false)
+  check(hasSpeaker, 'and offers a speaker beside the mic and camera', 'no output picker in the pre-join')
+  if (hasSpeaker) {
+    const options = await speaker.locator('option').count()
+    check(options > 1, 'with the outputs this machine actually has', `only ${options} option in the speaker list`)
+  }
+} else {
+  // Said out loud rather than skipped silently: a run that never checked is
+  // not a run that passed, and a green line here would claim otherwise.
+  console.log('  · no routable audio outputs in this browser — speaker picker not applicable')
+}
+
 await A.page.locator('[data-testid="call-prejoin-join"]').click()
 
 // Polled, not read once: pressing Join is the START of a request, and reading

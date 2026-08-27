@@ -22,7 +22,7 @@ import { useCallRecording } from '../../lib/use-call-recording'
 import { capturerFor } from '../../lib/call-recording'
 import { presentIn, type Call } from '../../lib/calls-api'
 import { EmojiPicker } from '../emoji/emoji-picker'
-import { BACKGROUND_TINT, type CallBackground } from './call-prejoin'
+import { BACKGROUND_TINT, applySink, type CallBackground } from './call-prejoin'
 
 /** How long a reaction stays on screen. Long enough to see, short enough to pass. */
 const REACTION_MS = 3000
@@ -54,6 +54,7 @@ export function CallSurface({
   recordingBusy,
   onInvite,
   canRecord,
+  speakerId,
 }: {
   call: Call
   myUserId: string
@@ -65,6 +66,8 @@ export function CallSurface({
   recordingBusy: boolean
   onInvite: () => void
   canRecord: boolean
+  /** §2.8 [19:46] — the audio output chosen before joining. */
+  speakerId?: string
 }) {
   const { t } = useTranslation()
   const [minimised, setMinimised] = useState(false)
@@ -307,7 +310,13 @@ export function CallSurface({
             background={background}
           />
           {peers.map((p) => (
-            <Tile key={p.userId} label={nameOf(p.userId)} stream={p.stream} background="none" />
+            <Tile
+              key={p.userId}
+              label={nameOf(p.userId)}
+              stream={p.stream}
+              background="none"
+              speakerId={speakerId}
+            />
           ))}
         </div>
 
@@ -451,17 +460,29 @@ function Tile({
   muted,
   videoOff,
   background,
+  speakerId,
 }: {
   label: string
   stream: MediaStream | null
   muted?: boolean
   videoOff?: boolean
   background: CallBackground
+  /** §2.8 [19:46] — the output picked in the pre-join, honoured per tile. */
+  speakerId?: string
 }) {
   const ref = useRef<HTMLVideoElement | null>(null)
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream
   }, [stream])
+  /*
+   * Re-applied when the stream changes as well as when the choice does: a tile
+   * that swaps to a new participant's stream is, as far as the element is
+   * concerned, a fresh source, and routing set before it arrived does not
+   * always survive. Cheap to redo, and silent when unsupported.
+   */
+  useEffect(() => {
+    void applySink(ref.current, speakerId ?? '')
+  }, [speakerId, stream])
   return (
     <div
       className={cn('relative rounded-xl overflow-hidden bg-black min-h-0', BACKGROUND_TINT[background])}

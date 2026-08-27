@@ -63,6 +63,8 @@ export function ChannelCall({
   const [prejoin, setPrejoin] = useState(false)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [background, setBackground] = useState<CallBackground>('none')
+  // §2.8 [19:46] — carried from the pre-join into the call, where the audio is.
+  const [speakerId, setSpeakerId] = useState<string>('')
   const [inCall, setInCall] = useState<Call | null>(null)
   const [consentOpen, setConsentOpen] = useState(false)
   const [recordingBusy, setRecordingBusy] = useState(false)
@@ -171,7 +173,7 @@ export function ChannelCall({
 
   const beginJoin = () => setPrejoin(true)
 
-  const confirmJoin = async (media: MediaStream, chosen: CallBackground) => {
+  const confirmJoin = async (media: MediaStream, chosen: CallBackground, speaker: string) => {
     if (!channelId) return false
     setJoining(true)
     try {
@@ -183,6 +185,7 @@ export function ChannelCall({
       joinedAt.current = Date.now()
       setStream(media)
       setBackground(chosen)
+      setSpeakerId(speaker)
       setInCall(call)
       setPrejoin(false)
       return true
@@ -342,6 +345,7 @@ export function ChannelCall({
           recordingBusy={recordingBusy}
           onInvite={onInvite}
           canRecord={canRecord}
+          speakerId={speakerId}
         />
       )}
 

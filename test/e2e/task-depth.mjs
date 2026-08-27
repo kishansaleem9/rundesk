@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 23
+const EXPECTED_CHECKS = 28
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -354,6 +354,72 @@ try {
     await page.locator('table').first().isVisible().catch(() => false),
     'and renders as a real table, not a row of pipes',
   )
+
+  /*
+   * §G [21:36] — "START date aur DUE date … TIME ke saath."
+   *
+   * The re-audit's one real find in this area. Both fields were
+   * `<input type="date">` over `timestamp with time zone` columns, so the only
+   * instant a person could write was midnight — and nudging a day threw away a
+   * time the row was already holding, silently, with nothing on screen to show
+   * it had gone.
+   *
+   * Exercised in the order that made the bug visible: store a time, see that
+   * the control can show it, change the day, and check the clock survived.
+   */
+  const dated = await A('/tasks', {
+    method: 'POST',
+    body: { listId, title: `date depth ${Date.now()}`, dueDate: new Date(2026, 9, 2, 9, 15).toISOString() },
+  })
+  const datedId = dated.data?.id
+  check(Boolean(datedId), 'a task with a due time can be created')
+
+  await page.goto(
+    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${datedId}`,
+    {
+      waitUntil: 'domcontentloaded',
+    },
+  )
+  await page.waitForTimeout(4000)
+
+  // Field labels are plain divs, not <label>s, so this reads the label text.
+  const dateField = (label) =>
+    page.evaluateHandle((lbl) => {
+      for (const d of Array.from(document.querySelectorAll('div.text-xs.uppercase'))) {
+        if (d.textContent?.trim().startsWith(lbl)) return d.parentElement?.querySelector('input')
+      }
+      return null
+    }, label).then((h) => h.asElement())
+
+  const dueEl = await dateField('Due date')
+  const startEl = await dateField('Start date')
+  check(Boolean(dueEl) && Boolean(startEl), 'the sheet has a due and a start field')
+  if (dueEl && startEl) {
+    const dueType = await dueEl.evaluate((e) => e.type)
+    const startType = await startEl.evaluate((e) => e.type)
+    check(
+      dueType === 'datetime-local' && startType === 'datetime-local',
+      'and both of them can hold a time',
+      `due=${dueType} start=${startType}`,
+    )
+    const shown = await dueEl.evaluate((e) => e.value)
+    check(shown.endsWith('T09:15'), 'a stored time is visible in the control', shown)
+
+    await dueEl.evaluate((e) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+      set.call(e, '2026-10-05T16:45')
+      e.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await page.waitForTimeout(2500)
+    const after = new Date((await A(`/tasks/${datedId}`)).data?.dueDate)
+    check(
+      after.getDate() === 5 && after.getHours() === 16 && after.getMinutes() === 45,
+      'a time typed into the sheet is stored as that instant',
+      after.toISOString(),
+    )
+  }
+
+  await A(`/tasks/${datedId}`, { method: 'DELETE' })
 
   await done(browser, stack)
 } catch (err) {

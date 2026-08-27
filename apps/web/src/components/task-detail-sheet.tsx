@@ -62,6 +62,7 @@ import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useDateFormat } from '../lib/date-format'
+import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart } from '../lib/task-dates'
 import { TaskSheetSkeleton } from './loading-skeletons'
 import { InlineSkeleton } from './loading-skeletons'
 
@@ -1308,7 +1309,6 @@ function OverviewPanel({
     enabled: Boolean(detail.listId),
   })
   const statusOptions = statusesQuery.data ?? []
-  const toDateInput = (d: string | null | undefined) => (d ? new Date(d).toISOString().slice(0, 10) : '')
 
   const commitDescription = () => {
     const trimmed = descriptionDraft.trim()
@@ -1691,19 +1691,24 @@ function OverviewPanel({
             </span>
           }
         >
+          {/* §G [21:36] — the deadline is a moment, not a day. See
+              lib/task-dates.ts for why this is local-time and what a bare
+              `type="date"` here used to do to a time already on the row. */}
           <input
-            type="date"
-            value={toDateInput(detail.dueDate)}
-            onChange={(e) => patchTask.mutate({ dueDate: e.target.value || null })}
+            type="datetime-local"
+            data-testid="task-due-date"
+            value={toDateTimeInput(detail.dueDate)}
+            onChange={(e) => patchTask.mutate({ dueDate: fromDateTimeInput(e.target.value) })}
             disabled={patchTask.isPending}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
         </Field>
         <Field label={t('taskDetail.fieldStartDate')}>
           <input
-            type="date"
-            value={toDateInput(detail.startDate)}
-            onChange={(e) => patchTask.mutate({ startDate: e.target.value || null })}
+            type="datetime-local"
+            data-testid="task-start-date"
+            value={toDateTimeInput(detail.startDate)}
+            onChange={(e) => patchTask.mutate({ startDate: fromDateTimeInput(e.target.value) })}
             disabled={patchTask.isPending}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
@@ -2396,12 +2401,17 @@ function SubtasksPanel({
                   ))}
                 </select>
               )}
+              {/* Deliberately coarse — a full datetime control would be wider
+                  than the subtask row it sits in. Coarse is fine; destroying a
+                  time it cannot show is not, hence withDatePart. */}
               {editingSubtaskId !== s.id && (
                 <input
                   type="date"
                   className="h-7 rounded border border-border bg-background px-1 text-[11px] text-muted-foreground"
-                  value={s.dueDate ? s.dueDate.slice(0, 10) : ''}
-                  onChange={(e) => setDueDate.mutate({ id: s.id, dueDate: e.target.value || null })}
+                  value={toDateInput(s.dueDate)}
+                  onChange={(e) =>
+                    setDueDate.mutate({ id: s.id, dueDate: withDatePart(s.dueDate, e.target.value) })
+                  }
                   title={t('taskDetail.dueDateTitle')}
                 />
               )}

@@ -232,3 +232,60 @@ describe('§2.8 an already-enabled feature stops being gated', () => {
     )
   })
 })
+
+/**
+ * §2.8 `[19:46]` — "aur yahan SPEAKER ka option hai."
+ *
+ * The re-audit found the pre-join offering a microphone and a camera and
+ * nothing for output. This is the wiring half of that fix, and it is the half
+ * that can rot: a picker whose value never reaches the elements the call's
+ * audio comes out of is indistinguishable, from the seat, from no picker at
+ * all — you choose your headphones, the sound keeps coming from the laptop,
+ * and there is nothing on screen to suggest the control was ignored.
+ *
+ * So each of the four joints is asserted separately: enumerate, offer, carry,
+ * apply. Any one of them missing is the whole feature missing.
+ */
+describe('§2.8 the speaker you choose is the speaker it uses', () => {
+  const prejoin = source('components/call/call-prejoin.tsx', 'export function CallPreJoin')
+  const surface = source('components/call/call-surface.tsx', 'export function CallSurface')
+  const channel = source('components/call/channel-call.tsx', 'CallPreJoin')
+
+  it('enumerates outputs, not just inputs', () => {
+    assert.match(prejoin, /kind === 'audiooutput'/, 'output devices are never collected')
+  })
+
+  it('offers them, and only where the browser can honour the choice', () => {
+    assert.match(prejoin, /data-testid="call-prejoin-speaker-select"/, 'no speaker picker in the pre-join')
+    // Firefox keeps setSinkId behind a pref and Safari has never shipped it. A
+    // picker drawn there would silently do nothing, which is worse than the
+    // gap this replaced: the person would have every reason to believe it had
+    // worked.
+    assert.match(prejoin, /'setSinkId' in HTMLMediaElement\.prototype/, 'the picker is drawn without checking it can work')
+    assert.match(prejoin, /showSpeakers = canPickSpeaker\(\) && devices\.speakers\.length > 0/,
+      'the picker is not gated on both support and having something to offer')
+  })
+
+  it('carries the choice out of the dialog and into the call', () => {
+    assert.match(prejoin, /onJoin\(stream, background, speakerId\)/, 'the choice never leaves the pre-join')
+    assert.match(channel, /setSpeakerId\(speaker\)/, 'the join handler drops the chosen speaker')
+    assert.match(channel, /speakerId=\{speakerId\}/, 'the call surface is never told which speaker')
+  })
+
+  it('and applies it to the elements the call actually plays through', () => {
+    // The tiles are where remote audio comes out; routing anything else would
+    // be a setting that looks applied and is not.
+    assert.match(surface, /speakerId=\{speakerId\}/, 'the peer tiles are not given the speaker')
+    assert.match(surface, /void applySink\(ref\.current, speakerId \?\? ''\)/, 'nothing ever calls setSinkId')
+    assert.match(surface, /\}, \[speakerId, stream\]\)/,
+      're-routing does not re-run when the tile swaps to another stream')
+  })
+
+  it('survives a device that disappears between listing and using it', () => {
+    // Unplugging headphones between enumerate and setSinkId is ordinary. An
+    // unhandled rejection here would take down a call that is otherwise fine.
+    const fn = /export async function applySink\(([\s\S]*?)\n\}/.exec(prejoin)?.[1] ?? ''
+    assert.ok(fn, 'could not find applySink')
+    assert.match(fn, /try \{[\s\S]*?\} catch \{/, 'a vanished output device would reject unhandled')
+  })
+})

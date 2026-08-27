@@ -39,6 +39,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { toDateInput, withDatePart } from '../lib/task-dates'
 import { criticalPath } from '../lib/gantt'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { ListStatusesManager } from '../components/list-statuses-manager'
@@ -2615,12 +2616,15 @@ function TaskRow({
         <Flag className={cn('h-3.5 w-3.5 shrink-0', PRIORITY_COLORS[task.priority])} />
       )}
 
+      {/* Coarse on purpose — this is a nudge from a row, not the place you set
+          a deadline. It may change the day; it may not quietly drop a time the
+          row is carrying, which sending a bare YYYY-MM-DD did. */}
       {onPatchTask ? (
         <input
           type="date"
-          value={task.dueDate ? format(new Date(task.dueDate), 'yyyy-MM-dd') : ''}
+          value={toDateInput(task.dueDate)}
           onClick={(e) => e.stopPropagation()}
-          onChange={(e) => void onPatchTask(task.id, { dueDate: e.target.value || null })}
+          onChange={(e) => void onPatchTask(task.id, { dueDate: withDatePart(task.dueDate, e.target.value) })}
           title={t('list.setDueDateTitle')}
           className="h-6 w-[7.5rem] shrink-0 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
         />

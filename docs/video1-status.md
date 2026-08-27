@@ -313,7 +313,9 @@ verdict here resolves to a file and a line rather than a commit message.
 Two limits worth stating plainly.
 
 **This does not look for a 158th gap.** It re-verifies the 157 the frame audit
-found; it does not re-watch the video for asks that audit missed.
+found; it does not re-watch the video for asks that audit missed. — *That limit
+has since been lifted; see the third pass below, which went looking and found
+two.*
 
 **"Shipped" means live, and checked there.** Every row in the shipped table was
 driven against the deployed instance, not only against a laptop — the 452
@@ -328,3 +330,114 @@ digit in the payload — including the ones inside a workspace UUID — and had
 passed an earlier release only because the map it read happened to be empty.
 The other pointed at a task id that was really a deleted task type. Where a
 check now cannot compare, it says `SKIP` and names what it did not look at.
+
+---
+
+## Third pass — exercised, not inspected (27 Aug)
+
+The two passes above answered "does this exist?". This one answers "does it
+work?", which turns out to be a different question: every control named in the
+transcript was **driven** against a real browser on the real stack, and every
+result read back off the API rather than off the screen.
+
+It found **two gaps the frame audit could not have found**, because in both
+cases the thing was present and looked right.
+
+### #158 — the deadline could not have a time on it
+
+> `[21:36–23:38]` "START date aur DUE date dono set kar sakte ho — TIME ke
+> saath."
+
+`start_date` and `due_date` are `timestamp with time zone`. The API parsed and
+stored a time perfectly well. Both controls were `<input type="date">`.
+
+What made it a defect rather than a missing feature is what that did to a time
+already on the row — this is the probe output, unedited:
+
+```
+WORKS the API stores a due time — 2026-09-15T17:30:00.000Z
+NOTE  the control shows "2026-09-15" for a task due 17:30
+NOTE  after a UI date edit: 2026-09-16T00:00:00.000Z
+GAP   a due/start date cannot carry a time in the UI, and editing the date
+      throws away a time the row was holding
+```
+
+Moving a deadline one day forward silently destroyed 17:30. Nothing errored;
+the field simply could not represent what it was holding, so it overwrote it.
+
+**Closed.** Both fields are `datetime-local` now. The pickers that stay coarse
+on purpose — the list row, the subtask line, where a full datetime control
+would be wider than the row it sits in — change the day and leave the clock
+alone, via `withDatePart` in `apps/web/src/lib/task-dates.ts`.
+
+The timezone rule is the part worth reading before touching it. Every row
+written before this is UTC midnight, because that is what `new Date('2026-09-16')`
+parses to; translated literally into local terms the whole estate would appear
+to shift by a day. So a value with no time in it is shown as the day it was
+picked, and only a value carrying a real time is converted. The rule is stable
+in both directions, and the suite proves it from **UTC+14 to UTC−11**, because
+in UTC alone both branches coincide and every one of these tests would pass
+while being wrong.
+
+### #159 — no speaker
+
+> `[19:46]` "aur yahan SPEAKER ka option hai."
+
+The pre-join offered a microphone and a camera. `setSinkId`, `audiooutput` and
+`audioOutput` returned zero hits across `apps/web/src`. Output was the one
+device choice you cannot correct once the call has started: a wrong camera is
+something you can see, a wrong speaker means silence and asking whether anyone
+is there.
+
+**Closed.** Outputs are enumerated from the same call that already lists mics
+and cameras, offered beside them, carried through Join, and applied with
+`setSinkId` on the tiles the call's audio actually comes out of. Gated on
+support — Firefox keeps `setSinkId` behind a pref and Safari has never shipped
+it — because a picker that changed nothing would be worse than the gap it
+replaced: you would choose your headphones, hear nothing, and have no reason to
+suspect the control was decorative.
+
+### Everything else exercised, and working
+
+Trash and the 30-day bin (restore, delete forever, retention stated, and the
+restored task back in its list); task types end to end including a search
+filter that actually discriminates; priorities (task lines, typed lines,
+ticking off, reordering); tags, dependencies, subtasks, checklists, assignment,
+priority, estimate, the `/` block menu and its ten blocks; `?task=<id>` deep
+links; threaded replies and the unread map.
+
+### Eleven verdicts of mine that were wrong, and how
+
+Worth recording, because they are all one mistake wearing different hats:
+**reading a surface instead of driving it.**
+
+| I claimed | Actually |
+|---|---|
+| No Restore in the bin | Behind an icon-only `⋯` trigger; I read `innerText` and got `""` |
+| Five search filters broken | Search returns mixed types; the filters bite on tasks and the rest backfills |
+| No task-type search filter | Compared `task-<uuid>` against `<uuid>` |
+| No call background picker | `call-prejoin-backgrounds`, present all along |
+| Five in-call controls missing | Labels live in `title`, not `innerText` |
+| Followers Add doesn't work | Correctly disabled until something is selected |
+| Google Drive integration absent | Wrong route |
+| `?task=` deep link is inert | Consumed at line 1293 via `URLSearchParams`, which my `useSearch` grep missed |
+| Estimate doesn't persist | A synthetic `blur` Event; React listens on `focusout` |
+| Dependencies/checklists store nothing | Wrong body param and wrong route — `relatedTaskId`, and items hang off the task |
+| A binned task is still editable | True at the API, but no UI path reaches it and the deep link does not open it |
+
+The two that survived did so because the probe compared a **before and an
+after** rather than looking for a word: store 17:30, edit the day, read it back.
+That is the shape a check has to have to be worth running.
+
+### What now guards them
+
+| | checks |
+|---|---|
+| `task-dates.test.ts` — the losing cases, in five timezones | 9 |
+| `call-wiring.test.ts` — enumerate, offer, carry, apply | 24 (5 new) |
+| `task-depth.mjs` — a time typed in the sheet, stored as that instant | 28 (5 new) |
+| `syncup-live.mjs` — a speaker offered beside the mic and camera | 30 (2 new) |
+
+The two call checks are conditional on the browser having routable outputs, and
+say so out loud when it does not — a run that never checked is not a run that
+passed.

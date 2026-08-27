@@ -37,6 +37,35 @@ export const BACKGROUND_TINT: Record<CallBackground, string> = {
   plum: 'bg-[#3d1f47]',
 }
 
+/**
+ * §2.8 `[19:46]` — "aur yahan SPEAKER ka option hai."
+ *
+ * Output routing is the one device choice you cannot fix once the call has
+ * started: a mic or camera on the wrong device is something you can see and
+ * correct, whereas the wrong speaker means you hear nothing and everyone else
+ * hears you asking whether anyone is there.
+ *
+ * Gated on support rather than always drawn. `setSinkId` is Chromium-and-Edge
+ * (Firefox keeps it behind a pref, Safari has never shipped it), and a picker
+ * that changed nothing would be worse than no picker at all — the person would
+ * choose their headphones, hear nothing, and have no reason to suspect the
+ * control was decorative.
+ */
+export const canPickSpeaker = (): boolean =>
+  typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype
+
+/** Route an element's audio at a device, ignoring the ones that cannot be. */
+export async function applySink(el: HTMLMediaElement | null, deviceId: string): Promise<void> {
+  if (!el || !deviceId || !canPickSpeaker()) return
+  try {
+    await (el as HTMLMediaElement & { setSinkId(id: string): Promise<void> }).setSinkId(deviceId)
+  } catch {
+    // A device unplugged between enumerate and here, or one the page is not
+    // allowed to address. The default output still works; failing loudly over
+    // it would take down a call that is otherwise fine.
+  }
+}
+
 export function CallPreJoin({
   onJoin,
   onCancel,
@@ -44,7 +73,11 @@ export function CallPreJoin({
   peopleAlreadyIn,
 }: {
   /** Resolves false when the join did not happen, so the preview comes back. */
-  onJoin: (stream: MediaStream, background: CallBackground) => void | boolean | Promise<void | boolean>
+  onJoin: (
+    stream: MediaStream,
+    background: CallBackground,
+    speakerId: string,
+  ) => void | boolean | Promise<void | boolean>
   onCancel: () => void
   joining: boolean
   peopleAlreadyIn: number
@@ -53,12 +86,14 @@ export function CallPreJoin({
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
 
-  const [devices, setDevices] = useState<{ mics: MediaDeviceInfo[]; cams: MediaDeviceInfo[] }>({
-    mics: [],
-    cams: [],
-  })
+  const [devices, setDevices] = useState<{
+    mics: MediaDeviceInfo[]
+    cams: MediaDeviceInfo[]
+    speakers: MediaDeviceInfo[]
+  }>({ mics: [], cams: [], speakers: [] })
   const [micId, setMicId] = useState<string>('')
   const [camId, setCamId] = useState<string>('')
+  const [speakerId, setSpeakerId] = useState<string>('')
   const [micOn, setMicOn] = useState(true)
   const [camOn, setCamOn] = useState(true)
   const [background, setBackground] = useState<CallBackground>('none')
@@ -98,6 +133,10 @@ export function CallPreJoin({
         setDevices({
           mics: all.filter((d) => d.kind === 'audioinput'),
           cams: all.filter((d) => d.kind === 'videoinput'),
+          // Enumerated from the same call: a browser that reports outputs at
+          // all reports them here, and one that does not returns an empty list
+          // rather than throwing.
+          speakers: all.filter((d) => d.kind === 'audiooutput'),
         })
       } catch (err) {
         if (cancelled) return
@@ -144,10 +183,13 @@ export function CallPreJoin({
    * pressed to no effect because there was nothing left to hand over, and the
    * camera it had let go of was running with no owner to stop it.
    */
+  // Only when the browser can act on the choice AND has something to offer.
+  const showSpeakers = canPickSpeaker() && devices.speakers.length > 0
+
   const handOff = async () => {
     const stream = takeStream(streamRef)
     if (!stream) return
-    const joined = await onJoin(stream, background)
+    const joined = await onJoin(stream, background, speakerId)
     if (joined === false) streamRef.current = stream
   }
 
@@ -237,7 +279,7 @@ export function CallPreJoin({
           </div>
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className={cn('grid gap-2', showSpeakers ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
           <select
             value={micId}
             onChange={(e) => setMicId(e.target.value)}
@@ -264,6 +306,21 @@ export function CallPreJoin({
               </option>
             ))}
           </select>
+          {showSpeakers && (
+            <select
+              value={speakerId}
+              onChange={(e) => setSpeakerId(e.target.value)}
+              data-testid="call-prejoin-speaker-select"
+              className="h-9 rounded-md border border-border/70 bg-background px-2 text-sm"
+            >
+              <option value="">{t('call.defaultSpeaker')}</option>
+              {devices.speakers.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || t('call.unnamedSpeaker')}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {peopleAlreadyIn > 0 && (
