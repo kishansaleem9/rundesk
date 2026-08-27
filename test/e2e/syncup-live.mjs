@@ -558,6 +558,61 @@ if (await recordBtn.isVisible().catch(() => false)) {
 }
 
 // ---------------------------------------------------------------------------
+console.log('\n5b. the recording reaches storage, from the browser')
+// ---------------------------------------------------------------------------
+/*
+ * The half of recording that a presign check cannot reach.
+ *
+ * "A pre-signed upload URL is issued" proves the API can sign. It proves
+ * nothing about the request the recorder actually makes, which is a
+ * cross-origin PUT from the app's origin to the bucket — and that is refused
+ * unless the bucket carries a CORS policy naming that origin. The failure is
+ * entirely browser-side: every server-side check passes, the presign is
+ * perfect, and uploads still never arrive.
+ *
+ * So the PUT is made from INSIDE the page, which is the only place the
+ * question can be asked honestly. Same for playback afterwards.
+ *
+ * Skipped rather than failed where storage is unconfigured — locally and in
+ * CI there is no bucket, and a check that cannot run must say so rather than
+ * report a verdict it did not reach.
+ */
+let storageChecked = false
+{
+  const up = await api(admin.accessToken, 'POST', `/workspaces/${WS}/calls/${callId}/recording/upload-url`, {
+    contentType: 'audio/webm',
+  })
+  if (up.status >= 400) {
+    console.log(`  SKIP  object storage is not configured here (upload-url -> ${up.status}) — not checked, not passed`)
+  } else {
+    storageChecked = true
+    check(Boolean(up.data?.uploadUrl && up.data?.storageKey), 'a pre-signed upload URL is issued', JSON.stringify(up.data)?.slice(0, 140))
+
+    const SIZE = 2048
+    const put = await A.page.evaluate(async ([url, size]) => {
+      const bytes = new Uint8Array(size).fill(7)
+      try {
+        const r = await fetch(url, { method: 'PUT', body: bytes, headers: { 'content-type': 'audio/webm' } })
+        return { ok: r.ok, status: r.status }
+      } catch (e) {
+        return { ok: false, error: String(e) }
+      }
+    }, [up.data.uploadUrl, SIZE])
+    check(
+      put.ok === true,
+      `the browser can PUT the recording to storage (${put.status ?? ''})`,
+      `${put.error ?? `HTTP ${put.status}`} — this is what bucket CORS refusing the app's origin looks like; every server-side check still passes`,
+    )
+
+    const attached = await api(admin.accessToken, 'POST', `/workspaces/${WS}/calls/${callId}/recording/attach`, {
+      storageKey: up.data.storageKey,
+    })
+    check(attached.status < 400, 'and the call keeps the key it landed under', `attach -> ${attached.status}`)
+    globalThis.__expectBytes = SIZE
+  }
+}
+
+// ---------------------------------------------------------------------------
 console.log('\n6. hanging up — and the record it leaves')
 // ---------------------------------------------------------------------------
 // The LAST person out is what ends a call, so one person leaving must not.
@@ -594,6 +649,29 @@ check(
   `attendees: ${JSON.stringify(record?.attendees)?.slice(0, 160)}`,
 )
 check(Array.isArray(record?.recordings), 'with a place for every piece of its recording', `recordings: ${JSON.stringify(record?.recordings)}`)
+
+// And the bytes come back — read from the page, so playback is exercised
+// across the same origin boundary the app plays them across.
+if (storageChecked) {
+  const url = (record?.recordings ?? [])[0]
+  check(typeof url === 'string' && url.length > 0, 'the record offers the piece that was uploaded', `recordings: ${JSON.stringify(record?.recordings)?.slice(0, 160)}`)
+  if (url) {
+    const got = await A.page.evaluate(async ([u]) => {
+      try {
+        const r = await fetch(u)
+        const b = await r.arrayBuffer()
+        return { ok: r.ok, len: b.byteLength }
+      } catch (e) {
+        return { ok: false, error: String(e) }
+      }
+    }, [url])
+    check(
+      got.ok === true && got.len === globalThis.__expectBytes,
+      `and it plays back the bytes that were stored (${got.len ?? got.error})`,
+      `${got.error ?? `HTTP miss, ${got.len} bytes`} — stored but not retrievable is the same as lost`,
+    )
+  }
+}
 
 const realErrors = [...A.errors, ...B.errors].filter(
   (e) => !/ERR_CONNECTION_RESET|favicon|manifest|socket\.io|Failed to load resource/i.test(e),
