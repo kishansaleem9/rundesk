@@ -32,6 +32,11 @@ export class NotificationsController {
     return this.notifications.unreadCount(user.id)
   }
 
+  @Get('unread-by-workspace')
+  unreadByWorkspace(@CurrentUser() user: CurrentUserPayload) {
+    return this.notifications.unreadByWorkspace(user.id)
+  }
+
   @Get('counts')
   triageCounts(@CurrentUser() user: CurrentUserPayload) {
     return this.notifications.triageCounts(user.id)

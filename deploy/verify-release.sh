@@ -383,6 +383,23 @@ check_sql "feature_flag_requests table exists (0113)" \
 check_sql "and the lookup it is read by is indexed" \
   "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname='feature_flag_requests_recent_idx');" "t"
 
+# ────────────────── §G08 [08:37] unread, split by workspace ───────────────
+# The switcher's dot. Checked against the bell's own total as well as for its
+# own sake: two counts of "unread" that disagree are worse than one, and the
+# split must never exceed the total it is a split of.
+say "Unread is available per workspace"
+UBW=$(curl -fsS --max-time 20 "$API/notifications/unread-by-workspace" -H "$AUTH" 2>/dev/null || true)
+printf '%s' "$UBW" | grep -q '"data"' \
+  && ok "the per-workspace unread map answers" \
+  || bad "unread-by-workspace -> $(printf '%s' "$UBW" | head -c 140)"
+TOTAL=$(curl -fsS --max-time 20 "$API/notifications/unread-count" -H "$AUTH" 2>/dev/null | jget count)
+SUMMED=$(printf '%s' "$UBW" | grep -oE '[0-9]+' | awk '{s+=$1} END {print s+0}')
+if [ -n "$TOTAL" ] && [ "$SUMMED" -le "$TOTAL" ] 2>/dev/null; then
+  ok "and never exceeds the bell's own total ($SUMMED <= $TOTAL)"
+else
+  bad "the split ($SUMMED) exceeds the bell total ($TOTAL) — they disagree on what unread means"
+fi
+
 # ─────────────────────────── §G01 [00:18] declining an invite ─────────────
 # Declining is the RECIPIENT saying no, and it is deliberately not the same
 # status as `revoked` (the sender cancelling). It also must not require an

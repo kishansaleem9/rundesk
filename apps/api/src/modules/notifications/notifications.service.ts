@@ -724,6 +724,42 @@ export class NotificationsService {
   }
 
   /**
+   * §G08 `[08:37]` — unread, split by workspace, for the switcher's dot.
+   *
+   * `unreadCount` answers "how many altogether", which is the wrong question
+   * for somebody deciding WHICH workspace to open. Grouped in the database
+   * rather than by asking each workspace in turn: the switcher lists every
+   * workspace a person belongs to, and one request that returns all of them
+   * beats N requests fired when a menu opens.
+   *
+   * Same predicate as `unreadCount` on purpose — unread here and unread in the
+   * bell disagreeing by a different definition would be worse than no dot.
+   */
+  async unreadByWorkspace(userId: string) {
+    const rows = await this.db
+      .select({
+        workspaceId: notifications.workspaceId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          isNull(notifications.readAt),
+          isNotNull(notifications.workspaceId),
+          this.viewCondition('inbox', new Date()),
+        ),
+      )
+      .groupBy(notifications.workspaceId)
+
+    const byWorkspace: Record<string, number> = {}
+    for (const row of rows) {
+      if (row.workspaceId) byWorkspace[row.workspaceId] = row.count
+    }
+    return byWorkspace
+  }
+
+  /**
    * Per-tab tallies for the inbox tab strip (§A2.6). One scan, four filtered
    * counts; `now()` rather than a bound timestamp so all four agree on the same
    * instant without a parameter round-trip.

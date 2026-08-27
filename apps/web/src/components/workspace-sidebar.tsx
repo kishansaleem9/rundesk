@@ -256,6 +256,14 @@ export function WorkspaceSidebar() {
   // Whatever the user chose to share — one panel serves every object type.
   const [shareItem, setShareItem] = useState<{ type: ShareObjectType; id: string; name: string } | null>(null)
   const [openSwitcher, setOpenSwitcher] = useState(false)
+  /*
+   * §G08 `[08:37]` — finding a workspace in the switcher.
+   *
+   * A list is fine at three and useless at thirty, and the frames show a search
+   * box above it. The filter only appears once there are enough workspaces for
+   * scanning to be work, because a search box above four items is furniture.
+   */
+  const [switcherFilter, setSwitcherFilter] = useState('')
   const collapsed = useSidebarStore((state) => state.collapsed)
   const toggleCollapsed = useSidebarStore((state) => state.toggle)
 
@@ -519,6 +527,20 @@ export function WorkspaceSidebar() {
   }
   const [recentItems, setRecentItems] = useState<Array<{ label: string; path: string }>>([])
   const [favoriteItems, setFavoriteItems] = useState<Array<{ label: string; path: string }>>([])
+
+  /*
+   * Unread per workspace, fetched only while the switcher is open.
+   *
+   * One grouped request rather than one per workspace: the point of the dot is
+   * to help somebody choose where to go, and a menu that fires N requests as it
+   * opens is slower than the decision it is meant to speed up.
+   */
+  const switcherUnread = useQuery({
+    enabled: openSwitcher,
+    queryKey: ['notifications', 'unread-by-workspace'],
+    queryFn: () => api<Record<string, number>>('/notifications/unread-by-workspace'),
+    staleTime: 30_000,
+  })
 
   const currentWorkspace = workspaceId ? workspaces.find((w) => w.id === workspaceId) : undefined
   const currentOrg = currentWorkspace ? organizations.find((o) => o.id === currentWorkspace.organizationId) : undefined
@@ -956,8 +978,27 @@ export function WorkspaceSidebar() {
         )}
         {openSwitcher && (
           <div className="mt-2 max-h-72 overflow-auto rounded-lg border border-border/60 bg-card p-1">
+            {/* Only once scanning the list is actually work. */}
+            {workspaces.length > 5 && (
+              <input
+                autoFocus
+                value={switcherFilter}
+                onChange={(e) => setSwitcherFilter(e.target.value)}
+                placeholder={t('nav.findWorkspace')}
+                data-testid="switcher-filter"
+                className="mb-1 w-full rounded-md border border-border/60 bg-background px-2 py-1 text-xs outline-none focus:border-accent"
+              />
+            )}
             {organizations.map((org) => {
-              const orgWorkspaces = workspaces.filter((w) => w.organizationId === org.id)
+              const needle = switcherFilter.trim().toLowerCase()
+              const orgWorkspaces = workspaces.filter(
+                (w) =>
+                  w.organizationId === org.id &&
+                  (!needle || w.name.toLowerCase().includes(needle)),
+              )
+              // An organisation whose workspaces all filtered out should not
+              // leave its heading behind as a row that explains nothing.
+              if (orgWorkspaces.length === 0) return null
               return (
                 <div key={org.id} className="mb-1 last:mb-0">
                   <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">{org.name}</div>
@@ -965,16 +1006,35 @@ export function WorkspaceSidebar() {
                     <button
                       key={ws.id}
                       className={cn(
-                        'w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/10 flex items-center justify-between',
+                        'w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/10 flex items-center gap-2',
                         ws.id === workspaceId && 'bg-accent/15 text-foreground',
                       )}
                       onClick={() => {
                         setOpenSwitcher(false)
+                        setSwitcherFilter('')
                         navigate({ to: '/app/$workspaceId', params: { workspaceId: ws.id } })
                       }}
                     >
-                      <span className="truncate">{ws.name}</span>
-                      {ws.id === workspaceId && <Check className="h-3 w-3" />}
+                      {/* An initial, not an image: workspaces have no avatar of
+                          their own, and a coloured letter is still something to
+                          aim at in a list of similar names. */}
+                      <span
+                        aria-hidden
+                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-brand-gradient text-[10px] font-semibold text-white"
+                      >
+                        {ws.name.trim().charAt(0).toUpperCase()}
+                      </span>
+                      <span className="truncate flex-1">{ws.name}</span>
+                      {(switcherUnread.data?.[ws.id] ?? 0) > 0 && (
+                        <span
+                          data-testid={`switcher-unread-${ws.id}`}
+                          aria-label={t('nav.workspaceUnread', {
+                            count: switcherUnread.data?.[ws.id] ?? 0,
+                          })}
+                          className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+                        />
+                      )}
+                      {ws.id === workspaceId && <Check className="h-3 w-3 shrink-0" />}
                     </button>
                   ))}
                 </div>
