@@ -19,10 +19,43 @@ than none, because it gets quoted.
   (23), `panel-collapse.mjs` (13), `settings-depth.mjs` (19) and
   `person-panel.mjs` (19); all six are pending the next deploy.
 
-**One of the 157 remains open:**
+**All 157 are closed — locally verified, not yet deployed.** The last one, #33
+"AI Agents", was closed by reading rather than by building; see below. What
+"closed" does and does not mean is spelled out under *Method* at the bottom.
 
-| # | Gap | `[time]` |
-|---|---|---|
+### #33 AI Agents — answered by Skills
+
+The frame audit flagged an "Agents" control in ClickUp's view headers and asked
+whether we were missing the third leg of a three-product AI story. Read beside
+the transcript, we were not:
+
+> `[04:44]` "Ab AI — in ki CHATS hain, AI AGENTS hain, aur BRAIN hai."
+> `[04:51]` "**Unhon ne** teen apne software launch kiye hain; main teenon ke
+> baare mein aap ko explain karoongi."
+
+That is narration about ClickUp's lineup — *they* launched three — and she
+pivots to Rundesk at `[04:58]`. What she asks of **us** she writes down herself,
+in her own numbered list:
+
+> "15. **SKILLS (AI agent)** — apna agent banana jo aap ki jagah kaam kare;
+> skill create, MEMORY (baat-cheet store), CONNECTIONS (kisi bhi system se
+> connect)."
+
+She equates the agent with Skills, and names memory and connections as its two
+parts. Both exist — `skill_memories` and `skill_connections` in
+`packages/db/src/schema/skills.ts` — alongside the hub, templates, the Miner,
+and AI-authored skills behind an approve-before-create gate. The same reading
+holds at `[17:46]`, where "woh aap ka AGENT kar sakta hai" is said *about a
+Skill*.
+
+Building a separate Agents product would also reverse a decision this codebase
+states out loud (`§A6.6` — "there are no agents: the AI surface is an
+assistant"). Confirmed with the client before closing rather than decided here.
+
+The frame audit had this one marked `explicitly_flagged_missing: false`, which
+was the clue.
+
+---|---|---|
 | 33 | **AI Agents** — a separate product from Skills, which we did build | `04:44` |
 
 > **On the count.** An earlier header here read "139 of 157 closed, 18 open"
@@ -182,22 +215,30 @@ All five of the open ones shipped together, because they are one surface:
 
 ---
 
-## The rest of what is open
+## Three verdicts of mine that were wrong
 
-| # | Gap | `[time]` |
-|---|---|---|
-| 33 | AI **Agents** — a separate product from Skills, which we did build | `04:44` |
+Kept in, rather than quietly fixed, because a status document's only value is
+that its verdicts can be trusted — and the way to earn that is to show what it
+got wrong and why.
 
-**Keyboard shortcuts** (#50) turned out to be *built and mounted*
-(`app.tsx:159`) — simply not reachable from the avatar menu where she looked, so
-that one was a menu entry, not a feature.
+**#50 keyboard shortcuts — reported missing, was built.** Built and mounted at
+`app.tsx:159`, simply not reachable from the avatar menu where she looked. A
+menu entry, not a feature.
 
-> **Correction, same day.** An earlier version of this list claimed archived
-> search was API-only with no UI. It is fully built — state, query parameter,
-> saved-search persistence and a filter chip in the palette. The check grepped
-> case-sensitively for `archived` and missed `includeArchived`. That is exactly
-> the failure this document warns about two sections down, made while writing
-> it, and it is why every verdict here is a file and a line.
+**Archived search — reported API-only, was fully built.** State, query
+parameter, saved-search persistence and a filter chip in the palette. The check
+grepped case-sensitively for `archived` and missed `includeArchived`.
+
+**#147 tags — reported as a naming mismatch, was entirely missing.** The worst
+of the three, because it was wrong in the direction that hides work: I read the
+schema, saw `labels` and `task_label_assignments` and working endpoints, and
+concluded the feature existed under a different word. Nothing in the web app
+ever called those endpoints. The full correction is in §2 above.
+
+The pattern in all three is the same: I checked whether the *parts* existed and
+not whether anything joined them up. A grep for a table proves a table. It
+proves nothing about whether a person can reach it, which is the only question
+this document is actually asking.
 
 ---
 
@@ -259,11 +300,18 @@ rather than the diff:
 
 ## Method, and its limits
 
-Each of the 157 gap titles was checked against the current code. Where a check
-was ambiguous I resolved it by file and line rather than by commit message —
-three of my first-pass results were false negatives caused by grepping the wrong
-file, and the sidebar-collapse one would have reported a shipped, live-verified
-feature as missing.
+Each of the 157 gap titles was checked against the current code, and every
+verdict here resolves to a file and a line rather than a commit message.
 
-What this pass does **not** do is re-watch the video for asks the frame audit
-missed. It re-verifies 157 known gaps; it does not look for a 158th.
+Two limits worth stating plainly.
+
+**This does not look for a 158th gap.** It re-verifies the 157 the frame audit
+found; it does not re-watch the video for asks that audit missed.
+
+**"Shipped" here means verified locally, not on production.** Everything in the
+shipped table below was driven through a real browser against a real API and a
+real Postgres, and the six suites named at the top are the evidence. They have
+not yet run against `rundesk.theaura.agency` — the last deploy predates all of
+today's work. Until `deploy.sh` and `verify-release.sh` have run there, the
+honest word for this column is *ready*, and the 295-check production figure at
+the top describes the release before it.
