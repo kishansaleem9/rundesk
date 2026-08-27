@@ -16,7 +16,10 @@ than none, because it gets quoted.
   `verify-ui.mjs` (186), `verify-release.sh` (72), `syncup-live.mjs` (33),
   `verify-email.sh` (4)
 
-**Result: 133 of the 157 are closed. 24 remain open, and they cluster.**
+**Result: 139 of the 157 are closed. 18 remain open, and they cluster.**
+
+*Kept current as work lands — see the shipped list at the bottom for what moved
+and when.*
 
 ---
 
@@ -79,7 +82,7 @@ The **workspace sidebar** collapses to icons — shipped and verified live
 But the second-level panel — the Chat channel list, the Docs tree — does not
 collapse (#79). That column is where the double-navigation cost actually falls,
 and it is still there. The keyboard shortcut she'd expect (`Ctrl + \`) is also
-absent (#76).
+shipped since (see below).
 
 ### 4. Chat message actions stop short of what the frames show — `13:59–15:47`
 
@@ -98,21 +101,23 @@ channel (#107).
 
 | # | Gap | `[time]` |
 |---|---|---|
-| 10 | Query suggestions / recent-search history | `01:12` |
-| — | **Archived** results: the API takes `includeArchived`, no UI ever sends it | `03:52` |
-| 15 | "Decline invite" on the invitation screen | `00:18` |
 | 33 | AI **Agents** — a separate product from Skills, which we did build | `04:44` |
 | 48 | Custom status message — text + emoji + duration, not four fixed presences | `06:42` |
 | 49 | Mute notifications **for a duration**, not just on/off | `06:53` |
-| 51 | "Download app" in the avatar menu | `07:28` |
 | 54 | High-contrast accessibility mode | `07:03` |
 | 56 | Help that can **book a meeting** with the team, not just read docs | `07:33` |
 | 72 | Workspace switcher: search box, per-workspace avatars, unread dot | `08:37` |
 
-Two of these are near-free. **Archived search** is a toggle wired to a parameter
-that already works. **Keyboard shortcuts** (#50) turned out to be *built and
-mounted* (`app.tsx:159`) — it is simply not reachable from the avatar menu where
-she looked, so that one is a menu entry, not a feature.
+**Keyboard shortcuts** (#50) turned out to be *built and mounted*
+(`app.tsx:159`) — simply not reachable from the avatar menu where she looked, so
+that one was a menu entry, not a feature.
+
+> **Correction, same day.** An earlier version of this list claimed archived
+> search was API-only with no UI. It is fully built — state, query parameter,
+> saved-search persistence and a filter chip in the palette. The check grepped
+> case-sensitively for `archived` and missed `includeArchived`. That is exactly
+> the failure this document warns about two sections down, made while writing
+> it, and it is why every verdict here is a file and a line.
 
 ---
 
@@ -137,6 +142,18 @@ rather than the diff:
 - **Search** (G02/G03) — type chips that select and unselect, ⋯ overflow,
   Location, folders as an entity type, created-date range, Drive results,
   task-type filter
+
+---
+
+## Shipped since this audit
+
+| when | gap | what landed |
+|---|---|---|
+| 27 Aug | #50 keyboard shortcuts | menu entry; the overlay was already built and only openable with `?` |
+| 27 Aug | #51 download app | install offer in the menu, rendered only where the browser can actually install |
+| 27 Aug | #76 sidebar shortcut | `Ctrl`/`⌘` + `\`, in the tooltips and the shortcuts list |
+| 27 Aug | #15 decline invite | new `declined` status, no login required, idempotent |
+| 27 Aug | #10 recent searches | per workspace, in the browser, recorded once a search has answered |
 
 ---
 
