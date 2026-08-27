@@ -12,16 +12,23 @@ than none, because it gets quoted.
 
 - **Transcript** — `6941a270-video1___Roman_Urdu.txt`, 24:05
 - **Frames** — `video1-frame-audit-raw.json`, 15 groups, **157 discrete gaps**
-- **Verified on** `https://rundesk.theaura.agency` — 295 checks across
-  `verify-ui.mjs` (186), `verify-release.sh` (72), `syncup-live.mjs` (33),
-  `verify-email.sh` (4). Since that run, `verify-release.sh` has grown to 121
-  and five suites are new — `chat-message-actions.mjs` (25), `task-depth.mjs`
-  (23), `panel-collapse.mjs` (13), `settings-depth.mjs` (19) and
-  `person-panel.mjs` (19); all six are pending the next deploy.
+- **Verified on** `https://rundesk.theaura.agency`, 27 Aug, against the
+  deployed instance — **448 checks, 0 failed**:
 
-**All 157 are closed — locally verified, not yet deployed.** The last one, #33
-"AI Agents", was closed by reading rather than by building; see below. What
-"closed" does and does not mean is spelled out under *Method* at the bottom.
+  | | checks |
+  |---|---|
+  | `verify-ui.mjs` — the surfaces that existed before today, unchanged | 186 |
+  | `verify-release.sh` — migrations applied, then every feature exercised over the live API | 130 |
+  | `syncup-live.mjs` — two browsers on one call, media crossing, recording reaching R2 | 33 |
+  | `chat-message-actions` · `task-depth` · `panel-collapse` · `settings-depth` · `person-panel` | 25 · 23 · 13 · 19 · 19 |
+  | `verify-email.sh` — SMTP, on the production sender | 4 |
+
+  `drizzle-kit migrate` applied 0114–0118 on the deployed database, and the
+  tables, columns and enum values are each asserted rather than inferred from a
+  successful-looking deploy.
+
+**All 157 are closed, and live.** The last one, #33 "AI Agents", was closed by
+reading rather than by building; see below.
 
 ### #33 AI Agents — answered by Skills
 
@@ -308,10 +315,16 @@ Two limits worth stating plainly.
 **This does not look for a 158th gap.** It re-verifies the 157 the frame audit
 found; it does not re-watch the video for asks that audit missed.
 
-**"Shipped" here means verified locally, not on production.** Everything in the
-shipped table below was driven through a real browser against a real API and a
-real Postgres, and the six suites named at the top are the evidence. They have
-not yet run against `rundesk.theaura.agency` — the last deploy predates all of
-today's work. Until `deploy.sh` and `verify-release.sh` have run there, the
-honest word for this column is *ready*, and the 295-check production figure at
-the top describes the release before it.
+**"Shipped" means live, and checked there.** Every row in the shipped table was
+driven against the deployed instance, not only against a laptop — the 448
+figure at the top is that run. Two edges are worth knowing. The R2 upload check
+only ever runs on production, because CI has no object storage and says `SKIP`
+rather than passing. And `verify-email.sh` proves SMTP accepted the message,
+not that anybody received it; that still wants a real mailbox.
+
+**A check that compares nothing is not a passing check.** Two of mine did
+exactly that and reached production before anyone noticed. One summed every
+digit in the payload — including the ones inside a workspace UUID — and had
+passed an earlier release only because the map it read happened to be empty.
+The other pointed at a task id that was really a deleted task type. Where a
+check now cannot compare, it says `SKIP` and names what it did not look at.
