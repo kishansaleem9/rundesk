@@ -27,6 +27,8 @@ import { GoalsModule } from './modules/goals/goals.module'
 import { FavoritesModule } from './modules/favorites/favorites.module'
 import { RemindersModule } from './modules/reminders/reminders.module'
 import { PresenceModule } from './modules/presence/presence.module'
+// §G06 [05:35] — the person profile panel: who somebody is and what they are on.
+import { PeopleModule } from './modules/people/people.module'
 import { TimeOffModule } from './modules/time-off/time-off.module'
 import { PersonalTasksModule } from './modules/personal-tasks/personal-tasks.module'
 import { SkillsModule } from './modules/skills/skills.module'
@@ -112,6 +114,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     FavoritesModule,
     RemindersModule,
     PresenceModule,
+    PeopleModule,
     TimeOffModule,
     PersonalTasksModule,
     SkillsModule,

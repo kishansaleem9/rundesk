@@ -596,6 +596,18 @@ export class WorkspacesService {
         managerId: workspaceMembers.managerId,
         joinedAt: workspaceMembers.joinedAt,
         lastSeenAt: users.lastSeenAt,
+        /*
+         * §G06 [05:46] — "mera TIME ZONE kya chal raha hai".
+         *
+         * Stored since forever and used server-side for quiet hours, and this
+         * read did not select it — so no surface in the product could show a
+         * colleague's local time even though the app knew it. One column.
+         */
+        timezone: users.timezone,
+        // §G06 [06:42] — the sentence, so a roster can show it beside the name.
+        statusEmoji: users.statusEmoji,
+        statusText: users.statusText,
+        statusExpiresAt: users.statusExpiresAt,
         organizationId: workspaces.organizationId,
       })
       .from(workspaceMembers)

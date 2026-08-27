@@ -60,6 +60,8 @@ export * from './task-templates'
 export * from './personal-tasks'
 export * from './custom-reports'
 export * from './favorites'
+// §G06 [05:54] — today's most important tasks, chosen by the person.
+export * from './priorities'
 export * from './reminders'
 export * from './doc-templates'
 export * from './checklist-templates'
