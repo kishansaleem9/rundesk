@@ -45,6 +45,9 @@ bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAIL=$((FAIL+1)); }
 die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # A grep that finds nothing exits 1, and under `set -e` that would kill the run
 # mid-way. Every pipeline below ends in `|| true` for that reason.
+# CAUTION: the `sed 's/.*://'` is greedy, so this mangles any value that
+# contains a colon — an ISO timestamp comes back as its last fragment. For
+# those, grep the whole "key":"value" pair instead of reaching for this.
 jget() { grep -o "\"$1\":[^,}]*" | head -1 | sed 's/.*://;s/"//g' || true; }
 
 say "API is up"
@@ -920,6 +923,97 @@ BADITEM=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/u
 [ "$BADITEM" = "400" ] \
   && ok "an unknown top bar item is refused (400)" \
   || bad "topbarHidden=[search] answered $BADITEM — arbitrary values reach a jsonb column"
+
+say "A task in the bin is not an editable task"
+# The third video1 pass found PATCH answering 200 and a comment answering 201
+# on a task in the bin — a row no list, no search and no deep link will show
+# you. Deleting is a soft delete and every READ path filtered on it; the write
+# paths never did. Checked here because the callers who could still reach such
+# a task are exactly the ones that cannot see the bin: a stale tab, a queued
+# request, an integration holding an id from before the delete.
+BIN_LIST=$(curl -fsS --max-time 20 "$API/spaces/workspace/$WS" -H "$AUTH" | grep -o '"id":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
+BIN_PROJ=$(curl -fsS --max-time 20 "$API/projects/space/$BIN_LIST" -H "$AUTH" | grep -o '"id":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
+BIN_LID=$(curl -fsS --max-time 20 "$API/lists/project/$BIN_PROJ" -H "$AUTH" | grep -o '"id":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
+if [ -z "$BIN_LID" ]; then
+  bad "no list to create a bin-probe task in"
+else
+  BIN_TID=$(curl -fsS --max-time 20 -X POST "$API/tasks" -H "$AUTH" -H 'content-type: application/json' \
+    -d "{\"listId\":\"$BIN_LID\",\"title\":\"deploy check — bin probe\"}" | jget id)
+  # Alive: it must still behave completely normally. A gate that refuses too
+  # much is the same defect wearing the other hat.
+  ALIVE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/tasks/$BIN_TID" \
+    -H "$AUTH" -H 'content-type: application/json' -d '{"title":"deploy check — alive"}' || true)
+  [ "$ALIVE" = "200" ] \
+    && ok "a live task still edits (200)" \
+    || bad "editing a live task answered $ALIVE — the bin gate is refusing too much"
+
+  curl -fsS --max-time 20 -X DELETE "$API/tasks/$BIN_TID" -H "$AUTH" >/dev/null 2>&1 || true
+  BINNED=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/tasks/$BIN_TID" \
+    -H "$AUTH" -H 'content-type: application/json' -d '{"title":"deploy check — edited from the bin"}' || true)
+  [ "$BINNED" = "409" ] \
+    && ok "and refuses edits once it is in the bin (409)" \
+    || bad "editing a binned task answered $BINNED — expected 409"
+  BINCOM=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/tasks/$BIN_TID/comments" \
+    -H "$AUTH" -H 'content-type: application/json' -d '{"body":"deploy check — from the bin"}' || true)
+  [ "$BINCOM" = "409" ] \
+    && ok "and refuses comments too (409)" \
+    || bad "commenting on a binned task answered $BINCOM — expected 409"
+
+  # A refusal has to be a refusal, not a 409 over a write that already landed.
+  # Also not jget, and here the failure mode is the dangerous direction: a
+  # mangled title matches nothing and this reports the refusal as having held.
+  STILL=$(curl -fsS --max-time 20 "$API/tasks/$BIN_TID" -H "$AUTH" \
+    | grep -o '"title":"[^"]*"' | head -1 || true)
+  case "$STILL" in
+    *"edited from the bin"*) bad "the refused edit was written anyway — title is now '$STILL'" ;;
+    *)                       ok "and wrote nothing while refusing" ;;
+  esac
+
+  # The two operations that exist FOR binned tasks must be untouched.
+  RESTORED=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST "$API/tasks/$BIN_TID/restore" -H "$AUTH" || true)
+  case "$RESTORED" in
+    2*) ok "restore still works on a binned task ($RESTORED)" ;;
+    *)  bad "restoring a binned task answered $RESTORED" ;;
+  esac
+  AFTER=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/tasks/$BIN_TID" \
+    -H "$AUTH" -H 'content-type: application/json' -d '{"title":"deploy check — after restore"}' || true)
+  [ "$AFTER" = "200" ] \
+    && ok "and it edits again once restored" \
+    || bad "a restored task answered $AFTER to an edit"
+
+  # A due time survives the round trip — the column carries one, and until this
+  # release the UI could only ever write midnight over it.
+  curl -fsS --max-time 20 -X PATCH "$API/tasks/$BIN_TID" -H "$AUTH" -H 'content-type: application/json' \
+    -d '{"dueDate":"2026-09-15T17:30:00.000Z"}' >/dev/null 2>&1 || true
+  # NOT jget: its `sed 's/.*://'` is greedy, so the colons inside an ISO
+  # timestamp eat the value and 17:30:00.000Z reads back as "00.000Z".
+  DUE=$(curl -fsS --max-time 20 "$API/tasks/$BIN_TID" -H "$AUTH" \
+    | grep -o '"dueDate":"[^"]*"' | head -1 || true)
+  case "$DUE" in
+    *T17:30*) ok "a due date keeps its time ($DUE)" ;;
+    *)        bad "a due time did not survive: $DUE" ;;
+  esac
+
+  curl -fsS --max-time 20 -X DELETE "$API/tasks/$BIN_TID" -H "$AUTH" >/dev/null 2>&1 || true
+  curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/trash/task/$BIN_TID" -H "$AUTH" >/dev/null 2>&1 || true
+fi
+
+say "The shipped bundle carries this release's UI (§G, §2.8)"
+# The two fixes above are half server, half browser. These are the browser
+# halves, asserted against the bundle that actually shipped: a datetime control
+# on the task sheet, and an output picker in the pre-join.
+BUNDLE_DIR="${WEB_DIST:-/opt/rundesk/apps/web/dist}"
+if [ -d "$BUNDLE_DIR" ]; then
+  for NEEDLE in 'task-due-date' 'task-start-date' 'call-prejoin-speaker-select' 'setSinkId'; do
+    if grep -rqs -- "$NEEDLE" "$BUNDLE_DIR"; then
+      ok "the bundle contains \"$NEEDLE\""
+    else
+      bad "the bundle does not contain \"$NEEDLE\" — the browser half did not ship"
+    fi
+  done
+else
+  bad "no web bundle at $BUNDLE_DIR to check — set WEB_DIST"
+fi
 
 say "Cleared notifications age out after 30 days (§2.5)"
 # The purge itself runs at 4am, which is a long time to wait to find out
