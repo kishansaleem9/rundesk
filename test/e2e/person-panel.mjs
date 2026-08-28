@@ -108,7 +108,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 26
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -170,6 +170,13 @@ try {
   if (!admin?.accessToken) throw new Error(`could not sign in as ${ADMIN.email}`)
   const A = apiAs(admin.accessToken)
   const workspaceId = admin.workspaces[0].id
+  const meId = admin.user?.id ?? admin.id
+  // Somewhere to seed the bucket fixtures; the panel reads across the whole
+  // workspace, so any list in it will do.
+  const bucketSpaces = await A(`/spaces/workspace/${workspaceId}`)
+  const bucketProjects = await A(`/projects/space/${bucketSpaces.data?.[0]?.id}`)
+  const bucketLists = await A(`/lists/project/${bucketProjects.data?.[0]?.id}`)
+  const bucketListId = bucketLists.data?.[0]?.id
 
   // A known timezone, so the clock check is about rendering rather than about
   // whatever this account happened to be set to.
@@ -298,6 +305,68 @@ try {
   // ---------------------------------------------------------------------
   await page.keyboard.press('Escape')
   await page.waitForTimeout(800)
+  /*
+   * §G05 [06:08–06:14] — the buckets she names, in her order.
+   *
+   * > "TODAY ke kya task hain, OVERDUE kaun se ho gaye the, NEXT kaun se
+   * >  upcoming task mere paas aa sakte hain, kaun si aisi cheezein jo maine
+   * >  CREATE ki hain par abhi tak maine kisi ko assign nahi kiya."
+   *
+   * The panel showed one flat "Working on" list, which answers none of those
+   * four questions. Seeded here rather than hoped for: a bucket check against
+   * whatever work happens to exist passes for the wrong reason on an empty
+   * account and fails for the wrong reason on a busy one.
+   */
+  const now = new Date()
+  const seedTask = async (title, dueDate, assign) => {
+    const created = await A('/tasks', {
+      method: 'POST',
+      body: { listId: bucketListId, title, ...(dueDate ? { dueDate } : {}) },
+    })
+    if (assign && created.data?.id) {
+      await A(`/tasks/${created.data.id}/assignees`, { method: 'POST', body: { userId: meId } })
+    }
+    return created.data
+  }
+  const bToday = await seedTask(`bucket today ${Date.now()}`,
+    new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0).toISOString(), true)
+  const bOver = await seedTask(`bucket overdue ${Date.now()}`,
+    new Date(now.getTime() - 4 * 86400000).toISOString(), true)
+  const bNext = await seedTask(`bucket next ${Date.now()}`,
+    new Date(now.getTime() + 4 * 86400000).toISOString(), true)
+  const bMine = await seedTask(`bucket unassigned ${Date.now()}`, null, false)
+
+  const profile = await A(`/workspaces/${workspaceId}/people/${meId}`)
+  const buckets = profile.data?.taskBuckets
+  check(Boolean(buckets), 'a profile answers with task buckets, not one flat list')
+  if (buckets) {
+    const holds = (key, id) => (buckets[key] ?? []).some((row) => row.id === id)
+    check(holds('today', bToday?.id), 'TODAY holds what is due today')
+    check(holds('overdue', bOver?.id), 'OVERDUE holds what has already passed')
+    check(holds('next', bNext?.id), 'NEXT holds what is coming')
+    check(holds('createdUnassigned', bMine?.id),
+      'and "created, not assigned to anyone" is its own question')
+    // The one that would quietly be wrong: anything with an assignee on it is
+    // somebody's, and must not appear in the pile that is sitting on nobody.
+    check(!holds('createdUnassigned', bToday?.id),
+      'a task with an assignee is not counted as unassigned')
+  }
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+  await page.getByTestId('user-menu').click()
+  await page.waitForTimeout(900)
+  await page.getByTestId('menu-my-profile').click()
+  await page.waitForTimeout(2200)
+  check((await page.locator('[data-testid^=person-bucket-]').count()) >= 4,
+    'and the panel draws them as separate sections')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(600)
+
+  for (const row of [bToday, bOver, bNext, bMine]) {
+    if (row?.id) await A(`/tasks/${row.id}`, { method: 'DELETE' })
+  }
+
   check(!(await page.getByTestId('person-panel').isVisible().catch(() => false)), 'Escape closes it')
   check(page.url() === urlBefore, 'and you are still where you started', page.url())
 

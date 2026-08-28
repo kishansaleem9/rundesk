@@ -730,3 +730,61 @@ step at all.
 17:30, the attach and notify controls, the private option, the settings step,
 its three view choices, and that "No thanks" applies nothing and still leaves
 you in the list. `task-dates.test.ts` is 14 (5 new), run in four timezones.
+
+---
+
+## Fifth pass — the other 14 groups, with the corrected lens (28 Aug)
+
+Applying the same reading to the rest: the walkthrough is the specification, so
+a feature she steps through is an ask whether or not she narrates it. All 157
+titles were re-read and the falsifiable ones checked against the code.
+
+### #167 — a person's tasks were one undifferentiated list
+
+> `[06:08–06:14]` "TODAY ke kya task hain, OVERDUE kaun se ho gaye the, NEXT
+> kaun se upcoming task mere paas aa sakte hain, kaun si aisi cheezein jo maine
+> CREATE ki hain par abhi tak maine kisi ko assign nahi kiya."
+
+Four questions, named out loud, in order. The panel answered none of them: it
+showed a single "Working on" section — up to eight assigned tasks with a date
+beside each. Frame G05 #4 records this, and it was marked closed.
+
+The profile now returns buckets: **Today**, **Overdue**, **Next**, undated work
+so it cannot vanish from a panel made of date buckets, and **created but
+assigned to nobody** — which is a different question from the other four and
+needs its own query, since it is about what you made rather than what you hold.
+
+"Today" is today **where they are**. The panel already shows a person's local
+time for the same reason: a deadline is a fact about their day, and a colleague
+eight hours away reading the panel should see the buckets that person sees.
+`startOfDayIn` does that conversion, with a correction pass for the DST
+changeover days when the offset at UTC midnight is not the offset at local
+midnight — without it the boundary lands an hour into yesterday.
+
+### Checked and already covered
+
+Written down so they are not chased a third time. Several were false negatives
+from a single grep, which is the failure mode this document keeps recording:
+
+| looked missing | actually |
+|---|---|
+| Task type on a task row (G03 #8) | `<TaskTypeMark type={task.taskType} />` in the list route |
+| Add time off from a profile (G05 #8) | 32 catalog strings; built |
+| AI answer when search finds nothing (G02 #4) | built |
+| **Download app** (G06 #4) | **`menu-install-app` → `promptInstall()`** — the app is a PWA, and the key is `topbar.installApp`, so the grep for "downloadApp" missed it |
+
+### Frame-only, and not built
+
+Two gaps have no spoken counterpart anywhere in the 534 lines: **Get StandUp**
+(G05 #11) and a **"Need help?" link on the invitation screen** (G01 #6). They
+come from frames of ClickUp's chrome rather than from anything she walks
+through or points at. Recorded here rather than silently skipped — if either is
+wanted, it is a decision to take rather than an omission to fix.
+
+### Guarded
+
+`person-panel.mjs` is 26 checks (7 new): each bucket holding the right seeded
+task, and the one that would quietly be wrong — a task with an assignee must
+not appear in the pile that is sitting on nobody. `zone.test.ts` adds 5,
+including a DST changeover and an unparseable timezone falling back to UTC
+rather than taking a profile page down.

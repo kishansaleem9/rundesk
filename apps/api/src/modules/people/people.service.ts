@@ -20,6 +20,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PresenceService } from '../presence/presence.service'
+import { startOfDayIn } from '../../common/time/zone'
 
 /**
  * §G06 [05:35–06:35] — the person profile panel.
@@ -185,6 +186,77 @@ export class PeopleService {
       .orderBy(sql`${tasks.dueDate} asc nulls last`)
       .limit(25)
 
+    /*
+     * §G05 [06:08–06:14] — the buckets she names, in her order:
+     *
+     * > "TODAY ke kya task hain, OVERDUE kaun se ho gaye the, NEXT kaun se
+     * >  upcoming task mere paas aa sakte hain, kaun si aisi cheezein jo maine
+     * >  CREATE ki hain par abhi tak maine kisi ko assign nahi kiya."
+     *
+     * The panel showed one flat "Working on" list, which answers none of the
+     * four questions: what is due now, what is late, what is coming, and what
+     * have I made that is still sitting on nobody.
+     *
+     * "Today" is today WHERE THEY ARE. A profile already shows their local
+     * time for the same reason — a deadline is a fact about their day, not
+     * about the server's, and a teammate eight hours away reading this panel
+     * should see the same buckets they would.
+     */
+    const zone = person.timezone || 'UTC'
+    const dayStart = startOfDayIn(zone)
+    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
+    const due = (t: { dueDate: Date | string | null }) => (t.dueDate ? new Date(t.dueDate) : null)
+
+    const buckets = {
+      today: assigned.filter((t) => {
+        const d = due(t)
+        return d && d >= dayStart && d < dayEnd
+      }),
+      overdue: assigned.filter((t) => {
+        const d = due(t)
+        return d && d < dayStart
+      }),
+      next: assigned.filter((t) => {
+        const d = due(t)
+        return d && d >= dayEnd
+      }),
+      // Undated work is neither late nor coming; it would otherwise vanish
+      // from a panel built entirely out of date buckets.
+      unscheduled: assigned.filter((t) => !due(t)),
+    }
+
+    /*
+     * "Cheezein jo maine CREATE ki hain par abhi tak kisi ko assign nahi kiya"
+     * — a separate question from anything above: these are tasks they made
+     * that are sitting on nobody, which is exactly the pile that goes quiet.
+     */
+    const createdUnassigned = await this.db
+      .select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+        listId: tasks.listId,
+        listName: lists.name,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(tasks.createdById, userId),
+          eq(spaces.workspaceId, workspaceId),
+          ne(tasks.status, 'done'),
+          eq(tasks.isArchived, false),
+          // Nobody on it at all — one assignee is enough to make it somebody's.
+          sql`not exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id})`,
+        ),
+      )
+      .orderBy(sql`${tasks.dueDate} asc nulls last`)
+      .limit(25)
+
     return {
       person: {
         ...person,
@@ -194,7 +266,10 @@ export class PeopleService {
       },
       teams,
       reporting: { manager, reports },
+      // Kept: other readers already depend on the flat list, and the buckets
+      // below are a view OF it rather than a replacement for it.
       assignedTasks: assigned,
+      taskBuckets: { ...buckets, createdUnassigned },
     }
   }
 

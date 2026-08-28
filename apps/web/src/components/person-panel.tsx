@@ -61,14 +61,24 @@ type Profile = {
     manager: { id: string; displayName: string; avatarUrl?: string | null; role?: string | null } | null
     reports: Array<{ id: string; displayName: string; avatarUrl?: string | null; role?: string | null }>
   }
-  assignedTasks: Array<{
-    id: string
-    title: string
-    status: string
-    priority?: string | null
-    dueDate?: string | null
-    listName?: string | null
-  }>
+  assignedTasks: PersonTask[]
+  /** §G05 [06:08–06:14] — the four buckets she names, plus undated work. */
+  taskBuckets?: {
+    today: PersonTask[]
+    overdue: PersonTask[]
+    next: PersonTask[]
+    unscheduled: PersonTask[]
+    createdUnassigned: PersonTask[]
+  }
+}
+
+type PersonTask = {
+  id: string
+  title: string
+  status: string
+  priority?: string | null
+  dueDate?: string | null
+  listName?: string | null
 }
 
 type Priority = {
@@ -677,7 +687,58 @@ export function PersonPanel() {
             {tab === 'calendar' && <PersonCalendar workspaceId={workspaceId} userId={userId} />}
           </div>
 
-          {!!profile?.assignedTasks?.length && (
+          {/*
+            §G05 [06:08–06:14] — "TODAY ke kya task hain, OVERDUE kaun se ho gaye
+            the, NEXT kaun se upcoming task mere paas aa sakte hain, kaun si
+            aisi cheezein jo maine CREATE ki hain par abhi tak maine kisi ko
+            assign nahi kiya."
+
+            This was one flat "Working on" list, which answers none of those
+            four questions. An empty bucket is left out rather than shown empty:
+            five headings over nothing is worse than the list it replaced.
+          */}
+          {(
+            [
+              ['today', 'person.bucketToday'],
+              ['overdue', 'person.bucketOverdue'],
+              ['next', 'person.bucketNext'],
+              ['unscheduled', 'person.bucketUnscheduled'],
+              ['createdUnassigned', 'person.bucketCreatedUnassigned'],
+            ] as const
+          ).map(([key, labelKey]) => {
+            const rows = profile?.taskBuckets?.[key] ?? []
+            if (!rows.length) return null
+            return (
+              <section key={key} className="border-t border-border/60 px-4 py-3" data-testid={`person-bucket-${key}`}>
+                <h3 className="mb-1.5 flex items-baseline gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t(labelKey)}
+                  <span className="text-[10px] font-normal opacity-70">{rows.length}</span>
+                </h3>
+                <div className="space-y-1">
+                  {rows.slice(0, 8).map((task) => (
+                    <div key={task.id} className="flex items-baseline gap-2 text-[13px]">
+                      <span className="min-w-0 flex-1 truncate">{task.title}</span>
+                      {task.dueDate && (
+                        <span
+                          className={cn(
+                            'shrink-0 text-[11px]',
+                            key === 'overdue' ? 'text-destructive' : 'text-muted-foreground',
+                          )}
+                        >
+                          {new Date(task.dueDate).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+
+          {/* Nothing bucketed at all — an older API, or a person with no work.
+              The flat list is what this panel showed before, so it stays as the
+              fallback rather than the section disappearing entirely. */}
+          {!profile?.taskBuckets && !!profile?.assignedTasks?.length && (
             <section className="border-t border-border/60 px-4 py-3">
               <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {t('person.workingOn')}
