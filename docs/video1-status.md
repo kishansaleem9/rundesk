@@ -867,6 +867,12 @@ Meili configured.
 Both are covered now, including the case that hid it: `verify-release.sh` asks
 the same search **as a non-manager** and expects a 200 rather than a 400.
 
+**Confirmed on the deployed instance: 148 passed, 0 failed** — including the
+archived line that had failed, and the non-manager search that used to 400.
+
 The lesson worth keeping: this deployment's search behaves differently from the
 sandbox's, and no amount of local green says otherwise. The check that found it
-was three hours old and had passed locally twice.
+was three hours old and had passed locally twice — for the wrong reason, because
+the sandbox has no Meilisearch. The bug it exposed underneath (search 400ing for
+every non-manager) had been live and invisible, since the people who check by
+hand are admins and admins took the early return past it.
