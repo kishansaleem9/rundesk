@@ -1067,6 +1067,48 @@ else
   curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/trash/task/$BIN_TID" -H "$AUTH" >/dev/null 2>&1 || true
 fi
 
+say "Binning a task takes it out of the search index, restoring puts it back"
+# There was no removal path anywhere: indexTask wrote on create and on edit and
+# nothing ever deleted, so a binned task stayed in Meili for good and the index
+# only ever grew. Those documents can never be returned — a search for archived
+# work skips Meili entirely — so they were pure dead weight sitting in the
+# result pages that live work needed.
+#
+# The crowding this caused is NOT checked here on purpose. Removal is the fix
+# for it, so with removal in place the scenario cannot be built through the API
+# any more, and a check trying to would pass without exercising the paging that
+# actually protects against it. That belongs in a unit test that can control
+# the index directly, and lives in search.service.test.ts.
+if [ -z "$ARCH_LIST" ]; then
+  bad "no list to seed the index-lifecycle probe in"
+else
+  CROWD="lifecycleprobe$(date +%s)"
+  CROWD_TID=$(curl -fsS --max-time 20 -X POST "$API/tasks" -H "$AUTH" -H 'content-type: application/json' \
+    -d "{\"listId\":\"$ARCH_LIST\",\"title\":\"$CROWD subject\"}" | jget id)
+  sleep 3
+  # Findable while alive, or the two checks below prove nothing.
+  curl -fsS --max-time 20 "$API/search/$WS?q=$CROWD&types=task&limit=5" -H "$AUTH" | grep -q "$CROWD_TID" \
+    && ok "a freshly created task is findable (so the checks below mean something)" \
+    || bad "the seeded task was never findable — the lifecycle checks prove nothing"
+
+  curl -fsS --max-time 20 -X DELETE "$API/tasks/$CROWD_TID" -H "$AUTH" >/dev/null 2>&1 || true
+  sleep 3
+  if curl -fsS --max-time 20 "$API/search/$WS?q=$CROWD&types=task&limit=5" -H "$AUTH" | grep -q "$CROWD_TID"; then
+    bad "a binned task is still returned by search"
+  else
+    ok "binning it takes it back out"
+  fi
+  # …and restoring puts it back, or a restored task would look fine everywhere
+  # except search, where it would be unfindable for good.
+  curl -fsS --max-time 20 -X POST "$API/tasks/$CROWD_TID/restore" -H "$AUTH" >/dev/null 2>&1 || true
+  sleep 3
+  curl -fsS --max-time 20 "$API/search/$WS?q=$CROWD&types=task&limit=5" -H "$AUTH" | grep -q "$CROWD_TID" \
+    && ok "and restoring it makes it findable again" \
+    || bad "a restored task never came back to the index"
+  curl -fsS --max-time 20 -X DELETE "$API/tasks/$CROWD_TID" -H "$AUTH" >/dev/null 2>&1 || true
+  curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/trash/task/$CROWD_TID" -H "$AUTH" >/dev/null 2>&1 || true
+fi
+
 say "The shipped bundle carries this release's UI (§G, §2.8)"
 # The two fixes above are half server, half browser. These are the browser
 # halves, asserted against the bundle that actually shipped: a datetime control

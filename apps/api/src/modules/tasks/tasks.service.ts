@@ -2785,6 +2785,10 @@ export class TasksService {
     }
     // Remove from every connected calendar — fire-and-forget.
     void this.calendarSync.deleteEverywhere(taskId).catch(() => undefined)
+    // …and out of the search index, for the same reason: a binned task is not
+    // something anyone should find by searching, and leaving it there made the
+    // index fill up with work that had been thrown away.
+    void this.search.removeTask(taskId).catch(() => undefined)
     return { ok: true }
   }
 
@@ -2811,6 +2815,10 @@ export class TasksService {
       taskId,
       patch: { isArchived: false },
     })
+    // Binning took it out of the index, so restoring has to put it back —
+    // otherwise a restored task would look fine everywhere except search,
+    // where it would be permanently unfindable.
+    void this.indexTaskInSearch(taskId)
     return row
   }
 

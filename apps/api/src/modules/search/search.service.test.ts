@@ -515,3 +515,101 @@ describe('§4 Google Drive in search', () => {
     assert.ok(ENTITY_TYPES.includes('drive' as never), 'drive is not an accepted type')
   })
 })
+
+/**
+ * The bug this guards, in one sentence: Meili applies its limit before anything
+ * in this process can drop a hit, and the rules that drop one — archived, and
+ * per-caller visibility — live in Postgres.
+ *
+ * So filtering a single page throws hits away without replacing them. Where the
+ * first page is entirely made of hits the caller may not see, the search
+ * answered "nothing" while live, visible matches sat further down the ranking.
+ * Production returned no tasks at all for "a" while ten live ones matched.
+ *
+ * Binning a task now removes its document, which stops archived work causing
+ * this. Visibility cannot be fixed that way — it is per caller and the index
+ * has no such field — so paging is what protects it, and this is where that is
+ * checked: a fake index gives exact control over which page a hit lands on.
+ */
+describe('SearchService pages Meili past hits the caller cannot see', () => {
+  /** An index of `total` task docs; only `visibleIds` survive the DB filter. */
+  const fakeIndex = (total: number) => {
+    const calls: Array<{ offset: number; limit: number }> = []
+    const docs = Array.from({ length: total }, (_, i) => ({
+      id: `task-t${i}`,
+      entityType: 'task',
+      title: `probe ${i}`,
+      content: '',
+      url: `/t${i}`,
+      createdAt: 1_700_000_000_000 - i,
+      updatedAt: 1_700_000_000_000 - i,
+    }))
+    const index = {
+      search: async (_q: string, opts: { limit: number; offset?: number }) => {
+        const offset = opts.offset ?? 0
+        calls.push({ offset, limit: opts.limit })
+        return { hits: docs.slice(offset, offset + opts.limit) }
+      },
+    }
+    return { index, calls }
+  }
+
+  /** A service wired to a fake index, with `keep` the rows the DB hands back. */
+  const svcWith = (index: unknown, keep: Array<{ id: string }>) => {
+    const { db } = makeDb({
+      tasks: keep,
+      docs: [], users: [], task_comments: [],
+      chat_channels: [], chat_channel_members: [], chat_messages: [],
+      folders: [], lists: [], spaces: [],
+    })
+    const svc = new SearchService(db as never, config)
+    Object.assign(svc as never, { enabled: true, index })
+    return svc
+  }
+
+  it('finds a visible task that ranks below the first page', async () => {
+    // 46 docs: the only one the caller may see is last, at index 45 — beyond
+    // the 40 the first page fetches, and far beyond a limit of 5.
+    const { index, calls } = fakeIndex(46)
+    const res = await svcWith(index, [{ id: 't45' }]).search('w1', 'u1', 'probe', 5, {})
+
+    assert.equal(res.length, 1, `the visible task was lost: ${JSON.stringify(res)}`)
+    assert.equal(res[0].id, 'task-t45')
+    assert.ok(calls.length > 1, 'it never paged — one page cannot reach doc 45')
+    assert.equal(calls[0].offset, 0, `first page must start at 0, got ${calls[0].offset}`)
+  })
+
+  it('stops at the scan cap rather than walking an unbounded index', async () => {
+    // Nothing is visible, so it can only stop by giving up. A search must not
+    // turn into a full scan of a large index.
+    const { index, calls } = fakeIndex(100_000)
+    const res = await svcWith(index, []).search('w1', 'u1', 'probe', 5, {})
+
+    assert.deepEqual(res, [], 'nothing was visible, so nothing may come back')
+    const scanned = calls.reduce((n, c) => n + c.limit, 0)
+    assert.ok(scanned <= 500, `scanned ${scanned} documents; the cap is 500`)
+  })
+
+  it('asks for one page only when the first page already answers', async () => {
+    // The ordinary case must not pay for the pathological one.
+    const { index, calls } = fakeIndex(46)
+    const res = await svcWith(index, Array.from({ length: 40 }, (_, i) => ({ id: `t${i}` })))
+      .search('w1', 'u1', 'probe', 5, {})
+
+    assert.equal(res.length, 5, 'a limit of 5 must return 5')
+    assert.equal(calls.length, 1, `one page should have sufficed, made ${calls.length} calls`)
+  })
+
+  it('does not return the same task twice when pages overlap', async () => {
+    // Meili paginates a live index, so a document can shift and be served on
+    // two pages. A search must never show one task under two headings.
+    const { index } = fakeIndex(46)
+    const overlapping = {
+      search: async (q: string, opts: { limit: number; offset?: number }) =>
+        // Every page starts from 0, so page 2 repeats page 1 entirely.
+        index.search(q, { ...opts, offset: 0 }),
+    }
+    const res = await svcWith(overlapping, [{ id: 't0' }]).search('w1', 'u1', 'probe', 5, {})
+    assert.equal(res.length, 1, `a repeated document was returned twice: ${JSON.stringify(res)}`)
+  })
+})

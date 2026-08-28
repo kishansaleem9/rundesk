@@ -203,6 +203,26 @@ export class SearchService implements OnModuleInit {
    * workspace filter keeps it invisible to other workspaces — the same way
    * indexed tasks are scoped — and links back to the task it belongs to.
    */
+  /**
+   * Take a task back out of the index.
+   *
+   * There was no removal path anywhere in the codebase: `indexTask` wrote on
+   * create and on edit, and nothing ever deleted, so a binned task stayed in
+   * Meili for good and the index only grew. Those documents are pure dead
+   * weight — an archived task can never be returned from here, because a
+   * search asking for archived work skips Meili entirely and goes to Postgres
+   * — yet they still occupied the result pages that live work needed.
+   *
+   * Never fatal. Losing the index entry for something the caller has just
+   * binned is not a reason to fail their delete; the read path filters against
+   * Postgres regardless, so a document that outlives its task is stale rather
+   * than dangerous.
+   */
+  async removeTask(taskId: string) {
+    if (!this.enabled || !this.index) return
+    await this.index.deleteDocument(`task-${taskId}`).catch(() => undefined)
+  }
+
   async indexTaskAttachment(
     attachment: { id: string; fileName: string; contentType: string; createdAt: Date },
     task: { id: string; listId: string },
@@ -297,8 +317,26 @@ export class SearchService implements OnModuleInit {
         updatedAt: new Date(attachment.createdAt).getTime(),
       })),
     ]
+    /*
+     * Clear this workspace's documents before writing the new ones.
+     *
+     * It only ever added, which meant "reindex" could not do the one thing the
+     * word promises: make the index match reality. Anything already indexed
+     * and no longer live — a task binned before removal-on-archive existed, a
+     * doc deleted by a cascade — survived every reindex, and the only tool for
+     * fixing a wrong index could not fix it.
+     *
+     * Scoped by filter so one workspace's repair never touches another's, and
+     * awaited so the add below cannot race the delete and lose what it wrote.
+     */
+    await this.index
+      .deleteDocuments({ filter: `workspaceId = "${workspaceId}"` })
+      .then((task) => this.index?.waitForTask(task.taskUid, { timeOutMs: 60_000 }))
+      .catch(() => undefined)
     if (payload.length) await this.index.addDocuments(payload)
     this.logger.log(`Reindexed workspace ${workspaceId}: ${payload.length} documents`)
+    // Answers with the count, so whoever runs the repair can see it did something.
+    return { indexed: payload.length }
   }
 
   async search(
@@ -368,31 +406,11 @@ export class SearchService implements OnModuleInit {
       if (filters.types?.length) {
         filterExpr.push(`(${filters.types.map((t) => `entityType = "${t}"`).join(' OR ')})`)
       }
-      const res = await this.index.search(trimmed, {
-        filter: filterExpr,
+      const safeMeili = await this.visibleMeiliHits(
+        trimmed,
+        filterExpr,
+        filters.sort,
         limit,
-        sort: meiliSort(filters.sort),
-      })
-      const meiliHits = res.hits.map((h) => ({
-        id: h.id,
-        entityType: h.entityType,
-        title: h.title,
-        content: (h.content ?? '').slice(0, 200),
-        url: h.url,
-        // Carried through so the merge orders Meili hits and Postgres extras as
-        // one list. Without it every Meili hit would look undated and sort to
-        // the bottom, silently undoing the order Meili just applied.
-        sortedAt: filters.sort === 'created'
-          ? new Date(h.createdAt)
-          : filters.sort === 'updated'
-            ? new Date(h.updatedAt)
-            : null,
-      }))
-      // Meili indexes tasks/docs/files — add the Postgres-only entity types
-      // (users, comments, channels, messages) for a general search.
-      // Meili has no visibility field — drop private task hits the caller can't see.
-      const safeMeili = await this.dropUnsearchableTaskHits(
-        meiliHits,
         userId,
         isManager,
         Boolean(filters.includeArchived),
@@ -550,6 +568,91 @@ export class SearchService implements OnModuleInit {
       if (y === null) return -1
       return y - x
     })
+  }
+
+  /**
+   * The first `limit` Meili hits this caller is actually allowed to see.
+   *
+   * Meili applies its own limit before anything in this process can look at a
+   * row, and both rules that remove a hit — archived, and per-caller
+   * visibility — live in Postgres. Filtering a single page therefore throws
+   * hits away without replacing them, and the search reports fewer results
+   * than exist. Where most of what matches a word is in the bin it reports
+   * NONE: the workspace this was found on holds 66 archived tasks matching
+   * "a" against 10 live ones, so every hit on page one was binned, all five
+   * were dropped, and an ordinary search answered "nothing" while ten live
+   * tasks matched.
+   *
+   * That is worse than the leak it came from — a leak shows too much and is
+   * obvious, an empty result looks like an answer.
+   *
+   * Visibility cannot be pushed into Meili (it is per caller, and the index
+   * has no such field), and archived cannot either: `indexTask` runs on create
+   * and on edit only, so a document's idea of archived would be stale the
+   * moment anything was binned. Postgres stays the authority; this pages until
+   * enough survive it.
+   *
+   * Bounded on purpose. A workspace with an enormous bin must not turn one
+   * search into an unbounded scan, so scanning stops at SCAN_CAP and returns
+   * what it has: fewer hits than ideal, rather than a slow request or none.
+   */
+  private async visibleMeiliHits(
+    query: string,
+    filterExpr: string[],
+    sort: SearchFilters['sort'],
+    limit: number,
+    userId: string,
+    isManager: boolean,
+    includeArchived: boolean,
+  ): Promise<SearchHit[]> {
+    const SCAN_CAP = 500
+    // Comfortably more than one page in the ordinary case, so the common
+    // search still costs exactly one round trip to each of Meili and Postgres.
+    const page = Math.min(Math.max(limit * 4, 40), SCAN_CAP)
+    const kept: SearchHit[] = []
+    const seen = new Set<string>()
+
+    for (let offset = 0; offset < SCAN_CAP && kept.length < limit; offset += page) {
+      const res = await this.index!.search(query, {
+        filter: filterExpr,
+        limit: Math.min(page, SCAN_CAP - offset),
+        offset,
+        sort: meiliSort(sort),
+      })
+      if (res.hits.length === 0) break
+
+      const mapped = res.hits.map((h) => ({
+        id: h.id,
+        entityType: h.entityType,
+        title: h.title,
+        content: (h.content ?? '').slice(0, 200),
+        url: h.url,
+        // Carried through so the merge orders Meili hits and Postgres extras as
+        // one list. Without it every Meili hit would look undated and sort to
+        // the bottom, silently undoing the order Meili just applied.
+        sortedAt: sort === 'created'
+          ? new Date(h.createdAt)
+          : sort === 'updated'
+            ? new Date(h.updatedAt)
+            : null,
+      })) as SearchHit[]
+
+      for (const hit of await this.dropUnsearchableTaskHits(mapped, userId, isManager, includeArchived)) {
+        // Meili paginates a live index; a document can shift between pages and
+        // arrive twice. Deduped here so a search cannot show the same task
+        // under two headings.
+        if (seen.has(hit.id)) continue
+        seen.add(hit.id)
+        kept.push(hit)
+        if (kept.length >= limit) break
+      }
+
+      // A short page is the end of the result set, so there is nothing left to
+      // page into — asking again would return the same nothing.
+      if (res.hits.length < page) break
+    }
+
+    return kept
   }
 
   /**

@@ -38,7 +38,9 @@ function makeService(db: any, security: any = { logAuditEvent: mock.fn(async () 
   return new TasksService(
     db,
     { emitToTask: mock.fn(), emitToList: mock.fn(), emitToUser: mock.fn(), emitToWorkspace: mock.fn() } as any,
-    {} as any, // search
+    // deleteTask takes the task back out of the search index, so the stub has
+    // to answer removeTask — an empty object made the delete throw.
+    { removeTask: mock.fn(async () => undefined) } as any, // search
     { fire: mock.fn(async () => undefined) } as any, // automations
     { fire: mock.fn(async () => undefined) } as any, // webhooks
     { notify: mock.fn(async () => undefined) } as any, // slack

@@ -5,6 +5,7 @@ import { spaces, folders, projects, lists, tasks, docs, users, workspaceMembers 
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { SearchService } from '../search/search.service'
 
 /** Item kinds the workspace Trash can hold. */
 export const TRASH_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc'] as const
@@ -37,6 +38,7 @@ export class TrashService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
+    private search: SearchService,
   ) {}
 
   // ─── permissions ────────────────────────────────────────────────────────────
@@ -325,6 +327,16 @@ export class TrashService {
         .delete(t)
         .where(and(eq(t.isArchived, true), isNotNull(t.archivedAt), lt(t.archivedAt, cutoff)))
         .returning({ id: t.id })
+      /*
+       * Binning a task now takes it out of the search index, so anything
+       * purged here should already be gone from it. This is the sweep for the
+       * ones that are not: every task archived before that change, plus any
+       * that reached the bin by a cascade rather than through deleteTask.
+       * Without it those documents would outlive the row itself.
+       */
+      if (type === 'task') {
+        for (const row of gone) await this.search.removeTask(row.id)
+      }
       total += gone.length
     }
     if (total > 0) this.logger.log(`Trash purge removed ${total} item(s) older than ${TRASH_RETENTION_DAYS} days`)
