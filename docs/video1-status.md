@@ -819,3 +819,54 @@ template literals my extraction had mangled. Recorded because that is now the
 fourth distinct time in this engagement a single grep has produced a false gap.
 
 `verify-release.sh` is 146 checks (6 new).
+
+---
+
+## What the production run caught (28 Aug)
+
+The archived-search check written a few hours earlier failed on its first real
+run, and it was right to.
+
+```
+FAIL archived work shows up in an ordinary search unasked
+PASS and comes back with includeArchived
+```
+
+**Deleted tasks were findable in search.** `indexTask` writes a task into
+Meilisearch on create and on edit, and there is no removal path anywhere in the
+codebase — no `deleteDocument`, nothing. Archiving never touched the index, so
+once indexed a task stayed searchable for good.
+
+The Postgres fallback had filtered `isArchived` all along, which is exactly why
+this survived so long: **it can only happen where Meilisearch is actually
+running**, and the sandbox had no Meili. The local run passed for the wrong
+reason. Reproducing it meant fetching a real Meilisearch binary and pointing
+the API at it — after which the failure appeared locally, identically.
+
+Fixed by filtering archived out of the Meili hits alongside the visibility
+filter that was already there. The archived rule applies **even to a manager**:
+managers skip the visibility check by design, but nobody should find deleted
+work by searching, and the old early return for managers skipped both rules at
+once.
+
+### And a second bug underneath it
+
+Removing that early return surfaced one that had been sitting there:
+
+```
+{"status":400,"message":"A value has an invalid format"}   ← Postgres 22P02
+```
+
+A Meili document id is `task-<uuid>`, not a uuid. The post-filter passed those
+straight into a uuid column. The old code never showed it because the early
+return meant it only ran for **non**-managers — and a manager is who tends to be
+looking when anyone checks by hand. So private-task filtering over Meili would
+have 400'd the entire search for every ordinary member on any deployment with
+Meili configured.
+
+Both are covered now, including the case that hid it: `verify-release.sh` asks
+the same search **as a non-manager** and expects a 200 rather than a 400.
+
+The lesson worth keeping: this deployment's search behaves differently from the
+sandbox's, and no amount of local green says otherwise. The check that found it
+was three hours old and had passed locally twice.

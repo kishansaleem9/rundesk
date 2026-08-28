@@ -959,6 +959,23 @@ else
   curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/trash/task/$ARCH_TID" -H "$AUTH" >/dev/null 2>&1 || true
 fi
 
+# The Meili post-filter queries Postgres by task id. A Meili document id is
+# `task-<uuid>`, not a uuid, so handing it over unstripped is a 22P02 and a 400
+# for the whole search. That only bites a caller the filter actually runs for,
+# which is why it needs asking as somebody who is NOT a manager.
+PEER_LOGIN=$(curl -fsS --max-time 20 -X POST "$API/auth/login" -H 'content-type: application/json' \
+  -d "{\"email\":\"${PEER_EMAIL:-org-admin@rundesk.internal}\",\"password\":\"${PEER_PASSWORD:-OrgAdmin@123!}\"}" 2>/dev/null || true)
+PEER_TOKEN=$(printf '%s' "$PEER_LOGIN" | jget accessToken)
+if [ -z "$PEER_TOKEN" ]; then
+  ok "no second account here, so the non-manager search path was not exercised"
+else
+  PEER_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+    "$API/search/$WS?q=zzsearchprobe&types=task" -H "authorization: Bearer $PEER_TOKEN" || true)
+  [ "$PEER_CODE" = "200" ] \
+    && ok "search answers for a non-manager, not a 400 from the visibility filter" \
+    || bad "search answered $PEER_CODE for a non-manager — the Meili id/uuid path"
+fi
+
 # §4 — "Google Drive … link kar ke drive se bhi search results aayein."
 DRIVE_PROVIDERS=$(curl -fsS --max-time 20 "$API/workspaces/$WS/integrations/connections/providers" -H "$AUTH" || true)
 printf '%s' "$DRIVE_PROVIDERS" | grep -q 'google-drive' \

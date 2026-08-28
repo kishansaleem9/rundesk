@@ -391,7 +391,12 @@ export class SearchService implements OnModuleInit {
       // Meili indexes tasks/docs/files — add the Postgres-only entity types
       // (users, comments, channels, messages) for a general search.
       // Meili has no visibility field — drop private task hits the caller can't see.
-      const safeMeili = await this.dropHiddenTaskHits(meiliHits, userId, isManager)
+      const safeMeili = await this.dropUnsearchableTaskHits(
+        meiliHits,
+        userId,
+        isManager,
+        Boolean(filters.includeArchived),
+      )
       const extras = await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
@@ -548,23 +553,54 @@ export class SearchService implements OnModuleInit {
   }
 
   /**
-   * Drop private task hits (from the Meili index, which carries no visibility
-   * field) that the caller may not see. Non-task hits pass through untouched.
+   * Drop task hits from the Meili index that this search should not return —
+   * ones the caller may not see, and ones that are in the bin.
+   *
+   * The index carries neither field. `indexTask` writes a task in on create and
+   * on edit and there is no removal path anywhere, so a deleted task stays in
+   * Meili forever: on a deployment with Meilisearch configured, an ordinary
+   * search returned work that had been thrown away. The Postgres path had
+   * filtered `isArchived` all along (see the fallback query), which is why this
+   * only ever showed up where Meili was actually running.
+   *
+   * Archived is enforced even for a manager. Managers skip the VISIBILITY
+   * check — that is what being a manager means here — but nobody is meant to
+   * find deleted work by searching, and the previous early return for managers
+   * meant they skipped both checks at once.
+   *
+   * Non-task hits pass through untouched.
    */
-  private async dropHiddenTaskHits<T extends { id: string; entityType: string }>(
+  private async dropUnsearchableTaskHits<T extends { id: string; entityType: string }>(
     hits: T[],
     userId: string,
     isManager: boolean,
+    includeArchived: boolean,
   ): Promise<T[]> {
-    if (isManager) return hits
-    const taskIds = hits.filter((h) => h.entityType === 'task').map((h) => h.id)
-    if (taskIds.length === 0) return hits
-    const visible = await this.db
+    /*
+     * A Meili hit's id is the DOCUMENT id, which `indexTask` writes as
+     * `task-<uuid>` — not a uuid. Handing those straight to a uuid column is a
+     * Postgres 22P02 and a 400 for the whole search.
+     *
+     * The previous version had the same bug and never showed it: it returned
+     * early for managers, and a manager is who tends to be looking when anyone
+     * checks. Stripped here once, and compared stripped.
+     */
+    const taskHits = hits.filter((h) => h.entityType === 'task')
+    if (taskHits.length === 0) return hits
+    const rawId = (docId: string) => docId.replace(/^task-/, '')
+    // Nothing to ask the database when neither rule applies to this caller.
+    if (isManager && includeArchived) return hits
+
+    const conds: Array<SQL | undefined> = [inArray(tasks.id, taskHits.map((h) => rawId(h.id)))]
+    if (!includeArchived) conds.push(eq(tasks.isArchived, false))
+    if (!isManager) conds.push(taskVisibilityFilter(this.db, userId, false))
+
+    const keep = await this.db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(and(inArray(tasks.id, taskIds), taskVisibilityFilter(this.db, userId, false)))
-    const ok = new Set(visible.map((r) => r.id))
-    return hits.filter((h) => h.entityType !== 'task' || ok.has(h.id))
+      .where(and(...conds))
+    const ok = new Set(keep.map((r) => r.id))
+    return hits.filter((h) => h.entityType !== 'task' || ok.has(rawId(h.id)))
   }
 
   /** Search users, comments, channels, and messages (Plan §11.1). */
