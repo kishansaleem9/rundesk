@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, cn } from '@rundesk/ui'
-import { CheckSquare, ClipboardList, Folder, FolderOpen, FileText, Layers, Upload, X, Clock, PenTool, LayoutDashboard } from 'lucide-react'
+import { Button, Input, cn, toast } from '@rundesk/ui'
+import { CheckSquare, ClipboardList, Folder, FolderOpen, FileText, Layers, Upload, X, Clock, PenTool, LayoutDashboard, Bell, Paperclip } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
@@ -159,6 +159,10 @@ function ModeTab({
   )
 }
 
+/** §G15 frame #12 — what the create footer needs to know about. */
+type TaskTemplate = { id: string; name: string }
+type WorkspaceMember = { userId: string; displayName?: string | null; email?: string | null }
+
 function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -168,6 +172,10 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const [projectId, setProjectId] = useState('')
   const [listId, setListId] = useState('')
   const [taskTypeId, setTaskTypeId] = useState('')
+  // §G15 frame #12 — the three footer controls.
+  const [templateId, setTemplateId] = useState('')
+  const [watcherIds, setWatcherIds] = useState<string[]>([])
+  const [attachment, setAttachment] = useState<File | null>(null)
 
   const spaces = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -191,14 +199,83 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     queryFn: () => api<TaskType[]>(`/workspaces/${workspaceId}/task-types`),
   }).data ?? []
 
+  /*
+   * §G15 frame #12 — "Task create karte waqt neeche Templates, attach aur
+   * notification (bell) ke controls hon."
+   *
+   * All three already existed and none of them was reachable from here.
+   * Templates could only be applied from the Templates page — and the two
+   * links in this modal's footer navigate away, losing the half-filled form,
+   * which is the opposite of useful at the moment you are filling it in.
+   * Attachments and watchers were detail-sheet-only, so "make the task, then
+   * go and find it again" was the only route to either.
+   */
+  const templates = useQuery({
+    queryKey: ['task-templates', workspaceId],
+    queryFn: () => api<TaskTemplate[]>(`/workspaces/${workspaceId}/task-templates`),
+    enabled: Boolean(workspaceId),
+  }).data ?? []
+  const members = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`),
+    enabled: Boolean(workspaceId),
+  }).data ?? []
+
   const create = useMutation({
-    mutationFn: () =>
-      api<{ id: string }>(`/tasks`, {
-        method: 'POST',
-        // Omit status → backend seeds the list's first/default status.
-        // Omit taskTypeId → same, for the list's default type.
-        body: { listId, title, priority: 'normal', ...(taskTypeId ? { taskTypeId } : {}) },
-      }),
+    mutationFn: async () => {
+      /*
+       * A template is not a set of defaults to copy into this form — it
+       * carries checklists, subtasks and custom-field values this modal has
+       * nowhere to put. So the server builds the task from it and the typed
+       * title wins, rather than this form trying to reproduce it.
+       */
+      const task = templateId
+        ? await api<{ id: string }>(`/workspaces/${workspaceId}/task-templates/${templateId}/instantiate`, {
+            method: 'POST',
+            body: { listId, titleOverride: title },
+          })
+        : await api<{ id: string }>(`/tasks`, {
+            method: 'POST',
+            // Omit status → backend seeds the list's first/default status.
+            // Omit taskTypeId → same, for the list's default type.
+            body: { listId, title, priority: 'normal', ...(taskTypeId ? { taskTypeId } : {}) },
+          })
+
+      // Both of these need a task to hang off, so they happen after it exists.
+      // Neither is allowed to lose you the task: a watcher that cannot be added
+      // or a file that will not upload is reported, not thrown.
+      const problems: string[] = []
+      for (const userId of watcherIds) {
+        try {
+          await api(`/tasks/${task.id}/watchers`, { method: 'POST', body: { userId } })
+        } catch {
+          problems.push(t('quickCreate.watcherFailed'))
+        }
+      }
+      if (attachment) {
+        try {
+          const contentType = attachment.type || 'application/octet-stream'
+          const presign = await api<{ uploadUrl: string; storageKey: string }>(
+            `/tasks/${task.id}/attachments/presign`,
+            { method: 'POST', body: { fileName: attachment.name, contentType, sizeBytes: attachment.size } },
+          )
+          const put = await fetch(presign.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': contentType },
+            body: attachment,
+          })
+          if (!put.ok) throw new Error(String(put.status))
+          await api(`/tasks/${task.id}/attachments`, {
+            method: 'POST',
+            body: { fileName: attachment.name, storageKey: presign.storageKey, contentType, sizeBytes: attachment.size },
+          })
+        } catch {
+          problems.push(t('quickCreate.attachmentFailed'))
+        }
+      }
+      if (problems.length) toast.error(problems.join(' '))
+      return task
+    },
     onSuccess: (task) => {
       qc.invalidateQueries({ queryKey: ['tasks', listId] })
       onClose()
@@ -238,6 +315,70 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
           data-testid="quick-create-task-type"
         />
       )}
+      {/*
+        §G15 frame #12 — Templates, attach and notify, at the moment you are
+        deciding what the task is. Each one is a control over machinery that
+        already existed and had no entry point from here.
+      */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
+        {templates.length > 0 && (
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Layers className="h-3.5 w-3.5" />
+            <select
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              data-testid="quick-create-template"
+              className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
+            >
+              <option value="">{t('quickCreate.noTemplate')}</option>
+              {templates.map((tpl) => (
+                <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <label
+          className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+          title={attachment ? attachment.name : t('quickCreate.attachFile')}
+        >
+          <Paperclip className="h-3.5 w-3.5" />
+          <input
+            type="file"
+            className="hidden"
+            data-testid="quick-create-attach"
+            onChange={(e) => setAttachment(e.target.files?.[0] ?? null)}
+          />
+          <span className="max-w-[9rem] truncate">
+            {attachment ? attachment.name : t('quickCreate.attachFile')}
+          </span>
+        </label>
+
+        {members.length > 0 && (
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Bell className="h-3.5 w-3.5" />
+            <select
+              value=""
+              data-testid="quick-create-notify"
+              onChange={(e) => {
+                const id = e.target.value
+                if (id && !watcherIds.includes(id)) setWatcherIds((prev) => [...prev, id])
+              }}
+              className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
+            >
+              <option value="">
+                {watcherIds.length ? t('quickCreate.notifyCount', { count: watcherIds.length }) : t('quickCreate.notify')}
+              </option>
+              {members
+                .filter((m) => !watcherIds.includes(m.userId))
+                .map((m) => (
+                  <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+                ))}
+            </select>
+          </label>
+        )}
+      </div>
+
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" disabled={!title.trim() || !listId || create.isPending}>
@@ -254,6 +395,7 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [listPrivate, setListPrivate] = useState(false)
+  const [createdList, setCreatedList] = useState<{ id: string; name: string } | null>(null)
   const [spaceId, setSpaceId] = useState('')
   const [projectId, setProjectId] = useState('')
 
@@ -276,13 +418,33 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     onSuccess: (list) => {
       qc.invalidateQueries({ queryKey: ['lists', projectId] })
       qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
-      onClose()
-      navigate({
-        to: '/app/$workspaceId/$spaceId/$projectId/$listId',
-        params: { workspaceId, spaceId, projectId, listId: list.id },
-      })
+      /*
+       * §G15 [22:15] — "list mein aap ko VIEW kaisa chahiye … main filhaal
+       * 'no thanks' kar rahi hoon, main is ko baad mein set down karoongi."
+       *
+       * She declines it on camera, which is the point: the step is offered and
+       * skipping it is one click. Both create paths used to navigate straight
+       * into an empty list, so a list shipped with views nobody chose at the
+       * one moment anybody is thinking about its shape.
+       */
+      setCreatedList({ id: list.id, name })
     },
   })
+
+  if (createdList) {
+    return (
+      <ListSettingsStep
+        list={createdList}
+        onDone={() => {
+          onClose()
+          navigate({
+            to: '/app/$workspaceId/$spaceId/$projectId/$listId',
+            params: { workspaceId, spaceId, projectId, listId: createdList.id },
+          })
+        }}
+      />
+    )
+  }
 
   return (
     <form
@@ -315,6 +477,112 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         <Button type="submit" size="sm" disabled={!name.trim() || !projectId || create.isPending}>{t('quickCreate.createList')}</Button>
       </div>
     </form>
+  )
+}
+
+/**
+ * §G15 [22:15] / frame #7 — the step after a list is made.
+ *
+ * > "List banne ke baad poochhe ke view kaisa chahiye — main abhi 'no thanks'
+ * >  karoon aur baad mein set kar loon."
+ *
+ * Offered, and skippable in one click, because that is exactly what she does
+ * with it. What it offers is only what a list really has: views, which are
+ * per-list rows with one of them default. It does not offer AI-generated
+ * custom fields or a default task type, because neither is a per-list thing
+ * here — a step that listed settings this product cannot actually apply to a
+ * list would be worse than no step.
+ *
+ * Nothing is applied unless something is ticked, and the list already exists
+ * either way: this is a step ABOUT the list, never a second chance to create it.
+ */
+const LIST_VIEW_CHOICES = [
+  { type: 'list' as const, labelKey: 'quickCreate.viewList' },
+  { type: 'board' as const, labelKey: 'quickCreate.viewBoard' },
+  { type: 'calendar' as const, labelKey: 'quickCreate.viewCalendar' },
+]
+
+function ListSettingsStep({
+  list,
+  onDone,
+}: {
+  list: { id: string; name: string }
+  onDone: () => void
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  // List is ticked by default because it is the view a list opens on; the
+  // other two are a decision.
+  const [chosen, setChosen] = useState<Array<'list' | 'board' | 'calendar'>>(['list'])
+
+  const apply = useMutation({
+    mutationFn: async () => {
+      let first = true
+      for (const type of chosen) {
+        const view = await api<{ id: string }>(`/lists/${list.id}/views`, {
+          method: 'POST',
+          body: { name: t(LIST_VIEW_CHOICES.find((v) => v.type === type)!.labelKey as TranslationKey), type },
+        })
+        // The first one ticked is the one the list opens on.
+        if (first) {
+          await api(`/views/${view.id}`, { method: 'PATCH', body: { isDefault: true } })
+          first = false
+        }
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['list-views', list.id] })
+      onDone()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  })
+
+  return (
+    <div className="px-5 py-4 space-y-3" data-testid="list-settings-step">
+      <div>
+        <p className="text-sm font-medium">{t('quickCreate.listReady', { name: list.name })}</p>
+        <p className="text-xs text-muted-foreground">{t('quickCreate.listSettingsHint')}</p>
+      </div>
+
+      <div className="space-y-1.5">
+        {LIST_VIEW_CHOICES.map((choice) => (
+          <label
+            key={choice.type}
+            className="flex cursor-pointer items-center gap-2 rounded-md border border-border/70 px-2.5 py-2 text-xs hover:bg-muted/40"
+          >
+            <input
+              type="checkbox"
+              data-testid={`list-settings-view-${choice.type}`}
+              checked={chosen.includes(choice.type)}
+              onChange={(e) =>
+                setChosen((prev) =>
+                  e.target.checked ? [...prev, choice.type] : prev.filter((c) => c !== choice.type),
+                )
+              }
+              className="h-3.5 w-3.5 rounded border-border"
+            />
+            {t(choice.labelKey as TranslationKey)}
+          </label>
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        {/* Her own words for this button. Skipping applies nothing and leaves
+            the list exactly as it was created. */}
+        <Button type="button" variant="outline" size="sm" data-testid="list-settings-skip" onClick={onDone}>
+          {t('quickCreate.noThanks')}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          data-testid="list-settings-apply"
+          disabled={chosen.length === 0 || apply.isPending}
+          onClick={() => apply.mutate()}
+        >
+          {apply.isPending ? t('quickCreate.creating') : t('quickCreate.applySettings')}
+        </Button>
+      </div>
+    </div>
   )
 }
 

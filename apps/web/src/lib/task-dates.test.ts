@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart } from './task-dates'
+import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart, presetToIso } from './task-dates'
 
 /**
  * §G [21:36–23:38] — "START date aur DUE date … TIME ke saath."
@@ -89,5 +89,55 @@ describe('§G a coarse picker does not destroy what it cannot show', () => {
   it('refuses a malformed day rather than inventing one', () => {
     assert.equal(withDatePart('2026-09-16T00:00:00.000Z', 'tomorrow'), null)
     assert.equal(withDatePart(null, '2026-09'), null)
+  })
+})
+
+/**
+ * §G15 frame #9 — the presets beside the date.
+ *
+ * "now" is injected on every one of these. A preset function that reads the
+ * clock itself can only be tested on the day it happens to be, which is how
+ * date code passes all week and fails on a Sunday.
+ */
+describe('§G15 date presets', () => {
+  // A Wednesday, so weekday/weekend arithmetic is unambiguous.
+  const wed = new Date(2026, 8, 16, 11, 0)
+
+  it('today, tomorrow and the fixed offsets', () => {
+    const day = (iso: string) => toDateInput(iso)
+    assert.equal(day(presetToIso('today', null, wed)), '2026-09-16')
+    assert.equal(day(presetToIso('tomorrow', null, wed)), '2026-09-17')
+    assert.equal(day(presetToIso('nextWeek', null, wed)), '2026-09-23')
+    assert.equal(day(presetToIso('twoWeeks', null, wed)), '2026-09-30')
+    assert.equal(day(presetToIso('fourWeeks', null, wed)), '2026-10-14')
+  })
+
+  it('"this weekend" is the coming Saturday', () => {
+    assert.equal(toDateInput(presetToIso('thisWeekend', null, wed)), '2026-09-19')
+  })
+
+  it('and never points backwards when you are already in the weekend', () => {
+    /*
+     * On a Saturday the answer is today. On a Sunday the weekend you are in
+     * has one day left — "this weekend" meaning yesterday is the only clearly
+     * wrong answer available.
+     */
+    const sat = new Date(2026, 8, 19, 11, 0)
+    const sun = new Date(2026, 8, 20, 11, 0)
+    assert.equal(toDateInput(presetToIso('thisWeekend', null, sat)), '2026-09-19')
+    assert.equal(toDateInput(presetToIso('thisWeekend', null, sun)), '2026-09-20')
+  })
+
+  it('carries the time already on the row', () => {
+    // A deadline at 17:30 moved to "next week" is still due at 17:30.
+    const at1730 = new Date(2026, 8, 15, 17, 30).toISOString()
+    assert.equal(toDateTimeInput(presetToIso('nextWeek', at1730, wed)), '2026-09-23T17:30')
+  })
+
+  it('and leaves a date-only row date-only', () => {
+    // Otherwise every use of a preset would silently stamp 00:00 local on a
+    // task that never had a time, which is the drift this module exists to stop.
+    const dateOnly = '2026-09-10T00:00:00.000Z'
+    assert.equal(presetToIso('tomorrow', dateOnly, wed), '2026-09-17T00:00:00.000Z')
   })
 })

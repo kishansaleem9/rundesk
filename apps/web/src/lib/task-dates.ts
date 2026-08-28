@@ -102,3 +102,74 @@ export function withDatePart(existing: string | null | undefined, ymd: string): 
   if (!carry) return new Date(Date.UTC(y, m - 1, d)).toISOString()
   return next.toISOString()
 }
+
+/**
+ * §G15 [22:59] / frame G15 #9 — "Today / Tomorrow / This weekend / Next week /
+ * 2 weeks / 4 weeks" beside the date, rather than a bare calendar.
+ *
+ * Setting "due next week" was four clicks and a mental date calculation. These
+ * are the six ClickUp offers, because the walkthrough is the specification: the
+ * point of the exercise is that somebody moving over finds what they reach for.
+ *
+ * Every preset keeps the time already on the row. A deadline of 17:30 nudged to
+ * "next week" is still due at 17:30 — losing it would be the same silent
+ * overwrite the date fields themselves used to do.
+ */
+export type DatePresetId = 'today' | 'tomorrow' | 'thisWeekend' | 'nextWeek' | 'twoWeeks' | 'fourWeeks'
+
+export const DATE_PRESETS: ReadonlyArray<{ id: DatePresetId; labelKey: string }> = [
+  { id: 'today', labelKey: 'taskDetail.datePreset.today' },
+  { id: 'tomorrow', labelKey: 'taskDetail.datePreset.tomorrow' },
+  { id: 'thisWeekend', labelKey: 'taskDetail.datePreset.thisWeekend' },
+  { id: 'nextWeek', labelKey: 'taskDetail.datePreset.nextWeek' },
+  { id: 'twoWeeks', labelKey: 'taskDetail.datePreset.twoWeeks' },
+  { id: 'fourWeeks', labelKey: 'taskDetail.datePreset.fourWeeks' },
+]
+
+/**
+ * The instant a preset means, carrying over the time already set.
+ *
+ * @param existing what the field holds now, so 17:30 survives the move
+ * @param now      injectable, because a function that reads the clock itself
+ *                 can only be tested on the day it happens to be
+ */
+export function presetToIso(
+  id: DatePresetId,
+  existing: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  switch (id) {
+    case 'today':
+      break
+    case 'tomorrow':
+      base.setDate(base.getDate() + 1)
+      break
+    case 'thisWeekend': {
+      // The coming Saturday. On a Saturday that is today; on a Sunday the
+      // weekend you are in has one day left, so "this weekend" is today too —
+      // pointing at yesterday would be the only clearly wrong answer.
+      const day = base.getDay()
+      if (day !== 0 && day !== 6) base.setDate(base.getDate() + (6 - day))
+      break
+    }
+    case 'nextWeek':
+      base.setDate(base.getDate() + 7)
+      break
+    case 'twoWeeks':
+      base.setDate(base.getDate() + 14)
+      break
+    case 'fourWeeks':
+      base.setDate(base.getDate() + 28)
+      break
+  }
+  const prev = existing ? new Date(existing) : null
+  const carry = prev && !Number.isNaN(prev.getTime()) && !isDateOnly(prev)
+  if (carry) {
+    base.setHours(prev!.getHours(), prev!.getMinutes(), 0, 0)
+    return base.toISOString()
+  }
+  // No time to carry: keep the date-only convention the rest of this module
+  // uses, so a preset does not quietly give every task a 00:00 local stamp.
+  return new Date(Date.UTC(base.getFullYear(), base.getMonth(), base.getDate())).toISOString()
+}

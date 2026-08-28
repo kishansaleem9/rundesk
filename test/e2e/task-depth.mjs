@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 42
+const EXPECTED_CHECKS = 52
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -533,6 +533,96 @@ try {
     JSON.stringify(slashBlocks))
   await page.keyboard.press('Escape')
   await A(`/tasks/${imgTask.data?.id}`, { method: 'DELETE' })
+
+  /*
+   * §G15 frame #9 — "Today / Tomorrow / This weekend / Next week / 2 weeks /
+   * 4 weeks aur 'Set Recurring' wahin milein."
+   *
+   * These were skipped once on the reasoning that she does not ask for them in
+   * so many words — she demonstrates them in ClickUp. That reasoning was wrong:
+   * the walkthrough IS the specification, because the point of the exercise is
+   * that somebody moving across finds what they reach for.
+   */
+  const presetTask = await A('/tasks', {
+    method: 'POST',
+    body: { listId, title: `preset depth ${Date.now()}`, dueDate: new Date(2026, 8, 15, 17, 30).toISOString() },
+  })
+  await page.goto(
+    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${presetTask.data?.id}`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await page.waitForTimeout(4000)
+  const presetLabels = await page.locator('[data-testid=task-due-presets] button').allInnerTexts().catch(() => [])
+  check(presetLabels.length >= 6, 'the due date offers natural-language presets', JSON.stringify(presetLabels))
+  check(
+    (await page.locator('[data-testid=task-due-set-recurring]').count()) > 0,
+    'and Set Recurring sits with them, not buried further down the sheet',
+  )
+  await page.locator('[data-testid=task-due-preset-nextWeek]').click()
+  await page.waitForTimeout(2200)
+  const movedDue = new Date((await A(`/tasks/${presetTask.data?.id}`)).data?.dueDate)
+  check(
+    movedDue.getHours() === 17 && movedDue.getMinutes() === 30,
+    'and a preset keeps the time the row was already carrying',
+    movedDue.toISOString(),
+  )
+  await A(`/tasks/${presetTask.data?.id}`, { method: 'DELETE' })
+
+  /*
+   * §G15 frame #12 — "Task create karte waqt neeche Templates, attach aur
+   * notification (bell) ke controls hon."
+   *
+   * All three existed and none was reachable from the create dialog: templates
+   * only from the Templates page, attachments and watchers only from the detail
+   * sheet once the task already existed.
+   */
+  await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  await page.locator('[data-testid=quick-create-open]').click()
+  await page.waitForTimeout(800)
+  await page.locator('[data-testid=create-tab-task]').click()
+  await page.waitForTimeout(600)
+  check((await page.locator('[data-testid=quick-create-attach]').count()) > 0,
+    'the create dialog can attach a file')
+  check((await page.locator('[data-testid=quick-create-notify]').count()) > 0,
+    'and notify somebody, without opening the task afterwards')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(500)
+
+  /*
+   * §G15 [22:15] / frame #7 — "List banne ke baad poochhe ke view kaisa
+   * chahiye — main abhi 'no thanks' karoon."
+   *
+   * She declines it on camera, which is the point: it is offered, and skipping
+   * is one click. Both create paths used to navigate straight into an empty
+   * list, so a list shipped with views nobody chose.
+   */
+  await page.locator('[data-testid=quick-create-open]').click()
+  await page.waitForTimeout(800)
+  await page.locator('[data-testid=create-tab-list]').click()
+  await page.waitForTimeout(700)
+  const listForm = page.locator('form').filter({ has: page.locator('[data-testid=quick-create-list-private]') })
+  check(await listForm.count() > 0, 'the list form asks whether to make it private (§G15 [22:07])')
+  await listForm.locator('input[type=text], input:not([type])').first().fill(`depth step ${Date.now()}`)
+  const listSelects = listForm.locator('select')
+  await listSelects.nth(0).selectOption({ index: 1 })
+  await page.waitForTimeout(900)
+  await listSelects.nth(1).selectOption({ index: 1 })
+  await page.waitForTimeout(900)
+  await listForm.locator('button[type=submit]').click()
+  await page.waitForTimeout(3200)
+  const settingsStep = await page.locator('[data-testid=list-settings-step]').count()
+  check(settingsStep > 0, 'and creating one asks which views it opens with')
+  if (settingsStep > 0) {
+    check((await page.locator('[data-testid^=list-settings-view-]').count()) >= 3,
+      'offering the views a list really has')
+    check((await page.locator('[data-testid=list-settings-skip]').count()) > 0,
+      'with a "No thanks", which is what she does with it')
+    await page.locator('[data-testid=list-settings-skip]').click()
+    await page.waitForTimeout(2500)
+    check((await page.locator('[data-testid=list-settings-step]').count()) === 0,
+      'and skipping applies nothing and leaves you in the list')
+  }
 
   await done(browser, stack)
 } catch (err) {

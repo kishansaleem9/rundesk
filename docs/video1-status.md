@@ -583,11 +583,10 @@ outstanding. Two more in the same group are in the same state:
 | #6 list private at creation | closed | list-from-task-flow ✓ **private ✗** |
 | #13 dead start-date state | closed | **still dead** |
 
-Not fixed here, and named so nobody assumes otherwise: #7 (a list-settings step
-after creation), #9 (natural-language date presets), #12 (template/attach/notify
-in the create footer). She does not ask for any of those in the transcript —
-#7 she is offered and declines on camera ("main filhaal 'no thanks'") — so they
-are ClickUp's surface, not her spec.
+*(An earlier version of this section deferred #7, #9 and #12 on the reasoning
+that she demonstrates them in ClickUp rather than asking for them in so many
+words. That reasoning was wrong and the three are built — see the section
+below.)*
 
 ### #162 — an image could not go in a description
 
@@ -655,3 +654,79 @@ being a role this product has); and time format `[07:03]`.
 | `syncup-live.mjs` — the meter exists AND moves with the input | 32 (2 new) |
 | `call-wiring.test.ts` — peak not average, torn down, announced, degrades | 29 (5 new) |
 | `markdown-blocks.test.ts` — image branch precedes the link branch | 9 new |
+
+---
+
+## The filter that was wrong (28 Aug)
+
+The fourth pass deferred three G15 gaps with this reasoning: *she does not ask
+for these in the transcript, so they are ClickUp's surface, not her spec.*
+
+That is backwards, and it is worth writing down because it is the kind of
+mistake that silently shrinks a piece of work. **The walkthrough is the
+specification.** She is demonstrating ClickUp because that is the product being
+replaced — every screen she steps through is a description of what Rundesk
+should do. A feature she shows and does not separately narrate is still an ask.
+
+The weakest link in that reasoning was #7, where the transcript actually argues
+against me: *"main filhaal 'no thanks' kar rahi hoon, main is ko baad mein set
+down karoongi."* She is declining to configure the step **in that moment**. Her
+saying it at all is evidence the step exists and is expected.
+
+All three are built. Each `why` in the frame audit said the same thing about
+them, which is the recurring shape of this whole engagement: **the machinery
+existed and nothing surfaced it where the decision is made.**
+
+### #164 — the date had no presets, and recurrence was somewhere else
+
+> frame G15 #9 — "Today / Tomorrow / This weekend / Next week / 2 weeks /
+> 4 weeks aur 'Set Recurring' wahin milein"
+
+"Due next week" was four clicks and a mental date calculation over a bare
+calendar. The six presets now sit under the due date, with **Set Recurring**
+beside them — recurrence already existed as a Repeat select further down the
+sheet, which is not where anyone is looking while setting a deadline.
+
+Every preset carries the time already on the row: a deadline at 17:30 moved to
+"next week" is still due at 17:30. `presetToIso` takes `now` as an argument, so
+the tests do not only pass on the day they are run, and "this weekend" is
+checked from a Saturday and a Sunday as well as a weekday — on a Sunday the
+weekend you are in has one day left, and pointing at yesterday is the only
+clearly wrong answer available.
+
+### #165 — the create dialog could not attach, notify or start from a template
+
+> frame G15 #12 — "neeche Templates, attach aur notification (bell) ke controls"
+
+All three existed; none was reachable from the dialog. Templates could only be
+applied from the Templates page — and this modal's two footer links *navigate
+away*, losing the half-filled form. Attachments and watchers were detail-sheet
+only, so "create it, then go and find it again" was the only route.
+
+A chosen template goes through the server's own `instantiate`, not by copying
+fields into this form: a template carries checklists, subtasks and custom-field
+values the modal has nowhere to put, and the typed title wins as an override.
+A watcher that cannot be added or a file that will not upload is reported and
+the task is still yours — neither is allowed to lose you the thing you made.
+
+### #166 — a new list opened with views nobody chose
+
+> `[22:15]` "List banne ke baad poochhe ke view kaisa chahiye — main abhi
+> 'no thanks' karoon aur baad mein set kar loon"
+
+Both create paths navigated straight into an empty list. There is now a step
+after creation offering the views a list really has — List, Board, Calendar —
+with **No thanks** in her own words, and the first one ticked becoming the
+list's default.
+
+It deliberately does *not* offer ClickUp's AI-generated custom fields or a
+default task type: neither is a per-list thing in Rundesk, and a step listing
+settings the product cannot actually apply to a list would be worse than no
+step at all.
+
+### Guarded
+
+`task-depth.mjs` is 52 checks (10 new): the preset row and that a preset keeps
+17:30, the attach and notify controls, the private option, the settings step,
+its three view choices, and that "No thanks" applies nothing and still leaves
+you in the list. `task-dates.test.ts` is 14 (5 new), run in four timezones.

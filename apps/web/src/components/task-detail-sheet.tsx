@@ -62,7 +62,14 @@ import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useDateFormat } from '../lib/date-format'
-import { toDateInput, toDateTimeInput, fromDateTimeInput, withDatePart } from '../lib/task-dates'
+import {
+  toDateInput,
+  toDateTimeInput,
+  fromDateTimeInput,
+  withDatePart,
+  presetToIso,
+  DATE_PRESETS,
+} from '../lib/task-dates'
 import { TaskSheetSkeleton } from './loading-skeletons'
 import { InlineSkeleton } from './loading-skeletons'
 
@@ -1823,6 +1830,37 @@ function OverviewPanel({
             disabled={patchTask.isPending}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
+          {/*
+            §G15 frame #9 — "Today / Tomorrow / This weekend / Next week /
+            2 weeks / 4 weeks aur 'Set Recurring' wahin milein."
+
+            Beside the field, because "due next week" was four clicks and a
+            mental date calculation. Recurrence is here for the same reason: it
+            already existed as a Repeat select further down the sheet, which is
+            not where anybody is looking when they are setting a deadline.
+          */}
+          <div className="mt-1.5 flex flex-wrap gap-1" data-testid="task-due-presets">
+            {DATE_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                data-testid={`task-due-preset-${preset.id}`}
+                disabled={patchTask.isPending}
+                onClick={() => patchTask.mutate({ dueDate: presetToIso(preset.id, detail.dueDate) })}
+                className="rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-accent hover:text-foreground disabled:opacity-50"
+              >
+                {t(preset.labelKey as TranslationKey)}
+              </button>
+            ))}
+            <button
+              type="button"
+              data-testid="task-due-set-recurring"
+              onClick={() => setRecurrenceDialogOpen(true)}
+              className="rounded-full border border-dashed border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-accent hover:text-foreground"
+            >
+              {t('taskDetail.setRecurring')}
+            </button>
+          </div>
         </Field>
         <Field label={t('taskDetail.fieldStartDate')}>
           <input
