@@ -35,10 +35,16 @@ export class ListsController {
   }
 
   @Post()
-  async createList(@CurrentUser() user: any, @Body() body: { projectId: string; name: string; description?: string }) {
+  async createList(
+    @CurrentUser() user: any,
+    @Body() body: { projectId: string; name: string; description?: string; visibility?: 'public' | 'private' },
+  ) {
+    // §G15 [22:07] — a list can be born private. Anything other than the two
+    // known values is ignored rather than trusted into the enum column.
+    const visibility = body.visibility === 'private' ? 'private' : 'public'
     return this.listsService.createList(
       body.projectId,
-      { name: body.name, description: body.description },
+      { name: body.name, description: body.description, visibility },
       user.id,
     )
   }

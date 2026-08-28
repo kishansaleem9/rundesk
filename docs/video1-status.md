@@ -558,3 +558,100 @@ from the TypeScript schema, then `seed.ts` — once pristine and once again on
 top of itself, because a suite that only passes on a clean database fails every
 re-run. The other nine harness suites were re-run alongside them and are
 unchanged.
+
+---
+
+## Fourth pass — the transcript against the frames, line by line (28 Aug)
+
+The three earlier passes worked from the frame audit's 157 gap *titles*. This
+one read all 534 lines of the transcript and, for each candidate, went back to
+the frame audit's own entry for that moment — the `on_screen` text, the `ask`,
+and the `why`. That combination is what the earlier passes did not do, and it
+found things a title alone hides.
+
+### Gaps recorded closed that were only partly built
+
+The frame audit's own G15 gap #4 is titled **"Task description has no
+slash-command editor (no table, banner, image or embed)"**. Batch 3 built the
+table and the banner. The image was never built, and the gap was marked closed
+— so the status above said "all 157 closed" while a quarter of one of them was
+outstanding. Two more in the same group are in the same state:
+
+| G15 | recorded | actually |
+|---|---|---|
+| #4 description editor | closed | table ✓ banner ✓ **image ✗** |
+| #6 list private at creation | closed | list-from-task-flow ✓ **private ✗** |
+| #13 dead start-date state | closed | **still dead** |
+
+Not fixed here, and named so nobody assumes otherwise: #7 (a list-settings step
+after creation), #9 (natural-language date presets), #12 (template/attach/notify
+in the create footer). She does not ask for any of those in the transcript —
+#7 she is offered and declines on camera ("main filhaal 'no thanks'") — so they
+are ClickUp's surface, not her spec.
+
+### #162 — an image could not go in a description
+
+> `[22:48]` "Main yahan pe koi aur image embed kar sakti hoon … jis tarah
+> document ko aap design karte hain, exactly wohi same feature hai."
+
+Measured in a browser before the fix, both ways somebody would try it:
+
+| written | rendered |
+|---|---|
+| `![the logo](https://…/logo.png)` | `!the logo` — no image, a stray `!` and a link |
+| `![dot](data:image/png;base64,…)` | the **whole raw markdown**, base64 and all, as text |
+
+The link branch of the inline matcher claims the `[alt](url)` that sits inside
+every image, so the `!` was left stranded. The image branch now sits ahead of
+it. The `data:` case was uglier only because `safeHref` rightly refuses that
+scheme and the fallback printed the source.
+
+The slash menu now offers **Image**, which asks for a file and uploads it
+through the same presign path the Files tab uses — so a description image is a
+real attachment, under the same size limit and the same storage-key guard.
+
+What goes into the text is `attachment:<id>`, never the URL that comes back.
+The API only ever issues **signed** storage URLs and they expire; writing one
+into the description would give a picture that works in the demo and is gone a
+week later, with the markdown still looking perfectly correct.
+
+**A regression this introduced, and how it surfaced.** The first version
+sanitised the source only when no resolver was present, so a resolver silently
+switched the check off and a `data:` image rendered. The browser probe caught
+it — the fix was written, the probe re-run, and the wrong answer was on screen.
+Resolution and sanitisation are now separate steps in that order, always both.
+
+### #163 — no way to tell whether the microphone was hearing you
+
+> `[19:44]` "Aap ke VOICE RECORDING wali options hain — check for the high
+> quality voice."
+
+The third pass read this as audio constraints and deferred it. The frames say
+otherwise, and they are specific: the pre-join's microphone row carries **"a
+live input-level bar filling most of the row width underneath"**. Picking a mic
+says which device is selected and nothing about whether it can hear you — which
+is the thing people get wrong, and the thing worth finding out before anyone is
+listening.
+
+There is now a Web Audio meter under the mic select: peak rather than average,
+because an average over a frame reads near-zero for ordinary speech and a dead
+bar sends someone off to debug a working microphone. It tears down with the
+stream it was built from, and a browser without Web Audio keeps its device
+pickers and simply loses the bar.
+
+### Three asks that turned out to be covered
+
+Chased and clean, recorded so they are not chased again: access-scoped search
+`[01:15]` (`taskVisibilityFilter`, `dropHiddenTaskHits`, channel scoping);
+guests and viewers refused a workspace `[09:13]`
+(`workspace-creation-policy.ts`, which reasons explicitly about "viewer" not
+being a role this product has); and time format `[07:03]`.
+
+### What guards it
+
+| | checks |
+|---|---|
+| `task-depth.mjs` — image renders, no stray `!`, Image block, list private ×3 | 42 (6 new) |
+| `syncup-live.mjs` — the meter exists AND moves with the input | 32 (2 new) |
+| `call-wiring.test.ts` — peak not average, torn down, announced, degrades | 29 (5 new) |
+| `markdown-blocks.test.ts` — image branch precedes the link branch | 9 new |

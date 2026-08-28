@@ -8,7 +8,12 @@
  * silently turned into a one-column table.
  */
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { TABLE_DIVIDER, startsTable, tableCells, hasBlockMarkdown } from './markdown'
+
+const here = dirname(fileURLToPath(import.meta.url))
 
 let checks = 0
 const ok = (cond: boolean, label: string) => {
@@ -60,3 +65,57 @@ ok(!hasBlockMarkdown('just a normal sentence'), 'an ordinary line still takes th
 ok(!hasBlockMarkdown('email me at a@b.c'), 'and so does one with punctuation in it')
 
 console.log(`  ${checks} checks passed`)
+
+// ── §G15 [22:48] an image is not a link with punctuation in front of it ─────
+/*
+ * The frame audit's own gap for this group was titled "Task description has no
+ * slash-command editor (no table, banner, image or embed)". Table and banner
+ * were built; the image half was not, and the gap was recorded closed.
+ *
+ * Measured in a browser before this fix: `![alt](url)` rendered as a stray "!"
+ * followed by a link, because the link branch claims the `[alt](url)` that sits
+ * inside every image. With a data: URL — which safeHref rightly refuses — the
+ * whole raw markdown, base64 and all, printed on screen as text.
+ *
+ * These read the source, because the rendering itself is JSX this runner
+ * cannot mount. The ordering IS the bug, so the ordering is what they guard.
+ */
+const mdSrc = readFileSync(join(here, 'markdown.tsx'), 'utf8')
+const sheetSrc = readFileSync(join(here, 'task-detail-sheet.tsx'), 'utf8')
+
+const tokenLine = /const token = \/(.+)\/\n/.exec(mdSrc)?.[1] ?? ''
+ok(tokenLine.length > 0, 'found the inline token matcher')
+ok(tokenLine.indexOf('!\\[') !== -1, 'the matcher has an image branch')
+ok(
+  tokenLine.indexOf('!\\[') < tokenLine.indexOf('(\\[[^\\]]+\\]'),
+  'the image branch comes before the link branch that would otherwise eat it',
+)
+
+ok(
+  /<MarkdownImage key=\{key\} src=\{img\[2\]\} alt=\{img\[1\]\} \/>/.test(mdSrc),
+  'the image branch emits MarkdownImage, which resolves its own source',
+)
+ok(
+  /if \(!resolved\) return <>\{alt\}<\/>/.test(mdSrc),
+  'an unresolvable image falls back to its alt text, not to raw markdown',
+)
+
+/*
+ * The API only issues SIGNED attachment URLs, and they expire. Storing one in
+ * the description would give a picture that works in the demo and is gone a
+ * week later, with the markdown still looking perfectly correct.
+ */
+ok(
+  /insertDescriptionBlock\(`!\[\$\{file\.name\}\]\(attachment:\$\{saved\.id\}\)/.test(sheetSrc),
+  'an uploaded image is referenced by id, never by its signed URL',
+)
+ok(
+  /if \(!raw\.startsWith\('attachment:'\)\) return raw/.test(sheetSrc),
+  'and an external https image URL is passed straight through',
+)
+
+ok(/id: 'image', labelKey: 'taskDetail\.slash\.image'/.test(sheetSrc), 'the slash menu offers an Image block')
+ok(
+  /block\.action === 'image'/.test(sheetSrc),
+  'which asks for a file rather than pasting an empty markdown scaffold',
+)

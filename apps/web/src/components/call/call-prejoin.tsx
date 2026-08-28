@@ -159,6 +159,64 @@ export function CallPreJoin({
     }
   }, [micId, camId, t])
 
+  /*
+   * §2.8 [19:44] — "Aap ke VOICE RECORDING wali options hain — check for the
+   * high quality voice."
+   *
+   * The frames show what "check" means: a live input-level bar under the
+   * microphone row. Picking a mic tells you which device is selected; it tells
+   * you nothing about whether it is actually hearing you, which is the thing
+   * people get wrong — muted at the OS level, the wrong input on a dock, a
+   * headset that connected for audio-out only. A bar that moves when you speak
+   * is the whole answer, and it has to be here rather than in the call,
+   * because the point is to find out BEFORE anyone is listening.
+   *
+   * Web Audio rather than a track property: MediaStreamTrack has no level. The
+   * analyser is torn down with the stream it was built from, so switching mic
+   * does not leave a second context running against a dead track.
+   */
+  const [micLevel, setMicLevel] = useState(0)
+  useEffect(() => {
+    if (!ready || !micOn) {
+      setMicLevel(0)
+      return
+    }
+    const stream = streamRef.current
+    const track = stream?.getAudioTracks()[0]
+    if (!stream || !track) return
+
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) return
+    let ctx: AudioContext
+    try {
+      ctx = new Ctx()
+    } catch {
+      // No Web Audio here; the picker still works, it just cannot show a level.
+      return
+    }
+    const source = ctx.createMediaStreamSource(stream)
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 512
+    source.connect(analyser)
+    const buf = new Uint8Array(analyser.frequencyBinCount)
+    let raf = 0
+    const tick = () => {
+      analyser.getByteTimeDomainData(buf)
+      // Peak deviation from silence (128), not an average: an average over a
+      // whole frame reads near-zero for ordinary speech and the bar looks dead.
+      let peak = 0
+      for (const v of buf) peak = Math.max(peak, Math.abs(v - 128))
+      setMicLevel(Math.min(1, peak / 96))
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      source.disconnect()
+      void ctx.close().catch(() => {})
+    }
+  }, [ready, micOn, micId])
+
   // Whatever happens, do not leave the camera running.
   //
   // This only ever stops a PREVIEW. Joining hands the stream to the call and
@@ -293,6 +351,28 @@ export function CallPreJoin({
               </option>
             ))}
           </select>
+          {/* §2.8 [19:44] — the level bar the frames show under the mic row.
+              Sits with the mic select rather than beside it, so what it is
+              reporting on is never in doubt. */}
+          <div className="sm:col-span-1">
+            <div
+              className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+              data-testid="call-prejoin-mic-level"
+              role="meter"
+              aria-label={t('call.micLevel')}
+              aria-valuenow={Math.round(micLevel * 100)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-[width] duration-75"
+                style={{ width: `${Math.round(micLevel * 100)}%` }}
+              />
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {micOn ? t('call.micLevelHint') : t('call.micOffHint')}
+            </p>
+          </div>
           <select
             value={camId}
             onChange={(e) => setCamId(e.target.value)}

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, createContext, useContext, type ReactNode } from 'react'
 
 /**
  * A tiny, dependency-free Markdown renderer (Plan §4 rich-text descriptions).
@@ -13,6 +13,60 @@ import { Fragment, type ReactNode } from 'react'
  * CommonMark parser.
  */
 
+/**
+ * §G15 [22:48] — how an embedded image finds its file.
+ *
+ * An uploaded image lives in object storage, and the only URL the API can hand
+ * back for it is a SIGNED one that expires. Writing that into the description
+ * would produce the worst kind of bug: a picture that is there in the demo and
+ * gone next week, with the markdown still looking perfectly correct.
+ *
+ * So the description stores a stable reference — `attachment:<id>` — and the
+ * signed URL is resolved at render time from the attachments the sheet has
+ * already loaded. External `https://` images need none of this and are used
+ * as written.
+ *
+ * A context rather than a prop threaded through every block function:
+ * `parseInline` is a plain function that cannot read context, but it can emit
+ * a component that does, which keeps the resolution in React where it belongs.
+ */
+export type MarkdownSrcResolver = (raw: string) => string | null
+const MarkdownAssets = createContext<MarkdownSrcResolver | null>(null)
+
+/**
+ * An image in a description, resolving its own source.
+ *
+ * Renders nothing at all when the source cannot be resolved — an `attachment:`
+ * ref whose file has been deleted, say. A broken-image icon would be a worse
+ * answer than the alt text, and the alt text is what the fallback below gives.
+ */
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  const resolve = useContext(MarkdownAssets)
+  /*
+   * Resolve, THEN sanitise — in that order, and never one or the other.
+   *
+   * An earlier version sanitised only when there was no resolver, which meant
+   * a resolver silently switched the check off: a `data:` source came back
+   * from it untouched and was rendered. A resolver's job is to turn a
+   * reference into a URL, not to decide whether that URL is safe to load, so
+   * safeHref runs on whatever it returns.
+   */
+  const mapped = resolve ? resolve(src) : src
+  const resolved = mapped ? safeHref(mapped) : null
+  if (!resolved) return <>{alt}</>
+  return (
+    <img
+      src={resolved}
+      alt={alt}
+      loading="lazy"
+      // Bounded, and scrolling with the text rather than blowing the sheet
+      // open: a 4000px screenshot pasted into a description must not decide
+      // the width of the panel it sits in.
+      className="my-2 block h-auto max-h-[26rem] max-w-full rounded-md border border-border/60"
+    />
+  )
+}
+
 function safeHref(raw: string): string | null {
   const url = raw.trim()
   if (/^(https?:|mailto:)/i.test(url)) return url
@@ -21,7 +75,7 @@ function safeHref(raw: string): string | null {
 }
 
 // Inline parsing → React nodes. Order matters: code spans first (their content
-// is literal), then links, then bold, then italic.
+// is literal), then images, then links, then bold, then italic.
 export function renderInlineMarkdown(text: string, keyPrefix = 'i'): ReactNode[] {
   return parseInline(text, keyPrefix)
 }
@@ -30,9 +84,20 @@ function parseInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = []
   let rest = text
   let k = 0
-  // Combined matcher for the next inline token. Order matters: code spans first
-  // (literal content), then links, then ~~strike~~, **bold**, *italic*, bare URL.
-  const token = /(`[^`]+`)|(\[[^\]]+\]\([^)\s]+\))|(~~[^~]+~~)|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|((?:https?:\/\/|www\.)[^\s)]+)/
+  /*
+   * Combined matcher for the next inline token. Order matters: code spans first
+   * (literal content), then IMAGES, then links, then ~~strike~~, **bold**,
+   * *italic*, bare URL.
+   *
+   * §G15 [22:48] — "main yahan pe koi aur image embed kar sakti hoon". The
+   * image branch has to sit before the link branch, because `![alt](url)` ends
+   * with a complete `[alt](url)` inside it: without its own branch the link
+   * matcher claims that part and the `!` is left stranded, so an image renders
+   * as a stray exclamation mark followed by a link. That is exactly what it did
+   * — and with a data: URL, which safeHref rightly refuses, the whole thing
+   * including the base64 fell through onto the screen as literal text.
+   */
+  const token = /(`[^`]+`)|(!\[[^\]]*\]\([^)\s]+\))|(\[[^\]]+\]\([^)\s]+\))|(~~[^~]+~~)|(\*\*[^*]+\*\*)|(\*[^*]+\*|_[^_]+_)|((?:https?:\/\/|www\.)[^\s)]+)/
 
   while (rest.length > 0) {
     const m = token.exec(rest)
@@ -52,6 +117,15 @@ function parseInline(text: string, keyPrefix: string): ReactNode[] {
         </code>,
       )
     } else if (m[2]) {
+      // ![alt](src) — an embedded image. MarkdownImage resolves the source and
+      // sanitises it; an src it cannot resolve falls back to the alt text.
+      const img = /^!\[([^\]]*)\]\(([^)\s]+)\)$/.exec(matched)
+      if (img) {
+        nodes.push(<MarkdownImage key={key} src={img[2]} alt={img[1]} />)
+      } else {
+        nodes.push(matched)
+      }
+    } else if (m[3]) {
       // [text](url)
       const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(matched)
       const href = link ? safeHref(link[2]) : null
@@ -64,16 +138,16 @@ function parseInline(text: string, keyPrefix: string): ReactNode[] {
       } else {
         nodes.push(matched)
       }
-    } else if (m[3]) {
+    } else if (m[4]) {
       // ~~strikethrough~~
       nodes.push(<del key={key}>{parseInline(matched.slice(2, -2), key)}</del>)
-    } else if (m[4]) {
+    } else if (m[5]) {
       // **bold**
       nodes.push(<strong key={key}>{parseInline(matched.slice(2, -2), key)}</strong>)
-    } else if (m[5]) {
+    } else if (m[6]) {
       // *italic* or _italic_
       nodes.push(<em key={key}>{parseInline(matched.slice(1, -1), key)}</em>)
-    } else if (m[6]) {
+    } else if (m[7]) {
       // bare URL
       const withProto = matched.startsWith('www.') ? `https://${matched}` : matched
       const href = safeHref(withProto)
@@ -379,6 +453,17 @@ export function renderMarkdownBlocks(source: string, inline: InlineRenderer = pa
   return blocks
 }
 
-export function Markdown({ source, className }: { source: string; className?: string }) {
-  return <div className={className}>{renderMarkdownBlocks(source)}</div>
+export function Markdown({
+  source,
+  className,
+  resolveSrc,
+}: {
+  source: string
+  className?: string
+  /** Maps an image source as written to one the browser can load. */
+  resolveSrc?: MarkdownSrcResolver
+}) {
+  const body = <div className={className}>{renderMarkdownBlocks(source)}</div>
+  if (!resolveSrc) return body
+  return <MarkdownAssets.Provider value={resolveSrc}>{body}</MarkdownAssets.Provider>
 }

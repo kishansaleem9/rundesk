@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 36
+const EXPECTED_CHECKS = 42
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -465,6 +465,74 @@ try {
   await A(`/tasks/${binnedId}`, { method: 'DELETE' })
   const reDelete = await A(`/tasks/${binnedId}`, { method: 'DELETE' })
   check(reDelete.status < 300, 'deleting an already-binned task is not an error', `DELETE → ${reDelete.status}`)
+
+  /*
+   * §G15 [22:07] — "yeh pooch raha ke PRIVATE karni hai ke nahi."
+   *
+   * The frame audit's gap for this said visibility was "create-time-unsettable
+   * even though the column and the PUT path both support it", so the only way
+   * to a private list was to make a public one and change it — a window,
+   * however short, in which the wrong people can see it.
+   */
+  const privateList = await A('/lists', {
+    method: 'POST',
+    body: { projectId: projects.data[0].id, name: `depth private ${Date.now()}`, visibility: 'private' },
+  })
+  check(privateList.data?.visibility === 'private', 'a list can be created private',
+    `visibility=${privateList.data?.visibility}`)
+  const publicList = await A('/lists', {
+    method: 'POST',
+    body: { projectId: projects.data[0].id, name: `depth public ${Date.now()}` },
+  })
+  check(publicList.data?.visibility === 'public', 'and omitting it still means public',
+    `visibility=${publicList.data?.visibility}`)
+  const oddList = await A('/lists', {
+    method: 'POST',
+    body: { projectId: projects.data[0].id, name: `depth odd ${Date.now()}`, visibility: 'sneaky' },
+  })
+  check(oddList.data?.visibility === 'public', 'an unknown visibility is ignored, not trusted into the column',
+    `visibility=${oddList.data?.visibility}`)
+
+  /*
+   * §G15 [22:48] — "main yahan pe koi aur image embed kar sakti hoon."
+   *
+   * Table and banner shipped with the slash menu; the image did not, and the
+   * gap was recorded closed. Before this, `![alt](url)` rendered as a stray "!"
+   * and a link, because the link branch claims the `[alt](url)` inside every
+   * image.
+   */
+  const imgTask = await A('/tasks', {
+    method: 'POST',
+    body: {
+      listId,
+      title: `image depth ${Date.now()}`,
+      description: 'Above.\n\n![the picture](https://example.com/p.png)\n\nBelow.',
+    },
+  })
+  await page.goto(
+    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${imgTask.data?.id}`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await page.waitForTimeout(4000)
+  check(
+    (await page.locator('img[src*="example.com"]').count()) === 1,
+    'an image in a description renders as an image',
+    'no <img> came from the description',
+  )
+  const descText = await page.locator('body').innerText()
+  check(!/!\s*the picture|!\[the picture\]/.test(descText),
+    'and not as a stray "!" beside a link', 'the raw markdown is still on screen')
+
+  await page.locator('[data-testid=description-open]').first().click().catch(() => {})
+  await page.waitForTimeout(700)
+  await page.keyboard.press('End')
+  await page.keyboard.type('\n/')
+  await page.waitForTimeout(900)
+  const slashBlocks = await page.locator('[data-testid=description-slash-menu] button').allInnerTexts().catch(() => [])
+  check(slashBlocks.some((b) => /image/i.test(b)), 'and the slash menu offers an Image block',
+    JSON.stringify(slashBlocks))
+  await page.keyboard.press('Escape')
+  await A(`/tasks/${imgTask.data?.id}`, { method: 'DELETE' })
 
   await done(browser, stack)
 } catch (err) {

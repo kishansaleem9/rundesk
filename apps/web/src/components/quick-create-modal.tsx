@@ -253,6 +253,7 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [name, setName] = useState('')
+  const [listPrivate, setListPrivate] = useState(false)
   const [spaceId, setSpaceId] = useState('')
   const [projectId, setProjectId] = useState('')
 
@@ -267,7 +268,11 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   }).data ?? []
 
   const create = useMutation({
-    mutationFn: () => api<{ id: string }>(`/lists`, { method: 'POST', body: JSON.stringify({ projectId, name }) }),
+    mutationFn: () =>
+      api<{ id: string }>(`/lists`, {
+        method: 'POST',
+        body: JSON.stringify({ projectId, name, visibility: listPrivate ? 'private' : 'public' }),
+      }),
     onSuccess: (list) => {
       qc.invalidateQueries({ queryKey: ['lists', projectId] })
       qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
@@ -288,6 +293,19 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
       }}
     >
       <Input autoFocus placeholder={t('quickCreate.listNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+      {/* §G15 [22:07] — "yeh pooch raha ke PRIVATE karni hai ke nahi". Asked
+          while the list is being made, not after: changing it afterwards
+          leaves a window in which the wrong people can see it. */}
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          data-testid="quick-create-list-private"
+          checked={listPrivate}
+          onChange={(e) => setListPrivate(e.target.checked)}
+          className="h-3.5 w-3.5 rounded border-border"
+        />
+        {t('quickCreate.listPrivate')}
+      </label>
       <div className="grid grid-cols-2 gap-2">
         <Select labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
         <Select labelKey="quickCreate.selectProject" value={projectId} onChange={setProjectId} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />

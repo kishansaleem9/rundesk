@@ -1120,6 +1120,25 @@ function OverviewPanel({
   const [slashFilter, setSlashFilter] = useState('')
   const [descriptionDraft, setDescriptionDraft] = useState('')
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const descriptionImageInputRef = useRef<HTMLInputElement>(null)
+  const [insertingImage, setInsertingImage] = useState(false)
+  /*
+   * The task's files, for resolving `attachment:<id>` images in the
+   * description. Same queryKey as the Files tab's own read, so React Query
+   * serves both from one cache entry and this costs no extra request.
+   */
+  const descriptionAssets = useQuery({
+    queryKey: ['task', taskId, 'attachments'],
+    queryFn: async () => {
+      try {
+        return await api<Attachment[]>(`/tasks/${taskId}/attachments`)
+      } catch (err) {
+        if (isNotWired(err)) return null
+        throw err
+      }
+    },
+    enabled: Boolean(taskId),
+  })
   // Streamed AI task summary (Plan §7.5): null = closed, '' = streaming started.
   const [summaryText, setSummaryText] = useState<string | null>(null)
   const [summarizing, setSummarizing] = useState(false)
@@ -1195,6 +1214,14 @@ function OverviewPanel({
     { id: 'divider', labelKey: 'taskDetail.slash.divider', md: '---\n' },
     { id: 'banner', labelKey: 'taskDetail.slash.banner', md: ':::note\n\n:::\n' },
     { id: 'warning', labelKey: 'taskDetail.slash.warning', md: ':::warn\n\n:::\n' },
+    /*
+     * §G15 [22:48] — "main yahan pe koi aur image embed kar sakti hoon".
+     *
+     * The only block that is not a piece of markdown to paste in: an image
+     * needs a file first. Picking one uploads it through the same presign path
+     * the Files tab uses, then writes a reference to it — see onPickImage.
+     */
+    { id: 'image', labelKey: 'taskDetail.slash.image', action: 'image' as const },
   ] as const
 
   /**
@@ -1234,6 +1261,66 @@ function OverviewPanel({
   const slashChoices = DESCRIPTION_BLOCKS.filter((b) =>
     t(b.labelKey as TranslationKey).toLowerCase().includes(slashFilter.toLowerCase()),
   )
+
+  /**
+   * §G15 [22:48] — a picked image becomes an attachment, then a reference.
+   *
+   * The same three steps the Files tab uses (presign, PUT, record), so an image
+   * in a description is a real attachment: it appears in Files, it is covered
+   * by the same size limit and the same storage-key guard, and deleting it
+   * there is a decision someone can actually make.
+   *
+   * What goes into the text is `attachment:<id>`, never the signed URL that
+   * comes back — see the resolver on <Markdown>. Writing the signed URL here
+   * would embed something that stops working on its own.
+   */
+  const onPickDescriptionImage = async (file: File | null | undefined) => {
+    if (!file) return
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast.error(t('taskDetail.fileTooLarge', { limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }))
+      return
+    }
+    setInsertingImage(true)
+    try {
+      const contentType = file.type || 'application/octet-stream'
+      const presign = await api<{ uploadUrl: string; storageKey: string }>(
+        `/tasks/${taskId}/attachments/presign`,
+        { method: 'POST', body: { fileName: file.name, contentType, sizeBytes: file.size } },
+      )
+      const put = await fetch(presign.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType },
+        body: file,
+      })
+      if (!put.ok) throw new Error(t('taskDetail.uploadFailedStatus', { status: put.status }))
+      const saved = await api<{ id: string }>(`/tasks/${taskId}/attachments`, {
+        method: 'POST',
+        body: { fileName: file.name, storageKey: presign.storageKey, contentType, sizeBytes: file.size },
+      })
+      // Alt text is the file name: it is what the person will see if the image
+      // ever cannot be shown, and it is the only name they gave it.
+      insertDescriptionBlock(`![${file.name}](attachment:${saved.id})\n`)
+      // Refresh the files list so the new image resolves on the next render.
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : (err as Error).message)
+    } finally {
+      setInsertingImage(false)
+    }
+  }
+
+  /** Run a slash choice: most write markdown, the image one asks for a file. */
+  const chooseDescriptionBlock = (block: (typeof DESCRIPTION_BLOCKS)[number]) => {
+    if ('action' in block && block.action === 'image') {
+      // Close the menu first: the file dialog steals focus, and a menu left
+      // open behind it is still listening for the keystrokes that follow.
+      setSlashOpen(false)
+      setSlashFilter('')
+      descriptionImageInputRef.current?.click()
+      return
+    }
+    insertDescriptionBlock((block as { md: string }).md)
+  }
 
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
@@ -1559,7 +1646,7 @@ function OverviewPanel({
                   }
                   if (e.key === 'Enter' && slashChoices.length > 0) {
                     e.preventDefault()
-                    insertDescriptionBlock(slashChoices[0].md)
+                    chooseDescriptionBlock(slashChoices[0])
                   }
                 }}
                 disabled={updateDescription.isPending}
@@ -1582,7 +1669,7 @@ function OverviewPanel({
                         data-testid={`description-slash-${block.id}`}
                         // The click has to land before the blur commits.
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => insertDescriptionBlock(block.md)}
+                        onClick={() => chooseDescriptionBlock(block)}
                         className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
                       >
                         {t(block.labelKey as TranslationKey)}
@@ -1592,7 +1679,26 @@ function OverviewPanel({
                 </div>
               )}
             </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">{t('taskDetail.slashHint')}</p>
+            {/* §G15 [22:48] — the picker the Image block opens. Hidden rather
+                than styled away: it is the file input doing the work, and a
+                real <input type="file"> is what a screen reader and a keyboard
+                both already understand. */}
+            <input
+              ref={descriptionImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              data-testid="description-image-input"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                // Cleared so picking the SAME file twice fires change again.
+                e.target.value = ''
+                void onPickDescriptionImage(file)
+              }}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {insertingImage ? t('taskDetail.insertingImage') : t('taskDetail.slashHint')}
+            </p>
           </div>
         ) : detail.description?.trim() ? (
           <div
@@ -1612,7 +1718,22 @@ function OverviewPanel({
             className="w-full cursor-text rounded-md px-2 py-1.5 -mx-2 text-sm hover:bg-muted/40 transition-colors"
             title={t('taskDetail.clickToEditDescription')}
           >
-            <Markdown source={detail.description} />
+            <Markdown
+              source={detail.description}
+              /*
+               * §G15 [22:48] — resolve `attachment:<id>` against the files this
+               * task already carries. The API only ever issues SIGNED storage
+               * URLs, which expire, so the description stores the id and the
+               * URL is looked up per render. An id with no matching file left
+               * (deleted, or not loaded yet) resolves to null and the image
+               * falls back to its alt text.
+               */
+              resolveSrc={(raw) => {
+                if (!raw.startsWith('attachment:')) return raw
+                const id = raw.slice('attachment:'.length)
+                return (descriptionAssets.data ?? []).find((f) => f.id === id)?.url ?? null
+              }}
+            />
           </div>
         ) : (
           <button

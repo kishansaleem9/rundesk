@@ -1012,7 +1012,6 @@ function ListDetail() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
   const [newTaskDueDate, setNewTaskDueDate] = useState('')
-  const [newTaskStartDate, setNewTaskStartDate] = useState('')
   const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table' | 'gantt'>('list')
   // §5 per-space view config (ClickUp "required views"): which task views this
   // space's lists expose + the default that opens. Reuses the ['spaces', ws]
@@ -1204,7 +1203,15 @@ function ListDetail() {
             title: newTaskTitle,
             priority: newTaskPriority,
             dueDate: newTaskDueDate,
-            startDate: newTaskStartDate,
+            /*
+             * No startDate here on purpose. This row carried a
+             * `newTaskStartDate` that nothing was ever bound to: it was
+             * declared, sent, and reset, and its value was permanently ''. The
+             * API reads '' as "not set", so it did nothing at all — but the
+             * code read as though a start date were settable from the quick
+             * add, which is the kind of thing someone later wires a bug to.
+             * A start date is set in the task sheet, where it can carry a time.
+             */
           }),
         ),
       })
@@ -1212,7 +1219,6 @@ function ListDetail() {
       setNewTaskTitle('')
       setNewTaskPriority('normal')
       setNewTaskDueDate('')
-      setNewTaskStartDate('')
       await refetch()
     } catch (error) {
       console.error('Failed to create task', error)

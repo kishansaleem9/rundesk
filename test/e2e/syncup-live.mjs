@@ -430,6 +430,26 @@ if (routable > 0) {
   console.log('  · no routable audio outputs in this browser — speaker picker not applicable')
 }
 
+/*
+ * §2.8 [19:44] — the microphone level, in the browser that has the microphone.
+ *
+ * A source test can prove the analyser is wired; only a real run proves the
+ * bar moves. Chromium's fake device emits a tone, so a meter that is genuinely
+ * reading the input leaves zero — and one that is drawn but connected to
+ * nothing does not.
+ */
+const micMeter = A.page.locator('[data-testid="call-prejoin-mic-level"]')
+const hasMeter = await micMeter.isVisible().catch(() => false)
+check(hasMeter, 'and shows whether the microphone is hearing you', 'no input-level meter in the pre-join')
+if (hasMeter) {
+  let peak = 0
+  for (let i = 0; i < 20 && peak === 0; i += 1) {
+    peak = Number(await micMeter.getAttribute('aria-valuenow')) || 0
+    if (peak === 0) await A.page.waitForTimeout(150)
+  }
+  check(peak > 0, `with a level that moves with the input (${peak}%)`, 'the meter never left zero')
+}
+
 await A.page.locator('[data-testid="call-prejoin-join"]').click()
 
 // Polled, not read once: pressing Join is the START of a request, and reading

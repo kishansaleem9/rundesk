@@ -289,3 +289,54 @@ describe('§2.8 the speaker you choose is the speaker it uses', () => {
     assert.match(fn, /try \{[\s\S]*?\} catch \{/, 'a vanished output device would reject unhandled')
   })
 })
+
+/**
+ * §2.8 `[19:44]` — "Aap ke VOICE RECORDING wali options hain — check for the
+ * high quality voice."
+ *
+ * The frames say what "check" is: the pre-join's microphone row carries a live
+ * input-level bar underneath it. Picking a mic tells you which device is
+ * selected and nothing about whether it can hear you — which is the thing
+ * people actually get wrong, and the thing you want to find out before anyone
+ * is listening rather than after.
+ */
+describe('§2.8 the pre-join shows whether the microphone is hearing you', () => {
+  const prejoin = source('components/call/call-prejoin.tsx', 'export function CallPreJoin')
+
+  it('reads a real level rather than trusting the track', () => {
+    // MediaStreamTrack carries no level, so this has to go through Web Audio.
+    assert.match(prejoin, /createMediaStreamSource\(stream\)/, 'nothing is analysing the mic stream')
+    assert.match(prejoin, /getByteTimeDomainData\(buf\)/, 'no samples are read')
+  })
+
+  it('measures the peak, not the average', () => {
+    /*
+     * Averaged over a frame, ordinary speech reads near zero and the bar looks
+     * broken — which would send someone off to debug a microphone that was
+     * working perfectly well.
+     */
+    assert.match(prejoin, /peak = Math\.max\(peak, Math\.abs\(v - 128\)\)/, 'the level is not a peak')
+  })
+
+  it('and tears the analyser down with the stream it was built from', () => {
+    // Switching mic re-acquires the stream. Without this, each switch leaves
+    // another AudioContext running against a track that has ended.
+    const effect = /const \[micLevel, setMicLevel\][\s\S]*?\}, \[ready, micOn, micId\]\)/.exec(prejoin)?.[0] ?? ''
+    assert.ok(effect, 'could not find the level effect')
+    assert.match(effect, /cancelAnimationFrame\(raf\)/, 'the animation frame is never cancelled')
+    assert.match(effect, /void ctx\.close\(\)/, 'the AudioContext is never closed')
+    assert.match(effect, /\[ready, micOn, micId\]/, 'the effect does not re-run when the mic changes')
+  })
+
+  it('is drawn as a meter, not just a coloured div', () => {
+    assert.match(prejoin, /data-testid="call-prejoin-mic-level"/, 'no level bar in the pre-join')
+    assert.match(prejoin, /role="meter"/, 'the level is invisible to assistive tech')
+    assert.match(prejoin, /aria-valuenow=\{Math\.round\(micLevel \* 100\)\}/, 'the meter reports no value')
+  })
+
+  it('and survives a browser with no Web Audio at all', () => {
+    // Safari-shaped environments and locked-down embeds. The device pickers
+    // must keep working; only the bar is optional.
+    assert.match(prejoin, /catch \{\n\s*\/\/ No Web Audio here/, 'a missing AudioContext would throw')
+  })
+})

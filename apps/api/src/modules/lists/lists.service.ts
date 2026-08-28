@@ -27,13 +27,27 @@ export class ListsService {
     private security: SecurityService,
   ) {}
 
-  async createList(projectId: string, data: { name: string; description?: string }, actorId?: string) {
+  /**
+   * §G15 [22:07] — "yeh pooch raha ke PRIVATE karni hai ke nahi."
+   *
+   * Visibility is settable at creation, not only afterwards. The column and the
+   * update path have always carried it; this endpoint dropped it on the floor,
+   * so the only way to get a private list was to create a public one and then
+   * change it — which is a window, however short, in which the wrong people
+   * can see it. Omitted still means public, exactly as before.
+   */
+  async createList(
+    projectId: string,
+    data: { name: string; description?: string; visibility?: 'public' | 'private' },
+    actorId?: string,
+  ) {
     const result = await this.db
       .insert(lists)
       .values({
         projectId,
         name: data.name,
         description: data.description,
+        visibility: data.visibility ?? 'public',
         createdById: actorId ?? null,
       })
       .returning()
