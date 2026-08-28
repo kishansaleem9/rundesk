@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
 #
-# Rebuild the Meilisearch index for every workspace this account can see.
+# Rebuild the Meilisearch index from the database.
 #
 #   bash deploy/reindex-search.sh
 #
-# Required once after the release that added `updatedAt` to the indexed
-# document. Documents written before it have no such field, and Meili's
-# behaviour when sorting on a missing attribute is not something to rely on —
-# a "last updated" search would quietly return them in an arbitrary order.
+# Why this exists as a script rather than a curl line: the endpoint needs a
+# bearer token and a workspace id, and pasting a command with <placeholders>
+# into bash makes it read `<workspaceId>` as a file redirect. This finds both
+# for you, and does every workspace rather than only the one you remembered.
 #
-# Safe to re-run: indexing is an upsert keyed by document id, so this replaces
-# documents rather than duplicating them, and nothing in Postgres is touched.
+# When you need it
+# ----------------
+# The index is written when a task is created or edited, so anything that
+# existed BEFORE Meilisearch was pointed at this database was never indexed and
+# cannot be found by searching — no amount of fixing the read path can return a
+# document that is not there. Run this once after enabling Meilisearch, and
+# again any time the index and the database might have drifted apart.
+#
+# It is safe to re-run: each workspace's documents are cleared and rewritten
+# from the database, so the result depends on the database alone.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Caller-supplied values win over .env — captured before sourcing, because
+# `set -a` would otherwise overwrite them.
 ovr_port="${API_HOST_PORT:-}"
 ovr_email="${RUNDESK_EMAIL:-}"
 ovr_pass="${RUNDESK_PASSWORD:-}"
@@ -25,8 +35,12 @@ API="http://127.0.0.1:${PORT}/api/v1"
 EMAIL="${ovr_email:-${RUNDESK_EMAIL:-admin@rundesk.internal}}"
 PASSWORD="${ovr_pass:-${RUNDESK_PASSWORD:-Admin@123!}}"
 
-say() { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
-die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+say()  { printf '\n\033[1;36m▶ %s\033[0m\n' "$*"; }
+ok()   { printf '  \033[32m%s\033[0m\n' "$*"; }
+warn() { printf '  \033[33m%s\033[0m\n' "$*"; }
+die()  { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+
+command -v node >/dev/null 2>&1 || die "node is needed to read the API's JSON"
 
 say "API is up"
 for _ in $(seq 1 45); do
@@ -34,52 +48,79 @@ for _ in $(seq 1 45); do
   printf '.'; sleep 2
 done
 curl -fsS --max-time 5 "$API/health" >/dev/null 2>&1 || die "API not answering on $API"
-echo "  ok"
-
-say "Is Meilisearch actually connected?"
-# Without it the reindex is a silent no-op — the service returns early when
-# search is running on the Postgres fallback. Better to say so than to print a
-# reassuring tick over nothing.
-if command -v docker >/dev/null 2>&1; then
-  C="$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE '(^|-)api$|rundesk-api' | head -1 || true)"
-  LOGS=$(docker logs "${C:-rundesk-api}" 2>&1 | grep -iE "Meilisearch (connected|init failed)" | tail -1 || true)
-  echo "  ${LOGS:-(no Meilisearch line in the API log)}"
-  if printf '%s' "$LOGS" | grep -qi "init failed"; then
-    printf '\033[1;33m  Meili is DOWN — reindexing would do nothing. Fix that first.\033[0m\n'
-    exit 1
-  fi
-fi
+ok "ok"
 
 say "Signing in as $EMAIL"
-TOKEN=$(curl -fsS --max-time 20 -X POST "$API/auth/login" \
-  -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" \
-  | grep -o '"accessToken":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
-[ -n "$TOKEN" ] || die "login rejected — set RUNDESK_EMAIL / RUNDESK_PASSWORD if the admin password was rotated"
+LOGIN=$(curl -fsS --max-time 30 -X POST "$API/auth/login" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}" 2>/dev/null) \
+  || die "could not sign in as $EMAIL — set RUNDESK_EMAIL / RUNDESK_PASSWORD"
 
-WS_IDS=$(curl -fsS --max-time 20 "$API/workspaces" -H "Authorization: Bearer $TOKEN" \
-  | grep -o '"id":"[0-9a-f-]\{36\}"' | sed 's/.*://;s/"//g' | sort -u || true)
-[ -n "$WS_IDS" ] || die "no workspaces visible for this account"
+# Parsed properly rather than with grep/sed: a JWT and a workspace name can
+# both contain the characters a regex would key on.
+TOKEN=$(printf '%s' "$LOGIN" | node -e '
+  let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+    try { process.stdout.write(JSON.parse(s)?.data?.accessToken ?? "") } catch { }
+  })')
+[ -n "$TOKEN" ] || die "signed in but no access token came back"
 
-say "Reindexing"
-COUNT=0; FAILED=0
-for ws in $WS_IDS; do
-  # The endpoint returns an empty body on success; a non-2xx means it did not run.
-  CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 180 -X POST \
-    "$API/search/$ws/reindex" -H "Authorization: Bearer $TOKEN" \
-    -H 'Content-Type: application/json' -d '{}' || true)
-  if [ "$CODE" = "200" ] || [ "$CODE" = "201" ]; then
-    printf '  \033[32mok\033[0m   %s\n' "$ws"; COUNT=$((COUNT+1))
-  else
-    printf '  \033[31mfail\033[0m %s (HTTP %s)\n' "$ws" "$CODE"; FAILED=$((FAILED+1))
+WS_IDS=$(printf '%s' "$LOGIN" | node -e '
+  let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+    try {
+      const ws = JSON.parse(s)?.data?.workspaces ?? []
+      process.stdout.write(ws.map((w) => w.id).filter(Boolean).join("\n"))
+    } catch { }
+  })')
+[ -n "$WS_IDS" ] || die "this account is not a member of any workspace"
+ok "$(printf '%s\n' "$WS_IDS" | grep -c .) workspace(s) to rebuild"
+
+TOTAL=0
+FAILED=0
+SKIPPED=0
+while IFS= read -r WS; do
+  [ -n "$WS" ] || continue
+  say "Rebuilding $WS"
+  # Generous timeout: this reads every live task, doc and attachment in the
+  # workspace and writes them all back.
+  RES=$(curl -fsS --max-time 600 -X POST "$API/search/$WS/reindex" \
+    -H "authorization: Bearer $TOKEN" 2>/dev/null) || RES=""
+  if [ -z "$RES" ]; then
+    warn "no answer — the rebuild failed for this workspace"
+    FAILED=$((FAILED+1))
+    continue
   fi
-done
+  N=$(printf '%s' "$RES" | node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try {
+        const n = JSON.parse(s)?.data?.indexed
+        process.stdout.write(n === undefined || n === null ? "" : String(n))
+      } catch { }
+    })')
+  if [ -z "$N" ]; then
+    # reindexWorkspace returns nothing when Meilisearch is not configured, so
+    # an empty answer is that — not a failure. Said plainly rather than
+    # reported as a successful rebuild that never happened.
+    warn "nothing was indexed: Meilisearch is not configured on this deployment"
+    warn "search is using the Postgres path, which reads the database directly"
+    warn "and needs no index — there is nothing to rebuild."
+    SKIPPED=$((SKIPPED+1))
+    continue
+  fi
+  ok "indexed $N document(s)"
+  TOTAL=$((TOTAL + N))
+done <<< "$WS_IDS"
 
-echo
-if [ "$FAILED" -eq 0 ]; then
-  printf '\033[32m─── reindexed %s workspace(s) ───\033[0m\n' "$COUNT"
-  echo "Now run: bash deploy/verify-release.sh"
-else
-  printf '\033[31m─── %s workspace(s) failed to reindex ───\033[0m\n' "$FAILED"
+printf '\n%s\n' "════════════════════════════════════════════════════════════"
+if [ "$FAILED" -gt 0 ]; then
+  printf '\033[31m%s workspace(s) failed to rebuild\033[0m\n' "$FAILED"
   exit 1
+fi
+printf '\033[1m%s document(s) indexed\033[0m\n' "$TOTAL"
+# Never claim the index matches the database when there is no index. A closing
+# line that reads as success regardless of what happened is how a run that did
+# nothing gets remembered as a run that worked.
+if [ "$SKIPPED" -gt 0 ] && [ "$TOTAL" -eq 0 ]; then
+  printf '\033[33m─── nothing to do: this deployment has no search index ───\033[0m\n'
+else
+  printf '\033[32m─── the search index now matches the database ───\033[0m\n'
 fi
