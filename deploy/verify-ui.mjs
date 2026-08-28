@@ -756,6 +756,72 @@ try {
     }
   })
 
+  await section('§G15', 'My Tasks is a place you can go, not a tab you have to find', async () => {
+    /*
+     * [21:22] — "MY TASKS … ASSIGNED TO ME, TODAY, aur PERSONAL LIST".
+     *
+     * All three used to be buttons inside Home's left card, driven by component
+     * state. That is why "I have no idea where tasks are going" was a fair
+     * complaint: there was no address for my tasks, so a task you had just made
+     * had nowhere you could go and look for it, and nobody could send you a
+     * link to it either.
+     *
+     * So the check is not "are the three labels on the page" — they always
+     * were. It is: does the sidebar carry them, does clicking one put it in the
+     * URL, and does arriving at that URL cold render that section.
+     */
+    await go(`/app/${WS}`, 4000)
+    const group = page.locator('[data-testid="sidebar-my-tasks"]')
+    if ((await group.count()) === 0) {
+      bad('the sidebar has no My Tasks group — the three sections are buried in Home again')
+    } else {
+      const links = await group.locator('a').count()
+      chk(links === 3, `the sidebar carries all three My Tasks links`, `the group has ${links} links, not 3`)
+
+      const today = page.locator('[data-testid="sidebar-my-tasks-today-overdue"]')
+      await today.click()
+      await page.waitForTimeout(1200)
+      const url = page.url()
+      const inUrl = /[?&]section=today-overdue\b/.test(url)
+      const rendered = (await page.locator('[data-testid="home-section-today-overdue"]').count()) > 0
+      chk(
+        inUrl && rendered,
+        'clicking Today & Overdue puts it in the URL, so it can be bookmarked or sent',
+        inUrl
+          ? 'the URL changed but the section did not open'
+          : `clicking it left the address at ${short(url)}`,
+      )
+
+      /*
+       * The one that actually proves the URL drives the page rather than
+       * merely recording it: land on the deep link cold, from a different
+       * route, and look for something only Personal List renders.
+       */
+      await go(`/app/${WS}/inbox`, 2500)
+      await go(`/app/${WS}?section=personal-list`, 4000)
+      /*
+       * Anchored on a testid, not on visible text: production can be running in
+       * any of the four languages, and a check that reads English copy would
+       * report a working page as broken the day somebody switches locale.
+       */
+      chk(
+        (await page.locator('[data-testid="home-section-personal-list"]').count()) > 0,
+        'a cold visit to ?section=personal-list opens Personal List, not the Inbox',
+        'the deep link fell back to the default section — the URL is not the source of truth',
+      )
+
+      // A section nobody knows about must not blank the page; it falls back.
+      await go(`/app/${WS}?section=not-a-real-section`, 3500)
+      const alive = (await page.locator('[data-testid="sidebar-my-tasks"]').count()) > 0
+      const stuck = (await page.locator('[data-testid="home-section-personal-list"]').count()) > 0
+      chk(
+        alive && !stuck,
+        'and an unknown section falls back to Home instead of erroring',
+        alive ? 'a bogus ?section left the previous section on screen' : 'an unrecognised ?section value broke the page',
+      )
+    }
+  })
+
   await section('§1.1', 'Task type at create time and in search', async () => {
     {
       // The picker hides itself when a workspace has no types, so this is not a

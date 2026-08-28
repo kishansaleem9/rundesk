@@ -379,7 +379,7 @@ function WorkspaceHome() {
           )}
 
           {(section === 'assigned-to-me' || section === 'today-overdue') && (
-            <div className="space-y-2">
+            <div className="space-y-2" data-testid={`home-section-${section}`}>
               {(section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).map((task) => (
                 <Link
                   key={task.id}
@@ -403,7 +403,7 @@ function WorkspaceHome() {
           )}
 
           {section === 'personal-list' && (
-            <div className="space-y-3">
+            <div className="space-y-3" data-testid="home-section-personal-list">
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
