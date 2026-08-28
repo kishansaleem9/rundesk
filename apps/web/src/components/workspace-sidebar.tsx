@@ -1,4 +1,4 @@
-import { Link, useNavigate, useParams, useRouterState } from '@tanstack/react-router'
+import { Link, useNavigate, useParams, useRouterState, useSearch } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSidebarStore } from '../store/sidebar'
@@ -43,6 +43,9 @@ import {
   Users,
   Gem,
   Video,
+  CircleCheck,
+  CalendarClock,
+  ListChecks,
 } from 'lucide-react'
 import {
   Button,
@@ -1073,6 +1076,24 @@ export function WorkspaceSidebar() {
           <div className="p-2 space-y-2">
           <NavLink to="/app/$workspaceId" params={{ workspaceId }} icon={Home} label={t('nav.home')} />
 
+          {/*
+            §G15 [21:22] — "MY TASKS … ASSIGNED TO ME, TODAY, aur PERSONAL LIST",
+            and she reaches the same three from her profile.
+
+            All three existed as buttons inside Home's left card, driven by
+            component state: there was no address for "my tasks", so a task you
+            had just made had nowhere you could go and look for it. These are
+            links now, and each one is a URL you can bookmark or send.
+          */}
+          <div className="pt-1" data-testid="sidebar-my-tasks">
+            <div className="px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+              {t('appWorkspace.myTasks')}
+            </div>
+            <MyTasksLink workspaceId={workspaceId} section="assigned-to-me" icon={CircleCheck} label={t('appWorkspace.assignedToMe')} />
+            <MyTasksLink workspaceId={workspaceId} section="today-overdue" icon={CalendarClock} label={t('appWorkspace.todayOverdue')} />
+            <MyTasksLink workspaceId={workspaceId} section="personal-list" icon={ListChecks} label={t('appWorkspace.personalList')} />
+          </div>
+
           <div className="pt-1">
             <button
               className="w-full flex items-center justify-between px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground"
@@ -1929,6 +1950,46 @@ function resolveRoutePath(
     path = path.replace(`$${key}`, value)
   }
   return path
+}
+
+/**
+ * One of the three My Tasks destinations.
+ *
+ * Separate from NavLink because these differ only by `?section=`, and NavLink's
+ * `to` is a union of literal paths with no room for search — bending it to take
+ * one would complicate every other caller for the sake of these three.
+ */
+function MyTasksLink({
+  workspaceId,
+  section,
+  icon: Icon,
+  label,
+}: {
+  workspaceId: string
+  section: 'assigned-to-me' | 'today-overdue' | 'personal-list'
+  icon: typeof Home
+  label: string
+}) {
+  const search = useSearch({ strict: false }) as { section?: string }
+  const pathname = useRouterState({ select: (st) => st.location.pathname })
+  // Active only on Home itself: the same query string on a task page would
+  // otherwise light this up from somewhere it does not describe.
+  const active = pathname === `/app/${workspaceId}` && search.section === section
+  return (
+    <Link
+      to="/app/$workspaceId"
+      params={{ workspaceId }}
+      search={{ section }}
+      data-testid={`sidebar-my-tasks-${section}`}
+      className={cn(
+        'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+        active ? 'bg-accent/15 text-foreground' : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="truncate">{label}</span>
+    </Link>
+  )
 }
 
 function NavLink({

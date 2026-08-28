@@ -876,3 +876,49 @@ was three hours old and had passed locally twice — for the wrong reason, becau
 the sandbox has no Meilisearch. The bug it exposed underneath (search 400ing for
 every non-manager) had been live and invisible, since the people who check by
 hand are admins and admins took the early return past it.
+
+---
+
+## "I have no idea where tasks are going" (28 Aug)
+
+Reported from using the product, which is the only place this kind of thing
+shows up. The video has a precise answer for it.
+
+> `[21:19]` "Ab hum aate hain **MY TASKS** pe … `[21:22]` ASSIGNED TO ME,
+> TODAY, aur PERSONAL LIST — yeh basically yahan pe bhi show ho rahi thi …
+> jab profile pe click karti thi to yeh task mein aata tha, to same yeh yahan
+> bhi hai."
+
+Frame G15 #11 records it and it was marked closed: *"'My Tasks' is buried
+inside Home instead of being a sidebar group with its own routes."*
+
+All three sections existed. Every one of them was a `useState` on the Home
+page — `setSection('assigned-to-me')` and so on. So there was **no address for
+"my tasks"**: nothing in the sidebar, nothing to bookmark, nothing to send
+somebody, and nowhere to go and look after making a task. The feature was
+present and the place was not.
+
+The section now comes from the URL, and the sidebar carries **My Tasks** with
+her three under it. `?section=` survives a reload and a cold link, and an
+unknown value falls back to the Inbox rather than rendering nothing — a stale
+bookmark should land somewhere useful.
+
+Two consequences worth noting. Every Home section became addressable, not just
+these three: Inbox, Replies and Assigned comments were state too. And the list
+route now declares `?task=` explicitly, because a parent with a search schema
+is entitled to drop an undeclared key on a child — the deep link that
+quick-create and chat task-links both use.
+
+### Still open: where a task goes when nobody picks a list
+
+Separate from the above, and found while chasing it. Three surfaces create a
+task without asking which list — the `/task` slash command, "create task from
+message", and the AI's "create task from this". All three call a helper that
+returns the **oldest non-archived list in the workspace**: sensible for code to
+pick, meaningless to receive. The feedback is `toast.success('Task created from
+message')` — true, and an answer to the wrong question.
+
+Not fixed here. The right fix is probably to put those in the person's Personal
+List, which is the thing ClickUp has for exactly this and which Rundesk already
+has an endpoint for — but that is a product decision about where somebody
+else's message becomes your work, not a bug to quietly patch.

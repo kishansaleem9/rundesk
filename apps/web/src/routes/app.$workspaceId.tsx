@@ -62,7 +62,35 @@ type WorkspaceAnnouncement = {
   tone: 'info' | 'celebrate' | 'warn'
 }
 
+/**
+ * §G15 [21:22] — "MY TASKS … ASSIGNED TO ME, TODAY, aur PERSONAL LIST."
+ *
+ * All three existed, and none of them had an address: they were `useState` on
+ * this page, so "where did my task go" had no answer you could navigate to,
+ * bookmark, or send to somebody. Reading the section from the URL is what makes
+ * My Tasks a place rather than a state the page happens to be in.
+ */
+const HOME_SECTIONS = [
+  'inbox',
+  'replies',
+  'assigned-comments',
+  'my-tasks',
+  'assigned-to-me',
+  'today-overdue',
+  'personal-list',
+  'more',
+] as const
+type HomeSection = (typeof HOME_SECTIONS)[number]
+
 export const Route = createFileRoute('/app/$workspaceId')({
+  validateSearch: (search: Record<string, unknown>): { section?: HomeSection } => {
+    const raw = search.section
+    // An unknown ?section= falls back to the Inbox rather than rendering
+    // nothing: a stale bookmark should land somewhere useful.
+    return typeof raw === 'string' && (HOME_SECTIONS as readonly string[]).includes(raw)
+      ? { section: raw as HomeSection }
+      : {}
+  },
   component: WorkspaceShell,
 })
 
@@ -83,9 +111,15 @@ function WorkspaceHome() {
   const { workspaceId } = Route.useParams()
   const user = useAuthStore((s) => s.user)
   const qc = useQueryClient()
-  const [section, setSection] = useState<
-    'inbox' | 'replies' | 'assigned-comments' | 'my-tasks' | 'assigned-to-me' | 'today-overdue' | 'personal-list' | 'more'
-  >('inbox')
+  /*
+   * The section lives in the URL, not in state. Picking one replaces the entry
+   * rather than pushing, so Back leaves Home instead of walking you through
+   * every section you clicked on the way here.
+   */
+  const { section: sectionParam } = Route.useSearch()
+  const section: HomeSection = sectionParam ?? 'inbox'
+  const setSection = (next: HomeSection) =>
+    navigate({ to: '/app/$workspaceId', params: { workspaceId }, search: { section: next }, replace: true })
 
   const notificationsQuery = useQuery({
     queryKey: ['notifications', workspaceId],

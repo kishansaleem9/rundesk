@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 52
+const EXPECTED_CHECKS = 60
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -175,6 +175,7 @@ try {
   if (!admin?.accessToken) throw new Error(`could not sign in as ${ADMIN.email}`)
   const A = apiAs(admin.accessToken)
   const workspaceId = admin.workspaces[0].id
+  const meId = admin.user?.id ?? admin.id
 
   // A task of this suite's own, so the tag checks are not reading somebody's
   // real task and the description starts empty.
@@ -623,6 +624,54 @@ try {
     check((await page.locator('[data-testid=list-settings-step]').count()) === 0,
       'and skipping applies nothing and leaves you in the list')
   }
+
+  /*
+   * §G15 [21:22] — "MY TASKS … ASSIGNED TO ME, TODAY, aur PERSONAL LIST",
+   * and she reaches the same three from her profile.
+   *
+   * All three existed as buttons inside Home's left card, driven by component
+   * state. There was no address for "my tasks", so a task you had just made had
+   * nowhere you could go and look for it — which is exactly how it feels when
+   * you cannot tell where a new task went.
+   */
+  const mineTask = await A('/tasks', { method: 'POST', body: { listId, title: `my tasks ${Date.now()}` } })
+  if (mineTask.data?.id) {
+    await A(`/tasks/${mineTask.data.id}/assignees`, { method: 'POST', body: { userId: meId } })
+  }
+  await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+
+  check((await page.locator('[data-testid=sidebar-my-tasks]').count()) > 0,
+    'the sidebar carries a My Tasks group')
+  for (const s of ['assigned-to-me', 'today-overdue', 'personal-list']) {
+    check((await page.locator(`[data-testid=sidebar-my-tasks-${s}]`).count()) > 0,
+      `with ${s} under it`)
+  }
+
+  await page.locator('[data-testid=sidebar-my-tasks-assigned-to-me]').click()
+  await page.waitForTimeout(2000)
+  check(/section=assigned-to-me/.test(page.url()), 'and choosing one puts it in the URL', page.url())
+  check((await page.locator('body').innerText()).includes(mineTask.data?.title ?? '#'),
+    'with the task that was just assigned on screen')
+
+  // Bookmarkable is the whole point: a section held in component state cannot
+  // be returned to, linked, or sent to anybody.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  check(
+    /section=assigned-to-me/.test(page.url()) &&
+      (await page.locator('body').innerText()).includes(mineTask.data?.title ?? '#'),
+    'and it survives a reload',
+    page.url(),
+  )
+
+  // A stale link must land somewhere useful rather than rendering nothing.
+  await page.goto(`${origin}/app/${workspaceId}?section=nonsense`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(2500)
+  check((await page.locator('body').innerText()).length > 200,
+    'an unknown ?section= falls back to a working page')
+
+  if (mineTask.data?.id) await A(`/tasks/${mineTask.data.id}`, { method: 'DELETE' })
 
   await done(browser, stack)
 } catch (err) {

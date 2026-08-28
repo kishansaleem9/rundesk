@@ -167,6 +167,14 @@ type CustomFieldValue = {
 }
 
 export const Route = createFileRoute('/app/$workspaceId/$spaceId/$projectId/$listId')({
+  /*
+   * `?task=<id>` is what quick-create and a task link in chat both navigate to,
+   * and what the effect below opens the detail sheet from. Declared rather than
+   * only read: the parent route now has a search schema, and an undeclared key
+   * on a child is one a router is entitled to drop.
+   */
+  validateSearch: (search: Record<string, unknown>): { task?: string } =>
+    typeof search.task === 'string' && search.task ? { task: search.task } : {},
   component: ListDetail,
 })
 
