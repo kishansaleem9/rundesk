@@ -924,6 +924,58 @@ BADITEM=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 -X PATCH "$API/u
   && ok "an unknown top bar item is refused (400)" \
   || bad "topbarHidden=[search] answered $BADITEM — arbitrary values reach a jsonb column"
 
+say "Archived work is still findable, and Drive is offered (her items 2 and 4)"
+# Two of her seventeen had no check anywhere. Both turned out to be built —
+# which is exactly why they needed one: "it works" and "we know it works" are
+# different claims, and only the second survives somebody editing the search
+# filters six months from now.
+ARCH_SPACE=$(curl -fsS --max-time 20 "$API/spaces/workspace/$WS" -H "$AUTH" | grep -o '"id":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
+ARCH_PROJ=$(curl -fsS --max-time 20 "$API/projects/space/$ARCH_SPACE" -H "$AUTH" | grep -o '"id":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
+ARCH_LIST=$(curl -fsS --max-time 20 "$API/lists/project/$ARCH_PROJ" -H "$AUTH" | grep -o '"id":"[^"]*"' | head -1 | sed 's/.*://;s/"//g' || true)
+if [ -z "$ARCH_LIST" ]; then
+  bad "no list to seed the archived-search probe in"
+else
+  ARCH_NEEDLE="deploycheck$(date +%s)"
+  ARCH_TID=$(curl -fsS --max-time 20 -X POST "$API/tasks" -H "$AUTH" -H 'content-type: application/json' \
+    -d "{\"listId\":\"$ARCH_LIST\",\"title\":\"$ARCH_NEEDLE archived probe\"}" | jget id)
+  sleep 2
+  # Findable while it is alive — otherwise the two checks below both "pass"
+  # against a task the index never had, which proves nothing at all.
+  curl -fsS --max-time 20 "$API/search/$WS?q=$ARCH_NEEDLE&types=task" -H "$AUTH" | grep -q "$ARCH_TID" \
+    && ok "a live task is findable (so the checks below mean something)" \
+    || bad "the seeded task was never findable — the archived checks prove nothing"
+
+  curl -fsS --max-time 20 -X DELETE "$API/tasks/$ARCH_TID" -H "$AUTH" >/dev/null 2>&1 || true
+  sleep 2
+  if curl -fsS --max-time 20 "$API/search/$WS?q=$ARCH_NEEDLE&types=task" -H "$AUTH" | grep -q "$ARCH_TID"; then
+    bad "archived work shows up in an ordinary search unasked"
+  else
+    ok "an archived task is hidden from an ordinary search"
+  fi
+  # §2 — "archived cheezein bhi search mein".
+  curl -fsS --max-time 20 "$API/search/$WS?q=$ARCH_NEEDLE&types=task&includeArchived=true" -H "$AUTH" | grep -q "$ARCH_TID" \
+    && ok "and comes back with includeArchived" \
+    || bad "includeArchived does not bring an archived task back"
+  curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/trash/task/$ARCH_TID" -H "$AUTH" >/dev/null 2>&1 || true
+fi
+
+# §4 — "Google Drive … link kar ke drive se bhi search results aayein."
+DRIVE_PROVIDERS=$(curl -fsS --max-time 20 "$API/workspaces/$WS/integrations/connections/providers" -H "$AUTH" || true)
+printf '%s' "$DRIVE_PROVIDERS" | grep -q 'google-drive' \
+  && ok "Google Drive is offered as a connectable provider" \
+  || bad "Google Drive is not in the provider catalog: $(printf '%s' "$DRIVE_PROVIDERS" | head -c 160)"
+printf '%s' "$(curl -fsS --max-time 20 "$API/search/$WS?q=zzz&types=drive" -H "$AUTH" -o /dev/null -w '%{http_code}')" | grep -q '200' \
+  && ok "and search accepts drive as an entity type" \
+  || bad "the drive entity type is refused by search"
+# Whether it is CONNECTED is a deployment fact, not a build one. Said out loud
+# either way, so a run never quietly implies Drive results are flowing.
+DRIVE_STATUS=$(curl -fsS --max-time 20 "$API/workspaces/$WS/integrations/connections/providers/status" -H "$AUTH" || true)
+DRIVE_REASON=$(printf '%s' "$DRIVE_STATUS" | grep -o '"provider":"google-drive"[^}]*' | head -1)
+case "$DRIVE_REASON" in
+  *'"available":true'*) ok "and this deployment has Drive credentials configured" ;;
+  *)                    ok "Drive is built but not credentialled here — ${DRIVE_REASON:-no status reported}" ;;
+esac
+
 say "A task in the bin is not an editable task"
 # The third video1 pass found PATCH answering 200 and a comment answering 201
 # on a task in the bin — a row no list, no search and no deep link will show

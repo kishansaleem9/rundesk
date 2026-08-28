@@ -788,3 +788,34 @@ task, and the one that would quietly be wrong — a task with an assignee must
 not appear in the pile that is sitting on nobody. `zone.test.ts` adds 5,
 including a DST changeover and an unparseable timezone falling back to UTC
 rather than taking a profile page down.
+
+---
+
+## Are her seventeen actually built? (28 Aug)
+
+Her own closing summary lists seventeen items. Each was mapped to a **named
+check that runs**, rather than to a memory of having built it.
+
+Fifteen mapped straight to existing checks. Two mapped to nothing at all — and
+both turned out to be built, which is precisely why they needed a check:
+"it works" and "we know it works" are different claims, and only the second
+survives somebody editing the search filters six months from now.
+
+| her item | state |
+|---|---|
+| **2 — "archived cheezein bhi search mein"** | built; **had no check**. Exercised: hidden from an ordinary search, returned by `includeArchived`. |
+| **4 — Google Drive** | built; **had no check**. In the provider catalog, and `types=drive` is accepted by search. |
+
+On Drive, one distinction the new check states out loud rather than glossing:
+the provider-status endpoint reports `available: false, reason: "Missing backend
+configuration: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET"`. That is **built but not
+credentialled** — a deployment fact, not a missing feature. The check passes
+either way and prints which, so a green run never quietly implies Drive results
+are flowing when no credentials are set.
+
+Two of the mappings looked missing and were not: "Location narrows by space" and
+the sidebar's `collapses 288px -> 72px` are both real checks whose labels are
+template literals my extraction had mangled. Recorded because that is now the
+fourth distinct time in this engagement a single grep has produced a false gap.
+
+`verify-release.sh` is 146 checks (6 new).
