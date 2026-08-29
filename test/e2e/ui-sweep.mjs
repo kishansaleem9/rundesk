@@ -102,6 +102,15 @@ const firstTaskCard = () => page.getByText(SWEEP_TASK, { exact: true }).first()
 
 const openAnyTask = async () => {
   await seedSweepTask()
+  /*
+   * A task sheet is now part of the address (`?task=`), so it survives a
+   * reload — which is the point of it. That makes this helper's old shape
+   * wrong: called with the sheet already open, the click landed on the
+   * sheet's full-screen overlay and timed out after 30s. It only ever worked
+   * because closing used to be invisible to the URL and a reload dropped the
+   * sheet. Already open is already done.
+   */
+  if ((await page.locator('button[aria-label="Close sheet overlay"]').count()) > 0) return
   await firstTaskCard().click()
   await page.waitForTimeout(2000)
 }
