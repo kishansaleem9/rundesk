@@ -19,6 +19,8 @@ import {
   taskViews,
   docs,
   listStatuses,
+  taskTypes,
+  DEFAULT_TASK_TYPES,
 } from './schema'
 import { DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 
@@ -81,6 +83,20 @@ async function upsertWorkspace(db: ReturnType<typeof getDb>, orgId: string) {
     .insert(workspaces)
     .values({ organizationId: orgId, name: 'Main Workspace', slug: WORKSPACE_SLUG })
     .returning()
+  /*
+   * §1.1 — the same Task/Milestone pair every other workspace gets.
+   *
+   * The API seeds these when a workspace is created, and migration 0093
+   * backfilled the ones that predate that. This path did neither: it writes
+   * the workspace straight to the table, and it runs AFTER the migrations, so
+   * the backfill has already been and gone. A freshly seeded database
+   * therefore had zero task types — which hides the type picker entirely, and
+   * failed three deploy checks on every clean install while looking like a
+   * quirk of the sandbox rather than a hole in the seed.
+   */
+  await db
+    .insert(taskTypes)
+    .values(DEFAULT_TASK_TYPES.map((type) => ({ ...type, workspaceId: created.id })))
   return created
 }
 

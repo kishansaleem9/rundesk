@@ -227,6 +227,13 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/person-panel.mjs --api 3011 --dist apps/web/dist
 
+      # Every addressability fix driven in one session against a real API, a
+      # real Postgres and a real Meilisearch — the thing the per-fix suites
+      # cannot catch is one of them breaking another.
+      - name: Addressability, end to end
+        if: '!cancelled()'
+        run: node test/e2e/addressability-live.mjs --api 3011 --dist apps/web/dist
+
       # The four suites that used to be unrunnable anywhere but one laptop.
       #
       # Each hardcoded some combination of a dev server on :5173, one
