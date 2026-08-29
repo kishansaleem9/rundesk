@@ -468,9 +468,31 @@ export function CommandPalette({
     <CommandDialog
       open={open}
       onOpenChange={setOpen}
-      // In command mode the leading `/` would score every item to zero, so the
-      // filtering is ours; everywhere else cmdk's fuzzy match still runs.
-      commandProps={{ shouldFilter: !commandMode }}
+      /*
+       * cmdk's fuzzy filter is off entirely, and has to be.
+       *
+       * It scores an item by its `value` string, and a search hit's value is
+       * `${entityType}-${id}-${title}` — the title and nothing else. The server
+       * searches titles AND bodies (`searchableAttributes: ['title','content']`),
+       * so every hit that matched on a description, a doc body, a comment or a
+       * chat message scored 0 here and cmdk unmounted it. The snippet was
+       * already rendered underneath the title; the user saw "no matches" over
+       * results the browser was holding. Chat messages could never appear at
+       * all — the server titles them the literal string "Chat message", so the
+       * words the user typed are never in the value being scored.
+       *
+       * Turning it off is right rather than merely expedient: by the time a
+       * query exists, everything on screen is already query-derived — the
+       * server filtered the hits and ranked them, and the quick actions are
+       * meant to be unconditional. Leaving the filter on also RE-SORTED the
+       * results by cmdk's score, quietly discarding the relevance order the
+       * search engine just computed.
+       *
+       * The `__create__${query}` / `__ask_ai__${query}` values below are the
+       * scars of this: the query was being stuffed into item values so that
+       * cmdk would not drop the quick actions either.
+       */
+      commandProps={{ shouldFilter: false }}
       // Screen-reader name for the dialog. Sighted users identify the palette
       // by its input; Radix requires a title regardless.
       title={t('palette.title')}

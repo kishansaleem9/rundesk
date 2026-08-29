@@ -7,6 +7,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Check,
+  ArrowLeft,
+  LayoutGrid,
   Home,
   Inbox,
   MessageCircle,
@@ -64,6 +66,7 @@ import { ContainerEditDialog, type ContainerEditValues } from './container-edit-
 import { CreateWorkspaceFlow, type WorkspaceDraft } from './create-workspace-flow'
 import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
 import { useTranslation } from '../lib/i18n'
+import { lastWorkspaceId, rememberWorkspace } from '../lib/last-workspace'
 import { useAiChatThreads } from '../lib/skills-api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
@@ -545,8 +548,8 @@ export function WorkspaceSidebar() {
     staleTime: 30_000,
   })
 
-  const currentWorkspace = workspaceId ? workspaces.find((w) => w.id === workspaceId) : undefined
-  const currentOrg = currentWorkspace ? organizations.find((o) => o.id === currentWorkspace.organizationId) : undefined
+  const storedWorkspace = workspaceId ? workspaces.find((w) => w.id === workspaceId) : undefined
+  const currentOrg = storedWorkspace ? organizations.find((o) => o.id === storedWorkspace.organizationId) : undefined
 
   // §A4.5 — the switcher showed a name and an org and nothing else, so it said
   // nothing about which workspace you are standing in. Both reads are already
@@ -556,6 +559,32 @@ export function WorkspaceSidebar() {
     queryFn: () => api<{ id: string; name: string; logoUrl?: string | null }>(`/workspaces/${workspaceId}`),
     enabled: !!workspaceId,
   })
+  /*
+   * The name comes from the live read first, the login payload second.
+   *
+   * `workspaces` is whatever the auth store was seeded with at sign-in, so a
+   * workspace joined since — or simply absent from that payload — is not in it,
+   * and `find` returned undefined. The header then fell back to the literal
+   * words "Workspace" / "Select workspace" while standing inside a named
+   * workspace, and the switcher below (which lists the same array) could not
+   * offer it either, so the one escape hatch off /app/profile and /app/help
+   * did not work for exactly the people who most needed it.
+   *
+   * The real name was already fetched and thrown away: this query types `name`
+   * and only `logoUrl` was ever read from it.
+   */
+  const currentWorkspace = storedWorkspace ?? workspaceBrandQuery.data
+
+  /*
+   * Drop a breadcrumb on every workspace route, so a page outside the
+   * workspace tree can offer a way back to the one you were actually in
+   * rather than dumping you at the picker.
+   */
+  useEffect(() => {
+    rememberWorkspace(workspaceId)
+  }, [workspaceId])
+  const backTo = workspaceId ? null : lastWorkspaceId()
+
   const workspacePlanQuery = useQuery({
     queryKey: ['workspace-plan', workspaceId],
     queryFn: () =>
@@ -934,7 +963,17 @@ export function WorkspaceSidebar() {
             )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{currentWorkspace?.name ?? t('common.workspace')}</p>
-              <p className="truncate text-xs text-muted-foreground">{currentOrg?.name ?? t('nav.selectWorkspace')}</p>
+              {/* "Select workspace" is an instruction, and it is only honest
+                  when you are not in one. The organisation is read from the
+                  auth store, so inside a workspace whose org the login payload
+                  did not carry this line used to tell you to pick a workspace
+                  while you were standing in one. Unknown org: say nothing —
+                  the plan line below already identifies where you are. */}
+              {currentOrg?.name ? (
+                <p className="truncate text-xs text-muted-foreground">{currentOrg.name}</p>
+              ) : !workspaceId ? (
+                <p className="truncate text-xs text-muted-foreground">{t('nav.selectWorkspace')}</p>
+              ) : null}
               {/* Guarded field by field: this renders inside the sidebar, which
                   is inside the app shell, so a plan payload missing `usage`
                   took the whole application down to the error boundary rather
@@ -1322,6 +1361,48 @@ export function WorkspaceSidebar() {
               </div>
             )}
           </div>
+          </div>
+        )}
+
+        {/*
+          Not every /app route carries a workspace id — /app/profile and
+          /app/help do not — and the whole nav above is gated on having one.
+          Those pages therefore rendered an empty rail: no Home, no Inbox, no
+          My Tasks, and neither page has a back link of its own. The Inbox
+          settings gear links directly into /app/profile, so asking "why am I
+          getting this?" cost you your place in the app and left the browser
+          Back button as the only way out.
+
+          The escape offered before this was the workspace switcher above, but
+          it lists the auth store's workspaces — the same stale array that made
+          the header read "Select workspace" — so on an account whose workspace
+          was missing from the login payload there was no way out at all.
+
+          Rendering the way back here rather than on each page means any route
+          added outside the workspace tree gets it without anyone remembering.
+        */}
+        {!workspaceId && (
+          <div className="p-2 space-y-1" data-testid="sidebar-no-workspace">
+            {backTo ? (
+              <NavLink
+                to="/app/$workspaceId"
+                params={{ workspaceId: backTo }}
+                icon={ArrowLeft}
+                label={t('nav.backToWorkspace')}
+              />
+            ) : null}
+            {/* A plain Link, not NavLink: that component is deliberately typed
+                to the workspace routes and resolves $workspaceId into the
+                path. /app is the picker, and it reads the workspace list from
+                the API rather than the auth store, so it is the one
+                destination that is never stale. */}
+            <Link
+              to="/app"
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+            >
+              <LayoutGrid className="h-4 w-4 shrink-0" />
+              <span className="truncate">{t('nav.yourWorkspaces')}</span>
+            </Link>
           </div>
         )}
 

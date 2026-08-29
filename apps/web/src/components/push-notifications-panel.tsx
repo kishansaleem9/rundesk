@@ -100,23 +100,42 @@ export function PushNotificationsPanel() {
     }>('/notifications/preferences'),
   })
 
-  const prefs = useMemo(
-    () =>
-      prefsQuery.data ?? {
-        channels: {
-          webEnabled: true,
-          mobileEnabled: false,
-          dndOn: false,
-          dndStart: '21:00',
-          dndEnd: '08:00',
-          muteSounds: false,
-        },
-        events: DEFAULTS,
-        digest: { enabled: false, frequency: 'daily' as const, hour: 8 },
-        autoFollow: true,
+  /*
+   * Merged onto the defaults field by field, not swapped for them.
+   *
+   * `data ?? defaults` only catches null and undefined, so a payload that
+   * arrives in any other shape — an empty array, an object without `channels`,
+   * a partial written by an older release — passed straight through and the
+   * next line read `.channels.webEnabled` off it. That throws, and this panel
+   * renders inside the profile page, so one malformed field took the whole
+   * page to the error boundary: /app/profile?tab=notifications became a screen
+   * saying "Something went wrong" with no sidebar and no way back.
+   *
+   * Same failure the plan payload had in the sidebar, and the same remedy.
+   */
+  const prefs = useMemo(() => {
+    const fallback = {
+      channels: {
+        webEnabled: true,
+        mobileEnabled: false,
+        dndOn: false,
+        dndStart: '21:00',
+        dndEnd: '08:00',
+        muteSounds: false,
       },
-    [prefsQuery.data],
-  )
+      events: DEFAULTS,
+      digest: { enabled: false, frequency: 'daily' as const, hour: 8 },
+      autoFollow: true,
+    }
+    const data = prefsQuery.data
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return fallback
+    return {
+      ...fallback,
+      ...data,
+      channels: { ...fallback.channels, ...(data.channels ?? {}) },
+      events: { ...fallback.events, ...(data.events ?? {}) },
+    }
+  }, [prefsQuery.data])
   const [matrix, setMatrix] = useState<Record<EventKey, Record<Channel, boolean>>>(prefs.events)
   const [webEnabled, setWebEnabled] = useState(prefs.channels.webEnabled)
   const [mobileEnabled, setMobileEnabled] = useState(prefs.channels.mobileEnabled)

@@ -327,3 +327,19 @@ jobs:
       - name: The emoji picker loads its list
         if: '!cancelled()'
         run: node test/e2e/emoji-picker.mjs
+
+      # Every hit the stub returns matches only in its BODY. The palette used
+      # to re-filter server results with cmdk's fuzzy matcher, which scores the
+      # title alone — so it hid results it was already holding, and chat
+      # messages (titled "Chat message" by the server) could never appear.
+      - name: The command palette shows what the server found
+        if: '!cancelled()'
+        run: node test/e2e/command-palette.mjs
+
+      # /app/profile and /app/help sit outside the workspace tree, so the
+      # sidebar's nav — which is built from a workspace id — rendered nothing
+      # and neither page has a back link. The Inbox settings gear links
+      # straight into that.
+      - name: No page is a dead end
+        if: '!cancelled()'
+        run: node test/e2e/no-dead-ends.mjs
