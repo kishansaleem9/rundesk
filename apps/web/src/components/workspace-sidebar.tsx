@@ -9,6 +9,7 @@ import {
   Check,
   ArrowLeft,
   LayoutGrid,
+  Play,
   Home,
   Inbox,
   MessageCircle,
@@ -157,6 +158,7 @@ function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: 
     { label: 'Templates', path: `${base}/templates` },
     { label: 'Integrations', path: `${base}/integrations` },
     { label: 'Goals', path: `${base}/goals` },
+    { label: 'Sprints', path: `${base}/sprints` },
     { label: 'Reports', path: `${base}/reports` },
     { label: 'Time', path: `${base}/time` },
     { label: 'Mind maps', path: `${base}/mindmaps` },
@@ -204,6 +206,7 @@ function railEntries(
     { path: `${base}/workload`, label: 'Workload', icon: BarChart3, flag: FLAGS.VIEWS_WORKLOAD },
     { path: `${base}/timeline`, label: 'Timeline', icon: GitBranch },
     { path: `${base}/goals`, label: 'Goals', icon: ClipboardList, flag: FLAGS.GOALS },
+    { path: `${base}/sprints`, label: 'Sprints', icon: Play, flag: FLAGS.SPRINTS },
     { path: `${base}/reports`, label: 'Reports', icon: BarChart3, flag: FLAGS.REPORTING },
     { path: `${base}/time`, label: 'Time', icon: Clock3, flag: FLAGS.TIME_TRACKING },
     { path: `${base}/templates`, label: 'Templates', icon: Layers },
@@ -659,6 +662,7 @@ export function WorkspaceSidebar() {
       case 'Templates': return t('nav.templates')
       case 'Integrations': return t('nav.integrations')
       case 'Goals': return t('nav.goals')
+      case 'Sprints': return t('nav.sprints')
       case 'Reports': return t('nav.reports')
       case 'Time': return t('nav.time')
       case 'Mind maps': return t('nav.mindMaps')
@@ -1342,6 +1346,9 @@ export function WorkspaceSidebar() {
                 <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label={t('nav.timeline')} compact />
                 {featureEnabled(FLAGS.GOALS) && (
                   <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label={t('nav.goals')} compact />
+                )}
+                {featureEnabled(FLAGS.SPRINTS) && (
+                  <NavLink to={"/app/$workspaceId/sprints" as any} params={{ workspaceId }} icon={Play} label={t('nav.sprints')} compact />
                 )}
                 {featureEnabled(FLAGS.REPORTING) && (
                   <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label={t('nav.reports')} compact />

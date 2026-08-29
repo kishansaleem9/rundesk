@@ -825,7 +825,16 @@ function SprintBurndownWidget({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1">{t('dashboardWidget.name.sprintBurndown')}</div>
+      {/* The heading is a link because this widget was, until now, the only
+          place in the app that mentioned a sprint at all — it drew the chart
+          and offered no way to reach the sprint behind it. */}
+      <Link
+        to="/app/$workspaceId/sprints/$sprintId"
+        params={{ workspaceId, sprintId: active.id }}
+        className="text-xs uppercase tracking-wider text-muted-foreground mb-1 hover:text-foreground"
+      >
+        {t('dashboardWidget.name.sprintBurndown')}
+      </Link>
       <div className="flex items-baseline gap-2">
         <div className="font-display text-3xl font-semibold tabular-nums">{remaining ?? '—'}</div>
         <div className="text-[10px] text-muted-foreground">

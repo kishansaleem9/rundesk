@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 65
+const EXPECTED_CHECKS = 68
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -753,6 +753,37 @@ try {
     await A(`/tasks/${secondId}`, { method: 'DELETE' })
   } else {
     check(false, 'could not create a second task to check the stale-param case')
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ Sprints is reachable — it was built and never linked')
+  // ---------------------------------------------------------------------
+  /*
+   * Sprints shipped whole — routes, pages, an API — and nothing in the app
+   * pointed at it: absent from the sidebar nav, from the collapsed rail, from
+   * the command palette's jump-to list, and there was no nav.sprints string in
+   * any locale. The only mention outside its own pages was a dashboard
+   * burndown widget that drew a chart with no link to the sprint behind it.
+   */
+  await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  const sprintLink = page.locator(`[data-testid="workspace-sidebar"] a[href$="/sprints"]`)
+  check(
+    (await sprintLink.count()) > 0,
+    'the sidebar offers a way into Sprints',
+    (await page.locator('[data-testid="workspace-sidebar"]').innerText()).replace(/\s+/g, ' ').slice(0, 160),
+  )
+  if ((await sprintLink.count()) > 0) {
+    await sprintLink.first().click()
+    await page.waitForTimeout(3000)
+    check(/\/sprints$/.test(new URL(page.url()).pathname), 'and it goes to the sprints page', page.url())
+    check(
+      (await page.locator('body').innerText()).length > 200,
+      'which renders something rather than an empty shell',
+    )
+  } else {
+    check(false, 'no sprints link to follow')
+    check(false, 'no sprints page to render')
   }
 
   await done(browser, stack)
