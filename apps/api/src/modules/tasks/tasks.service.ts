@@ -1796,9 +1796,25 @@ export class TasksService {
   async getTasksForWorkspace(
     workspaceId: string,
     limit = 500,
-    opts: { includeAssignees?: boolean; actorId?: string; actorRole?: string } = {},
+    opts: {
+      includeAssignees?: boolean
+      actorId?: string
+      actorRole?: string
+      /**
+       * Narrow to one person's tasks IN SQL, before the limit.
+       *
+       * The dashboard used to ask for 500 workspace rows and then keep the
+       * viewer's in JavaScript. Those 500 are everyone's, ordered by
+       * `updatedAt desc`, so in a busy workspace one person's slice of them is
+       * a handful of rows or none — and overdue work is hit hardest, because a
+       * task is overdue precisely when nobody has touched it, which is what
+       * sorts it out of a recently-updated window. The card then reported
+       * "Overdue: 0" as a fact.
+       */
+      assigneeId?: string
+    } = {},
   ) {
-    const { includeAssignees = true, actorId, actorRole } = opts
+    const { includeAssignees = true, actorId, actorRole, assigneeId } = opts
     const safeLimit = Math.min(Math.max(limit, 1), 1000)
 
     const rawRows = await this.db
@@ -1831,16 +1847,35 @@ export class TasksService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, false),
+          assigneeId
+            ? sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${assigneeId})`
+            : undefined,
+        ),
+      )
       .orderBy(desc(tasks.updatedAt))
-      .limit(safeLimit)
+      /*
+       * Over-fetched when the caller is scoped, because the container filter
+       * below runs AFTER this limit and only removes rows. Asking for exactly
+       * `safeLimit` therefore returned fewer than asked for whenever any of the
+       * top rows sat in a private space — the same shape as the search bug
+       * where hits were dropped after Meilisearch had already applied its own
+       * limit. Bounded at the same 1000 ceiling the parameter is clamped to.
+       */
+      .limit(actorId ? Math.min(safeLimit * 2, 1000) : safeLimit)
 
     // The workspace listing is guarded only by workspace membership, so without
     // this it would leak tasks in private spaces/projects the caller can't reach.
     // Scope to accessible containers when the caller is known; unknown-actor
     // (internal) callers stay unfiltered to preserve existing behavior.
     const scopedRows = actorId
-      ? await this.filterTasksByContainerAccess(rawRows, workspaceId, { id: actorId, role: actorRole })
+      ? (await this.filterTasksByContainerAccess(rawRows, workspaceId, { id: actorId, role: actorRole })).slice(
+          0,
+          safeLimit,
+        )
       : rawRows
     // Drop the visibility helper columns so the response shape is unchanged.
     const rows = scopedRows.map(

@@ -47,6 +47,7 @@ export class TasksController {
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,
     @Query('limit') limit?: string,
+    @Query('assigneeId') assigneeId?: string,
   ) {
     // Pass the caller so the listing is scoped to containers they can access
     // (the guard only checks workspace membership, not private space/project
@@ -54,6 +55,13 @@ export class TasksController {
     return this.tasks.getTasksForWorkspace(workspaceId, limit ? Number(limit) : 500, {
       actorId: user.id,
       actorRole: user.role,
+      /*
+       * `assigneeId=me` rather than a raw id: this narrows to the caller, and
+       * accepting an arbitrary id here would turn a workspace listing into a
+       * way to read any colleague's workload without a separate permission
+       * check. The member-scoped endpoint below is the one for that.
+       */
+      assigneeId: assigneeId === 'me' ? user.id : undefined,
     })
   }
 

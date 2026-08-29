@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge, Button, Card, cn, Input } from '@rundesk/ui'
 import { useState } from 'react'
@@ -86,6 +86,20 @@ type Preset = {
 const REFRESH_INTERVALS = [0, 60_000, 300_000, 900_000] as const
 
 export const Route = createFileRoute('/app/$workspaceId/dashboard')({
+  /*
+   * A preset is explicitly a shared object — it carries `shareCount` and
+   * `isSharedWithMe`, and there is a Share dialog on every row — but the route
+   * declared no search schema, so which one you were looking at lived in
+   * component state. Share "Q3 Exec" with your team, send them the URL, and
+   * they land on the Overview tab and have to hunt for it in the index; your
+   * own reload does the same to you.
+   */
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { preset?: string; mode?: 'overview' | 'custom' } => ({
+    preset: typeof search.preset === 'string' && search.preset ? search.preset : undefined,
+    mode: search.mode === 'custom' ? 'custom' : undefined,
+  }),
   component: Dashboard,
 })
 
@@ -99,8 +113,29 @@ function greetingKey(): 'dashboard.greetingMorning' | 'dashboard.greetingAfterno
 function Dashboard() {
   const { workspaceId } = Route.useParams()
   const { t, tCount } = useTranslation()
-  const [viewMode, setViewMode] = useState<'overview' | 'custom'>('overview')
-  const [activePresetId, setActivePresetId] = useState<string | null>(null)
+  /*
+   * Both the tab and the chosen preset are the address. `mode` is omitted
+   * when it is the default, so an ordinary visit stays at /dashboard rather
+   * than growing a parameter that says nothing.
+   */
+  const { preset: presetParam, mode: modeParam } = Route.useSearch()
+  const navigate = useNavigate()
+  const viewMode: 'overview' | 'custom' = modeParam ?? 'overview'
+  const activePresetId = presetParam ?? null
+  const goDashboard = (next: { mode?: 'overview' | 'custom'; preset?: string | null }) =>
+    navigate({
+      to: '/app/$workspaceId/dashboard',
+      params: { workspaceId },
+      search: (
+        prev: { preset?: string; mode?: 'overview' | 'custom' },
+      ): { preset?: string; mode?: 'overview' | 'custom' } => ({
+        mode: (next.mode ?? prev.mode) === 'custom' ? 'custom' : undefined,
+        preset: (next.preset === undefined ? prev.preset : next.preset) ?? undefined,
+      }),
+      replace: true,
+    })
+  const setViewMode = (mode: 'overview' | 'custom') => goDashboard({ mode })
+  const setActivePresetId = (id: string | null) => goDashboard({ preset: id, mode: 'custom' })
   const [isSaving, setIsSaving] = useState(false)
   const [newPresetName, setNewPresetName] = useState('')
   const [refreshMs, setRefreshMs] = useState<number>(REFRESH_INTERVALS[0])
@@ -143,19 +178,36 @@ function Dashboard() {
 
   const activePreset = presets.find((p) => p.id === activePresetId) || presets.find((p) => p.isDefault) || presets[0]
 
-  // Single denormalised query — see Task type comment above.
+  /*
+   * Two reads, because the page asks two different questions.
+   *
+   * "Recent activity" is genuinely workspace-wide, so it takes the workspace
+   * listing. Everything about YOU — due today, overdue, completed this week —
+   * used to come out of that same 500-row window by filtering it in the
+   * browser, and that is wrong in a way that reads as fact: the 500 are
+   * everyone's, ordered by most recently updated, so one person's share of
+   * them can be a handful of rows or none. Overdue suffers most, because a
+   * task is overdue precisely when nobody has touched it — exactly what sorts
+   * it out of a recently-updated window — and the card then said "Overdue: 0".
+   *
+   * `assigneeId=me` puts the predicate in SQL, before the limit.
+   */
   const { data: tasks = [], isLoading, dataUpdatedAt, refetch } = useQuery({
     queryKey: ['dashboard-tasks', workspaceId],
     queryFn: () => api<Task[]>(`/tasks/workspace/${workspaceId}?limit=500`),
+    refetchInterval: refreshMs === 0 ? false : refreshMs,
+  })
+  const { data: myTasks = [] } = useQuery({
+    queryKey: ['dashboard-my-tasks', workspaceId, userId],
+    enabled: Boolean(userId),
+    queryFn: () => api<Task[]>(`/tasks/workspace/${workspaceId}?limit=500&assigneeId=me`),
     refetchInterval: refreshMs === 0 ? false : refreshMs,
   })
 
   const now = new Date()
   const weekStart = startOfWeek(now, { weekStartsOn: 1 })
 
-  const mine = tasks.filter((t) =>
-    (t.assignees ?? []).some((a) => a.userId === userId),
-  )
+  const mine = myTasks
 
   // Custom statuses replaced the old enum — bucket by the canonical
   // `statusCategory` so dashboards work regardless of how a workspace
@@ -551,7 +603,11 @@ function DashboardsIndex({
                 )}
               >
                 <td className="px-4 py-2.5">
-                  <button className="font-medium hover:text-accent" onClick={() => onSelect(preset.id)}>
+                  <button
+                    className="font-medium hover:text-accent"
+                    data-testid={`dashboard-preset-${preset.id}`}
+                    onClick={() => onSelect(preset.id)}
+                  >
                     {preset.name}
                   </button>
                   {preset.isWorkspaceDefault && (

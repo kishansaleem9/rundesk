@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 16
+const EXPECTED_CHECKS = 18
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -333,6 +333,50 @@ try {
 
     await A(`/docs/${idA}`, { method: 'DELETE' }).catch(() => {})
     await A(`/docs/${idB}`, { method: 'DELETE' }).catch(() => {})
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ A dashboard preset you can share is a preset you can link')
+  // ---------------------------------------------------------------------
+  /*
+   * Presets carry shareCount / isSharedWithMe and have a Share dialog on every
+   * row, but the route declared no search schema at all — which one you were
+   * looking at was component state. Share "Q3 Exec", send the URL, and the
+   * recipient lands on the Overview tab and has to hunt for it; your own
+   * reload does the same to you.
+   */
+  const PRESET = `addr preset ${Date.now()}`
+  // POST /dashboards with workspaceId in the body, and `layout` an array —
+  // CreateDashboardPresetDto validates both.
+  const preset = await A('/dashboards', {
+    method: 'POST',
+    body: { workspaceId, name: PRESET, layout: [] },
+  })
+  const presetId = preset.data?.id
+  if (!presetId) {
+    check(false, 'could not create a preset to link to')
+    check(false, 'so the preset address was never exercised')
+  } else {
+    await page.goto(`${origin}/app/${workspaceId}/dashboard`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3000)
+    check(!/[?&]preset=/.test(page.url()), 'the dashboard starts with no preset in the address', page.url())
+
+    // Custom is where presets are listed.
+    await page.getByText('Custom', { exact: false }).first().click().catch(() => {})
+    await page.waitForTimeout(2000)
+    const row = page.getByTestId(`dashboard-preset-${presetId}`)
+    if ((await row.count()) === 0) {
+      check(false, `the preset "${PRESET}" was not listed to click`)
+    } else {
+      await row.first().click()
+      await page.waitForTimeout(1800)
+      check(
+        page.url().includes(`preset=${presetId}`),
+        'choosing a preset puts it in the address',
+        page.url(),
+      )
+    }
+    await A(`/dashboards/${presetId}`, { method: 'DELETE' }).catch(() => {})
   }
 
   await done(browser, stack, restore)

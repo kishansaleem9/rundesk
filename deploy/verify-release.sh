@@ -1067,6 +1067,38 @@ else
   curl -fsS --max-time 20 -X DELETE "$API/workspaces/$WS/trash/task/$BIN_TID" -H "$AUTH" >/dev/null 2>&1 || true
 fi
 
+say "A dashboard counts your work, not a window it might not be in"
+# The dashboard asked for the 500 most-recently-updated tasks in the whole
+# workspace and then kept the viewer's in the browser. Those 500 are
+# everyone's, so one person's share of them can be none — and overdue work is
+# hit hardest, because a task is overdue precisely when nobody has touched it,
+# which is what sorts it out of a recently-updated window. The card then
+# reported "Overdue: 0" as a fact. The predicate belongs in SQL.
+MINE=$(curl -fsS --max-time 30 "$API/tasks/workspace/$WS?limit=500&assigneeId=me" -H "$AUTH" || echo '')
+if [ -z "$MINE" ]; then
+  bad "assigneeId=me was refused, so the dashboard cannot ask for its own tasks"
+else
+  ok "the workspace listing can be narrowed to the caller in SQL"
+  # Every row it returns must actually be the caller's. Counted by asking for
+  # the same rows a second way: the member-scoped endpoint.
+  MINE_N=$(printf '%s' "$MINE" | grep -o '"id":"' | wc -l | tr -d ' ')
+  # NOT $ME: that holds the caller's id at the top of this file but is
+  # reassigned to a whole /users/me payload further up, so by here it is JSON.
+  SELF_ID=$(curl -fsS --max-time 20 "$API/users/me" -H "$AUTH" 2>/dev/null | jget id)
+  MEMBER_N=$(curl -fsS --max-time 30 "$API/tasks/workspace/$WS/members/$SELF_ID" -H "$AUTH" 2>/dev/null | grep -o '"id":"' | wc -l | tr -d ' ')
+  [ -n "$MINE_N" ] && [ -n "$MEMBER_N" ] && [ "$MINE_N" -le "$MEMBER_N" ] \
+    && ok "and it never returns more than the member-scoped endpoint does ($MINE_N <= $MEMBER_N)" \
+    || bad "assigneeId=me returned $MINE_N rows against the member endpoint's $MEMBER_N"
+fi
+# `assigneeId` takes the literal "me" and nothing else. Accepting an arbitrary
+# id would turn a workspace listing into a way to read a colleague's workload
+# without the permission check the member-scoped endpoint carries.
+OTHER=$(curl -fsS --max-time 30 "$API/tasks/workspace/$WS?limit=5&assigneeId=00000000-0000-4000-8000-000000000000" -H "$AUTH" | grep -o '"id":"' | wc -l | tr -d ' ')
+ALL_N=$(curl -fsS --max-time 30 "$API/tasks/workspace/$WS?limit=5" -H "$AUTH" | grep -o '"id":"' | wc -l | tr -d ' ')
+[ "$OTHER" = "$ALL_N" ] \
+  && ok "an arbitrary assigneeId is ignored rather than honoured ($OTHER = $ALL_N unfiltered)" \
+  || bad "assigneeId accepted a raw user id: $OTHER rows vs $ALL_N unfiltered"
+
 say "Binning a task takes it out of the search index, restoring puts it back"
 # There was no removal path anywhere: indexTask wrote on create and on edit and
 # nothing ever deleted, so a binned task stayed in Meili for good and the index
