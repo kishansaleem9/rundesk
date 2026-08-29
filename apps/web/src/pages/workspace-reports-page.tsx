@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Card, cn } from '@rundesk/ui'
 import {
@@ -90,13 +90,23 @@ function printReport(
 export function ReportsPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/reports' })
-  // A5.13 — honor a ?tab=<id> deep link so the dashboard's "Schedule delivery"
-  // lands on the builder that owns scheduling, not on the overview.
-  const [activeTab, setActiveTab] = useState<Tab>(() => {
-    if (typeof window === 'undefined') return 'overview'
-    const requested = new URLSearchParams(window.location.search).get('tab')
-    return TABS.includes(requested as Tab) ? (requested as Tab) : 'overview'
-  })
+  /*
+   * A5.13 — the dashboard's "Schedule delivery" links at ?tab=custom, so this
+   * param was already load-bearing. It used to be read once out of
+   * window.location.search and never written back, which made every report but
+   * the one you arrived on unaddressable: switch to Time, send the URL, and
+   * the recipient gets the overview.
+   */
+  const { tab: tabFromUrl } = useSearch({ from: '/app/$workspaceId/reports' })
+  const navigate = useNavigate()
+  const activeTab: Tab = tabFromUrl ?? 'overview'
+  const setActiveTab = (next: Tab) =>
+    navigate({
+      to: '/app/$workspaceId/reports',
+      params: { workspaceId },
+      search: { tab: next === 'overview' ? undefined : next },
+      replace: true,
+    })
   const [days, setDays] = useState(30)
   const [exportPayload, setExportPayload] = useState<CsvExport>(null)
 

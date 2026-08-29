@@ -101,15 +101,24 @@ export function FormBuilderPage() {
   const search = useSearch({ from: '/app/$workspaceId/forms/$formId' })
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'builder' | 'settings' | 'submissions'>(() =>
-    search.tab === 'submissions' || search.tab === 'settings' || search.tab === 'builder' ? search.tab : 'builder',
-  )
-
-  useEffect(() => {
-    if (search.tab === 'submissions' || search.tab === 'settings' || search.tab === 'builder') {
-      setActiveTab(search.tab)
-    }
-  }, [search.tab])
+  /*
+   * The tab is the address. It was seeded from `?tab=` and re-synced by the
+   * effect below, but nothing ever wrote it, so the param could only ever
+   * arrive — switching to Submissions and sending the URL sent somebody the
+   * builder. With the search param as the state there is nothing to sync, so
+   * the effect goes too.
+   */
+  const activeTab: 'builder' | 'settings' | 'submissions' =
+    search.tab === 'submissions' || search.tab === 'settings' || search.tab === 'builder'
+      ? search.tab
+      : 'builder'
+  const setActiveTab = (next: 'builder' | 'settings' | 'submissions') =>
+    navigate({
+      to: '/app/$workspaceId/forms/$formId',
+      params: { workspaceId, formId },
+      search: { tab: next === 'builder' ? undefined : next },
+      replace: true,
+    })
   const [expandedField, setExpandedField] = useState<string | null>(null)
   const [addingField, setAddingField] = useState(false)
   const [newFieldType, setNewFieldType] = useState('short_text')

@@ -136,7 +136,28 @@ export function SettingsPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/settings' })
   const { tab: tabFromUrl } = useSearch({ from: '/app/$workspaceId/settings' })
   const validWorkspaceId = isUuidLike(workspaceId) ? workspaceId : null
-  const [tab, setTab] = useState<SettingsTabId>(tabFromUrl ?? 'general')
+  /*
+   * The tab is the address, not a copy of it taken on arrival.
+   *
+   * `?tab=` was read once into state and never written back, so the sixteen
+   * tabs here — Trash and Archived among them — were not places. Land on
+   * Members from the workspace panel, click through to Trash, find the list
+   * somebody deleted, and the URL still says `?tab=members`: what you send a
+   * colleague is not what you are looking at, and your own reload throws the
+   * navigation away.
+   *
+   * The route already validated all sixteen values, so arriving worked; only
+   * the write was missing. workspace-time-approvals-page.tsx has done it this
+   * way all along.
+   */
+  const tab: SettingsTabId = tabFromUrl ?? 'general'
+  const setTab = (next: SettingsTabId) =>
+    navigate({
+      to: '/app/$workspaceId/settings',
+      params: { workspaceId },
+      search: { tab: next === 'general' ? undefined : next },
+      replace: true,
+    })
   const { t } = useTranslation()
 
   useEffect(() => {
@@ -190,6 +211,7 @@ export function SettingsPage() {
                 {group.tabs.map((item) => (
                   <button
                     key={item.id}
+                    data-testid={`settings-tab-${item.id}`}
                     onClick={() => setTab(item.id)}
                     className={cn(
                       'w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all',

@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 22
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -323,6 +323,43 @@ try {
     'carrying both times, with nothing booked until somebody answers',
     JSON.stringify({ slots: call?.requestedSlots?.length, scheduledAt: call?.scheduledAt }),
   )
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ The settings tab you are on is the address you can send')
+  // ---------------------------------------------------------------------
+  /*
+   * `?tab=` was read once into state and never written back. Sixteen tabs,
+   * Trash and Archived among them: land on Members from the workspace panel,
+   * click through to Trash, find the list somebody deleted, and the URL still
+   * says ?tab=members — so what you send is not what you are looking at, and
+   * your own reload throws the navigation away. The route already validated
+   * all sixteen values; only the write was missing.
+   */
+  await page.goto(`${origin}/app/${workspaceId}/settings?tab=members`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  check(/[?&]tab=members/.test(page.url()), 'arriving at a named tab keeps it', page.url())
+
+  const trashTab = page.getByTestId('settings-tab-trash')
+  if ((await trashTab.count()) === 0) {
+    check(false, 'no Trash tab to move to')
+    check(false, 'so the tab address was never exercised')
+  } else {
+    await trashTab.first().click()
+    await page.waitForTimeout(2000)
+    check(
+      /[?&]tab=trash/.test(page.url()) && !/tab=members/.test(page.url()),
+      'moving to another tab replaces it in the address',
+      page.url(),
+    )
+    // The point of the address: reopening it returns the same tab.
+    await page.goto(page.url(), { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3000)
+    check(
+      /[?&]tab=trash/.test(page.url()),
+      'and reopening that address returns the same tab',
+      page.url(),
+    )
+  }
 
   await done(browser, stack, restore)
 } catch (err) {

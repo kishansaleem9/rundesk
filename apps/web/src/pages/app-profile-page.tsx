@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { useSearch } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
 import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check , Loader2} from 'lucide-react'
@@ -44,7 +44,20 @@ export function ProfilePage() {
   const { t } = useTranslation()
   // §A2.11 — honour ?tab= so the inbox gear lands on delivery preferences.
   const { tab: tabFromUrl } = useSearch({ from: '/app/profile' })
-  const [tab, setTab] = useState<(typeof TABS)[number]['id']>(tabFromUrl ?? 'general')
+  /*
+   * Same as workspace settings: `?tab=` was read on arrival and never written,
+   * so Security and Notifications had no address. The Inbox gear links
+   * straight at ?tab=notifications, and from there a reload dropped you back
+   * on General.
+   */
+  const navigate = useNavigate()
+  const tab: (typeof TABS)[number]['id'] = tabFromUrl ?? 'general'
+  const setTab = (next: (typeof TABS)[number]['id']) =>
+    navigate({
+      to: '/app/profile',
+      search: { tab: next === 'general' ? undefined : next },
+      replace: true,
+    })
   const profileQuery = useQuery({
     queryKey: ['users', 'me'],
     queryFn: () => api<Profile>('/users/me'),
