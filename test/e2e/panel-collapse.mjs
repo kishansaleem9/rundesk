@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 16
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -276,6 +276,64 @@ try {
   await page.getByTestId('docs-tree-expand').click()
   await page.waitForTimeout(1400)
   check(await page.getByTestId('docs-tree').isVisible().catch(() => false), 'and the tree comes back')
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ Which doc is open is an address')
+  // ---------------------------------------------------------------------
+  /*
+   * `?doc=` was read once at mount out of window.location.search and never
+   * written — docs-panel.tsx contained no navigate at all. So clicking a page
+   * changed nothing in the address, a reload put you on whichever doc sorted
+   * first, and copying the address bar sent the docs index. The app was
+   * already generating this exact link: the insert menu writes
+   * /app/<ws>/docs?doc=<id> into doc bodies, and the search indexer builds it.
+   */
+  const DOC_A = `addr probe A ${Date.now()}`
+  const DOC_B = `addr probe B ${Date.now()}`
+  const docA = await A(`/workspaces/${workspaceId}/docs`, { method: 'POST', body: { title: DOC_A } })
+  const docB = await A(`/workspaces/${workspaceId}/docs`, { method: 'POST', body: { title: DOC_B } })
+  const idA = docA.data?.id
+  const idB = docB.data?.id
+
+  if (!idA || !idB) {
+    check(false, 'could not seed two docs to switch between')
+    check(false, 'so the doc address was never exercised')
+    check(false, 'and neither was the bucket rail')
+  } else {
+    await page.goto(`${origin}/app/${workspaceId}/docs`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3500)
+    check(
+      /[?&]doc=/.test(page.url()),
+      'landing on /docs names the doc it opened',
+      page.url(),
+    )
+
+    await page.getByTestId(`docs-tree-item-${idB}`).first().click()
+    await page.waitForTimeout(1800)
+    check(page.url().includes(`doc=${idB}`), 'clicking a page puts it in the address', page.url())
+
+    /*
+     * The point of an address: reopening it returns the SAME doc rather than
+     * whichever sorts first. Asserted on the active-doc heading, not on page
+     * text — the tree lists every doc, so "DOC_B appears somewhere" is true
+     * even when the editor is showing something else, and it passed against
+     * the unfixed code for exactly that reason.
+     */
+    const opened = page.url()
+    await page.goto(`${origin}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(1500)
+    await page.goto(opened, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3500)
+    const activeTitle = await page.getByTestId('docs-active-title').innerText().catch(() => '')
+    check(
+      activeTitle.includes(DOC_B),
+      `and reopening that address returns the same doc (${activeTitle.trim()})`,
+      `the editor opened "${activeTitle.trim()}" instead`,
+    )
+
+    await A(`/docs/${idA}`, { method: 'DELETE' }).catch(() => {})
+    await A(`/docs/${idB}`, { method: 'DELETE' }).catch(() => {})
+  }
 
   await done(browser, stack, restore)
 } catch (err) {

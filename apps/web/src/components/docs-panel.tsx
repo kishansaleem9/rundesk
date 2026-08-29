@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, toast } from '@rundesk/ui'
 import {
@@ -118,18 +119,35 @@ type DocComment = {
 
 export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const { t } = useTranslation()
   // §1.3 [10:13] — the page tree collapses too, and remembers per person.
   const treeCollapsed = useSidebarStore((s) => s.panels.docs === true)
   const togglePanel = useSidebarStore((s) => s.togglePanel)
-  // Honor a ?doc=<id> deep link (e.g. from global search) by preselecting it.
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      const fromUrl = new URLSearchParams(window.location.search).get('doc')
-      if (fromUrl) return fromUrl
-    }
-    return null
-  })
+  /*
+   * Which doc is open is the URL, not a copy of it taken at mount.
+   *
+   * `?doc=` was read once here, out of `window.location.search`, and never
+   * written — this file contained no `navigate` at all. So the deep link was
+   * inbound-only: clicking a page in the tree changed nothing in the address,
+   * a reload put you on `docsQuery.data[0]` (the auto-select below), and
+   * copying the address bar sent a colleague the docs index rather than the
+   * doc you were writing.
+   *
+   * The app has been generating exactly this link the whole time — the insert
+   * menu writes `/app/<ws>/docs?doc=<id>` into doc bodies, and the search
+   * indexer builds the same URL — so the format was settled; only the write
+   * was missing.
+   */
+  const search = useSearch({ from: '/app/$workspaceId/docs' })
+  const selectedDocId = search.doc ?? null
+  const setSelectedDocId = (id: string | null) =>
+    navigate({
+      to: '/app/$workspaceId/docs',
+      params: { workspaceId },
+      search: (prev: Record<string, unknown>) => ({ ...prev, doc: id ?? undefined }),
+      replace: true,
+    })
   const [newDocName, setNewDocName] = useState('')
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashFilter, setSlashFilter] = useState('')
@@ -142,7 +160,20 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const [aiMenuOpen, setAiMenuOpen] = useState(false)
   const [insertOpen, setInsertOpen] = useState(false)
   const [createTask, setCreateTask] = useState<{ open: boolean; title: string }>({ open: false, title: '' })
-  const [scope, setScope] = useState<DocScope>('all')
+  /*
+   * The bucket rail is an address too: "the archived docs" is a thing to send
+   * somebody, and it survives a reload for the same reason the doc does.
+   * Changing bucket drops `doc`, because the doc you had open is usually not
+   * in the bucket you just moved to.
+   */
+  const scope: DocScope = search.scope ?? 'all'
+  const setScope = (next: DocScope) =>
+    navigate({
+      to: '/app/$workspaceId/docs',
+      params: { workspaceId },
+      search: { scope: next === 'all' ? undefined : next },
+      replace: true,
+    })
   const [pane, setPane] = useState<'editor' | 'index'>('editor')
   const [pickerMode, setPickerMode] = useState<'listEmbed' | 'linkTask' | null>(null)
   const editorWrapRef = useRef<HTMLDivElement | null>(null)
@@ -168,9 +199,12 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
   const toggleFavorite = useToggleFavorite(workspaceId)
 
   useEffect(() => {
+    // Landing with no doc named picks the first and says so in the address,
+    // so what you are looking at is always shareable — including the default.
     if (!selectedDocId && docsQuery.data?.length) {
       setSelectedDocId(docsQuery.data[0].id)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docsQuery.data, selectedDocId])
 
   const activeDoc = useMemo(
@@ -543,6 +577,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
             )}
             <button
               className="flex-1 truncate text-left py-1.5 text-sm"
+              data-testid={`docs-tree-item-${node.id}`}
               onClick={() => setSelectedDocId(node.id)}
             >
               {node.icon ? <span className="mr-1">{node.icon}</span> : null}
@@ -770,7 +805,7 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       ) : (
       <div className="flex flex-col min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-border/60">
-          <h3 className="font-display text-base font-semibold truncate">
+          <h3 className="font-display text-base font-semibold truncate" data-testid="docs-active-title">
             {activeDoc?.title ?? t('docs.selectADoc')}
           </h3>
           {activeDoc && (
