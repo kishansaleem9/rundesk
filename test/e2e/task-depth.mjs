@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 60
+const EXPECTED_CHECKS = 65
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -349,7 +349,20 @@ try {
   await page.waitForTimeout(2500)
   const saved = await A(`/tasks/${taskId}`)
   check(/\|\s*---\s*\|/.test(saved.data?.description ?? ''), 'the table survives the save')
-  await page.reload({ waitUntil: 'domcontentloaded' })
+  /*
+   * Reopened by address rather than by reload.
+   *
+   * The click above lands on the sheet's full-screen overlay, so it closes the
+   * sheet as well as blurring the editor. This used to be invisible: closing
+   * the sheet only changed component state and left a stale `?task=` behind,
+   * so a plain reload put the sheet back. Now that closing clears the param,
+   * a reload correctly shows the list — and this check wants the task, so it
+   * asks for the task.
+   */
+  await page.goto(
+    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${taskId}`,
+    { waitUntil: 'domcontentloaded' },
+  )
   await page.waitForTimeout(3800)
   check(
     await page.locator('table').first().isVisible().catch(() => false),
@@ -672,6 +685,75 @@ try {
     'an unknown ?section= falls back to a working page')
 
   if (mineTask.data?.id) await A(`/tasks/${mineTask.data.id}`, { method: 'DELETE' })
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ Opening a task writes ?task=, so the sheet has an address')
+  // ---------------------------------------------------------------------
+  /*
+   * `?task=` was declared and consumed but never written: the scheme was
+   * inbound-only. Every check above navigates straight to a ?task= URL, which
+   * exercises reading it — the direction that already worked. These drive the
+   * other half, from the list.
+   */
+  const listUrl = `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}`
+  const SECOND = `depth probe second ${Date.now()}`
+  const otherTask = await A('/tasks', { method: 'POST', body: { listId, title: SECOND } })
+  const secondId = otherTask.data?.id
+
+  await page.goto(listUrl, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3200)
+  check(!/[?&]task=/.test(page.url()), 'the list starts with no task in the address', page.url())
+
+  /*
+   * `exact` matters: this suite also creates `${TITLE} two` for the tag
+   * checks, so a loose match clicks whichever of the two happens to be first
+   * and the assertion then fails against a perfectly correct URL.
+   */
+  await page.getByText(TITLE, { exact: true }).first().click()
+  await page.waitForTimeout(1800)
+  check(
+    page.url().includes(`task=${taskId}`),
+    'clicking a task puts it in the address',
+    page.url(),
+  )
+
+  // The point of an address: it survives being reloaded, and can be sent.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3200)
+  check(
+    (await page.locator('body').innerText()).includes(TITLE),
+    'and the sheet is still open after a reload',
+    page.url(),
+  )
+
+  /*
+   * The case that made the old behaviour actively wrong rather than merely
+   * missing: arrive at ?task=A, move to task B, and the URL still said A — so
+   * a reload reopened the task you had already moved on from.
+   */
+  if (secondId) {
+    await page.goto(`${listUrl}?task=${taskId}`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3200)
+    // The sheet's own overlay, not Escape: the overlay covers the list and
+    // intercepts pointer events, so the next click never reaches a task row.
+    await page.locator('[aria-label="Close sheet overlay"]').first().click()
+    await page.waitForTimeout(1500)
+    check(
+      !/[?&]task=/.test(page.url()),
+      'closing the sheet takes the task back out of the address',
+      page.url(),
+    )
+    await page.getByText(SECOND, { exact: true }).first().click()
+    await page.waitForTimeout(1800)
+    check(
+      page.url().includes(`task=${secondId}`) && !page.url().includes(`task=${taskId}`),
+      'opening a second task replaces the first in the address',
+      page.url(),
+    )
+    await A(`/tasks/${secondId}`, { method: 'DELETE' })
+  } else {
+    check(false, 'could not create a second task to check the stale-param case')
+  }
 
   await done(browser, stack)
 } catch (err) {

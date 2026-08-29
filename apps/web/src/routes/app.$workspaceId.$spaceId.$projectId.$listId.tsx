@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate, useRouterState } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
@@ -1091,7 +1091,35 @@ function ListDetail() {
   // Board: collapsed columns (ephemeral) + per-status WIP limits (persisted).
   const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(() => new Set())
   const [wipLimits, setWipLimits] = useState<Record<string, number>>({})
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  /*
+   * Which task is open lives in the URL, not in state.
+   *
+   * `?task=` was declared in validateSearch and consumed on arrival, but
+   * nothing ever wrote it — the address scheme was inbound-only. So a task
+   * sheet could be opened from a link and never produced one: copying the
+   * address bar sent a colleague the list, and a reload closed the sheet. It
+   * was also actively wrong once you arrived from search at `?task=A`, closed
+   * the sheet and opened task B — the URL still said A, so a reload reopened
+   * the task you had moved on from.
+   *
+   * The server has been minting exactly this URL the whole time
+   * (tasks.service.ts buildTaskUrl, and the search indexer), so the format was
+   * never in question; only the write was missing.
+   *
+   * `replace` rather than push, deliberately: the sheet is a view of the list
+   * rather than a page of its own, and replacing keeps Back doing what it does
+   * today — leaving the list — instead of making the user walk back out
+   * through every task they happened to glance at.
+   */
+  const { task: taskParam } = Route.useSearch()
+  const selectedTaskId = taskParam ?? null
+  const setSelectedTaskId = (id: string | null) =>
+    navigate({
+      to: '/app/$workspaceId/$spaceId/$projectId/$listId',
+      params: { workspaceId, spaceId, projectId, listId },
+      search: (prev: Record<string, unknown>) => ({ ...prev, task: id ?? undefined }),
+      replace: true,
+    })
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [statusManagerOpen, setStatusManagerOpen] = useState(false)
   const [sharePanelOpen, setSharePanelOpen] = useState(false)
@@ -1108,7 +1136,6 @@ function ListDetail() {
   const [selectedSavedViewId, setSelectedSavedViewId] = useState<string>('')
   const [appliedInitialView, setAppliedInitialView] = useState(false)
   const quickAddRef = useRef<HTMLInputElement | null>(null)
-  const locationSearch = useRouterState({ select: (s) => (s.location as any).searchStr as string })
 
   const { data: tasks = [], isLoading, refetch } = useQuery({
     queryKey: ['tasks', listId],
@@ -1304,10 +1331,11 @@ function ListDetail() {
     return Array.from(map.entries())
   }, [visibleTasks, calendarAssignee])
 
-  useEffect(() => {
-    const nextTaskId = new URLSearchParams(locationSearch ?? '').get('task')
-    if (nextTaskId) setSelectedTaskId(nextTaskId)
-  }, [locationSearch])
+  /*
+   * The effect that used to copy `?task=` into state is gone: the search
+   * param IS the state now, so mirroring it into a second copy could only
+   * reintroduce the drift it was written to paper over.
+   */
 
   const applyView = (viewId: string) => {
     const view = savedViews.find((v) => v.id === viewId)
