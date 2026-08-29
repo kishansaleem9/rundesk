@@ -237,12 +237,29 @@ export function ChatPage() {
   // §15 — the installed skills this person can type as /slug, offered in the
   // composer's command menu alongside /task and /remind.
   const { data: skillCommands = [] } = useSkillCommands(workspaceId)
-  const deepLink = useSearch({ from: '/app/$workspaceId/chat' }) as { channel?: string; message?: string }
+  const deepLink = useSearch({ from: '/app/$workspaceId/chat' }) as {
+    channel?: string
+    message?: string
+    thread?: string
+  }
   const navigate = useNavigate()
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const consumedDeepLinkRef = useRef<string | null>(null)
+  const selectedId = deepLink.channel ?? null
+  /**
+   * Move to a channel by changing the address. `message` and `thread` are
+   * dropped on the way out: both name something inside the channel you are
+   * leaving, so carrying them over would point at nothing while making the
+   * URL look like it should point somewhere.
+   */
+  const selectChannel = (id: string | null) =>
+    navigate({
+      to: '/app/$workspaceId/chat',
+      params: { workspaceId },
+      search: { channel: id ?? undefined },
+      replace: true,
+    })
+  const setSelectedId = selectChannel
   const [addPeopleOpen, setAddPeopleOpen] = useState(false)
   const [input, setInput] = useState('')
   // Files uploaded (to R2) and awaiting attachment to the next sent message (§6.8).
@@ -263,7 +280,21 @@ export function ChatPage() {
   const [editIcon, setEditIcon] = useState('')
   const [startingDm, setStartingDm] = useState(false)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
-  const [threadParentId, setThreadParentId] = useState<string | null>(null)
+  /*
+   * An open thread is a place too. Reading a long discussion and reloading
+   * used to lose it — you were back in the channel hunting for the parent
+   * message — and "look at this thread" could not be sent to anybody. The
+   * route already carried `?message=` to point at a single message, so the
+   * identifier shape was settled; only the thread had no name in the URL.
+   */
+  const threadParentId = deepLink.thread ?? null
+  const setThreadParentId = (id: string | null) =>
+    navigate({
+      to: '/app/$workspaceId/chat',
+      params: { workspaceId },
+      search: (prev: Record<string, unknown>) => ({ ...prev, thread: id ?? undefined }),
+      replace: true,
+    })
   // Which face of a DM is showing. Reset when the conversation changes, or you
   // land on someone else's shared work while thinking you switched to a chat.
   const [dmTab, setDmTab] = useState<'chat' | 'calendar' | 'tasks'>('chat')
@@ -426,22 +457,29 @@ export function ChatPage() {
     setInput(`${input.slice(0, mentionTrigger.start)}${token} `)
   }
 
+  /*
+   * Which channel you are in comes from the URL, so it can be sent.
+   *
+   * `?channel=` was read on arrival and never written: the route declared it,
+   * the API minted links carrying it for every chat notification, and the
+   * in-app search panel wrote it — but clicking a channel in the sidebar was
+   * `onSelectChannel={setSelectedId}` and touched nothing. So you could be
+   * sent into #design-review and never send anyone there yourself: copying the
+   * address bar gave them /chat, which lands in #general, and your own reload
+   * did the same to you.
+   *
+   * Reading the selection from the URL also retires the "consume this deep
+   * link once" ref. That existed to stop the effect fighting the state it had
+   * just set; with one source of truth there is nothing to fight.
+   */
   useEffect(() => {
     if (channels.length === 0) return
-    // Deep-link (inbox → chat): open the linked channel once (Plan §6).
-    if (deepLink.channel && consumedDeepLinkRef.current !== deepLink.channel) {
-      const linked = channels.find((c) => c.id === deepLink.channel)
-      if (linked) {
-        consumedDeepLinkRef.current = deepLink.channel
-        setSelectedId(linked.id)
-        return
-      }
-    }
-    if (!selectedId) {
-      const general = channels.find((c) => c.name === 'general') ?? channels[0]
-      setSelectedId(general.id)
-    }
-  }, [channels, selectedId, deepLink.channel])
+    if (deepLink.channel && channels.some((c) => c.id === deepLink.channel)) return
+    // No channel named, or one that is not in this workspace: fall back, and
+    // put the fallback in the address so it is shareable like any other.
+    const general = channels.find((c) => c.name === 'general') ?? channels[0]
+    if (general) selectChannel(general.id)
+  }, [channels, deepLink.channel])
 
   const selectedChannel = useMemo(
     () => channels.find((c) => c.id === selectedId) ?? null,
@@ -2726,6 +2764,7 @@ export function ChatPage() {
                           <button
                             type="button"
                             className="inline-flex items-center gap-1.5 text-[12px] font-medium text-violet-600 dark:text-violet-300 hover:underline"
+                            data-testid={`view-thread-${m.id}`}
                             onClick={() => setThreadParentId(m.id)}
                           >
                             {t('chat.viewThread', { count: replyCount })}
@@ -3891,7 +3930,10 @@ function ThreadPanel({
   )
 
   return (
-    <aside className="relative z-50 hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col">
+    <aside
+      data-testid="chat-thread-panel"
+      className="relative z-50 hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col"
+    >
       <div className="h-[52px] shrink-0 border-b border-border/80 px-4 flex items-center justify-between bg-background">
         <div className="min-w-0">
           <div className="text-[14px] font-semibold text-foreground">{t('chat.thread')}</div>

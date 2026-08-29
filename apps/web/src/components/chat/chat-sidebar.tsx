@@ -731,6 +731,9 @@ function ChannelRow({
       <button
         type="button"
         onClick={onClick}
+        // Every channel row in every group renders through here, so this is
+        // the one anchor a test needs to click a named channel.
+        data-testid={channelId ? `channel-row-${channelId}` : undefined}
         className={cn(
           'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px]',
           active

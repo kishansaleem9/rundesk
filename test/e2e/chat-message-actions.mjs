@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 30
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -393,6 +393,54 @@ try {
   const afterReload = await page.locator('[data-testid^="thread-mute-"]').first().innerText().catch(() => '')
   check(/Unmute/i.test(afterReload), 'the mute survives a reload', afterReload)
   await page.keyboard.press('Escape')
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ The channel you are in, and the thread you opened, are addresses')
+  // ---------------------------------------------------------------------
+  /*
+   * `?channel=` was read on arrival and never written. Every check above
+   * navigates straight to a ?channel= URL, which exercises the direction that
+   * already worked. These drive the other one: clicking a channel in the
+   * sidebar wrote nothing, so you could be sent into a channel but never send
+   * anyone there — copying the address bar gave /chat, which lands in #general.
+   */
+  await page.goto(`${origin}/app/${workspaceId}/chat`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+  check(
+    /[?&]channel=/.test(page.url()),
+    'landing on /chat puts the channel it chose in the address',
+    page.url(),
+  )
+
+  const sidebarChannel = page.locator(`[data-testid="channel-row-${channelId}"]`).first()
+  check((await sidebarChannel.count()) > 0, 'the channel is listed in the sidebar')
+  await sidebarChannel.click()
+  await page.waitForTimeout(2500)
+  check(
+    page.url().includes(`channel=${channelId}`),
+    'and clicking it puts that channel in the address',
+    page.url(),
+  )
+
+  // An open thread survives a reload and can be sent to somebody.
+  const openThread = page.locator('[data-testid^="view-thread-"]').first()
+  if ((await openThread.count()) > 0) {
+    await openThread.click()
+    await page.waitForTimeout(1800)
+    check(/[?&]thread=/.test(page.url()), 'opening a thread puts it in the address', page.url())
+    const threadUrl = page.url()
+    await page.goto(threadUrl, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3500)
+    check(
+      /[?&]thread=/.test(page.url()) &&
+        (await page.locator('[data-testid="chat-thread-panel"]').count()) > 0,
+      'and the thread is still open when that address is reopened',
+      page.url(),
+    )
+  } else {
+    check(false, 'no "open thread" control to drive')
+    check(false, 'so the thread address was never exercised')
+  }
 
   await done(browser, stack, cleanup)
 } catch (err) {
