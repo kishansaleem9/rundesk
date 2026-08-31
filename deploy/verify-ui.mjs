@@ -822,6 +822,235 @@ try {
     }
   })
 
+  await section('§ADDR', 'The things you look at have addresses you can send', async () => {
+    /*
+     * The addressability audit fixed nine things whose common shape was: the
+     * app knows what you are looking at and the URL does not. Each has its own
+     * CI suite, and every one of those runs against a FRESH install. None of
+     * them look at the deployed instance — which is exactly the gap that let
+     * My Tasks sit green in CI while nothing confirmed it on the running
+     * server. These are the deployed-side checks.
+     *
+     * Written to survive a workspace with real data in it: nothing here
+     * depends on a particular task, channel or doc existing, only on the
+     * app naming whatever it chose.
+     */
+
+    // ── ⌘K shows what the server found, not just what the title says ───────
+    {
+      /*
+       * A task whose TITLE cannot match, so only the body can. cmdk used to
+       * re-filter server hits on the title alone and unmount everything that
+       * matched on content — the user saw "No matches" over results the
+       * browser was holding.
+       */
+      const needle = `zqxaddr${Date.now().toString(36)}`
+      /*
+       * Reached through space → project → list, like the task check below.
+       * A flat `/workspaces/:id/lists` does not exist, and asking for it
+       * returned nothing — which sent this straight to its "nothing to do"
+       * branch and reported a PASS for a check that never ran.
+       */
+      const sp = (await apiGet(`/spaces/workspace/${WS}`)) ?? []
+      const pr = sp[0] ? (await apiGet(`/projects/space/${sp[0].id}`)) ?? [] : []
+      const ls = pr[0] ? (await apiGet(`/lists/project/${pr[0].id}`)) ?? [] : []
+      const listId = ls[0]?.id
+      const made = listId
+        ? await apiPost('/tasks', {
+            listId,
+            title: 'Addressability probe',
+            description: `body only: ${needle}`,
+          })
+        : null
+      if (!made?.id) {
+        ok('no list to seed a body-only search probe in, so ⌘K was not exercised here')
+      } else {
+        await new Promise((r) => setTimeout(r, 2500))
+        await go(`/app/${WS}/inbox`, 3000)
+        await page.keyboard.press('Control+k')
+        await page.waitForTimeout(900)
+        const input = page.locator('[cmdk-input]').first()
+        if ((await input.count()) === 0) {
+          bad('⌘K did not open')
+        } else {
+          await input.fill(needle)
+          await page.waitForTimeout(2500)
+          const list = (await page.locator('[cmdk-list]').first().innerText()).replace(/\s+/g, ' ')
+          chk(
+            list.includes('Addressability probe'),
+            'a result that matched only in its body is shown in ⌘K',
+            `the palette hid it: ${list.slice(0, 120)}`,
+          )
+          await page.keyboard.press('Escape')
+          await page.waitForTimeout(400)
+        }
+        await fetch(`${API}/tasks/${made.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {})
+      }
+    }
+
+    // ── a page you can reach is a page you can leave ───────────────────────
+    {
+      await go(`/app/${WS}/inbox`, 2500)
+      // The exact link the Inbox settings gear uses.
+      await go('/app/profile?tab=notifications', 3500)
+      chk(
+        !/Something went wrong/i.test(await seen()),
+        'the notifications tab renders rather than dying on its payload',
+        'the profile page is on the error boundary',
+      )
+      const escape = page.locator('[data-testid="sidebar-no-workspace"]')
+      chk(
+        (await escape.count()) > 0,
+        'a route outside the workspace tree still offers a way back',
+        'the profile page is a dead end again — the sidebar has no way out',
+      )
+      chk(
+        (await escape.locator('a[href="/app"]').count()) > 0,
+        'and the workspace picker is always offered as a fallback',
+        'no picker fallback on a workspace-less route',
+      )
+      const back = escape.locator(`a[href="/app/${WS}"]`).first()
+      if ((await back.count()) === 0) {
+        bad('no "Back to workspace" link — the breadcrumb was not remembered')
+      } else {
+        await back.click()
+        await page.waitForTimeout(2500)
+        chk(page.url().endsWith(`/app/${WS}`), 'which returns to the workspace you came from', page.url())
+      }
+    }
+
+    // ── the sidebar names the workspace it is standing in ──────────────────
+    {
+      await go(`/app/${WS}`, 3000)
+      const sidebar = (await page.locator('[data-testid="workspace-sidebar"]').innerText()).replace(/\s+/g, ' ')
+      chk(
+        !/Select workspace/i.test(sidebar),
+        'the sidebar does not say "Select workspace" while you are in one',
+        `header reads: ${sidebar.slice(0, 90)}`,
+      )
+    }
+
+    // ── Sprints is reachable ───────────────────────────────────────────────
+    {
+      const link = page.locator('[data-testid="workspace-sidebar"] a[href$="/sprints"]')
+      chk(
+        (await link.count()) > 0,
+        'Sprints is reachable from the sidebar',
+        'Sprints is built and nothing links to it again',
+      )
+    }
+
+    // ── opening a task names it ────────────────────────────────────────────
+    {
+      const spaces = (await apiGet(`/spaces/workspace/${WS}`)) ?? []
+      const projects = spaces[0] ? (await apiGet(`/projects/space/${spaces[0].id}`)) ?? [] : []
+      const lists = projects[0] ? (await apiGet(`/lists/project/${projects[0].id}`)) ?? [] : []
+      const listId = lists[0]?.id
+      if (!listId) {
+        ok('no list on this deployment, so the task address was not exercised')
+      } else {
+        const title = `addr probe ${Date.now()}`
+        const made = await apiPost('/tasks', { listId, title })
+        await go(`/app/${WS}/${spaces[0].id}/${projects[0].id}/${listId}`, 3500)
+        const row = page.getByText(title, { exact: true }).first()
+        if ((await row.count()) === 0) {
+          bad('the seeded task never rendered, so the address check proves nothing')
+        } else {
+          await row.click()
+          await page.waitForTimeout(2000)
+          chk(
+            made?.id ? page.url().includes(`task=${made.id}`) : /[?&]task=/.test(page.url()),
+            'opening a task puts it in the address',
+            page.url(),
+          )
+        }
+        if (made?.id) {
+          await fetch(`${API}/tasks/${made.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {})
+        }
+      }
+    }
+
+    // ── chat and docs name what they opened ────────────────────────────────
+    {
+      await go(`/app/${WS}/chat`, 4000)
+      chk(
+        /[?&]channel=/.test(page.url()),
+        'landing on chat names the channel it chose',
+        page.url(),
+      )
+      await go(`/app/${WS}/docs`, 4000)
+      chk(/[?&]doc=/.test(page.url()), 'landing on docs names the doc it opened', page.url())
+    }
+
+    // ── the dashboard tab, and a tab that is not the default ───────────────
+    {
+      await go(`/app/${WS}/dashboard`, 3500)
+      chk(
+        !/[?&]mode=/.test(page.url()),
+        'the dashboard opens on Overview without a parameter that says nothing',
+        page.url(),
+      )
+      /*
+       * The line above is true of a build with no search schema at all, so on
+       * its own it proves nothing. Switching tabs is the half that only passes
+       * once the tab is actually in the address.
+       */
+      const custom = page.getByText('Custom', { exact: false }).first()
+      if ((await custom.count()) === 0) {
+        bad('no Custom tab on the dashboard to switch to')
+      } else {
+        await custom.click()
+        await page.waitForTimeout(2000)
+        chk(
+          /[?&]mode=custom/.test(page.url()),
+          'and switching to Custom puts that in the address',
+          page.url(),
+        )
+      }
+      await go(`/app/${WS}/settings?tab=members`, 3000)
+      const trash = page.getByTestId('settings-tab-trash')
+      if ((await trash.count()) === 0) {
+        // Not an excuse: this account reached workspace settings, so the tab
+        // strip should be there. Reporting a PASS here would hide exactly the
+        // case where the build predates the fix.
+        bad('no Trash tab in workspace settings to move to')
+      } else {
+        await trash.first().click()
+        await page.waitForTimeout(2000)
+        chk(
+          /[?&]tab=trash/.test(page.url()) && !/tab=members/.test(page.url()),
+          'moving between settings tabs replaces the old one in the address',
+          page.url(),
+        )
+      }
+    }
+
+    // ── the dashboard's own counts come from the server ────────────────────
+    {
+      const mine = await apiRead(`/tasks/workspace/${WS}?limit=500&assigneeId=me`)
+      chk(
+        mine.status === 200 && Array.isArray(mine.data),
+        'the workspace listing can be narrowed to the caller in SQL',
+        `assigneeId=me answered ${mine.status}`,
+      )
+      const spoof = await apiRead(
+        `/tasks/workspace/${WS}?limit=5&assigneeId=00000000-0000-4000-8000-000000000000`,
+      )
+      const plain = await apiRead(`/tasks/workspace/${WS}?limit=5`)
+      chk(
+        (spoof.data?.length ?? -1) === (plain.data?.length ?? -2),
+        'and an arbitrary assigneeId is ignored rather than honoured',
+        `${spoof.data?.length} rows vs ${plain.data?.length} unfiltered`,
+      )
+    }
+  })
+
   await section('§1.1', 'Task type at create time and in search', async () => {
     {
       // The picker hides itself when a workspace has no types, so this is not a
