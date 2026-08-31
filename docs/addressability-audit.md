@@ -32,8 +32,45 @@ search could answer "nothing" while live matching tasks existed.
 | 8 | Dashboard counted the viewer's work out of a 500-row window | `tasks.service.ts`, dashboard |
 | 9 | `?tab=` read once, never written, on four pages | settings, profile, reports, form builder |
 
+## And one the re-audit found, which had been dismissed all along
+
+Rebuilding from an empty database before deploying turned up a tenth item
+that was not a class-A/B/C/D instance at all.
+
+Three `verify-release` checks had failed on every fresh database for the
+length of this work, and were being written off as environmental. They were
+not. Migration `0093` backfills Task and Milestone into workspaces that exist
+**when it runs**, and `workspaces.service.ts` seeds them for workspaces
+created through the API. `packages/db/src/seed.ts` did neither: it writes the
+workspace straight to the table, and it runs *after* the migrations, so the
+backfill has already been and gone. A freshly seeded database therefore had
+zero task types — and the type picker hides itself when a workspace has none.
+
+Production was never affected: its workspace predates the migration and was
+backfilled, and any workspace a user creates goes through the API path. It
+only ever bit a clean install — which is to say every developer and every CI
+run, while presenting as a quirk of the sandbox.
+
+The lesson is the dismissal, not the defect. "It only fails locally" was the
+reason it survived.
+
+## Where each fix is checked
+
+| Layer | What it proves |
+|---|---|
+| Per-fix CI suites | the mechanism, on a fresh install |
+| `addressability-live.mjs` | the whole set in one session, so one fix cannot break another |
+| `verify-ui.mjs` §ADDR | the fixes are present **on the deployed instance** |
+| `verify-release.sh` | the API-side guarantees the dashboard counts rest on |
+
+The §ADDR section exists because everything else runs against a fresh install
+or in CI. That is the same gap that once had My Tasks green in CI while
+nothing confirmed it was live: a deploy could report "0 failed" with the work
+missing from the bundle. It is verified in both directions — 15/15 against the
+current build, 11 of 15 failing against a bundle built from `fde1c53`.
+
 Every fix carries checks that were **run against the unfixed code first**, to
-establish they fail. Three would not have:
+establish they fail. Five would not have:
 
 - The docs check first asserted on page text, and passed unfixed — the tree
   lists every doc, so the title appeared whatever the editor showed. Anchored
@@ -43,6 +80,13 @@ establish they fail. Three would not have:
   original file plus only the new testids.
 - The `?task=` control was contaminated by an ambiguous locator: `getByText`
   with `exact: false` also matched a sibling task created by an earlier check.
+- The §ADDR ⌘K probe looked for a list at `/workspaces/:id/lists`, which does
+  not exist. It found none, took its "nothing to seed" branch and reported a
+  PASS for the most important check in the section, which never ran.
+- Two more §ADDR checks passed against the pre-audit bundle: "the dashboard
+  opens on Overview without a parameter" is equally true of a build with no
+  search schema, and "no Trash tab offered" excused a bundle that simply
+  lacked the testid. Both were rewritten rather than kept.
 
 ## Two tests were leaning on the bug
 
