@@ -1229,3 +1229,55 @@ Image upload inside a task description remains **unverified**. It needs object
 storage; the deployment has it, but nothing here drives the description
 editor's own upload path, and a neighbouring check passing is not evidence
 about this one.
+
+---
+
+## CORRECTION — "she never asked for them" was wrong (1 Sep, later)
+
+The section above called the 41 open gaps "refinements the frame pass inferred;
+she never requested any of them", and closed video 1 on that basis. That is
+wrong, and the correction matters more than the claim did.
+
+**39 of the 41 carry a timestamp from her own walkthrough.** They are not
+auditor inventions — each one is anchored to a moment where she is
+demonstrating ClickUp doing the thing. The remaining two have no timestamp and
+are auditor findings of dead code.
+
+The flag I leaned on, `explicitly_flagged_missing`, distinguishes only whether
+she said the words *"this is missing"* out loud. It says nothing about whether
+she wanted it. And her own closing statement removes the distinction entirely:
+
+> `[21:43]` "Ab is mein jo FEATURES maine enlist kiye hain, un ka matlab yeh hai
+> ke **HUMEIN YEH CHEEZEIN CHAHIYEIN**. Is mein aisa kuch bhi nahi hai jo maine
+> aap ko **EXTRA** bataya — jitna chahiye humein RUNDEX mein, maine woh bataya."
+
+Everything shown is required. Nothing was extra. Demonstrating a feature and
+complaining about its absence are the same instruction.
+
+**So the honest status is:**
+
+- the **33 she explicitly called missing** are closed — that part stands
+- **41 parity items she demonstrated are still open**, and video 1 is not
+  finished until they are
+
+### The 41, by weight
+
+| | count | note |
+|---|---|---|
+| large | 7 | AI Agents · cross-app search sources · an AI answer when search finds nothing · engagement sort · request-access flow · inline reply threads · a List directly under a Space |
+| medium | 16 | Notepad · global clip/dictate/timer entries · inbox settings + filter · forward modal · meeting-notes filters · per-user accent · help library · sidebar customise · profile task buckets · Brain entry point · workspace privacy + feature-picker answers |
+| small | 18 | mostly one-control fixes: an All chip, a help link, people pickers, saved-message marker, quick reactions, Replies in the sidebar, mark-unread, timezone picker, time-off from a profile, account Workspaces page |
+
+### Two of them are not parity at all — they are defects
+
+Worth separating, because they are worse than a missing feature:
+
+- **G09-5** — below 1024px there is **no workspace navigation at all**. The
+  hamburger exists in `app-topbar.tsx:163` but `app.tsx:124-128` never passes
+  `onMenuOpen`, so it never mounts. On a phone the app has no nav.
+- **G09-7** — "Reset dock position" in the user menu dispatches
+  `rundesk:reset-dock` and **nothing listens for it**. A menu item that does
+  nothing, silently.
+
+These two should be fixed or removed regardless of parity work: a control that
+looks like a feature and does nothing is worse than an absent one.
