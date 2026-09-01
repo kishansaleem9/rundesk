@@ -558,7 +558,11 @@ export function CommandPalette({
       */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60">
         <FilterGroup label={t('palette.filterType')}>
-          <FilterChip active={typeFilter.size === 0} onClick={() => setTypeFilter(new Set())}>
+          <FilterChip
+            active={typeFilter.size === 0}
+            onClick={() => setTypeFilter(new Set())}
+            testId="palette-type-all"
+          >
             {t('palette.all')}
           </FilterChip>
           {ENTITY_ORDER.filter(

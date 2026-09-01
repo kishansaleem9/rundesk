@@ -445,7 +445,10 @@ try {
     const both = await palette.innerText()
     check(/^TASKS$/m.test(both), 'adding Tasks brings them back alongside Docs — multi-select works',
       `task group missing with Tasks+Docs selected: ${both.slice(0, 200)}`)
-    await palette.getByRole('button', { name: 'All', exact: true }).click()
+    // By testid: Status and Priority now offer their own "All" chip, so a
+    // click matched on the visible label alone is ambiguous between three
+    // buttons and throws on strict mode. This one means the TYPE group.
+    await palette.locator('[data-testid="palette-type-all"]').click()
     await page.waitForTimeout(1200)
 
     await palette.getByRole('button', { name: 'Last updated', exact: true }).click()
