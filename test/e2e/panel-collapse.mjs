@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 23
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -377,6 +377,110 @@ try {
       )
     }
     await A(`/dashboards/${presetId}`, { method: 'DELETE' }).catch(() => {})
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ …and the keyboard does it too')
+  // ---------------------------------------------------------------------
+  /*
+   * §1.3 [10:46] — "kyunke yeh SPACE leta hai, aur jab hum kaam kar rahe hote
+   * hain to it's kind of frustrating."
+   *
+   * The chord is advertised in the shortcuts overlay and handled in the
+   * sidebar, and the frame cross-check found that nothing had ever pressed it.
+   * A shortcut listed in a help panel and wired to nothing is worse than an
+   * unlisted one: the person learns it, uses it mid-task, and concludes the app
+   * is broken.
+   *
+   * The third check is the one worth having. `\` is an ordinary character, so
+   * the handler deliberately stands down inside a text field — and that guard
+   * is pure omission. Nothing about the sidebar looks wrong if it is dropped;
+   * you only find out when somebody types a Windows path into a task title and
+   * their sidebar disappears.
+   */
+  /*
+   * Put the sidebar back to expanded FIRST, and on the server.
+   *
+   * `toggle()` writes through to the user record, so the collapse survives the
+   * browser context, the port and the run. Written the first time without this,
+   * the section passed on a machine where an earlier run had left it collapsed:
+   * "the chord collapsed it" was true before a key was pressed, and a build
+   * with the handler deleted outright still went green on that line. Which is
+   * the whole reason these are pressed against a deliberately broken build
+   * before being believed.
+   */
+  await A('/users/me', { method: 'PATCH', body: { sidebarCollapsed: false } })
+  restore = () =>
+    A('/users/me', { method: 'PATCH', body: { panelsCollapsed: {}, sidebarCollapsed: false } })
+
+  await page.goto(`${origin}/app/${workspaceId}/chat`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+
+  /*
+   * `data-collapsed` on the <aside>, not `aria-expanded` on a toggle. The rail
+   * and the full sidebar are different branches with a button each, so a
+   * `querySelector` for the toggle answers about whichever branch happens to be
+   * mounted — which is the state being measured. The attribute is on the one
+   * element that is present either way.
+   */
+  const sidebarState = () =>
+    page.evaluate(() => document.querySelector('[data-testid="workspace-sidebar"]')?.getAttribute('data-collapsed') ?? null)
+  const settlesTo = (want) =>
+    page
+      .waitForFunction(
+        (w) => document.querySelector('[data-testid="workspace-sidebar"]')?.getAttribute('data-collapsed') === w,
+        want,
+        { timeout: 5000 },
+      )
+      .then(() => true)
+      .catch(() => false)
+
+  check((await sidebarState()) === 'false', 'the workspace sidebar starts expanded', `data-collapsed=${await sidebarState()}`)
+
+  // Ctrl rather than Meta: the handler accepts either, and Meta is not the
+  // modifier on the platform CI runs on.
+  await page.keyboard.press('Control+\\')
+  const collapsedByKey = await settlesTo('true')
+  check(collapsedByKey, 'Ctrl+\\ collapses it without reaching for the mouse', 'the chord did nothing')
+
+  /*
+   * Everything below asks whether a state CHANGED, so it can only be asked
+   * once a change has happened. Run unconditionally, both of these go green on
+   * a build where the chord is not wired at all — the sidebar never left
+   * expanded, so "it came back" and "it did not collapse while typing" are
+   * both true and both meaningless. Said as failures with the reason attached
+   * rather than skipped, because the behaviour really is broken.
+   */
+  if (!collapsedByKey) {
+    check(false, 'and pressing it again brings it back', 'never collapsed, so expanding could not be tested')
+    check(false, 'with the caret in a text field', 'the chord does nothing, so the typing guard is untestable')
+    check(false, 'typing a backslash does NOT collapse the sidebar out from under you', 'the chord does nothing at all')
+  } else {
+    await page.keyboard.press('Control+\\')
+    check(await settlesTo('false'), 'and pressing it again brings it back', 'the chord collapsed but could not expand')
+
+    // Now the guard: the same chord, with the caret in a text field. Asserted
+    // against the expanded state re-established above, so "it did not move"
+    // means the guard held rather than that nothing was listening.
+    const composer = page.locator('textarea, [contenteditable="true"], input[type="text"]').first()
+    if ((await composer.count()) === 0) {
+      check(false, 'with the caret in a text field', 'no text field on this page to test the guard against')
+      check(false, 'typing a backslash does NOT collapse the sidebar out from under you', 'nowhere to type')
+    } else {
+      await composer.click({ timeout: 5000 }).catch(() => {})
+      const focused = await page.evaluate(() => {
+        const el = document.activeElement
+        return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      })
+      check(focused, 'with the caret in a text field', 'could not focus a text field, so the guard was never exercised')
+      await page.keyboard.press('Control+\\')
+      await page.waitForTimeout(1200)
+      check(
+        (await sidebarState()) === 'false',
+        'typing a backslash does NOT collapse the sidebar out from under you',
+        'the sidebar collapsed while somebody was typing',
+      )
+    }
   }
 
   await done(browser, stack, restore)

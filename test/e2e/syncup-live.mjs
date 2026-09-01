@@ -182,8 +182,15 @@ const check = (ok, label, detail = '') => {
  *
  * Raise this when checks are added. Failing on the floor is the point: a suite
  * that quietly shrinks is the most expensive kind of green.
+ *
+ * A full local run performs 53. The floor is five lower because five of them
+ * are conditional on the machine rather than on the app, and skipping those is
+ * not the suite shrinking: two speaker-picker checks that need a routable audio
+ * output, and three recording checks that need the AI Notes entitlement. Set
+ * the floor at 53 and a perfectly healthy CI runner fails for having no
+ * soundcard.
  */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 48
 
 const done = async (browser, stack) => {
   await browser?.close().catch(() => {})
@@ -450,6 +457,54 @@ if (hasMeter) {
   check(peak > 0, `with a level that moves with the input (${peak}%)`, 'the meter never left zero')
 }
 
+/*
+ * §2.8 [19:40] — "BACKGROUND colours wagera select down kar sakte ho."
+ *
+ * The frame cross-check found this built and unexercised: the picker, the five
+ * choices and the tint were all in the bundle, and nothing anywhere pressed
+ * one. That is the shape of defect this engagement keeps finding — shipped,
+ * plausible, and never once run — so it is checked the only way that settles
+ * it, by choosing a background and reading what the browser actually painted.
+ *
+ * Computed colour, not the class name. `bg-[#0c215d]` is an arbitrary Tailwind
+ * value, which exists in the stylesheet only if the compiler saw that exact
+ * string; asserting the class is on the element proves the JSX, and a run where
+ * the rule was never generated looks identical. Reading the computed
+ * background asks the question that matters — is this person's background
+ * actually navy — and can only be answered by CSS that shipped.
+ */
+const bgPicker = A.page.locator('[data-testid="call-prejoin-backgrounds"]')
+const hasBgPicker = await bgPicker.isVisible().catch(() => false)
+check(hasBgPicker, 'the pre-join offers a background to choose', 'no background picker in the pre-join')
+
+const PREJOIN_TINT = 'rgb(12, 33, 93)' // #0c215d — BACKGROUND_TINT.navy
+if (hasBgPicker) {
+  const swatches = await bgPicker.locator('button').count()
+  check(swatches >= 3, `with more than one to pick from (${swatches})`, `only ${swatches} background swatch(es)`)
+
+  // The preview's own container is what carries the tint.
+  const previewTint = () =>
+    A.page.evaluate(() => {
+      const v = document.querySelector('[data-testid="call-prejoin-preview"]')
+      return v?.parentElement ? getComputedStyle(v.parentElement).backgroundColor : null
+    })
+  const before = await previewTint()
+
+  await bgPicker.locator('button[aria-label="Navy"]').click().catch(() => {})
+  const applied = await A.page
+    .waitForFunction(
+      (want) => {
+        const v = document.querySelector('[data-testid="call-prejoin-preview"]')
+        return !!v?.parentElement && getComputedStyle(v.parentElement).backgroundColor === want
+      },
+      PREJOIN_TINT,
+      { timeout: 5000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  check(applied, 'and choosing one changes the preview', `preview stayed ${before} — picking Navy painted nothing`)
+}
+
 await A.page.locator('[data-testid="call-prejoin-join"]').click()
 
 // Polled, not read once: pressing Join is the START of a request, and reading
@@ -470,6 +525,31 @@ const surfaced = await A.page
   .then(() => true)
   .catch(() => false)
 check(surfaced, 'and A is on the call surface', 'the call surface never rendered for the person who started it')
+
+/*
+ * And the background chosen a moment ago is still the background.
+ *
+ * The pre-join picker and the call are separate components with separate
+ * state, joined by one argument to `onJoin`. A picker that works perfectly and
+ * a call that ignores what it returned is a whole feature that demos fine and
+ * does nothing — you set your background, press Join, and it quietly reverts
+ * with no error and nothing to notice unless you were looking for it. Checked
+ * here rather than in the pre-join because this is the half nothing else sees.
+ */
+if (hasBgPicker && surfaced) {
+  const carried = await A.page
+    .waitForFunction(
+      (want) =>
+        [...document.querySelectorAll('[data-testid="call-tile"]')].some(
+          (el) => getComputedStyle(el).backgroundColor === want,
+        ),
+      PREJOIN_TINT,
+      { timeout: 10000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  check(carried, 'and the background chosen in the pre-join survives into the call', 'the call ignored the pre-join choice')
+}
 
 // ---------------------------------------------------------------------------
 console.log('\n3. the other person is told, and joins')
@@ -618,6 +698,218 @@ check(tiles >= 2, `A sees both people on the call (${tiles} tiles)`, `only ${til
 
 await A.page.screenshot({ path: '/tmp/syncup-A-oncall.png' })
 await B.page.screenshot({ path: '/tmp/syncup-B-oncall.png' })
+
+// ---------------------------------------------------------------------------
+console.log('\n4b. the three in-call controls the walkthrough shows')
+// ---------------------------------------------------------------------------
+/*
+ * Screen share, reactions and minimise were all built and none of them had
+ * ever been run. They are grouped here because they share the one expensive
+ * precondition — two browsers in a connected call — and because each of them
+ * fails in a way the DOM alone cannot see.
+ */
+
+/*
+ * §2.8 [20:12] — "koi tab share karni hai, window share karni hai, ya poori
+ * screen."
+ *
+ * Read off the sender, not the button. `sharing` is a useState, and a share
+ * that lights the control while `replaceTrack` silently rejects is the exact
+ * failure worth catching: your screen is not going anywhere and your own UI
+ * says it is. So the question asked is the one the other person cares about —
+ * what track is this peer connection actually sending — and the answer comes
+ * from the live RTCPeerConnection the instrumentation already holds.
+ *
+ * Chromium's fake capture answers getDisplayMedia with a source labelled
+ * `screen:…`, so a camera track and a screen track are told apart by name
+ * rather than by hoping the dimensions differ.
+ */
+const outgoingVideoLabel = async (p) =>
+  p.evaluate(() => {
+    const peers = window.__rundeskPeers
+    if (!Array.isArray(peers)) return null
+    for (const pc of peers) {
+      const s = pc.getSenders?.().find((x) => x.track?.kind === 'video')
+      if (s?.track) return s.track.label
+    }
+    return null
+  })
+
+const isScreen = (label) => !!label && /screen|window|display|tab/i.test(label)
+
+const shareBtn = A.page.locator('[data-testid="call-share"]')
+const hasShare = await shareBtn.isVisible().catch(() => false)
+check(hasShare, 'the call offers screen share', 'no share control in the call footer')
+
+if (hasShare) {
+  const camLabel = await outgoingVideoLabel(A.page)
+  check(
+    camLabel !== null && !isScreen(camLabel),
+    `A is sending their camera before sharing (${camLabel ?? 'no sender'})`,
+    'no outgoing video sender to swap — the rest of this section would prove nothing',
+  )
+
+  await shareBtn.click()
+  // Polled: getDisplayMedia is a permission round trip and replaceTrack is
+  // async, so reading immediately after the click asks before anything can
+  // have happened.
+  let shareLabel = null
+  for (let i = 0; i < 40; i += 1) {
+    shareLabel = await outgoingVideoLabel(A.page)
+    if (isScreen(shareLabel)) break
+    await A.page.waitForTimeout(250)
+  }
+  check(
+    isScreen(shareLabel),
+    `and sharing puts the screen on the wire, not just on the button (${shareLabel ?? 'no sender'})`,
+    `the outgoing track is still ${shareLabel ?? 'missing'} — nothing was shared with anyone`,
+  )
+  check(
+    (await shareBtn.getAttribute('aria-pressed')) === 'true',
+    'with the control showing that it is on',
+    'the share button does not report its own state',
+  )
+
+  // The swap must not cost the picture. `replaceTrack` on the existing sender
+  // is what keeps this true; a renegotiation here would black out every tile.
+  const stillPainting = await B.page
+    .waitForFunction(
+      () =>
+        [...document.querySelectorAll('[data-testid="call-tile"] video')].some(
+          (v) => !v.muted && v.videoWidth > 0 && !v.paused,
+        ),
+      { timeout: 15000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  check(stillPainting, 'and B never loses the picture while the track is swapped', 'B went black when A shared')
+
+  await shareBtn.click()
+  let backLabel = null
+  for (let i = 0; i < 40; i += 1) {
+    backLabel = await outgoingVideoLabel(A.page)
+    if (backLabel !== null && !isScreen(backLabel)) break
+    await A.page.waitForTimeout(250)
+  }
+  check(
+    backLabel !== null && !isScreen(backLabel),
+    `and stopping the share gives the camera back (${backLabel ?? 'no sender'})`,
+    `still sending ${backLabel ?? 'nothing'} after stopping — the camera never came back`,
+  )
+}
+
+/*
+ * §2.8 — the reactions overlay.
+ *
+ * Sent from A and looked for on B. A reaction that only ever appears for the
+ * person who sent it is the failure this has: `sendReaction` paints locally
+ * before the round trip precisely so the button feels responsive, which means
+ * A's own screen proves nothing at all about whether anybody else saw it.
+ */
+const reactBtn = A.page.locator('[data-testid="call-react"]')
+const hasReact = await reactBtn.isVisible().catch(() => false)
+check(hasReact, 'the call offers reactions', 'no reaction control in the call footer')
+
+if (hasReact) {
+  await reactBtn.click()
+  const picker = A.page.locator('[data-testid="call-reaction-picker"]')
+  const pickerUp = await picker.waitFor({ timeout: 8000 }).then(() => true).catch(() => false)
+  check(pickerUp, 'and opens a picker over the tiles', 'the reaction picker never appeared')
+
+  if (pickerUp) {
+    /*
+     * `button[data-emoji]`, not `button` — the first button in this picker is
+     * the skin-tone control, and clicking it opens a submenu and sends nothing.
+     * A check written against the loose selector would have passed the click
+     * and then failed the overlay for a reason that has nothing to do with
+     * reactions.
+     *
+     * Waited for rather than read: the catalog is fetched, so the grid is empty
+     * for the first moment the picker is on screen.
+     */
+    const firstEmoji = picker.locator('button[data-emoji]').first()
+    const gridReady = await firstEmoji.waitFor({ timeout: 15000 }).then(() => true).catch(() => false)
+    check(gridReady, 'with emoji in it to choose from', 'the picker opened but its catalog never loaded')
+
+    // The rendered character, which is what gets sent — `data-emoji` is the
+    // base, and a skin tone is applied on the way out.
+    const emoji = gridReady ? ((await firstEmoji.textContent().catch(() => ''))?.trim() ?? '') : ''
+    if (gridReady) await firstEmoji.click().catch(() => {})
+
+    const overlayHas = (p) =>
+      p
+        .waitForFunction(
+          (want) => {
+            const o = document.querySelector('[data-testid="call-reactions"]')
+            if (!o) return false
+            return want ? o.textContent?.includes(want) : (o.textContent?.trim().length ?? 0) > 0
+          },
+          emoji,
+          { timeout: 10000 },
+        )
+        .then(() => true)
+        .catch(() => false)
+
+    check(await overlayHas(A.page), `A sees their own reaction (${emoji || 'an emoji'})`, 'nothing floated over A’s tiles')
+    check(
+      await overlayHas(B.page),
+      'and it reaches the other person in the call',
+      'the reaction never left the sender — everybody else saw nothing',
+    )
+  }
+}
+
+/*
+ * §2.8 — minimising to the corner.
+ *
+ * The point of minimise is that the call KEEPS RUNNING while you go and look
+ * at something else, so the check is not that a small box appears — it is that
+ * the box is showing live video and the call row is still live behind it. A
+ * minimise that tears the call down would look completely correct from the
+ * markup.
+ */
+const minBtn = A.page.locator('[data-testid="call-minimise"]')
+const hasMin = await minBtn.isVisible().catch(() => false)
+check(hasMin, 'the call can be minimised', 'no minimise control in the call header')
+
+if (hasMin) {
+  await minBtn.click()
+  const docked = await A.page
+    .locator('[data-testid="call-minimised"]')
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false)
+  check(docked, 'and it docks into the corner', 'no minimised dock appeared')
+
+  check(
+    !(await A.page.locator('[data-testid="call-surface"]').isVisible().catch(() => false)),
+    'with the full-screen call out of the way',
+    'the full call surface is still covering the app',
+  )
+
+  const dockPainting = await A.page
+    .waitForFunction(
+      () => {
+        const v = document.querySelector('[data-testid="call-minimised"] video')
+        return v instanceof HTMLVideoElement && v.videoWidth > 0
+      },
+      { timeout: 10000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  check(dockPainting, 'and the docked tile is live rather than a black box', 'the minimised preview never painted a frame')
+
+  const stillLive = await api(admin.accessToken, 'GET', `/workspaces/${WS}/calls/live?channelId=${CHANNEL}`)
+  check(stillLive.data?.id === callId, 'and the call is still running while minimised', `live -> ${JSON.stringify(stillLive.data)?.slice(0, 120)}`)
+
+  await A.page.locator('[data-testid="call-expand"]').click().catch(() => {})
+  const restored = await A.page
+    .locator('[data-testid="call-surface"]')
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false)
+  check(restored, 'and expanding brings the call back', 'the call could be minimised but not restored')
+}
 
 // ---------------------------------------------------------------------------
 console.log('\n5. recording announces itself to everyone')
