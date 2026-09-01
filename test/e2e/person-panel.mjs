@@ -318,6 +318,46 @@ try {
    * account and fails for the wrong reason on a busy one.
    */
   const now = new Date()
+
+  /**
+   * MIDDAY today in a given timezone, as an instant.
+   *
+   * The buckets are computed in the PERSON'S zone — deliberately, and the
+   * service says so: *"'Today' is today WHERE THEY ARE … a deadline is a fact
+   * about their day, not about the server's."* This suite sets that zone to
+   * Asia/Karachi a few lines above, and then built its "due today" fixture from
+   * `new Date(y, m, d, 14, 0)` — 14:00 in the CONTAINER's zone.
+   *
+   * Those are the same day for nineteen hours out of twenty-four and different
+   * for the other five. From 19:00 UTC (midnight in Karachi) the container's
+   * "today 14:00" is already yesterday for the person, so the task landed in
+   * OVERDUE and two checks failed — on a docs-only commit, which is what made
+   * it look like flake rather than a fixture that has always been wrong after
+   * 19:00 UTC.
+   *
+   * Shifting from the current instant rather than constructing a local date
+   * keeps it correct across DST. "Midday" rather than "noon" because a
+   * spring-forward day lands on 13:00 — checked over a year of samples in
+   * seven zones (incl. Lord Howe's 30-minute and Chatham's 45-minute offsets):
+   * the hour stays within 10:00-14:00 and the DAY, which is the only thing
+   * this fixture needs, is never wrong.
+   */
+  const middayIn = (zone) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: zone,
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+        .formatToParts(now)
+        .filter((p) => p.type !== 'literal')
+        .map((p) => [p.type, p.value]),
+    )
+    const minutesFromNoon = (12 - (Number(parts.hour) % 24)) * 60 - Number(parts.minute)
+    return new Date(now.getTime() + minutesFromNoon * 60_000)
+  }
+
   const seedTask = async (title, dueDate, assign) => {
     const created = await A('/tasks', {
       method: 'POST',
@@ -328,8 +368,11 @@ try {
     }
     return created.data
   }
-  const bToday = await seedTask(`bucket today ${Date.now()}`,
-    new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0).toISOString(), true)
+  // Midday in the zone this suite set on the account, so "today" means the
+  // same thing to the fixture and to the service.
+  const bToday = await seedTask(`bucket today ${Date.now()}`, middayIn('Asia/Karachi').toISOString(), true)
+  // ±4 days: further than any timezone offset can move a boundary, so these two
+  // do not need the same care.
   const bOver = await seedTask(`bucket overdue ${Date.now()}`,
     new Date(now.getTime() - 4 * 86400000).toISOString(), true)
   const bNext = await seedTask(`bucket next ${Date.now()}`,
