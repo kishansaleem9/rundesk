@@ -922,3 +922,105 @@ Not fixed here. The right fix is probably to put those in the person's Personal
 List, which is the thing ClickUp has for exactly this and which Rundesk already
 has an endpoint for — but that is a product decision about where somebody
 else's message becomes your work, not a bug to quietly patch.
+
+---
+
+## Fifth pass — the frames beside the transcript, not behind it (1 Sep)
+
+The fourth pass read the transcript line by line and consulted the frame audit
+for each moment. That is not the same as reading the frames. Asked to check
+them side by side rather than trusting what she *said*, this pass found seven
+things — three of which the transcript alone could not have surfaced, because
+she never mentions them out loud. They are in the frames as controls sitting on
+screen.
+
+Five of the seven were **already built and had never been run by anything**.
+That is its own category, distinct from the four defect classes this audit has
+been tracking, and it is the most comfortable one to have: nothing to build,
+and no evidence any of it works.
+
+| | Frame | State | Now |
+|---|---|---|---|
+| Screen share | `[20:12]` | built, unchecked | 6 checks in `syncup-live` |
+| Pre-join backgrounds | `[19:40]` | built, unchecked | 4 checks in `syncup-live` |
+| In-call reactions | §2.8 | built, unchecked | 5 checks in `syncup-live` |
+| Minimise to the corner | §2.8 | built, unchecked | 6 checks in `syncup-live` |
+| `Ctrl/⌘ + \` sidebar | `[10:46]` | built, unchecked | 4 checks in `panel-collapse` |
+| Per-message Copy link | §G11 | **not built** | built + 4 checks |
+| Get StandUp | `[05:40]` | **not built** | built + 13 checks |
+
+### What "checked" had to mean
+
+Every one of these has a cheap check that proves nothing, and the cheap check
+is the one that suggests itself first:
+
+- Screen share reads off the **RTCPeerConnection's video sender**, not the
+  button. A share that lights the control while `replaceTrack` quietly rejects
+  is the failure worth catching, and the button cannot see it. Chromium's fake
+  capture answers `getDisplayMedia` with a source labelled `screen:…`, so a
+  camera track and a screen track are told apart by name.
+- The background is read as a **computed colour**. The tint is an arbitrary
+  Tailwind value, so asserting the class is on the element proves the JSX and
+  passes just as happily when the rule was never generated — and it is checked
+  again *after joining*, because the picker and the call are separate
+  components joined by one argument.
+- The reaction is looked for on the **other browser**. `sendReaction` paints
+  locally before the round trip, so the sender's own screen says nothing about
+  whether anybody else saw it.
+- The permalink is checked by **following it in a second page**, not by
+  matching its shape. A regex proving the URL looks right is satisfied just as
+  well by one that lands on an empty channel.
+
+### Every check was pressed against a broken build
+
+Twenty-four of them, across four deliberately broken builds: the swap removed
+from `toggleShare`, the emit removed from `sendReaction`, the stream withheld
+from the docked video, the chosen background dropped on the way into the call,
+the guard removed from the sidebar chord, the chord unhandled entirely, Copy
+link made to copy the address bar, the closed-status filter dropped from the
+standup's overdue query, and the summary made to fetch on open.
+
+That pass caught **two checks of mine that could not fail**:
+
+1. The sidebar chord was asserted against end states, and the collapse is
+   persisted to the user record — so a run that started collapsed reported
+   *"the chord collapsed it"* before a key was pressed, and a build with the
+   handler deleted outright still went green on that line. It now resets the
+   flag on the server first, reads `data-collapsed` on the one element present
+   in both branches, and fails the dependent checks **by name** when the chord
+   does nothing rather than letting them pass for want of a state change.
+2. The standup seeded its "finished" task with **no due date**, so it could
+   never land in the overdue bucket — and *"a finished task is not also
+   reported as overdue"* passed identically against a build with the
+   closed-status filter deleted. The fixture now carries a past due date.
+
+Neither was found by reading the code. Both were found by breaking the thing
+the check was supposed to be watching and noticing it stayed green.
+
+### Get StandUp, and the deployments with no key
+
+The one design decision worth recording. The standup gathers four buckets and
+then writes them up, and the two steps are kept apart: `getStandup` decides
+what is **true**, the model only decides how to **say** it and is handed
+nothing but those rows. A summary generated from a free-text prompt would be
+free to invent a task, and the person reading it — often their manager — has no
+way to check and is not in the room.
+
+"In progress" is read from the activity log **by actor** rather than from
+`tasks.updatedAt`. A task is updated when anybody touches it, so an updatedAt
+window reports work this person did not do.
+
+With no `ANTHROPIC_API_KEY` the deterministic text **is** the answer, not a
+placeholder apologising for one — the rule the daily briefing already follows.
+That is what makes it testable on a box with no key, and it is why the panel
+says which one wrote it: a reader who assumes every summary on the page came
+from a model would trust a sentence differently than they should.
+
+### Still not verifiable here
+
+**Image upload inside a task description** needs object storage, and no sandbox
+in this engagement has had R2 configured — `upload-url` answers 400, which is
+also what `syncup-live` §5b reports rather than passing. It is built; it has
+never been exercised end to end by me, and saying it works would be a guess.
+The honest status is *unverified*, and it stays that way until it runs against
+a deployment that has a bucket.
