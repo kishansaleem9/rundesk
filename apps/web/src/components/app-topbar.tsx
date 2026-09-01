@@ -163,6 +163,7 @@ export function AppTopbar({
       {onMenuOpen && (
         <button
           onClick={onMenuOpen}
+          data-testid="nav-menu-open"
           className="lg:hidden h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
           aria-label={t('topbar.openSidebar')}
         >

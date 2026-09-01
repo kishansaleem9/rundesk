@@ -61,6 +61,13 @@ function AppShell() {
   const [cmdOpen, setCmdOpen] = useState(false)
   const [cmdQuery, setCmdQuery] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
+  /*
+   * G09-5 — below 1024px there was NO navigation at all. The sidebar is
+   * `hidden lg:flex`, and the hamburger in AppTopbar only renders when it is
+   * given `onMenuOpen`, which nothing ever passed. So the control existed, the
+   * breakpoint existed, and on a phone the app simply had no way to move.
+   */
+  const [navOpen, setNavOpen] = useState(false)
   const [aiAsk, setAiAsk] = useState<{ text: string; id: number } | undefined>(undefined)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const routeId = useRouterState({ select: (s) => s.matches[s.matches.length - 1]?.routeId ?? '' })
@@ -120,8 +127,21 @@ function AppShell() {
   return (
     <div className="h-screen flex bg-background overflow-hidden">
       <WorkspaceSidebar />
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex lg:hidden"
+          data-testid="nav-drawer"
+          onClick={() => setNavOpen(false)}
+        >
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <WorkspaceSidebar drawer onNavigate={() => setNavOpen(false)} />
+          </div>
+        </div>
+      )}
       <div className="flex-1 flex flex-col min-w-0">
         <AppTopbar
+          onMenuOpen={() => setNavOpen(true)}
           onCommandOpen={openCommand}
           onAiToggle={workspaceId ? () => setAiOpen((v) => !v) : undefined}
           aiOpen={aiDocked}

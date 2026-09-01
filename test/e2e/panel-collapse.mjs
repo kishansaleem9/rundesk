@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 23
+const EXPECTED_CHECKS = 31
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -481,6 +481,101 @@ try {
         'the sidebar collapsed while somebody was typing',
       )
     }
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ G09-5 — on a phone there is navigation at all')
+  // ---------------------------------------------------------------------
+  /*
+   * The sidebar is `hidden lg:flex`, and the hamburger in AppTopbar renders
+   * only when it is handed `onMenuOpen` — which nothing ever passed. So the
+   * breakpoint existed, the control existed, and below 1024px the app had NO
+   * way to move between pages. Checked at 390x844, which is a phone, not a
+   * narrow desktop.
+   */
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  const small = await phone.newPage()
+  await signIn(small)
+  await small.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+  await small.waitForTimeout(3500)
+
+  check(
+    !(await small.getByTestId('workspace-sidebar').isVisible().catch(() => false)),
+    'the docked sidebar is correctly hidden on a phone',
+    'the full sidebar is on screen at 390px',
+  )
+  /*
+   * By testid. Matched by accessible name (/open sidebar|menu/i) this passed
+   * with the hamburger unmounted entirely — it was finding a different button
+   * whose label happens to contain "menu". A check that green-lights the exact
+   * bug it exists to catch is worse than no check.
+   */
+  const burger = small.getByTestId('nav-menu-open')
+  const hasBurger = await burger.isVisible().catch(() => false)
+  check(hasBurger, 'and a menu button is offered instead', 'no way to open navigation below 1024px')
+
+  if (hasBurger) {
+    await burger.click()
+    const drawer = await small
+      .getByTestId('workspace-sidebar-drawer')
+      .waitFor({ timeout: 6000 })
+      .then(() => true)
+      .catch(() => false)
+    check(drawer, 'which opens the navigation', 'the menu button opened nothing')
+    if (drawer) {
+      const links = await small.locator('[data-testid="workspace-sidebar-drawer"] a').count()
+      check(links >= 3, `carrying the destinations (${links} links)`, `only ${links} link(s) in the drawer`)
+      // A nav that stays open over the page it navigated to is its own dead end.
+      await small.locator('[data-testid="workspace-sidebar-drawer"] a').first().click().catch(() => {})
+      await small.waitForTimeout(1200)
+      check(
+        !(await small.getByTestId('workspace-sidebar-drawer').isVisible().catch(() => false)),
+        'and closes once you go somewhere',
+        'the drawer stayed open over the page it opened',
+      )
+    }
+  }
+  await phone.close()
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ G09-7 — "Reset dock position" actually resets it')
+  // ---------------------------------------------------------------------
+  /*
+   * The menu item dispatched `rundesk:reset-dock` and nothing listened, so the
+   * only escape for a dock dragged off-screen did nothing at all. Driven by
+   * putting the dock somewhere absurd first — otherwise "it is at 16,16
+   * afterwards" is true before the button is pressed.
+   */
+  await page.evaluate(() =>
+    localStorage.setItem('rundesk.floatingDockPos', JSON.stringify({ x: 900, y: 700 })),
+  )
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  const dockLeft = async () =>
+    page.evaluate(() => {
+      const el = document.querySelector('[data-testid="floating-dock"]')
+      return el ? Math.round(el.getBoundingClientRect().left) : null
+    })
+  const moved = await dockLeft()
+  check(moved !== null && moved > 400, `the dock can be moved away (left=${moved})`, `dock left=${moved}`)
+  if (moved !== null && moved > 400) {
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('rundesk:reset-dock')))
+    const back = await page
+      .waitForFunction(
+        () => {
+          const el = document.querySelector('[data-testid="floating-dock"]')
+          return !!el && el.getBoundingClientRect().left < 100
+        },
+        { timeout: 5000 },
+      )
+      .then(() => true)
+      .catch(() => false)
+    check(back, 'and Reset dock position brings it home', 'the reset event did nothing')
+    check(
+      await page.evaluate(() => localStorage.getItem('rundesk.floatingDockPos') === null),
+      'and forgets the old spot, so a reload does not undo it',
+      'the stored position survived the reset',
+    )
   }
 
   await done(browser, stack, restore)

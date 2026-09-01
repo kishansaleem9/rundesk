@@ -250,7 +250,11 @@ function recentFromPathname(pathname: string, workspaceId: string): NavRecent | 
   return null
 }
 
-export function WorkspaceSidebar() {
+/** Where the floating dock sits before anybody drags it, and where "Reset
+ *  dock position" puts it back. */
+const DOCK_HOME = { x: 16, y: 16 }
+
+export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: boolean; onNavigate?: () => void } = {}) {
   const navigate = useNavigate()
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -308,7 +312,7 @@ export function WorkspaceSidebar() {
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
   const [browseExpanded, setBrowseExpanded] = useState(true)
   const [recentsExpanded, setRecentsExpanded] = useState(true)
-  const [dockPos, setDockPos] = useState({ x: 16, y: 16 })
+  const [dockPos, setDockPos] = useState(DOCK_HOME)
   const [draggingDock, setDraggingDock] = useState(false)
   const [showDockSettings, setShowDockSettings] = useState(false)
   const [viewport, setViewport] = useState({ w: 1400, h: 900 })
@@ -843,6 +847,28 @@ export function WorkspaceSidebar() {
     }
   }, [])
 
+  /*
+   * "Reset dock position", from the avatar menu.
+   *
+   * The menu item has been dispatching `rundesk:reset-dock` since it shipped
+   * and NOTHING has ever listened for it — so the one escape hatch for a dock
+   * dragged off-screen did nothing, silently, which is worse than not offering
+   * it. The stored position is cleared as well as the state, or the next load
+   * would put it straight back where it was.
+   */
+  useEffect(() => {
+    const onReset = () => {
+      setDockPos(DOCK_HOME)
+      try {
+        localStorage.removeItem('rundesk.floatingDockPos')
+      } catch {
+        // A browser refusing storage is not a reason to leave the dock lost.
+      }
+    }
+    window.addEventListener('rundesk:reset-dock', onReset)
+    return () => window.removeEventListener('rundesk:reset-dock', onReset)
+  }, [])
+
   // §1.3 — "agar main is ko off karoon to mujhe bas ICONS show hon — kyunke yeh
   // SPACE leta hai." Collapsed is a genuinely different sidebar rather than the
   // same one squeezed: the tree, the switcher and the section headers have no
@@ -923,15 +949,26 @@ export function WorkspaceSidebar() {
 
   return (
     <aside
-      data-testid="workspace-sidebar"
+      data-testid={drawer ? 'workspace-sidebar-drawer' : 'workspace-sidebar'}
       data-collapsed={collapsed ? 'true' : 'false'}
+      /*
+       * `hidden lg:flex` is right for the docked column and wrong for the
+       * drawer — the drawer only ever renders BELOW that breakpoint, so
+       * inheriting the hide left the phone with no navigation at all. Any tap
+       * inside it closes the drawer, because a nav that stays open over the
+       * page it just navigated to is its own dead end.
+       */
+      onClick={drawer ? onNavigate : undefined}
       className={cn(
-        'border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden hidden lg:flex lg:flex-col min-h-0',
-        collapsed ? 'w-[72px]' : 'w-72',
+        'border-r border-border/60 bg-card/40 backdrop-blur-md h-screen shrink-0 overflow-hidden min-h-0',
+        drawer ? 'flex flex-col' : 'hidden lg:flex lg:flex-col',
+        collapsed && !drawer ? 'w-[72px]' : 'w-72',
       )}
     >
-      {collapsed && railBody}
-      {!collapsed && (
+      {/* A drawer is opened deliberately and has the whole screen; showing the
+          72px icon rail inside it would be the worst of both. */}
+      {collapsed && !drawer && railBody}
+      {(!collapsed || drawer) && (
       <>
       <div className="border-b border-border/60 p-3">
         <div className="flex items-center gap-2">
@@ -1819,6 +1856,7 @@ export function WorkspaceSidebar() {
         <>
           <div
             ref={dockRef}
+            data-testid="floating-dock"
             className={cn(
               'fixed z-50 hidden xl:flex rounded-full border border-border/70 bg-card/85 backdrop-blur shadow-lg',
               appearance.orientation === 'vertical' ? 'flex-col p-1.5 gap-1' : 'flex-row px-2 py-1.5 gap-1',
