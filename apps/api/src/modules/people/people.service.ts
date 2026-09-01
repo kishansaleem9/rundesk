@@ -10,6 +10,7 @@ import {
   taskAssignees,
   taskActivity,
   taskComments,
+  taskDependencies,
   lists,
   projects,
   spaces,
@@ -20,6 +21,8 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PresenceService } from '../presence/presence.service'
+import { AiService } from '../ai/ai.service'
+import type { StandupData } from './standup'
 import { startOfDayIn } from '../../common/time/zone'
 
 /**
@@ -46,7 +49,33 @@ import { startOfDayIn } from '../../common/time/zone'
  */
 @Injectable()
 export class PeopleService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private ai: AiService,
+  ) {}
+
+  /**
+   * §G05 [05:40] — the standup, gathered and then written.
+   *
+   * Two steps kept apart on purpose. `getStandup` decides what is TRUE about
+   * this person's work; the model only decides how to say it, and is handed
+   * nothing but that. A summary generated from a free-text prompt would be
+   * free to invent a task, and the person reading it has no way to tell.
+   *
+   * The data comes back alongside the prose for the same reason: the panel can
+   * show the counts it is claiming, so a reader who doubts a sentence can look
+   * at what it was written from.
+   */
+  async generateStandup(
+    workspaceId: string,
+    requesterId: string,
+    userId: string,
+    opts: { days?: number } = {},
+  ): Promise<{ text: string; data: StandupData; generated: boolean }> {
+    const data = await this.getStandup(workspaceId, requesterId, userId, opts)
+    const text = await this.ai.generateStandup(data, { userId: requesterId, workspaceId })
+    return { text, data, generated: this.ai.isAvailable() }
+  }
 
   /**
    * Both people must be in the workspace.
@@ -322,6 +351,161 @@ export class PeopleService {
       .orderBy(desc(taskActivity.createdAt))
       .limit(limit)
 
+    return rows
+  }
+
+  /**
+   * §G05 [05:40] — "✦ Get StandUp".
+   *
+   * What this person has been doing, on demand, from their profile. The daily
+   * briefing answers the same shape of question about YOURSELF and is pushed
+   * on a schedule; this is about somebody else and is pulled when you ask,
+   * which is why it could not simply reuse it.
+   *
+   * Four buckets, scoped to this workspace. "Active" is read from the activity
+   * log by ACTOR rather than from `tasks.updatedAt`: a task is updated when
+   * anybody touches it, so an updatedAt window reports work this person did not
+   * do — which, on a summary somebody's manager is reading, is the one error
+   * worth going out of the way to avoid.
+   *
+   * Bounded on both sides. Each bucket is capped so a person with four hundred
+   * tasks produces a paragraph rather than a page, and the window is clamped so
+   * a caller cannot ask for a year of history in a request that is meant to
+   * answer while a panel is open.
+   */
+  async getStandup(
+    workspaceId: string,
+    requesterId: string,
+    userId: string,
+    opts: { days?: number } = {},
+  ): Promise<StandupData> {
+    await this.assertBothMembers(workspaceId, requesterId, userId)
+
+    const days = Math.min(Math.max(Math.trunc(opts.days ?? 7) || 7, 1), 30)
+    const now = new Date()
+    const since = new Date(now.getTime() - days * 86_400_000)
+    const CAP = 20
+
+    // Every bucket is a task in THIS workspace assigned to this person. The
+    // join chain is the same one the activity feed uses; tasks reach a
+    // workspace only through their list's project's space.
+    const inWorkspace = and(eq(taskAssignees.userId, userId), eq(spaces.workspaceId, workspaceId))
+
+    const columns = {
+      id: tasks.id,
+      title: tasks.title,
+      dueDate: tasks.dueDate,
+      completedAt: tasks.completedAt,
+    }
+    const from = () =>
+      this.db
+        .select(columns)
+        .from(taskAssignees)
+        .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+
+    const done = await from()
+      .where(and(inWorkspace, eq(tasks.isArchived, false), eq(tasks.statusCategory, 'closed'), gte(tasks.completedAt, since)))
+      .orderBy(desc(tasks.completedAt))
+      .limit(CAP)
+
+    // Distinct, because a person who touched one task nine times has done one
+    // thing. `select distinct` rather than a Set afterwards so the LIMIT counts
+    // tasks rather than activity rows — the same post-limit trap that made
+    // search return nothing earlier in this engagement.
+    const active = await this.db
+      .selectDistinct(columns)
+      .from(taskActivity)
+      .innerJoin(tasks, eq(tasks.id, taskActivity.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .innerJoin(taskAssignees, and(eq(taskAssignees.taskId, tasks.id), eq(taskAssignees.userId, userId)))
+      .where(
+        and(
+          eq(taskActivity.actorId, userId),
+          eq(spaces.workspaceId, workspaceId),
+          gte(taskActivity.createdAt, since),
+          eq(tasks.isArchived, false),
+          ne(tasks.statusCategory, 'closed'),
+        ),
+      )
+      .limit(CAP)
+
+    const overdue = await from()
+      .where(
+        and(
+          inWorkspace,
+          eq(tasks.isArchived, false),
+          ne(tasks.statusCategory, 'closed'),
+          lte(tasks.dueDate, now),
+        ),
+      )
+      .orderBy(asc(tasks.dueDate))
+      .limit(CAP)
+
+    const [person] = await this.db
+      .select({ displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1)
+
+    return {
+      displayName: person?.displayName || person?.email || '',
+      days,
+      done,
+      active,
+      overdue,
+      blocked: await this.blockedTasks(workspaceId, userId, CAP),
+    }
+  }
+
+  /**
+   * Their open tasks that are waiting on another task which is also still open.
+   *
+   * The mirror of the briefing's `blockingTasks`, which asks the other
+   * question — what of yours is holding somebody else up. A dependency row is
+   * stored from either end (`blocks` or `blocked_by`), so which column names
+   * the blocker depends on the row's type; getting that backwards produces a
+   * list that looks entirely plausible and is exactly inverted.
+   */
+  private async blockedTasks(workspaceId: string, userId: string, cap: number): Promise<StandupData['blocked']> {
+    const blocker = alias(tasks, 'standup_blocker')
+    const blocked = alias(tasks, 'standup_blocked')
+    const rows = await this.db
+      .selectDistinct({
+        id: blocked.id,
+        title: blocked.title,
+        dueDate: blocked.dueDate,
+        completedAt: blocked.completedAt,
+      })
+      .from(taskDependencies)
+      .innerJoin(
+        blocked,
+        sql`${blocked.id} = case when ${taskDependencies.type} = 'blocks' then ${taskDependencies.relatedTaskId} else ${taskDependencies.taskId} end`,
+      )
+      .innerJoin(
+        blocker,
+        sql`${blocker.id} = case when ${taskDependencies.type} = 'blocks' then ${taskDependencies.taskId} else ${taskDependencies.relatedTaskId} end`,
+      )
+      .innerJoin(taskAssignees, and(eq(taskAssignees.taskId, blocked.id), eq(taskAssignees.userId, userId)))
+      .innerJoin(lists, eq(lists.id, blocked.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          inArray(taskDependencies.type, ['blocks', 'blocked_by']),
+          ne(blocked.statusCategory, 'closed'),
+          eq(blocked.isArchived, false),
+          // Still open, or it is not blocking anything any more.
+          ne(blocker.statusCategory, 'closed'),
+          eq(blocker.isArchived, false),
+        ),
+      )
+      .limit(cap)
     return rows
   }
 

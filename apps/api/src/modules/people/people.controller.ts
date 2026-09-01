@@ -45,6 +45,29 @@ export class PeopleController {
     })
   }
 
+  /**
+   * §G05 [05:40] — "✦ Get StandUp": what this person has been doing.
+   *
+   * POST rather than GET because it may call a model, which costs money and
+   * must not be issued by a cache warming a link or a browser prefetching one.
+   * It reads nothing it does not own and writes nothing, so it is safe to
+   * repeat — but "safe to repeat" and "free to repeat" are different claims.
+   *
+   * Always answers. With no model configured it returns the deterministic
+   * summary, which is a real answer rather than a 503 — the same rule the daily
+   * briefing follows, and the reason this can be tested on a box with no key.
+   */
+  @Post(':userId/standup')
+  @ApiOperation({ summary: 'Summarise what this person has been working on (§G05 [05:40])' })
+  standup(
+    @Param('workspaceId') workspaceId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body?: { days?: number },
+  ) {
+    return this.people.generateStandup(workspaceId, user.id, userId, { days: body?.days })
+  }
+
   /** §G06 [06:22] — their dated tasks and the meetings they are in. */
   @Get(':userId/calendar')
   calendar(

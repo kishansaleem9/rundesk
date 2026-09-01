@@ -15,6 +15,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'driz
 import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { formatStandupFallback, type StandupData } from '../people/standup'
 import { modelForTier } from './model-tiers'
 import {
   fallbackProposal,
@@ -2690,6 +2691,50 @@ Respond ONLY with valid JSON: { "score": 0-100 integer (0 very negative, 50 neut
         max_tokens: 400,
         system: `You are Rundesk's daily briefing assistant. Write a warm, concise morning briefing (2-4 sentences, plain text) that leads with what is most urgent (overdue, then tasks blocking others, then due-today, then at-risk). Address the person by their first name. Do not invent tasks beyond those provided.`,
         messages: [{ role: 'user', content: `Here is my work for today:\n${lines}` }],
+      })
+      const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
+      return text || fallback
+    } catch {
+      return fallback
+    }
+  }
+
+  /**
+   * §G05 [05:40] — "✦ Get StandUp", written up.
+   *
+   * The counterpart to generateBriefing, and deliberately not the same prompt.
+   * A briefing is addressed TO you about your own day and can be warm about
+   * it; a standup is read BY somebody else about a third person's week, quite
+   * often their manager, so the register that suits one is wrong for the other.
+   * Hence the third person and the flat tone: this describes work, it does not
+   * appraise the person doing it.
+   *
+   * The model is given the buckets and nothing else, and is told not to add to
+   * them. A standup that invents a task is worse than no standup — the reader
+   * has no way to check it, and the person it is about is not in the room.
+   */
+  async generateStandup(data: StandupData, ctx: AiCtx = {}): Promise<string> {
+    const fallback = formatStandupFallback(data)
+    if (!this.isAvailable()) return fallback
+    try {
+      const titles = (rows: StandupData['done']) => rows.slice(0, 8).map((r) => r.title).join('; ') || 'none'
+      const lines = [
+        `Person: ${data.displayName || 'this teammate'}`,
+        `Window: the last ${data.days} day(s)`,
+        `Completed (${data.done.length}): ${titles(data.done)}`,
+        `In progress (${data.active.length}): ${titles(data.active)}`,
+        `Overdue (${data.overdue.length}): ${titles(data.overdue)}`,
+        `Blocked by unfinished work (${data.blocked.length}): ${titles(data.blocked)}`,
+      ].join('\n')
+      const response = await this.complete('people.standup', ctx, {
+        model: 'claude-haiku-4-5',
+        max_tokens: 400,
+        system:
+          "You are Rundesk's standup writer. In 2-4 plain-text sentences, summarise what this person has been working on for a colleague reading their profile. " +
+          'Write in the third person and use their first name. Lead with completed work, then work in progress, then anything overdue or blocked. ' +
+          'Describe the work, never appraise the person, and never speculate about why something is late. ' +
+          'Use only the tasks listed — do not invent any, and do not pad the summary when a bucket is empty.',
+        messages: [{ role: 'user', content: `Here is their work:\n${lines}` }],
       })
       const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : ''
       return text || fallback

@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 30
+const EXPECTED_CHECKS = 34
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -245,7 +245,14 @@ try {
   })()
 
   browser = await chromium.launch(LAUNCH)
-  const page = await (await browser.newContext({ viewport: { width: 1680, height: 1000 } })).newPage()
+  // Clipboard granted up front: "Copy link" is checked by reading back what it
+  // actually put on the clipboard, and an ungranted read rejects in a way that
+  // looks exactly like a feature that copied nothing.
+  const ctx = await browser.newContext({
+    viewport: { width: 1680, height: 1000 },
+    permissions: ['clipboard-read', 'clipboard-write'],
+  })
+  const page = await ctx.newPage()
   await signIn(page, origin, ADMIN)
   await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(4000)
@@ -440,6 +447,72 @@ try {
   } else {
     check(false, 'no "open thread" control to drive')
     check(false, 'so the thread address was never exercised')
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ §G11 — a link to one message, that a person can make')
+  // ---------------------------------------------------------------------
+  /*
+   * The frame cross-check found the two halves of this built and not joined
+   * up. `?channel=&message=` already worked — the inbox and the search results
+   * navigate to it, and the page scrolls to and highlights whatever it names —
+   * but nothing anywhere would GIVE you one. You could follow a link to a
+   * message and never make one, so pointing a colleague at what somebody said
+   * meant pasting the text.
+   *
+   * Checked by following it, not by matching it. A permalink is a promise that
+   * the address goes somewhere, and a regex proving the URL has the right
+   * shape is satisfied just as well by one that lands on an empty channel.
+   */
+  await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+
+  const linkTarget = page.locator('.group').filter({ hasText: BODY }).first()
+  const targetId = await linkTarget
+    .evaluate((el) => el.closest('[data-testid^="message-row-"]')?.getAttribute('data-testid')?.replace('message-row-', '') ?? null)
+    .catch(() => null)
+  check(!!targetId, 'the probe message can be identified to link to', 'no message row id found')
+
+  await linkTarget.hover()
+  await page.waitForTimeout(400)
+  await page.locator('[data-testid^="message-overflow-"]').first().click()
+  await page.waitForTimeout(600)
+
+  const copyItem = page.locator(`[data-testid="message-copy-link-${targetId}"]`)
+  const hasCopy = await copyItem.isVisible().catch(() => false)
+  check(hasCopy, 'the message menu offers "Copy link"', 'no per-message copy-link action')
+
+  if (!hasCopy || !targetId) {
+    check(false, 'and it copies an address for THAT message', 'there was no control to press')
+    check(false, 'and opening it lands on the message, highlighted', 'nothing was copied to open')
+  } else {
+    await copyItem.click()
+    await page.waitForTimeout(900)
+
+    const copied = await page.evaluate(() => navigator.clipboard.readText().catch(() => '')).catch(() => '')
+    check(
+      copied.includes(`message=${targetId}`) && copied.includes(`channel=${channelId}`),
+      'and it copies an address for THAT message',
+      `clipboard held ${JSON.stringify(copied.slice(0, 160))}`,
+    )
+
+    /*
+     * Opened in a SECOND page, from the clipboard, with no shared component
+     * state — the way the person receiving it opens it. Re-navigating the page
+     * that made the link can be satisfied by state that is already in memory.
+     */
+    const recipient = await ctx.newPage()
+    await recipient.goto(copied || `${origin}/app/${workspaceId}/chat`, { waitUntil: 'domcontentloaded' })
+    const landed = await recipient
+      .waitForFunction(
+        (id) => document.querySelector(`[data-testid="message-row-${id}"]`)?.getAttribute('data-highlighted') === 'true',
+        targetId,
+        { timeout: 20000 },
+      )
+      .then(() => true)
+      .catch(() => false)
+    check(landed, 'and opening it lands on the message, highlighted', `${copied} did not highlight the message`)
+    await recipient.close()
   }
 
   await done(browser, stack, cleanup)

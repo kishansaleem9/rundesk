@@ -58,6 +58,7 @@ import {
   Calendar,
   Video,
   UserRound,
+  Link2,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -287,6 +288,41 @@ export function ChatPage() {
    * route already carried `?message=` to point at a single message, so the
    * identifier shape was settled; only the thread had no name in the URL.
    */
+  /**
+   * §G11 — "Copy link", on the message itself.
+   *
+   * The address it produces is not new: `?channel=&message=` is the shape the
+   * inbox and the search results already navigate to, and the page already
+   * scrolls to and highlights whatever `message` names. What was missing was
+   * any way for a PERSON to obtain one. You could be sent a link to a message
+   * and follow it; you could not make one, so "have a look at what Sara said"
+   * meant pasting the text and hoping.
+   *
+   * Built from the channel and message on the row rather than from
+   * `window.location`. Copying the current address is what the channel-level
+   * control does and it is right there, but for one message it would hand over
+   * whatever happened to be in the URL — the wrong message, a stale thread, or
+   * a bare channel — and the person pasting it has no way to tell.
+   *
+   * A reply carries its thread, because a link to a reply that opens the
+   * channel and highlights nothing is a link that does not work. The parent is
+   * what the thread panel is keyed on.
+   */
+  const copyMessageLink = (m: Message) => {
+    const url = new URL(`/app/${workspaceId}/chat`, window.location.origin)
+    url.searchParams.set('channel', m.channelId)
+    url.searchParams.set('message', m.id)
+    if (m.parentMessageId) url.searchParams.set('thread', m.parentMessageId)
+    // Written optimistically and corrected on failure: clipboard access is
+    // refused in a few real situations (an insecure origin, a browser that
+    // requires the gesture to reach it directly), and claiming success there
+    // sends somebody away to paste nothing.
+    navigator.clipboard.writeText(url.toString()).then(
+      () => toast.success(t('chat.messageLinkCopied')),
+      () => toast.error(t('chat.couldNotCopyLink')),
+    )
+  }
+
   const threadParentId = deepLink.thread ?? null
   const setThreadParentId = (id: string | null) =>
     navigate({
@@ -2158,6 +2194,15 @@ export function ChatPage() {
                     ref={(el) => {
                       messageRefs.current[m.id] = el
                     }}
+                    data-testid={`message-row-${m.id}`}
+                    /*
+                     * The highlight, as a fact rather than as a colour. It is
+                     * what tells you a link to a message actually arrived, and
+                     * it was only ever expressed as two Tailwind classes — so
+                     * the one thing worth asserting about the permalink could
+                     * not be asserted without matching on a ring shade.
+                     */
+                    data-highlighted={highlightedMessageId === m.id ? 'true' : 'false'}
                     className={cn(
                       'relative flex gap-3 group rounded-md px-2 py-0.5 hover:bg-black/[0.03] dark:hover:bg-white/[0.03] transition-colors',
                       highlightedMessageId === m.id && 'ring-1 ring-violet-500/40 bg-violet-500/5',
@@ -2539,6 +2584,21 @@ export function ChatPage() {
                                 >
                                   <Forward className="h-3.5 w-3.5 text-muted-foreground" />
                                   {t('chat.forward')}
+                                </button>
+                                {/* §G11 — beside Forward, because they answer the
+                                    same question: this message needs to reach
+                                    somebody who is not looking at it. */}
+                                <button
+                                  type="button"
+                                  data-testid={`message-copy-link-${m.id}`}
+                                  className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                  onClick={() => {
+                                    copyMessageLink(m)
+                                    setOverflowFor(null)
+                                  }}
+                                >
+                                  <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {t('chat.copyLink')}
                                 </button>
                                 <button
                                   type="button"

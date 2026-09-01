@@ -108,7 +108,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 26
+const EXPECTED_CHECKS = 39
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -363,7 +363,140 @@ try {
   await page.keyboard.press('Escape')
   await page.waitForTimeout(600)
 
-  for (const row of [bToday, bOver, bNext, bMine]) {
+  // ---------------------------------------------------------------------
+  console.log('\n▶ §G05 [05:40] — “✦ Get StandUp”')
+  // ---------------------------------------------------------------------
+  /*
+   * The frames put a StandUp button beside the message icon and nothing in
+   * Rundesk answered it. The daily briefing is about YOURSELF and arrives on a
+   * schedule; the contribution report is a chart in another part of the app.
+   * Neither is "what has this person been doing", pulled from their profile.
+   *
+   * Seeded rather than read off whatever exists. A standup checked against an
+   * account's ambient work passes trivially on a busy workspace and silently
+   * on an empty one — and "every bucket came back empty" is exactly how a
+   * broken join reads, which is how the search regression earlier in this
+   * engagement got as far as it did.
+   */
+  /*
+   * The finished task carries a PAST due date, and that is the whole point of
+   * it. Seeded without one, "a finished task is not also reported as overdue"
+   * cannot fail: a task with no date never matches the overdue predicate, so
+   * the check passed just as happily against a build with the closed-status
+   * filter deleted. It was only worth anything once the fixture could actually
+   * land in the wrong bucket.
+   */
+  const finished = await seedTask(
+    `standup finished ${Date.now()}`,
+    new Date(now.getTime() - 2 * 86400000).toISOString(),
+    true,
+  )
+  const late = await seedTask(
+    `standup late ${Date.now()}`,
+    new Date(now.getTime() - 3 * 86400000).toISOString(),
+    true,
+  )
+  // Closed through the API, so completedAt is set the way the app sets it.
+  if (finished?.id) await A(`/tasks/${finished.id}`, { method: 'PATCH', body: { status: 'done' } })
+
+  const standup = await A(`/workspaces/${workspaceId}/people/${meId}/standup`, {
+    method: 'POST',
+    body: { days: 7 },
+  })
+  check(standup.status === 200 || standup.status === 201, 'a standup can be asked for', `-> ${standup.status} ${JSON.stringify(standup.error ?? '').slice(0, 160)}`)
+
+  const sd = standup.data
+  check(
+    typeof sd?.text === 'string' && sd.text.trim().length > 0,
+    'and it answers with prose, with or without a model configured',
+    `text was ${JSON.stringify(sd?.text)}`,
+  )
+
+  /*
+   * The buckets, individually. A summary that says something plausible while
+   * every list behind it is empty is the failure worth catching, and the
+   * sentence alone cannot tell you which query is wrong.
+   */
+  const holdsTask = (bucket, id) => (sd?.data?.[bucket] ?? []).some((r) => r.id === id)
+  check(holdsTask('done', finished?.id), 'work finished in the window is counted as finished', JSON.stringify(sd?.data?.done ?? []).slice(0, 160))
+  check(holdsTask('overdue', late?.id), 'and work already past its date is counted as overdue', JSON.stringify(sd?.data?.overdue ?? []).slice(0, 160))
+  check(!holdsTask('overdue', finished?.id), 'a task that is finished is not also reported as overdue')
+  check(!holdsTask('active', finished?.id), 'and a finished task is not reported as still in progress')
+
+  // The prose has to be about the same rows, or the panel is showing a
+  // paragraph that its own data does not support.
+  /*
+   * Asked differently depending on who wrote it. Without a model the text is
+   * the deterministic formatter's, so it MUST name the task — that is what
+   * proves the rows reached it. With a model it is prose, and demanding an
+   * exact title back would fail a deployment whose only sin is having an API
+   * key; what can still be insisted on is that the model was not handed an
+   * empty person, which is the wiring failure worth catching either way.
+   */
+  if (sd?.generated) {
+    check(
+      (sd?.text ?? '').trim().length > 20 && !/no recorded task activity/i.test(sd?.text ?? ''),
+      'and the sentence was written from real work, not from an empty week',
+      (sd?.text ?? '').slice(0, 200),
+    )
+  } else {
+    check(
+      !!finished?.title && (sd?.text ?? '').includes(finished.title),
+      'and the sentence names the work it was written from',
+      (sd?.text ?? '').slice(0, 200),
+    )
+  }
+
+  // The one that says whether this is honest about itself.
+  check(
+    typeof sd?.generated === 'boolean',
+    'and it says whether a model wrote it or the rows did',
+    `generated was ${JSON.stringify(sd?.generated)}`,
+  )
+
+  // Somebody outside the workspace must not be able to pull it.
+  const outsider = await fetch(`${API}/workspaces/${workspaceId}/people/${meId}/standup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ days: 7 }),
+  })
+  check(outsider.status === 401, 'and it is not readable without signing in', `-> ${outsider.status}`)
+
+  // …and through the UI, which is where it was asked for.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+  await page.getByTestId('user-menu').click()
+  await page.waitForTimeout(900)
+  await page.getByTestId('menu-my-profile').click()
+  await page.waitForTimeout(2200)
+
+  const standupBtn = page.getByTestId('person-standup')
+  const hasBtn = await standupBtn.isVisible().catch(() => false)
+  check(hasBtn, 'the profile panel offers it beside the message button')
+  if (!hasBtn) {
+    check(false, 'and pressing it writes a summary into the panel', 'there was no button to press')
+  } else {
+    check(
+      !(await page.getByTestId('person-standup-result').isVisible().catch(() => false)),
+      'and does not spend a model call before anybody asks',
+      'the summary was already on screen before the button was pressed',
+    )
+    await standupBtn.click()
+    const wrote = await page
+      .getByTestId('person-standup-result')
+      .waitFor({ timeout: 25000 })
+      .then(() => true)
+      .catch(() => false)
+    check(wrote, 'and pressing it writes a summary into the panel', 'nothing appeared after pressing Get StandUp')
+    if (wrote) {
+      const shown = (await page.getByTestId('person-standup-result').innerText().catch(() => '')) ?? ''
+      check(shown.trim().length > 10, 'with something actually in it', JSON.stringify(shown.slice(0, 120)))
+    }
+  }
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(600)
+
+  for (const row of [bToday, bOver, bNext, bMine, finished, late]) {
     if (row?.id) await A(`/tasks/${row.id}`, { method: 'DELETE' })
   }
 

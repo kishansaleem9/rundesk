@@ -34,6 +34,8 @@ import {
   ChevronUp,
   ChevronDown,
   MessageSquare,
+  Sparkles,
+  Loader2,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -468,6 +470,35 @@ export function PersonPanel() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
   })
 
+  /**
+   * §G05 [05:40] — "✦ Get StandUp".
+   *
+   * On demand rather than on open. It is the one thing on this panel that can
+   * cost money to answer, and a profile you glance at forty times a day must
+   * not bill for a summary nobody read — which is also why it is a button in
+   * the frames rather than a section that is simply there.
+   *
+   * The answer is kept in local state instead of a query cache: pressing it
+   * again means "tell me again, now", and a cache would hand back the same
+   * paragraph and look broken.
+   */
+  const [standup, setStandup] = useState<{ text: string; generated: boolean } | null>(null)
+  const getStandup = useMutation({
+    mutationFn: () =>
+      api<{ text: string; generated: boolean }>(
+        `/workspaces/${workspaceId}/people/${userId}/standup`,
+        { method: 'POST', body: { days: 7 } },
+      ),
+    onSuccess: (res) => setStandup({ text: res.text, generated: res.generated }),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  // A new person means a new panel, and last person's summary must not be
+  // sitting under their name while the request for this one is still out.
+  useEffect(() => {
+    setStandup(null)
+  }, [userId])
+
   const dotClass = useMemo(() => {
     switch (profile?.person?.status) {
       case 'online':
@@ -551,6 +582,26 @@ export function PersonPanel() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {/* §G05 [05:40] — beside the message button, as the frames show.
+                Offered for yourself too: "what have I actually been doing this
+                week" is a question people ask before a standup, not only
+                about somebody else. */}
+            <button
+              type="button"
+              data-testid="person-standup"
+              title={t('person.getStandup')}
+              aria-label={t('person.getStandup')}
+              disabled={getStandup.isPending}
+              onClick={() => getStandup.mutate()}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {getStandup.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              {t('person.getStandup')}
+            </button>
             {!isMe && (
               <button
                 type="button"
@@ -577,6 +628,32 @@ export function PersonPanel() {
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {/*
+            §G05 [05:40] — the standup, once it has been asked for.
+            First in the body rather than at the bottom: it is what the button
+            just above it produced, and a summary that appears below three
+            other sections reads as though nothing happened.
+          */}
+          {standup && (
+            <section className="border-b border-border/60 bg-muted/30 px-4 py-3" data-testid="person-standup-result">
+              <h3 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <Sparkles className="h-3.5 w-3.5" />
+                {t('person.standup')}
+              </h3>
+              <p className="whitespace-pre-line text-[13px] leading-relaxed text-foreground">{standup.text}</p>
+              {/*
+                Said rather than hidden. Without a model this is assembled from
+                the task rows directly, and a reader who assumes every summary
+                on the page came from one would trust a sentence differently
+                than they should.
+              */}
+              {!standup.generated && (
+                <p className="mt-1.5 text-[11px] text-muted-foreground" data-testid="person-standup-plain">
+                  {t('person.standupNoModel')}
+                </p>
+              )}
+            </section>
+          )}
           {/* §G06 [05:43] — "main kis ki TEAM MEMBER hoon". */}
           {!!profile?.teams?.length && (
             <section className="border-b border-border/60 px-4 py-3">
