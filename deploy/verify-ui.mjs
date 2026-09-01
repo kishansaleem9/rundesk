@@ -28,8 +28,8 @@
  * RUNDESK_PASSWORD, API_PORT, CHROME, PLAYWRIGHT_DIR, NO_HOST_MAP=1 to resolve
  * the hostname normally instead of pinning it to loopback.
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { pathToFileURL, fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { dirname, resolve as resolvePath } from 'node:path'
 
 const REPO = resolvePath(dirname(fileURLToPath(import.meta.url)), '..')
@@ -56,34 +56,23 @@ const EMAIL = process.env.RUNDESK_EMAIL ?? fromEnvFile('RUNDESK_EMAIL') ?? 'admi
 const PASSWORD = process.env.RUNDESK_PASSWORD ?? fromEnvFile('RUNDESK_PASSWORD') ?? 'Admin@123!'
 const SHOT = process.env.SHOT_DIR ?? '/tmp'
 
-// Resolving playwright is fiddlier than it looks. This repo is a pnpm
-// workspace using the `link:` protocol, so `npm i playwright` inside it fails
-// outright (EUNSUPPORTEDPROTOCOL) — it has to live somewhere else. And ESM
-// ignores NODE_PATH, so a bare import cannot see it there either. Hence an
-// explicit search of a few sane locations.
-const PW_DIRS = [
-  process.env.PLAYWRIGHT_DIR,
-  '/opt/rundesk-pw/node_modules',
-  `${process.env.HOME ?? '/root'}/.rundesk-pw/node_modules`,
-  '/usr/lib/node_modules',
-].filter(Boolean)
-
-let chromium
-try {
-  ;({ chromium } = await import('playwright'))
-} catch {
-  for (const dir of PW_DIRS) {
-    for (const entry of ['playwright/index.mjs', 'playwright/index.js']) {
-      const file = `${dir}/${entry}`
-      if (!existsSync(file)) continue
-      try {
-        ;({ chromium } = await import(pathToFileURL(file).href))
-      } catch { /* try the next candidate */ }
-      if (chromium) break
-    }
-    if (chromium) break
-  }
-}
+/*
+ * Resolving playwright is fiddlier than it looks: this repo is a pnpm
+ * workspace using the `link:` protocol, so `npm i playwright` inside it fails
+ * outright and it has to live somewhere else — and ESM ignores NODE_PATH, so a
+ * bare import cannot see it there either.
+ *
+ * The shared resolver in test/e2e/lib does that search once. This file used to
+ * carry its own copy, and the copy had drifted: it tried a bare `playwright`
+ * and then a fixed list of directories, and never `@playwright/test`. On a
+ * machine where only `@playwright/test` is installed — which is what `pnpm
+ * install` in this workspace actually produces — the deployed-UI check could
+ * not run at all, and said "playwright is not installed anywhere this script
+ * can see" while playwright sat in node_modules. Reading as an environment
+ * problem rather than a resolution bug is what let it stand.
+ */
+const { resolveChromium, PW_DIRS } = await import('../test/e2e/lib/playwright.mjs')
+const chromium = await resolveChromium({ exitIfMissing: false })
 
 if (!chromium) {
   console.error(
@@ -161,6 +150,11 @@ const page = await (await browser.newContext({
   // The VPS serves this over plain http on loopback; a self-signed cert on the
   // public vhost must not stop the check.
   ignoreHTTPSErrors: true,
+  // §G11c reads back what "Copy link" put on the clipboard. Without this the
+  // read is refused and the check falls back to building the address itself,
+  // which still proves the link works but no longer proves the button produced
+  // it — a weaker claim than the one the section is there to make.
+  permissions: ['clipboard-read', 'clipboard-write'],
 })).newPage()
 
 const seen = async () => (await page.locator('body').innerText()).replace(/\s+/g, ' ')
@@ -331,6 +325,15 @@ try {
           body: JSON.stringify(body ?? {}),
         }).then((r) => r.json()).then((j) => j?.data).catch(() => null)
       : Promise.resolve(null)
+  // For tidying up after a check that had to create something. This runs
+  // against a real account, so a probe left behind is somebody's channel with
+  // a stray message in it.
+  const apiDelete = (path) =>
+    token
+      ? fetch(`${API}${path}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+          .then((r) => r.ok)
+          .catch(() => false)
+      : Promise.resolve(false)
   // apiGet swallows the status, so a 404 and an empty list look identical. Some
   // checks below turn on exactly that difference.
   const apiRead = (path) =>
@@ -752,6 +755,34 @@ try {
         await page.locator('[data-testid="sidebar-toggle"]').first().click()
         await page.waitForTimeout(1200)
         chk((await width()) > 200, 'and expands again', 'it would not expand back')
+
+        /*
+         * [10:46] — and the chord, which is advertised in the shortcuts overlay.
+         *
+         * Read from `data-collapsed` on the <aside> rather than from the toggle:
+         * the rail and the full sidebar are separate branches with a button
+         * each, so a query for the toggle answers about whichever one happens to
+         * be mounted, which is the state being measured.
+         */
+        const collapsedAttr = () =>
+          page.evaluate(
+            () => document.querySelector('[data-testid="workspace-sidebar"]')?.getAttribute('data-collapsed') ?? null,
+          )
+        if ((await collapsedAttr()) !== 'false') {
+          bad('the sidebar would not return to expanded, so the chord was not tested')
+        } else {
+          await page.keyboard.press('Control+\\')
+          await page.waitForTimeout(1200)
+          const byChord = (await collapsedAttr()) === 'true'
+          chk(byChord, 'and Ctrl+\\ does it from the keyboard', 'the advertised chord does nothing')
+          if (byChord) {
+            await page.keyboard.press('Control+\\')
+            await page.waitForTimeout(1200)
+            chk((await collapsedAttr()) === 'false', 'and again to bring it back', 'the chord could not expand it')
+          } else {
+            bad('the chord never collapsed it, so expanding could not be tested')
+          }
+        }
       }
     }
   })
@@ -2100,6 +2131,138 @@ try {
         await page.keyboard.press('Escape').catch(() => {})
       }
     }
+  })
+
+  await section('§G11c', 'A link to one message, that a person can make', async () => {
+    /*
+     * `?channel=&message=` was already the app's own deep link — the inbox and
+     * the search results navigate to it — and nothing anywhere would give a
+     * person one. Verified by FOLLOWING it rather than by matching its shape:
+     * an address of the right form that lands on an empty channel passes a
+     * regex and fails the person holding it.
+     */
+    const channels = (await apiGet(`/workspaces/${WS}/chat/channels`)) ?? []
+    const channel = channels.find((c) => !c.isDm) ?? channels[0]
+    if (!channel) {
+      ok('no channel on this account, so there was no message to link to')
+      return
+    }
+    const posted = await apiPost(`/chat/channels/${channel.id}/messages`, {
+      body: `verify-ui permalink probe ${Date.now()}`,
+    })
+    if (!posted?.id) {
+      bad('could not post a message to link to')
+      return
+    }
+
+    await go(`/app/${WS}/chat?channel=${channel.id}`, 4500)
+    const row = page.locator(`[data-testid="message-row-${posted.id}"]`)
+    if ((await row.count()) === 0) {
+      bad('the probe message did not render, so Copy link could not be reached')
+    } else {
+      await row.hover().catch(() => {})
+      await page.waitForTimeout(400)
+      await page.locator(`[data-testid="message-overflow-${posted.id}"]`).click({ timeout: 5000 }).catch(() => {})
+      await page.waitForTimeout(600)
+      const copy = page.locator(`[data-testid="message-copy-link-${posted.id}"]`)
+      const hasCopy = (await copy.count()) > 0
+      chk(hasCopy, 'the message menu offers "Copy link"', 'no per-message copy-link action')
+
+      if (hasCopy) {
+        /*
+         * Read back from the clipboard where the browser allows it, and fall
+         * back to building the same address when it does not. This context is
+         * created without a clipboard grant, and a check that reported a
+         * failure because a permission was missing would be reporting on the
+         * harness rather than on the product — so the copy is confirmed where
+         * it can be, and the landing is confirmed either way.
+         */
+        await copy.click().catch(() => {})
+        await page.waitForTimeout(700)
+        const copied = await page.evaluate(() => navigator.clipboard?.readText?.().catch(() => '') ?? '').catch(() => '')
+        if (copied) {
+          chk(
+            copied.includes(`message=${posted.id}`) && copied.includes(`channel=${channel.id}`),
+            'and it copies an address for THAT message',
+            `clipboard held ${copied.slice(0, 140)}`,
+          )
+        } else {
+          ok('clipboard is not readable from this context — the address is checked by following it')
+        }
+
+        const link = copied || `${BASE}/app/${WS}/chat?channel=${channel.id}&message=${posted.id}`
+        await page.goto(link, { waitUntil: 'domcontentloaded' })
+        const landed = await page
+          .waitForFunction(
+            (id) => document.querySelector(`[data-testid="message-row-${id}"]`)?.getAttribute('data-highlighted') === 'true',
+            posted.id,
+            { timeout: 20000 },
+          )
+          .then(() => true)
+          .catch(() => false)
+        chk(landed, 'and opening it lands on the message, highlighted', `${link} did not highlight the message`)
+      }
+    }
+
+    // Posted only to be linked to; it should not stay in somebody's channel.
+    await apiDelete(`/chat/messages/${posted.id}`).catch(() => {})
+  })
+
+  await section('§G05', 'Get StandUp says what a person has been doing', async () => {
+    /*
+     * [05:40] — the button beside the message icon in the profile header.
+     *
+     * Checked on the deployed instance because the interesting half is
+     * environmental: this box may or may not have a model configured, and the
+     * promise is that the answer is real either way. A 503 when no key is set
+     * would be a feature that only works on one deployment.
+     */
+    const me = await apiGet('/users/me')
+    if (!me?.id) {
+      bad('could not identify the signed-in account')
+      return
+    }
+    const res = await apiPost(`/workspaces/${WS}/people/${me.id}/standup`, { days: 7 })
+    chk(
+      typeof res?.text === 'string' && res.text.trim().length > 0,
+      'a standup answers with prose, model or no model',
+      `standup returned ${JSON.stringify(res)?.slice(0, 160)}`,
+    )
+    chk(
+      typeof res?.generated === 'boolean',
+      `and says who wrote it (model: ${res?.generated === true ? 'yes' : 'no'})`,
+      'the answer does not say whether a model wrote it',
+    )
+    chk(
+      !!res?.data && ['done', 'active', 'overdue', 'blocked'].every((k) => Array.isArray(res.data[k])),
+      'with the four buckets it was written from',
+      `buckets were ${Object.keys(res?.data ?? {}).join(', ') || 'absent'}`,
+    )
+
+    // And the control, where the frames put it.
+    await go(`/app/${WS}`, 4000)
+    await page.locator('[data-testid="user-menu"]').click({ timeout: 8000 }).catch(() => {})
+    await page.waitForTimeout(900)
+    await page.locator('[data-testid="menu-my-profile"]').click({ timeout: 8000 }).catch(() => {})
+    await page.waitForTimeout(2200)
+    const btn = page.locator('[data-testid="person-standup"]')
+    const hasBtn = (await btn.count()) > 0
+    chk(hasBtn, 'the profile panel offers it beside the message button', 'no Get StandUp control on the panel')
+    if (hasBtn) {
+      chk(
+        (await page.locator('[data-testid="person-standup-result"]').count()) === 0,
+        'and does not spend a model call before anybody asks',
+        'the summary was on screen before the button was pressed',
+      )
+      await btn.click().catch(() => {})
+      const wrote = await page
+        .locator('[data-testid="person-standup-result"]')
+        .waitFor({ timeout: 30000 })
+        .then(() => true)
+        .catch(() => false)
+      chk(wrote, 'and pressing it writes a summary into the panel', 'nothing appeared after pressing it')
+    }
+    await page.keyboard.press('Escape').catch(() => {})
   })
 
   await section('§2.8f', 'AI Notes: what is said is kept, and only while it is announced', async () => {
