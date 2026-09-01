@@ -1024,3 +1024,39 @@ also what `syncup-live` §5b reports rather than passing. It is built; it has
 never been exercised end to end by me, and saying it works would be a guess.
 The honest status is *unverified*, and it stays that way until it runs against
 a deployment that has a bucket.
+
+### Deployed, and the half the sandbox could not reach
+
+`0da175f` is live. `verify-release.sh` 154/0, `verify-ui.mjs` **216 passed, 0
+failed** — run twice, once with `PLAYWRIGHT_DIR` pinned to the box's own
+playwright, identically green both ways.
+
+The line worth keeping from that run:
+
+```
+PASS [§G05] and says who wrote it (model: yes)
+```
+
+Locally it reads `(model: no)`. There is no `ANTHROPIC_API_KEY` in any sandbox
+used for this engagement, so every local run exercised the deterministic
+formatter and **only** the deterministic formatter. The deployment has a key,
+so the same check took the other branch — the model was handed the four buckets
+and wrote from them, and the panel reported that it had.
+
+Both halves of `generateStandup` are therefore exercised, in different places,
+which is the whole reason the endpoint reports `generated` rather than quietly
+returning prose either way. A check that only asserted "some text came back"
+would have been satisfied by the fallback on both machines and would never have
+told anyone whether the model path worked at all.
+
+The §14 fix also got the case it was written for. Production holds 605 live
+notifications, so §2.5 took its non-clear-all branch, §14 found real rows, and
+the seeding path correctly did not fire — `the Inbox has 10 row(s) to judge`,
+with no "(one seeded for this check)" annotation. Seeded only to break the
+coupling between two sections, never to stand in for data that is really there.
+
+Still unverified, unchanged: image upload in a task description. This
+deployment has object storage — `§2.8f` gets a pre-signed upload URL — but
+nothing here drives the description editor's own upload path, so it stays
+*unverified* rather than being upgraded on the strength of a neighbouring check
+that passed.
