@@ -1110,3 +1110,122 @@ claim nothing supports.
 So: **the commitments are met bar two, both of which video 2 re-opens in a
 sharper form.** The right move is not to chase them separately — V2-01 and the
 create-modal work are the same job.
+
+---
+
+# CLOSURE — video 1, all 157 gaps adjudicated (1 Sep)
+
+This section exists so nobody audits video 1 again. Every gap the frame pass
+produced now carries a status, and the two numbers that matter are at the top.
+
+## The headline
+
+**All 33 gaps she explicitly asked for are closed.**
+
+Of the 157 gaps total:
+
+| status | count |
+|---|---|
+| CLOSED | 113 |
+| OPEN | 41 |
+| MOOT | 3 |
+
+Of the 41 OPEN, **exactly one was something she asked for** — G15-6, creating a
+list from inside the task flow — and it is fixed in `6bc12a7`. The other 40 are
+refinements the frame pass inferred; she never requested any of them. They are
+listed below as a backlog, not as unfinished work.
+
+## How it was adjudicated
+
+Five agents, one per group-cluster, read-only, each required to prove a verdict
+with `file:line` it had personally opened, and each told the rule this
+engagement learned the expensive way: **a single grep produces false gaps.**
+Anything it could not prove absent had to come back UNSURE rather than OPEN.
+Zero UNSURE came back.
+
+Their claims were then checked rather than taken. Two things came out of that:
+
+- **They corrected me.** I had reported #33 (a List settings step after
+  creating a list) as still open, on a shallow grep. `ListSettingsStep` already
+  existed — `quick-create-modal.tsx:701`, with view choices and a "No thanks".
+  My reconciliation was wrong and the agent was right.
+- **One report was a race, not a finding.** The G13–G15 agent called the brief's
+  "priority is hard-coded at quick-create-modal.tsx:241" stale. It was reading
+  code I was changing while it ran. The gap was real when the brief was written.
+
+## The last two fixes
+
+**#28 — task creation collected only a title.** The API had accepted
+description, priority, startDate, dueDate, timeEstimate, assigneeIds and
+labelIds the whole time; the form never asked, and posted `priority: 'normal'`
+hard-coded. Now collects all of it, in her order.
+
+**G15-6 — a project with no list was a dead end.** The picker listed only lists
+that already existed, so choosing an empty project left Create disabled with no
+way out but the List tab, which discards the form. A list can now be made
+inline, private or not.
+
+Two silent bugs surfaced while proving those, both mine: `POST /labels`
+requires a `color` and 400s without one — swallowed by a best-effort catch, so
+every tag vanished with no error; and the new check filled `input[placeholder]`
+unscoped, matching the top-bar search, so the title stayed empty and the
+failure read as "element is not enabled" thirty seconds later.
+
+## Verified green at closure
+
+| | |
+|---|---|
+| API unit | 1266 / 0 |
+| Web unit | 18 files, 0 failures |
+| task-depth | 84 / 0 |
+| ui-sweep | 107 / 0 |
+| video-regression | 71 / 0 |
+| syncup-live | 53 / 0 |
+| person-panel | 39 / 0 |
+| chat-message-actions | 34 / 0 |
+| addressability-live | 24 / 0 |
+| panel-collapse | 23 / 0 |
+| settings-depth | 22 / 0 |
+| a39-dm-tabs | 19 / 0 |
+| a61-meeting-record | 12 / 0 |
+| command-palette · no-dead-ends | 9 / 0 each |
+
+## The 40 open refinements — backlog, not debt
+
+Recorded so they are a decision rather than a surprise. None was requested.
+
+**Loading / search** · no help link on the invite screen · freshness chrome is
+dashboard-only · palette zero-result state is static text, no AI answer ·
+assignee/creator filters are native selects, no avatars or type-ahead · only
+Drive federates (no Gmail/SharePoint) · no engagement sort · Status group has
+no explicit "All" chip
+
+**Top bar / profile / settings** · no agent runtime · Brain is a tab, not a
+global surface · sidebar favourites still localStorage · no Done or Delegated
+bucket on a person · time off only on the workload page · avatar menu has no
+Themes row or notification-prefs link · timezone is free text, no drift notice
+· no per-user accent colour · Help page shows 4 of 10 backend topics
+
+**Pinned tools / workspace / nav** · no notepad · no global timer or dictation
+· nav favourites not server-side · signup picks discarded on the server ·
+workspace creation reuses the caller's oldest org · no account-level Workspaces
+page · no sub-1024px navigation · the dock-reset event has no listener · no
+Customize footer or tree search
+
+**Inbox / chat / replies** · no inbox display/order controls · no content
+access-request path · comment assign/resolve reuse task notification types ·
+one notification kind missing from the enum · no funnel filter on the inbox ·
+forward is a 10-item popover with no search or note · saved messages have no
+badge or toast · channel toolbar has one quick reaction, not four · thread
+header has no assign/create-task row · replies rows navigate away instead of
+replying inline · no Replies entry in the sidebar · no mark-unread on a reply
+
+**Meetings / tasks** · no meeting filters or tags · lists still require a
+project (`lists.project_id` is NOT NULL)
+
+## What is NOT claimed
+
+Image upload inside a task description remains **unverified**. It needs object
+storage; the deployment has it, but nothing here drives the description
+editor's own upload path, and a neighbouring check passing is not evidence
+about this one.
