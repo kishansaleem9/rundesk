@@ -12,6 +12,7 @@ import {
   Play,
   Home,
   Inbox,
+  Reply,
   MessageCircle,
   FolderOpen,
   Folder,
@@ -143,6 +144,10 @@ function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: 
   return [
     { label: 'Home', path: base, exact: true },
     { label: 'Inbox', path: `${base}/inbox` },
+    // G12-7 — the Replies page existed and was reachable only from the command
+    // palette, so a reply you were told about had no place you could go and
+    // look for it. Sits beside the Inbox because it answers the same question.
+    { label: 'Replies', path: `${base}/replies` },
     { label: 'Teams', path: `${base}/chat` },
     { label: 'Docs', path: `${base}/docs` },
     { label: 'Dashboards', path: `${base}/dashboard` },
@@ -187,6 +192,7 @@ function railEntries(
   }> = [
     { path: base, label: 'Home', icon: Home, exact: true },
     { path: `${base}/inbox`, label: 'Inbox', icon: Inbox },
+    { path: `${base}/replies`, label: 'Replies', icon: Reply },
     // Guarded to match the floating dock, which gates exactly these three. A
     // ClickApp turned off has to disappear from every surface, or the rail
     // becomes the one place a disabled feature is still reachable.
@@ -651,6 +657,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     switch (label) {
       case 'Home': return t('nav.home')
       case 'Inbox': return t('nav.inbox')
+      case 'Replies': return t('nav.replies')
       case 'Teams': return t('nav.teams')
       case 'Docs': return t('nav.docs')
       case 'Dashboards': return t('nav.dashboards')
@@ -1351,6 +1358,16 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             </button>
             {browseExpanded && (
               <div className="space-y-1">
+                {/*
+                  G12-7 — the Replies page shipped and was reachable ONLY from
+                  the command palette, so a reply you were notified about had
+                  nowhere you could go and look for it. In her sidebar Replies
+                  sits just before Skills and Meetings [17:38], which is here.
+                  Adding it to workspaceNavEntries was not enough on its own:
+                  that list drives label lookup and the collapsed rail, while
+                  the expanded column is these hand-written links.
+                */}
+                <NavLink to={"/app/$workspaceId/replies" as any} params={{ workspaceId }} icon={Reply} label={t('nav.replies')} compact />
                 {featureEnabled(FLAGS.AI) && (
                   <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact />
                 )}

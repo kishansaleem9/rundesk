@@ -66,7 +66,7 @@ const check = (ok, label, detail = '') => {
 const say = (s) => console.log(`\n▶ ${s}`)
 
 /** Raise when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 24
+const EXPECTED_CHECKS = 28
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -153,6 +153,28 @@ try {
     paletteText.slice(0, 140),
   )
   check(!/No matches/i.test(paletteText), 'and the palette does not claim "no matches"', paletteText.slice(0, 90))
+
+  /*
+   * G03-9 — her Status submenu (frames 047/052) reads "All ✓ / Active /
+   * Closed". All is a VISIBLE, checked default; clearing a filter should not
+   * mean clicking the active chip again and hoping. Type already had this and
+   * Status and Priority did not.
+   */
+  for (const group of ['status', 'priority']) {
+    const all = page.locator(`[data-testid="palette-${group}-all"]`)
+    const present = await all.count()
+    check(present > 0, `the ${group} filter offers an explicit All`, `no All chip in the ${group} group`)
+    if (present > 0) {
+      check(
+        (await all.getAttribute('aria-pressed')) === 'true' ||
+          (await all.getAttribute('data-active')) === 'true' ||
+          /bg-|text-foreground/.test((await all.getAttribute('class')) ?? ''),
+        `and All is the state it starts in for ${group}`,
+        'All is offered but does not read as selected with nothing filtered',
+      )
+    }
+  }
+
   await page.keyboard.press('Escape')
   await page.waitForTimeout(500)
 

@@ -643,6 +643,16 @@ export function CommandPalette({
           ))}
         </FilterGroup>
         <FilterGroup label={t('palette.filterStatus')}>
+          {/*
+            G03-9 — her Status submenu (frames 047/052) reads "All ✓ / Active /
+            Closed": All is a visible, checked default, not the absence of a
+            choice. Type already worked this way; Status and Priority did not,
+            so clearing them meant clicking the active chip a second time and
+            hoping. Same chip, same meaning, in all three groups.
+          */}
+          <FilterChip active={statusFilter === ''} onClick={() => setStatusFilter('')} testId="palette-status-all">
+            {t('palette.all')}
+          </FilterChip>
           {(['open', 'in_progress', 'closed'] as const).map((v) => (
             <FilterChip
               key={v}
@@ -654,6 +664,9 @@ export function CommandPalette({
           ))}
         </FilterGroup>
         <FilterGroup label={t('palette.filterPriority')}>
+          <FilterChip active={priorityFilter === ''} onClick={() => setPriorityFilter('')} testId="palette-priority-all">
+            {t('palette.all')}
+          </FilterChip>
           {(['urgent', 'high', 'normal', 'low'] as const).map((v) => (
             <FilterChip
               key={v}

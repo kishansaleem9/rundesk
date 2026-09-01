@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 31
+const EXPECTED_CHECKS = 33
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -481,6 +481,25 @@ try {
         'the sidebar collapsed while somebody was typing',
       )
     }
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ G12-7 — Replies is somewhere you can go')
+  // ---------------------------------------------------------------------
+  /*
+   * The Replies page shipped and was reachable only from the command palette,
+   * so a reply you were notified about had nowhere you could go and look. It
+   * belongs next to the Inbox because it answers the same question.
+   */
+  await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  const repliesLink = page.locator(`[data-testid="workspace-sidebar"] a[href$="/replies"]`).first()
+  const hasReplies = (await repliesLink.count()) > 0
+  check(hasReplies, 'the sidebar carries a Replies entry', 'Replies is still palette-only')
+  if (hasReplies) {
+    await repliesLink.click()
+    await page.waitForTimeout(2500)
+    check(/\/replies$/.test(new URL(page.url()).pathname), 'and it goes to the Replies page', page.url())
   }
 
   // ---------------------------------------------------------------------
