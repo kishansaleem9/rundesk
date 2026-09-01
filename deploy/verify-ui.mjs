@@ -1353,10 +1353,33 @@ try {
   })
 
   await section('§14', 'Unread is visible without opening the chat', async () => {
+    /*
+     * Seeded, not borrowed.
+     *
+     * This read whatever the Inbox happened to hold, and §2.5 above ends by
+     * pressing "Clear all" — so on any account quiet enough that §2.5's own
+     * seeded row was the only one, this section arrived at an empty Inbox and
+     * reported "no notifications to check against". A failure about the order
+     * two sections ran in, on a deployment where nothing is wrong.
+     *
+     * Sections are meant to be independent, and the fix is the one §2.5
+     * already uses: bring your own row. Only seeded when the Inbox is empty,
+     * so a busy instance is still judged on its real notifications.
+     */
     await go(`/app/${WS}/inbox`, 4500)
+    let seededHere = false
+    if ((await page.locator('[data-testid^="notif-"]').count()) === 0) {
+      seededHere = (await apiPost('/notifications/test', { workspaceId: WS })) !== null
+      await go(`/app/${WS}/inbox`, 4500)
+    }
+
     const rows = page.locator('[data-testid^="notif-"]')
     const count = await rows.count()
-    chk(count > 0, `the Inbox has ${count} row(s) to judge`, 'no notifications to check against')
+    chk(
+      count > 0,
+      `the Inbox has ${count} row(s) to judge${seededHere ? ' (one seeded for this check)' : ''}`,
+      'the Inbox is empty and a seeded notification did not arrive either',
+    )
     if (count > 0) {
       const states = await page.evaluate(() =>
         [...document.querySelectorAll('[data-testid^="notif-"]')].map((el) => ({
@@ -1379,6 +1402,19 @@ try {
         // never happened.
         ok(`only ${unread.length ? 'unread' : 'read'} rows are present, so no contrast to check here`)
       }
+    }
+    /*
+     * Only what this section put there. A row somebody actually received is
+     * theirs, and this runs against a real account — so the cleanup is gated
+     * on having seeded, which only happens when the Inbox was empty, and is
+     * narrowed to the seeder's own type. `/notifications/test` answers with a
+     * delivery report rather than the row, so there is no id to clear by.
+     */
+    if (seededHere) {
+      const ours = ((await apiGet('/notifications?view=inbox')) ?? []).filter(
+        (n) => n.type === 'test_notification',
+      )
+      for (const n of ours) await apiPost(`/notifications/${n.id}/clear`).catch(() => {})
     }
   })
 
