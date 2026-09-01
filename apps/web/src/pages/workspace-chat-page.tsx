@@ -1327,8 +1327,10 @@ export function ChatPage() {
   const setSavedMutation = useMutation({
     mutationFn: ({ messageId, saved }: { messageId: string; saved: boolean }) =>
       api(`/chat/messages/${messageId}/save`, { method: saved ? 'POST' : 'DELETE' }),
-    onSuccess: () => {
+    onSuccess: (_data, { saved }) => {
       qc.invalidateQueries({ queryKey: ['chat-saved', workspaceId] })
+      // Says WHERE it went. "Saved" on its own leaves you hunting for the place.
+      toast.success(saved ? t('chat.savedToLaterToast') : t('chat.removedFromSaved'))
     },
     onError: (error) => {
       toast.error(error instanceof ApiError ? error.message : t('chat.couldNotUpdateSaved'))
@@ -2256,6 +2258,23 @@ export function ChatPage() {
                           <Pin className="h-2.5 w-2.5" />
                           {t('chat.pinned')}{m.pinnedByName ? ` ${t('chat.pinnedBy', { name: m.pinnedByName })}` : ''}
                           {m.pinnedAt ? ` · ${formatMessageTime(m.pinnedAt)}` : ''}
+                        </div>
+                      )}
+                      {/*
+                        §G11 [15:11] — saving a message left no trace. The
+                        bookmark tinted, but the whole action bar is hover-
+                        revealed, so the moment the pointer left there was
+                        nothing saying this message was in Later. Pinned already
+                        had a persistent row badge; saved gets the same, because
+                        "did that work?" should not require re-hovering.
+                      */}
+                      {savedIds.has(m.id) && !m.deletedAt && (
+                        <div
+                          data-testid={`message-saved-badge-${m.id}`}
+                          className="flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-300 mb-0.5"
+                        >
+                          <Bookmark className="h-2.5 w-2.5" />
+                          {t('chat.savedToLater')}
                         </div>
                       )}
                       {m.deletedAt ? (

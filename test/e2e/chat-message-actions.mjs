@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 38
+const EXPECTED_CHECKS = 42
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -448,6 +448,57 @@ try {
     check(false, 'no "open thread" control to drive')
     check(false, 'so the thread address was never exercised')
   }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ §G11 [15:11] — saving a message leaves a trace')
+  // ---------------------------------------------------------------------
+  /*
+   * The bookmark tinted when saved — inside a toolbar that only exists while
+   * the pointer is over the row. Move the mouse and there was nothing to say
+   * the message was in Later, so "did that work?" meant hovering again. The
+   * badge is checked with the pointer moved AWAY, which is the whole point.
+   */
+  await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+  const saveRow = page.locator('.group').filter({ hasText: BODY }).first()
+  const saveId = await saveRow
+    .evaluate((el) => el.closest('[data-testid^="message-row-"]')?.getAttribute('data-testid')?.replace('message-row-', '') ?? null)
+    .catch(() => null)
+  check(!!saveId, 'a message to save is on screen', 'no message row found')
+
+  check(
+    !(await page.getByTestId(`message-saved-badge-${saveId}`).isVisible().catch(() => false)),
+    'and it is not marked saved before anybody saves it',
+    'the saved badge was already showing',
+  )
+
+  await saveRow.hover()
+  await page.waitForTimeout(400)
+  // The bookmark is found by its title, which is the only stable handle the
+  // action bar gives it. Emphatically NOT "click the first button with a
+  // title" — that is a coin flip over a row whose toolbar includes Delete.
+  const saveBtn = page.locator(`[data-testid="message-row-${saveId}"] button`).filter({ has: page.locator('svg') })
+  const count = await saveBtn.count()
+  let clicked = false
+  for (let i = 0; i < count; i += 1) {
+    const title = (await saveBtn.nth(i).getAttribute('title')) ?? ''
+    if (/save/i.test(title) && !/unsave/i.test(title)) {
+      await saveBtn.nth(i).click().catch(() => {})
+      clicked = true
+      break
+    }
+  }
+  check(clicked, 'the toolbar offers Save', 'no save control on the message')
+  await page.waitForTimeout(2000)
+
+  // Pointer deliberately moved off the row before looking.
+  await page.mouse.move(5, 5)
+  await page.waitForTimeout(600)
+  check(
+    await page.getByTestId(`message-saved-badge-${saveId}`).isVisible().catch(() => false),
+    'and once saved the row says so without hovering',
+    'the only marker is still inside the hover toolbar',
+  )
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G11 [14:16] — the hover toolbar offers real quick reactions')
