@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 34
+const EXPECTED_CHECKS = 38
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -448,6 +448,42 @@ try {
     check(false, 'no "open thread" control to drive')
     check(false, 'so the thread address was never exercised')
   }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ §G11 [14:16] — the hover toolbar offers real quick reactions')
+  // ---------------------------------------------------------------------
+  /*
+   * "hovering a message reveals quick reactions 👍 ✅ 🔥". The channel toolbar
+   * carried ONE of them, drawn as a ThumbsUp icon — a picture of a reaction
+   * rather than the reaction. The thread panel already had all three as emoji,
+   * so the same message offered different reactions depending on where you
+   * hovered it. Checked by clicking one and reading the reaction back off the
+   * server, because a row of emoji that posts nothing looks identical.
+   */
+  await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+  const reactRow = page.locator('.group').filter({ hasText: BODY }).first()
+  const reactId = await reactRow
+    .evaluate((el) => el.closest('[data-testid^="message-row-"]')?.getAttribute('data-testid')?.replace('message-row-', '') ?? null)
+    .catch(() => null)
+  await reactRow.hover()
+  await page.waitForTimeout(400)
+  for (const emoji of ['👍', '✅', '🔥']) {
+    check(
+      await page.getByTestId(`message-quick-${emoji}-${reactId}`).isVisible().catch(() => false),
+      `the toolbar offers ${emoji}`,
+      `${emoji} is not offered on a channel message`,
+    )
+  }
+  await page.getByTestId(`message-quick-✅-${reactId}`).click().catch(() => {})
+  await page.waitForTimeout(1800)
+  const reacted = await A(`/chat/channels/${channelId}/messages?limit=50`)
+  const target = (reacted.data ?? []).find((m) => m.id === reactId)
+  check(
+    (target?.reactions ?? []).some((r) => r.emoji === '✅'),
+    'and clicking one actually reacts',
+    JSON.stringify(target?.reactions ?? []),
+  )
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G11 — a link to one message, that a person can make')

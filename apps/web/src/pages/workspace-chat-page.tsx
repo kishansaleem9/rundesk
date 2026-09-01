@@ -26,7 +26,6 @@ import {
   Smile,
   Sparkles,
   ListTodo,
-  ThumbsUp,
   Reply,
   Forward,
   Bookmark,
@@ -108,6 +107,14 @@ type PendingInvite = {
   status: 'pending'
   expiresAt: string
 }
+
+/**
+ * §G11 [14:16] — the quick reactions her hover toolbar offers, before the
+ * picker. Declared once because the channel row and the thread panel both draw
+ * them, and they had already drifted: the thread had all three as emoji while
+ * the channel had a single thumbs-up icon.
+ */
+const QUICK_REACTIONS = ['👍', '✅', '🔥'] as const
 
 type Message = {
   id: string
@@ -2415,19 +2422,32 @@ export function ChatPage() {
                               stays inline is what gets used on almost every
                               message; the tail moved into the overflow. */}
                           <span className="mx-0.5 h-4 w-px bg-border/70" />
-                          <button
-                            type="button"
-                            title={t('chat.like')}
-                            className={cn(
-                              'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center',
-                              m.reactions?.some((r) => r.emoji === '👍' && r.reacted)
-                                ? 'text-accent'
-                                : 'text-muted-foreground hover:text-foreground',
-                            )}
-                            onClick={() => toggleReactionMutation.mutate({ messageId: m.id, emoji: '👍' })}
-                          >
-                            <ThumbsUp className="h-3 w-3" />
-                          </button>
+                          {/*
+                            §G11 [14:16]–[14:21] — hovering a message reveals
+                            quick reactions "👍 ✅ 🔥", as the emoji themselves.
+                            This was one ThumbsUp ICON: a picture of a reaction
+                            rather than the reaction, and only one of the three.
+                            The thread panel already did it this way, so the
+                            same message offered different reactions depending
+                            on which surface you hovered it in.
+                          */}
+                          {QUICK_REACTIONS.map((emoji) => (
+                            <button
+                              key={`${m.id}-quick-${emoji}`}
+                              type="button"
+                              data-testid={`message-quick-${emoji}-${m.id}`}
+                              title={t('chat.react')}
+                              className={cn(
+                                'h-[22px] w-[22px] rounded hover:bg-muted flex items-center justify-center text-[12px]',
+                                m.reactions?.some((r) => r.emoji === emoji && r.reacted)
+                                  ? 'bg-accent/20'
+                                  : '',
+                              )}
+                              onClick={() => toggleReactionMutation.mutate({ messageId: m.id, emoji })}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
                           <button
                             type="button"
                             title={t('chat.reply')}
@@ -3967,7 +3987,7 @@ function ThreadPanel({
     <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100">
       {/* The three she names at [20:24] — "👍 ✅ 🔥" — as the emoji themselves,
           not icons standing in for them. The picker beside them is the rest. */}
-      {['👍', '✅', '🔥'].map((emoji) => (
+      {QUICK_REACTIONS.map((emoji) => (
         <button
           key={`${message.id}-quick-${emoji}`}
           type="button"
