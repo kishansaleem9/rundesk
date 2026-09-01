@@ -44,29 +44,53 @@ export const PW_DIRS = [
 export async function resolveChromium({ exitIfMissing = true } = {}) {
   let chromium
 
-  // The ordinary case: it is installed where node would look anyway.
-  for (const id of ['playwright', '@playwright/test', 'playwright-core']) {
-    try {
-      ;({ chromium } = require_(id))
-    } catch {
-      /* next */
+  /** Load playwright from one directory, or return undefined. */
+  const fromDir = async (dir) => {
+    for (const entry of ['playwright/index.mjs', 'playwright/index.js']) {
+      const file = `${dir}/${entry}`
+      if (!fs.existsSync(file)) continue
+      try {
+        const mod = await import(pathToFileURL(file).href)
+        if (mod?.chromium) return mod.chromium
+      } catch {
+        /* try the next */
+      }
     }
-    if (chromium) break
+    return undefined
+  }
+
+  /*
+   * An explicitly-set PLAYWRIGHT_DIR wins over anything installed ambiently.
+   *
+   * It used to be searched only after the bare specifiers, which made the
+   * variable a no-op wherever playwright was already resolvable — and
+   * `@playwright/test` is, in this workspace, straight out of `pnpm install`.
+   * The caller that noticed is verify-ui's isolation test: it points this at a
+   * stub standing in for playwright and rigs one selector to throw, and with
+   * the real package winning it was silently exercising a real browser against
+   * a dead port instead of the control flow it means to test.
+   *
+   * "Use this one" should mean it. Only this first branch is an override; the
+   * rest of PW_DIRS are still fallbacks, tried after the ordinary install.
+   */
+  if (process.env.PLAYWRIGHT_DIR) chromium = await fromDir(process.env.PLAYWRIGHT_DIR)
+
+  // The ordinary case: it is installed where node would look anyway.
+  if (!chromium) {
+    for (const id of ['playwright', '@playwright/test', 'playwright-core']) {
+      try {
+        ;({ chromium } = require_(id))
+      } catch {
+        /* next */
+      }
+      if (chromium) break
+    }
   }
 
   // Otherwise, the places this project is known to put it.
   if (!chromium) {
     for (const dir of PW_DIRS) {
-      for (const entry of ['playwright/index.mjs', 'playwright/index.js']) {
-        const file = `${dir}/${entry}`
-        if (!fs.existsSync(file)) continue
-        try {
-          ;({ chromium } = await import(pathToFileURL(file).href))
-        } catch {
-          /* try the next */
-        }
-        if (chromium) break
-      }
+      chromium = await fromDir(dir)
       if (chromium) break
     }
   }
