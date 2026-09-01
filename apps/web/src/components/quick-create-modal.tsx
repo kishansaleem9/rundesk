@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn, toast } from '@rundesk/ui'
 import { CheckSquare, ClipboardList, Folder, FolderOpen, FileText, Layers, Upload, X, Clock, PenTool, LayoutDashboard, Bell, Paperclip } from 'lucide-react'
 import { api } from '../lib/api'
+import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type Space = { id: string; name: string }
@@ -176,6 +177,44 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const [templateId, setTemplateId] = useState('')
   const [watcherIds, setWatcherIds] = useState<string[]>([])
   const [attachment, setAttachment] = useState<File | null>(null)
+  /*
+   * §G15 [22:55]–[23:31] — the rest of what she fills in BEFORE pressing
+   * create: "ASSIGN pe main khud ko assign kar sakti hoon ya kisi aur ko …
+   * DUE DATE — maine START DATE rakhi to yeh mujhse TIME bhi pooch raha …
+   * PRIORITY — urgent hai, high hai … TAGS aap create kar sakte ho … aur
+   * yahan pe TIME ESTIMATE".
+   *
+   * Her complaint was that task creation collected a title and nothing else,
+   * so every other property was something you set afterwards by finding the
+   * task again. The API has accepted all of these on create since before the
+   * complaint (CreateTaskDto: description, priority, startDate, dueDate,
+   * timeEstimate, assigneeIds, labelIds) — only the form never asked.
+   *
+   * `datetime-local` rather than a date input, because she sets a time on both
+   * ends and says so twice.
+   */
+  const [description, setDescription] = useState('')
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([])
+  const [startDate, setStartDate] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [priority, setPriority] = useState<'urgent' | 'high' | 'normal' | 'low'>('normal')
+  const [estimateHours, setEstimateHours] = useState('')
+  const [tagNames, setTagNames] = useState<string[]>([])
+  const [tagDraft, setTagDraft] = useState('')
+  /*
+   * §G15 [21:59]–[22:11] — "yeh isi space se mujhe bol raha hai ke LIST banao
+   * pehle — **agar main list nahi banaoongi to yeh nahi create karega**" …
+   * "yeh pooch raha ke PRIVATE karni hai ke nahi".
+   *
+   * A task must live in a list, and the picker only ever listed the lists that
+   * already existed. Pick a project with none and the form was a dead end: the
+   * Create button stayed disabled, and the only way to make a list was the
+   * List tab, which throws away everything typed so far. So the list gets made
+   * from here, without leaving the task you are in the middle of describing.
+   */
+  const [newListName, setNewListName] = useState('')
+  const [newListPrivate, setNewListPrivate] = useState(false)
+  const [makingList, setMakingList] = useState(false)
 
   const spaces = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -221,8 +260,55 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     enabled: Boolean(workspaceId),
   }).data ?? []
 
+  /*
+   * Making the list selects it, so the form carries straight on rather than
+   * asking her to find what she just made in a dropdown.
+   */
+  const makeList = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>(`/lists`, {
+        method: 'POST',
+        body: { projectId, name: newListName.trim(), visibility: newListPrivate ? 'private' : 'public' },
+      }),
+    onSuccess: (list) => {
+      qc.invalidateQueries({ queryKey: ['lists', projectId] })
+      qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      setListId(list.id)
+      setMakingList(false)
+      setNewListName('')
+      setNewListPrivate(false)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : String(err)),
+  })
+
   const create = useMutation({
     mutationFn: async () => {
+      /*
+       * Tags first, because the task wants ids and she types names —
+       * [23:23] "agar aap likh ke enter kar doongi to yeh tag ban jayega".
+       * Creating a name that already exists returns the existing label
+       * (case-insensitively), so typing "Design" twice does not make two.
+       *
+       * A tag that will not create must not cost her the task: it is dropped
+       * from the payload rather than thrown, the same rule the watcher and
+       * attachment loops below already follow.
+       */
+      const labelIds: string[] = []
+      for (const name of tagNames) {
+        try {
+          // `color` is required by CreateLabelDto — omitting it 400s, and the
+          // catch below would then drop the tag silently. Same derivation the
+          // task sheet uses, so a tag made here and one made there are the
+          // same colour rather than two shades of the same word.
+          const label = await api<{ id: string }>(`/workspaces/${workspaceId}/labels`, {
+            method: 'POST',
+            body: { name, color: colorForTagName(name) },
+          })
+          if (label?.id) labelIds.push(label.id)
+        } catch {
+          /* reported below with the other best-effort extras */
+        }
+      }
       /*
        * A template is not a set of defaults to copy into this form — it
        * carries checklists, subtasks and custom-field values this modal has
@@ -238,7 +324,25 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
             method: 'POST',
             // Omit status → backend seeds the list's first/default status.
             // Omit taskTypeId → same, for the list's default type.
-            body: { listId, title, priority: 'normal', ...(taskTypeId ? { taskTypeId } : {}) },
+            body: {
+              listId,
+              title,
+              priority,
+              ...(taskTypeId ? { taskTypeId } : {}),
+              ...(description.trim() ? { description: description.trim() } : {}),
+              ...(assigneeIds.length ? { assigneeIds } : {}),
+              // datetime-local has no zone; the browser's own offset is the
+              // one she picked it in, so let Date apply it rather than
+              // pinning a Z and shifting everybody's 7pm.
+              ...(startDate ? { startDate: new Date(startDate).toISOString() } : {}),
+              ...(dueDate ? { dueDate: new Date(dueDate).toISOString() } : {}),
+              // The column is seconds; the field asks for hours because that
+              // is the unit she says out loud ("12 hours").
+              ...(Number(estimateHours) > 0
+                ? { timeEstimate: Math.round(Number(estimateHours) * 3600) }
+                : {}),
+              ...(labelIds.length ? { labelIds } : {}),
+            },
           })
 
       // Both of these need a task to hang off, so they happen after it exists.
@@ -299,10 +403,60 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     >
       <Input autoFocus placeholder={t('quickCreate.taskTitlePlaceholder')} value={title} onChange={(e) => setTitle(e.target.value)} />
       <div className="grid grid-cols-3 gap-2">
-        <Select labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId(''); setListId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
-        <Select labelKey="quickCreate.selectProject" value={projectId} onChange={(v) => { setProjectId(v); setListId('') }} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
-        <Select labelKey="quickCreate.selectList" value={listId} onChange={setListId} options={lists.map((l) => ({ value: l.id, label: l.name }))} disabled={!projectId} />
+        <Select data-testid="quick-create-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId(''); setListId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
+        <Select data-testid="quick-create-project" labelKey="quickCreate.selectProject" value={projectId} onChange={(v) => { setProjectId(v); setListId('') }} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
+        <Select data-testid="quick-create-list" labelKey="quickCreate.selectList" value={listId} onChange={setListId} options={lists.map((l) => ({ value: l.id, label: l.name }))} disabled={!projectId} />
       </div>
+
+      {/* §G15 [21:59] — a project with no list used to be a dead end here. */}
+      {projectId && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border/70 px-2 py-1.5">
+          {lists.length === 0 && !makingList && (
+            <span className="text-[11px] text-muted-foreground">{t('quickCreate.listRequired')}</span>
+          )}
+          {!makingList ? (
+            <button
+              type="button"
+              data-testid="quick-create-new-list"
+              onClick={() => setMakingList(true)}
+              className="text-[11px] font-medium text-primary hover:underline"
+            >
+              {t('quickCreate.newListHere')}
+            </button>
+          ) : (
+            <>
+              <input
+                autoFocus
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                data-testid="quick-create-new-list-name"
+                placeholder={t('quickCreate.listNamePlaceholder')}
+                className="h-7 w-44 rounded-md border border-border bg-card px-1.5 text-[11px]"
+              />
+              <label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={newListPrivate}
+                  onChange={(e) => setNewListPrivate(e.target.checked)}
+                  data-testid="quick-create-new-list-private"
+                  className="h-3 w-3 rounded border-border"
+                />
+                {t('quickCreate.listPrivate')}
+              </label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                data-testid="quick-create-new-list-save"
+                disabled={!newListName.trim() || makeList.isPending}
+                onClick={() => makeList.mutate()}
+              >
+                {t('quickCreate.createList')}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       {taskTypes.length > 0 && (
         <Select
           labelKey="quickCreate.selectTaskType"
@@ -315,6 +469,138 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
           data-testid="quick-create-task-type"
         />
       )}
+
+      {/* §G15 [22:26]–[23:31] — everything she fills in before pressing create. */}
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        data-testid="quick-create-description"
+        placeholder={t('quickCreate.descriptionPlaceholder')}
+        rows={2}
+        className="w-full resize-y rounded-md border border-border bg-card px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-ring"
+      />
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          {t('quickCreate.startDate')}
+          <input
+            type="datetime-local"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            data-testid="quick-create-start"
+            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          {t('quickCreate.dueDate')}
+          <input
+            type="datetime-local"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            data-testid="quick-create-due"
+            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          {t('quickCreate.priority')}
+          <select
+            value={priority}
+            onChange={(e) => setPriority(e.target.value as typeof priority)}
+            data-testid="quick-create-priority"
+            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
+          >
+            <option value="urgent">{t('taskDetail.priority.urgent')}</option>
+            <option value="high">{t('taskDetail.priority.high')}</option>
+            <option value="normal">{t('taskDetail.priority.normal')}</option>
+            <option value="low">{t('taskDetail.priority.low')}</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+          {t('quickCreate.timeEstimate')}
+          <input
+            type="number"
+            min="0"
+            step="0.5"
+            value={estimateHours}
+            onChange={(e) => setEstimateHours(e.target.value)}
+            data-testid="quick-create-estimate"
+            placeholder={t('quickCreate.hours')}
+            className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
+          />
+        </label>
+      </div>
+
+      {/* [22:55] "ASSIGN pe main khud ko assign kar sakti hoon ya kisi aur ko" —
+          assignment is a create-time decision, not an afterthought. */}
+      {members.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="quick-create-assignees">
+          <select
+            value=""
+            data-testid="quick-create-assign"
+            onChange={(e) => {
+              const id = e.target.value
+              if (id && !assigneeIds.includes(id)) setAssigneeIds((prev) => [...prev, id])
+            }}
+            className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
+          >
+            <option value="">{t('quickCreate.assign')}</option>
+            {members
+              .filter((m) => !assigneeIds.includes(m.userId))
+              .map((m) => (
+                <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+              ))}
+          </select>
+          {assigneeIds.map((id) => {
+            const m = members.find((x) => x.userId === id)
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setAssigneeIds((prev) => prev.filter((x) => x !== id))}
+                className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] hover:bg-muted/70"
+                title={t('common.remove')}
+              >
+                {m?.displayName || m?.email || id}
+                <X className="h-3 w-3" />
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* [23:23] "agar aap likh ke enter kar doongi to yeh tag ban jayega" —
+          typed and committed with Enter, exactly as she describes it. */}
+      <div className="flex flex-wrap items-center gap-1.5" data-testid="quick-create-tags">
+        <input
+          value={tagDraft}
+          onChange={(e) => setTagDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return
+            // Enter commits a tag; it must not also submit the half-filled form.
+            e.preventDefault()
+            const name = tagDraft.trim()
+            if (name && !tagNames.some((n) => n.toLowerCase() === name.toLowerCase())) {
+              setTagNames((prev) => [...prev, name])
+            }
+            setTagDraft('')
+          }}
+          data-testid="quick-create-tag-input"
+          placeholder={t('quickCreate.tagPlaceholder')}
+          className="h-7 w-36 rounded-md border border-border bg-card px-1.5 text-[11px]"
+        />
+        {tagNames.map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setTagNames((prev) => prev.filter((n) => n !== name))}
+            className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] hover:bg-muted/70"
+            title={t('common.remove')}
+          >
+            {name}
+            <X className="h-3 w-3" />
+          </button>
+        ))}
+      </div>
       {/*
         §G15 frame #12 — Templates, attach and notify, at the moment you are
         deciding what the task is. Each one is a control over machinery that

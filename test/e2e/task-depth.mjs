@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 68
+const EXPECTED_CHECKS = 84
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -251,6 +251,166 @@ try {
     (reminders.data ?? []).find((r) => r.note === NOTE)?.taskId == null,
     'made with no task invented to hold it',
   )
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ §G15 [22:55]–[23:31] — creating a task collects more than a title')
+  // ---------------------------------------------------------------------
+  /*
+   * Her gap #28, in her words: task creation collected a title and every other
+   * property was something you set afterwards, by finding the task again.
+   *
+   * The API had accepted all of it on create for months — CreateTaskDto takes
+   * description, priority, startDate, dueDate, timeEstimate, assigneeIds and
+   * labelIds. The form simply never asked, and posted `priority: 'normal'`
+   * hard-coded. So this drives the FORM and then reads the TASK: a control
+   * that renders but does not reach the payload is exactly the failure that
+   * shape of bug produces.
+   */
+  /*
+   * Re-open the modal. The reminder section above SUBMITS, which closes it —
+   * so reaching straight for the task tab waited 30s for a control that was
+   * not on screen. The floor guard caught that ("only 7 of 83 checks ran"),
+   * which is the entire reason it exists.
+   */
+  if (!(await page.getByTestId('create-tab-task').isVisible().catch(() => false))) {
+    await page.getByTestId('quick-create-open').click()
+    await page.waitForTimeout(1200)
+  }
+  await page.getByTestId('create-tab-task').click()
+  await page.waitForTimeout(900)
+
+  const CREATED = `depth create ${Date.now()}`
+  const CREATE_TAG = `dtag${Date.now()}`
+  // Scoped to the form. Unscoped, `input[placeholder]` first-matched a field
+  // OUTSIDE the modal (the top-bar search), so the title stayed empty and the
+  // Create button stayed disabled — with nothing on screen explaining why.
+  await page.locator('form input[placeholder]').first().fill(CREATED)
+
+  /*
+   * Space → Project → List, each enabling the next. Waited on rather than
+   * timed: every step fires a query for the next level, and a fixed 700ms was
+   * sometimes not enough — the list stayed unset, the Create button stayed
+   * disabled, and the failure surfaced 30 seconds later as an unhelpful
+   * "element is not enabled" on a button nobody had explained.
+   */
+  for (const id of ['quick-create-space', 'quick-create-project', 'quick-create-list']) {
+    // By testid, not by position: the form gained selects for priority and
+    // assignee, and `form select` nth(2) is only the list until somebody adds
+    // a control above it. Waited on because each choice fires the query that
+    // fills the next.
+    await page
+      .waitForFunction(
+        (sel) => (document.querySelector(`[data-testid="${sel}"]`)?.options?.length ?? 0) > 1,
+        id,
+        { timeout: 15000 },
+      )
+      .catch(() => {})
+    await page.getByTestId(id).selectOption({ index: 1 }).catch(() => {})
+  }
+
+  /*
+   * §G15 [21:59] — "agar main list nahi banaoongi to yeh nahi create karega."
+   * If this project genuinely has no list, the form must let her make one
+   * WITHOUT leaving the task she is describing. That is the whole gap.
+   */
+  const listSelect = page.getByTestId('quick-create-list')
+  if ((await listSelect.locator('option').count().catch(() => 0)) <= 1) {
+    const offered = await page.getByTestId('quick-create-new-list').isVisible().catch(() => false)
+    check(offered, 'a project with no list offers to make one right here', 'the task form is a dead end without a list')
+    if (offered) {
+      await page.getByTestId('quick-create-new-list').click()
+      await page.getByTestId('quick-create-new-list-name').fill(`inline list ${Date.now()}`)
+      await page.getByTestId('quick-create-new-list-save').click()
+      await page.waitForTimeout(2000)
+    }
+  } else {
+    // There was a list, so the dead-end path is not exercised — said out loud
+    // rather than passing a check that never ran.
+    console.log('  ·  this project already has a list, so the inline creator was not needed')
+  }
+
+  const hasDesc = await page.getByTestId('quick-create-description').isVisible().catch(() => false)
+  check(hasDesc, 'the create form asks for a description', 'no description field on create')
+  if (hasDesc) await page.getByTestId('quick-create-description').fill('made at create time')
+
+  const hasPriority = await page.getByTestId('quick-create-priority').isVisible().catch(() => false)
+  check(hasPriority, 'and a priority', 'priority is still decided for you')
+  if (hasPriority) await page.getByTestId('quick-create-priority').selectOption('urgent')
+
+  const hasDue = await page.getByTestId('quick-create-due').isVisible().catch(() => false)
+  check(hasDue, 'and a due date that carries a time', 'no due field on create')
+  // [22:59] a start AND a due, each with a time of day.
+  const stamp = (d) => new Date(d).toISOString().slice(0, 16)
+  if (hasDue) {
+    await page.getByTestId('quick-create-start').fill(stamp(Date.now() + 3600_000))
+    await page.getByTestId('quick-create-due').fill(stamp(Date.now() + 4 * 86400_000))
+  }
+
+  const hasEstimate = await page.getByTestId('quick-create-estimate').isVisible().catch(() => false)
+  check(hasEstimate, 'and a time estimate', 'no estimate field on create')
+  if (hasEstimate) await page.getByTestId('quick-create-estimate').fill('3')
+
+  const hasAssign = await page.getByTestId('quick-create-assign').isVisible().catch(() => false)
+  check(hasAssign, 'and somebody to assign it to', 'no assignee control on create')
+  if (hasAssign) await page.getByTestId('quick-create-assign').selectOption({ index: 1 }).catch(() => {})
+
+  const hasTag = await page.getByTestId('quick-create-tag-input').isVisible().catch(() => false)
+  check(hasTag, 'and a tag you type and commit with Enter', 'no tag input on create')
+  if (hasTag) {
+    await page.getByTestId('quick-create-tag-input').fill(CREATE_TAG)
+    await page.getByTestId('quick-create-tag-input').press('Enter')
+    await page.waitForTimeout(400)
+    // Enter commits the tag; it must not submit the half-filled form.
+    check(
+      await page.getByTestId('quick-create-description').isVisible().catch(() => false),
+      'and Enter commits the tag without submitting the form',
+      'pressing Enter on a tag closed the form',
+    )
+  }
+
+  /*
+   * Assert the form is actually submittable before clicking. Without this the
+   * failure was a 30s Playwright timeout on a disabled button, which says
+   * nothing about WHY — the real cause was that no list had been selected.
+   */
+  const submit = page.getByRole('button', { name: /Create task/i }).first()
+  const submittable = await submit.isEnabled().catch(() => false)
+  check(submittable, 'the form is submittable once a list is chosen', 'Create task stayed disabled — no list selected')
+  if (!submittable) throw new Error('create form not submittable; the checks below would prove nothing')
+  await submit.click()
+  await page.waitForTimeout(3000)
+
+  // Now read the task the server actually made.
+  const madeList = await A(`/tasks/workspace/${workspaceId}?limit=200`)
+  const made = (madeList.data ?? []).find((x) => x.title === CREATED)
+  check(!!made, 'the task is created', `no task titled ${CREATED}`)
+
+  if (made) {
+    const full = await A(`/tasks/${made.id}`)
+    const d = full.data ?? {}
+    check(d.priority === 'urgent', 'the priority she chose is the priority it has', `priority=${d.priority}`)
+    check(!!d.dueDate && !!d.startDate, 'both dates arrived', `start=${d.startDate} due=${d.dueDate}`)
+    // The time of day is the half that used to be dropped.
+    check(
+      !!d.dueDate && new Date(d.dueDate).getUTCHours() + new Date(d.dueDate).getUTCMinutes() >= 0 &&
+        /T\d\d:\d\d/.test(new Date(d.dueDate).toISOString()),
+      'and the due date carries a time, not just a day',
+      String(d.dueDate),
+    )
+    check(Number(d.timeEstimate) === 3 * 3600, 'the estimate is stored in seconds', `timeEstimate=${d.timeEstimate}`)
+    check(
+      typeof d.description === 'string' && d.description.includes('made at create time'),
+      'the description arrived',
+      JSON.stringify(d.description ?? null),
+    )
+    check((d.assignees ?? []).length > 0, 'somebody is assigned', JSON.stringify(d.assignees ?? []))
+    check(
+      (d.labels ?? []).some((l) => (l.name ?? l) === CREATE_TAG),
+      'and the tag she typed is on it',
+      JSON.stringify(d.labels ?? []),
+    )
+    await A(`/tasks/${made.id}`, { method: 'DELETE' }).catch(() => {})
+  }
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G15 [23:16] — a tag can reach a task')
