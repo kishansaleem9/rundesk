@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 33
+const EXPECTED_CHECKS = 37
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -481,6 +481,47 @@ try {
         'the sidebar collapsed while somebody was typing',
       )
     }
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ G12-8 — a notification can be put back to unread')
+  // ---------------------------------------------------------------------
+  /*
+   * The Inbox could mark read, mark ALL read, clear one and clear all — and had
+   * no way back from the first. Opening a notification to see what it was
+   * destroyed the only signal that you had not dealt with it yet.
+   *
+   * Driven through the API for the setup (seed a row, read it) so the state is
+   * known, then through the UI for the act, then read back off the server —
+   * a button that toggles a class and posts nothing looks identical on screen.
+   */
+  await A('/notifications/test', { method: 'POST', body: { workspaceId } })
+  const seeded = ((await A('/notifications?view=inbox')).data ?? []).find((n) => n.type === 'test_notification')
+  check(!!seeded, 'a notification exists to mark unread', 'could not seed one')
+  if (seeded) {
+    await A(`/notifications/${seeded.id}/read`, { method: 'POST' })
+    const afterRead = ((await A('/notifications?view=inbox')).data ?? []).find((n) => n.id === seeded.id)
+    check(!!afterRead?.readAt, 'and it can be marked read first', `readAt=${afterRead?.readAt}`)
+
+    await page.goto(`${origin}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3500)
+    const row = page.getByTestId(`notif-${seeded.id}`)
+    if ((await row.count()) === 0) {
+      check(false, 'the read row is on the Inbox', 'the seeded row did not render')
+    } else {
+      await row.hover()
+      await page.waitForTimeout(400)
+      const btn = page.getByTestId(`notif-unread-${seeded.id}`)
+      const offered = await btn.isVisible().catch(() => false)
+      check(offered, 'a read row offers Mark unread', 'no way back from read')
+      if (offered) {
+        await btn.click()
+        await page.waitForTimeout(2000)
+        const afterUnread = ((await A('/notifications?view=inbox')).data ?? []).find((n) => n.id === seeded.id)
+        check(afterUnread?.readAt == null, 'and pressing it really un-reads it', `readAt=${afterUnread?.readAt}`)
+      }
+    }
+    await A(`/notifications/${seeded.id}/clear`, { method: 'POST' }).catch(() => {})
   }
 
   // ---------------------------------------------------------------------

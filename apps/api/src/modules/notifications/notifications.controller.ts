@@ -138,6 +138,15 @@ export class NotificationsController {
     return this.notifications.markRead(user.id, notificationId)
   }
 
+  /** §G12 [16:56] — put a row back the way it was before you opened it. */
+  @Post(':notificationId/unread')
+  markUnread(
+    @Param('notificationId') notificationId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.notifications.markUnread(user.id, notificationId)
+  }
+
   @Post('mark-all-read')
   markAllRead(@CurrentUser() user: CurrentUserPayload) {
     return this.notifications.markAllRead(user.id)

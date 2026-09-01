@@ -714,6 +714,25 @@ export class NotificationsService {
     return { ok: true }
   }
 
+  /**
+   * §G12 [16:56] — "mark unread", the way you would in an email client.
+   *
+   * The Inbox could mark a row read, mark them all read, clear one and clear
+   * all — and had no way back. Opening a notification to see what it was
+   * therefore destroyed the only signal that you had not dealt with it yet,
+   * which is exactly what "I'll come back to this" needs.
+   *
+   * Scoped by userId like every sibling: a notification id is not a
+   * capability, and this must not let one person un-read another's row.
+   */
+  async markUnread(userId: string, notificationId: string) {
+    await this.db
+      .update(notifications)
+      .set({ readAt: null })
+      .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    return { ok: true }
+  }
+
   async markAllRead(userId: string) {
     const now = new Date()
     // Scoped to the Inbox bucket so a snoozed row comes back unread when its

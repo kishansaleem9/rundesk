@@ -19,6 +19,7 @@ import {
   Archive,
   ArrowUpRight,
   ArchiveRestore,
+  MailOpen,
   Clock4,
   Settings,
   Undo2,
@@ -524,6 +525,18 @@ export function InboxPage() {
     mutationFn: (id: string) => api(`/notifications/${id}/read`, { method: 'POST' }),
     onSuccess: refreshAll,
   })
+  /*
+   * §G12 [16:56] — put a row back the way it was before you opened it.
+   *
+   * The Inbox could mark read, mark ALL read, clear one and clear all, and had
+   * no way back from the first of those. Opening a notification to see what it
+   * was destroyed the only signal that you had not dealt with it — which is
+   * precisely what "I'll come back to this" needs to survive.
+   */
+  const markUnread = useMutation({
+    mutationFn: (id: string) => api(`/notifications/${id}/unread`, { method: 'POST' }),
+    onSuccess: refreshAll,
+  })
   const markAllRead = useMutation({
     mutationFn: () => api('/notifications/mark-all-read', { method: 'POST' }),
     onSuccess: refreshAll,
@@ -809,6 +822,11 @@ export function InboxPage() {
                             : undefined
                         }
                         onClear={() => clear.mutate(ids)}
+                        onMarkUnread={
+                          group.items.some((n) => n.readAt)
+                            ? () => group.items.filter((n) => n.readAt).forEach((n) => markUnread.mutate(n.id))
+                            : undefined
+                        }
                         onUnclear={() => unclear.mutate(ids)}
                         onSnooze={(hours) => snooze.mutate({ ids, hours })}
                         onUnsnooze={() => unsnooze.mutate(ids)}
@@ -835,6 +853,7 @@ function NotificationRow({
   onOpen,
   onResolve,
   onClear,
+  onMarkUnread,
   onUnclear,
   onSnooze,
   onUnsnooze,
@@ -845,6 +864,8 @@ function NotificationRow({
   onOpen?: () => void | Promise<void>
   onResolve?: () => void | Promise<void>
   onClear: () => void
+  /** Absent when every row in the group is already unread. */
+  onMarkUnread?: () => void
   onUnclear: () => void
   onSnooze: (hours: number) => void
   onUnsnooze: () => void
@@ -946,6 +967,11 @@ function NotificationRow({
           {onResolve && (
             <RowAction onClick={act(() => void onResolve())}>{t('inbox.resolve')}</RowAction>
           )}
+          {onMarkUnread && view !== 'cleared' && (
+            <RowAction onClick={act(onMarkUnread)} icon={MailOpen} testId={`notif-unread-${notif.id}`}>
+              {t('inbox.markUnread')}
+            </RowAction>
+          )}
           {view === 'cleared' ? (
             <RowAction onClick={act(onUnclear)} icon={ArchiveRestore}>
               {t('inbox.unclear')}
@@ -992,14 +1018,17 @@ function RowAction({
   onClick,
   icon: Icon,
   children,
+  testId,
 }: {
   onClick: (e: React.MouseEvent) => void
   icon?: React.ElementType
   children: React.ReactNode
+  testId?: string
 }) {
   return (
     <button
       type="button"
+      data-testid={testId}
       onClick={onClick}
       className="inline-flex h-7 items-center gap-1 rounded-md border border-border/70 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
     >
