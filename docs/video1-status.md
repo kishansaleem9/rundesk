@@ -1060,3 +1060,53 @@ deployment has object storage — `§2.8f` gets a pre-signed upload URL — but
 nothing here drives the description editor's own upload path, so it stays
 *unverified* rather than being upgraded on the strength of a neighbouring check
 that passed.
+
+---
+
+## Reconciliation — what "done with video 1" actually means (1 Sep)
+
+Asked directly whether video 1 is finished, and the honest answer needs three
+numbers, not one.
+
+**The 33 she explicitly flagged.** Checked one by one against the deployed
+instance and the code, not against the diff:
+
+- **30 are closed and verified live.** The stale-chunk crash, the whole loading
+  system (skeletons, `id="boot"` pre-boot shell, `defaultPendingComponent`, the
+  two `Suspense fallback={null}`), task type at create and in search, the
+  Location filter, language out of the top bar, nav customisation, the bell,
+  pinnable personal tools and the avatar-menu launcher, workspace creation for
+  members plus the stepped wizard, sidebar collapse and the icon rail,
+  per-kind notification importance, the Other chip, the tabbed inbox,
+  assignee-change notifications (`task_assigned` **and** `task_unassigned`),
+  replies reaching the Replies page, Skills with the approve-before-create
+  gate, SyncUp, AI Notes, dates carrying a time, tags, the slash editor on the
+  description, and creating a private list from inside the task flow.
+- **1 is built but not verifiable here** — federated Drive search (#9). The
+  provider is offered and `drive` is accepted as an entity type; this
+  deployment has no Google credentials, so `verify-release` reports it as
+  *built, not credentialled* rather than passing.
+- **2 are genuinely still open**, and both are the same complaint:
+
+  **#28 — "Task creation collects only a title; every other property is
+  post-creation."** Partially addressed. The quick-create modal now collects a
+  **task type**, but it still posts `priority: 'normal'` hard-coded
+  (`quick-create-modal.tsx:241`) and collects no assignee, dates or tags. The
+  task *sheet* has all of them, which is exactly the thing she was complaining
+  about. Video 2 sharpens this: her create modal carries name, rich
+  description, assignee, start+due with times, priority, tags, time estimate,
+  custom fields, attachments and templates — see **V2-01** in the video 2
+  audit, which is the same surface.
+
+  **#33 — "No 'List settings' step after a list is created."** The private
+  toggle exists at creation; the post-creation settings step does not.
+
+**The other 124 gaps** from the frame pass were inferred refinements rather than
+things she asked for, and they were never individually tracked to closure. Some
+are certainly fixed as a side effect of the sections above; nobody has walked
+them one by one. Treating "video 1 is done" as covering all 157 would be a
+claim nothing supports.
+
+So: **the commitments are met bar two, both of which video 2 re-opens in a
+sharper form.** The right move is not to chase them separately — V2-01 and the
+create-modal work are the same job.
