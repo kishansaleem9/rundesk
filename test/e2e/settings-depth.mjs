@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 37
+const EXPECTED_CHECKS = 39
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -440,6 +440,32 @@ try {
     await page.getByTestId('book-call-open').isVisible().catch(() => false),
     'Help offers a call, not only a mailto:',
   )
+
+  /*
+   * Every curated topic has a card, so no citation is a dead link.
+   *
+   * `answerHelp` cites its sources as `/app/help#help-<id>`, and the page hand
+   * wrote four cards out of ten topics. For the other six the product
+   * generated its own dead link: the assistant answered, offered a source, and
+   * clicking it did nothing — `openSource` looked the element up, found
+   * nothing, and returned.
+   *
+   * Driven off the server's own list rather than a literal ten, so adding a
+   * topic tightens this check instead of leaving it behind.
+   */
+  {
+    const topics = (await A('/ai/help/topics')).data ?? []
+    check(topics.length >= 10, `the API serves the curated library (${topics.length} topics)`)
+    const missing = []
+    for (const topic of topics) {
+      if ((await page.locator(`#help-${topic.id}`).count()) === 0) missing.push(topic.id)
+    }
+    check(
+      missing.length === 0,
+      `every cited topic has somewhere to land (${topics.length - missing.length}/${topics.length})`,
+      `no card for: ${missing.join(', ')}`,
+    )
+  }
   await page.getByTestId('book-call-open').click()
   await page.waitForTimeout(700)
   await page.getByTestId('book-call-reason').fill('Walk me through onboarding')

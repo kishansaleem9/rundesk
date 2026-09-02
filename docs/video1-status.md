@@ -2271,3 +2271,59 @@ nav-customise affordance there is; and the topbar timer pill is `hidden sm:flex`
 (`app-topbar.tsx:427`). A sweep that opens each surface at a narrow width and
 asserts that whatever is on screen can be operated would retire the whole
 family. **Recorded as the next harness gap, not built here.**
+
+## The help library, and a dead link the product generated itself (2 Sep)
+
+> "Help page shows 4 of 10 backend topics" — the backlog, line 1207.
+
+That was true, and the half nobody had written down is worse than the half
+that was.
+
+`knowledge.ts` curates **ten** topics; `app-help-page.tsx` hand-wrote **four**
+cards. The assistant answers out of the ten and cites its sources through
+`helpTopicToSource`, whose url is `/app/help#help-<id>`. `openSource` resolved
+that with `document.getElementById(...)` and, finding nothing, returned.
+
+So for six of the ten topics **the product minted its own dead link**: you
+asked a question, it answered, it offered you the source it answered from, you
+clicked, and nothing happened at all. Not an error, not a scroll — nothing.
+That reads as a broken page rather than a missing feature, which is why it is
+worse than simply not offering the source.
+
+The bug lived in neither half. It lived in the fact that two halves each kept
+their own list.
+
+**Fixed by serving the list.** `GET /ai/help/topics` returns the curated
+topics, and the page merges them with the four authored cards keyed by id — the
+authored one wins where it exists, every remaining topic gets a card and an
+anchor. The four stay hand-written because they carry formatting plain text
+cannot (a ⌘K key cap, emphasised control names); the point is not to replace
+them but to stop them being the whole library. Keywords are deliberately not
+returned: they are matching fuel for the deterministic fallback — 'todo',
+'seat', 'item' — not prose to put on screen.
+
+Measured in a browser: **10 topics served, 10 anchors on the page, none
+missing.** Before, the page had four ids in its source.
+
+The one remaining way to click a citation and reach nothing was a source
+arriving before the topic list loaded. That now falls through to
+`window.location.hash`, so it lands when the card mounts instead of being
+swallowed.
+
+Six checks in `apps/api/src/modules/ai/help-library.test.ts`, cross-cutting on
+purpose, and two in `settings-depth.mjs` (floor 37 → 39) driven off the
+server's own list rather than a literal ten — so adding a topic tightens the
+check instead of leaving it behind.
+
+**One of the five breaks was missed on the first attempt, and that is the
+useful part.** The check for "the page renders more than the authored four"
+asserted that `allFaqs` appeared somewhere in the `filteredFaqs` assignment. It
+passed with the unfiltered branch put back to `faqs` — the original bug —
+because the filtered branch says `allFaqs.filter(...)` and one match satisfied
+it. Rewritten to assert that *no* branch renders the authored list alone.
+Break-testing is the only reason that was caught; the check had been green and
+meaningless.
+
+The browser break says it best: `every cited topic has somewhere to land
+(4/10) — no card for: docs, automations, time-tracking, goals, search,
+ai-assistant`.

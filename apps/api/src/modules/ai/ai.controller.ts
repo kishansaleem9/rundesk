@@ -10,6 +10,7 @@ import { NotGuestGuard } from '../../common/guards/not-guest.guard'
 import { PlanFeatureGuard } from '../plans/plan-feature.guard'
 import { RequirePlan } from '../plans/require-plan.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { HELP_TOPICS } from './knowledge'
 
 @ApiTags('ai')
 @ApiBearerAuth()
@@ -387,6 +388,24 @@ export class AiController {
       userId: user.id,
       workspaceId: body.workspaceId,
     })
+  }
+
+  /*
+   * The help library, served rather than restated.
+   *
+   * `answerHelp` cites its sources as `/app/help#help-<id>`, but the page hand
+   * wrote four cards out of ten topics — so for the other six the assistant
+   * cited an anchor that did not exist, and clicking it did nothing at all.
+   * The page now renders one card per topic from this list, which is the only
+   * arrangement in which a citation cannot point at nothing.
+   *
+   * Keywords are deliberately not returned: they are matching fuel for the
+   * fallback, not something to show anybody.
+   */
+  @Get('help/topics')
+  @ApiOperation({ summary: 'The curated help topics the assistant answers from, for the help library' })
+  helpTopics() {
+    return HELP_TOPICS.map(({ id, question, answer }) => ({ id, question, answer }))
   }
 
   @Post('help')

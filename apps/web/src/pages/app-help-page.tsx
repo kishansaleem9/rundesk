@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Card,
   CardHeader,
@@ -250,14 +250,50 @@ export function HelpPage() {
     [t],
   )
 
+  /*
+   * The rest of the library, from the server.
+   *
+   * The four cards above are hand-written because they carry formatting — a
+   * ⌘K key cap, emphasised control names — that plain text cannot. The backend
+   * curates ten topics and `answerHelp` cites them as `/app/help#help-<id>`,
+   * so the six with no card were citations pointing at an anchor that did not
+   * exist: `openSource` looked the element up, found nothing, and returned
+   * silently. A source you can click and that does nothing is worse than one
+   * that is not offered.
+   *
+   * Merged rather than replaced, and keyed by id: a hand-written card wins for
+   * the topic it covers, and every remaining topic still gets a card and an
+   * anchor. Adding a topic to `HELP_TOPICS` now adds it here too, which is the
+   * only arrangement where the two cannot drift back apart.
+   */
+  const topicsQuery = useQuery<{ id: string; question: string; answer: string }[]>({
+    queryKey: ['help-topics'],
+    queryFn: () => api('/ai/help/topics'),
+    staleTime: 60 * 60 * 1000,
+  })
+
+  const allFaqs = useMemo(() => {
+    const authored = new Set(faqs.map((f) => f.id))
+    const extra = (topicsQuery.data ?? [])
+      .filter((topic) => !authored.has(topic.id))
+      .map((topic) => ({
+        id: topic.id,
+        icon: BookOpen,
+        question: topic.question,
+        plain: topic.answer,
+        answer: <>{topic.answer}</>,
+      }))
+    return [...faqs, ...extra]
+  }, [faqs, topicsQuery.data])
+
   const normalizedQuery = query.trim().toLowerCase()
   const filteredFaqs = normalizedQuery
-    ? faqs.filter(
+    ? allFaqs.filter(
         (faq) =>
           faq.question.toLowerCase().includes(normalizedQuery) ||
           faq.plain.toLowerCase().includes(normalizedQuery),
       )
-    : faqs
+    : allFaqs
 
   const ask = useMutation({
     mutationFn: (q: string) => api<HelpAnswer>('/ai/help', { method: 'POST', body: { question: q } }),
@@ -281,7 +317,18 @@ export function HelpPage() {
     setQuery('')
     requestAnimationFrame(() => {
       const el = typeof document !== 'undefined' ? document.getElementById(anchor) : null
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        return
+      }
+      /*
+       * Every curated topic now has a card, so the only way to get here is a
+       * citation arriving before the topic list has loaded. Handing it to the
+       * browser as a hash means it lands when the card mounts, instead of the
+       * click being swallowed — which is what used to happen for six topics
+       * out of ten, permanently.
+       */
+      if (typeof window !== 'undefined') window.location.hash = anchor
     })
   }
 
