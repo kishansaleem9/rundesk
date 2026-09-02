@@ -2697,3 +2697,50 @@ nothing about the one under test.
 Re-run alone against a clean build it fails for its own reason — `the server
 says null` — which is the check doing its job. **A break is only evidence when
 it is the only thing broken.**
+
+## The adversarial pass caught a regression I had shipped that day (2 Sep)
+
+The scope re-derivation ran 39 code checks and then handed **every CLOSED
+verdict to an adversary** whose only job was to find the missing door. It
+overturned six. One of them was mine, from a few hours earlier.
+
+Several refutations said the same thing about the thread header's "Assign to"
+and "Create task": *dead below 1280px, gated by z-index rather than by a
+`hidden xl:` class.*
+
+That is the drawer from earlier today. It shipped at `z-[65]` over a `z-[60]`
+scrim — above **every** `fixed inset-0 z-50` modal on the chat page. So "Create
+task" from inside the thread opened its dialog *underneath* the scrim: in the
+DOM, rendered, and impossible to click.
+
+Measured before the fix, and the message is the whole story:
+
+| width | thread opens | the dialog it opens |
+|---|---|---|
+| 1680 | yes | card is clickable |
+| 1200 | yes | **COVERED by thread-scrim** |
+
+**Why my own checks missed it.** The narrow-viewport checks I added with the
+drawer opened it, looked at the scrim, and closed it. A drawer that opens is
+not a drawer you can use, and nothing drove a control *inside* it. Fixing the
+first thing at a width nobody tested is how you introduce the second.
+
+**The fix is the layering, not seven z-indexes.** Raising each modal above the
+drawer would have fixed today and left the next modal to rediscover it. A
+drawer is chrome; a dialog is the top layer by definition, so the chrome goes
+under it — scrim `z-40`, panel `z-[45]`, dialogs keep `z-50`. Nothing else on
+the page uses 30–49.
+
+The new check hit-tests the card's own centre, the point a person clicks.
+Asking whether the dialog is "visible" would have said yes throughout: it was
+visible the entire time, just buried. Break-tested by restoring the exact
+z-indexes I shipped — `buried under thread-scrim`.
+
+### And a check-ordering fault it exposed
+
+The first version dismissed the dialog with Escape, which is not wired on it.
+The dialog stayed up, its `fixed inset-0` backdrop swallowed the *next* check's
+click on the scrim, and "clicking away closes it again" failed. **A step that
+leaves state behind fails the check after it, which reads as a defect in
+something that is fine.** It now clicks the backdrop and asserts the dialog is
+gone before moving on.

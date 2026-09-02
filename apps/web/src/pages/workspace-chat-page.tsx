@@ -3334,7 +3334,7 @@ export function ChatPage() {
             */}
             <div
               data-testid="thread-scrim"
-              className="fixed inset-0 z-[60] bg-black/50 xl:hidden"
+              className="fixed inset-0 z-40 bg-black/50 xl:hidden"
               onClick={() => setThreadParentId(null)}
             />
           </>
@@ -4200,7 +4200,21 @@ function ThreadPanel({
        * surface, which is how two implementations of one thing start drifting.
        */
       className={cn(
-        'fixed inset-y-0 right-0 z-[65] flex w-full max-w-[420px] flex-col border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]',
+        /*
+         * The drawer sits BELOW this page's dialog layer, not above it.
+         *
+         * It first shipped at z-[65] over a z-[60] scrim, which put it above
+         * every `fixed inset-0 z-50` modal on this page — so "Create task" from
+         * the thread header opened a modal underneath the scrim and could not
+         * be clicked. Measured at 1200px: `COVERED by thread-scrim`.
+         *
+         * Raising those seven modals instead would have fixed today and left
+         * the next one to rediscover it. The drawer is chrome; a dialog is the
+         * top layer by definition, so the chrome goes under it. Nothing else on
+         * this page uses 30–49, so the scrim/panel pair has that range to
+         * itself and still covers the conversation.
+         */
+        'fixed inset-y-0 right-0 z-[45] flex w-full max-w-[420px] flex-col border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]',
         'xl:relative xl:inset-auto xl:z-50 xl:w-[360px] xl:max-w-none xl:shrink-0',
       )}
     >

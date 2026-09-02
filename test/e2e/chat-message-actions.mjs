@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 66
+const EXPECTED_CHECKS = 68
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -830,6 +830,60 @@ try {
         'the drawer dims the conversation behind it',
         'no scrim, so there is nothing to click to dismiss it',
       )
+
+      /*
+       * ...and the controls INSIDE it still work.
+       *
+       * The drawer first shipped at z-[65] over a z-[60] scrim, which put it
+       * above every `fixed inset-0 z-50` modal on this page. "Create task" from
+       * the thread header opened its modal UNDERNEATH the scrim: present in the
+       * DOM, impossible to click. The checks above did not catch it because
+       * they only opened and closed the drawer — a drawer that opens is not a
+       * drawer you can use.
+       *
+       * Read by hit-testing the card's own centre, the point a person clicks.
+       * Asking whether the modal is "visible" says nothing: it was visible the
+       * whole time, just buried.
+       */
+      const ct = np.getByTestId('thread-create-task')
+      if (await ct.isVisible().catch(() => false)) {
+        await ct.click({ timeout: 8000 }).catch(() => {})
+        await np.waitForTimeout(1200)
+        const reachable = await np.evaluate(() => {
+          const card = document.querySelector('[data-testid="chat-task-draft"]')
+          if (!card) return 'the modal did not open'
+          const r = card.getBoundingClientRect()
+          if (!r.width) return 'the modal has no box'
+          const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+          return card.contains(top) || card === top
+            ? 'ok'
+            : 'buried under ' + (top?.getAttribute('data-testid') || String(top?.className).slice(0, 60))
+        })
+        check(
+          reachable === 'ok',
+          'and a dialog opened from inside the drawer is clickable, not buried under it',
+          reachable,
+        )
+        /*
+         * Dismissed by clicking its own backdrop, and confirmed gone.
+         *
+         * Escape is not wired on this modal, so pressing it left the dialog up
+         * — and the dialog's backdrop is `fixed inset-0`, so the NEXT check's
+         * click on the scrim landed on the backdrop instead and the drawer
+         * never closed. A step that leaves state behind fails the check after
+         * it, which reads as a defect in something that is fine.
+         */
+        await np.locator('.fixed.inset-0.z-50').first().click({ position: { x: 5, y: 5 } }).catch(() => {})
+        await np.waitForTimeout(700)
+        check(
+          !(await np.getByTestId('chat-task-draft').isVisible().catch(() => false)),
+          'and that dialog closes again',
+          'the task draft stayed open, which would block everything behind it',
+        )
+      } else {
+        check(false, 'and a dialog opened from inside the drawer is clickable, not buried under it',
+          'no create-task control in the thread header')
+      }
       await scrim.click({ position: { x: 5, y: 5 } }).catch(() => {})
       await np.waitForTimeout(700)
       check(
