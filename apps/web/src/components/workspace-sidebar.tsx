@@ -35,6 +35,7 @@ import {
   Clock3,
   ArrowUp,
   ArrowDown,
+  Search,
   X,
   MoreHorizontal,
   ArrowRightLeft,
@@ -375,6 +376,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const [expandedSpaces, setExpandedSpaces] = useState<Record<string, boolean>>({})
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({})
+  const [treeFilter, setTreeFilter] = useState('')
   // §2/§13.4 — the folder/project/list currently being renamed from the tree.
   // One shared dialog serves the whole tree; `null` means it is closed.
   const [treeEdit, setTreeEdit] = useState<
@@ -670,6 +672,54 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
       return projectGroups
     },
   })
+  /*
+   * Finding something in the tree without opening every space first.
+   *
+   * The sidebar's only text box was the workspace switcher's, and even that
+   * only appears past six workspaces. The space/folder/project/list tree had
+   * no filter at all: the only way to find a list was to remember which space
+   * it was in and expand your way down to it.
+   *
+   * Two decisions worth keeping:
+   *
+   * 1. A space is kept when it matches *or any of its descendants do*.
+   *    Matching only the top level would hide every list whose space is named
+   *    something else, which is most of them — the same shape as filtering a
+   *    page of results after slicing it.
+   * 2. While a filter is active everything reads as expanded, but the user's
+   *    own expansion state is never written to. A match inside a collapsed
+   *    space would otherwise be invisible — present in the tree and impossible
+   *    to see — and force-expanding for real would silently destroy the
+   *    arrangement they left, which clearing the box could not put back.
+   */
+  const treeNeedle = treeFilter.trim().toLowerCase()
+  const filtering = treeNeedle.length > 0
+  const hit = (name: string) => name.toLowerCase().includes(treeNeedle)
+
+  const visibleTree = (() => {
+    const tree = spaceTreeQuery.data
+    if (!tree || !filtering) return tree
+    return tree
+      .map((space) => {
+        const spaceHit = hit(space.name)
+        const projects = space.projects
+          .map((project) => {
+            const projectHit = spaceHit || hit(project.name)
+            const lists = projectHit ? project.lists : project.lists.filter((l) => hit(l.name))
+            return projectHit || lists.length > 0 ? { ...project, lists } : null
+          })
+          .filter((p): p is NonNullable<typeof p> => p !== null)
+        const folders = spaceHit ? space.folders : space.folders.filter((f) => hit(f.name))
+        return spaceHit || projects.length > 0 || folders.length > 0
+          ? { ...space, projects, folders }
+          : null
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+  })()
+
+  const spaceOpen = (id: string) => filtering || !!expandedSpaces[id]
+  const projectOpen = (id: string) => filtering || !!expandedProjects[id]
+
   const dockConfigQuery = useQuery({
     queryKey: ['user-dock-config', workspaceId],
     queryFn: () => api<any>(`/dashboards/dock/${workspaceId}`),
@@ -1593,6 +1643,43 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
         <div className="px-2 pb-3">
           {spacesExpanded && workspaceId && (
             <div className="space-y-1">
+            {/*
+              Rendered whatever the tree contains, unlike the workspace
+              switcher's box, which only appears past six workspaces. A filter
+              that hides itself until you have enough items is one nobody
+              discovers, and the count at which it starts mattering is not the
+              same for everybody.
+            */}
+            <div className="relative mb-1">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={treeFilter}
+                onChange={(e) => setTreeFilter(e.target.value)}
+                placeholder={t('nav.findInTree')}
+                aria-label={t('nav.findInTree')}
+                data-testid="tree-filter"
+                className="w-full rounded-md border border-border/60 bg-background py-1 pl-7 pr-6 text-xs outline-none focus:border-accent"
+              />
+              {filtering && (
+                <button
+                  type="button"
+                  onClick={() => setTreeFilter('')}
+                  aria-label={t('nav.clearFilter')}
+                  data-testid="tree-filter-clear"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            {filtering && (visibleTree?.length ?? 0) === 0 && (
+              <div
+                data-testid="tree-filter-empty"
+                className="px-2 py-1.5 text-[11px] text-muted-foreground"
+              >
+                {t('nav.findInTreeEmpty')}
+              </div>
+            )}
             <div className="px-2 py-1 rounded-md border border-dashed border-border/70 bg-card/40 text-[11px] text-muted-foreground flex items-center gap-1.5">
               <Star className="h-3.5 w-3.5" />
               {t('nav.starHint')}
@@ -1601,7 +1688,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               <Clock3 className="h-3.5 w-3.5" />
               {t('nav.recentHint')}
             </div>
-            {spaceTreeQuery.data?.map((space) => {
+            {visibleTree?.map((space) => {
               const renderProjectNode = (project: (typeof space.projects)[number]) => (
                 <div key={project.id} className="space-y-0.5">
                   <div className="group flex items-center gap-1">
@@ -1609,13 +1696,13 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     <button
                       type="button"
                       onClick={() => setExpandedProjects((prev) => ({ ...prev, [project.id]: !prev[project.id] }))}
-                      aria-expanded={!!expandedProjects[project.id]}
-                      aria-label={t(expandedProjects[project.id] ? 'nav.collapseItem' : 'nav.expandItem', { name: project.name })}
+                      aria-expanded={projectOpen(project.id)}
+                      aria-label={t(projectOpen(project.id) ? 'nav.collapseItem' : 'nav.expandItem', { name: project.name })}
                       data-testid={`project-toggle-${project.id}`}
                       className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/10"
                     >
                       <ChevronDown
-                        className={cn('h-3 w-3 transition-transform', expandedProjects[project.id] && 'rotate-180')}
+                        className={cn('h-3 w-3 transition-transform', projectOpen(project.id) && 'rotate-180')}
                       />
                     </button>
                     <Link
@@ -1676,7 +1763,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                  {expandedProjects[project.id] && (
+                  {projectOpen(project.id) && (
                     <div className="ml-5 space-y-0.5">
                       {project.lists.map((list) => {
                         const listPath = resolveRoutePath(
@@ -1790,12 +1877,12 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                   <button
                     type="button"
                     onClick={() => setExpandedSpaces((prev) => ({ ...prev, [space.id]: !prev[space.id] }))}
-                    aria-expanded={!!expandedSpaces[space.id]}
-                    aria-label={t(expandedSpaces[space.id] ? 'nav.collapseItem' : 'nav.expandItem', { name: space.name })}
+                    aria-expanded={spaceOpen(space.id)}
+                    aria-label={t(spaceOpen(space.id) ? 'nav.collapseItem' : 'nav.expandItem', { name: space.name })}
                     data-testid={`space-toggle-${space.id}`}
                     className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/10"
                   >
-                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', expandedSpaces[space.id] && 'rotate-180')} />
+                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', spaceOpen(space.id) && 'rotate-180')} />
                   </button>
                   <Link
                     to="/app/$workspaceId/$spaceId"
@@ -1851,11 +1938,11 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-                {expandedSpaces[space.id] && (
+                {spaceOpen(space.id) && (
                   <div className="ml-6 space-y-0.5">
                     {(space.folders ?? []).map((folder) => {
                       const folderProjects = space.projects.filter((p) => p.folderId === folder.id)
-                      const open = expandedFolders[folder.id] ?? true
+                      const open = filtering || (expandedFolders[folder.id] ?? true)
                       return (
                         <div key={folder.id} className="space-y-0.5">
                           <div className="group flex items-center gap-1">

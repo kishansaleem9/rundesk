@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 49
+const EXPECTED_CHECKS = 56
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -872,6 +872,119 @@ try {
       'so the defaults come back on screen',
       `favourites: ${restored.slice(0, 120)}`,
     )
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ the space tree can be searched')
+  // ---------------------------------------------------------------------
+  /*
+   * Seeded with THREE spaces, and the target list buried in one of them.
+   *
+   * The seeded workspace has a single space. Against that, a filter that
+   * matched everything and a filter that worked would both leave one row on
+   * screen and both read as a pass — the same shape as the forward modal's
+   * ten-item cap, which only showed itself past the tenth conversation.
+   *
+   * The list is what gets typed, not the space. Matching only top-level names
+   * would hide every list whose space is called something else, which is most
+   * of them, and that failure is invisible if you search for a space name.
+   */
+  {
+    const tag = Date.now()
+    const names = [`treefind-alpha-${tag}`, `treefind-beta-${tag}`, `treefind-gamma-${tag}`]
+    const madeSpaces = []
+    for (const name of names) {
+      const sp = await A(`/spaces`, { method: 'POST', body: { workspaceId, name } })
+      if (sp.data?.id) madeSpaces.push(sp.data.id)
+    }
+    const LIST_NEEDLE = `needle-list-${tag}`
+    let listMade = false
+    if (madeSpaces.length === 3) {
+      const proj = await A(`/projects`, {
+        method: 'POST',
+        body: { spaceId: madeSpaces[2], name: `treefind-project-${tag}` },
+      })
+      if (proj.data?.id) {
+        const list = await A(`/lists`, {
+          method: 'POST',
+          body: { projectId: proj.data.id, name: LIST_NEEDLE },
+        })
+        listMade = !!list.data?.id
+      }
+    }
+    check(madeSpaces.length === 3 && listMade, 'three spaces and a buried list could be seeded',
+      `spaces=${madeSpaces.length} list=${listMade}`)
+
+    const cleanupTree = async () => {
+      for (const id of madeSpaces) await A(`/spaces/${id}`, { method: 'DELETE' }).catch(() => {})
+    }
+
+    try {
+      if (madeSpaces.length === 3 && listMade) {
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        await page.waitForTimeout(4000)
+
+        const rows = () => page.locator('[data-testid^="space-link-"]').count()
+        const box = page.getByTestId('tree-filter')
+        check(await box.isVisible().catch(() => false), 'the tree has a search box')
+
+        const before = await rows()
+        check(before >= 3, `all the spaces are listed to begin with (${before})`)
+
+        // Typing a LIST name: its space survives, the other two do not.
+        await box.fill(LIST_NEEDLE)
+        await page.waitForTimeout(900)
+        const narrowed = await rows()
+        check(
+          narrowed === 1,
+          `searching a list name narrows to the one space holding it (${narrowed} of ${before})`,
+          `${narrowed} spaces still shown — the filter is not matching descendants`,
+        )
+        check(
+          await page.locator(`text=${JSON.stringify(LIST_NEEDLE)}`).first().isVisible().catch(() => false),
+          'and the list itself is on screen without expanding anything',
+          'the match is in the tree but still hidden inside a collapsed space',
+        )
+
+        await box.fill(`nothing-matches-${tag}`)
+        await page.waitForTimeout(700)
+        /*
+         * Read for words, not for the element.
+         *
+         * The first version asked `isVisible()`, and that passed with the
+         * message emptied to `{''}` — the div still renders, still has
+         * padding, still has a box. It was checking that a container existed,
+         * which is the opposite of what "says so" means. Break-testing is the
+         * only reason that showed up.
+         */
+        const emptyText = (
+          await page.getByTestId('tree-filter-empty').innerText().catch(() => '')
+        ).trim()
+        check(
+          emptyText.length > 0,
+          `a search that matches nothing says so ("${emptyText}")`,
+          'an empty tree renders blank, or an empty box with nothing in it',
+        )
+
+        await page.getByTestId('tree-filter-clear').click()
+        await page.waitForTimeout(900)
+        const after = await rows()
+        check(after === before, `clearing brings every space back (${after})`, `${after} vs ${before}`)
+      } else {
+        for (const label of [
+          'the tree has a search box',
+          'all the spaces are listed to begin with',
+          'searching a list name narrows to the one space holding it',
+          'and the list itself is on screen without expanding anything',
+          'a search that matches nothing says so',
+          'clearing brings every space back',
+        ]) {
+          check(false, label, 'seeding failed')
+        }
+      }
+    } finally {
+      await cleanupTree()
+    }
   }
 
   await done(browser, stack, restore)

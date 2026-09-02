@@ -2414,3 +2414,63 @@ back on the inbox" and leave you to find out where.
 The litter that exposed it is left in place deliberately: the notification with
 "other" in its body is still in the dev database, and the check passes anyway.
 That is the demonstration.
+
+## The sidebar tree could not be searched (2 Sep)
+
+> "no Customize footer or tree search" — the backlog, line 1213. Customize
+> exists (the dock's ⚙, and deliberately xl-only — see G07-7). Tree search did
+> not.
+
+The sidebar had exactly one text box, the workspace switcher's, and even that
+only appears past six workspaces (`workspace-sidebar.tsx:1186`). The
+space/folder/project/list tree had no filter at all: the only way to reach a
+list was to remember which space it lived in and expand your way down.
+
+**Fixed** with a filter above the tree. Two decisions are the whole design:
+
+1. **A space is kept when it matches *or any of its descendants do*.** Matching
+   only top-level names would hide every list whose space is called something
+   else — which is most of them. That is the same shape as filtering a page of
+   results after slicing it: the thing you searched for is structurally
+   unreachable, and the control looks like it works.
+2. **While a filter is active everything reads as expanded, and the user's own
+   expansion state is never written to.** A match inside a collapsed space
+   would otherwise be in the tree and impossible to see; force-expanding for
+   real would silently destroy the arrangement they left, which clearing the
+   box could not put back.
+
+The box renders whatever the tree contains, unlike the switcher's. A filter
+that hides itself until you have "enough" items is one nobody discovers, and
+the count at which it starts mattering is not the same for everybody.
+
+Seven checks in `panel-collapse.mjs`, floor 49 → 56, seeding **three** spaces
+with the target list buried in the third. The seeded workspace has one space,
+and against one space a filter that matched everything and a filter that worked
+would both leave one row on screen and both read as a pass — the forward
+modal's ten-item cap all over again. What gets typed is the **list** name, not
+the space: searching for a space name would pass even with descendant matching
+broken.
+
+Four breaks. Three caught first time: top-level-only matching (`0 of 4` — the
+filter matching nothing at all), matches left hidden inside collapsed spaces,
+and clearing not restoring the tree (`0 vs 4`).
+
+### The fourth was missed, and it is the third time this session
+
+Emptying the no-match message to `{''}` **passed**. The check asked
+`isVisible()`, and the div still renders — still has padding, still has a box.
+It was checking that a container existed, which is the opposite of what "says
+so" means.
+
+That is now three checks in one session that break-testing found to be green
+and meaningless, and they share a shape:
+
+| check | what it asserted | what it should have asserted |
+|---|---|---|
+| forward source id | a variable name appeared | the id and body come off one object |
+| help library | `allFaqs` appeared *somewhere* | no branch renders the authored four alone |
+| tree no-match | the element is visible | the element has words in it |
+
+Each one asserted the presence of a thing rather than the property that made
+the thing worth having. It now reads the text back:
+`a search that matches nothing says so ("Nothing here matches that.")`.
