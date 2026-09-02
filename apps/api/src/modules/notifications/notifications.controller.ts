@@ -74,6 +74,8 @@ export class NotificationsController {
       reminderLeadDays?: number[]
       /** §2.2 — which types the Inbox's Primary chip shows. */
       primaryTypes?: string[]
+      /** §2.2 — the Customize Inbox drawer: grouping, order and density. */
+      inboxView?: { groupByDate?: boolean; sortNewestFirst?: boolean; density?: 'comfortable' | 'compact' }
     },
   ) {
     return this.notifications.updatePreferences(user.id, body)

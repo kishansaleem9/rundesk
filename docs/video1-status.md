@@ -2474,3 +2474,77 @@ and meaningless, and they share a shape:
 Each one asserted the presence of a thing rather than the property that made
 the thing worth having. It now reads the text back:
 `a search that matches nothing says so ("Nothing here matches that.")`.
+
+## Customize Inbox was named after settings it did not have (2 Sep)
+
+The frame audit spells out the drawer behind the gear on the Primary tab:
+
+> "Inbox settings drawer: **Show All tab, Group by date, Sort by newest first,
+> Display mode** — the gear on the Primary tab that opens 'Customize Inbox' —
+> the container she goes through to reach Customize importance."
+
+We had the importance list she reaches *through* that drawer, and none of the
+three settings the drawer is named for. The inbox had **no sort or order state
+at all** — the server's order was walked straight into day buckets.
+
+### One thing checked and deliberately not changed
+
+The other half of this backlog line — "no funnel filter on the inbox" — read
+as the gear being hidden unless you stand on Primary. It is, and that is
+correct: the code comment quotes her saying so, *"Primary pe yeh setting ka
+option hai"*. Verified before touching it, because "fixing" it would have moved
+a control she put somewhere on purpose.
+
+### What was built
+
+Three settings in the drawer, above the importance list: **Group by date**,
+**Sort by newest first**, and a **display mode** (comfortable / compact).
+
+They live in `notificationPreferences` beside `primaryTypes`, so they are
+per-user and server-side. localStorage was the alternative and it is the same
+complaint as the sidebar favourites: an inbox you arranged on one machine that
+comes back unarranged on the next. No migration — the column is jsonb and
+already carries `primaryTypes`.
+
+Defaulted to the behaviour that shipped before it was a choice — day buckets,
+newest first, comfortable — so an account that never opens the drawer sees no
+change at all.
+
+Two implementation notes that are the difference between working and looking
+like it works:
+
+- **Sorted before grouping, never after.** The buckets are built by walking the
+  list and starting a new one when the day changes, so a list in the wrong
+  order would produce the same day twice with rows scattered between them.
+  Reversing the rendered buckets instead would put the newest day first with
+  its oldest row at the top — neither order anybody asked for.
+- **Grouping off means one unlabelled run, not one bucket per row.** A header
+  above every single notification is the same as no grouping and three times
+  the height.
+
+### The checks, and why they read the server
+
+Nine in `video-regression.mjs`. Each of these settings has an obvious way to be
+a lie — a checkbox that redraws its own tick and moves no rows, or one that
+moves rows and forgets by the next visit — so the checks drive the control,
+reload the page, read the list back, **and then read the preference back off
+the server**.
+
+Three breaks, all caught:
+
+| break | what the check said |
+|---|---|
+| sort changes no rows | `the top row did not move: OA Organization Admin Commented Task 53 minutes ago` |
+| grouping off still renders headers | `buckets=1 ungrouped=0` |
+| the server drops the setting | `server says {"groupByDate":true,"sortNewestFirst":true,"density":"comfortable"}` |
+
+The third took down three checks at once, including the server read. That is
+the "changed the screen but not the record" case, and it is the third time this
+audit has needed a check that looks past the DOM to catch it.
+
+**One own-goal worth recording.** The server-read check failed first time with
+`server says null` — I read `stored.inboxView` where the fixture's `apiClient`
+returns `{ status, data, error }`. Undefined is indistinguishable from "the
+server did not store it", so the check reported a defect that did not exist
+while the feature worked. The tell was that the UI check passed *after a full
+page reload*, which cannot happen unless the value is stored.

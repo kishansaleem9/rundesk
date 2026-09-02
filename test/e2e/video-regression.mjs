@@ -67,6 +67,16 @@ if (!WS) {
   )
 }
 
+/*
+ * A client that outlives the discovery block above, whose own `api` is scoped
+ * to it. The inbox display checks need to read a preference back from the
+ * server, because a setting that only redraws the screen is the defect this
+ * suite keeps finding.
+ */
+const API_ROOT = `${BASE}/api/v1`
+const rootAuth = await login(API_ROOT, EMAIL, PASSWORD)
+const rootApi = apiClient(API_ROOT, rootAuth.accessToken)
+
 const results = []
 let REF = '—'
 const ok = (m) => { results.push([REF, true, m]); console.log(`  \x1b[32mPASS\x1b[0m [${REF}] ${m}`) }
@@ -289,6 +299,102 @@ try {
     // an empty inbox, so with nothing to clear this check cannot be answered.
     console.log('  \x1b[2mSKIP  no notification could be arranged — "Clear all" not checked\x1b[0m')
   }
+
+  /*
+   * §2.2 — the gear opens "Customize Inbox", not just an importance list.
+   *
+   * The frame audit names the drawer's contents: "Show All tab, Group by date,
+   * Sort by newest first, Display mode". We had the importance list she walks
+   * into *through* that drawer, and none of the three settings the drawer is
+   * named for.
+   *
+   * Driven rather than looked at. Each of these has an obvious way to be a lie
+   * — a checkbox that redraws itself and changes no rows, or one that changes
+   * rows and forgets by the next visit — so the checks read the list back and
+   * then read the server back.
+   */
+  ref('A2.6b', 'The gear opens Customize Inbox: grouping, order and density')
+  await rootApi('/notifications/preferences', {
+    method: 'POST',
+    body: { inboxView: { groupByDate: true, sortNewestFirst: true, density: 'comfortable' } },
+  }).catch(() => {})
+  await go(`/app/${WS}/inbox?filter=primary`, 3200)
+
+  const gear = page.getByTestId('primary-customise')
+  chk(await gear.isVisible().catch(() => false), 'the gear is on the Primary tab', 'no gear on Primary')
+  await gear.click().catch(() => {})
+  await page.waitForTimeout(700)
+  for (const [id, what] of [
+    ['inbox-group-by-date', 'Group by date'],
+    ['inbox-sort-newest', 'Sort by newest first'],
+    ['inbox-density-compact', 'a display mode'],
+  ]) {
+    chk(
+      await page.getByTestId(id).isVisible().catch(() => false),
+      `${what} is in the drawer`,
+      `${what} is missing from Customize Inbox`,
+    )
+  }
+
+  const firstRow = async () =>
+    (await page.locator('[data-testid^="notif-"]').first().innerText().catch(() => ''))
+      .replace(/\s+/g, ' ')
+      .slice(0, 60)
+  const dateBuckets = () => page.locator('[data-testid^="inbox-bucket-"]').count()
+  const ungrouped = () => page.locator('[data-testid="inbox-ungrouped"]').count()
+
+  const newestFirst = await firstRow()
+  const groupedCount = await dateBuckets()
+  chk(groupedCount > 0 && (await ungrouped()) === 0, 'by default the rows sit under date headers',
+    `buckets=${groupedCount} ungrouped=${await ungrouped()}`)
+  chk(newestFirst.length > 0, 'and there is a row to reorder', 'the inbox is empty, so order cannot be checked')
+
+  if (newestFirst.length > 0) {
+    // Turning the sort off has to change which row is on top. A checkbox that
+    // only changes its own tick is the whole defect class this audit is about.
+    await page.getByTestId('inbox-sort-newest').click()
+    await page.waitForTimeout(1600)
+    await go(`/app/${WS}/inbox?filter=primary`, 3200)
+    const oldestFirst = await firstRow()
+    chk(
+      oldestFirst !== newestFirst,
+      'turning off "newest first" puts a different row on top',
+      `the top row did not move: ${newestFirst}`,
+    )
+    // ...and survived a reload, which is what "stored" means.
+    // `apiClient` returns { status, data, error }, so the preferences are one
+    // level down. Reading `stored.inboxView` gave undefined, which is
+    // indistinguishable from "the server did not store it" — the check failed
+    // while the feature worked.
+    const stored = (await rootApi('/notifications/preferences').catch(() => null))?.data
+    chk(
+      stored?.inboxView?.sortNewestFirst === false,
+      'and the server remembers the choice',
+      `server says ${JSON.stringify(stored?.inboxView ?? null)}`,
+    )
+
+    await page.getByTestId('primary-customise').click().catch(() => {})
+    await page.waitForTimeout(600)
+    await page.getByTestId('inbox-group-by-date').click()
+    await page.waitForTimeout(1600)
+    await go(`/app/${WS}/inbox?filter=primary`, 3200)
+    chk(
+      (await dateBuckets()) === 0 && (await ungrouped()) === 1,
+      'turning off "group by date" removes the date headers',
+      `buckets=${await dateBuckets()} ungrouped=${await ungrouped()}`,
+    )
+  } else {
+    chk(false, 'turning off "newest first" puts a different row on top', 'no rows')
+    chk(false, 'and the server remembers the choice', 'no rows')
+    chk(false, 'turning off "group by date" removes the date headers', 'no rows')
+  }
+
+  // Put it back, so the rest of this suite and every other one see the inbox
+  // they expect.
+  await rootApi('/notifications/preferences', {
+    method: 'POST',
+    body: { inboxView: { groupByDate: true, sortNewestFirst: true, density: 'comfortable' } },
+  }).catch(() => {})
 
   ref('A2.9', 'Replies get their own route, with unread against read')
   await go(`/app/${WS}/replies`, 3500)

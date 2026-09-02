@@ -275,6 +275,41 @@ function normalizePrimaryTypes(value: unknown): string[] {
   return value.length > 0 && chosen.length === 0 ? DEFAULT_PRIMARY_TYPES : chosen
 }
 
+/**
+ * §2.2 — how the Inbox is laid out, from the gear on the Primary tab.
+ *
+ * Her frame calls this drawer "Customize Inbox" and shows Group by date, Sort
+ * by newest first, and a display mode alongside the importance list we already
+ * had. These are per-user view settings, so they live beside `primaryTypes`
+ * rather than in localStorage: an inbox arranged on one machine that comes back
+ * unarranged on the next is the same complaint as the sidebar favourites.
+ *
+ * Clamped rather than trusted. An unknown density is not a reason to render an
+ * inbox with no class on it.
+ */
+const INBOX_DENSITIES = ['comfortable', 'compact'] as const
+type InboxDensity = (typeof INBOX_DENSITIES)[number]
+type InboxViewPrefs = { groupByDate: boolean; sortNewestFirst: boolean; density: InboxDensity }
+
+const DEFAULT_INBOX_VIEW: InboxViewPrefs = {
+  // The behaviour before this was a choice: day buckets, newest first.
+  groupByDate: true,
+  sortNewestFirst: true,
+  density: 'comfortable',
+}
+
+function normalizeInboxView(value: unknown): InboxViewPrefs {
+  const v = (value ?? {}) as Partial<InboxViewPrefs>
+  return {
+    groupByDate: typeof v.groupByDate === 'boolean' ? v.groupByDate : DEFAULT_INBOX_VIEW.groupByDate,
+    sortNewestFirst:
+      typeof v.sortNewestFirst === 'boolean' ? v.sortNewestFirst : DEFAULT_INBOX_VIEW.sortNewestFirst,
+    density: (INBOX_DENSITIES as readonly string[]).includes(v.density as string)
+      ? (v.density as InboxDensity)
+      : DEFAULT_INBOX_VIEW.density,
+  }
+}
+
 type DigestFrequency = 'daily' | 'weekly'
 
 type NotificationPreferences = {
@@ -318,6 +353,8 @@ type NotificationPreferences = {
    * customiser keeps behaving exactly as before.
    */
   primaryTypes?: string[]
+  /** §2.2 — the Customize Inbox drawer: grouping, order and density. */
+  inboxView?: InboxViewPrefs
   /**
    * §A4.7 — whether creating, being assigned to, or commenting on a task
    * subscribes you to it. The behaviour has always been on and invisible; this
@@ -341,10 +378,13 @@ type NotificationPreferencesPatch = {
   autoFollow?: boolean
   /** §2.2 — which types the Inbox's Primary chip shows. */
   primaryTypes?: string[]
+  /** §2.2 — the Customize Inbox drawer. */
+  inboxView?: Partial<InboxViewPrefs>
 }
 
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   primaryTypes: DEFAULT_PRIMARY_TYPES,
+  inboxView: DEFAULT_INBOX_VIEW,
   channels: {
     webEnabled: true,
     mobileEnabled: false,
@@ -1313,6 +1353,7 @@ export class NotificationsService {
       briefing: normalizeBriefingPrefs({ ...base.briefing, ...(patch.briefing ?? {}) }),
       reminderLeadDays: normalizeReminderLeadDays(patch.reminderLeadDays ?? base.reminderLeadDays),
     primaryTypes: normalizePrimaryTypes(patch.primaryTypes ?? base.primaryTypes),
+      inboxView: normalizeInboxView({ ...(base.inboxView ?? DEFAULT_INBOX_VIEW), ...(patch.inboxView ?? {}) }),
       autoFollow: patch.autoFollow ?? base.autoFollow,
       // §14.3 — carry through the onboarding-dismissed flag untouched (set out of
       // band by WorkspacesService) so editing notification prefs never resets it.

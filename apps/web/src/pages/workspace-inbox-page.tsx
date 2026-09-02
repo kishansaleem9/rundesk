@@ -358,14 +358,33 @@ const FILTER_HINT_KEY: Record<InboxFilter, TranslationKey> = {
  * Every change saves immediately — this is a view filter, so there is nothing
  * to commit and no state worth losing to a mis-click on Cancel.
  */
+/**
+ * §2.2 — "Customize Inbox", the drawer behind the gear on the Primary tab.
+ *
+ * > "Primary pe yeh setting ka option hai; is par main click karti hoon to yeh
+ * >  mujh se poochta hai ke mujhe kya cheezein show karwani hain."
+ *
+ * Her frame shows this as a container: Group by date, Sort by newest first and
+ * a display mode sit above the importance list, which is the part she then
+ * walks into. We had only the list, so three of the four settings the drawer
+ * is named for did not exist.
+ *
+ * The gear stays on Primary, because that is where she opens it from. The view
+ * settings it now carries apply to every tab, which is the only sensible
+ * reading — nobody wants Later sorted the opposite way from Inbox.
+ */
 function PrimaryCustomiser({
   selected,
   pending,
   onChange,
+  view,
+  onViewChange,
 }: {
   selected: Set<string>
   pending: boolean
   onChange: (types: string[]) => void
+  view: InboxViewPrefs
+  onViewChange: (patch: Partial<InboxViewPrefs>) => void
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -399,7 +418,54 @@ function PrimaryCustomiser({
             className="absolute right-0 z-50 mt-1 w-72 rounded-lg border border-border/70 bg-card p-2 shadow-xl"
             data-testid="primary-customise-panel"
           >
-            <p className="px-2 pb-1.5 pt-1 text-[11px] text-muted-foreground">
+            <div className="border-b border-border/60 pb-1.5">
+              <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                {t('inbox.displayHeading')}
+              </p>
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] hover:bg-accent/10">
+                <input
+                  type="checkbox"
+                  checked={view.groupByDate}
+                  onChange={() => onViewChange({ groupByDate: !view.groupByDate })}
+                  data-testid="inbox-group-by-date"
+                  className="h-3.5 w-3.5 rounded border-border"
+                />
+                <span>{t('inbox.groupByDate')}</span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] hover:bg-accent/10">
+                <input
+                  type="checkbox"
+                  checked={view.sortNewestFirst}
+                  onChange={() => onViewChange({ sortNewestFirst: !view.sortNewestFirst })}
+                  data-testid="inbox-sort-newest"
+                  className="h-3.5 w-3.5 rounded border-border"
+                />
+                <span>{t('inbox.sortNewestFirst')}</span>
+              </label>
+              <div className="flex items-center gap-1 px-2 py-1.5">
+                <span className="text-[13px] text-muted-foreground">{t('inbox.density')}</span>
+                <div className="ml-auto flex gap-1">
+                  {(['comfortable', 'compact'] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => onViewChange({ density: d })}
+                      aria-pressed={view.density === d}
+                      data-testid={`inbox-density-${d}`}
+                      className={cn(
+                        'rounded-full border px-2 py-0.5 text-[11px]',
+                        view.density === d
+                          ? 'border-brand-500 bg-brand-500/10 text-foreground'
+                          : 'border-border/70 text-muted-foreground hover:bg-accent/10',
+                      )}
+                    >
+                      {t(d === 'comfortable' ? 'inbox.densityComfortable' : 'inbox.densityCompact')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <p className="px-2 pb-1.5 pt-1.5 text-[11px] text-muted-foreground">
               {t('inbox.customisePrimaryHint')}
             </p>
             <div className="max-h-72 overflow-y-auto">
@@ -456,6 +522,8 @@ function groupNotifications(notifs: Notification[]): NotificationGroup[] {
   return groups
 }
 
+type InboxViewPrefs = { groupByDate: boolean; sortNewestFirst: boolean; density: 'comfortable' | 'compact' }
+
 /** Day bucket for the Today / Yesterday / date headers (§A2.7). */
 function dayBucket(iso: string): string {
   const d = new Date(iso)
@@ -496,9 +564,26 @@ export function InboxPage() {
   // set while it loads, so the counts do not jump as the request lands.
   const prefsQuery = useQuery({
     queryKey: ['notification-preferences'],
-    queryFn: () => api<{ primaryTypes?: string[] }>('/notifications/preferences'),
+    queryFn: () =>
+      api<{ primaryTypes?: string[]; inboxView?: Partial<InboxViewPrefs> }>('/notifications/preferences'),
   })
   const primaryTypes = new Set(prefsQuery.data?.primaryTypes ?? [...HUMAN_TYPES])
+  /*
+   * Defaulted to the behaviour that shipped before it was a choice — day
+   * buckets, newest first, comfortable — so an account that never opens the
+   * drawer sees no change at all.
+   */
+  const inboxView: InboxViewPrefs = {
+    groupByDate: prefsQuery.data?.inboxView?.groupByDate ?? true,
+    sortNewestFirst: prefsQuery.data?.inboxView?.sortNewestFirst ?? true,
+    density: prefsQuery.data?.inboxView?.density === 'compact' ? 'compact' : 'comfortable',
+  }
+  const setInboxView = useMutation({
+    mutationFn: (patch: Partial<InboxViewPrefs>) =>
+      api('/notifications/preferences', { method: 'POST', body: { inboxView: { ...inboxView, ...patch } } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notification-preferences'] }),
+  })
+
   const setPrimaryTypes = useMutation({
     mutationFn: (types: string[]) =>
       api('/notifications/preferences', { method: 'POST', body: { primaryTypes: types } }),
@@ -603,12 +688,30 @@ export function InboxPage() {
   const setSearch = (next: { view?: InboxView; filter?: InboxFilter }) =>
     navigate({ to: '/app/$workspaceId/inbox', params: { workspaceId }, search: { view, filter, ...next } })
 
-  const groups = groupNotifications(notifs)
+  const stampOf = (g: NotificationGroup) =>
+    view === 'cleared' ? (g.latest.dismissedAt ?? g.latest.createdAt) : g.latest.createdAt
+
+  /*
+   * Sorted before grouping, never after.
+   *
+   * The buckets are built by walking the list and starting a new one whenever
+   * the day changes, so a list in the wrong order would produce the same day
+   * twice with rows scattered between them. Reversing the rendered buckets
+   * instead would put the newest day first with its oldest row at the top,
+   * which is neither order anybody asked for.
+   */
+  const ordered = [...groupNotifications(notifs)].sort((a, b) => {
+    const d = new Date(stampOf(a)).getTime() - new Date(stampOf(b)).getTime()
+    return inboxView.sortNewestFirst ? -d : d
+  })
+
+  const groups = ordered
   const buckets: Array<{ bucket: string; groups: NotificationGroup[] }> = []
   for (const group of groups) {
-    const bucket = dayBucket(
-      view === 'cleared' ? (group.latest.dismissedAt ?? group.latest.createdAt) : group.latest.createdAt,
-    )
+    // "Group by date" off means one unlabelled run, not one bucket per row:
+    // a header above every single notification is the same as no grouping and
+    // three times the height.
+    const bucket = inboxView.groupByDate ? dayBucket(stampOf(group)) : ''
     const last = buckets[buckets.length - 1]
     if (last && last.bucket === bucket) last.groups.push(group)
     else buckets.push({ bucket, groups: [group] })
@@ -723,6 +826,8 @@ export function InboxPage() {
                 selected={primaryTypes}
                 pending={setPrimaryTypes.isPending}
                 onChange={(types) => setPrimaryTypes.mutate(types)}
+                view={inboxView}
+                onViewChange={(patch) => setInboxView.mutate(patch)}
               />
             )}
           </div>
@@ -816,11 +921,15 @@ export function InboxPage() {
             />
           ) : (
             buckets.map(({ bucket, groups: bucketGroups }) => (
-              <section key={bucket}>
-                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  {bucketLabel(bucket)}
-                </h2>
-                <div className="space-y-1">
+              <section key={bucket || 'ungrouped'} data-testid={bucket ? `inbox-bucket-${bucket}` : 'inbox-ungrouped'}>
+                {/* No header when grouping is off — an empty <h2> would still
+                    take its margin and leave a gap where a date used to be. */}
+                {bucket !== '' && (
+                  <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                    {bucketLabel(bucket)}
+                  </h2>
+                )}
+                <div className={inboxView.density === 'compact' ? 'space-y-0.5' : 'space-y-1'}>
                   {bucketGroups.map((group) => {
                     const ids = group.items.map((n) => n.id)
                     const unreadIds = group.items.filter((n) => !n.readAt).map((n) => n.id)
