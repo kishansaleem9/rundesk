@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 39
+const EXPECTED_CHECKS = 46
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -520,6 +520,69 @@ try {
       'and reopening that address returns the same tab',
       page.url(),
     )
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ §G06 — Themes as a choice, and the preferences screen from the menu')
+  // ---------------------------------------------------------------------
+  /*
+   * The bar's theme button calls toggle(), which walks light → dark → system.
+   * To reach a specific mode you press it until it lands, and nothing says what
+   * the next press gives you. The three-way choice already existed on
+   * /app/profile, so this was a capability with no door on the surface her
+   * frames show it on.
+   *
+   * The preferences link was reachable only from the bell popover's footer, and
+   * the bell is not pinned by default — so the one door to "why am I getting
+   * this?" sat behind a control most accounts never turn on.
+   */
+  {
+    const startTheme = (await A('/users/me')).data?.theme ?? 'system'
+    await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2500)
+    await page.getByTestId('user-menu').click()
+    await page.waitForTimeout(900)
+
+    /*
+     * Counted, not just present. An empty <div data-testid="menu-themes"> is
+     * visible and offers nothing — the same "the container exists" mistake this
+     * audit has now made four times. Three is the point: fewer than three is a
+     * cycle wearing a menu row's clothes.
+     */
+    const themeChoices = await page.getByTestId('menu-themes').locator('button').count()
+    check(
+      themeChoices === 3,
+      `the avatar menu offers all three themes (${themeChoices})`,
+      `the Themes row offers ${themeChoices} choice(s), not three`,
+    )
+    for (const mode of ['light', 'dark', 'system']) {
+      check(
+        await page.getByTestId(`menu-theme-${mode}`).isVisible().catch(() => false),
+        `${mode} can be chosen directly`,
+        `${mode} is not offered as a choice`,
+      )
+    }
+    check(
+      await page.getByTestId('menu-notification-prefs').isVisible().catch(() => false),
+      'and the notification preferences screen has a door that is not the bell',
+      'notification preferences are only reachable from the unpinned bell',
+    )
+
+    // Pick the one it is NOT on, so "it was already that" cannot pass this.
+    const target = startTheme === 'dark' ? 'light' : 'dark'
+    await page.getByTestId(`menu-theme-${target}`).click()
+    await page.waitForTimeout(1500)
+    check(
+      await page.evaluate((m) => document.documentElement.classList.contains(m), target),
+      `choosing ${target} applies it to the page`,
+      `the page did not switch to ${target}`,
+    )
+    check(
+      ((await A('/users/me')).data?.theme ?? '') === target,
+      'and the server records it, so it follows you to another machine',
+      `the server still says ${(await A('/users/me')).data?.theme}`,
+    )
+    await A('/users/me', { method: 'PATCH', body: { theme: startTheme } })
   }
 
   await done(browser, stack, restore)

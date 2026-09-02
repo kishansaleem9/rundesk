@@ -900,6 +900,17 @@ const PRESENCE_CHOICES = [
 ] as const
 
 function UserMenu({ workspaceId }: { workspaceId?: string }) {
+  /*
+   * §G06 — Themes, as a choice rather than a cycle.
+   *
+   * The bar's icon button calls `toggle()`, which walks light → dark → system.
+   * To reach a specific mode you press it until it lands, and nothing on screen
+   * says what the next press will give you. The three-way choice already exists
+   * — `ThemeSelector` on /app/profile — so this was another capability with no
+   * door on the surface her frames show it on.
+   */
+  const theme = useThemeStore((s) => s.theme)
+  const setTheme = useThemeStore((s) => s.setTheme)
   const user = useAuthStore((s) => s.user)
   // §6 — pinning, from the menu behind the avatar.
   const pinned = usePinnedTopbarItems()
@@ -1275,6 +1286,54 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
             })}
           </div>
         </div>
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1.5">
+          <div className="px-1 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground">
+            {t('topbar.themesHeading')}
+          </div>
+          <div className="grid grid-cols-3 gap-1" data-testid="menu-themes">
+            {(['light', 'dark', 'system'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                // Like the Tools grid above: the menu stays open, because
+                // trying a theme and changing your mind is one gesture.
+                onClick={(e) => {
+                  e.preventDefault()
+                  setTheme(mode)
+                }}
+                aria-pressed={theme === mode}
+                data-testid={`menu-theme-${mode}`}
+                className={cn(
+                  'rounded-md border px-2 py-1 text-[11px] transition-colors',
+                  theme === mode
+                    ? 'border-brand-500 bg-brand-500/10 text-foreground'
+                    : 'border-border/70 text-muted-foreground hover:bg-accent/10 hover:text-foreground',
+                )}
+              >
+                {mode === 'light'
+                  ? t('topbar.themeLight')
+                  : mode === 'dark'
+                    ? t('topbar.themeDark')
+                    : t('topbar.themeSystem')}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/*
+          * The preferences screen, from the menu.
+          *
+          * It was reachable only from the bell popover's footer — and the bell
+          * is not pinned by default, so the one door to "why am I getting
+          * this?" was hidden behind a control most accounts never turn on.
+          */}
+        <DropdownMenuItem
+          data-testid="menu-notification-prefs"
+          onSelect={() => navigate({ to: '/app/profile', search: { tab: 'notifications' } as never })}
+        >
+          <Bell className="h-4 w-4 text-muted-foreground" />
+          {t('topbar.notificationPrefs')}
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         {/*
           * §G06 [06:53] — mute FOR a length of time.

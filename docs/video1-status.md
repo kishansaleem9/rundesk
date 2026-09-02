@@ -2606,3 +2606,45 @@ The general rule this session keeps arriving at from different directions: a
 check must not be satisfiable by the environment it happens to run in. Seeding
 what the check needs is one half; the other half is running it against an
 environment that has nothing.
+
+## Themes as a choice, and preferences with a door (2 Sep)
+
+Two halves of one backlog line — "avatar menu has no Themes row or
+notification-prefs link" — and both are the shape this audit keeps finding:
+a capability that exists with no door on the surface her frames show it on.
+
+**Themes.** The bar's icon button calls `toggle()`, which walks light → dark →
+system. To reach a specific mode you press it until it lands, and nothing on
+screen says what the next press will give you. The three-way choice already
+existed as `ThemeSelector` on `/app/profile`. The menu now offers all three
+directly, and stays open while you try them.
+
+**Preferences.** The notification-preferences screen was reachable only from
+the bell popover's footer — and the bell is not in `DEFAULT_PINNED`, so the one
+door to "why am I getting this?" sat behind a control most accounts never turn
+on. It is now a row in the avatar menu as well.
+
+Seven checks in `settings-depth.mjs`, floor 39 → 46. The theme check picks the
+mode the account is **not** on, so "it was already that" cannot pass it, and
+reads `/users/me` back afterwards — `setTheme` persists to the server, and a
+theme that only changed locally would be the sidebar-favourites complaint over
+again.
+
+### A missed break that was the break's fault, not the check's
+
+The first break hid the row with a bare `hidden` attribute, and the check
+passed. That looked like a weak check, and the reflex is to go strengthen it —
+but the break was inert: the div carries `className="grid ..."`, and an author
+`display: grid` beats the UA stylesheet's `[hidden] { display: none }`. Nothing
+was hidden, so nothing should have failed.
+
+**A missed break means one of two things, and they need telling apart:** the
+check is weak, or the break did not break anything. Diagnosing it as the former
+would have added noise to a check that was fine.
+
+It was checked properly afterwards and *did* find a real weakness — the same
+one this document has now recorded four times. `menu-themes` being visible
+proves nothing about an empty row, so the check counts the choices instead.
+Two genuine breaks confirm it: no choices at all (`offers 0 choice(s), not
+three`) and one choice (`offers 1 choice(s)`) — the second being a cycle
+wearing a menu row's clothes, which is precisely what was being fixed.
