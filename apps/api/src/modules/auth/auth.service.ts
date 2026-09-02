@@ -2,10 +2,11 @@ import { Injectable, UnauthorizedException, ConflictException, ForbiddenExceptio
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { randomUUID, randomBytes, createHash } from 'node:crypto'
-import { and, eq, isNull, desc } from 'drizzle-orm'
+import { and, eq, isNull, desc, sql } from 'drizzle-orm'
 import { compareSync, hashSync } from 'bcryptjs'
-import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications, taskTypes, DEFAULT_TASK_TYPES } from '@rundesk/db'
+import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications, taskTypes, featureFlags, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
+import { signupFeatureRows } from './signup-features'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { UsersService } from '../users/users.service'
 import { WorkspacesService } from '../workspaces/workspaces.service'
@@ -343,6 +344,36 @@ export class AuthService {
       await tx.insert(taskTypes).values(
         DEFAULT_TASK_TYPES.map((type) => ({ ...type, workspaceId: workspace.id })),
       )
+
+      /*
+       * G08-4 [08:43], [09:02] — honour the feature picker.
+       *
+       * The wizard's second step says, in as many words: "Pick what you'll use
+       * — we'll turn the rest off so the workspace stays uncluttered." The
+       * picks arrived, the DTO declared them, and `signUp` read them nowhere.
+       * The sentence was false, and the workspace came up with the platform
+       * defaults whatever anybody ticked.
+       *
+       * Written inside the same transaction as the workspace: a workspace that
+       * exists with the wrong features switched on, because a second write
+       * failed, is the state this is meant to prevent.
+       *
+       * Only flags named by a pill are touched. Auth and SSO keep their
+       * defaults because nobody was asked about them, and writing rows for
+       * settings a user never saw would be its own kind of dishonest.
+       */
+      const flagRows = signupFeatureRows(dto.features, workspace, user.id)
+      if (flagRows.length) {
+        await tx
+          .insert(featureFlags)
+          .values(flagRows)
+          // A flag can be governed by more than one pill in future; last write
+          // wins rather than blowing up the whole signup on a unique clash.
+          .onConflictDoUpdate({
+            target: [featureFlags.flagKey, featureFlags.scope, featureFlags.scopeId, featureFlags.workspaceId],
+            set: { enabled: sql`excluded.enabled`, updatedAt: new Date() },
+          })
+      }
 
       // 6. Create initial invitations
       const inviteTokens: Array<{ email: string; token: string; claimUrl: string }> = []

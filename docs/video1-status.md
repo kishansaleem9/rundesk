@@ -2013,3 +2013,64 @@ Four checks in `person-panel.mjs`, floor 51 → 57. Four breaks, all caught afte
 those two were fixed.
 
 **Running total: 133 closed, 23 open, 1 unverifiable.**
+
+## G08-4 — the feature picker actually picks (2 Sep)
+
+The signup wizard's second step says, in as many words:
+
+> "Pick what you'll use — **we'll turn the rest off** so the workspace stays
+> uncluttered."
+
+The picks were sent by the web app, declared on the DTO, and read by **nothing**
+— `signUp()` created user → org → members → workspace → invitations and never
+looked at `features` at all. The sentence was false: every workspace came up
+with platform defaults whatever anybody ticked.
+
+`signUp` now writes workspace-scoped flag rows inside the same transaction as
+the workspace, because a workspace that exists with the wrong features on —
+because a second write failed — is exactly the state this prevents.
+
+The pill → flags mapping lives in the shared `feature-flags` package, not in
+either app, because **both ends need it and they must not drift**: a pill the
+server ignores is a checkbox with no effect, which is this same defect wearing
+a different hat.
+
+### Two distinctions the code has to make
+
+- **Auth is not touched.** Nobody is asked about SSO in the wizard, and
+  switching it off would lock a workspace out of the login it expected.
+- **An absent list is not an empty one.** `undefined` means an API client or an
+  older web build that never saw the picker — turning every feature off for
+  them is a silent, destructive answer to an unasked question. `[]` is a real
+  answer and is honoured.
+
+### The extraction, and why
+
+The row-building came out of the transaction into `signupFeatureRows()`.
+Testing it in place would have meant mocking eight inserts to assert one of
+them; as a pure function the thing that can actually be wrong — which flags end
+up on and which off — is checkable directly.
+
+Verified end to end as well: a real signup picking `core, views, docs, goals`
+comes back with `docs: true, goals: true, chat: false, ai: false`.
+
+### A test file that broke the build
+
+The first version resolved paths with `import.meta.url`. That runs fine under
+the tsx loader the tests use and **fails `tsc -p tsconfig.build.json`**, whose
+module setting forbids the meta-property — so a test file took the whole API
+build down, and the next API restart silently came up on a stale bundle. It
+walks up for `pnpm-workspace.yaml` now; `process.cwd()` would have worked only
+while tests are launched from `apps/api`.
+
+Nine unit tests, five breaks, all caught.
+
+### Still collected and unused
+
+`industry` and `teamSize` are still sent by the wizard, still declared on the
+DTO, and still read by nothing. There is no column for them and no settings
+blob to put them in — and adding one for data nothing reads would be this same
+defect in a new place. Either the wizard should stop asking, or they need a
+home where somebody actually sees them. **Flagged rather than guessed at.**
+
+**Running total: 134 closed, 22 open, 1 unverifiable.**

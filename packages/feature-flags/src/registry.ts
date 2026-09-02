@@ -132,6 +132,40 @@ export const FLAG_CATEGORIES: Record<string, FlagKey[]> = {
   integrations: [FLAGS.INTEGRATIONS, FLAGS.INTEGRATIONS_SLACK, FLAGS.INTEGRATIONS_GOOGLE_DRIVE, FLAGS.INTEGRATIONS_GOOGLE_CALENDAR, FLAGS.INTEGRATIONS_WEBHOOKS, FLAGS.INTEGRATIONS_CLICKUP_IMPORT, FLAGS.INTEGRATIONS_GITHUB, FLAGS.INTEGRATIONS_MEETINGS, FLAGS.INTEGRATIONS_STRIPE, FLAGS.INTEGRATIONS_PUBLIC_API],
 }
 
+/**
+ * G08-4 [08:43], [09:02] — what each signup pill actually governs.
+ *
+ * The wizard's second step says, in as many words: "Pick what you'll use —
+ * we'll turn the rest off so the workspace stays uncluttered." The picks were
+ * sent, declared on the DTO, and then read by nothing — `signUp()` never
+ * looked at them — so that sentence was simply false.
+ *
+ * This mapping lives in the shared package rather than in either app because
+ * BOTH ends need it and they must not drift: the wizard offers these pills,
+ * and the server writes exactly the flags they name. A pill that governs
+ * nothing would be a checkbox with no effect, which is the same defect wearing
+ * a different hat.
+ *
+ * Only flags named here are touched at signup. Everything else — auth, SSO —
+ * keeps its default, because nobody was asked about it.
+ */
+export const SIGNUP_FEATURE_FLAGS: Record<string, FlagKey[]> = {
+  core: FLAG_CATEGORIES.core,
+  views: FLAG_CATEGORIES.views,
+  ai: FLAG_CATEGORIES.ai,
+  chat: FLAG_CATEGORIES.chat,
+  time_tracking: FLAG_CATEGORIES.time_tracking,
+  reporting: FLAG_CATEGORIES.reporting,
+  integrations: FLAG_CATEGORIES.integrations,
+  // These four are single flags rather than categories; the pill and the flag
+  // are the same thing.
+  docs: [FLAGS.DOCS],
+  goals: [FLAGS.GOALS],
+  sprints: [FLAGS.SPRINTS],
+  forms: [FLAGS.FORMS],
+  mobile: [FLAGS.MOBILE],
+}
+
 // Flags that are on by default for all new workspaces
 export const DEFAULT_ENABLED_FLAGS: FlagKey[] = [
   FLAGS.AUTH_SSO_GOOGLE,
