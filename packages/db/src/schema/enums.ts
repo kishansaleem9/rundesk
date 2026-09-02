@@ -130,6 +130,24 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   // §G11 [15:19] — a reminder you set on a saved message coming due. It reads
   // as task_due_soon only if you squint, and clicking it must open the message.
   'message_reminder',
+  // G10-10 [12:21–12:24] — "kisi ne mujhe comment/assign kiya to mujhe show
+  // ho". Both of these already fired, wearing somebody else's type: an
+  // assigned comment arrived as `task_assigned` and a resolved one as
+  // `task_commented`. In the Inbox they were indistinguishable from a task
+  // assignment and a new comment, and in the Primary customiser they could
+  // never be toggled apart — which is the whole point of listing them
+  // separately, since a resolved comment is routine and an assigned one is
+  // somebody asking you to do something.
+  'comment_assigned',
+  'comment_resolved',
+  // G10-11 [12:38–12:41] — a subtask appearing under a task you are on. Off by
+  // default; it belongs in the "Not Important" half of her panel.
+  //
+  // Her list also has "Task created", which is deliberately NOT here: it fires
+  // to people who follow a List, and this product has no list-follow concept
+  // to deliver it to. Adding the label with no emitter behind it is the exact
+  // defect this audit keeps finding, so it waits for the feature it needs.
+  'subtask_created',
 ])
 
 export const viewTypeEnum = pgEnum('view_type', [

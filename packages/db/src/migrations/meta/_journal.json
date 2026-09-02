@@ -834,6 +834,13 @@
       "when": 1900000089026,
       "tag": "0118_user_priorities",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1900000089027,
+      "tag": "0119_comment_and_subtask_notification_kinds",
+      "breakpoints": true
     }
   ]
 }

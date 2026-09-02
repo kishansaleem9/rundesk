@@ -174,6 +174,16 @@ type NotificationType =
   | 'message_assigned'
   // §G11 [15:19] — a reminder you set on a message coming due.
   | 'message_reminder'
+  // G10-10 [12:21–12:24] — "kisi ne mujhe comment/assign kiya to mujhe show
+  // ho". Both fired already, wearing someone else's type: an assigned comment
+  // arrived as task_assigned, a resolved one as task_commented. Separate types
+  // are what let the customiser offer them as separate rows, which is the
+  // granularity she is pointing at — a resolved comment is routine, an
+  // assigned one is somebody asking you to act.
+  | 'comment_assigned'
+  | 'comment_resolved'
+  // G10-11 [12:38–12:41] — a subtask appearing under a task you are on.
+  | 'subtask_created'
 
 type NotificationEventKey =
   | 'mention'
@@ -219,6 +229,11 @@ export const PRIMARY_SELECTABLE_TYPES = [
   'message_reaction',
   'shared_with_me',
   'access_requested',
+  // G10-10 / G10-11 — offerable as their own rows, which is the entire reason
+  // they needed their own types.
+  'comment_assigned',
+  'comment_resolved',
+  'subtask_created',
 ] as const
 
 /** What Primary shows for someone who has never opened the customiser. */
@@ -238,8 +253,15 @@ export const DEFAULT_PRIMARY_TYPES: string[] = [
   'task_unassigned',
   'task_follower_changed',
   'access_requested',
+  // G10-10 — an assigned comment is somebody asking you to do something, so it
+  // defaults on alongside the other "you are being asked" kinds.
+  'comment_assigned',
   // Offered but off, because she said so: "Ab neeche se REACTIONS mujhe na show
   // hon, [shared with] mujhe na show ho."
+  //
+  // Off too, and deliberately: `comment_resolved` and `subtask_created` are the
+  // "Not Important" half of her panel — worth being able to turn on, not worth
+  // interrupting anybody by default.
 ]
 
 function normalizePrimaryTypes(value: unknown): string[] {
@@ -1219,8 +1241,15 @@ export class NotificationsService {
       // something. Somebody who muted "assigned" meant both.
       case 'task_assigned':
       case 'message_assigned':
+      // G10-10 — an assigned comment is being asked to act, same as the other
+      // two. Somebody who muted "assigned" meant this one too.
+      case 'comment_assigned':
         return 'assigned'
       case 'task_commented':
+      // G10-10 — a resolved comment is comment traffic; muting comments must
+      // mute it, or the split into its own type becomes a way to get MORE
+      // notifications than before.
+      case 'comment_resolved':
         return 'comment'
       // §G11 [15:19] — a reminder you set yourself is a deadline arriving,
       // whatever it is about, so it rides the same channel as a due date.

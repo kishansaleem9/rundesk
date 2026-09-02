@@ -1543,3 +1543,56 @@ patched. Break patches are anchored on an adjacent unique line now.
 
 **Running total: 123 closed, 33 open, 1 unverifiable.**
 Local: 17 suites, 737 checks, 0 failed.
+
+## G10-10 / G10-11 — comments and subtasks as their own kinds of news (2 Sep)
+
+> "kisi ne mujhe comment/assign kiya to mujhe show ho"  `[12:21–12:24]`
+
+Two of these already fired, **wearing someone else's type**. `assignComment`
+wrote `task_assigned` and `notifyCommentResolved` wrote `task_commented`, so in
+the Inbox an assigned comment was indistinguishable from being handed a task,
+and a resolved one from a new comment arriving. In the Primary customiser they
+could never be toggled apart — which is exactly the granularity she is pointing
+at, since a resolved comment is routine and an assigned one is somebody asking
+you to act.
+
+Three new kinds, migration `0119`:
+
+| kind | audience | default |
+|---|---|---|
+| `comment_assigned` | the person the comment was assigned to | **on** — being asked to act |
+| `comment_resolved` | the comment's author | off — the "Not Important" half |
+| `subtask_created` | the parent task's watchers and assignees | off |
+
+### What is deliberately NOT here
+
+Her list also names **"Task created"**. It fires to people who follow a *List*,
+and this product has **no list-follow concept** to deliver it to. Adding the
+enum label with nothing writing it would have looked like progress and been the
+exact defect this audit keeps turning up — a thing that exists in the schema and
+is reachable by nobody. So `task_created` waits for the feature it needs, and
+G10-11 is closed only for the half that has a real audience.
+
+That reclassification matters for the count: G10-11 was filed as *small*, and
+the half that remains is not.
+
+### How it was checked
+
+Four checks in `task-depth.mjs` (floor 84 → 88) that **drive each notification
+and read the stored type back**, using a second account so the actor is never
+the recipient. An enum-label assertion would have passed on a kind nothing
+writes; that is the whole point of driving it.
+
+All four break-tested: each type reverted to the one it used to wear, the
+subtask emitter removed, and the subtask recipients inverted so only the actor
+would hear. Schema-only checks also added to `verify-release.sh`, marked as
+schema-only in a comment so nobody later mistakes them for proof of delivery.
+
+One thing worth recording: the first version of this check reported
+`comment_resolved` missing when it was not. The resolve route takes
+`{ resolved: boolean }`, and the probe sent an empty body — so it silently
+*un*-resolved instead. The check now sends the boolean, and says why in a
+comment.
+
+**Running total: 125 closed, 31 open, 1 unverifiable.**
+Local: 17 suites, 741 checks, 0 failed; api 1266/0 and web 200/0 unit tests.

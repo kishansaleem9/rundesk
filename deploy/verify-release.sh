@@ -419,6 +419,19 @@ check_sql "the message_assigned notification kind exists" \
 check_sql "the message_reminder notification kind exists" \
   "SELECT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='notification_type' AND e.enumlabel='message_reminder');" "t"
 
+# G10-10 [12:21-12:24] / G10-11 [12:38-12:41] — "kisi ne mujhe comment/assign
+# kiya to mujhe show ho". The two comment kinds already fired wearing another
+# type; splitting them is what lets the Primary customiser offer them as
+# separate rows. Schema only here — that they are actually WRITTEN is driven in
+# test/e2e/task-depth.mjs, because an enum label with no emitter behind it is
+# the exact defect this file exists to catch.
+check_sql "the comment_assigned notification kind exists (0119)" \
+  "SELECT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='notification_type' AND e.enumlabel='comment_assigned');" "t"
+check_sql "the comment_resolved notification kind exists (0119)" \
+  "SELECT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='notification_type' AND e.enumlabel='comment_resolved');" "t"
+check_sql "the subtask_created notification kind exists (0119)" \
+  "SELECT EXISTS (SELECT 1 FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='notification_type' AND e.enumlabel='subtask_created');" "t"
+
 # ────────────────── §G08 [08:37] unread, split by workspace ───────────────
 # The switcher's dot. Checked against the bell's own total as well as for its
 # own sake: two counts of "unread" that disagree are worse than one, and the

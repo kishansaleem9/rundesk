@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 84
+const EXPECTED_CHECKS = 88
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -944,6 +944,91 @@ try {
   } else {
     check(false, 'no sprints link to follow')
     check(false, 'no sprints page to render')
+  }
+
+  /*
+   * ---------------------------------------------------------------------
+   * G10-10 [12:21–12:24] / G10-11 [12:38–12:41] — three notification kinds
+   *
+   * > "kisi ne mujhe comment/assign kiya to mujhe show ho"
+   *
+   * Two of these already fired wearing somebody else's type: an assigned
+   * comment arrived as `task_assigned` and a resolved one as `task_commented`.
+   * In the Inbox they were indistinguishable from a task assignment and a new
+   * comment, and in the Primary customiser they could never be toggled apart —
+   * which is the entire granularity she is pointing at.
+   *
+   * Checked by DRIVING each one and reading the stored type back, not by
+   * asserting the enum has the label. A label with nothing writing it is the
+   * defect this whole audit keeps turning up, and an enum check would pass on
+   * exactly that.
+   * ---------------------------------------------------------------------
+   */
+  console.log('\n▶ G10-10 / G10-11 — comments and subtasks are their own kinds of news')
+  const otherLogin = await fetch(`${API}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: process.env.RUNDESK_EMAIL_2 ?? 'org-admin@rundesk.internal',
+      password: process.env.RUNDESK_PASSWORD_2 ?? 'OrgAdmin@123!',
+    }),
+  }).then((r) => r.json()).catch(() => null)
+  const other = otherLogin?.data
+  if (!other?.accessToken) {
+    check(false, 'a second account to be notified', 'could not sign in as the second user')
+    check(false, 'so comment_assigned was never driven')
+    check(false, 'so comment_resolved was never driven')
+    check(false, 'so subtask_created was never driven')
+  } else {
+    const B = apiAs(other.accessToken)
+    const stamp = Date.now()
+    // The parent belongs to the OTHER account, so they are the audience for
+    // everything below and the actor is never the recipient.
+    const parent = await A('/tasks', { method: 'POST', body: { listId, title: `notify probe ${stamp}` } })
+    await A(`/tasks/${parent.data.id}/assignees`, { method: 'POST', body: { userId: other.user.id } })
+
+    const before = await B('/notifications?limit=60')
+    const seenBefore = new Set((before.data ?? []).map((n) => n.id))
+
+    await A('/tasks', {
+      method: 'POST',
+      body: { listId, title: `notify probe sub ${stamp}`, parentTaskId: parent.data.id },
+    })
+    const c1 = await A(`/tasks/${parent.data.id}/comments`, { method: 'POST', body: { body: `probe ${stamp}` } })
+    await A(`/tasks/${parent.data.id}/comments/${c1.data.id}/assign`, {
+      method: 'POST',
+      body: { userId: other.user.id },
+    })
+    const c2 = await B(`/tasks/${parent.data.id}/comments`, { method: 'POST', body: { body: `probe reply ${stamp}` } })
+    // `resolved: true` matters — the route takes a boolean, and sending an
+    // empty body silently un-resolves instead, which made an earlier version
+    // of this check report a missing notification that was never asked for.
+    await A(`/tasks/${parent.data.id}/comments/${c2.data.id}/resolve`, {
+      method: 'POST',
+      body: { resolved: true },
+    })
+
+    await new Promise((r) => setTimeout(r, 2500))
+    const after = await B('/notifications?limit=60')
+    const fresh = (after.data ?? []).filter((n) => !seenBefore.has(n.id))
+    const kinds = fresh.map((n) => n.type)
+    check(fresh.length > 0, 'the second account hears about all of it', `${fresh.length} new notifications`)
+    check(
+      kinds.includes('comment_assigned'),
+      'an assigned comment arrives as its own kind, not as a task assignment',
+      `kinds: ${kinds.join(', ') || '(none)'}`,
+    )
+    check(
+      kinds.includes('comment_resolved'),
+      'and a resolved comment as its own kind, not as a new comment',
+      `kinds: ${kinds.join(', ') || '(none)'}`,
+    )
+    check(
+      kinds.includes('subtask_created'),
+      'and a subtask under your task is news in its own right',
+      `kinds: ${kinds.join(', ') || '(none)'}`,
+    )
+    await A(`/tasks/${parent.data.id}`, { method: 'DELETE' })
   }
 
   await done(browser, stack)

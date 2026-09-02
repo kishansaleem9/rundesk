@@ -221,6 +221,61 @@ export class TasksService {
     return `/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`
   }
 
+  /**
+   * G10-11 [12:38–12:41] — a subtask appeared under a task you are on.
+   *
+   * The audience is the PARENT's watchers and assignees, which is the only
+   * honest one available: her list pairs this with "Task created", which fires
+   * to people following a List, and there is no list-follow concept here. So
+   * this ships and that one waits, rather than adding a notification kind with
+   * nothing behind it.
+   *
+   * Off by default (see DEFAULT_PRIMARY_TYPES) — worth being able to turn on,
+   * not worth interrupting anybody who did not ask.
+   */
+  private async notifySubtaskCreated(
+    parentTaskId: string,
+    subtaskId: string,
+    subtaskTitle: string,
+    actorId: string,
+  ) {
+    const [parent] = await this.db
+      .select({ id: tasks.id, title: tasks.title, listId: tasks.listId })
+      .from(tasks)
+      .where(eq(tasks.id, parentTaskId))
+      .limit(1)
+    if (!parent) return
+    const ctx = await this.resolveWorkspaceForList(parent.listId)
+    if (!ctx) return
+
+    const [watchers, assignees] = await Promise.all([
+      this.db.select({ userId: taskWatchers.userId }).from(taskWatchers).where(eq(taskWatchers.taskId, parentTaskId)),
+      this.db.select({ userId: taskAssignees.userId }).from(taskAssignees).where(eq(taskAssignees.taskId, parentTaskId)),
+    ])
+    // Not the person who just made it: they know.
+    const recipients = [...new Set([...watchers, ...assignees].map((r) => r.userId))].filter(
+      (id) => id !== actorId,
+    )
+    if (recipients.length === 0) return
+
+    const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+    // The link opens the SUBTASK — the thing that is new — not the parent the
+    // reader already knows about.
+    const url = this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, parent.listId, subtaskId)
+    for (const userId of recipients) {
+      void this.notifications.create({
+        userId,
+        workspaceId: ctx.workspaceId,
+        actorId,
+        type: 'subtask_created',
+        title: `New subtask in "${parent.title}"`,
+        body: subtaskTitle,
+        target: { entityType: 'task', entityId: subtaskId, url },
+        emailContext: { taskTitle: parent.title, workspaceName },
+      })
+    }
+  }
+
   private async notifyTaskUpdate(params: {
     taskId: string
     actorId: string
@@ -1632,6 +1687,7 @@ export class TasksService {
         action: 'subtask_added',
         meta: { subtaskId: task.id, title: task.title },
       })
+      void this.notifySubtaskCreated(data.parentTaskId, task.id, task.title, data.createdById)
     }
 
     const hydrated = await this.getTask(task.id)
@@ -3239,7 +3295,10 @@ export class TasksService {
           userId,
           workspaceId: ctx.workspaceId,
           actorId,
-          type: 'task_assigned',
+          // G10-10 [12:21–12:24] — its own kind. As `task_assigned` this was
+          // indistinguishable in the Inbox from being given a task, and could
+          // not be toggled apart from one in the Primary customiser.
+          type: 'comment_assigned',
           title: `You were assigned a comment in "${taskRow.title}"`,
           target: {
             entityType: 'task',
@@ -3319,7 +3378,9 @@ export class TasksService {
           userId,
           workspaceId: ctx.workspaceId,
           actorId,
-          type: 'task_commented',
+          // G10-10 — routine by comparison, and now separately mutable: as
+          // `task_commented` it looked exactly like a new comment arriving.
+          type: 'comment_resolved',
           title: `Your comment was resolved on "${taskRow.title}"`,
           body: snippet,
           target: { entityType: 'task', entityId: taskRow.id, url: taskUrl },

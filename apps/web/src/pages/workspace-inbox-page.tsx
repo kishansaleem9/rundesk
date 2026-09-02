@@ -28,6 +28,9 @@ import {
   SmilePlus,
   Share2,
   KeyRound,
+  MessageSquarePlus,
+  CheckCheck,
+  ListPlus,
   Video,
 } from 'lucide-react'
 import { formatDistanceToNowStrict, isToday, isYesterday } from 'date-fns'
@@ -118,6 +121,13 @@ const TYPE_META: Record<string, { icon: React.ElementType; color: string; labelK
   access_requested: { icon: KeyRound, color: 'text-amber-600', labelKey: 'inbox.type.accessRequested' },
   // §2.8 [19:25] — a SyncUp starting in a channel you are in.
   call_started: { icon: Video, color: 'text-violet-500', labelKey: 'inbox.type.callStarted' },
+  // G10-10 [12:21–12:24] — comments, told apart. Both of these used to arrive
+  // wearing another kind's icon and label: an assigned comment looked exactly
+  // like being given a task, and a resolved one exactly like a new comment.
+  comment_assigned: { icon: MessageSquarePlus, color: 'text-emerald-500', labelKey: 'inbox.type.commentAssigned' },
+  comment_resolved: { icon: CheckCheck, color: 'text-muted-foreground', labelKey: 'inbox.type.commentResolved' },
+  // G10-11 [12:38–12:41] — a subtask appeared under a task you are on.
+  subtask_created: { icon: ListPlus, color: 'text-sky-500', labelKey: 'inbox.type.subtaskCreated' },
 }
 
 /**
@@ -241,6 +251,10 @@ const HUMAN_TYPES = new Set([
   'task_unassigned',
   'task_follower_changed',
   'access_requested',
+  // G10-10 — an assigned comment is somebody asking you to act, so it defaults
+  // on with the rest of that family. comment_resolved and subtask_created are
+  // offered and off: the "Not Important" half of her panel.
+  'comment_assigned',
 ])
 
 /**
@@ -284,6 +298,13 @@ export const PRIMARY_SELECTABLE_TYPES: Array<{ type: string; labelKey: Translati
   // mujhe na show hon, [shared with] mujhe na show ho."
   { type: 'message_reaction', labelKey: 'inbox.type.reaction' },
   { type: 'shared_with_me', labelKey: 'inbox.type.sharedWithMe' },
+  // G10-10 / G10-11 — the rows she lists separately. Placed next to the
+  // comment kinds they split off from, so the difference is legible where it
+  // matters; comment_resolved and subtask_created sit in the off-by-default
+  // tail with reactions and shares.
+  { type: 'comment_assigned', labelKey: 'inbox.type.commentAssigned' },
+  { type: 'comment_resolved', labelKey: 'inbox.type.commentResolved' },
+  { type: 'subtask_created', labelKey: 'inbox.type.subtaskCreated' },
 ]
 
 export function matchesInboxFilter(
