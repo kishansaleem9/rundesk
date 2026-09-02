@@ -2586,3 +2586,23 @@ The drawer is now reopened before every interaction instead of assumed open.
 Verified by running the seeding path deliberately — the branch CI takes and my
 machine never does — and then re-running all three breaks, which still fail
 with the timestamps printed.
+
+### Reproduce CI's data shape, don't reason about it
+
+Two CI failures in a row, both my checks rather than the product, and both the
+same root cause: **the check depended on data this machine happened to have.**
+The dev database holds ~50 notifications; CI's fixture makes exactly one.
+
+The second fix was reasoned about rather than tested — "three distinct tasks
+should render three rows" — which is how the first fix got shipped too. The
+decisive move was available the whole time and takes one call:
+
+    POST /notifications/clear-all      # inbox: 50 -> 0
+
+Run the suite from there and you are testing CI's shape, harsher. It went
+90/90 from an empty inbox, which is the evidence; "it should pass" was not.
+
+The general rule this session keeps arriving at from different directions: a
+check must not be satisfiable by the environment it happens to run in. Seeding
+what the check needs is one half; the other half is running it against an
+environment that has nothing.
