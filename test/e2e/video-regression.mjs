@@ -90,7 +90,11 @@ const MY_ID = rootAuth.user?.id ?? rootAuth.id
  */
 async function ensureTwoNotifications() {
   const count = () => rootApi('/notifications?limit=50').then((r) => (r.data ?? []).length)
-  if ((await count()) >= 2) return await count()
+  // Three, not two. Notifications on the same entity collapse into one row
+  // (`groupNotifications` keys on type:entityType:entityId), and the Primary
+  // chip hides types outside the user's set — so "two exist" does not mean
+  // "two are on screen", which is exactly how the last version failed.
+  if ((await count()) >= 3) return await count()
 
   const peerEmail = process.env.E2E_PEER_EMAIL ?? 'org-admin@rundesk.internal'
   const peerPassword = process.env.E2E_PEER_PASSWORD ?? 'OrgAdmin@123!'
@@ -115,7 +119,7 @@ async function ensureTwoNotifications() {
   }
   if (!listId) return await count()
 
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 3; i++) {
     const task = (await peerApi('/tasks', {
       method: 'POST',
       body: { listId, title: `a2.6b order fixture ${i} ${Date.now()}` },
@@ -126,7 +130,7 @@ async function ensureTwoNotifications() {
     // Distinct timestamps, so "newest first" has something to be first about.
     await new Promise((r) => setTimeout(r, 1100))
   }
-  for (let i = 0; i < 12 && (await count()) < 2; i++) await new Promise((r) => setTimeout(r, 500))
+  for (let i = 0; i < 12 && (await count()) < 3; i++) await new Promise((r) => setTimeout(r, 500))
   return await count()
 }
 
@@ -382,10 +386,13 @@ try {
    * broken rather than like the check losing its place.
    */
   const openDrawer = async () => {
-    if (!(await page.getByTestId('primary-customise-panel').isVisible().catch(() => false))) {
-      await page.getByTestId('primary-customise').click().catch(() => {})
-      await page.waitForTimeout(700)
+    if (await page.getByTestId('primary-customise-panel').isVisible().catch(() => false)) return
+    // The gear only renders on Primary, so get there before reaching for it.
+    if (!(await page.getByTestId('primary-customise').isVisible().catch(() => false))) {
+      await go(`/app/${WS}/inbox?filter=primary`, 3000)
     }
+    await page.getByTestId('primary-customise').click().catch(() => {})
+    await page.waitForTimeout(700)
   }
   await openDrawer()
   for (const [id, what] of [
@@ -428,14 +435,30 @@ try {
   const seeded = await ensureTwoNotifications()
   chk(seeded >= 2, `there are at least two notifications to reorder (${seeded})`,
     `only ${seeded} notification(s) — an order check needs two`)
-  if (seeded >= 2) await go(`/app/${WS}/inbox?filter=primary`, 3200)
+
+  /*
+   * The rows are read on All, not Primary.
+   *
+   * The gear lives on Primary, so the drawer has to be opened there — but
+   * Primary shows only the types in the user's set, and rows about the same
+   * entity collapse into one. Reading the order there made the check depend on
+   * both, and it failed in CI with "2 notifications, 1 row on screen" while the
+   * feature worked. All hides nothing, and the settings are claimed to apply to
+   * every tab, so reading them here checks that claim too.
+   */
+  const readOn = `/app/${WS}/inbox?filter=all`
+  await go(readOn, 3200)
 
   const newestFirst = await rowTimes()
   const groupedCount = await dateBuckets()
   chk(groupedCount > 0 && (await ungrouped()) === 0, 'by default the rows sit under date headers',
     `buckets=${groupedCount} ungrouped=${await ungrouped()}`)
-  chk(newestFirst.length >= 2, `the list has rows to order (${newestFirst.length})`,
-    `only ${newestFirst.length} row(s) on screen`)
+  chk(
+    newestFirst.length >= 2,
+    `the list has rows to order (${newestFirst.length})`,
+    `${seeded} notification(s) exist but only ${newestFirst.length} row(s) render — ` +
+      'they are grouping onto one row, or the view is hiding them',
+  )
   chk(
     runsDown(newestFirst),
     'and by default they run newest first',
@@ -448,7 +471,7 @@ try {
     await openDrawer()
     await page.getByTestId('inbox-sort-newest').click()
     await page.waitForTimeout(1600)
-    await go(`/app/${WS}/inbox?filter=primary`, 3200)
+    await go(readOn, 3200)
     const oldestFirst = await rowTimes()
     chk(
       runsUp(oldestFirst) && oldestFirst.length >= 2,
@@ -470,7 +493,7 @@ try {
     await openDrawer()
     await page.getByTestId('inbox-group-by-date').click()
     await page.waitForTimeout(1600)
-    await go(`/app/${WS}/inbox?filter=primary`, 3200)
+    await go(readOn, 3200)
     chk(
       (await dateBuckets()) === 0 && (await ungrouped()) === 1,
       'turning off "group by date" removes the date headers',
