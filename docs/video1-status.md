@@ -1650,3 +1650,39 @@ Five breaks. Two of the first five caught **nothing**, and both were my fault:
 Nine checks in `settings-depth.mjs`, floor 22 → 31.
 
 **Running total: 126 closed, 30 open, 1 unverifiable.**
+
+## The push that went red on lint alone (2 Sep)
+
+`7f75fee` failed CI. Not on a suite — on **lint**, and only lint. Every later
+step in that job was then skipped, so the run reported nothing about the
+typecheck, the unit tests, the migration guardrail or anything else.
+
+Two `no-fallthrough` errors, both mine, both from putting an explanatory
+comment *between* two `case` labels:
+
+```ts
+case 'task_assigned':
+case 'message_assigned':
+// G10-10 — an assigned comment is being asked to act…      <- here
+case 'comment_assigned':
+  return 'assigned'
+```
+
+ESLint treats a comment between labels as a fallthrough marker only when it
+matches `commentPattern` (`falls?\s?through`). Mine did not, so the rule read
+the group as three separate cases with a body between them. The existing code
+in that switch had always put its comments *above* the first label of a group,
+which is why nothing had tripped it before. Comments moved; behaviour identical
+— `task-depth.mjs` still 88/0, including all three notification-kind checks.
+
+### Why it got through
+
+I ran typecheck and both unit suites locally and did not run lint. Then I told
+the user CI was green through that commit, which I had **inferred rather than
+checked** — the webhook I had seen was for the commit before it.
+
+`scripts/preflight.sh` now runs everything CI's "Verify Monorepo" job runs, in
+its order: lint, typecheck, api tests, web tests, the migration guardrail and
+the verify-ui isolation harness. It is a single command, so there is nothing to
+remember. And a CI claim gets verified against the run for that exact SHA, or
+it does not get made.

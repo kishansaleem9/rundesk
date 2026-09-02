@@ -1239,16 +1239,17 @@ export class NotificationsService {
         return 'mention'
       // §G11 [15:36] — being asked to act on a message is being assigned
       // something. Somebody who muted "assigned" meant both.
+      //
+      // G10-10 — and an assigned comment for the same reason: it is somebody
+      // asking you to do something, whatever it is attached to.
       case 'task_assigned':
       case 'message_assigned':
-      // G10-10 — an assigned comment is being asked to act, same as the other
-      // two. Somebody who muted "assigned" meant this one too.
       case 'comment_assigned':
         return 'assigned'
-      case 'task_commented':
       // G10-10 — a resolved comment is comment traffic; muting comments must
-      // mute it, or the split into its own type becomes a way to get MORE
-      // notifications than before.
+      // mute it too, or splitting it into its own type becomes a way to
+      // receive MORE than before rather than to tell two things apart.
+      case 'task_commented':
       case 'comment_resolved':
         return 'comment'
       // §G11 [15:19] — a reminder you set yourself is a deadline arriving,
