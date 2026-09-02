@@ -2136,3 +2136,98 @@ pasted back in, source and body from different messages, the body dropped to
 the note alone, the source not sent. All four fail, each with its own message.
 
 **Running total: 135 closed, 21 open, 1 unverifiable.**
+
+## The open list was not a list — a re-derivation from code (2 Sep)
+
+**The "21 open" figure was arithmetic, not a count.** It came from 35 − 14
+closed, and the 35 came from a backlog written before ten closing passes. That
+is precisely the "status column nobody trusts" this document opens by warning
+about, and it is the same thing the walkthrough review caught me out on: a
+number I could not check.
+
+So the backlog was re-derived from code, claim by claim, under one rule — the
+one the CORRECTION section already set: *the API existing is not closed if
+nothing calls it*, and a feature only reachable above some viewport width is
+not closed either.
+
+### Six entries were stale — already built, still listed as open
+
+| listed as open | actually |
+|---|---|
+| no Replies entry in the sidebar | `workspace-sidebar.tsx:1484`, and in the collapsed rail at `:196` |
+| saved messages have no badge or toast | badge `workspace-chat-page.tsx:2422`, toast `:1362` |
+| channel toolbar has one quick reaction | three, plus the full picker — `workspace-chat-page.tsx:117` |
+| Status group has no explicit "All" chip | `command-palette.tsx:660`, `palette-status-all` |
+| Brain is a tab, not a global surface | the AI panel is docked on every workspace route, `routes/app.tsx:156` |
+| **G09-5 / G09-7**, the two dead controls | both fixed — `app.tsx:144` passes `onMenuOpen`; `workspace-sidebar.tsx:989` listens for `rundesk:reset-dock` |
+
+The last row is the worst of them: those two were written up here as live
+defects *and fixed in the same session*, and this document never said so.
+
+### Three defects nobody had filed, found while verifying
+
+Two are fixed below. One is measured and not yet fixed.
+
+#### §A2.4 — "Clear filters" did not clear the filters it was counting
+
+The Filters button carries a tally. It counted **seventeen** controls
+(`command-palette.tsx:316-331`) and the Clear button reset **twelve**
+(`:531`). The five left behind were created-after, created-before, and the
+space, folder and list pickers.
+
+What that is, from the outside: you narrow a search to one Space, change your
+mind, press **Clear filters** — and the badge stays lit while the results stay
+narrowed. The control reports having done something it did not do, and the only
+way out is to close the palette. Same family as the dead "Reset dock position"
+menu item, except this one leaves the product in a state you cannot see the
+cause of.
+
+Fixed by adding the five resets, but the fix that matters is the guard, because
+the cause was two hand-maintained lists drifting:
+`apps/web/src/components/palette-filters.test.ts` reads *both* lists out of the
+source and fails if anything counted is not cleared — and, in the other
+direction, if the handler resets state the component no longer has.
+
+Break-tested four ways: all five resets removed (the original bug, named
+control by control), one removed, a reset for state that does not exist, and
+the sort left set. All four caught.
+
+A source guard cannot tell you the button is wired to anything, so
+`command-palette.mjs` gained four browser checks that set two filters, press
+the button, and read the badge back. Driven with the date pair rather than the
+Space picker on purpose: the Space select is gated on
+`spacesQuery.data.length > 0` (`:811`), so on a workspace with no spaces that
+check would have passed by not running. Break-tested twice against a rebuilt
+bundle; both caught.
+
+Worth recording separately: the first version of the browser check failed for a
+reason that was not the product. The preceding block leaves the Creator
+submenu open, and that popover covers the header row — including its own
+trigger, so it cannot be clicked shut. The check now reopens the palette
+instead. A check that fights an overlay is measuring the overlay.
+
+#### A thread is unreachable below 1280px — measured, not yet fixed
+
+`ThreadPanel` is rendered exactly once (`workspace-chat-page.tsx:3328`) and its
+root carries `hidden xl:flex` (`:4173`). Six controls set `threadParentId`.
+Below 1280px every one of them is inert, and the **"N replies" link still
+renders** (`:2989-2997`) — so the message advertises a thread, you click, and
+nothing happens.
+
+Measured in a browser rather than read off the source:
+
+| width | "N replies" link | thread opens |
+|---|---|---|
+| 1680 | visible | **yes** |
+| 1279 | visible | **no** |
+| 1200 | visible | **no** |
+
+The 1680 row is the control, and it earned its place: the first run reported
+"no" at *every* width because the selector was `thread-panel` and the panel is
+`chat-thread-panel`. Measuring only the width under suspicion would have
+"confirmed" the defect on a broken selector.
+
+Every browser suite runs at 1680×1000, which is why nothing has ever said so.
+This is the same shape as G09-5 (no nav below 1024px) and G07-7 (the dock
+`hidden xl:flex`), both of which were treated as real defects. **Filed, not
+fixed in this pass.**

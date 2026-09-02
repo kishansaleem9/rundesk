@@ -376,6 +376,76 @@ try {
     'and a search that matches nobody says so',
     'an empty people search renders a blank panel',
   )
+
+  /*
+   * §A2.4 — "Clear filters" clears the filters it is counting.
+   *
+   * The badge counted seventeen controls and the button reset twelve. The five
+   * left behind were the date pair and the space/folder/list pickers, so
+   * narrowing a search to one Space and pressing Clear left the badge lit and
+   * the results still narrowed, with no way out but closing the palette.
+   *
+   * palette-filters.test.ts keeps the two lists in step by reading the source.
+   * This is the other half: that pressing the button in a real browser
+   * actually puts the count back to zero. A source guard cannot tell you the
+   * control is wired to anything.
+   */
+  console.log('\n▶ §A2.4 — Clear filters clears every filter it counts')
+  /*
+   * Reopened from scratch. The block above leaves the Creator submenu open,
+   * and that popover covers the header row — including its own trigger, so it
+   * cannot be clicked shut. Fighting an overlay would mean measuring the
+   * overlay; a fresh palette is both cleaner and closer to how somebody
+   * actually arrives at this button.
+   */
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  await page.keyboard.press('Control+k')
+  await page.waitForTimeout(700)
+  await page.locator('[cmdk-input]').first().fill(QUERY)
+  await page.waitForTimeout(900)
+  await page
+    .locator('[role=dialog]:visible, [cmdk-root]')
+    .first()
+    .getByRole('button', { name: /Filters/ })
+    .click()
+  await page.waitForTimeout(700)
+
+  const toggle = page.getByTestId('palette-filters-toggle')
+  const countNow = async () => Number(await toggle.getAttribute('data-active-filters')) || 0
+
+  /*
+   * Driven with the created-after/created-before pair rather than the Space
+   * picker. Both are among the five that were left behind, and both are always
+   * rendered — the Space select is gated on `spacesQuery.data.length > 0`
+   * (command-palette.tsx:811), so a workspace with no spaces would have made
+   * this check pass by not running, which is the failure mode this suite
+   * exists to catch.
+   */
+  await page.getByTestId('palette-created-after').fill('2020-01-01')
+  await page.getByTestId('palette-created-before').fill('2030-01-01')
+  await page.waitForTimeout(600)
+
+  const before = await countNow()
+  chk(before >= 2, `the two date filters count toward the badge (${before})`, `the badge reads ${before}`)
+
+  const clear = page.getByTestId('palette-clear-filters')
+  chk(await clear.isVisible().catch(() => false), 'Clear filters is on screen', 'the Clear filters button is not visible')
+  await clear.click({ timeout: 5000 }).catch(async () => {
+    // Reported rather than swallowed: a button that cannot be clicked is its
+    // own defect, and the checks below would otherwise blame the handler.
+    bad('the Clear filters button could not be clicked')
+  })
+  await page.waitForTimeout(600)
+
+  const after = await countNow()
+  chk(after === 0, 'Clear filters puts the count back to zero', `the badge still reads ${after} after clearing`)
+  chk(
+    (await page.getByTestId('palette-created-after').inputValue().catch(() => 'x')) === '',
+    'and the date field is actually empty again',
+    'created-after still holds its value after Clear filters',
+  )
+
   await page.keyboard.press('Escape')
 } catch (e) {
   bad(`threw: ${e.message.split('\n')[0]}`)

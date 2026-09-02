@@ -514,6 +514,8 @@ export function CommandPalette({
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border/60">
         <button
           type="button"
+          data-testid="palette-filters-toggle"
+          data-active-filters={activeFilterCount}
           onClick={() => setFiltersOpen((v) => !v)}
           className={cn(
             'inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] transition-colors',
@@ -528,6 +530,7 @@ export function CommandPalette({
         {activeFilterCount > 0 && (
           <button
             type="button"
+            data-testid="palette-clear-filters"
             onClick={() => {
               setTypeFilter(new Set())
               setSortBy('relevance')
@@ -540,6 +543,19 @@ export function CommandPalette({
               setIncludeArchived(false)
               setDueAfter('')
               setDueBefore('')
+              /*
+               * These five count toward `activeFilterCount` and were not being
+               * reset, so "Clear filters" left the button lit and the results
+               * still narrowed — a control saying it had done something it had
+               * not. `palette-filters.test.ts` now derives both lists from this
+               * file and fails if they drift apart again, which is the only
+               * reason they stayed out of step long enough to ship.
+               */
+              setCreatedAfter('')
+              setCreatedBefore('')
+              setSpaceFilter('')
+              setFolderFilter('')
+              setListFilter('')
               setCustomFieldId('')
               setCustomFieldValue('')
             }}
