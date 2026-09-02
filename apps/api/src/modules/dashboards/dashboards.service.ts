@@ -266,12 +266,75 @@ export class DashboardsService {
     return config ?? null
   }
 
-  async updateDockConfig(userId: string, workspaceId: string, patch: { pinnedLinks?: any[], appearance?: any }) {
+  /**
+   * G04-7 / G07-6 — the nav lists are capped here, not only in the client.
+   *
+   * They arrive as jsonb straight from a browser, so a caller could otherwise
+   * store an unbounded array and make every later read of this row expensive
+   * for everybody who shares the workspace.
+   */
+  private static readonly NAV_LIMIT = { favorites: 12, recents: 8 }
+
+  private static navList(value: unknown, limit: number) {
+    if (!Array.isArray(value)) return []
+    return value
+      .filter(
+        (entry): entry is { label: string; path: string } =>
+          !!entry &&
+          typeof entry === 'object' &&
+          typeof (entry as { label?: unknown }).label === 'string' &&
+          typeof (entry as { path?: unknown }).path === 'string',
+      )
+      // Only the fields this feature stores. A row is user-supplied jsonb, and
+      // echoing back whatever arrived is how a sidebar starts carrying data
+      // nothing put there on purpose.
+      .map((entry) => {
+        const kind = (entry as { kind?: unknown }).kind
+        return {
+          label: String(entry.label).slice(0, 80),
+          path: String(entry.path).slice(0, 300),
+          ...(typeof kind === 'string' ? { kind: kind.slice(0, 40) } : {}),
+        }
+      })
+      .slice(0, limit)
+  }
+
+  async updateDockConfig(
+    userId: string,
+    workspaceId: string,
+    patch: { pinnedLinks?: any[]; appearance?: any; navFavorites?: unknown; navRecents?: unknown },
+  ) {
     const existing = await this.getDockConfig(userId, workspaceId)
-    // Whitelist the two jsonb columns; never spread the raw body onto the row.
+    // Whitelist the jsonb columns; never spread the raw body onto the row.
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.pinnedLinks !== undefined) set.pinnedLinks = Array.isArray(patch.pinnedLinks) ? patch.pinnedLinks : []
     if (patch.appearance !== undefined) set.appearance = patch.appearance
+    /*
+     * Three states, and they are all different answers:
+     *
+     *   undefined → not part of this patch, leave the column alone
+     *   null      → "clear it", back to never-arranged, so the defaults return
+     *   an array  → that exact list, even when empty ("I want none")
+     *
+     * `navList(null)` returns `[]`, so folding null in with the array case made
+     * clearing IMPOSSIBLE: it stored a deliberate empty list instead. That is a
+     * product bug — nothing could reset the sidebar to its defaults — and it
+     * showed up first as a cross-suite failure, because a teardown that passed
+     * null left the next suite with an empty sidebar and Docs and Dashboards
+     * missing from the nav.
+     */
+    if (patch.navFavorites !== undefined) {
+      set.navFavorites =
+        patch.navFavorites === null
+          ? null
+          : DashboardsService.navList(patch.navFavorites, DashboardsService.NAV_LIMIT.favorites)
+    }
+    if (patch.navRecents !== undefined) {
+      set.navRecents =
+        patch.navRecents === null
+          ? null
+          : DashboardsService.navList(patch.navRecents, DashboardsService.NAV_LIMIT.recents)
+    }
 
     if (existing) {
       const [updated] = await this.db
@@ -288,6 +351,16 @@ export class DashboardsService {
           workspaceId,
           pinnedLinks: patch.pinnedLinks ?? [],
           appearance: patch.appearance ?? { size: 'md', opacity: 0.8, theme: 'system' },
+          // Left null when absent: "never arranged it" earns the defaults,
+          // "arranged it to be empty" does not.
+          navFavorites:
+            patch.navFavorites === undefined
+              ? null
+              : DashboardsService.navList(patch.navFavorites, DashboardsService.NAV_LIMIT.favorites),
+          navRecents:
+            patch.navRecents === undefined
+              ? null
+              : DashboardsService.navList(patch.navRecents, DashboardsService.NAV_LIMIT.recents),
         })
         .returning()
       return created

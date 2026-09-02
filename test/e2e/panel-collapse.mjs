@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 43
+const EXPECTED_CHECKS = 49
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -734,6 +734,144 @@ try {
       `${await page.locator('[data-testid^="dock-tool-"]').count()} tool(s) came back`,
     )
     await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } })
+  }
+
+  /*
+   * ---------------------------------------------------------------------
+   * G04-7 [05:29] / G07-6 [08:26–08:31] — the sidebar arrangement is the
+   * person's, not the browser's
+   *
+   * FAVORITES and RECENTS lived in localStorage while everything else about a
+   * user — theme, locale, notification preferences, and the dock appearance in
+   * that very same row — was server-persisted. Sign in on another machine, or
+   * open a private window, and a sidebar somebody had arranged reverted to
+   * four hard-coded defaults.
+   *
+   * G07-6 adds a second complaint: the only way to ADD a favourite was the
+   * star on a RECENTS row, so a page you had never opened could not be
+   * favourited at all — you had to visit it, find it in Recents, then star it.
+   * ---------------------------------------------------------------------
+   */
+  console.log('\n▶ G04-7 / G07-6 — the sidebar you arranged follows you')
+  await A(`/dashboards/dock/${workspaceId}`, {
+    method: 'POST',
+    body: { navFavorites: null, navRecents: null },
+  })
+  const priorRestore2 = restore
+  restore = async () => {
+    await priorRestore2?.()
+    await A(`/dashboards/dock/${workspaceId}`, {
+      method: 'POST',
+      body: { navFavorites: null, navRecents: null },
+    })
+  }
+  await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+
+  // Templates: a Browse row, and one this run has never navigated to — which
+  // is exactly the page the old star-on-Recents could not reach.
+  const star = page.getByTestId('nav-favorite-templates')
+  check(
+    (await star.count()) > 0,
+    'a page you have never opened can still be favourited',
+    'no star on a Browse row — favouriting still needs a visit first',
+  )
+  if ((await star.count()) === 0) {
+    check(false, 'and the choice is stored on the account', 'skipped')
+    check(false, 'so a different browser sees it too', 'skipped')
+    check(false, 'and an emptied list is not silently refilled', 'skipped')
+  } else {
+    await star.click({ force: true })
+    await page.waitForTimeout(2000)
+
+    const saved = await A(`/dashboards/dock/${workspaceId}`)
+    check(
+      (saved.data?.navFavorites ?? []).some((f) => String(f.path).endsWith('/templates')),
+      'and the choice is stored on the account',
+      `navFavorites=${JSON.stringify(saved.data?.navFavorites)}`,
+    )
+
+    /*
+     * The claim itself: a brand-new context has no localStorage at all, so
+     * this is the "another machine" case rather than a reload.
+     */
+    const fresh = await (await browser.newContext({ viewport: { width: 1680, height: 1000 } })).newPage()
+    await signIn(fresh)
+    await fresh.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+    await fresh.waitForTimeout(4500)
+    /*
+     * Scoped to the FAVORITES list, not the whole sidebar.
+     *
+     * Templates is a permanent Browse row, so `/Templates/` over the sidebar's
+     * text is true whether or not anything was ever favourited — a check that
+     * cannot fail. Only its presence in this container means the star did
+     * something that crossed a machine.
+     */
+    const freshFavorites = (await fresh
+      .getByTestId('nav-favorites-list')
+      .innerText()
+      .catch(() => '')).replace(/\s+/g, ' ')
+    check(
+      /Templates/i.test(freshFavorites),
+      'so a different browser sees it too',
+      `fresh favourites: ${freshFavorites.slice(0, 120) || '(none rendered)'}`,
+    )
+    await fresh.close()
+
+    // "I want none" is an answer here too: an empty list must not be read as
+    // "never arranged it" and refilled with Inbox/Teams/Docs/Dashboards.
+    await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { navFavorites: [] } })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3500)
+    /*
+     * Read off the SIDEBAR, not the API.
+     *
+     * The failure this guards is a client-side read: `Array.isArray(stored) &&
+     * stored.length` falls through to the defaults branch, which sets the four
+     * hard-coded rows on screen WITHOUT writing them back. The stored value
+     * stays `[]`, so an API-side assertion passes while the user is looking at
+     * a list they deleted — which is exactly what a break using that
+     * expression did.
+     */
+    const emptied = (await page
+      .getByTestId('nav-favorites-list')
+      .innerText()
+      .catch(() => '')).replace(/\s+/g, ' ')
+    check(
+      !/Dashboards/i.test(emptied) && !/Templates/i.test(emptied),
+      'and an emptied list is not silently refilled',
+      `favourites still showing: ${emptied.slice(0, 120)}`,
+    )
+
+    /*
+     * …and there is a way back. `null` means "never arranged it", so the
+     * defaults return.
+     *
+     * This exists because folding null in with the array case made clearing
+     * impossible — navList(null) returns [], so a reset stored a deliberate
+     * empty list. It surfaced as a CROSS-SUITE failure: this suite's teardown
+     * passed null, left [] behind, and video-regression then reported Docs and
+     * Dashboards missing from the sidebar. A check that only ever sets a list
+     * cannot see that, so it is driven here.
+     */
+    await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { navFavorites: null } })
+    const cleared = await A(`/dashboards/dock/${workspaceId}`)
+    check(
+      cleared.data?.navFavorites === null,
+      'and clearing it restores "never arranged", not an empty list',
+      `navFavorites=${JSON.stringify(cleared.data?.navFavorites)}`,
+    )
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3500)
+    const restored = (await page
+      .getByTestId('nav-favorites-list')
+      .innerText()
+      .catch(() => '')).replace(/\s+/g, ' ')
+    check(
+      /Docs/i.test(restored) && /Dashboards/i.test(restored),
+      'so the defaults come back on screen',
+      `favourites: ${restored.slice(0, 120)}`,
+    )
   }
 
   await done(browser, stack, restore)

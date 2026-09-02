@@ -1883,3 +1883,90 @@ than the one that exists.
 Five checks in `panel-collapse.mjs`, floor 37 → 43. Four breaks, all caught.
 
 **Running total: 130 closed, 26 open, 1 unverifiable.**
+
+## G04-7 / G07-6 — the sidebar you arranged follows you (2 Sep)
+
+> "The whole point of pinning your tools is that YOUR choice follows you."
+> `[05:29]`, `[08:26–08:31]`
+
+FAVORITES and RECENTS lived in `localStorage` while everything else about a
+user — theme, locale, notification preferences, and the dock appearance sitting
+in **that very same database row** — was server-persisted. So it was an
+inconsistency rather than a decision: sign in on another machine, or open a
+private window, and a sidebar somebody had arranged reverted to four hard-coded
+defaults.
+
+Both now live on `user_dock_configs` (migration `0121`), beside the dock tools
+from the previous commit.
+
+### Three decisions worth naming
+
+- **Nullable, not `default '[]'`.** "Never arranged it" earns the defaults;
+  "arranged it to be empty" must not. A NOT NULL default would make every
+  existing row look like a deliberate empty list.
+- **A one-time migration on read.** Server list → use it. No server list but a
+  local one → adopt it, write it up, and *delete the local copy* so the
+  migration cannot run twice and resurrect a list since changed elsewhere.
+  Neither → the defaults. Somebody who arranged their sidebar before this
+  shipped keeps it.
+- **Recents are coalesced.** They change on every navigation, so the write is
+  debounced 2s and cancelled on unmount. Clicking through four pages costs one
+  write, and a pending one cannot fire against a workspace the user has left.
+  Unlike favourites, this list is a side effect of moving around rather than
+  something anybody asked for — it must never be why the app feels busy.
+
+Server-side, the lists are capped (12 / 8) and stripped to `label`/`path`/`kind`
+on the way in. They arrive as jsonb straight from a browser: an uncapped array
+would make every later read expensive for everyone in the workspace, and
+echoing back whatever arrived is how a sidebar starts carrying fields nothing
+put there on purpose.
+
+### G07-6's second half
+
+The only way to ADD a favourite was the star on a **Recents** row — so a page
+you had never opened could not be favourited at all. You had to visit it, find
+it in Recents, then star it. `NavLink` takes an optional star now, which gives
+all 18 Browse rows one directly. The empty-state copy said "Star from Recents",
+which was true and is not any more; corrected in four locales.
+
+### Two checks that were wrong before they were right
+
+- **"a different browser sees it too"** tested `/Templates/` against the whole
+  sidebar — and Templates is a permanent Browse row, so it was true whether or
+  not anything had ever been favourited. A check that could not fail. Scoped to
+  the favourites list.
+- **"an emptied list is not silently refilled"** asserted against the API. The
+  failure it guards is a *client-side read*: `Array.isArray(stored) &&
+  stored.length` falls through to the defaults branch, which paints four rows
+  on screen without writing them back — so the stored value stays `[]` and an
+  API assertion passes while the user stares at a list they deleted. Now read
+  off the sidebar; the break reports `Inbox 70 Teams Docs Dashboards`.
+
+### The bug the FULL suite run found, that the suite itself could not
+
+`panel-collapse` was green at 47/0. `video-regression`, running after it,
+reported **Docs and Dashboards missing from the sidebar**.
+
+The teardown passed `navFavorites: null` to mean "clear it". The service folded
+null in with the array case, and `navList(null)` returns `[]` — so clearing
+stored a *deliberate empty list* instead. The next suite inherited an emptied
+sidebar, and Docs and Dashboards live only in the favourites defaults.
+
+That is a product bug, not a fixture one: **nothing could reset the sidebar to
+its defaults.** Three states, three answers, and they had been two:
+
+| sent | means |
+|---|---|
+| `undefined` | not part of this patch — leave the column alone |
+| `null` | clear it; back to never-arranged, so the defaults return |
+| an array | that exact list, even when empty |
+
+Worth recording because no single-suite run could have found it. A check that
+only ever *sets* a list never exercises the clear path, and the failure landed
+in a different suite entirely — which is the whole reason the full set runs
+before every push.
+
+Six checks in `panel-collapse.mjs`, floor 43 → 49. Five breaks, all caught,
+including the null-folding one that started this.
+
+**Running total: 132 closed, 24 open, 1 unverifiable.**

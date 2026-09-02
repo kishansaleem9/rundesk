@@ -848,6 +848,13 @@
       "when": 1900000089028,
       "tag": "0120_timezone_change_notice",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1900000089029,
+      "tag": "0121_nav_favorites_on_the_account",
+      "breakpoints": true
     }
   ]
 }

@@ -779,6 +779,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     appearance?: { size?: string; opacity?: number; orientation?: string }
     /** G07-7 — which tools the dock carries. Stored per user, per workspace. */
     pinnedLinks?: string[]
+    /** G04-7 / G07-6 — the sidebar arrangement, on the account not the browser. */
+    navFavorites?: Array<{ label: string; path: string }>
+    navRecents?: NavRecent[]
   }) => {
     if (!workspaceId) return
     await api(`/dashboards/dock/${workspaceId}`, {
@@ -795,15 +798,39 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     return () => window.removeEventListener('resize', sync)
   }, [])
 
+  /*
+   * G04-7 [05:29] / G07-6 [08:26–08:31] — the arrangement follows the person.
+   *
+   * The order matters, and each branch is a different answer:
+   *
+   *   1. the server has a list        → use it, whatever it is (including empty)
+   *   2. this browser has an old one  → adopt it AND write it up, once, so a
+   *                                     user who arranged their sidebar before
+   *                                     this shipped does not lose it
+   *   3. neither                      → the defaults
+   *
+   * Null and `[]` are deliberately different on the way in: "never arranged
+   * it" earns the defaults and "arranged it to be empty" does not.
+   */
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || dockConfigQuery.isPending) return
+    const stored = dockConfigQuery.data?.navFavorites
+    if (Array.isArray(stored)) {
+      setFavoriteItems(stored.slice(0, 12))
+      return
+    }
     const key = `rundesk.navFavorites.${workspaceId}`
     try {
       const raw = localStorage.getItem(key)
       if (raw) {
         const parsed = JSON.parse(raw) as Array<{ label: string; path: string }>
         if (Array.isArray(parsed)) {
-          setFavoriteItems(parsed.slice(0, 12))
+          const adopted = parsed.slice(0, 12)
+          setFavoriteItems(adopted)
+          void updateDockConfig({ navFavorites: adopted })
+          // Removed so the migration cannot run twice and resurrect a list the
+          // user has since changed on another machine.
+          localStorage.removeItem(key)
           return
         }
       }
@@ -817,31 +844,43 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
       { label: 'Docs', path: `/app/${workspaceId}/docs` },
       { label: 'Dashboards', path: `/app/${workspaceId}/dashboard` },
     ])
-  }, [workspaceId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, dockConfigQuery.isPending, dockConfigQuery.data?.navFavorites])
 
+  /*
+   * G04-7 / G07-6 — every write goes to the account.
+   *
+   * Optimistic on screen and persisted behind it: waiting on a round trip to
+   * move a favourite up one place would make the arrows feel broken. A failed
+   * write costs the arrangement, never the session, and the next load reads
+   * whatever the server actually holds.
+   */
+  const persistFavorites = (next: Array<{ label: string; path: string }>) => {
+    if (!workspaceId) return
+    void updateDockConfig({ navFavorites: next })
+  }
+  /**
+   * G07-6 — the star props for a Browse row, in one place.
+   *
+   * The label is the stable English string the nav stores (`navLabel` handles
+   * display), so a favourite made in one locale still resolves in another.
+   */
+  const favoriteProps = (label: string, path: string) => ({
+    on: favoriteItems.some((f) => pathsEqual(f.path, path)),
+    onToggle: () => toggleFavorite({ label, path }),
+    addLabel: t('nav.addFavorite'),
+    removeLabel: t('nav.removeFavorite'),
+  })
   const toggleFavorite = (item: { label: string; path: string }) => {
     if (!workspaceId) return
-    const key = `rundesk.navFavorites.${workspaceId}`
     setFavoriteItems((prev) => {
       const exists = prev.some((f) => pathsEqual(f.path, item.path))
       const next = exists
         ? prev.filter((f) => !pathsEqual(f.path, item.path))
         : [item, ...prev.filter((f) => !pathsEqual(f.path, item.path))].slice(0, 12)
-      try {
-        localStorage.setItem(key, JSON.stringify(next))
-      } catch {
-        // ignore storage errors
-      }
+      persistFavorites(next)
       return next
     })
-  }
-  const persistFavorites = (next: Array<{ label: string; path: string }>) => {
-    if (!workspaceId) return
-    try {
-      localStorage.setItem(`rundesk.navFavorites.${workspaceId}`, JSON.stringify(next))
-    } catch {
-      // ignore storage errors
-    }
   }
   const moveFavorite = (index: number, dir: -1 | 1) => {
     setFavoriteItems((prev) => {
@@ -862,44 +901,59 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     })
   }
 
+  /* G04-7 — recents, read from the account, migrating any local list once. */
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || dockConfigQuery.isPending) return
+    const stored = dockConfigQuery.data?.navRecents
+    if (Array.isArray(stored)) {
+      setRecentItems(stored.slice(0, 8))
+      return
+    }
     const storageKey = `rundesk.navRecents.${workspaceId}`
     try {
       const raw = localStorage.getItem(storageKey) ?? localStorage.getItem('rundesk.navRecents')
       if (!raw) return
       const parsed = JSON.parse(raw) as NavRecent[]
       if (!Array.isArray(parsed)) return
-      const deduped = parsed.filter(
-        (item, index, arr) => arr.findIndex((other) => pathsEqual(other.path, item.path)) === index,
-      )
-      setRecentItems(deduped.slice(0, 8))
-      if (!localStorage.getItem(storageKey)) {
-        localStorage.setItem(storageKey, JSON.stringify(deduped.slice(0, 8)))
-      }
+      const deduped = parsed
+        .filter((item, index, arr) => arr.findIndex((other) => pathsEqual(other.path, item.path)) === index)
+        .slice(0, 8)
+      setRecentItems(deduped)
+      void updateDockConfig({ navRecents: deduped })
+      localStorage.removeItem(storageKey)
     } catch {
       // ignore invalid cached nav recents
     }
-  }, [workspaceId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, dockConfigQuery.isPending, dockConfigQuery.data?.navRecents])
 
+  /*
+   * G04-7 — recents change on every navigation, so the write is coalesced.
+   *
+   * On screen immediately; persisted 2s after the last move. Somebody clicking
+   * through four pages should cost one write, not four — and unlike favourites
+   * this list is a side effect of moving around rather than something the user
+   * asked for, so it must never be the reason the app feels busy.
+   */
+  const recentsSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (!workspaceId) return
     const hit = recentFromPathname(pathname, workspaceId)
     if (!hit) return
-    const storageKey = `rundesk.navRecents.${workspaceId}`
     setRecentItems((prev) => {
-      const next = [
-        hit,
-        ...prev.filter((item) => !pathsEqual(item.path, hit.path)),
-      ].slice(0, 8)
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(next))
-      } catch {
-        // ignore storage failure
-      }
+      const next = [hit, ...prev.filter((item) => !pathsEqual(item.path, hit.path))].slice(0, 8)
+      if (recentsSaveRef.current) clearTimeout(recentsSaveRef.current)
+      recentsSaveRef.current = setTimeout(() => void updateDockConfig({ navRecents: next }), 2000)
       return next
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, workspaceId])
+
+  // A pending write must not outlive the sidebar, or it fires against a
+  // workspace the user has already left.
+  useEffect(() => () => {
+    if (recentsSaveRef.current) clearTimeout(recentsSaveRef.current)
+  }, [])
 
   useEffect(() => {
     try {
@@ -1250,7 +1304,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               <ChevronDown className={cn('h-3 w-3 transition-transform', favoritesExpanded && 'rotate-180')} />
             </button>
             {favoritesExpanded && (
-              <div className="space-y-1">
+              <div className="space-y-1" data-testid="nav-favorites-list">
                 {favoriteItems.length === 0 ? (
                   <div className="px-2 py-1 text-xs text-muted-foreground">{t('nav.noFavorites')}</div>
                 ) : (
@@ -1427,14 +1481,14 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                   that list drives label lookup and the collapsed rail, while
                   the expanded column is these hand-written links.
                 */}
-                <NavLink to={"/app/$workspaceId/replies" as any} params={{ workspaceId }} icon={Reply} label={t('nav.replies')} compact />
+                <NavLink to={"/app/$workspaceId/replies" as any} params={{ workspaceId }} icon={Reply} label={t('nav.replies')} compact favorite={favoriteProps('Replies', `/app/${workspaceId}/replies`)} />
                 {featureEnabled(FLAGS.AI) && (
-                  <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact />
+                  <NavLink to="/app/$workspaceId/ai" params={{ workspaceId }} icon={Bot} label={t('nav.ai')} compact favorite={favoriteProps('AI', `/app/${workspaceId}/ai`)} />
                 )}
                 {/* §15 — "Skills" sits next to AI, as it does in her sidebar
                     between Replies and Meetings [17:38]. */}
                 {featureEnabled(FLAGS.AI) && (
-                  <NavLink to={"/app/$workspaceId/skills" as any} params={{ workspaceId }} icon={Gem} label={t('nav.skills')} compact />
+                  <NavLink to={"/app/$workspaceId/skills" as any} params={{ workspaceId }} icon={Gem} label={t('nav.skills')} compact favorite={favoriteProps('Skills', `/app/${workspaceId}/skills`)} />
                 )}
                 {/* §15 — her "AI Chats" section, frames `296_1817` → `304_1907`:
                     the conversation that authored a skill is still listed after
@@ -1442,40 +1496,40 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                 {/* §2.8 — "yahan pe aap ko show hongi meetings" [19:16]. Not
                     behind the AI flag: a meeting record is a record, and the
                     page is useful with the assistant switched off. */}
-                <NavLink to={"/app/$workspaceId/meetings" as any} params={{ workspaceId }} icon={Video} label={t('nav.meetings')} compact />
+                <NavLink to={"/app/$workspaceId/meetings" as any} params={{ workspaceId }} icon={Video} label={t('nav.meetings')} compact favorite={favoriteProps('Meetings', `/app/${workspaceId}/meetings`)} />
                 {featureEnabled(FLAGS.AI) && <AiChatsSection workspaceId={workspaceId} />}
                 {/* A1.7 — without this row a privately shared list is only
                     reachable by link, since it is hidden from the tree below. */}
-                <NavLink to={"/app/$workspaceId/shared" as any} params={{ workspaceId }} icon={Users} label={t('nav.sharedWithMe')} compact />
-                <NavLink to="/app/$workspaceId/whiteboards" params={{ workspaceId }} icon={Frame} label={t('nav.whiteboards')} compact />
+                <NavLink to={"/app/$workspaceId/shared" as any} params={{ workspaceId }} icon={Users} label={t('nav.sharedWithMe')} compact favorite={favoriteProps('Shared with me', `/app/${workspaceId}/shared`)} />
+                <NavLink to="/app/$workspaceId/whiteboards" params={{ workspaceId }} icon={Frame} label={t('nav.whiteboards')} compact favorite={favoriteProps('Whiteboards', `/app/${workspaceId}/whiteboards`)} />
                 {featureEnabled(FLAGS.FORMS) && (
-                  <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label={t('nav.forms')} compact />
+                  <NavLink to="/app/$workspaceId/forms" params={{ workspaceId }} icon={ClipboardList} label={t('nav.forms')} compact favorite={favoriteProps('Forms', `/app/${workspaceId}/forms`)} />
                 )}
                 {featureEnabled(FLAGS.AI_AUTOMATIONS) && (
-                  <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label={t('nav.automations')} compact />
+                  <NavLink to="/app/$workspaceId/automations" params={{ workspaceId }} icon={Zap} label={t('nav.automations')} compact favorite={favoriteProps('Automations', `/app/${workspaceId}/automations`)} />
                 )}
                 {featureEnabled(FLAGS.VIEWS_WORKLOAD) && (
-                  <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label={t('nav.workload')} compact />
+                  <NavLink to="/app/$workspaceId/workload" params={{ workspaceId }} icon={BarChart3} label={t('nav.workload')} compact favorite={favoriteProps('Workload', `/app/${workspaceId}/workload`)} />
                 )}
-                <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label={t('nav.timeline')} compact />
+                <NavLink to="/app/$workspaceId/timeline" params={{ workspaceId }} icon={GitBranch} label={t('nav.timeline')} compact favorite={favoriteProps('Timeline', `/app/${workspaceId}/timeline`)} />
                 {featureEnabled(FLAGS.GOALS) && (
-                  <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label={t('nav.goals')} compact />
+                  <NavLink to={"/app/$workspaceId/goals" as any} params={{ workspaceId }} icon={ClipboardList} label={t('nav.goals')} compact favorite={favoriteProps('Goals', `/app/${workspaceId}/goals`)} />
                 )}
                 {featureEnabled(FLAGS.SPRINTS) && (
-                  <NavLink to={"/app/$workspaceId/sprints" as any} params={{ workspaceId }} icon={Play} label={t('nav.sprints')} compact />
+                  <NavLink to={"/app/$workspaceId/sprints" as any} params={{ workspaceId }} icon={Play} label={t('nav.sprints')} compact favorite={favoriteProps('Sprints', `/app/${workspaceId}/sprints`)} />
                 )}
                 {featureEnabled(FLAGS.REPORTING) && (
-                  <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label={t('nav.reports')} compact />
+                  <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label={t('nav.reports')} compact favorite={favoriteProps('Reports', `/app/${workspaceId}/reports`)} />
                 )}
                 {featureEnabled(FLAGS.TIME_TRACKING) && (
-                  <NavLink to={"/app/$workspaceId/time" as any} params={{ workspaceId }} icon={Clock3} label={t('nav.time')} compact />
+                  <NavLink to={"/app/$workspaceId/time" as any} params={{ workspaceId }} icon={Clock3} label={t('nav.time')} compact favorite={favoriteProps('Time', `/app/${workspaceId}/time`)} />
                 )}
-                <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label={t('nav.templates')} compact />
+                <NavLink to="/app/$workspaceId/templates" params={{ workspaceId }} icon={Layers} label={t('nav.templates')} compact favorite={favoriteProps('Templates', `/app/${workspaceId}/templates`)} />
                 {featureEnabled(FLAGS.INTEGRATIONS) && (
-                  <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label={t('nav.integrations')} compact />
+                  <NavLink to="/app/$workspaceId/integrations" params={{ workspaceId }} icon={PlugZap} label={t('nav.integrations')} compact favorite={favoriteProps('Integrations', `/app/${workspaceId}/integrations`)} />
                 )}
-                <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label={t('nav.mindMaps')} compact />
-                <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label={t('nav.clips')} compact />
+                <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label={t('nav.mindMaps')} compact favorite={favoriteProps('Mind maps', `/app/${workspaceId}/mindmaps`)} />
+                <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label={t('nav.clips')} compact favorite={favoriteProps('Clips', `/app/${workspaceId}/clips`)} />
                 {isAdmin && (
                   <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label={t('nav.settings')} compact />
                 )}
@@ -2243,6 +2297,7 @@ function NavLink({
   icon: Icon,
   label,
   compact,
+  favorite,
 }: {
   to:
     | '/app/$workspaceId'
@@ -2265,18 +2320,28 @@ function NavLink({
   icon: typeof Home
   label: string
   compact?: boolean
+  /**
+   * G07-6 [08:26–08:31] — starring a place you have not been.
+   *
+   * The only way to add a favourite was the star on a RECENTS row, so a page
+   * you had never opened could not be favourited at all — you had to visit it
+   * first, then find it in Recents, then star it. Passing this makes every
+   * Browse row starrable directly.
+   */
+  favorite?: { on: boolean; onToggle: () => void; addLabel: string; removeLabel: string }
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const href = resolveRoutePath(to, params)
   const isActive = isNavPathActive(pathname, href, to === '/app/$workspaceId')
 
-  return (
+  const link = (
     <Link
       to={to}
       params={params}
       className={cn(
         'flex items-center gap-2 rounded-md hover:bg-accent/10',
         compact ? 'px-2 py-1.5 text-[13px]' : 'px-2 py-1.5 text-sm',
+        favorite && 'flex-1 min-w-0',
         isActive
           ? 'bg-accent/15 text-foreground font-medium'
           : 'text-muted-foreground hover:text-foreground',
@@ -2285,6 +2350,32 @@ function NavLink({
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
     </Link>
+  )
+
+  if (!favorite) return link
+
+  return (
+    <div className="group/nav flex items-center gap-1">
+      {link}
+      {/*
+        Hidden until hover, except when it is already on — an unlit star on
+        every row would turn a nav list into a column of controls, and a lit
+        one has to stay visible or you cannot tell what you favourited.
+      */}
+      <button
+        type="button"
+        data-testid={`nav-favorite-${href.split('/').pop() || 'home'}`}
+        onClick={favorite.onToggle}
+        title={favorite.on ? favorite.removeLabel : favorite.addLabel}
+        aria-label={favorite.on ? favorite.removeLabel : favorite.addLabel}
+        className={cn(
+          'h-6 w-6 shrink-0 rounded flex items-center justify-center text-muted-foreground hover:bg-accent/15 hover:text-foreground',
+          favorite.on ? 'opacity-100' : 'opacity-0 group-hover/nav:opacity-100 focus:opacity-100',
+        )}
+      >
+        <Star className={cn('h-3.5 w-3.5', favorite.on && 'text-amber-400')} />
+      </button>
+    </div>
   )
 }
 
