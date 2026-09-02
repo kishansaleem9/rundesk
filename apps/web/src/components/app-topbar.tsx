@@ -545,6 +545,7 @@ function AiDockToggle({
           onClick={onToggle}
           aria-pressed={open}
           aria-label={t('topbar.askAi')}
+          data-testid="ai-dock-toggle"
           className={cn(
             'h-9 w-9 rounded-lg flex items-center justify-center transition-colors',
             open ? 'bg-accent/15 text-accent' : 'hover:bg-card/60 text-muted-foreground',

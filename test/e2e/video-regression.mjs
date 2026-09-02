@@ -413,6 +413,115 @@ try {
   const dock = page.locator('button[aria-label*="AI" i], button[title*="AI" i]').first()
   chk(await dock.count() > 0, 'the AI dock is on screen outside the AI page', 'no global AI affordance')
 
+  /*
+   * G13-10 [18:33–18:36] — the assistant says what it is reading.
+   *
+   * Her frames show retrieval steps before any answer: "Checking what you're
+   * working on", "Checking the latest Skills basics". Ours showed a blinking
+   * caret, so a turn spending seconds inspecting a real workspace looked
+   * identical to one doing nothing.
+   *
+   * Its OWN context, for two reasons that both cost a debugging round:
+   *
+   *  - `serviceWorkers: 'block'`. The PWA worker serves from its own cache and
+   *    steps around page.route entirely, so the stubs below were silently
+   *    ignored and the real (unavailable) answers came through. Blocking it
+   *    for the whole suite would change the environment of forty other checks;
+   *    a separate context changes nothing outside this one.
+   *  - two endpoints are stubbed, both environment facts rather than the
+   *    behaviour under test: /ai/chat needs an Anthropic key this box does not
+   *    have, and /ai/status decides whether the composer is even ENABLED —
+   *    with no key the panel correctly disables it, so nothing could ever be
+   *    sent and the trace could not appear however well it worked.
+   *
+   * The server half — that a step is written immediately before the work it
+   * names, and never for work that was skipped — is covered without a key by
+   * apps/api/src/modules/ai/chat-trace.test.ts.
+   */
+  ref('G13-10', 'the assistant says what it is reading, before it answers')
+  {
+    const aiCtx = await browser.newContext({
+      viewport: { width: 1600, height: 1100 },
+      serviceWorkers: 'block',
+    })
+    const aiPage = await aiCtx.newPage()
+    await aiPage.route('**/api/v1/ai/status', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { available: true }, error: null }),
+      }),
+    )
+    await aiPage.route('**/api/v1/ai/chat', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        body:
+          `data: ${JSON.stringify({ step: 'workspace' })}\n\n` +
+          `data: ${JSON.stringify({ step: 'writing' })}\n\n` +
+          `data: ${JSON.stringify({ delta: 'You have three tasks due today.' })}\n\n` +
+          'data: [DONE]\n\n',
+      }),
+    )
+
+    await aiPage.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded' })
+    await aiPage.fill('input[type=email]', EMAIL)
+    await aiPage.fill('input[type=password]', PASSWORD)
+    await aiPage.click('button[type=submit]')
+    await aiPage.waitForURL(/\/app\//, { timeout: 30000 })
+    await aiPage.goto(`${BASE}/app/${WS}`, { waitUntil: 'domcontentloaded' })
+    await aiPage.waitForTimeout(3500)
+
+    const aiToggle = aiPage.getByTestId('ai-dock-toggle')
+    if ((await aiToggle.count()) === 0) {
+      chk(false, 'the AI dock can be opened', 'no ai-dock-toggle on the top bar')
+      chk(false, 'so the trace was never checked', 'skipped')
+      chk(false, 'and neither was the answer', 'skipped')
+    } else {
+      await aiToggle.click()
+      await aiPage.waitForTimeout(1500)
+      const composer = aiPage.locator('input[placeholder*="Ask Rundesk" i]').first()
+      // Asserted rather than assumed: with no key the composer is disabled,
+      // and `fill` would then time out 30s into a failure whose message says
+      // nothing about why.
+      const enabled = !(await composer.isDisabled().catch(() => true))
+      chk(enabled, 'the AI composer is usable once the model is available', 'the composer stayed disabled')
+      if (enabled) {
+        await composer.fill('what am I working on?')
+        await composer.press('Enter')
+        const answered = await aiPage
+          .locator('text=You have three tasks due today.')
+          .first()
+          .waitFor({ timeout: 15000 })
+          .then(() => true)
+          .catch(() => false)
+        chk(answered, 'the answer arrives', 'the answer never rendered')
+        /*
+         * Read AFTER the answer, on purpose. A first version looked while the
+         * turn was still streaming and found nothing, because the trace was
+         * transient — which meant a fast turn showed no trace at all, exactly
+         * when you would want to check whether it read your data. The trace
+         * now belongs to the message and stays with it.
+         */
+        chk(
+          (await aiPage.getByTestId('ai-trace').count()) > 0,
+          'and the trace of what it read stays with it',
+          'no trace survived the answer',
+        )
+        chk(
+          (await aiPage.getByTestId('ai-trace-step-workspace').count()) > 0,
+          'naming the workspace read the server reported',
+          'the workspace step never rendered',
+        )
+      } else {
+        chk(false, 'the answer arrives', 'composer disabled')
+        chk(false, 'and the trace of what it read stays with it', 'composer disabled')
+        chk(false, 'naming the workspace read the server reported', 'composer disabled')
+      }
+    }
+    await aiCtx.close()
+  }
+
   ref('A6.1', 'A meeting can be recorded and reopened')
   await go(`/app/${WS}/ai`, 3500)
   const notesTab = page.getByRole('button', { name: 'Meeting notes', exact: true })

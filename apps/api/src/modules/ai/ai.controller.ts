@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { AiService } from './ai.service'
+import { AiService, openSseStream } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
 import { MODEL_TIERS } from './model-tiers'
 import { BriefingService } from './briefing.service'
@@ -252,12 +252,34 @@ export class AiController {
       res.status(503).send({ error: 'AI features are not configured' })
       return
     }
-    // Real context injection (§7.6): build a grounded workspace summary
-    // server-side when a workspaceId is provided, passing the caller's optional
-    // current-view hint (§7.15) so answers reflect where the user is.
-    const context = body.workspaceId
-      ? await this.ai.buildWorkspaceContext(body.workspaceId, user.id, { currentView: body.currentView })
-      : body.workspaceContext ?? ''
+    /*
+     * G13-10 [18:33–18:36] — say what is being read, while it is being read.
+     *
+     * Her frames show a status with the retrieval steps streaming beneath it
+     * before any answer appears: "Checking what you're working on", "Checking
+     * the latest Skills basics". Ours showed a blinking caret, so a turn that
+     * spends several seconds inspecting a real workspace looked identical to
+     * one doing nothing — and seeing that it read your actual data is the
+     * whole trust signal.
+     *
+     * The stream opens HERE rather than inside chatStream, because the work
+     * worth reporting happens before the model is called. Each step is written
+     * immediately before the operation it names, so the trace is a record of
+     * work rather than decoration: skip buildWorkspaceContext and its line
+     * never appears.
+     */
+    const stream = openSseStream(res)
+    const step = (name: string) => stream.write(`data: ${JSON.stringify({ step: name })}\n\n`)
+
+    let context: string
+    if (body.workspaceId) {
+      step('workspace')
+      context = await this.ai.buildWorkspaceContext(body.workspaceId, user.id, {
+        currentView: body.currentView,
+      })
+    } else {
+      context = body.workspaceContext ?? ''
+    }
 
     // §15 — resolve the skill through SkillsService rather than reading the row
     // here. The service owns the visibility filter and the enabled check, so
@@ -267,6 +289,7 @@ export class AiController {
     let skillPrompt: string | undefined
     if (body.skillId && body.workspaceId) {
       try {
+        step('skill')
         const invocation = await this.skills.buildInvocationContext(
           body.workspaceId,
           user.id,
@@ -274,12 +297,20 @@ export class AiController {
         )
         skillPrompt = this.skills.renderSkillPrompt(invocation)
       } catch (err) {
-        // Failing closed matters more than streaming something: silently
-        // answering as the generic assistant would look like the skill worked.
-        const status = err instanceof HttpException ? err.getStatus() : HttpStatus.BAD_REQUEST
-        res.status(status).send({
-          error: err instanceof Error ? err.message : 'Skill unavailable',
-        })
+        /*
+         * Failing closed matters more than streaming something: silently
+         * answering as the generic assistant would look like the skill worked.
+         *
+         * The stream is already open by now, so the refusal goes down it as an
+         * error frame. `res.status().send()` throws once headers have flushed,
+         * and the client would be left with a truncated stream carrying no
+         * reason — worse than the 4xx it used to get.
+         */
+        stream.write(
+          `data: ${JSON.stringify({ error: err instanceof Error ? err.message : 'Skill unavailable' })}\n\n`,
+        )
+        stream.write('data: [DONE]\n\n')
+        stream.end()
         return
       }
     }
@@ -291,6 +322,7 @@ export class AiController {
       { userId: user.id, workspaceId: body.workspaceId },
       skillPrompt,
       body.tier,
+      stream,
     )
   }
 

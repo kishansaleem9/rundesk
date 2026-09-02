@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { Fragment, useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Input, cn, toast } from '@rundesk/ui'
 import {
@@ -17,10 +17,11 @@ import {
   RefreshCw,
   ThumbsUp,
   ThumbsDown,
+  Check,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useAiChatActions, useAiChatThread, useAiMessageActions } from '../lib/skills-api'
 
@@ -30,6 +31,16 @@ type Message = {
   id: string
   /** §15 — a vote already cast, restored when a thread is reopened. */
   feedback?: 'up' | 'down' | null
+  /**
+   * G13-10 — what the server said it read to produce this answer.
+   *
+   * Kept ON THE MESSAGE rather than only in transient state. A first version
+   * rendered the trace while `isStreaming` was true and dropped it the moment
+   * the answer landed, which meant a fast turn showed nothing at all — and the
+   * fast turns are exactly the ones where you would want to check whether it
+   * really looked at your workspace or just answered from the question.
+   */
+  steps?: string[]
 }
 
 type AiPanelProps = {
@@ -63,6 +74,46 @@ type AiPanelProps = {
 
 // Stable catalog-key identifiers; the localized text is both shown and sent
 // as the chat message when a suggestion is clicked.
+/**
+ * G13-10 — the trace, wherever it is shown.
+ *
+ * One component for the live case and the finished one, so the two cannot
+ * drift into showing different things about the same turn.
+ */
+function AiTrace({ steps, t }: { steps: string[]; t: (k: TranslationKey) => string }) {
+  if (steps.length === 0) return null
+  return (
+    <div className="flex items-start gap-2" data-testid="ai-trace">
+      <div className="h-6 w-6 shrink-0" />
+      <div className="space-y-0.5">
+        {steps.map((s, i) => (
+          <div
+            key={`${s}-${i}`}
+            data-testid={`ai-trace-step-${s}`}
+            className="flex items-center gap-1.5 text-[11px] text-muted-foreground"
+          >
+            <Check className="h-3 w-3 shrink-0 opacity-60" />
+            {t(AI_STEP_LABEL[s] ?? 'aiPanel.stepWorking')}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * G13-10 — the server's step names, mapped to something a person reads.
+ *
+ * The wire carries short stable keys (`workspace`, `skill`, `writing`) rather
+ * than prose, so the API is not a translation table and an unknown step from a
+ * newer server still renders as something honest instead of vanishing.
+ */
+const AI_STEP_LABEL: Record<string, TranslationKey> = {
+  workspace: 'aiPanel.stepWorkspace',
+  skill: 'aiPanel.stepSkill',
+  writing: 'aiPanel.stepWriting',
+}
+
 const SUGGESTED_PROMPT_KEYS = [
   'aiPanel.suggestion.dueThisWeek',
   'aiPanel.suggestion.summarizeProjects',
@@ -101,6 +152,14 @@ export function AiPanel({
     }
   })
   const [isStreaming, setIsStreaming] = useState(false)
+  /*
+   * G13-10 [18:33–18:36] — what the server says it is reading, as it reads it.
+   *
+   * Transient by design: this is process, not content. Once the answer is on
+   * screen the steps have done their job, and keeping them would turn every
+   * past turn into a pile of scaffolding.
+   */
+  const [steps, setSteps] = useState<string[]>([])
   const [streamBuffer, setStreamBuffer] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -193,6 +252,7 @@ export function AiPanel({
     if (threadId && !opts.skipEcho) void chat.append(threadId, 'user', content).catch(() => {})
     setIsStreaming(true)
     setStreamBuffer('')
+    setSteps([])
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -234,6 +294,10 @@ export function AiPanel({
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let accumulated = ''
+      // A local alongside the state: setSteps is async, and the message is
+      // finalized in this same tick, so reading the state here would attach
+      // whatever it held one render ago.
+      const collectedSteps: string[] = []
 
       while (true) {
         const { done, value } = await reader.read()
@@ -246,6 +310,11 @@ export function AiPanel({
             if (data === '[DONE]') continue
             try {
               const parsed = JSON.parse(data)
+              // G13-10 — the retrieval trace, ahead of any text.
+              if (parsed.step) {
+                collectedSteps.push(String(parsed.step))
+                setSteps((prev) => [...prev, String(parsed.step)])
+              }
               if (parsed.delta) {
                 accumulated += parsed.delta
                 setStreamBuffer(accumulated)
@@ -262,6 +331,7 @@ export function AiPanel({
         role: 'assistant',
         content: accumulated,
         id: Date.now().toString(),
+        steps: collectedSteps.length ? collectedSteps : undefined,
       }
       setMessages((prev) => [...prev, assistantMsg])
       setStreamBuffer('')
@@ -364,6 +434,9 @@ export function AiPanel({
         )}
 
         {messages.map((msg) => (
+          <Fragment key={msg.id}>
+            {/* G13-10 — above the answer it explains, and it stays there. */}
+            {msg.role === 'assistant' && <AiTrace steps={msg.steps ?? []} t={t} />}
           <MessageBubble
             key={msg.id}
             message={msg}
@@ -378,7 +451,18 @@ export function AiPanel({
                 : undefined
             }
           />
+          </Fragment>
         ))}
+
+        {/*
+          G13-10 [18:33–18:36] — the trace, above the answer.
+
+          Rendered only while streaming, and only from steps the server
+          actually sent. Nothing here is invented client-side: if the server
+          skipped a piece of work, its line is absent, which is what makes this
+          evidence rather than a loading animation with words on it.
+        */}
+        {isStreaming && <AiTrace steps={steps} t={t} />}
 
         {/* Streaming */}
         {isStreaming && streamBuffer && (

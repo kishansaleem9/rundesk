@@ -1713,3 +1713,69 @@ the role caption removed (1 — `row read "main workspace ·main open"`), and
 
 **Running total: 127 closed, 29 open, 1 unverifiable.**
 Local: 17 suites, 756 checks, 0 failed. `scripts/preflight.sh` clean.
+
+## G13-10 — the assistant says what it is reading (2 Sep)
+
+> A status with the retrieval steps streaming beneath it — "Checking what
+> you're working on", "Checking the latest Skills basics" — before the answer
+> appears.  `[18:33–18:36]`
+
+Ours showed a blinking caret. A turn that spends several seconds inspecting a
+real workspace looked exactly like one doing nothing, and being able to see
+that it read *your* data is the whole trust signal.
+
+The `{ step }` frame convention already existed — the skill-author endpoints
+used it. `/ai/chat` did not.
+
+### Making it evidence rather than decoration
+
+The stream now opens in the **controller**, not inside `chatStream`, because
+the work worth reporting happens before the model is ever called. Each step is
+written immediately before the operation it names, so:
+
+- no `workspaceId` → no "reading your workspace" line, because no read happened
+- no `skillId` → no "loading the skill" line
+- the model call's own step is written by `chatStream`, where it happens,
+  rather than guessed at by the controller
+
+A step for work that did not happen would be worse than no trace: a claim the
+reader has no way to check.
+
+One consequence worth noting: the stream is open by the time a skill can be
+refused, so a refusal now goes down it as an error frame. `res.status().send()`
+throws on flushed headers, and the caller would have been left with a truncated
+stream carrying no reason at all — worse than the 4xx it used to get.
+
+### Three things the checks changed about the feature
+
+1. **The trace was transient.** It rendered while `isStreaming` was true and
+   vanished the moment the answer landed, so a *fast* turn showed nothing —
+   exactly when you would want to check whether it really looked at your
+   workspace. It now belongs to the message and stays with it.
+2. **The service worker was eating the stubs.** The browser check's route
+   interception was being bypassed by the PWA worker, so the real "AI not
+   configured" answers came through and the check failed against a working
+   implementation. It runs in its own `serviceWorkers: 'block'` context, which
+   also leaves the other forty checks in that suite untouched.
+3. **`/ai/status` had to be stubbed as well as `/ai/chat`.** With no key the
+   panel correctly *disables* its composer — right behaviour, and it meant
+   nothing could ever be sent.
+
+### The unit test that claimed something it did not check
+
+`chat-trace.test.ts` runs without an Anthropic key, which is the point: the
+live path cannot run in CI. Its first version kept frames and calls in two
+separate arrays and asserted things about each. That looked like an ordering
+check and was not — moving `step('workspace')` to after the `await` left both
+arrays identical and every assertion passing. Break C caught nothing.
+
+Rewritten around a single interleaved timeline, so "announced then read" and
+"read then announced" are distinguishable. Break C, plus the same break on the
+skill step and one reverting the refusal path, are all caught now.
+
+Six unit tests, four browser checks. The harness's own first failure is
+recorded in a comment: `AiController` takes `(ai, briefings, skills)`, and
+getting the arity wrong silently lands `skills` in the briefings slot so every
+skill turn throws into the refusal path.
+
+**Running total: 128 closed, 28 open, 1 unverifiable.**

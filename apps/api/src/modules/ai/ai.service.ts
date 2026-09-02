@@ -735,6 +735,29 @@ export function mapAiWorkloadMoves(raw: unknown, loads: WorkloadLoad[]): Workloa
   }
 }
 
+/**
+ * G13-10 [18:33–18:36] — one SSE stream, opened once.
+ *
+ * Fastify's reply has no setHeader/write/end, so this reaches for the
+ * underlying Node response and hijacks the reply so Fastify does not also try
+ * to send one. Extracted because the trace and the answer now share a stream:
+ * the caller opens it to report what it is reading, and `chatStream` writes
+ * the answer into the same one. Calling setHeader a second time after the
+ * headers have flushed throws, so there has to be exactly one opener.
+ */
+export type SseStream = { write: (chunk: string) => void; end: () => void }
+
+export function openSseStream(res: Response): SseStream {
+  const reply = res as any
+  if (typeof reply.hijack === 'function') reply.hijack()
+  const raw = reply.raw ?? reply
+  raw.setHeader('Content-Type', 'text/event-stream')
+  raw.setHeader('Cache-Control', 'no-cache')
+  raw.setHeader('Connection', 'keep-alive')
+  raw.flushHeaders?.()
+  return raw as SseStream
+}
+
 @Injectable()
 export class AiService {
   private client: Anthropic | null = null
@@ -1116,6 +1139,12 @@ Focus on the key goals, current status, and any blockers.`,
      * pass one.
      */
     tier?: string,
+    /**
+     * G13-10 — an SSE stream the caller already opened so it could report its
+     * own retrieval steps before the model was ever called. When absent this
+     * opens its own, so every existing caller is unaffected.
+     */
+    opened?: SseStream,
   ): Promise<void> {
     // Enforce rate limits before we hijack the reply for streaming.
     await this.assertWithinRateLimit(ctx)
@@ -1134,18 +1163,21 @@ ${workspaceContext}
 
 Current date: ${new Date().toISOString().split('T')[0]}`
 
-    // This runs on Fastify, whose reply has no setHeader/write/end — use the
-    // underlying Node response (reply.raw) and hijack the reply so Fastify
-    // doesn't also try to send one.
-    const reply = res as any
-    if (typeof reply.hijack === 'function') reply.hijack()
-    const raw = reply.raw ?? reply
-    raw.setHeader('Content-Type', 'text/event-stream')
-    raw.setHeader('Cache-Control', 'no-cache')
-    raw.setHeader('Connection', 'keep-alive')
-    raw.flushHeaders?.()
+    // Already open when the caller reported its own steps first (G13-10);
+    // otherwise open it here. Calling setHeader twice throws once the headers
+    // have been flushed, which is why this is a branch rather than a re-run.
+    const raw = opened ?? openSseStream(res)
 
     try {
+      /*
+       * G13-10 [18:33–18:36] — the last step, named where it happens.
+       *
+       * Everything above this line is retrieval the caller already reported.
+       * This one belongs to the model call, so it is written here rather than
+       * guessed at by the controller — a step that claims work happening
+       * somewhere else is how a trace stops being evidence.
+       */
+      raw.write(`data: ${JSON.stringify({ step: 'writing' })}\n\n`)
       const stream = this.claude.messages.stream({
         model,
         max_tokens: 2048,
