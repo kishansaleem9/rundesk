@@ -2744,3 +2744,42 @@ click on the scrim, and "clicking away closes it again" failed. **A step that
 leaves state behind fails the check after it, which reads as a defect in
 something that is fine.** It now clicks the backdrop and asserts the dialog is
 gone before moving on.
+
+## The six "decisions" were answered by the walkthrough (2 Sep)
+
+These sat blocked on a human for most of a day. They should not have: the
+walkthrough is the specification, and it settles **five of the six outright**.
+Reading the transcript and frame audit first is what I should have done instead
+of handing them back.
+
+| | answered? | what she actually shows |
+|---|---|---|
+| **AI Agents** | yes | `[04:44]` "**Unhon ne** teen apne software…" — she is *narrating ClickUp's lineup*, not asking for an agent runtime. Her own definition is a **Skill**: a saved, named playbook a person invokes, with memory and connections, behind approve-then-execute. Rundesk ships Skills. **Do not build an agent runtime.** |
+| **A List under a Space** | yes | She does it on camera and narrates two levels: `[21:49–21:54]` "pehle space hoti hai…". Fix is one line — make `lists.project_id` nullable, exactly as `folder_id` already is. |
+| **Drive scope** | yes | `[04:04–04:32]` "**humari** Google Drive" — whole-Drive search. And the shipped code already assumes it: `search.service.ts:767` issues an account-wide `name contains` query while the OAuth grant is `drive.file`. That is a live mismatch, not a design question. |
+| **Workspace privacy** | yes | She creates a second workspace on camera from inside an existing one, `08:35–09:57`, and the frames show where it lands. |
+| **industry / teamSize** | yes | Zero occurrences in 386 transcript lines and 143 frames; the wizard she holds up as the model never asks them either. |
+| **request-access** | partly | Named once at `[12:16–12:20]` while reading down ClickUp's notification list; she never takes the requester's seat. Enough to build the owner-facing half. |
+
+Each residual is narrower than the question I asked — "does a connected Skill
+still need per-run approval", "whose Drive", "what the wall discloses" — and
+none of them blocks starting.
+
+### industry / teamSize: worse than unused
+
+`sign-up-page.tsx` `canAdvance` required **both** to advance past step 1, and
+the only thing touching them server-side was the DTO declaration. Two
+compulsory questions collecting data with no consumer — a toll gate on the way
+into the product, for nothing.
+
+Removed: the wizard fields, the two option lists, the validation, the DTO
+declaration, and 56 orphaned catalogue lines (14 keys × 4 locales, exactly).
+Removed rather than made optional, because an unused field is an invitation for
+somebody to start reading it.
+
+Safe for older clients: `main.ts:39-44` sets `whitelist: true` with
+`forbidNonWhitelisted: false`, so a client still sending them is not rejected —
+the fields are dropped.
+
+Guarded in `signup-features.test.ts` on **both** the wizard and the DTO, since
+leaving it on the DTO is how it comes back. Break-tested both ways.

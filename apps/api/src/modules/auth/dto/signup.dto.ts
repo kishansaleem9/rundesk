@@ -47,16 +47,20 @@ export class SignupDto {
   @IsString()
   organizationSlug?: string
 
-  // — metadata (telemetry / feature seeding) —
-  @ApiPropertyOptional({ example: 'Software' })
-  @IsOptional()
-  @IsString()
-  industry?: string
-
-  @ApiPropertyOptional({ example: '11–50' })
-  @IsOptional()
-  @IsString()
-  teamSize?: string
+  /*
+   * `industry` and `teamSize` used to live here. The signup wizard made them
+   * REQUIRED to advance past step 1, and nothing on the server ever read them
+   * — two compulsory questions collecting data with no consumer.
+   *
+   * The walkthrough never asks for them: across 386 transcript lines and 143
+   * catalogued frames she never says either word, and the ClickUp wizard she
+   * holds up as the model does not ask them either. Removed rather than left
+   * optional, because an unused field invites somebody to start reading it.
+   *
+   * `whitelist: true` with `forbidNonWhitelisted: false` (main.ts:39-44) means
+   * an older client still sending them is not rejected — the fields are simply
+   * dropped.
+   */
 
   @ApiPropertyOptional({ type: [String], example: ['core', 'ai', 'chat'] })
   @IsOptional()

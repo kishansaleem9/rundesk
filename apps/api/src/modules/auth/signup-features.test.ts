@@ -153,6 +153,27 @@ describe('G08-4 — the signup feature picker configures the workspace', () => {
     assert.ok(emptied.every((r) => r.enabled === false), 'and they are all off')
   })
 
+  it('no longer asks for anything nobody reads', () => {
+    /*
+     * `industry` and `teamSize` were REQUIRED to advance past step 1
+     * (sign-up-page.tsx canAdvance) and were read by nothing on the server —
+     * two compulsory questions collecting data with no consumer.
+     *
+     * The walkthrough settles it: across 386 transcript lines and 143
+     * catalogued frames she never says either word, and the ClickUp wizard she
+     * holds up as the model does not ask them either.
+     *
+     * Asserted on the wizard AND the DTO, because leaving the field on the DTO
+     * is how it comes back — somebody sees it and wires a form to it.
+     */
+    assert.ok(!/industry/i.test(WIZARD), 'the wizard is asking about industry again')
+    assert.ok(!/teamSize/i.test(WIZARD), 'the wizard is asking about team size again')
+    const dto = readFileSync(join(HERE, 'dto/signup.dto.ts'), 'utf8')
+    const declared = dto.replace(/\/\*[\s\S]*?\*\//g, '')
+    assert.ok(!/industry\?:/.test(declared), 'the signup DTO declares industry again')
+    assert.ok(!/teamSize\?:/.test(declared), 'the signup DTO declares teamSize again')
+  })
+
   it('is actually read by signUp', () => {
     /*
      * The check that would have caught the original bug. Everything above can

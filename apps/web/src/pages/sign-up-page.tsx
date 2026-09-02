@@ -50,8 +50,6 @@ type WizardState = {
   // Step 1 — workspace
   workspaceName: string
   workspaceSlug: string
-  industry: string
-  teamSize: string
   // Step 2 — features
   features: string[]
   // Step 3 — invites
@@ -67,8 +65,6 @@ export function SignUpWizard() {
     password: '',
     workspaceName: '',
     workspaceSlug: '',
-    industry: '',
-    teamSize: '',
     features: ['core', 'views', 'docs', 'chat', 'ai'],
     invites: [],
   })
@@ -99,8 +95,6 @@ export function SignUpWizard() {
           password: state.password,
           organizationName: state.workspaceName,
           organizationSlug: state.workspaceSlug,
-          industry: state.industry,
-          teamSize: state.teamSize,
           features: state.features,
           invites: state.invites,
         },
@@ -225,7 +219,7 @@ export function SignUpWizard() {
 
 function canAdvance(step: Step, s: WizardState): boolean {
   if (step === 0) return s.fullName.trim().length > 1 && /^.+@.+\..+$/.test(s.email) && passwordPolicyError(s.password) === null
-  if (step === 1) return s.workspaceName.trim().length > 1 && s.industry !== '' && s.teamSize !== ''
+  if (step === 1) return s.workspaceName.trim().length > 1
   if (step === 2) return s.features.length > 0
   return true
 }
@@ -355,26 +349,10 @@ function StepWorkspace({
   const { t } = useTranslation()
   const [touched, setTouched] = useState({
     workspaceName: false,
-    industry: false,
-    teamSize: false,
   })
 
   const workspaceNameError = validateWorkspaceName(state.workspaceName)
 
-  const industryOptions = [
-    { value: 'Software', labelKey: 'signUp.industrySoftware' },
-    { value: 'Marketing', labelKey: 'signUp.industryMarketing' },
-    { value: 'Design', labelKey: 'signUp.industryDesign' },
-    { value: 'Operations', labelKey: 'signUp.industryOperations' },
-    { value: 'Other', labelKey: 'signUp.industryOther' },
-  ] as const
-  const teamSizeOptions = [
-    { value: 'Just me', labelKey: 'signUp.teamJustMe' },
-    { value: '2–10', labelKey: 'signUp.team2to10' },
-    { value: '11–50', labelKey: 'signUp.team11to50' },
-    { value: '51–200', labelKey: 'signUp.team51to200' },
-    { value: '200+', labelKey: 'signUp.team200plus' },
-  ] as const
 
   function setName(name: string) {
     const slug = name
@@ -422,55 +400,6 @@ function StepWorkspace({
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>{t('signUp.industryLabel')}</Label>
-            <RadioGroup
-              value={state.industry}
-              onValueChange={(v) => {
-                update({ industry: v })
-                setTouched((prev) => ({ ...prev, industry: true }))
-              }}
-              className="grid gap-1.5"
-            >
-              {industryOptions.map((opt) => (
-                <SelectableRow
-                  key={opt.value}
-                  label={t(opt.labelKey)}
-                  value={opt.value}
-                  selected={state.industry === opt.value}
-                />
-              ))}
-            </RadioGroup>
-            {touched.industry && state.industry === '' && (
-              <FieldError messageKey="signUp.errIndustry" />
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label>{t('signUp.teamSizeLabel')}</Label>
-            <RadioGroup
-              value={state.teamSize}
-              onValueChange={(v) => {
-                update({ teamSize: v })
-                setTouched((prev) => ({ ...prev, teamSize: true }))
-              }}
-              className="grid gap-1.5"
-            >
-              {teamSizeOptions.map((opt) => (
-                <SelectableRow
-                  key={opt.value}
-                  label={t(opt.labelKey)}
-                  value={opt.value}
-                  selected={state.teamSize === opt.value}
-                />
-              ))}
-            </RadioGroup>
-            {touched.teamSize && state.teamSize === '' && (
-              <FieldError messageKey="signUp.errTeamSize" />
-            )}
-          </div>
-        </div>
       </div>
     </div>
   )
