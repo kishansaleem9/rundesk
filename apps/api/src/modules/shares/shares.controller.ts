@@ -57,6 +57,30 @@ export class SharesController {
     return this.shares.updateLevel(this.shares.assertType(objectType), objectId, shareId, user, body.level, ip)
   }
 
+  /**
+   * §G10 [12:16–12:20] — ask the people who can grant it.
+   *
+   * Deliberately NOT under the permission check the other routes share: the
+   * whole point is that the caller cannot see this object. It needs only a
+   * workspace membership, which the service establishes by looking the object
+   * up inside `workspaceId`.
+   */
+  @Post('request')
+  @ApiOperation({ summary: 'Ask whoever can grant it for access to this object' })
+  async request(
+    @Param('objectType') objectType: string,
+    @Param('objectId') objectId: string,
+    @Body() body: { workspaceId: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.shares.requestAccess(
+      body.workspaceId,
+      this.shares.assertType(objectType),
+      objectId,
+      { id: user.id, name: user.displayName, email: user.email },
+    )
+  }
+
   @Delete(':shareId')
   @ApiOperation({ summary: 'Revoke access' })
   async revoke(

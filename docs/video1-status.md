@@ -2838,3 +2838,50 @@ Fixed by seeding what a real connection now carries, not by relaxing the guard.
 A fifth check asserts the behaviour directly: on a `drive.file` grant, **no
 request is sent** — asserted as "no round trip", not "no results", because the
 thing being prevented is a call that cannot succeed and never says why.
+
+## Asking for access to something you cannot see (2 Sep)
+
+> `[12:16–12:20]` — she names it once, reading down ClickUp's notification
+> types: *someone asked for access to something*.
+
+`access_requested` has been in the enum since it was written, has an Inbox icon
+and label, and is in `PRIMARY_SELECTABLE_TYPES`. It was emitted by exactly one
+thing: a **feature** request. Somebody who hit a doc, list or space they could
+not see had no way to ask for it — the wall was the end of the road, which is
+the whole complaint.
+
+**Built by mirroring the feature-flag request flow rather than reinventing it**,
+because that one already learned two things the hard way and both apply:
+
+1. **The ask is recorded before the fan-out.** A request that dies partway
+   through is still an ask that happened, not one that can be repeated at will.
+2. **The once-a-day rule reads the asks, not the notifications they produced.**
+   A notification row only exists for a recipient with in-app switched on, so
+   counting rows let an email-only owner be re-mailed on every press. The same
+   distinction governs the returned count: `notified` counts **delivery**, so
+   an owner who took the email and not the bell is not reported as nobody.
+
+Recipients are whoever holds `admin` on the object itself plus the workspace
+admins, minus the asker. Anyone below admin cannot widen access, so telling
+them would be noise they can do nothing about.
+
+The notification links to the object, where the Share panel already lives — no
+second granting UI, because two implementations of one action drift.
+
+Verified against the real API, not just stubs:
+
+```
+first ask  -> 201 {"status":"sent","notified":1}
+second ask -> 201 {"status":"already_asked","notified":0}
+owner's access_requested notifications: 0 -> 1
+  "org-admin@… asked for access to private thing …" → /app/…/docs?doc=…
+```
+
+Five checks in `request-access.test.ts`. Four breaks, all caught: the asker
+told about their own request, the de-dup removed, the ask not recorded before
+the fan-out, and `notified` counting rows instead of deliveries.
+
+**The requester's own screen is not built.** She never takes that seat, and her
+two rules pull against each other — search must not reveal what you cannot see,
+yet a wall you cannot ask from is the thing she is complaining about. The
+owner-facing half is what she named, and it is what shipped.

@@ -1,7 +1,7 @@
 import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm'
 import {
-  objectShares, users, workspaceMembers,
+  objectShares, users, workspaceMembers, contentAccessRequests,
   spaces, folders, projects, lists, tasks, docs, chatChannels, dashboardPresets,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -561,4 +561,106 @@ export class SharesService {
       .returning({ id: objectShares.id })
     return { claimed: claimed.length }
   }
+
+  /**
+   * §G10 [12:16–12:20] — "someone asked for access to something".
+   *
+   * The `access_requested` notification kind has existed since the enum was
+   * written and was only ever emitted for FEATURE requests. Somebody who hit a
+   * doc, list or space they could not see had no way to ask for it — the wall
+   * was the end of the road.
+   *
+   * Modelled on the feature-flag request flow rather than reinvented, because
+   * that one already learned two things the hard way, and both apply here.
+   */
+  async requestAccess(
+    workspaceId: string,
+    type: ShareType,
+    objectId: string,
+    requester: { id: string; name?: string | null; email?: string | null },
+  ): Promise<{ status: 'sent' | 'already_asked' | 'no_owners'; notified: number }> {
+    if (!SHARE_TYPES.includes(type)) throw new BadRequestException('unknown object type')
+
+    /*
+     * Who can actually grant it: whoever holds admin on the object itself, plus
+     * the workspace's admins. Anyone below admin on the object cannot widen it,
+     * so telling them would be noise they can do nothing about.
+     */
+    const objectAdmins = await this.db
+      .select({ userId: objectShares.userId })
+      .from(objectShares)
+      .where(
+        and(
+          eq(objectShares.workspaceId, workspaceId),
+          eq(objectShares.objectType, type),
+          eq(objectShares.objectId, objectId),
+          eq(objectShares.level, 'admin'),
+        ),
+      )
+    const wsAdmins = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+        ),
+      )
+    const recipients = [
+      ...new Set([...objectAdmins.map((a) => a.userId), ...wsAdmins.map((a) => a.userId)]),
+    ].filter((id): id is string => !!id && id !== requester.id)
+    if (recipients.length === 0) return { status: 'no_owners', notified: 0 }
+
+    /*
+     * One ask per person per object per day, read from the ASKS rather than
+     * from the notifications they produced. A notification row only exists for
+     * a recipient with in-app switched on, so counting rows let an email-only
+     * owner be re-mailed on every press — the exact bug the feature-flag flow
+     * hit and documented.
+     */
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const [recent] = await this.db
+      .select({ id: contentAccessRequests.id })
+      .from(contentAccessRequests)
+      .where(
+        and(
+          eq(contentAccessRequests.workspaceId, workspaceId),
+          eq(contentAccessRequests.requesterId, requester.id),
+          eq(contentAccessRequests.objectType, type),
+          eq(contentAccessRequests.objectId, objectId),
+          gte(contentAccessRequests.createdAt, since),
+        ),
+      )
+      .limit(1)
+    if (recent) return { status: 'already_asked', notified: 0 }
+
+    // Recorded BEFORE the fan-out, so a request that dies partway through is
+    // still an ask that happened rather than one that can be repeated at will.
+    await this.db
+      .insert(contentAccessRequests)
+      .values({ workspaceId, objectType: type, objectId, requesterId: requester.id })
+      .catch(() => undefined)
+
+    const meta = (await this.resolveSharedBatch(workspaceId, type, [objectId])).get(objectId)
+    const what = meta?.name ?? `this ${type}`
+    const who = requester.name?.trim() || requester.email || 'Someone'
+
+    let notified = 0
+    for (const userId of recipients) {
+      const outcome = await this.notifications.createWithOutcome({
+        userId,
+        workspaceId,
+        actorId: requester.id,
+        type: 'access_requested',
+        title: `${who} asked for access to ${what}`,
+        body: `${who} tried to open ${what} and could not. You can give them access from its Share panel.`,
+        target: { entityType: type, entityId: objectId, url: meta?.url ?? `/app/${workspaceId}` },
+      })
+      // Delivery, not the row — see the de-dup note above. Somebody who took
+      // the email and not the bell was told.
+      if (outcome?.delivered) notified += 1
+    }
+    return { status: 'sent', notified }
+  }
+
 }
