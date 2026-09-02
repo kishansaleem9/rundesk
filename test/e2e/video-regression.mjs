@@ -76,6 +76,59 @@ if (!WS) {
 const API_ROOT = `${BASE}/api/v1`
 const rootAuth = await login(API_ROOT, EMAIL, PASSWORD)
 const rootApi = apiClient(API_ROOT, rootAuth.accessToken)
+const MY_ID = rootAuth.user?.id ?? rootAuth.id
+
+/**
+ * At least two notifications, because one cannot be reordered.
+ *
+ * `ensureNotification` makes exactly one, and only when there are none — which
+ * is right for "Clear all", the check it was written for. A2.6b compares the
+ * order of the list before and after flipping the sort, and against a single
+ * row that comparison is identical either way: the check passed on a developer
+ * box holding fifty notifications and failed in CI holding one, which is the
+ * check depending on ambient data rather than on what it needs.
+ */
+async function ensureTwoNotifications() {
+  const count = () => rootApi('/notifications?limit=50').then((r) => (r.data ?? []).length)
+  if ((await count()) >= 2) return await count()
+
+  const peerEmail = process.env.E2E_PEER_EMAIL ?? 'org-admin@rundesk.internal'
+  const peerPassword = process.env.E2E_PEER_PASSWORD ?? 'OrgAdmin@123!'
+  let peerApi
+  try {
+    const peerAuth = await login(API_ROOT, peerEmail, peerPassword)
+    peerApi = apiClient(API_ROOT, peerAuth.accessToken)
+  } catch {
+    return await count()
+  }
+
+  // Any list will do; the notification comes from the assignment, not the task.
+  const spaces = (await rootApi(`/spaces/workspace/${WS}`)).data ?? []
+  let listId = null
+  for (const sp of spaces) {
+    const projects = (await rootApi(`/projects/space/${sp.id}`)).data ?? []
+    for (const pr of projects) {
+      const lists = (await rootApi(`/lists/project/${pr.id}`)).data ?? []
+      if (lists.length) { listId = lists[0].id; break }
+    }
+    if (listId) break
+  }
+  if (!listId) return await count()
+
+  for (let i = 0; i < 2; i++) {
+    const task = (await peerApi('/tasks', {
+      method: 'POST',
+      body: { listId, title: `a2.6b order fixture ${i} ${Date.now()}` },
+    })).data
+    if (task?.id) {
+      await peerApi(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId: MY_ID } })
+    }
+    // Distinct timestamps, so "newest first" has something to be first about.
+    await new Promise((r) => setTimeout(r, 1100))
+  }
+  for (let i = 0; i < 12 && (await count()) < 2; i++) await new Promise((r) => setTimeout(r, 500))
+  return await count()
+}
 
 const results = []
 let REF = '—'
@@ -322,8 +375,19 @@ try {
 
   const gear = page.getByTestId('primary-customise')
   chk(await gear.isVisible().catch(() => false), 'the gear is on the Primary tab', 'no gear on Primary')
-  await gear.click().catch(() => {})
-  await page.waitForTimeout(700)
+  /*
+   * Reopened before every interaction rather than assumed open. Each `go()`
+   * below is a real page load, which closes the drawer — and a click into a
+   * closed drawer fails as a 30s timeout that reads like the control being
+   * broken rather than like the check losing its place.
+   */
+  const openDrawer = async () => {
+    if (!(await page.getByTestId('primary-customise-panel').isVisible().catch(() => false))) {
+      await page.getByTestId('primary-customise').click().catch(() => {})
+      await page.waitForTimeout(700)
+    }
+  }
+  await openDrawer()
   for (const [id, what] of [
     ['inbox-group-by-date', 'Group by date'],
     ['inbox-sort-newest', 'Sort by newest first'],
@@ -336,30 +400,60 @@ try {
     )
   }
 
-  const firstRow = async () =>
-    (await page.locator('[data-testid^="notif-"]').first().innerText().catch(() => ''))
-      .replace(/\s+/g, ' ')
-      .slice(0, 60)
+  /*
+   * Read the instants the rows are ordered by, not their text.
+   *
+   * Two earlier versions of this were wrong in instructive ways. Comparing the
+   * top row's text says nothing about direction and agrees with itself when
+   * there is one row. Comparing the whole sequence against its own reverse is
+   * too strict: `sort` is stable, so rows sharing a timestamp keep their
+   * relative order in BOTH directions and an exact reversal never happens.
+   *
+   * The promise being made is "newest first", so the check reads the timestamps
+   * and asks whether they run the way the setting says. Ties are allowed to sit
+   * either way round, because nothing has promised otherwise.
+   */
+  const rowTimes = async () =>
+    (await page.locator('[data-testid^="notif-"]').evaluateAll((els) =>
+      els.map((e) => e.getAttribute('data-created')),
+    ))
+      .filter(Boolean)
+      .map((t) => new Date(t).getTime())
+
+  const runsDown = (xs) => xs.every((v, i) => i === 0 || xs[i - 1] >= v)
+  const runsUp = (xs) => xs.every((v, i) => i === 0 || xs[i - 1] <= v)
   const dateBuckets = () => page.locator('[data-testid^="inbox-bucket-"]').count()
   const ungrouped = () => page.locator('[data-testid="inbox-ungrouped"]').count()
 
-  const newestFirst = await firstRow()
+  const seeded = await ensureTwoNotifications()
+  chk(seeded >= 2, `there are at least two notifications to reorder (${seeded})`,
+    `only ${seeded} notification(s) — an order check needs two`)
+  if (seeded >= 2) await go(`/app/${WS}/inbox?filter=primary`, 3200)
+
+  const newestFirst = await rowTimes()
   const groupedCount = await dateBuckets()
   chk(groupedCount > 0 && (await ungrouped()) === 0, 'by default the rows sit under date headers',
     `buckets=${groupedCount} ungrouped=${await ungrouped()}`)
-  chk(newestFirst.length > 0, 'and there is a row to reorder', 'the inbox is empty, so order cannot be checked')
+  chk(newestFirst.length >= 2, `the list has rows to order (${newestFirst.length})`,
+    `only ${newestFirst.length} row(s) on screen`)
+  chk(
+    runsDown(newestFirst),
+    'and by default they run newest first',
+    `the default order is not newest-first: ${newestFirst.map((t) => new Date(t).toISOString()).join(' / ')}`,
+  )
 
-  if (newestFirst.length > 0) {
+  if (newestFirst.length >= 2) {
     // Turning the sort off has to change which row is on top. A checkbox that
     // only changes its own tick is the whole defect class this audit is about.
+    await openDrawer()
     await page.getByTestId('inbox-sort-newest').click()
     await page.waitForTimeout(1600)
     await go(`/app/${WS}/inbox?filter=primary`, 3200)
-    const oldestFirst = await firstRow()
+    const oldestFirst = await rowTimes()
     chk(
-      oldestFirst !== newestFirst,
-      'turning off "newest first" puts a different row on top',
-      `the top row did not move: ${newestFirst}`,
+      runsUp(oldestFirst) && oldestFirst.length >= 2,
+      'turning off "newest first" puts the oldest at the top',
+      `the timestamps do not run oldest-first: ${oldestFirst.map((t) => new Date(t).toISOString()).join(' / ')}`,
     )
     // ...and survived a reload, which is what "stored" means.
     // `apiClient` returns { status, data, error }, so the preferences are one
@@ -373,8 +467,7 @@ try {
       `server says ${JSON.stringify(stored?.inboxView ?? null)}`,
     )
 
-    await page.getByTestId('primary-customise').click().catch(() => {})
-    await page.waitForTimeout(600)
+    await openDrawer()
     await page.getByTestId('inbox-group-by-date').click()
     await page.waitForTimeout(1600)
     await go(`/app/${WS}/inbox?filter=primary`, 3200)
@@ -384,9 +477,9 @@ try {
       `buckets=${await dateBuckets()} ungrouped=${await ungrouped()}`,
     )
   } else {
-    chk(false, 'turning off "newest first" puts a different row on top', 'no rows')
-    chk(false, 'and the server remembers the choice', 'no rows')
-    chk(false, 'turning off "group by date" removes the date headers', 'no rows')
+    chk(false, 'turning off "newest first" puts the oldest at the top', 'not enough rows')
+    chk(false, 'and the server remembers the choice', 'not enough rows')
+    chk(false, 'turning off "group by date" removes the date headers', 'not enough rows')
   }
 
   // Put it back, so the rest of this suite and every other one see the inbox

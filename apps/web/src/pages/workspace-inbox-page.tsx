@@ -1021,6 +1021,10 @@ function NotificationRow({
     <Card
       data-testid={`notif-${notif.id}`}
       data-unread={unread ? 'true' : 'false'}
+      /* The instant this row is ordered by. On screen the time is relative
+         ("53 minutes ago"), which cannot be compared; sort order is a promise
+         to the user, so it has to be checkable. */
+      data-created={notif.createdAt}
       variant="glass"
       onClick={() => void onOpen?.()}
       className={cn(

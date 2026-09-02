@@ -2548,3 +2548,41 @@ returns `{ status, data, error }`. Undefined is indistinguishable from "the
 server did not store it", so the check reported a defect that did not exist
 while the feature worked. The tell was that the UI check passed *after a full
 page reload*, which cannot happen unless the value is stored.
+
+### The A2.6b checks failed in CI, and the check was wrong twice
+
+Local: 17/17, 822 checks. CI: `The video1 regression sweep` failed. Worth
+writing down in full, because both faults were mine and both are the same
+mistake in different clothes — **a check that depends on the data it happens to
+find**.
+
+**First fault: one row cannot be reordered.** The check compared the top row's
+text before and after flipping the sort. My inbox held fifty notifications; CI's
+`ensureNotification` makes exactly **one**, and only when there are none. With
+one row the two reads are identical and the check fails against working code.
+It now seeds two itself, from the peer account, rather than hoping.
+
+**Second fault, found by forcing the seeding path.** The rewrite compared the
+whole rendered sequence against its own reverse. That is too strict: `sort` is
+stable, so rows sharing a timestamp keep their relative order in *both*
+directions and an exact reversal never happens. It failed on correct code and
+would have gone on failing intermittently, which is worse than failing always.
+
+Both versions were checking a *proxy* for the promise. The promise is "newest
+first", so the row now carries `data-created` and the check reads the instants
+and asks whether they run the way the setting says — ties allowed to sit either
+way round, because nothing promised otherwise. On screen the time is relative
+("53 minutes ago"), which cannot be compared, so the ordering had to be exposed
+to be checkable at all.
+
+Two more checks fell out of doing it properly: that the default order *is*
+newest-first (never asserted before), and that there are two rows to order at
+all, said out loud with the count.
+
+A third, smaller fault: each `go()` is a real page load and closes the drawer,
+so a later click into it timed out after 30s and read like a broken control.
+The drawer is now reopened before every interaction instead of assumed open.
+
+Verified by running the seeding path deliberately — the branch CI takes and my
+machine never does — and then re-running all three breaks, which still fail
+with the timestamps printed.
