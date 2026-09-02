@@ -2105,4 +2105,34 @@ Eight checks in `chat-message-actions.mjs`, floor 48 → 56. Four breaks, all
 caught: the cap restored, confirm live before a recipient is chosen, the note
 dropped, and the preview removed.
 
+### A check that failed on a rename
+
+All 17 suites came back green — 750 checks — and **preflight failed**. One API
+unit test, `message-forwarding.test.ts`, asserted `sourceId: m.id` and
+`body: m.body,`: literally the shape of the popover it was written against.
+Both were true. Both stopped existing the moment forwarding moved into a modal
+holding a draft.
+
+That is a rename, not a regression, and it is worth writing down because of
+what happens next: a check that fails on a rename gets edited to whatever makes
+it green, and what it was defending is what gets lost. The temptation here was
+to delete the `body:` assertion outright, since the note box means the body is
+now *legitimately* allowed to carry a prefix.
+
+Rewritten to read two invariants structurally, naming no variable:
+
+1. the id sent as the source and the body sent as the text come off the same
+   object — wiring them to different messages would mint a source link
+   pointing somewhere other than the text the recipient reads;
+2. the only literal text allowed inside the body expression is separator
+   whitespace. Interpolations pass, because an interpolation carries a
+   variable and the variable is either the note or the body. Literal words do
+   not, because literal words can only have come from us.
+
+That second one is the original "no `Forwarded message:` prefix" rule stated in
+terms of where text comes from rather than what it says — so the user's note
+passes and an app-generated label does not. Break-tested four ways: the prefix
+pasted back in, source and body from different messages, the body dropped to
+the note alone, the source not sent. All four fail, each with its own message.
+
 **Running total: 135 closed, 21 open, 1 unverifiable.**
