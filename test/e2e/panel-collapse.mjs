@@ -116,7 +116,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 37
+const EXPECTED_CHECKS = 43
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -636,6 +636,104 @@ try {
       'and forgets the old spot, so a reload does not undo it',
       'the stored position survived the reset',
     )
+  }
+
+  /*
+   * ---------------------------------------------------------------------
+   * G07-7 [08:29–08:31] — the dock carries what the user chose
+   *
+   * > "hum limited de dein … woh us ko choose karna parega"
+   *
+   * The settings panel offered Orientation, Opacity, Size and Reset —
+   * everything about how the dock LOOKS and nothing about what is in it. The
+   * `pinned_links` column and its endpoint had existed the whole time with
+   * nothing in the web app ever writing to them, which is the defect class
+   * this audit keeps turning up: built, and joined to nothing.
+   *
+   * Driven through the real panel and read back off the API, because a
+   * checkbox that toggles local state and never persists looks identical on
+   * screen to one that works.
+   * ---------------------------------------------------------------------
+   */
+  console.log('\n▶ G07-7 — the dock carries the tools the user picked')
+  /*
+   * Reset to the default set first, and put it back afterwards.
+   *
+   * `pinnedLinks` persists per user per workspace, so a run that died between
+   * the two toggles below left Docs switched off — and the NEXT run then
+   * failed on "Docs is in the dock to begin with" for a reason that had
+   * nothing to do with the code. A break test surfaced exactly that cascade.
+   */
+  const DEFAULT_DOCK = ['home', 'inbox', 'chat', 'ai', 'docs', 'dashboards', 'settings']
+  await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } })
+  const priorRestore = restore
+  restore = async () => {
+    await priorRestore?.()
+    await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } })
+  }
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+
+  const dockSettings = page.locator('[title="Dock settings"], [data-testid="floating-dock"] button').first()
+  await dockSettings.click().catch(() => {})
+  await page.waitForTimeout(800)
+  const picker = page.getByTestId('dock-tool-picker')
+  check(
+    await picker.isVisible().catch(() => false),
+    'dock settings offers what goes in it, not only how it looks',
+  )
+
+  const docsToggle = page.getByTestId('dock-tool-toggle-docs')
+  if (!(await docsToggle.count())) {
+    check(false, 'a tool can be turned off', 'no docs toggle in the picker')
+    check(false, 'and the choice is stored on the person, not the browser', 'skipped')
+    check(false, 'and the dock stops carrying it', 'skipped')
+    check(false, 'and turning it back on brings it back', 'skipped')
+  } else {
+    const wasOn = await docsToggle.isChecked()
+    check(wasOn, 'Docs is in the dock to begin with', 'docs was not in the default set')
+    await docsToggle.click()
+    await page.waitForTimeout(1800)
+
+    // Read back from the API: this is the half a screenshot cannot show.
+    const stored = await A(`/dashboards/dock/${workspaceId}`)
+    check(
+      Array.isArray(stored.data?.pinnedLinks) && !stored.data.pinnedLinks.includes('docs'),
+      'and the choice is stored on the person, not the browser',
+      `pinnedLinks=${JSON.stringify(stored.data?.pinnedLinks)}`,
+    )
+    check(
+      (await page.getByTestId('dock-tool-docs').count()) === 0,
+      'and the dock stops carrying it',
+      'the dock still shows a tool that was switched off',
+    )
+
+    await docsToggle.click()
+    await page.waitForTimeout(1800)
+    check(
+      (await page.getByTestId('dock-tool-docs').count()) > 0,
+      'and turning it back on brings it back',
+      'the tool did not return',
+    )
+
+    /*
+     * "I want none" is an answer, and it is not the same as "never chose".
+     *
+     * An absent value falls back to the default set; an empty array must not.
+     * The obvious `stored?.length ? stored : DEFAULT` reads the two as one and
+     * silently repopulates the dock somebody just emptied — a break test using
+     * exactly that expression failed nothing until this check existed, because
+     * every other case has a non-empty list.
+     */
+    await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: [] } })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3000)
+    check(
+      (await page.locator('[data-testid^="dock-tool-"]').count()) === 0,
+      'and emptying it entirely is respected, not treated as "never chose"',
+      `${await page.locator('[data-testid^="dock-tool-"]').count()} tool(s) came back`,
+    )
+    await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } })
   }
 
   await done(browser, stack, restore)

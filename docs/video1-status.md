@@ -1828,3 +1828,58 @@ Ten unit tests, three browser checks. Four breaks, all caught after those two
 additions.
 
 **Running total: 129 closed, 27 open, 1 unverifiable.**
+
+## G07-7 — the dock carries what the user picked (2 Sep)
+
+> "hum limited de dein … woh us ko choose karna parega"  `[08:29–08:31]`
+
+The dock settings panel offered Orientation, Opacity, Size and Reset —
+everything about how the dock *looks* and nothing about what is in it. The
+links themselves were a hard-coded list: we chose the tools, the user did not.
+
+`user_dock_configs.pinned_links` and `POST /dashboards/dock/:workspaceId` had
+existed the whole time. The web app read `appearance` from that same endpoint
+and **never once wrote or read `pinnedLinks`** — the defect class this audit
+keeps turning up: built, and joined to nothing.
+
+Now a checkbox list of registered tools, persisted through the endpoint that
+was already there. The registry is data beside the render for the same reason
+the top bar's picker is: a tool that can be ticked and then leads nowhere is
+worse than one never offered. Filtered by feature flag and role before it is
+offered, so a workspace can never be shown a tool it does not have, and a
+stored id for a since-disabled feature stops appearing rather than rendering a
+link to a 404.
+
+**One entry did not survive writing that comment.** "My Tasks" pointed at
+`/my-tasks`, which does not exist as a route — the exact defect the comment
+warns about, caught by the typechecker complaining about a missing i18n key.
+Removed, and every remaining entry's route verified present.
+
+### Two things the break tests changed about the check
+
+- **A fixture-order dependency of my own making.** `pinnedLinks` persists per
+  user per workspace, so a run that died between the two toggles left Docs
+  switched off — and the *next* run failed on "Docs is in the dock to begin
+  with" for a reason that had nothing to do with the code. The section resets
+  to the default set first and restores on the way out.
+- **"I want none" is an answer, and not the same as "never chose".** An absent
+  value falls back to the defaults; an empty array must not. The obvious
+  `stored?.length ? stored : DEFAULT` reads the two as one and silently
+  repopulates a dock somebody just emptied — and a break using exactly that
+  expression failed nothing, because every other case has a non-empty list.
+  Now checked directly: it fails with `7 tool(s) came back`.
+
+### What was NOT changed, and why
+
+The gap's title also calls the dock "desktop-XL only" — it is `hidden xl:flex`,
+so below 1280px it disappears. Left alone deliberately: the gap's own reasoning
+is that this "makes the top-bar strip the right home for pinned tools rather
+than the dock", and the top bar's picker already ships. Every dock destination
+is reachable from the sidebar at every width, and the sidebar drawer covers
+below 1024px. So the dock is a convenience, not a dependency — and putting a
+draggable floating widget over a 13" laptop's content would be a worse answer
+than the one that exists.
+
+Five checks in `panel-collapse.mjs`, floor 37 → 43. Four breaks, all caught.
+
+**Running total: 130 closed, 26 open, 1 unverifiable.**

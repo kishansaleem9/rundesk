@@ -31,6 +31,7 @@ import {
   Star,
   Hash,
   CheckSquare,
+  Target,
   Clock3,
   ArrowUp,
   ArrowDown,
@@ -67,7 +68,7 @@ import { api } from '../lib/api'
 import { ContainerEditDialog, type ContainerEditValues } from './container-edit-dialog'
 import { CreateWorkspaceFlow, type WorkspaceDraft } from './create-workspace-flow'
 import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { lastWorkspaceId, rememberWorkspace } from '../lib/last-workspace'
 import { useAiChatThreads } from '../lib/skills-api'
 import { useAuthStore } from '../store/auth'
@@ -259,6 +260,40 @@ function recentFromPathname(pathname: string, workspaceId: string): NavRecent | 
 /** Where the floating dock sits before anybody drags it, and where "Reset
  *  dock position" puts it back. */
 const DOCK_HOME = { x: 16, y: 16 }
+
+/**
+ * G07-7 [08:29–08:31] — "hum limited de dein … woh us ko choose karna parega".
+ *
+ * The dock carried a hard-coded list: we chose the tools, the user did not. The
+ * `pinned_links` column and its endpoint had existed the whole time and nothing
+ * in the web app ever wrote to them.
+ *
+ * Kept as data next to the render for the same reason the top bar's picker is:
+ * a tool that can be ticked and then leads nowhere is worse than one that was
+ * never offered. Each entry names a route this app actually has, and the flag
+ * decides whether it may be offered at all.
+ */
+const DOCKABLE_TOOLS: Array<{
+  id: string
+  path: string
+  icon: typeof Home
+  labelKey: TranslationKey
+  flag?: FlagKey
+  adminOnly?: boolean
+}> = [
+  { id: 'home', path: '', icon: Home, labelKey: 'nav.home' },
+  { id: 'inbox', path: '/inbox', icon: Inbox, labelKey: 'nav.inbox' },
+  { id: 'chat', path: '/chat', icon: MessageCircle, labelKey: 'nav.chat', flag: FLAGS.CHAT },
+  { id: 'ai', path: '/ai', icon: Bot, labelKey: 'nav.ai', flag: FLAGS.AI },
+  { id: 'docs', path: '/docs', icon: FileText, labelKey: 'nav.docs', flag: FLAGS.DOCS },
+  { id: 'dashboards', path: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboards', flag: FLAGS.VIEWS_DASHBOARD },
+  { id: 'goals', path: '/goals', icon: Target, labelKey: 'nav.goals' },
+  { id: 'whiteboards', path: '/whiteboards', icon: Frame, labelKey: 'nav.whiteboards' },
+  { id: 'settings', path: '/settings', icon: Settings, labelKey: 'nav.settings', adminOnly: true },
+]
+
+/** What the dock carries for somebody who has never opened the picker. */
+const DEFAULT_DOCK_TOOLS = ['home', 'inbox', 'chat', 'ai', 'docs', 'dashboards', 'settings']
 
 export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: boolean; onNavigate?: () => void } = {}) {
   const navigate = useNavigate()
@@ -694,6 +729,27 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     opacity: 0.9,
     orientation: 'horizontal',
   }
+  /*
+   * G07-7 — what the dock carries, and what it is allowed to offer.
+   *
+   * `pinnedLinks` is stored per user per workspace and had never been written
+   * to by anything. An absent value means "never chosen", which is not the
+   * same as "chose nothing": the first falls back to the default set, and the
+   * second is an empty dock somebody asked for.
+   *
+   * The offerable list is filtered by feature flag and role first, so the
+   * picker can never show a tool this workspace does not have — and a stored
+   * id that has since been switched off simply stops appearing rather than
+   * rendering a link to a 404.
+   */
+  const offerableTools = DOCKABLE_TOOLS.filter(
+    (tool) => (!tool.flag || featureEnabled(tool.flag)) && (!tool.adminOnly || isAdmin),
+  )
+  const storedDockTools: string[] | null = Array.isArray(dockConfigQuery.data?.pinnedLinks)
+    ? (dockConfigQuery.data.pinnedLinks as unknown[]).map(String)
+    : null
+  const chosenDockTools = storedDockTools ?? DEFAULT_DOCK_TOOLS
+  const dockTools = offerableTools.filter((tool) => chosenDockTools.includes(tool.id))
 
   // Keep dockSize honest as the dock resizes, the orientation setting changes,
   // or the xl breakpoint takes it away entirely (display:none reports 0, which
@@ -719,7 +775,11 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const sidebarWidth = collapsed ? 72 : 288
   const dockOverlapsSidebar = dockSize.h > 0 && dockPos.x < sidebarWidth
   const listPadBottom = dockOverlapsSidebar ? dockPos.y + dockSize.h + 12 : 0
-  const updateDockConfig = async (patch: { appearance?: { size?: string; opacity?: number; orientation?: string } }) => {
+  const updateDockConfig = async (patch: {
+    appearance?: { size?: string; opacity?: number; orientation?: string }
+    /** G07-7 — which tools the dock carries. Stored per user, per workspace. */
+    pinnedLinks?: string[]
+  }) => {
     if (!workspaceId) return
     await api(`/dashboards/dock/${workspaceId}`, {
       method: 'POST',
@@ -1914,23 +1974,21 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               window.addEventListener('mouseup', up)
             }}
           >
-            <DockLink to="/app/$workspaceId" params={{ workspaceId: workspaceId! }} icon={Home} label={t('nav.home')} />
-            <DockLink to="/app/$workspaceId/inbox" params={{ workspaceId: workspaceId! }} icon={Inbox} label={t('nav.inbox')} />
-            {featureEnabled(FLAGS.CHAT) && (
-              <DockLink to="/app/$workspaceId/chat" params={{ workspaceId: workspaceId! }} icon={MessageCircle} label={t('nav.chat')} />
-            )}
-            {featureEnabled(FLAGS.AI) && (
-              <DockLink to="/app/$workspaceId/ai" params={{ workspaceId: workspaceId! }} icon={Bot} label={t('nav.ai')} />
-            )}
-            {featureEnabled(FLAGS.DOCS) && (
-              <DockLink to="/app/$workspaceId/docs" params={{ workspaceId: workspaceId! }} icon={FileText} label={t('nav.docs')} />
-            )}
-            {featureEnabled(FLAGS.VIEWS_DASHBOARD) && (
-              <DockLink to="/app/$workspaceId/dashboard" params={{ workspaceId: workspaceId! }} icon={LayoutDashboard} label={t('nav.dashboards')} />
-            )}
-            {isAdmin && (
-              <DockLink to="/app/$workspaceId/settings" params={{ workspaceId: workspaceId! }} icon={Settings} label={t('nav.settings')} />
-            )}
+            {/*
+              G07-7 — from what the user chose, not from a list we wrote.
+              `dockTools` is already filtered by flag and role, so nothing here
+              can render a link the workspace does not have.
+            */}
+            {dockTools.map((tool) => (
+              <DockLink
+                key={tool.id}
+                to={`/app/$workspaceId${tool.path}`}
+                params={{ workspaceId: workspaceId! }}
+                icon={tool.icon}
+                label={t(tool.labelKey)}
+                testId={`dock-tool-${tool.id}`}
+              />
+            ))}
             <button
               className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] text-muted-foreground border border-border/60 ml-1 hover:bg-accent/15"
               title={t('nav.dockSettings')}
@@ -1954,6 +2012,50 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                 </button>
               </div>
               <div className="space-y-3">
+                {/*
+                  G07-7 [08:29–08:31] — "hum limited de dein … woh us ko choose
+                  karna parega". The panel offered Orientation, Opacity, Size
+                  and Reset — everything about how the dock LOOKS and nothing
+                  about what is in it. The column and the endpoint to store
+                  this had existed the whole time, unwritten by anything.
+
+                  Only the tools this workspace actually has are listed, so a
+                  box can never be ticked for something that leads nowhere.
+                */}
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">{t('nav.dockTools')}</div>
+                  <div className="space-y-0.5" data-testid="dock-tool-picker">
+                    {offerableTools.map((tool) => {
+                      const on = chosenDockTools.includes(tool.id)
+                      return (
+                        <label
+                          key={tool.id}
+                          className="flex items-center gap-2 rounded px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent/10"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            data-testid={`dock-tool-toggle-${tool.id}`}
+                            onChange={() =>
+                              void updateDockConfig({
+                                // Sent as the full list rather than a delta, so
+                                // turning the last one off stores an empty
+                                // array — "I want none" is an answer, and a
+                                // delta API would read it as "never chose".
+                                pinnedLinks: on
+                                  ? chosenDockTools.filter((id) => id !== tool.id)
+                                  : [...chosenDockTools, tool.id],
+                              })
+                            }
+                            className="h-3 w-3 rounded border-border"
+                          />
+                          <tool.icon className="h-3 w-3 shrink-0 opacity-70" />
+                          {t(tool.labelKey)}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">{t('nav.orientation')}</div>
                   <div className="flex gap-2">
@@ -2191,20 +2293,21 @@ function DockLink({
   params,
   icon: Icon,
   label,
+  testId,
 }: {
-  to:
-    | '/app/$workspaceId'
-    | '/app/$workspaceId/inbox'
-    | '/app/$workspaceId/chat'
-    | '/app/$workspaceId/ai'
-    | '/app/$workspaceId/skills'
-    | '/app/$workspaceId/meetings'
-    | '/app/$workspaceId/docs'
-    | '/app/$workspaceId/dashboard'
-    | '/app/$workspaceId/settings'
+  /*
+   * G07-7 — a plain string now that the dock is built from DOCKABLE_TOOLS.
+   *
+   * The union was a nice guard while the list was hard-coded here, and it
+   * cannot survive a list the user composes. The guarantee moves to the
+   * registry instead: every entry names a route that exists, checked when it
+   * was written, and the picker can only offer what is in it.
+   */
+  to: string
   params: { workspaceId: string }
   icon: typeof Home
   label: string
+  testId?: string
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const href = resolveRoutePath(to, params)
@@ -2212,8 +2315,9 @@ function DockLink({
 
   return (
     <Link
-      to={to}
+      to={to as '/app/$workspaceId'}
       params={params}
+      data-testid={testId}
       title={label}
       className={cn(
         'h-8 w-8 rounded-full flex items-center justify-center',
