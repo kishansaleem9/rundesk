@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 62
+const EXPECTED_CHECKS = 66
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -843,6 +843,92 @@ try {
       check(false, 'and clicking away closes it again', 'no thread link at 1200px')
     }
     await narrow.close()
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ a reply you have read can be put back')
+  // ---------------------------------------------------------------------
+  /*
+   * The Replies page moved in one direction only. Opening a row marked it read
+   * on the way out, and its single button did the same thing again — while
+   * `POST /notifications/:id/unread` had existed all along and the Inbox had
+   * been calling it all along. Built, never joined up here.
+   *
+   * On a page whose whole job is "replies I still owe somebody", that means
+   * reading the queue is what destroys it. Losing your place by browsing is
+   * worse than a missing feature, because it punishes the thing the page is
+   * for.
+   *
+   * Seeded rather than borrowed from ambient data: the reply has to come from
+   * somebody else, or there is no notification to put back, and a check with
+   * nothing to act on passes by not running.
+   */
+  {
+    // Snapshot first: the notification's title is the channel name, not the
+    // message, so the only reliable way to name the one we just caused is
+    // "the id that was not there before".
+    const before = new Set(((await A('/notifications?limit=50')).data ?? []).map((n) => n.id))
+
+    const seedBody = `putback-${Date.now()}`
+    const seed = await A(`/chat/channels/${channelId}/messages`, { method: 'POST', body: { body: seedBody } })
+    await B(`/chat/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: { body: 'someone else replies to it', parentMessageId: seed.data?.id },
+    })
+
+    /*
+     * Polled, not slept against. The notification is written after the reply's
+     * response returns, so reading immediately finds nothing — which is how
+     * the first version of this check failed on working code. A fixed sleep
+     * would trade that for a slower suite and a flake on a loaded runner.
+     */
+    let mine = null
+    let seen = 0
+    for (let i = 0; i < 16 && !mine; i++) {
+      const notifs = (await A('/notifications?limit=50')).data ?? []
+      seen = notifs.length
+      mine = notifs.find((n) => n.type === 'chat_reply' && !n.readAt && !before.has(n.id)) ?? null
+      if (!mine) await page.waitForTimeout(500)
+    }
+    check(!!mine, 'a reply from somebody else lands in Replies', `no new unread chat_reply among ${seen}`)
+
+    if (mine) {
+      /*
+       * On the All tab, because the page defaults to `unread`
+       * (workspace-replies-page.tsx:65) and a resolved row leaves that list
+       * immediately. Watching it vanish would say nothing about whether there
+       * is a way back — All is where both states of the same row are visible,
+       * which is the only place the question can be asked.
+       */
+      await page.goto(`${origin}/app/${workspaceId}/replies?filter=all`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(3000)
+
+      const resolve = page.getByTestId(`reply-resolve-${mine.id}`)
+      check(await resolve.isVisible().catch(() => false), 'an unread reply offers to resolve it')
+      await resolve.click()
+      await page.waitForTimeout(1500)
+
+      // The whole point: once read, there is a way back.
+      const unread = page.getByTestId(`reply-unread-${mine.id}`)
+      check(
+        await unread.isVisible().catch(() => false),
+        'and once read, it offers to mark it unread again',
+        'the row is read with no way back — the queue is destroyed by reading it',
+      )
+      await unread.click()
+      await page.waitForTimeout(1500)
+      check(
+        (await A(`/notifications?limit=50`)).data?.find((n) => n.id === mine.id)?.readAt == null,
+        'and the server agrees it is unread again',
+        'the button changed the screen but not the record',
+      )
+    } else {
+      check(false, 'an unread reply offers to resolve it', 'nothing seeded')
+      check(false, 'and once read, it offers to mark it unread again', 'nothing seeded')
+      check(false, 'and the server agrees it is unread again', 'nothing seeded')
+    }
   }
 
   // The control. At 1680 the panel is a column in the flow, so no scrim.

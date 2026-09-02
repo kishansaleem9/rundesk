@@ -232,9 +232,31 @@ try {
 
   ref('A2.6', 'Inbox: All / Primary / Other, and Later / Cleared')
   await go(`/app/${WS}/inbox`, 3500)
-  const inbox = await seen()
+  /*
+   * Read off the controls row, not the whole page.
+   *
+   * These assertions are about which buckets the inbox *offers*, and the page
+   * text also contains every notification in the list. Scanning all of it made
+   * the checks answer a different question than they asked: this failed once on
+   * a notification whose body happened to contain the word "other", which is
+   * ordinary content — "ask the other team" would do it — and it would have
+   * gone the other way too, passing "Later is reachable" off a message with the
+   * word "later" in it while the tab was missing.
+   *
+   * A check that a real message can turn red is one people learn to re-run
+   * until it goes green.
+   */
+  const controls = await page
+    .getByTestId('inbox-controls')
+    .innerText()
+    .catch(() => '')
+  chk(controls.length > 0, 'the inbox offers its bucket controls', 'no inbox controls row on the page')
   for (const state of ['Later', 'Cleared', 'Primary']) {
-    chk(new RegExp(`\\b${state}\\b`, 'i').test(inbox), `${state} is reachable`, `${state} is not on the inbox`)
+    chk(
+      new RegExp(`\\b${state}\\b`, 'i').test(controls),
+      `${state} is reachable`,
+      `${state} is not among the inbox controls: ${controls.replace(/\s+/g, ' ').slice(0, 120)}`,
+    )
   }
   /*
    * §2.2 — Other is gone on her instruction ("yeh mujhe NAHI CHAHIYE humari
@@ -242,7 +264,11 @@ try {
    * among the buckets that must be reachable, and went on failing for the
    * shipped behaviour the whole time it was out of CI.
    */
-  chk(!/\bOther\b/i.test(inbox), 'and Other is gone (§2.2)', 'Other is back on the inbox')
+  chk(
+    !/\bOther\b/i.test(controls),
+    'and Other is gone (§2.2)',
+    `Other is back among the inbox controls: ${controls.replace(/\s+/g, ' ').slice(0, 120)}`,
+  )
 
   /*
    * §2.5 — the one-move action is "Clear all", not "Mark all read": clearing
@@ -250,7 +276,14 @@ try {
    * The old copy never existed after that change landed.
    */
   if (NOTIFIED) {
-    chk(/Clear all/i.test(inbox), 'the inbox can be cleared in one move', 'no Clear all')
+    // By testid rather than by scanning the page for the words "Clear all" —
+    // same reason as the controls row above, and it survives the copy being
+    // translated.
+    chk(
+      (await page.getByTestId('inbox-clear-all').count()) > 0,
+      'the inbox can be cleared in one move',
+      'no Clear all',
+    )
   } else {
     // Said out loud, not skipped silently: the control is correctly absent on
     // an empty inbox, so with nothing to clear this check cannot be answered.

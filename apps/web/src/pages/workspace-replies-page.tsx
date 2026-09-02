@@ -81,13 +81,34 @@ export function RepliesPage() {
   const visible =
     filter === 'all' ? replies : replies.filter((n) => (filter === 'read' ? Boolean(n.readAt) : !n.readAt))
 
+  const refreshCounts = async () => {
+    await qc.invalidateQueries({ queryKey: ['notifications'] })
+    await qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
+    await qc.invalidateQueries({ queryKey: ['notification-counts'] })
+  }
+
   const markRead = useMutation({
     mutationFn: (id: string) => api(`/notifications/${id}/read`, { method: 'POST' }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['notifications'] })
-      await qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
-      await qc.invalidateQueries({ queryKey: ['notification-counts'] })
-    },
+    onSuccess: refreshCounts,
+  })
+
+  /*
+   * The way back.
+   *
+   * This page moved in one direction only: opening a row marked it read on the
+   * way out, and the single button did the same thing again. There was no
+   * mark-unread anywhere on it — while `POST /notifications/:id/unread` has
+   * existed all along and the Inbox has called it all along
+   * (workspace-inbox-page.tsx:558). Built, and never joined up here.
+   *
+   * On a page whose whole job is "replies I still owe somebody", that means
+   * reading the queue is what destroys it: one click to look, and no way to
+   * put it back. Losing your place by browsing is worse than a missing
+   * feature, because it punishes the thing the page is for.
+   */
+  const markUnread = useMutation({
+    mutationFn: (id: string) => api(`/notifications/${id}/unread`, { method: 'POST' }),
+    onSuccess: refreshCounts,
   })
 
   return (
@@ -184,10 +205,23 @@ export function RepliesPage() {
                         <MentionText text={n.body} namesById={namesById} className="line-clamp-2" />
                       </div>
                     )}
-                    {!n.readAt && (
-                      <div className="mt-2">
+                    <div className="mt-2">
+                      {n.readAt ? (
                         <button
                           type="button"
+                          data-testid={`reply-unread-${n.id}`}
+                          className="inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void markUnread.mutateAsync(n.id)
+                          }}
+                        >
+                          {t('inbox.markUnread')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid={`reply-resolve-${n.id}`}
                           className="inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                           onClick={(e) => {
                             e.stopPropagation()
@@ -196,8 +230,8 @@ export function RepliesPage() {
                         >
                           {t('inbox.resolve')}
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </Card>
               )

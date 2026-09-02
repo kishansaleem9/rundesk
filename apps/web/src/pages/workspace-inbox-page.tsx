@@ -675,7 +675,7 @@ export function InboxPage() {
           {view === 'cleared' ? t('inbox.clearedRetentionNote') : t('inbox.subtitle')}
         </p>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="mt-4 flex flex-wrap items-center gap-3" data-testid="inbox-controls">
           <div className="flex items-center gap-1">
             {VIEWS.map((v) => (
               <button

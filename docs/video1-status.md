@@ -2327,3 +2327,90 @@ meaningless.
 The browser break says it best: `every cited topic has somewhere to land
 (4/10) — no card for: docs, automations, time-tracking, goals, search,
 ai-assistant`.
+
+## Reading the queue was what destroyed it (2 Sep)
+
+The Replies page moved in one direction only. Opening a row marked it read on
+the way out (`workspace-replies-page.tsx:152`), and its single button did the
+same thing again. There was no mark-unread anywhere on the page.
+
+`POST /notifications/:id/unread` has existed all along, and the Inbox has been
+calling it all along (`workspace-inbox-page.tsx:558`). Built; never joined up
+here. That is the third time this audit has found the same shape, and it is
+becoming the signature defect of this codebase: the capability is present, the
+door is missing, and nothing fails.
+
+What it costs is specific to *this* page. Replies exists to hold the things you
+still owe somebody. A queue you cannot put anything back into is one that
+browsing empties — one click to look, and it is gone from the list for good.
+That is worse than a missing feature, because it punishes exactly the thing the
+page is for.
+
+**Fixed.** The row now offers the inverse of whatever state it is in: Resolve
+while unread, Mark unread once read, both wired to the endpoint the Inbox uses.
+No new i18n — `inbox.markUnread` already existed in all four locales, which is
+its own small evidence that this was an omission rather than a decision.
+
+Four checks in `chat-message-actions.mjs`, floor 62 → 66. Two things about how
+they are built are worth keeping:
+
+- The reply is **seeded from the other account**, because a reply to your own
+  message notifies nobody — a check with nothing to act on passes by not
+  running.
+- It is driven on the **All** tab. The page defaults to `unread` (`:65`), so a
+  resolved row leaves that list at once; watching it vanish would say nothing
+  about whether there is a way back. All is the only tab where both states of
+  one row are visible, which is the only place the question can be asked.
+
+Two breaks, both caught, and the second is the one that earns its keep:
+
+| break | what the check said |
+|---|---|
+| the way back removed | `the row is read with no way back — the queue is destroyed by reading it` |
+| the button present but wired to nothing | `the button changed the screen but not the record` |
+
+The second only fails because the check reads the notification back from the
+server rather than believing the screen. Every "built but not joined up" defect
+in this document would have passed a check that only looked at the DOM.
+
+### Two false starts, recorded because both would have read as product bugs
+
+1. The first version queried notifications immediately after posting the reply
+   and found none — the row is written after the response returns. That looked
+   exactly like "no notification is created", which is a defect report I would
+   have filed against working code. It polls now rather than sleeping.
+2. The second matched the notification by title, on the assumption the title
+   carried the message. It carries the **channel name** (`New reply in
+   #channel`). It now snapshots notification ids before seeding and takes the
+   one that was not there before.
+
+### A check a real message could turn red
+
+The full-set run surfaced this one, and only the full set could: `video-regression`
+failed on `A2.6 — Other is back on the inbox` while passing on its own.
+
+The cause was not the product. It was a diagnostic *I* had run minutes earlier,
+which posted a chat reply with the body `other replies`. The check read the
+whole inbox page as text and asserted the word "Other" appeared nowhere — so a
+notification containing the word failed it.
+
+That is a false alarm today and a worse thing tomorrow. "Ask the other team" in
+any message would turn it red, and a check a real message can break is one
+people learn to re-run until it goes green. It also failed in the other
+direction: `Later is reachable` was satisfied by any message containing the
+word "later", so the tab could have gone missing and the check would still have
+passed.
+
+Now scoped to a new `inbox-controls` testid on the bucket row, so the
+assertions mean what they say — *which buckets does the inbox offer* — rather
+than *what words are on the page*. "Clear all" moved from a text scan to its
+existing testid at the same time, which also survives translation.
+
+Break-tested by putting an Other chip back: caught, and the failure now names
+the row it read — `Other is back among the inbox controls: Inbox 111 Later 0
+Cleared 40 Other All 50 Primary 11`. The old check could only say "Other is
+back on the inbox" and leave you to find out where.
+
+The litter that exposed it is left in place deliberately: the notification with
+"other" in its body is still in the dev database, and the check passes anyway.
+That is the demonstration.
