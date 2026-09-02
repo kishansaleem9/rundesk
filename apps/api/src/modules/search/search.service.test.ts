@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { DRIVE_SEARCH_SCOPE } from './drive-scope'
 import { describe, it } from 'node:test'
 import { getTableName } from 'drizzle-orm'
 import { PgDialect } from 'drizzle-orm/pg-core'
@@ -419,7 +420,12 @@ describe('§2 search: the containers, Location, and created dates', () => {
  */
 describe('§4 Google Drive in search', () => {
   const connected = {
-    workspace_integration_connections: [{ status: 'connected', accessToken: 'tok' }],
+    // Seeded with the scope a real connection now carries. Without it
+    // `searchDrive` correctly refuses to send an account-wide query, because
+    // `drive.file` cannot answer one — see drive-scope.ts.
+    workspace_integration_connections: [
+      { status: 'connected', accessToken: 'tok', scopes: [DRIVE_SEARCH_SCOPE] },
+    ],
     tasks: [],
     docs: [],
   }
@@ -494,6 +500,31 @@ describe('§4 Google Drive in search', () => {
     const svc = drive(db, [])
     await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
     assert.equal(svc.seen.length, 0, 'used a token from a revoked connection')
+  })
+
+  it('does not query Drive on a grant that cannot answer the query', async () => {
+    /*
+     * §G03 — a connection made before the scope change holds `drive.file`,
+     * which returns only files this app created or the user picked by hand.
+     * The query is account-wide, so Drive answers "nothing" and the empty
+     * section reads as "you have no matching files" — a false statement about
+     * somebody's own Drive.
+     *
+     * Asserted as "no request was sent", not "no results came back": the
+     * failure being prevented is a round trip that cannot succeed and says
+     * nothing about why.
+     */
+    const { db } = makeDb({
+      workspace_integration_connections: [
+        { status: 'connected', accessToken: 'tok', scopes: ['https://www.googleapis.com/auth/drive.file'] },
+      ],
+      tasks: [],
+      docs: [],
+    })
+    const svc = drive(db, [])
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    assert.equal(svc.seen.length, 0, 'sent an account-wide query on a drive.file grant')
+    assert.equal(res.length, 0)
   })
 
   it('survives Drive being down, and still answers', async () => {

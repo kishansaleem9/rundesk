@@ -1,4 +1,5 @@
 import { Injectable, Inject, Optional, OnModuleInit, Logger } from '@nestjs/common'
+import { DRIVE_SEARCH_SCOPE, grantCoversWholeDrive } from './drive-scope'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 'drizzle-orm'
@@ -746,6 +747,7 @@ export class SearchService implements OnModuleInit {
       .select({
         status: workspaceIntegrationConnections.status,
         accessToken: workspaceIntegrationConnections.accessToken,
+        scopes: workspaceIntegrationConnections.scopes,
       })
       .from(workspaceIntegrationConnections)
       .where(
@@ -756,6 +758,28 @@ export class SearchService implements OnModuleInit {
       )
       .limit(1)
     if (!conn || conn.status !== 'connected' || !conn.accessToken) return []
+
+    /*
+     * A grant that cannot answer the question we are about to ask.
+     *
+     * Connections made before the scope changed hold `drive.file`, which sees
+     * only files this app created or the user picked by hand. The query below
+     * is account-wide, so against such a grant Google answers "nothing" — and
+     * an empty Drive section reads to a person as "you have no matching
+     * files", which is false.
+     *
+     * Skipped and logged rather than sent anyway: a request that cannot
+     * succeed is not worth a round trip, and the log is the only place this
+     * currently says why. Reconnecting the integration re-consents at the
+     * broader scope.
+     */
+    if (!grantCoversWholeDrive(conn.scopes)) {
+      this.logger?.warn?.(
+        `Drive search skipped for workspace ${workspaceId}: the stored grant is missing ` +
+          `${DRIVE_SEARCH_SCOPE}, so an account-wide query would return nothing. Reconnect Google Drive.`,
+      )
+      return []
+    }
 
     // Drive's `q` is its own query language, and the term is interpolated into
     // a quoted string inside it. A name containing an apostrophe would close

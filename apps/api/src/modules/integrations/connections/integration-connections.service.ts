@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
+import { DRIVE_SEARCH_SCOPE } from '../../search/drive-scope'
 import { ConfigService } from '@nestjs/config'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
@@ -494,7 +495,7 @@ export class IntegrationConnectionsService {
     const scopes =
       provider === 'gcal'
         ? ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/calendar.events']
-        : ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/drive.file']
+        : ['openid', 'email', 'profile', DRIVE_SEARCH_SCOPE]
 
     return {
       provider,

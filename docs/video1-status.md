@@ -2783,3 +2783,58 @@ the fields are dropped.
 
 Guarded in `signup-features.test.ts` on **both** the wizard and the DTO, since
 leaving it on the DTO is how it comes back. Break-tested both ways.
+
+## Drive search asked for everything and was allowed to see almost nothing (2 Sep)
+
+> `[04:04–04:32]` "GOOGLE DRIVE … hum is ko LINK kar sakte hain … agar hum
+> Google Drive se search karein" — **humari** Google Drive. She searches the
+> whole of it, on camera.
+
+This was filed as a decision — "re-consent to `drive.readonly` is a consent
+question, not an engineering one" — and that framing was wrong. It is a live
+inconsistency in shipped code:
+
+| | |
+|---|---|
+| grant requested | `drive.file` (`integration-connections.service.ts:497`) |
+| query issued | `name contains '…' and trashed = false` — account-wide (`search.service.ts:767`) |
+
+`drive.file` returns only files **this app created or the user picked by hand in
+Google's file picker**. So the product asked Google for everything and was
+permitted to see almost nothing, and it failed the way this audit keeps finding
+— **silently**. No error, no notice, just an empty Drive section, which reads
+to a person as "you have no matching files". That is a false statement about
+their own Drive.
+
+**Fixed** by making the two agree at the breadth she demonstrated:
+`DRIVE_SEARCH_SCOPE` is now `drive.readonly`, shared by both modules so a
+literal cannot reintroduce the split.
+
+Worth stating plainly: **this changes the permission users are asked for on
+Google's consent screen.** That is the honest trade for a feature whose whole
+premise is searching a Drive the app did not create — but it is a real,
+outward-facing change, not a refactor.
+
+Connections made before this hold the old grant, and an account-wide query
+against them still returns nothing. Rather than ship another silent empty list,
+`searchDrive` now checks the stored `scopes` and skips with a log naming the
+missing scope and saying to reconnect.
+
+Four checks in `drive-scope.test.ts`, and they assert the two halves **agree**
+rather than that either is a particular string — two lists in two modules that
+must match is precisely the shape that drifts. Three breaks, all caught,
+including the one in the other direction: narrowing the query while keeping the
+broad consent, which would leave the product asking for more access than it
+uses.
+
+### The fixture that could never have worked
+
+Two existing Drive tests failed the moment the guard landed — they seeded a
+`connected` connection with **no scopes at all**, which in production can only
+mean a grant that answers nothing. They had been green for as long as they have
+existed, against a connection shaped like one that cannot work.
+
+Fixed by seeding what a real connection now carries, not by relaxing the guard.
+A fifth check asserts the behaviour directly: on a `drive.file` grant, **no
+request is sent** — asserted as "no round trip", not "no results", because the
+thing being prevented is a call that cannot succeed and never says why.
