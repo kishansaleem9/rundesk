@@ -1121,6 +1121,36 @@ try {
           'search offers a Task type filter',
           'no task-type filter in the palette',
         )
+        /*
+         * G02-7 [02:14] — Assignee and Creator as pickers, not bare dropdowns.
+         *
+         * On a real box rather than a stub, because the picker only renders
+         * when the members query has actually returned somebody; a deployment
+         * where that endpoint 500s would show no picker at all and CI, which
+         * stubs the response, could never see it.
+         */
+        const assigneePicker = page.getByTestId('palette-assignee')
+        chk(
+          (await assigneePicker.count()) > 0,
+          'Assignee is a people picker on the filter bar',
+          'no assignee picker — the members read may be failing on this box',
+        )
+        if ((await assigneePicker.count()) > 0) {
+          await assigneePicker.click().catch(() => {})
+          await page.waitForTimeout(800)
+          chk(
+            (await page.getByTestId('palette-assignee-search').count()) > 0,
+            'and it opens with a search box over the members',
+            'the picker opened without a search box',
+          )
+          chk(
+            (await page.locator('[data-testid^="palette-assignee-option-"]').count()) > 0,
+            'with real people in it',
+            'the picker listed nobody — this workspace read returned no members',
+          )
+          await page.keyboard.press('Escape')
+          await page.waitForTimeout(400)
+        }
         await page.keyboard.press('Escape')
         await page.waitForTimeout(600)
       }
@@ -2298,7 +2328,90 @@ try {
         .catch(() => false)
       chk(wrote, 'and pressing it writes a summary into the panel', 'nothing appeared after pressing it')
     }
+    /*
+     * G05-8 [05:43] — time off, on the profile rather than only on the workload
+     * heat map. Presence only: booking real leave for the verify account on a
+     * production box would put a live person on the capacity chart as away.
+     */
+    chk(
+      (await page.locator('[data-testid="person-time-off"]').count()) > 0,
+      'and time off is a section on the profile',
+      'no time-off section on the panel — it is still only inside Workload',
+    )
+    chk(
+      (await page.locator('[data-testid="person-time-off-add"]').count()) > 0,
+      'with "Add time off" offered on the row, as her frame has it',
+      'time off is shown but cannot be added from here',
+    )
     await page.keyboard.press('Escape').catch(() => {})
+  })
+
+  await section('§G01', 'The invitation screen, for somebody with no account', async () => {
+    /*
+     * G01-6 [00:18] — the one screen in the product reached by a person who is
+     * not signed in, and the only one with no in-app support widget behind it.
+     *
+     * Worth checking on a real box specifically: the broken-token path used to
+     * redirect to /login, and a redirect is exactly the kind of thing that
+     * comes back when a proxy rule or a router config changes underneath you.
+     *
+     * The garbage token needs no fixture and exercises the dead end directly.
+     */
+    await go('/accept-invite?token=not-a-real-token', 3500)
+    chk(
+      page.url().includes('/accept-invite'),
+      'a broken invitation stays put instead of bouncing to /login',
+      `it redirected to ${page.url()}`,
+    )
+    chk(
+      (await page.locator('[data-testid="invite-unusable"]').count()) > 0,
+      'and says on the page why it could not be opened',
+      'nothing on the page explains the failure',
+    )
+    const helpOnError = page.locator('[data-testid="invite-help"]')
+    chk(
+      (await helpOnError.count()) > 0,
+      'and the person who most needs help can reach it',
+      'no help link on the broken-invitation screen',
+    )
+    chk(
+      /^mailto:.+@.+\?.*subject=/.test((await helpOnError.first().getAttribute('href')) ?? ''),
+      'by an address, with the reason already in the subject',
+      'the help link does not resolve to an addressed mailto',
+    )
+
+    // A real invitation, on the real deployment. Declined afterwards rather
+    // than left pending — this runs against a live workspace, and a stray
+    // invite is somebody's member list with a ghost in it.
+    const invite = await apiPost('/invitations', {
+      email: `verify-ui-invite-${Date.now()}@rundesk.invalid`,
+      workspaceId: WS,
+      role: 'member',
+    })
+    if (!invite?.token) {
+      // verify-release.sh raises one the same way, so this account can; a
+      // failure here is the invitation API, not a missing permission.
+      bad('could not raise an invitation to check the good-token screen')
+    } else {
+      await go(`/accept-invite?token=${invite.token}`, 3500)
+      chk(
+        (await page.locator('[data-testid="invite-decline"]').count()) > 0,
+        'a good invitation still renders, with a way to say no',
+        'the invitation screen did not render for a valid token',
+      )
+      chk(
+        (await page.locator('[data-testid="invite-help"]').count()) > 0,
+        'and it carries the help link her frame puts at the foot of the page',
+        'no help link on the invitation screen',
+      )
+      await fetch(`${API}/invitations/decline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: invite.token }),
+      }).catch(() => {})
+    }
+    // Back inside the app: every section after this assumes a signed-in shell.
+    await go(`/app/${WS}`, 3000)
   })
 
   await section('§2.8f', 'AI Notes: what is said is kept, and only while it is announced', async () => {

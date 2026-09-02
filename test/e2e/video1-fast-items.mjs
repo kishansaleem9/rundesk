@@ -320,6 +320,28 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
   await page.waitForTimeout(1200)
   const bell = page.locator('header [data-testid="notifications-bell"]')
   check((await bell.count()) > 0, 'a member who turns it back on gets it back')
+
+  /*
+   * G04-3 [05:13–05:25] — the other half of the same sentence.
+   *
+   * "yeh option jo hai woh humare members ke paas hona chahiye, kyunke yahan
+   * se set down kar sakein." Making the bell hideable answered "should it be
+   * here at all"; this answers "and if it stays, I must be able to turn a
+   * notification off from it". The preference matrix already existed and was
+   * already member-accessible — it just had no door from the bell, so the
+   * only way to stop a notification was to already know it lived on your
+   * profile page.
+   */
+  await bell.click()
+  await page.waitForTimeout(900)
+  const gear = page.locator('[data-testid="bell-notification-settings"]')
+  check((await gear.count()) > 0, 'and the bell offers a way to configure notifications from it')
+  const href = (await gear.first().getAttribute('href')) ?? ''
+  check(
+    /\/app\/profile/.test(href) && /tab=notifications/.test(href),
+    'which lands on the notification preferences, not just the profile',
+    `gear points at ${href || '(nothing)'}`,
+  )
   await ctx.close()
 }
 

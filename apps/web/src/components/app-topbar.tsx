@@ -849,14 +849,36 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
           )}
         </div>
         {workspaceId && (
-          <div className="px-4 py-2.5 border-t border-border/60 shrink-0">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-t border-border/60 shrink-0">
             <Link
               to="/app/$workspaceId/inbox"
               params={{ workspaceId }}
               onClick={() => setOpen(false)}
-              className="block text-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+              className="flex-1 text-center text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
               {t('topbar.viewAllNotifications')}
+            </Link>
+            {/*
+              G04-3 [05:13–05:25] — "yeh option jo hai woh humare members ke
+              paas hona chahiye, kyunke yahan se set down kar sakein."
+
+              The bell was made hideable, which is only half of what she asked.
+              The other half is this: somewhere to turn a notification off from
+              the place you just saw it. The preference matrix already existed
+              and was already member-accessible; it simply had no door here, so
+              a member who wanted to stop a notification had to know that the
+              answer lived on their profile page.
+            */}
+            <Link
+              to="/app/profile"
+              search={{ tab: 'notifications' }}
+              onClick={() => setOpen(false)}
+              data-testid="bell-notification-settings"
+              aria-label={t('topbar.notificationSettings')}
+              title={t('topbar.notificationSettings')}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
+            >
+              <SettingsIcon className="h-3.5 w-3.5" />
             </Link>
           </div>
         )}

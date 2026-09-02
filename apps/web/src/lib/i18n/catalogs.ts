@@ -4699,6 +4699,7 @@ export const en = {
   'import.attachmentsSkipped': 'Attachments skipped',
 
   'topbar.viewAllNotifications': 'View all',
+  'topbar.notificationSettings': 'Notification settings',
 
   // Report builder — drag-and-drop metric selection (§9.5)
   'reportBuilder.availableMetrics': 'Available metrics',
@@ -10172,6 +10173,7 @@ export const es: Record<TranslationKey, string> = {
   'import.attachmentsSkipped': 'Adjuntos omitidos',
 
   'topbar.viewAllNotifications': 'Ver todo',
+  'topbar.notificationSettings': 'Ajustes de notificaciones',
 
   // Report builder — drag-and-drop metric selection (§9.5)
   'reportBuilder.availableMetrics': 'Métricas disponibles',
@@ -15629,6 +15631,7 @@ export const ar: Record<TranslationKey, string> = {
   'import.attachmentsSkipped': 'المرفقات المتخطّاة',
 
   'topbar.viewAllNotifications': 'عرض الكل',
+  'topbar.notificationSettings': 'إعدادات الإشعارات',
 
   // Report builder — drag-and-drop metric selection (§9.5)
   'reportBuilder.availableMetrics': 'المقاييس المتاحة',
@@ -20936,6 +20939,7 @@ export const ur: Record<TranslationKey, string> = {
   'import.attachmentsSkipped': 'چھوڑے گئے منسلکات',
 
   'topbar.viewAllNotifications': 'سب دیکھیں',
+  'topbar.notificationSettings': 'اطلاعات کی ترتیبات',
 
   // Report builder — drag-and-drop metric selection (§9.5)
   'reportBuilder.availableMetrics': 'دستیاب میٹرکس',

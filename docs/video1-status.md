@@ -1417,3 +1417,92 @@ Eleven of the 41 parity items are now closed; 30 remain — 7 large, 15 medium,
 8 small. Three of the large ones need a decision before any code: **AI Agents**,
 the **request-access flow**, and **a List directly under a Space** (which is a
 migration — `lists.project_id` is `NOT NULL`).
+
+## CORRECTION — six gaps recorded as closed were not (2 Sep, later)
+
+An ID-by-ID re-audit of all 157 gaps against the current code, with every
+verdict required to name the file that implements the thing AND the place in
+the UI that reaches it. Six gaps this document counts as closed are not. I
+verified each one myself at the cited line before writing this.
+
+**The one that matters most: G04-3, the notification bell.** It is one of her
+**33 explicitly-flagged** items, and this document's headline claim — "the 33
+she explicitly called missing are closed" — was therefore wrong.
+
+Her ask has two halves `[05:13–05:25]`:
+
+> "…ya phir humein rakhne ki zaroorat hai to yeh option jo hai woh humare
+> members ke paas hona chahiye, kyunke yahan se set down kar sakein."
+
+The bell was made **hideable**, which answers "should it be here at all". The
+other half — turn a notification off *from where you saw it* — was never built:
+`app-topbar.tsx` had a footer containing a single `Link` to the Inbox and
+nothing else. The preference matrix already existed and was already
+member-accessible; it simply had no door from the bell. **Fixed in this pass**,
+with two checks in `video1-fast-items.mjs`, both break-tested.
+
+### The other five
+
+| ID | recorded as | actually |
+|---|---|---|
+| G13-9 | G13 counted 12/12 closed | `ai-panel.tsx` gates suggestions on `messages.length === 0`, from a fixed five-item list — after the first reply there are no follow-up chips at all |
+| G13-10 | G13 counted 12/12 closed | no reasoning trace on the assistant surface; `ai-panel.tsx` has no `reasoning`/`trace`/`thinking` at all. The skill-author panel does stream steps, which is not the surface her frames show |
+| G07-7 | counted closed, absent from the backlog | dock popover is still Orientation / Opacity / Size / Reset with a hard-coded link list, and the dock is still `hidden xl:flex` — no tool picker, and it does not exist below 1280px |
+| G01-9 | counted closed, absent from the backlog | Workspace Bookmarks do not exist — no table, module, route or API. The only "bookmark" in the repo is `chatMessageSaves` |
+| G11-11 | counted closed, absent from the backlog | `SavedMessageCard` still offers only tag add/remove, Remove and Open thread — no edit, no assign |
+
+### Two claims that were true in outline and overstated in fact
+
+- Line 106 says the person panel replaced the old chat card "**everywhere a
+  name appears**". It did not. `openPersonPanel` has exactly three call sites
+  outside the panel: the avatar menu, and two on a chat message author. A task
+  assignee, a members row or a watcher chip still opens nothing. G05-1 is
+  genuinely closed; the reach claim is not.
+- **G03-5 / Drive federation** is described here as "built, not credentialled".
+  Credentials are indeed missing — but the OAuth scope requested is
+  `https://www.googleapis.com/auth/drive.file`, and `searchDrive` issues
+  `files?q=name contains '…'` against it. Under `drive.file` that call can only
+  ever return files this app itself created or the user explicitly picked — not
+  "humari Google Drive". **Adding credentials will not make this behave the way
+  she asked.** It needs a re-consent to `drive.readonly`, which is a different
+  and more invasive permission to ask a workspace for. That is a decision, not
+  a config change, and it should be surfaced as one.
+
+### One contradiction inside this document
+
+Line 773 records "AI answer when search finds nothing (G02 #4) | built"; line
+1199 records the same gap as open. **Line 1199 is right** — the zero-result
+state is static text, and the only AI affordance closes the palette and hands
+the query to the docked panel. There is no inline answer.
+
+## The real number (2 Sep)
+
+Counted ID by ID against the code rather than from this document's prose:
+
+| | count |
+|---|---|
+| CLOSED | 121 |
+| OPEN | 35 |
+| UNVERIFIABLE in this sandbox | 1 — G03-5, and see the scope problem above |
+
+The 35 open, by weight: **8 large**, **17 medium**, **10 small**.
+
+The eight large ones are: AI Agents · cross-app search sources
+(Gmail/SharePoint/Apps) · an AI answer when search finds nothing · engagement
+("Trending") sort · request-access for content · inline reply threads · a List
+directly under a Space · and federated Drive search, which is on this list
+rather than the unverifiable one now that the scope problem is understood.
+
+Three still need a decision before any code: **AI Agents**, **request-access**,
+and **a List directly under a Space** (a migration — `lists.project_id` is
+`NOT NULL`). Drive is arguably a fourth, because `drive.readonly` is a consent
+question rather than an engineering one.
+
+### Why this document was wrong
+
+Every one of the six was recorded closed on the strength of a *related* change
+landing: the bell became hideable, so the bell was ticked; G13 had twelve gaps
+and ten were done, so G13 was ticked. The re-audit only caught them because it
+was required to name the implementing line and the UI that reaches it, and to
+treat "the API exists" as not closed when nothing calls it. That rule is what
+should have been applied the first time, and it is the rule from here on.
