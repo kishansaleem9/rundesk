@@ -2206,7 +2206,7 @@ submenu open, and that popover covers the header row — including its own
 trigger, so it cannot be clicked shut. The check now reopens the palette
 instead. A check that fights an overlay is measuring the overlay.
 
-#### A thread is unreachable below 1280px — measured, not yet fixed
+#### A thread was unreachable below 1280px
 
 `ThreadPanel` is rendered exactly once (`workspace-chat-page.tsx:3328`) and its
 root carries `hidden xl:flex` (`:4173`). Six controls set `threadParentId`.
@@ -2229,5 +2229,45 @@ The 1680 row is the control, and it earned its place: the first run reported
 
 Every browser suite runs at 1680×1000, which is why nothing has ever said so.
 This is the same shape as G09-5 (no nav below 1024px) and G07-7 (the dock
-`hidden xl:flex`), both of which were treated as real defects. **Filed, not
-fixed in this pass.**
+`hidden xl:flex`), both of which were treated as real defects.
+
+**Fixed.** One component, two layouts: at xl it is the inline column it always
+was; below xl it is a right-hand drawer over the conversation, with a scrim to
+dismiss it — the same shape the shell already uses for nav below lg. Not a
+second thread surface, because two implementations of one thing is how they
+start drifting.
+
+| width | before | after |
+|---|---|---|
+| 1680 | opens | opens |
+| 1279 | **inert** | opens |
+| 1200 | **inert** | opens |
+
+Six checks in `chat-message-actions.mjs`, floor 56 → 62, four of them in a
+context at **1200 wide** — the first checks in this repo to visit a viewport a
+laptop actually has. The last two run at 1680 as the control, and they are the
+point: without them a selector that matched nothing would report "not visible"
+at every width and read as a defect confirmed rather than a check misfiring,
+which is precisely what happened on the first measurement.
+
+Three breaks, all caught: `hidden xl:flex` restored (the original defect — "the
+panel stayed hidden — the control is inert at this width"), the scrim removed,
+and the scrim left un-gated so it dims the wide column too. The third also took
+down three unrelated assign-flow checks, which is its own small proof that an
+always-on scrim really does block the page underneath.
+
+### The class, rather than the three instances
+
+This is the third defect of exactly one shape: a control that renders at every
+width and works only above one. G09-5 was the nav below 1024px, G07-7 the dock
+below 1280px, this the thread below 1280px. Each was found by hand, and each
+time the harness was silent because **every suite in this repo runs at
+1680×1000**.
+
+The narrow context added here covers chat. It does not cover the class. Also
+still `hidden xl:flex`, and unchecked at any narrow width: the floating dock and
+its settings popover (`workspace-sidebar.tsx:1992`, `:2059`), which is the only
+nav-customise affordance there is; and the topbar timer pill is `hidden sm:flex`
+(`app-topbar.tsx:427`). A sweep that opens each surface at a narrow width and
+asserts that whatever is on screen can be operated would retire the whole
+family. **Recorded as the next harness gap, not built here.**

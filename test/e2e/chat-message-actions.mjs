@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 56
+const EXPECTED_CHECKS = 62
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -782,6 +782,97 @@ try {
       check(false, 'and it arrives in the conversation you chose', 'no match to pick')
       check(false, 'and the note travels with it', 'no match to pick')
     }
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ a thread is reachable on a narrow screen')
+  // ---------------------------------------------------------------------
+  /*
+   * In its own context, at 1200 wide, because that is the whole point.
+   *
+   * ThreadPanel was `hidden xl:flex` and is rendered exactly once, so below
+   * 1280px every control that sets threadParentId was inert — while the
+   * "N replies" link went on advertising a thread you could not open. Nothing
+   * caught it because every suite in this repo runs at 1680×1000, where the
+   * panel is always there.
+   *
+   * So this is not really a check about threads. It is a check that the
+   * viewport a person actually has is one the harness ever visits. The 1680
+   * assertion at the end is the control: without it, a selector that matched
+   * nothing would report the same "not visible" at every width and read as a
+   * defect confirmed rather than a check misfiring — which is exactly what
+   * happened on the first measurement.
+   */
+  {
+    const narrow = await browser.newContext({ viewport: { width: 1200, height: 900 } })
+    const np = await narrow.newPage()
+    await signIn(np, origin, ADMIN)
+    await np.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await np.waitForTimeout(4000)
+
+    const threadLink = np.locator('[data-testid^="view-thread-"]').first()
+    const linkThere = await threadLink.isVisible().catch(() => false)
+    check(linkThere, 'a message with replies offers to open the thread at 1200px')
+
+    if (linkThere) {
+      await threadLink.click()
+      await np.waitForTimeout(1200)
+      check(
+        await np.getByTestId('chat-thread-panel').isVisible().catch(() => false),
+        'and clicking it actually opens the thread',
+        'the panel stayed hidden — the control is inert at this width',
+      )
+      const scrim = np.getByTestId('thread-scrim')
+      check(
+        await scrim.isVisible().catch(() => false),
+        'the drawer dims the conversation behind it',
+        'no scrim, so there is nothing to click to dismiss it',
+      )
+      await scrim.click({ position: { x: 5, y: 5 } }).catch(() => {})
+      await np.waitForTimeout(700)
+      check(
+        !(await np.getByTestId('chat-thread-panel').isVisible().catch(() => false)),
+        'and clicking away closes it again',
+        'the drawer would not close',
+      )
+    } else {
+      check(false, 'and clicking it actually opens the thread', 'no thread link at 1200px')
+      check(false, 'the drawer dims the conversation behind it', 'no thread link at 1200px')
+      check(false, 'and clicking away closes it again', 'no thread link at 1200px')
+    }
+    await narrow.close()
+  }
+
+  // The control. At 1680 the panel is a column in the flow, so no scrim.
+  {
+    const wide = await browser.newContext({ viewport: { width: 1680, height: 1000 } })
+    const wp = await wide.newPage()
+    await signIn(wp, origin, ADMIN)
+    await wp.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, {
+      waitUntil: 'domcontentloaded',
+    })
+    await wp.waitForTimeout(4000)
+    const wideLink = wp.locator('[data-testid^="view-thread-"]').first()
+    if (await wideLink.isVisible().catch(() => false)) {
+      await wideLink.click()
+      await wp.waitForTimeout(1200)
+      check(
+        await wp.getByTestId('chat-thread-panel').isVisible().catch(() => false),
+        'and the wide layout still opens it too',
+        'the panel does not open at 1680 either — this check is misfiring, not finding a bug',
+      )
+      check(
+        !(await wp.getByTestId('thread-scrim').isVisible().catch(() => false)),
+        'with no scrim, because there it is a column beside the conversation',
+        'the wide layout dims the conversation it sits next to',
+      )
+    } else {
+      check(false, 'and the wide layout still opens it too', 'no thread link at 1680px')
+      check(false, 'with no scrim, because there it is a column beside the conversation', 'no link')
+    }
+    await wide.close()
   }
 
   await done(browser, stack, cleanup)

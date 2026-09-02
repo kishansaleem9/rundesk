@@ -3325,6 +3325,21 @@ export function ChatPage() {
         </div>
         </div>
         {threadParent && (
+          <>
+            {/*
+              The scrim belongs to the drawer layout only. At xl the panel is a
+              column in the flow and dimming the conversation beside it would be
+              wrong; below xl it covers the conversation, so there has to be
+              somewhere to click that means "put this away".
+            */}
+            <div
+              data-testid="thread-scrim"
+              className="fixed inset-0 z-[60] bg-black/50 xl:hidden"
+              onClick={() => setThreadParentId(null)}
+            />
+          </>
+        )}
+        {threadParent && (
           <ThreadPanel
             workspaceId={workspaceId}
             parent={threadParent}
@@ -4170,7 +4185,24 @@ function ThreadPanel({
   return (
     <aside
       data-testid="chat-thread-panel"
-      className="relative z-50 hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col"
+      /*
+       * Two layouts, one component.
+       *
+       * This used to be `hidden xl:flex`, and it is rendered exactly once — so
+       * below 1280px all six controls that set threadParentId did nothing at
+       * all, while the "N replies" link went on advertising a thread. Measured
+       * at 1680/1279/1200 before the change: the link was visible at every
+       * width and the panel opened only at 1680.
+       *
+       * At xl and above it stays the inline column it was. Below that it is a
+       * right-hand drawer over the conversation, which is the same shape the
+       * shell already uses for nav below lg — rather than a second thread
+       * surface, which is how two implementations of one thing start drifting.
+       */
+      className={cn(
+        'fixed inset-y-0 right-0 z-[65] flex w-full max-w-[420px] flex-col border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]',
+        'xl:relative xl:inset-auto xl:z-50 xl:w-[360px] xl:max-w-none xl:shrink-0',
+      )}
     >
       <div className="shrink-0 border-b border-border/80 px-4 py-2 flex items-start justify-between bg-background">
         <div className="min-w-0">
