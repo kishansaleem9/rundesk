@@ -103,6 +103,12 @@ export const users = pgTable('users', {
    * change without overwriting anybody's answer.
    */
   highContrast:  boolean('high_contrast'),
+  /*
+   * §G06 [07:11] — the accent this person picked, from the named palette.
+   * NULL means "no personal choice" and falls back to the workspace's accent,
+   * so an account that never opens the palette is unaffected.
+   */
+  accentColor:   text('accent_color'),
   // UI language (Plan §13 i18n). BCP-47 short code; the web app localizes +
   // sets text direction (RTL for ar/he/fa) from this.
   locale:        text('locale').notNull().default('en'),

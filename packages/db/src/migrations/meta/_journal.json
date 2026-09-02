@@ -855,6 +855,13 @@
       "when": 1900000089029,
       "tag": "0121_nav_favorites_on_the_account",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1900000090029,
+      "tag": "0122_per_user_accent",
+      "breakpoints": true
     }
   ]
 }

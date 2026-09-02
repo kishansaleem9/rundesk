@@ -2648,3 +2648,52 @@ proves nothing about an empty row, so the check counts the choices instead.
 Two genuine breaks confirm it: no choices at all (`offers 0 choice(s), not
 three`) and one choice (`offers 1 choice(s)`) — the second being a cycle
 wearing a menu row's clothes, which is precisely what was being fixed.
+
+## An accent you pick for yourself (2 Sep)
+
+> `07:11`, frame `113_0716` — "Theme: Light / Dark / **Auto** + an accent
+> palette". *'themes wohi ke hum log kya themes rakh sakte hain'* — ClickUp's
+> Themes item opens a **named** palette: Black, Purple, Blue, Pink, Violet,
+> Indigo, Orange, Teal, Bronze, Mint.
+
+Colour was workspace-only: `primaryColor`/`accentColor` on the workspace, set
+once by an admin and applied to everybody. One person's choice repainted the
+app for the whole team, and no individual could pick their own.
+
+**The frame audit specified this better than I would have.** Left to myself I
+would have built a hex picker — a colour field is the obvious shape. Her frame
+shows ten *named* colours, and that is right for reasons past fidelity: an
+arbitrary hex can come out unreadable against light or dark, and a fixed set is
+the only version of this the server can validate and a check can assert. Going
+to the walkthrough first is what caught that.
+
+`users.accent_color` (migration 0122), nullable on purpose: NULL means "no
+personal choice" and falls back to the workspace's accent, so an account that
+never opens the palette is unaffected and clearing is an expressible state
+rather than a second flag. `PATCH /users/me` rejects anything outside the
+palette.
+
+`ACCENT_PALETTE` lives in the shared package, imported by both sides — the
+server to reject, the client to render. A palette restated in two places is one
+that drifts, which this document has already recorded twice (the help topics,
+the palette's own filter list). The package is named for feature flags; it is
+in practice the only module both apps import, and one honest home beats two
+that disagree.
+
+Five checks in `settings-depth.mjs`, floor 46 → 51. Two ways this could be a
+lie — a swatch that stores a value and repaints nothing, or one that repaints
+and is forgotten — so it reads the `--accent` variable off the page *and* the
+column off the server, checks the workspace's own accent did **not** change,
+then clears and checks the fallback.
+
+### A break that verified nothing, and how it showed
+
+Three breaks, all reported CAUGHT. The third was not: its output carried the
+*second* break's failure message. The harness restores the source file between
+breaks but does not rebuild, so the API-side break ran against the previous
+break's web bundle — two defects present at once, and the pass/fail said
+nothing about the one under test.
+
+Re-run alone against a clean build it fails for its own reason — `the server
+says null` — which is the check doing its job. **A break is only evidence when
+it is the only thing broken.**

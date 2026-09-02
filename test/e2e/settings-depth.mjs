@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 46
+const EXPECTED_CHECKS = 51
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -583,6 +583,68 @@ try {
       `the server still says ${(await A('/users/me')).data?.theme}`,
     )
     await A('/users/me', { method: 'PATCH', body: { theme: startTheme } })
+
+    /*
+     * §G06 [07:11], frame 113_0716 — "Theme: Light / Dark / Auto + an accent
+     * palette". Colour was workspace-only: one admin's choice repainted the app
+     * for everybody and no individual could pick their own.
+     *
+     * Driven rather than looked at. The palette has two ways to be a lie — a
+     * swatch that stores a value and repaints nothing, or one that repaints and
+     * is forgotten — so this reads the CSS variable off the page AND the column
+     * off the server, then clears it and checks the fallback.
+     */
+    const startAccent = (await A('/users/me')).data?.accentColor ?? null
+    await A('/users/me', { method: 'PATCH', body: { accentColor: null } })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2500)
+    await page.getByTestId('user-menu').click()
+    await page.waitForTimeout(900)
+
+    const swatches = await page.getByTestId('menu-accents').locator('button').count()
+    check(
+      swatches >= 11,
+      `the menu offers the accent palette (${swatches} incl. the workspace default)`,
+      `only ${swatches} accent control(s) — her frame shows a named palette, not one colour`,
+    )
+
+    const accentVar = () =>
+      page.evaluate(() => document.documentElement.style.getPropertyValue('--accent').trim())
+    const beforePick = await accentVar()
+    await page.getByTestId('menu-accent-teal').click()
+    await page.waitForTimeout(1800)
+    const afterPick = await accentVar()
+    check(
+      afterPick.length > 0 && afterPick !== beforePick,
+      'picking one repaints the app',
+      `--accent did not change (was "${beforePick}", now "${afterPick}")`,
+    )
+    check(
+      ((await A('/users/me')).data?.accentColor ?? null) === 'teal',
+      'and the server records it against the person, not the workspace',
+      `the server says ${JSON.stringify((await A('/users/me')).data?.accentColor ?? null)}`,
+    )
+    check(
+      (await A(`/workspaces/${workspaceId}`)).data?.accentColor !== 'teal',
+      'without changing it for everybody else',
+      'the personal pick leaked onto the workspace',
+    )
+
+    /*
+     * Clearing falls back rather than blanking — the reason the column is
+     * nullable. No reopen first: the swatches are plain buttons inside the
+     * menu, so picking one leaves it open on purpose (trying colours is the
+     * point). Clicking the avatar again would CLOSE it, and the next click
+     * then lands on the overlay — which reads as a broken control.
+     */
+    await page.getByTestId('menu-accent-default').click()
+    await page.waitForTimeout(1800)
+    check(
+      ((await A('/users/me')).data?.accentColor ?? null) === null,
+      'and choosing Workspace clears it back',
+      `the server still says ${JSON.stringify((await A('/users/me')).data?.accentColor ?? null)}`,
+    )
+    await A('/users/me', { method: 'PATCH', body: { accentColor: startAccent } })
   }
 
   await done(browser, stack, restore)

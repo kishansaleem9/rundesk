@@ -1,0 +1,11 @@
+-- §G06 [07:11], frame 113_0716 — "Theme: Light / Dark / Auto + an accent palette".
+--
+-- Colour theming was workspace-only: primaryColor/accentColor on the workspace,
+-- set once by an admin and applied to everybody. One person's choice repainted
+-- the app for the whole team, and nobody could pick their own.
+--
+-- Nullable on purpose. NULL means "no personal choice", which falls back to the
+-- workspace's accent — so an account that never opens the palette sees exactly
+-- what it saw before, and clearing a choice is a real, expressible state rather
+-- than a second flag.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "accent_color" text;

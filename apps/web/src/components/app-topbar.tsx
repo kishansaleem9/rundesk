@@ -62,7 +62,8 @@ import { MentionText } from './mention-text'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useMentionNames } from '../hooks/use-mention-names'
 import { useResolvedFlags } from '../lib/use-feature-flags'
-import { FLAGS } from '@rundesk/feature-flags'
+import { FLAGS, ACCENT_PALETTE, ACCENT_HEX } from '@rundesk/feature-flags'
+import type { AccentName } from '@rundesk/feature-flags'
 import { InlineSkeleton } from './loading-skeletons'
 import {
   useTopbarVisible,
@@ -256,10 +257,25 @@ function BrandingApplier({ workspaceId }: { workspaceId?: string }) {
     enabled: !!workspaceId,
     staleTime: 60_000,
   })
+  /*
+   * The person's accent wins over the workspace's.
+   *
+   * Workspace branding still sets the primary colour and remains the default
+   * accent — a member who has never opened the palette sees exactly what an
+   * admin chose. A personal pick overrides only the accent, and clearing it
+   * (null) falls straight back, which is why the column is nullable rather
+   * than defaulted.
+   */
+  const mine = useQuery({
+    queryKey: ['users', 'me'],
+    queryFn: () => api<{ accentColor?: string | null }>('/users/me'),
+    staleTime: 60_000,
+  })
+  const myAccent = mine.data?.accentColor as AccentName | null | undefined
   useEffect(() => {
     applyBrandColor(data?.primaryColor ?? null)
-    applyAccentColor(data?.accentColor ?? null)
-  }, [data?.primaryColor, data?.accentColor])
+    applyAccentColor(myAccent ? ACCENT_HEX[myAccent] : (data?.accentColor ?? null))
+  }, [data?.primaryColor, data?.accentColor, myAccent])
   return null
 }
 
@@ -932,8 +948,15 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
         statusEmoji?: string | null
         statusText?: string | null
         statusExpiresAt?: string | null
+        accentColor?: string | null
       }>('/users/me'),
     staleTime: 60_000,
+  })
+  const myAccent = (meQuery.data?.accentColor ?? null) as AccentName | null
+  const setAccent = useMutation({
+    mutationFn: (accentColor: AccentName | null) =>
+      api('/users/me', { method: 'PATCH', body: { accentColor } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users', 'me'] }),
   })
   const prefsQuery = useQuery({
     queryKey: ['notification-preferences'],
@@ -1317,6 +1340,55 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
                     ? t('topbar.themeDark')
                     : t('topbar.themeSystem')}
               </button>
+            ))}
+          </div>
+          {/*
+            §G06 [07:11] — "Theme: Light / Dark / Auto + an accent palette".
+            Named colours, as her frame shows them, not a hex field: an
+            arbitrary hex can come out unreadable against either theme, and a
+            fixed set is the only version of this a check can assert. The first
+            swatch clears back to whatever the workspace chose.
+          */}
+          <div className="px-1 pb-1 pt-2 text-[10px] uppercase tracking-widest text-muted-foreground">
+            {t('topbar.accentHeading')}
+          </div>
+          <div className="flex flex-wrap gap-1.5 px-1" data-testid="menu-accents">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                setAccent.mutate(null)
+              }}
+              aria-pressed={!myAccent}
+              title={t('topbar.accentDefault')}
+              data-testid="menu-accent-default"
+              className={cn(
+                'h-5 rounded-full border px-2 text-[10px]',
+                !myAccent
+                  ? 'border-brand-500 bg-brand-500/10 text-foreground'
+                  : 'border-border/70 text-muted-foreground hover:bg-accent/10',
+              )}
+            >
+              {t('topbar.accentDefault')}
+            </button>
+            {ACCENT_PALETTE.map((name) => (
+              <button
+                key={name}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setAccent.mutate(name)
+                }}
+                aria-pressed={myAccent === name}
+                aria-label={name}
+                title={name}
+                data-testid={`menu-accent-${name}`}
+                className={cn(
+                  'h-5 w-5 rounded-full border-2 transition-transform',
+                  myAccent === name ? 'border-foreground scale-110' : 'border-transparent hover:scale-110',
+                )}
+                style={{ backgroundColor: ACCENT_HEX[name] }}
+              />
             ))}
           </div>
         </div>

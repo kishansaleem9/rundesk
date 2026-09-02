@@ -1,4 +1,5 @@
 import { Injectable, Inject, UnauthorizedException, BadRequestException } from '@nestjs/common'
+import { ACCENT_PALETTE } from '@rundesk/feature-flags'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import * as bcrypt from 'bcryptjs'
@@ -139,6 +140,7 @@ export class UsersService {
       panelsCollapsed?: Record<string, boolean>
       /** §G06 [07:03] — high-contrast text and borders. */
       highContrast?: boolean
+      accentColor?: string | null
     },
   ) {
     if (patch.locale !== undefined && !SUPPORTED_LOCALES.includes(patch.locale as SupportedLocale)) {
@@ -186,6 +188,21 @@ export class UsersService {
         throw new BadRequestException(`Unknown top bar item(s): ${unknown.join(', ')}`)
       }
       patch.topbarPinned = [...new Set(patch.topbarPinned)]
+    }
+    /*
+     * A named palette, not a hex field.
+     *
+     * Her frame shows ClickUp's Themes tab as ten named colours, and that is
+     * the right shape for two reasons beyond fidelity: an arbitrary hex can be
+     * unreadable against either theme, and a fixed set is the only version of
+     * this that can be checked. null clears the choice back to the workspace's.
+     */
+    if (
+      patch.accentColor !== undefined &&
+      patch.accentColor !== null &&
+      !(ACCENT_PALETTE as readonly string[]).includes(patch.accentColor)
+    ) {
+      throw new BadRequestException(`accentColor must be null or one of: ${ACCENT_PALETTE.join(', ')}`)
     }
     if (patch.highContrast !== undefined && typeof patch.highContrast !== 'boolean') {
       throw new BadRequestException('highContrast must be a boolean')
@@ -244,7 +261,7 @@ export class UsersService {
     }
 
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed', 'panelsCollapsed', 'highContrast', 'timezoneChangeNotice'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed', 'panelsCollapsed', 'highContrast', 'timezoneChangeNotice', 'accentColor'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db
