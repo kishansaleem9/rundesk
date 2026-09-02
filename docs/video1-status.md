@@ -1281,3 +1281,139 @@ Worth separating, because they are worse than a missing feature:
 
 These two should be fixed or removed regardless of parity work: a control that
 looks like a feature and does nothing is worse than an absent one.
+
+## Sixth pass — three parity items, and two defects underneath them (2 Sep)
+
+Three of the 41 open items, built end to end and checked.
+
+### G01-6 — a help link on the invitation screen `[00:18]`
+
+Her frame 008 has a small centred "Need help?" near the bottom of ClickUp's
+join page. Ours ended at "Secure invitation link valid for 7 days." The
+`SupportWidget` is mounted inside the authenticated shell, so it does not exist
+for the one person in the product who has no account yet.
+
+The link is the smaller half. The audit's own note pointed at the real dead
+end: a bad or expired token **toasted and redirected to `/login`** — sending
+the person who cannot get in to a sign-in form for an account they do not have,
+with the explanation already fading out of the corner of the screen. That is
+now a named screen that stays put, keeps the server's reason, offers "I already
+have an account", and carries the same help link.
+
+The support address moved to `apps/web/src/lib/support.ts` so the Help page and
+the invitation screen cannot drift apart, and the mailto carries the reason in
+its subject.
+
+### G05-8 — time off, from a profile `[05:43]`
+
+"+ Add time off" is the first row of her profile's Activity tab, above the
+contact details. Ours was fully built — schema, service, controller — and its
+only door was a collapsed accordion inside the Workload heat map. Nobody opens
+a capacity chart to say "I'm out on Friday". The same endpoints now have a
+second, obvious door on the person panel: readable by everyone, writable for
+yourself and, if you manage the workspace, for anyone — the rule the server
+already enforced, so the form never offers what would come back a 403.
+
+### G02-7 — Assignee and Creator as searchable people pickers `[02:14]`
+
+> "yeh kisi aur ko assign hai, ya phir is ka creator kaun hai … CREATOR ka
+> matlab hai jis ne woh cheez banayi ho, aur ASSIGNEE ka matlab hai jis bande
+> ko woh cheez di gayi ho."
+
+Both filters worked. Both were a native `<select>` listing every member. Her
+frame 040_0225 shows the value inline on the parent row — "Assignee · Anyone ›"
+— over a submenu with a "Search…" box and avatar rows. That is not decoration:
+a `<select>` of forty people is a scroll with no type-ahead, and it cannot
+separate two people who share a first name, which is why the picker searches
+email as well as display name.
+
+One component drives both, because they are the same question asked about two
+columns, and two implementations of one control is how the two quietly stop
+behaving alike.
+
+## The two defects the checks found on the way (2 Sep)
+
+Neither was on the list. Both sit in the code behind `§G05 [06:08–06:14]`, the
+four task buckets — work already marked closed.
+
+### The buckets were sliced out of one shared page
+
+`getProfile` fetched **the 25 earliest-due assigned tasks** and split that page
+four ways in JavaScript. Sorted by due date ascending, the page fills with the
+oldest overdue work first — so on any account with 25+ dated tasks, NEXT and
+UNSCHEDULED were not merely short, they were **structurally unreachable**: the
+rows that belong in them sit past the `LIMIT` before the filter ever runs.
+
+Measured on a working account before the fix:
+
+```
+today 7   overdue 18   next 0   unscheduled 0     <- 7 + 18 = 25, the whole page
+```
+
+and after:
+
+```
+today 8   overdue 18   next 12  unscheduled 10
+```
+
+Twenty-two tasks of real upcoming and undated work the panel was hiding. A
+limit that swallows a whole category reads exactly like "you have nothing
+coming up", which is the one thing this panel must never say wrongly.
+
+Each bucket is now its own query with its own limit. `createdUnassigned` had
+the same bug from the other direction — ordered `dueDate asc nulls last`, so
+every *undated* unassigned task sorted behind every dated one, and "I made this
+and have not handed it out yet" is overwhelmingly a task with no date on it. It
+is ordered newest-first now.
+
+### A task you deleted still counted as work you owed
+
+Deleting a task archives the row rather than removing it. The four assigned
+buckets filtered on `status` alone and never on `isArchived` — so a deleted
+task kept appearing on the profile as due today, with nothing you could do
+about it from that panel. `createdUnassigned` had always excluded archived
+rows; these four never did, which is why it went unnoticed.
+
+## How these were checked (2 Sep)
+
+Every new check was pressed against a deliberately broken build before being
+believed — twelve breaks, each caught by the check that should catch it:
+
+| | breaks | what was broken |
+|---|---|---|
+| invitation screen | 4 | help link removed · href pointed at nothing · redirect restored · server reason swallowed |
+| people pickers | 6 | search ignored · choice discarded · menu left open · "Anyone" re-picks the current person · empty state removed · row never names the choice |
+| task buckets | 2 | NEXT sliced from the shared page again · archived filter dropped |
+
+Two things went wrong in the break testing itself, and both produced a **false
+green** — worth recording, because a broken instrument is worse than no
+instrument:
+
+- `pkill -f "dist/apps/api/src/main.js"` matched the shell script that
+  contained that string and killed it mid-run. Its replacement, `ss -lptnH`,
+  did not report the pid at all — so the old API kept running and three
+  measurements in a row described code that was not the code under test. The
+  restart helper now scans `ps`, excludes its own pid, and **refuses to start
+  a second server** while the old one is still up.
+- A shell heredoc mangled `&&` into `\&\&` inside a patch; `tsc` failed and the
+  error went to `/dev/null`. The break was never compiled, so the suite's
+  "0 failed" meant nothing. Break patches are applied from Python files now,
+  and a failing compile is reported rather than hidden.
+
+The first version of the bucket regression check only failed because *this*
+database happened to hold 25+ dated tasks; on a fresh one it would have passed
+over the same bug. It now seeds 25 overdue tasks of its own and cleans them up,
+so it catches the regression on any database.
+
+### Suite floors raised
+
+`test/e2e/person-panel.mjs` 39 → 51. New checks live in `test/e2e/no-dead-ends.mjs`
+(the invitation screen), `test/e2e/command-palette.mjs` (the people pickers) and
+`test/e2e/person-panel.mjs` (time off, and both bucket defects).
+
+### Running total
+
+Eleven of the 41 parity items are now closed; 30 remain — 7 large, 15 medium,
+8 small. Three of the large ones need a decision before any code: **AI Agents**,
+the **request-access flow**, and **a List directly under a Space** (which is a
+migration — `lists.project_id` is `NOT NULL`).

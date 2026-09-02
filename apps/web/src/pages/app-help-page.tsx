@@ -29,6 +29,7 @@ import { toast } from '@rundesk/ui'
 import { useTranslation } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { SUPPORT_EMAIL } from '../lib/support'
 
 /** An hour from now, as `datetime-local` wants it: local wall time, no zone. */
 function defaultSlot(offsetHours: number): string {
@@ -172,8 +173,6 @@ function BookCallCard() {
     </Card>
   )
 }
-
-const SUPPORT_EMAIL = 'support@theaura.agency'
 
 type HelpSource = { type: string; id: string; title: string; url: string }
 type HelpAnswer = { answer: string; sources: HelpSource[]; source: 'ai' | 'faq' }

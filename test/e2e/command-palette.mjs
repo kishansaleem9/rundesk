@@ -133,11 +133,29 @@ const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, s
 // nothing, which looks exactly like the bug this file is testing for.
 const envelope = (data) => JSON.stringify({ data, error: null })
 
+/*
+ * G02-7 — the workspace this palette is filtering. Two people share a first
+ * name deliberately: "type Hamda and pick the right one" is the case a native
+ * <select> could not serve, and it is the reason the picker searches email as
+ * well as display name.
+ */
+const MEMBERS = [
+  { userId: 'u1', displayName: 'Admin', email: 'admin@rundesk.test' },
+  { userId: 'u2', displayName: 'Hamda Tahir', email: 'hamda@rundesk.test' },
+  { userId: 'u3', displayName: 'Hamda Raza', email: 'raza@rundesk.test' },
+  { userId: 'u4', displayName: 'Suleman', email: 'suleman@rundesk.test' },
+]
+
+/** Every /search request this run made, so the filters can be read off the wire. */
+const searchCalls = []
+
 await ctx.route('**/api/**', async (route) => {
   const url = route.request().url()
   let data = []
   if (url.includes('/users/me')) data = USER
+  else if (/\/workspaces\/[^/]+\/members(\?|$)/.test(url)) data = MEMBERS
   else if (/\/search\/[^/?]+\?/.test(url)) {
+    searchCalls.push(url)
     // Answer only the query under test, so an unrelated prefetch cannot
     // populate the list and make this pass for the wrong reason.
     data = new URL(url).searchParams.get('q') === QUERY ? HITS : []
@@ -230,6 +248,135 @@ try {
     `/ still narrows commands itself (${allCommands} -> ${narrowed})`,
     `command mode no longer filters (${allCommands} -> ${narrowed})`,
   )
+
+  /*
+   * ── G02-7 [02:14] — Assignee and Creator as people pickers ────────────────
+   *
+   * > "yeh kisi aur ko assign hai, ya phir is ka creator kaun hai … CREATOR ka
+   * > matlab hai jis ne woh cheez banayi ho, aur ASSIGNEE ka matlab hai jis
+   * > bande ko woh cheez di gayi ho."
+   *
+   * Both filters already worked; both were a native <select> of every member,
+   * with no type-ahead and no avatars. Her frame 040_0225 shows the parent row
+   * carrying the value inline ("Assignee · Anyone ›") over a submenu with a
+   * "Search…" box and avatar rows.
+   *
+   * The swap is the risk: a picker that looks right and no longer reaches the
+   * server is a worse state than the <select> it replaced, so the last checks
+   * here read the outgoing request rather than the screen.
+   */
+  console.log('\n▶ G02-7 [02:14] — Assignee and Creator are searchable people pickers')
+
+  await input.fill(QUERY)
+  await page.waitForTimeout(1200)
+  const palette = page.locator('[role=dialog]:visible, [cmdk-root]').first()
+  await palette.getByRole('button', { name: 'Filters', exact: true }).click()
+  await page.waitForTimeout(800)
+
+  const assignee = page.getByTestId('palette-assignee')
+  chk(
+    (await assignee.count()) > 0,
+    'Assignee is a picker, not a bare dropdown',
+    'the Assignee picker is not rendered',
+  )
+  chk(
+    (await page.locator('[data-testid="palette-assignee-value"]').innerText().catch(() => '')).trim() ===
+      'Anyone',
+    'and it says "Anyone" inline, the way her frame does',
+    'the current value is not shown on the row',
+  )
+
+  await assignee.click()
+  await page.waitForTimeout(500)
+  const search = page.getByTestId('palette-assignee-search')
+  chk((await search.count()) > 0, 'opening it gives a search box', 'the picker has no search box')
+  chk(
+    (await page.locator('[data-testid^="palette-assignee-option-"]').count()) === MEMBERS.length,
+    `every member is offered (${MEMBERS.length})`,
+    'the picker does not list the workspace members',
+  )
+
+  // Type-ahead: the whole reason for the change.
+  await search.fill('Hamda')
+  await page.waitForTimeout(400)
+  chk(
+    (await page.locator('[data-testid^="palette-assignee-option-"]').count()) === 2,
+    'typing a name narrows the list',
+    'typing did not narrow the list — the picker is a list, not a search',
+  )
+
+  // The case a name alone cannot settle.
+  await search.fill('raza@')
+  await page.waitForTimeout(400)
+  chk(
+    (await page.getByTestId('palette-assignee-option-u3').count()) === 1 &&
+      (await page.locator('[data-testid^="palette-assignee-option-"]').count()) === 1,
+    'and an email address separates two people with the same first name',
+    'searching by email does not find the person',
+  )
+
+  const beforePick = searchCalls.length
+  await page.getByTestId('palette-assignee-option-u3').click()
+  await page.waitForTimeout(1500)
+  chk(
+    (await page.locator('[data-testid="palette-assignee-value"]').innerText().catch(() => '')).trim() ===
+      'Hamda Raza',
+    'choosing somebody puts their name on the row',
+    'the row still says "Anyone" after choosing a person',
+  )
+  chk(
+    (await page.getByTestId('palette-assignee-menu').count()) === 0,
+    'and the menu closes behind the choice',
+    'the picker menu stays open after choosing',
+  )
+
+  // The check that matters: the picker still filters.
+  const afterPick = searchCalls.slice(beforePick)
+  chk(
+    afterPick.some((u) => new URL(u).searchParams.get('assigneeId') === 'u3'),
+    'and the choice reaches the server as assigneeId',
+    `no search carried assigneeId=u3 (${afterPick.length} requests since)`,
+  )
+
+  // Creator is a second, independent question about the same people.
+  await page.getByTestId('palette-creator').click()
+  await page.waitForTimeout(500)
+  const beforeCreator = searchCalls.length
+  await page.getByTestId('palette-creator-option-u4').click()
+  await page.waitForTimeout(1500)
+  const afterCreator = searchCalls.slice(beforeCreator)
+  chk(
+    afterCreator.some((u) => {
+      const p = new URL(u).searchParams
+      return p.get('creatorId') === 'u4' && p.get('assigneeId') === 'u3'
+    }),
+    'Creator filters independently, and does not clear Assignee',
+    'creator and assignee do not survive together',
+  )
+
+  // Clearing has to be reachable, which is what "Anyone" is for.
+  await page.getByTestId('palette-assignee').click()
+  await page.waitForTimeout(400)
+  const beforeClear = searchCalls.length
+  await page.getByTestId('palette-assignee-anyone').click()
+  await page.waitForTimeout(1500)
+  chk(
+    searchCalls.slice(beforeClear).some((u) => !new URL(u).searchParams.get('assigneeId')),
+    '"Anyone" clears the filter again',
+    'choosing "Anyone" does not clear assigneeId',
+  )
+
+  // A picker with no match must say so rather than look broken.
+  await page.getByTestId('palette-creator').click()
+  await page.waitForTimeout(400)
+  await page.getByTestId('palette-creator-search').fill('zzzzz')
+  await page.waitForTimeout(400)
+  chk(
+    (await page.getByTestId('palette-creator-empty').count()) > 0,
+    'and a search that matches nobody says so',
+    'an empty people search renders a blank panel',
+  )
+  await page.keyboard.press('Escape')
 } catch (e) {
   bad(`threw: ${e.message.split('\n')[0]}`)
   await page.screenshot({ path: '/tmp/command-palette-fail.png', fullPage: true }).catch(() => {})

@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react'
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { motion } from 'framer-motion'
 import { 
   Button, 
   Input, 
   Label, 
-  LogoWordmark, 
-  PersonAvatar, 
+  LogoWordmark,
   toast
 } from '@rundesk/ui'
 import { 
@@ -18,11 +17,13 @@ import {
   Mail,
   Calendar,
   Loader2,
+  LifeBuoy,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { PasswordChecklist, isPasswordStrong } from '../lib/password'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
+import { supportMailto } from '../lib/support'
 
 export const Route = createFileRoute('/accept-invite')({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -47,6 +48,32 @@ type ClaimResponse = {
   workspaces: Array<{ id: string; name: string; slug: string; organizationId: string; role: string }>
 }
 
+/**
+ * G01-6 [00:18] — the "Need help?" link at the foot of ClickUp's join page.
+ *
+ * The invitation screen is the one screen in the product reached by somebody
+ * who has no account, so the SupportWidget — mounted inside the authenticated
+ * shell — is not available to exactly the person most likely to be stuck. This
+ * is that person's only way to reach a human, so it appears on every state of
+ * this route, including the two dead ends.
+ *
+ * The mailto carries the reason in its subject; someone who could not get in
+ * should not also have to explain the category of their problem.
+ */
+function NeedHelp({ reason }: { reason: string }) {
+  const { t } = useTranslation()
+  return (
+    <a
+      href={supportMailto(reason)}
+      data-testid="invite-help"
+      className="inline-flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+    >
+      <LifeBuoy className="h-3 w-3" />
+      {t('acceptInvite.needHelp')}
+    </a>
+  )
+}
+
 function AcceptInvite() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -55,6 +82,7 @@ function AcceptInvite() {
   const [claiming, setClaiming] = useState(false)
   const [declining, setDeclining] = useState(false)
   const [declined, setDeclined] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const [invite, setInvite] = useState<InvitePreview | null>(null)
   
   const [fullName, setFullName] = useState('')
@@ -74,8 +102,16 @@ function AcceptInvite() {
         const data = await api<InvitePreview>(`/invitations/preview?token=${token}`, { skipAuth: true })
         setInvite(data)
       } catch (err: any) {
-        toast.error(t('acceptInvite.invalidInvitation'), { description: err.message })
-        navigate({ to: '/login' })
+        /*
+         * G01-6 — this used to toast and redirect to /login.
+         *
+         * Which means the one person who genuinely needs help — their link
+         * expired, or the URL got mangled by their mail client — was bounced
+         * to a sign-in form for an account they do not have, with the
+         * explanation already fading out of the corner of the screen. Stay
+         * put, say what happened, and offer the way to a human.
+         */
+        setPreviewError(err?.message ?? '')
       } finally {
         setLoading(false)
       }
@@ -151,7 +187,42 @@ function AcceptInvite() {
     )
   }
 
-  if (!invite) return null
+  /*
+   * The invitation could not be read. A named dead end beats a silent one: it
+   * says which of the two things went wrong (expired, or not a real link), it
+   * keeps the server's reason rather than swallowing it, and it offers both
+   * ways forward — ask for a new invitation, or sign in if you already have an
+   * account here.
+   */
+  if (previewError !== null || !invite) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-background">
+        <div className="bg-aurora pointer-events-none absolute inset-0" />
+        <header className="relative z-10 flex items-center justify-center p-8">
+          <LogoWordmark gradient />
+        </header>
+        <main className="relative z-10 mx-auto flex max-w-md flex-col gap-6 px-6 pb-20 pt-4">
+          <div className="card-glass space-y-4 p-8 text-center" data-testid="invite-unusable">
+            <h1 className="font-display text-2xl font-semibold tracking-tight">
+              {t('acceptInvite.unusableTitle')}
+            </h1>
+            <p className="text-sm text-muted-foreground">{t('acceptInvite.unusableBody')}</p>
+            {previewError && (
+              <p className="text-xs text-muted-foreground/80" data-testid="invite-unusable-reason">
+                {previewError}
+              </p>
+            )}
+            <Button variant="outline" className="w-full" onClick={() => navigate({ to: '/login' })}>
+              {t('acceptInvite.unusableSignIn')}
+            </Button>
+          </div>
+          <p className="text-center">
+            <NeedHelp reason={t('acceptInvite.helpSubjectUnusable')} />
+          </p>
+        </main>
+      </div>
+    )
+  }
 
   /*
    * Declined stays on screen.
@@ -177,6 +248,9 @@ function AcceptInvite() {
               {t('acceptInvite.declinedBody', { org: invite.orgName })}
             </p>
           </div>
+          <p className="text-center">
+            <NeedHelp reason={t('acceptInvite.helpSubjectDeclined')} />
+          </p>
         </main>
       </div>
     )
@@ -299,6 +373,11 @@ function AcceptInvite() {
 
         <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
           <ShieldCheck className="h-3 w-3" /> {t('acceptInvite.secureFooter')}
+        </p>
+
+        {/* Below the fold in her frame, and below the seal here: present, not competing. */}
+        <p className="text-center">
+          <NeedHelp reason={t('acceptInvite.helpSubjectInvite')} />
         </p>
       </main>
     </div>

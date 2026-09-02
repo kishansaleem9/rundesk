@@ -36,10 +36,12 @@ import {
   MessageSquare,
   Sparkles,
   Loader2,
+  Plane,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { usePersonPanel } from '../store/person-panel'
 import { InlineSkeleton } from './loading-skeletons'
 
@@ -332,6 +334,178 @@ function ActivityFeed({ workspaceId, userId }: { workspaceId: string; userId: st
 }
 
 /** §G06 [06:22] — their next two weeks: dated tasks and meetings they are in. */
+type TimeOffEntry = {
+  id: string
+  userId: string
+  startsOn: string
+  endsOn: string
+  note: string | null
+  displayName: string
+}
+
+/**
+ * G05-8 [05:43] — "+ Add time off", the first row of the profile's Activity tab.
+ *
+ * Time off was fully built — schema, service, controller — and its only way in
+ * was a collapsed accordion inside the Workload heat map. Nobody books leave by
+ * first navigating to a capacity chart; they open the person and say "I'm out
+ * next week". So the same endpoints get a second, obvious door here.
+ *
+ * Sits above the contact details, where her frames put it. Read-only for
+ * everyone (availability is a team fact), writable for yourself and, if you
+ * manage the workspace, for anyone — the same rule the server enforces, so the
+ * form never offers what would come back a 403.
+ */
+function TimeOff({
+  workspaceId,
+  userId,
+  isMe,
+  personName,
+}: {
+  workspaceId: string
+  userId: string
+  isMe: boolean
+  personName: string
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const { isManagerOrAbove } = useWorkspaceRole(workspaceId)
+  const canBook = isMe || isManagerOrAbove
+  const [adding, setAdding] = useState(false)
+  const [startsOn, setStartsOn] = useState('')
+  const [endsOn, setEndsOn] = useState('')
+
+  // From today forward. Leave that ended is history; this answers "when is
+  // this person away", which is only ever a question about the future.
+  const from = new Date().toLocaleDateString('en-CA')
+
+  const entriesQuery = useQuery({
+    queryKey: ['time-off', workspaceId, from],
+    queryFn: () => api<TimeOffEntry[]>(`/workspaces/${workspaceId}/time-off?from=${from}`),
+    enabled: Boolean(workspaceId),
+  })
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['time-off', workspaceId] })
+    qc.invalidateQueries({ queryKey: ['workload-report', workspaceId] })
+  }
+
+  const add = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/time-off`, {
+        method: 'POST',
+        // A single day is the common case, so an empty end date means "just
+        // that day" rather than a validation error.
+        body: { userId, startsOn, endsOn: endsOn || startsOn },
+      }),
+    onSuccess: () => {
+      setStartsOn('')
+      setEndsOn('')
+      setAdding(false)
+      toast.success(t('person.timeOffAdded'))
+      invalidate()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/time-off/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : (err as Error).message),
+  })
+
+  // The workspace endpoint returns everyone's; this panel is about one person.
+  const mine = (entriesQuery.data ?? []).filter((e) => e.userId === userId)
+
+  return (
+    <section className="border-b border-border/60 px-4 py-3" data-testid="person-time-off">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <Plane className="h-3.5 w-3.5" />
+          {t('person.timeOff')}
+        </h3>
+        {canBook && (
+          <button
+            type="button"
+            data-testid="person-time-off-add"
+            onClick={() => setAdding((v) => !v)}
+            aria-expanded={adding}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Plus className="h-3 w-3" />
+            {t('person.addTimeOff')}
+          </button>
+        )}
+      </div>
+
+      {adding && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="person-time-off-form">
+          <input
+            type="date"
+            value={startsOn}
+            onChange={(e) => setStartsOn(e.target.value)}
+            aria-label={t('person.timeOffFrom')}
+            data-testid="person-time-off-from"
+            className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
+          />
+          <span className="text-[11px] text-muted-foreground/60">→</span>
+          <input
+            type="date"
+            value={endsOn}
+            onChange={(e) => setEndsOn(e.target.value)}
+            aria-label={t('person.timeOffTo')}
+            data-testid="person-time-off-to"
+            className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
+          />
+          <Button
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            data-testid="person-time-off-save"
+            disabled={!startsOn || add.isPending}
+            onClick={() => add.mutate()}
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      )}
+
+      {mine.length === 0 ? (
+        <p className="mt-1.5 text-[12px] text-muted-foreground" data-testid="person-time-off-empty">
+          {isMe ? t('person.timeOffNoneMe') : t('person.timeOffNone', { name: personName })}
+        </p>
+      ) : (
+        <ul className="mt-1.5 space-y-1" data-testid="person-time-off-list">
+          {mine.map((entry) => (
+            <li
+              key={entry.id}
+              data-testid={`person-time-off-${entry.id}`}
+              className="flex items-center gap-2 text-[12px]"
+            >
+              <span className="flex-1 truncate tabular-nums text-foreground">
+                {entry.startsOn === entry.endsOn
+                  ? entry.startsOn
+                  : `${entry.startsOn} → ${entry.endsOn}`}
+              </span>
+              {canBook && (
+                <button
+                  type="button"
+                  data-testid={`person-time-off-remove-${entry.id}`}
+                  aria-label={t('common.remove')}
+                  onClick={() => remove.mutate(entry.id)}
+                  disabled={remove.isPending}
+                  className="rounded p-0.5 text-muted-foreground hover:text-destructive disabled:opacity-50"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function PersonCalendar({ workspaceId, userId }: { workspaceId: string; userId: string }) {
   const { t } = useTranslation()
   const query = useQuery({
@@ -653,6 +827,19 @@ export function PersonPanel() {
                 </p>
               )}
             </section>
+          )}
+          {/*
+            G05-8 [05:43] — first in the body, as her frames place it: above the
+            teams and the reporting line, because "are they even here this week"
+            is the question that changes what you do next.
+          */}
+          {workspaceId && userId && (
+            <TimeOff
+              workspaceId={workspaceId}
+              userId={userId}
+              isMe={isMe}
+              personName={profile?.person?.displayName ?? ''}
+            />
           )}
           {/* §G06 [05:43] — "main kis ki TEAM MEMBER hoon". */}
           {!!profile?.teams?.length && (

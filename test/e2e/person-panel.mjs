@@ -108,7 +108,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 39
+const EXPECTED_CHECKS = 51
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -189,6 +189,11 @@ try {
     for (const p of mine.data ?? []) {
       await A(`/workspaces/${workspaceId}/priorities/${p.id}`, { method: 'DELETE' })
     }
+    // A run that dies mid-section must not leave this account booked away.
+    const leave = await A(`/workspaces/${workspaceId}/time-off`)
+    for (const e of leave.data ?? []) {
+      if (e.userId === meId) await A(`/workspaces/${workspaceId}/time-off/${e.id}`, { method: 'DELETE' })
+    }
   }
   // Start from an empty list so the empty state is checkable.
   const existing = await A(`/workspaces/${workspaceId}/priorities`)
@@ -256,6 +261,86 @@ try {
       (await page.getByTestId('person-manager').isVisible().catch(() => false)),
     '"No manager" is rendered as an answer, not left blank',
   )
+
+  /*
+   * ---------------------------------------------------------------------
+   * G05-8 [05:43] — "+ Add time off", the first row of her Activity tab.
+   *
+   * Time off was fully built — schema, service, controller — and its only way
+   * in was a collapsed accordion inside the workload heat map. Nobody opens a
+   * capacity chart to say "I'm out on Friday". This is the class of defect
+   * where reading the diff convinces you it works, so every assertion below
+   * that claims something was saved reads it back off the API.
+   * ---------------------------------------------------------------------
+   */
+  console.log('\n▶ G05-8 [05:43] — time off, from the profile rather than the heat map')
+  // Start clean: a leftover entry would make the empty state unassertable and
+  // would let the "it saved" check pass on somebody else's row.
+  const priorLeave = await A(`/workspaces/${workspaceId}/time-off`)
+  for (const e of priorLeave.data ?? []) {
+    if (e.userId === meId) await A(`/workspaces/${workspaceId}/time-off/${e.id}`, { method: 'DELETE' })
+  }
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(2500)
+  await page.getByTestId('user-menu').click()
+  await page.waitForTimeout(900)
+  await page.getByTestId('menu-my-profile').click()
+  await page.waitForTimeout(2000)
+
+  check(
+    await page.getByTestId('person-time-off').isVisible().catch(() => false),
+    'time off is a section on the profile, not only on the workload page',
+  )
+  check(
+    await page.getByTestId('person-time-off-empty').isVisible().catch(() => false),
+    'with nothing booked it says so rather than showing an empty box',
+  )
+
+  // The frames put "+ Add time off" on the row itself, not behind a tab.
+  check(
+    await page.getByTestId('person-time-off-add').isVisible().catch(() => false),
+    'and "Add time off" is offered right there',
+  )
+  await page.getByTestId('person-time-off-add').click()
+  await page.waitForTimeout(500)
+  check(
+    await page.getByTestId('person-time-off-form').isVisible().catch(() => false),
+    'which opens the dates rather than sending you to another page',
+  )
+
+  // Two known days, far enough out that no seeded fixture collides with them.
+  const away = new Date(Date.now() + 30 * 86400000).toLocaleDateString('en-CA')
+  const back = new Date(Date.now() + 32 * 86400000).toLocaleDateString('en-CA')
+  await page.getByTestId('person-time-off-from').fill(away)
+  await page.getByTestId('person-time-off-to').fill(back)
+  await page.getByTestId('person-time-off-save').click()
+  await page.waitForTimeout(2200)
+
+  const savedLeave = await A(`/workspaces/${workspaceId}/time-off`)
+  const savedRow = (savedLeave.data ?? []).find(
+    (e) => e.userId === meId && e.startsOn === away && e.endsOn === back,
+  )
+  check(
+    !!savedRow,
+    'booking it from the profile actually stores it',
+    JSON.stringify((savedLeave.data ?? []).map((e) => [e.startsOn, e.endsOn])).slice(0, 160),
+  )
+  check(
+    (await page.getByTestId('person-time-off-list').innerText().catch(() => '')).includes(away),
+    'and the panel shows the days back, without a reload',
+  )
+
+  if (savedRow) {
+    await page.getByTestId(`person-time-off-remove-${savedRow.id}`).click()
+    await page.waitForTimeout(2000)
+    const afterRemove = await A(`/workspaces/${workspaceId}/time-off`)
+    check(
+      !(afterRemove.data ?? []).some((e) => e.id === savedRow.id),
+      'and taking it back off removes it too — plans change',
+    )
+  } else {
+    check(false, 'and taking it back off removes it too — plans change', 'nothing was saved to remove')
+  }
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G06 [05:54] — Priorities, the one thing that is a decision')
@@ -394,6 +479,81 @@ try {
     check(!holds('createdUnassigned', bToday?.id),
       'a task with an assignee is not counted as unassigned')
   }
+
+  /*
+   * The bug the four checks above could only catch by accident.
+   *
+   * The buckets were computed by fetching the 25 earliest-due assigned tasks
+   * and splitting THAT PAGE four ways in JavaScript. Sorted by due date
+   * ascending, the page fills with the oldest overdue work first — so on any
+   * account with 25+ dated tasks, NEXT and UNSCHEDULED were structurally
+   * unreachable, not merely short. Measured on a working account before the
+   * fix: 18 overdue + 7 today = 25, `next: 0` while upcoming work existed.
+   *
+   * The checks above only caught it because this database had accumulated
+   * enough tasks; on a fresh one they would have passed over the same bug. So
+   * this seeds past the limit deliberately, and cleans up after itself — a
+   * regression check that does not depend on how old the database is.
+   */
+  const CROWD = 25
+  const crowd = []
+  for (let i = 0; i < CROWD; i++) {
+    crowd.push(
+      await seedTask(
+        `bucket crowd ${i} ${Date.now()}`,
+        new Date(now.getTime() - (10 + i) * 86400000).toISOString(),
+        true,
+      ),
+    )
+  }
+  const crowded = await A(`/workspaces/${workspaceId}/people/${meId}`)
+  const crowdedBuckets = crowded.data?.taskBuckets
+  check(
+    (crowdedBuckets?.next ?? []).some((row) => row.id === bNext?.id),
+    `NEXT survives ${CROWD} overdue tasks ahead of it in the sort`,
+    `next held ${(crowdedBuckets?.next ?? []).length} rows and not the seeded one`,
+  )
+  check(
+    (crowdedBuckets?.unscheduled ?? []).length > 0 || (crowdedBuckets?.overdue ?? []).length >= CROWD,
+    'and each bucket is filled on its own, not carved out of one shared page',
+    `overdue held ${(crowdedBuckets?.overdue ?? []).length} of ${CROWD}+ seeded`,
+  )
+  for (const t of crowd) {
+    if (t?.id) await A(`/tasks/${t.id}`, { method: 'DELETE' })
+  }
+
+  /*
+   * A task you deleted must stop being work you owe.
+   *
+   * Deleting a task archives the row rather than removing it, and the bucket
+   * queries filtered on `status` alone — so deleted work kept appearing on the
+   * profile as due today, with nothing you could do about it from here. The
+   * createdUnassigned query had always excluded archived rows; the four
+   * assigned buckets never did, which is why this went unnoticed.
+   *
+   * The delete is sent with no content-type header on purpose: Fastify rejects
+   * a DELETE that declares a JSON body and sends none, which made an earlier
+   * version of this check "pass" against tasks it had never actually deleted.
+   */
+  const bGone = await seedTask(
+    `bucket deleted ${Date.now()}`,
+    new Date(now.getTime() + 3 * 86400000).toISOString(),
+    true,
+  )
+  const inAssignedBuckets = async () => {
+    const p = await A(`/workspaces/${workspaceId}/people/${meId}`)
+    const b = p.data?.taskBuckets ?? {}
+    return [...(b.today ?? []), ...(b.overdue ?? []), ...(b.next ?? []), ...(b.unscheduled ?? [])]
+      .some((row) => row.id === bGone?.id)
+  }
+  check(await inAssignedBuckets(), 'a task assigned to you shows up in a bucket to begin with')
+  const gone = await A(`/tasks/${bGone.id}`, { method: 'DELETE' })
+  check(gone.status === 200, 'and deleting it is accepted', `DELETE returned ${gone.status}`)
+  check(
+    !(await inAssignedBuckets()),
+    'after which it is no longer work you owe',
+    'a deleted task still shows on the profile as assigned work',
+  )
 
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3500)

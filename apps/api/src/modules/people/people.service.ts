@@ -1,5 +1,5 @@
 import { Injectable, Inject, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql, ilike } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, ilike } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import {
   users,
@@ -186,34 +186,49 @@ export class PeopleService {
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.managerId, userId)))
       .orderBy(asc(users.displayName))
 
+    /** One panel section's worth. Each bucket gets its own, never a shared page. */
+    const BUCKET_LIMIT = 25
+
+    /**
+     * Open work that is theirs, in this workspace. Shared by every bucket below.
+     *
+     * `isArchived` matters as much as `status`: deleting a task archives it
+     * rather than removing the row (tasks.service.ts deleteTask), and this
+     * clause was missing — so a task you deleted kept appearing on your profile
+     * as due today, with no way to get rid of it. The createdUnassigned query
+     * below always excluded archived rows; these did not.
+     */
+    const mine = and(
+      eq(taskAssignees.userId, userId),
+      eq(spaces.workspaceId, workspaceId),
+      ne(tasks.status, 'done'),
+      eq(tasks.isArchived, false),
+    )
+
+    const assignedColumns = {
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      listId: tasks.listId,
+      listName: lists.name,
+    }
+
     // What they are working on: open tasks assigned to them, soonest due first.
     const assigned = await this.db
-      .select({
-        id: tasks.id,
-        title: tasks.title,
-        status: tasks.status,
-        priority: tasks.priority,
-        dueDate: tasks.dueDate,
-        listId: tasks.listId,
-        listName: lists.name,
-      })
+      .select(assignedColumns)
       .from(taskAssignees)
       .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(
-        and(
-          eq(taskAssignees.userId, userId),
-          eq(spaces.workspaceId, workspaceId),
-          ne(tasks.status, 'done'),
-        ),
-      )
+      .where(mine)
       // Nulls last: a task with a date is more urgent than one without, and
       // Postgres sorts NULL first ascending by default, which would put every
       // undated task above everything that is actually due.
       .orderBy(sql`${tasks.dueDate} asc nulls last`)
-      .limit(25)
+      .limit(BUCKET_LIMIT)
 
     /*
      * §G05 [06:08–06:14] — the buckets she names, in her order:
@@ -234,25 +249,48 @@ export class PeopleService {
     const zone = person.timezone || 'UTC'
     const dayStart = startOfDayIn(zone)
     const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
-    const due = (t: { dueDate: Date | string | null }) => (t.dueDate ? new Date(t.dueDate) : null)
 
-    const buckets = {
-      today: assigned.filter((t) => {
-        const d = due(t)
-        return d && d >= dayStart && d < dayEnd
-      }),
-      overdue: assigned.filter((t) => {
-        const d = due(t)
-        return d && d < dayStart
-      }),
-      next: assigned.filter((t) => {
-        const d = due(t)
-        return d && d >= dayEnd
-      }),
+    /*
+     * Each bucket is its OWN query, with its own limit.
+     *
+     * This used to fetch the 25 earliest-due assigned tasks and split that page
+     * four ways in JavaScript. Sorting by due date ascending means the page
+     * fills with the oldest overdue work first, so on any account with 25+
+     * dated tasks — which is every real account after a few weeks — NEXT and
+     * UNSCHEDULED were permanently empty. Not "sometimes short": structurally
+     * unreachable, because the rows that would land in them are past the LIMIT
+     * before the filter ever runs. Measured on a working account: 18 overdue +
+     * 7 today = 25, with `next: 0` while upcoming work existed.
+     *
+     * A limit that hides a whole category reads exactly like "you have nothing
+     * coming up", which is the one thing this panel must never say wrongly.
+     */
+    const bucketRows = (where: ReturnType<typeof and>, order: 'asc' | 'desc') =>
+      this.db
+        .select(assignedColumns)
+        .from(taskAssignees)
+        .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(mine, where))
+        .orderBy(order === 'asc' ? asc(tasks.dueDate) : desc(tasks.dueDate))
+        .limit(BUCKET_LIMIT)
+
+    // Half-open on both sides, matching the filters this replaced: a task due
+    // at exactly midnight tomorrow is coming up, not due today.
+    const [today, overdue, next, unscheduled] = await Promise.all([
+      bucketRows(and(gte(tasks.dueDate, dayStart), lt(tasks.dueDate, dayEnd)), 'asc'),
+      // Newest miss first: the deadline you blew yesterday is the one you act
+      // on, not the one from four months ago.
+      bucketRows(lt(tasks.dueDate, dayStart), 'desc'),
+      // Soonest first: "what is coming" is answered from the near end.
+      bucketRows(gte(tasks.dueDate, dayEnd), 'asc'),
       // Undated work is neither late nor coming; it would otherwise vanish
       // from a panel built entirely out of date buckets.
-      unscheduled: assigned.filter((t) => !due(t)),
-    }
+      bucketRows(isNull(tasks.dueDate), 'asc'),
+    ])
+    const buckets = { today, overdue, next, unscheduled }
 
     /*
      * "Cheezein jo maine CREATE ki hain par abhi tak kisi ko assign nahi kiya"
@@ -283,8 +321,16 @@ export class PeopleService {
           sql`not exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id})`,
         ),
       )
-      .orderBy(sql`${tasks.dueDate} asc nulls last`)
-      .limit(25)
+      /*
+       * Newest first, not by due date.
+       *
+       * Sorting these by `dueDate asc nulls last` put every UNDATED unassigned
+       * task behind every dated one — and "I made this and have not handed it
+       * out yet" is overwhelmingly a task with no date on it, so the rows this
+       * bucket exists to surface were the exact rows the limit cut off.
+       */
+      .orderBy(desc(tasks.createdAt))
+      .limit(BUCKET_LIMIT)
 
     return {
       person: {

@@ -226,6 +226,96 @@ try {
     )
     await ctx.close()
   }
+
+  /*
+   * ── 3. G01-6 [00:18] — the invitation screen ─────────────────────────────
+   *
+   * The one screen in the product reached by somebody with no account, which
+   * makes it the one screen where the in-app SupportWidget does not exist. Her
+   * frame 008 puts a small "Need help?" link near the bottom of the join page.
+   *
+   * The dead end this closes is the second half: a bad or expired token used
+   * to toast and redirect to /login — sending the person who cannot get in to
+   * a sign-in form for an account they do not have, with the explanation
+   * already fading out of the corner. No session is set here: this is
+   * deliberately the signed-out case, because that is who follows an invite.
+   */
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' })
+    const page = await ctx.newPage()
+
+    // (a) a good invitation still renders, and now carries the help link.
+    let previewOk = true
+    await ctx.route('**/api/**', async (route) => {
+      if (route.request().url().includes('/invitations/preview')) {
+        if (!previewOk) {
+          return route.fulfill({
+            status: 400,
+            contentType: 'application/json',
+            body: JSON.stringify({ data: null, error: { message: 'This invitation has expired' } }),
+          })
+        }
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: envelope({
+            orgName: 'Aura',
+            inviterName: 'Suleman',
+            email: 'invitee@example.com',
+            expiresAt: new Date(Date.now() + 6 * 86400000).toISOString(),
+            requiresAccountCreation: true,
+          }),
+        })
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: envelope([]) })
+    })
+
+    await page.goto(`${BASE}/accept-invite?token=good`, { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('[data-testid="invite-decline"]', { timeout: 15000 }).catch(() => {})
+
+    const help = page.locator('[data-testid="invite-help"]')
+    chk(
+      (await help.count()) > 0,
+      'the invitation screen offers a way to reach a human',
+      'the invitation screen has no help link — an invitee who is stuck has nowhere to go',
+    )
+    // A link that goes nowhere is the failure this is meant to catch, so the
+    // href is read rather than the presence of an <a>.
+    const href = (await help.count()) ? await help.first().getAttribute('href') : ''
+    chk(
+      /^mailto:.+@.+\?.*subject=/.test(href ?? ''),
+      'and it is addressed, with the reason already in the subject',
+      `the help link goes to ${href || '(nothing)'}`,
+    )
+
+    // (b) the broken invitation — the case that used to redirect away.
+    previewOk = false
+    await page.goto(`${BASE}/accept-invite?token=expired`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2500)
+
+    chk(
+      page.url().includes('/accept-invite'),
+      'a broken invitation stays on the invitation screen',
+      `a broken invitation still bounces away — landed on ${page.url()}`,
+    )
+    chk(
+      (await page.locator('[data-testid="invite-unusable"]').count()) > 0,
+      'and says so on the page rather than in a toast that fades',
+      'nothing on the page explains why the invitation did not open',
+    )
+    chk(
+      (await page.locator('[data-testid="invite-unusable-reason"]').innerText().catch(() => ''))
+        .includes('expired'),
+      'and it keeps the reason the server gave',
+      'the server’s reason is swallowed',
+    )
+    chk(
+      (await page.locator('[data-testid="invite-help"]').count()) > 0,
+      'and the person who most needs help can still reach it',
+      'the broken-invitation screen has no help link',
+    )
+    await ctx.close()
+  }
 } catch (e) {
   bad(`threw: ${e.message.split('\n')[0]}`)
 } finally {

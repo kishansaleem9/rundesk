@@ -9,6 +9,7 @@ import {
   CommandList,
   CommandShortcut,
   CommandSeparator,
+  PersonAvatar,
   cn,
 } from '@rundesk/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -16,6 +17,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  ChevronRight,
   FileText,
   Folder,
   GanttChart,
@@ -29,6 +31,7 @@ import {
   Paperclip,
   Play,
   Plus,
+  Search,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -716,34 +719,24 @@ export function CommandPalette({
         )}
         {(membersQuery.data?.length ?? 0) > 0 && (
           <FilterGroup label={t('palette.filterAssignee')}>
-            <select
+            <PeoplePicker
+              label={t('palette.filterAssignee')}
+              members={membersQuery.data!}
               value={assigneeFilter}
-              onChange={(e) => setAssigneeFilter(e.target.value)}
-              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
-            >
-              <option value="">{t('palette.filterAnyone')}</option>
-              {membersQuery.data!.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.displayName || m.email}
-                </option>
-              ))}
-            </select>
+              onChange={setAssigneeFilter}
+              testId="palette-assignee"
+            />
           </FilterGroup>
         )}
         {(membersQuery.data?.length ?? 0) > 0 && (
           <FilterGroup label={t('palette.filterCreator')}>
-            <select
+            <PeoplePicker
+              label={t('palette.filterCreator')}
+              members={membersQuery.data!}
               value={creatorFilter}
-              onChange={(e) => setCreatorFilter(e.target.value)}
-              className="h-6 rounded-full border border-border/70 bg-transparent px-2 text-[11px] text-muted-foreground"
-            >
-              <option value="">{t('palette.filterAnyone')}</option>
-              {membersQuery.data!.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.displayName || m.email}
-                </option>
-              ))}
-            </select>
+              onChange={setCreatorFilter}
+              testId="palette-creator"
+            />
           </FilterGroup>
         )}
         <FilterGroup label={t('palette.filterArchived')}>
@@ -1103,6 +1096,151 @@ export function CommandPalette({
         <span>{t('palette.hintClose')}</span>
       </div>
     </CommandDialog>
+  )
+}
+
+type Member = { userId: string; displayName: string; email: string }
+
+/**
+ * G02-7 [02:14] — "yeh kisi aur ko assign hai, ya phir is ka creator kaun hai".
+ *
+ * Assignee and Creator both worked already; both were a native `<select>`
+ * listing every member of the workspace. Her frames (040_0225) show something
+ * different in kind: the parent row carries the current value inline —
+ * "Assignee · Anyone ›" — and opening it gives a "Search…" box over avatar +
+ * name rows. That difference is not decoration. A `<select>` of forty people
+ * is a scroll with no type-ahead, and an agency workspace passes forty people
+ * long before it stops needing this filter.
+ *
+ * One component for both, because they are the same question asked about two
+ * columns, and two divergent implementations of one control is how the two
+ * quietly stop behaving alike.
+ */
+function PeoplePicker({
+  label,
+  members,
+  value,
+  onChange,
+  testId,
+}: {
+  label: string
+  members: Member[]
+  value: string
+  onChange: (userId: string) => void
+  testId: string
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [needle, setNeedle] = useState('')
+
+  const nameOf = (m: Member) => m.displayName || m.email
+  const selected = members.find((m) => m.userId === value)
+
+  const shown = useMemo(() => {
+    const q = needle.trim().toLowerCase()
+    if (!q) return members
+    // Email as well as name: half of "who is this" in a workspace is answered
+    // by the address, especially where two people share a first name.
+    return members.filter(
+      (m) => nameOf(m).toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
+    )
+  }, [members, needle])
+
+  const choose = (userId: string) => {
+    onChange(userId)
+    setOpen(false)
+    setNeedle('')
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        data-testid={testId}
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] transition-colors',
+          selected
+            ? 'border-brand-500 bg-brand-500/10 text-foreground'
+            : 'border-border/70 text-muted-foreground hover:bg-accent/10 hover:text-foreground',
+        )}
+      >
+        <span data-testid={`${testId}-value`}>
+          {selected ? nameOf(selected) : t('palette.filterAnyone')}
+        </span>
+        <ChevronRight className="h-3 w-3 opacity-60" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div
+            className="absolute left-0 z-50 mt-1 w-56 rounded-lg border border-border/70 bg-card p-1 shadow-xl"
+            data-testid={`${testId}-menu`}
+          >
+            <div className="flex items-center gap-1.5 border-b border-border/60 px-2 pb-1.5">
+              <Search className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <input
+                autoFocus
+                value={needle}
+                onChange={(e) => setNeedle(e.target.value)}
+                placeholder={t('palette.searchPeople')}
+                aria-label={t('palette.searchPeople')}
+                data-testid={`${testId}-search`}
+                /*
+                 * cmdk owns keyboard navigation for the results list behind
+                 * this menu, and it listens on the dialog. Without this, typing
+                 * a name here also moved the highlighted search result, and
+                 * Enter opened whatever it had landed on.
+                 */
+                onKeyDown={(e) => e.stopPropagation()}
+                className="h-7 w-full bg-transparent text-[11px] outline-none placeholder:text-muted-foreground/60"
+              />
+            </div>
+            <div className="max-h-56 overflow-y-auto pt-1">
+              <button
+                type="button"
+                data-testid={`${testId}-anyone`}
+                onClick={() => choose('')}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12px]',
+                  value === '' ? 'text-foreground' : 'text-muted-foreground',
+                  'hover:bg-accent/10 hover:text-foreground',
+                )}
+              >
+                {t('palette.filterAnyone')}
+              </button>
+              {shown.map((m) => (
+                <button
+                  key={m.userId}
+                  type="button"
+                  data-testid={`${testId}-option-${m.userId}`}
+                  onClick={() => choose(m.userId)}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12px]',
+                    value === m.userId ? 'text-foreground' : 'text-muted-foreground',
+                    'hover:bg-accent/10 hover:text-foreground',
+                  )}
+                >
+                  <PersonAvatar name={nameOf(m)} size="xs" />
+                  <span className="truncate">{nameOf(m)}</span>
+                </button>
+              ))}
+              {shown.length === 0 && (
+                <p
+                  className="px-2 py-1.5 text-[11px] text-muted-foreground"
+                  data-testid={`${testId}-empty`}
+                >
+                  {t('palette.noPeople')}
+                </p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
