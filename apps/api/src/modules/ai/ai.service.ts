@@ -15,6 +15,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'driz
 import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
 import { formatStandupFallback, type StandupData } from '../people/standup'
 import { modelForTier } from './model-tiers'
 import {
@@ -1161,7 +1162,9 @@ Be concise, helpful, and action-oriented.`
 Workspace context:
 ${workspaceContext}
 
-Current date: ${new Date().toISOString().split('T')[0]}`
+Current date: ${new Date().toISOString().split('T')[0]}
+
+${FOLLOW_UP_INSTRUCTION}`
 
     // Already open when the caller reported its own steps first (G13-10);
     // otherwise open it here. Calling setHeader twice throws once the headers
@@ -1186,11 +1189,26 @@ Current date: ${new Date().toISOString().split('T')[0]}`
         messages,
       })
 
+      /*
+       * G13-9 [18:42] — the follow-ups ride this same completion, after a
+       * marker, so offering them costs no second billed call on every turn.
+       * The splitter keeps that trade honest: it holds back exactly the
+       * characters that could still become the marker, so a reader never sees
+       * `<<<FOLLOW` when a chunk boundary lands mid-marker, and ordinary prose
+       * is never delayed.
+       */
+      const followUps = createFollowUpSplitter()
       for await (const chunk of stream) {
         if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-          raw.write(`data: ${JSON.stringify({ delta: chunk.delta.text })}\n\n`)
+          const visible = followUps.push(chunk.delta.text)
+          if (visible) raw.write(`data: ${JSON.stringify({ delta: visible })}\n\n`)
         }
       }
+      // Anything still held back was never a marker and belongs to the answer.
+      const tail = followUps.flush()
+      if (tail) raw.write(`data: ${JSON.stringify({ delta: tail })}\n\n`)
+      const suggestions = followUps.followUps()
+      if (suggestions.length) raw.write(`data: ${JSON.stringify({ followUps: suggestions })}\n\n`)
       const final = await stream.finalMessage().catch(() => null)
       void this.recordUsage(
         'chat',

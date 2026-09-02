@@ -1779,3 +1779,52 @@ getting the arity wrong silently lands `skills` in the briefings slot so every
 skill turn throws into the refusal path.
 
 **Running total: 128 closed, 28 open, 1 unverifiable.**
+
+## G13-9 — follow-ups, under the answer they came from (2 Sep)
+
+> Under every assistant answer, a "Follow ups" label and clickable next-step
+> chips generated from that answer. She drives the whole demo by clicking one.
+> `[18:42]`
+
+Ours were a fixed five-item menu rendered only while `messages.length === 0`.
+The moment you asked anything, the guided path that makes Skills discoverable
+disappeared.
+
+### The cost decision, made explicitly
+
+The obvious implementation is a small follow-up model call once the answer is
+done. It is also **a second billed request on every turn, forever, for three
+lines of text** — and this is sold to an agency watching its AI spend. So the
+answer carries its own follow-ups after a marker and the server strips them
+off the stream. One completion, no extra call.
+
+That trade buys a real problem: the marker arrives in arbitrary chunks, and a
+naive `indexOf` per chunk shows the reader `<<<FOLLOW` whenever a boundary
+lands mid-marker. Hence a splitter that holds back exactly the suffix which
+could still become the marker and nothing more — so prose is never delayed and
+a partial marker is never shown.
+
+It is a pure function with its own tests, because that is where the bugs are.
+The adversarial case is chunk size **1**: every character its own delta, so the
+marker is split at every possible offset.
+
+### Two breaks that caught nothing, and what they added
+
+- **Dropping the held-back text at end of stream** failed no test. Every
+  existing case happened to end on a character the marker does not start with,
+  so nothing was ever in the buffer when the stream closed. An answer ending
+  in `<` would have silently lost it. Now covered for `<`, `<<`, `<<<` and
+  `<<<FOLLOW`.
+- **Removing the instruction from the system prompt** failed no test — and
+  that break kills the feature outright. Every test fed the splitter text that
+  already contained a marker, so all ten passed with the model never once
+  being asked to produce one. There is now a test that captures the system
+  prompt and asserts the instruction is in it.
+
+The second is the more instructive: a full green suite over a feature that
+could not possibly work in production.
+
+Ten unit tests, three browser checks. Four breaks, all caught after those two
+additions.
+
+**Running total: 129 closed, 27 open, 1 unverifiable.**

@@ -460,6 +460,9 @@ try {
           `data: ${JSON.stringify({ step: 'workspace' })}\n\n` +
           `data: ${JSON.stringify({ step: 'writing' })}\n\n` +
           `data: ${JSON.stringify({ delta: 'You have three tasks due today.' })}\n\n` +
+          // G13-9 — the follow-ups frame the server emits once it has stripped
+          // the marker off the completion. The client never sees the marker.
+          `data: ${JSON.stringify({ followUps: ['Show me the overdue one', 'Move it to tomorrow'] })}\n\n` +
           'data: [DONE]\n\n',
       }),
     )
@@ -513,6 +516,38 @@ try {
           'naming the workspace read the server reported',
           'the workspace step never rendered',
         )
+
+        /*
+         * G13-9 [18:42] — "Follow ups", under the answer they came from.
+         *
+         * Ours were a static five-item menu shown only while the thread was
+         * empty, so the moment you asked anything the guided path vanished —
+         * and she drives the whole demo by clicking one of these.
+         */
+        const chip = aiPage.locator('[data-testid^="ai-followup-"]').first()
+        chk(
+          (await chip.count()) > 0,
+          'and the answer offers next steps drawn from it',
+          'no follow-up chips under the answer',
+        )
+        if ((await chip.count()) > 0) {
+          chk(
+            (await chip.innerText()).trim() === 'Show me the overdue one',
+            'phrased as something you could say back',
+            await chip.innerText().catch(() => '(unreadable)'),
+          )
+          // A chip that does not ask the question is a label.
+          await chip.click()
+          await aiPage.waitForTimeout(2000)
+          chk(
+            (await aiPage.locator('text=Show me the overdue one').count()) >= 2,
+            'and clicking one actually asks it',
+            'the chip did not send its suggestion',
+          )
+        } else {
+          chk(false, 'phrased as something you could say back', 'no chip')
+          chk(false, 'and clicking one actually asks it', 'no chip')
+        }
       } else {
         chk(false, 'the answer arrives', 'composer disabled')
         chk(false, 'and the trace of what it read stays with it', 'composer disabled')

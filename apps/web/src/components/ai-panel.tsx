@@ -41,6 +41,14 @@ type Message = {
    * really looked at your workspace or just answered from the question.
    */
   steps?: string[]
+  /**
+   * G13-9 [18:42] — next steps generated from THIS answer.
+   *
+   * On the message rather than in panel state, so scrolling back to an earlier
+   * answer still offers the path it suggested — which is the point of a guided
+   * flow, as opposed to a menu that only exists for the newest reply.
+   */
+  followUps?: string[]
 }
 
 type AiPanelProps = {
@@ -298,6 +306,7 @@ export function AiPanel({
       // finalized in this same tick, so reading the state here would attach
       // whatever it held one render ago.
       const collectedSteps: string[] = []
+      let collectedFollowUps: string[] = []
 
       while (true) {
         const { done, value } = await reader.read()
@@ -314,6 +323,11 @@ export function AiPanel({
               if (parsed.step) {
                 collectedSteps.push(String(parsed.step))
                 setSteps((prev) => [...prev, String(parsed.step)])
+              }
+              // G13-9 — one frame, at the end, after the marker was stripped
+              // server-side. Nothing here has to know the marker exists.
+              if (Array.isArray(parsed.followUps)) {
+                collectedFollowUps = parsed.followUps.map((f: unknown) => String(f))
               }
               if (parsed.delta) {
                 accumulated += parsed.delta
@@ -332,6 +346,7 @@ export function AiPanel({
         content: accumulated,
         id: Date.now().toString(),
         steps: collectedSteps.length ? collectedSteps : undefined,
+        followUps: collectedFollowUps.length ? collectedFollowUps : undefined,
       }
       setMessages((prev) => [...prev, assistantMsg])
       setStreamBuffer('')
@@ -451,6 +466,38 @@ export function AiPanel({
                 : undefined
             }
           />
+            {/*
+              G13-9 [18:42] — "Follow ups", under the answer they came from.
+
+              She drives the entire demo by clicking one of these, which is the
+              part our static cold-start menu could never do: it rendered only
+              while `messages.length === 0`, so the moment you asked anything
+              the guided path disappeared.
+
+              Rendered only when the model offered some. Most turns should have
+              none — it is told to omit them rather than invent a next step,
+              and three chips of filler under every reply would train people to
+              stop reading them.
+            */}
+            {msg.role === 'assistant' && (msg.followUps?.length ?? 0) > 0 && (
+              <div className="ml-8 space-y-1" data-testid={`ai-followups-${msg.id}`}>
+                <p className="text-[11px] text-muted-foreground">{t('aiPanel.followUps')}</p>
+                <div className="flex flex-col items-start gap-1">
+                  {msg.followUps!.map((suggestion, i) => (
+                    <button
+                      key={`${msg.id}-f${i}`}
+                      type="button"
+                      data-testid={`ai-followup-${msg.id}-${i}`}
+                      disabled={isStreaming}
+                      onClick={() => sendMessage(suggestion)}
+                      className="rounded-full border border-border/70 px-2.5 py-1 text-left text-[12px] text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground disabled:opacity-50"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </Fragment>
         ))}
 
