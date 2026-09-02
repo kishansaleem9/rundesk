@@ -11,6 +11,13 @@ export const users = pgTable('users', {
   avatarUrl:     text('avatar_url'),
   bio:           text('bio'),
   timezone:      text('timezone').notNull().default('UTC'),
+  /**
+   * G06-6 [07:03] — ClickUp's "Notify me of Timezone changes", checked by
+   * default. When the browser reports a different zone from this one, say so
+   * and offer to update, rather than letting somebody who has moved keep a
+   * stale zone silently skewing every due date they see.
+   */
+  timezoneChangeNotice: boolean('timezone_change_notice').notNull().default(true),
   role:          userRoleEnum('role').notNull().default('member'),
   passwordHash:  text('password_hash'),
   emailVerified: boolean('email_verified').notNull().default(false),

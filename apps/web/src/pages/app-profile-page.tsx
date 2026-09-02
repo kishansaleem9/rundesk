@@ -27,12 +27,41 @@ type Profile = {
   avatarUrl?: string | null
   bio?: string | null
   timezone: string
+  /** G06-6 [07:03] — ClickUp's "Notify me of Timezone changes", on by default. */
+  timezoneChangeNotice?: boolean
   role: string
   emailVerified: boolean
   dateFormat?: string
   timeFormat?: string
   weekStart?: string
 }
+
+/**
+ * G06-6 [07:03] — every IANA zone this browser knows, for the picker.
+ *
+ * `Intl.supportedValuesOf` is ES2022 and absent on older engines; falling back
+ * to a short list is better than rendering an empty dropdown, which would look
+ * exactly like the feature being broken. The stored value is always offered
+ * separately, so nobody's zone disappears because their browser is old.
+ */
+const TIME_ZONES: string[] = (() => {
+  try {
+    const supported = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf
+    if (typeof supported === 'function') return supported('timeZone')
+  } catch {
+    /* fall through */
+  }
+  return ['UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Karachi', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney']
+})()
+
+/** What this browser thinks the zone is — the input to the drift notice. */
+const browserZone: string = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  } catch {
+    return ''
+  }
+})()
 
 const TABS = [
   { id: 'general', labelKey: 'profile.tabGeneral', icon: User },
@@ -135,6 +164,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
   const [displayName, setDisplayName] = useState(profile.displayName)
   const [bio, setBio] = useState(profile.bio ?? '')
   const [timezone, setTimezone] = useState(profile.timezone)
+  const [tzNotice, setTzNotice] = useState(profile.timezoneChangeNotice !== false)
   const [dateFormat, setDateFormat] = useState(profile.dateFormat ?? 'system')
   const [timeFormat, setTimeFormat] = useState(profile.timeFormat ?? 'system')
   const [weekStart, setWeekStart] = useState(profile.weekStart ?? 'sunday')
@@ -147,6 +177,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
     setDisplayName(profile.displayName)
     setBio(profile.bio ?? '')
     setTimezone(profile.timezone)
+    setTzNotice(profile.timezoneChangeNotice !== false)
     setDateFormat(profile.dateFormat ?? 'system')
     setTimeFormat(profile.timeFormat ?? 'system')
     setWeekStart(profile.weekStart ?? 'sunday')
@@ -169,7 +200,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
     mutationFn: () =>
       api<Profile>('/users/me', {
         method: 'PATCH',
-        body: JSON.stringify({ displayName, bio, timezone, dateFormat, timeFormat, weekStart }),
+        body: JSON.stringify({ displayName, bio, timezone, dateFormat, timeFormat, weekStart, timezoneChangeNotice: tzNotice }),
       }),
     onSuccess: applyProfile,
   })
@@ -228,6 +259,7 @@ function GeneralTab({ profile }: { profile: Profile }) {
     displayName !== profile.displayName ||
     (bio || '') !== (profile.bio ?? '') ||
     timezone !== profile.timezone ||
+    tzNotice !== (profile.timezoneChangeNotice !== false) ||
     dateFormat !== (profile.dateFormat ?? 'system') ||
     timeFormat !== (profile.timeFormat ?? 'system') ||
     weekStart !== (profile.weekStart ?? 'sunday')
@@ -304,10 +336,68 @@ function GeneralTab({ profile }: { profile: Profile }) {
         />
       </div>
 
+      {/*
+        G06-6 [07:03] — a dropdown, not a box you type an IANA name into from
+        memory. A typo used to be accepted and then quietly skew every due
+        date, reminder, digest and "today" bucket for the account, because the
+        server falls back to UTC on a zone it cannot read rather than throwing.
+        The API refuses an unknown zone now; this stops one being offered.
+      */}
       <div className="space-y-1">
         <Label htmlFor="timezone">{t('profile.timezone')}</Label>
-        <Input id="timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
+        <select
+          id="timezone"
+          data-testid="profile-timezone"
+          value={timezone}
+          onChange={(e) => setTimezone(e.target.value)}
+          className="w-full h-9 px-3 rounded-md border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          {/*
+            A stored value that is not in the list still has to be selectable,
+            or opening this page would silently rewrite somebody's zone to
+            whatever sorts first. Legacy aliases like "US/Pacific" are real and
+            in use; the API accepts them, so the form must show them.
+          */}
+          {!TIME_ZONES.includes(timezone) && <option value={timezone}>{timezone}</option>}
+          {TIME_ZONES.map((zone) => (
+            <option key={zone} value={zone}>
+              {zone}
+            </option>
+          ))}
+        </select>
         <p className="text-xs text-muted-foreground">{t('profile.timezoneHelp')}</p>
+
+        {/*
+          The other half of her frame: "Notify me of Timezone changes", checked.
+          Somebody who has moved keeps a stale zone otherwise, and a stale zone
+          is invisible — every date just looks slightly wrong.
+        */}
+        <label className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            data-testid="profile-timezone-notice"
+            checked={tzNotice}
+            onChange={(e) => setTzNotice(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-border"
+          />
+          {t('profile.timezoneNotice')}
+        </label>
+        {tzNotice && browserZone && browserZone !== timezone && (
+          <div
+            data-testid="profile-timezone-drift"
+            className="mt-1.5 flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-xs"
+          >
+            <span>{t('profile.timezoneDrift', { zone: browserZone })}</span>
+            <button
+              type="button"
+              data-testid="profile-timezone-adopt"
+              onClick={() => setTimezone(browserZone)}
+              className="font-medium underline underline-offset-2 hover:no-underline"
+            >
+              {t('profile.timezoneAdopt')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* §1.2 — date / time / week-start display preferences */}

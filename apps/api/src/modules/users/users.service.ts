@@ -17,6 +17,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { isValidTimeZone } from '../../common/time/zone'
 import { R2Service } from '../../common/storage/r2.service'
 
 /** Locales the web app ships translations for (Plan §13). */
@@ -123,6 +124,7 @@ export class UsersService {
       displayName?: string
       bio?: string | null
       timezone?: string
+      timezoneChangeNotice?: boolean
       avatarUrl?: string | null
       locale?: string
       theme?: string
@@ -226,8 +228,23 @@ export class UsersService {
     // body let a caller mass-assign any users column — most critically `role`,
     // so `PATCH /users/me {role:"super_admin"}` escalated a member to platform
     // super-admin. Only copy the fields a user is allowed to change themselves.
+    /*
+     * G06-6 [07:03] — refuse a timezone this system cannot read.
+     *
+     * `startOfDayIn` falls back to UTC on anything unrecognised so that one bad
+     * row cannot take down a profile page, and the cost of that is silence:
+     * somebody who typed "Asia/Karach" would get UTC for every due date,
+     * reminder, digest and "today" bucket with nothing saying so. Checked here
+     * rather than only in the form, because the form is not the only writer.
+     */
+    if (patch.timezone !== undefined && !isValidTimeZone(patch.timezone)) {
+      throw new BadRequestException(
+        `"${String(patch.timezone)}" is not a timezone this system recognises`,
+      )
+    }
+
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed', 'panelsCollapsed', 'highContrast'] as const) {
+    for (const key of ['displayName', 'bio', 'timezone', 'avatarUrl', 'locale', 'theme', 'dateFormat', 'timeFormat', 'weekStart', 'topbarHidden', 'topbarPinned', 'sidebarCollapsed', 'panelsCollapsed', 'highContrast', 'timezoneChangeNotice'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
     }
     const [row] = await this.db

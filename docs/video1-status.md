@@ -1596,3 +1596,57 @@ comment.
 
 **Running total: 125 closed, 31 open, 1 unverifiable.**
 Local: 17 suites, 741 checks, 0 failed; api 1266/0 and web 200/0 unit tests.
+
+## G06-6 — a timezone you pick, and one the server will vouch for (2 Sep)
+
+> ClickUp's Language & Region: a Timezone **dropdown** showing "Asia/Karachi",
+> plus a checked "Notify me of Timezone changes"  `[07:03]`
+
+Ours was a free-text box you typed an IANA name into from memory. The picker is
+the visible half; the half that mattered was underneath it.
+
+### The silence
+
+`startOfDayIn` falls back to UTC on a zone it cannot read, **deliberately** — a
+bad row in `users.timezone` must not be able to take down a profile page. The
+cost of that kindness is that nothing anywhere complains. Somebody who typed
+`Asia/Karach` got UTC for every due date, every reminder, every digest and
+every TODAY bucket, and the only symptom was that dates looked slightly wrong.
+
+Nothing validated the value on write: `PATCH /users/me` whitelists the columns
+a user may change and then stores whatever string arrives.
+
+So the fix is three parts, and the order matters:
+
+1. **The API refuses a zone it cannot read** — because the form is not the only
+   writer, and a picker on one screen does not stop the next form, or an API
+   client, from storing a typo.
+2. **The form offers a list** rather than asking you to remember a name.
+3. **"Notify me of timezone changes"** (new column, migration `0120`, default
+   true): when the browser reports a different zone from the stored one, say so
+   and offer to adopt it.
+
+Validation goes through the *formatter*, not `Intl.supportedValuesOf`. The
+canonical list omits legacy aliases like `US/Pacific` that real accounts carry
+and the system handles perfectly well; a whitelist would have started rejecting
+values it had itself been storing for months.
+
+### What the break tests changed
+
+Five breaks. Two of the first five caught **nothing**, and both were my fault:
+
+- **"the picker drops a stored zone it does not know"** passed with the guard
+  deleted, because the check drove the seeded account whose zone is a canonical
+  name already in the list. Rewritten to put `US/Pacific` on the account first
+  — a real alias, accepted by the server, absent from `supportedValuesOf`. It
+  now fails with `picker=Africa/Abidjan`, which is precisely the silent rewrite
+  the guard exists to prevent: open your profile, and your zone is quietly
+  whatever sorts first.
+- **"the server accepts any string again"** never compiled. The patch left
+  unreachable code and `tsc` refused it, so the break was never tested at all.
+  Retried with a patch that compiles; it now fails two checks, one of them
+  reporting `stored=Asia/Karach` — the typo landing in the database.
+
+Nine checks in `settings-depth.mjs`, floor 22 → 31.
+
+**Running total: 126 closed, 30 open, 1 unverifiable.**

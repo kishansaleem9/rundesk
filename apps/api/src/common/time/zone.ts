@@ -11,6 +11,31 @@
  */
 
 /**
+ * G06-6 [07:03] — is this a real IANA zone?
+ *
+ * `startOfDayIn` below deliberately falls back to UTC on anything it does not
+ * recognise, so that one bad row cannot take down a profile page. The cost of
+ * that kindness is silence: somebody who typed "Asia/Karach" gets UTC for
+ * every due date, reminder, digest and "today" bucket, with nothing anywhere
+ * saying so. The fix is to refuse the value at the point it is written, which
+ * is why this lives here rather than in the form — a picker on one screen does
+ * not stop an API client, or the next form, from storing a typo.
+ *
+ * `Intl.supportedValuesOf` would give the whole list, but it is not needed:
+ * the formatter already knows, and it also accepts legacy aliases like
+ * "US/Pacific" that the canonical list omits and real accounts still carry.
+ */
+export function isValidTimeZone(timeZone: unknown): timeZone is string {
+  if (typeof timeZone !== 'string' || timeZone.trim() === '') return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date())
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * How far `timeZone` is from UTC at a given instant, in milliseconds.
  *
  * Read off the formatter rather than a table, so it is right across DST without

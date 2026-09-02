@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 22
+const EXPECTED_CHECKS = 31
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -295,6 +295,86 @@ try {
   await page.waitForTimeout(1200)
   const hc = await A('/users/me')
   check(hc.data?.highContrast === true, 'and the choice follows the person to their next device')
+
+  /*
+   * ---------------------------------------------------------------------
+   * G06-6 [07:03] — the timezone, from the same panel
+   *
+   * It was a free-text box you typed an IANA name into from memory. A typo was
+   * accepted, and `startOfDayIn` falls back to UTC on a zone it cannot read
+   * rather than throwing — deliberately, so one bad row cannot take down a
+   * profile page. The cost of that kindness is silence: "Asia/Karach" bought
+   * you UTC for every due date, reminder, digest and TODAY bucket, with
+   * nothing anywhere saying so.
+   *
+   * The picker is the visible half. The API refusing the value is the half
+   * that matters, because the form is not the only writer — so both are
+   * driven here, and the refusal is driven through the API directly.
+   * ---------------------------------------------------------------------
+   */
+  console.log('\n▶ G06-6 [07:03] — a timezone you pick, and one the server will vouch for')
+  const tzBefore = (await A('/users/me')).data?.timezone ?? 'UTC'
+
+  const tzPicker = page.getByTestId('profile-timezone')
+  check(await tzPicker.isVisible().catch(() => false), 'the timezone is a picker, not a box to type into')
+  check(
+    (await tzPicker.evaluate((el) => el.tagName).catch(() => '')) === 'SELECT',
+    'and it really is a list of zones',
+    await tzPicker.evaluate((el) => el.tagName).catch(() => '(missing)'),
+  )
+  // A handful would mean a fallback list rendered because the real one failed.
+  const zoneCount = await tzPicker.evaluate((el) => el.options.length).catch(() => 0)
+  check(zoneCount > 100, 'holding the world, not a shortlist', `${zoneCount} options`)
+  /*
+   * Driven with a LEGACY alias on the account, not whatever it happened to be.
+   *
+   * The first version of this check used the seeded zone, which is a canonical
+   * name and therefore already in the list — so deleting the "offer the stored
+   * value even if we do not know it" line broke nothing and the check still
+   * passed. `US/Pacific` is real, in use, accepted by the server, and absent
+   * from `Intl.supportedValuesOf`, which is exactly the case that would
+   * silently rewrite somebody's zone on page load.
+   */
+  await A('/users/me', { method: 'PATCH', body: { timezone: 'US/Pacific' } })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(2500)
+  check(
+    (await page.getByTestId('profile-timezone').inputValue().catch(() => '')) === 'US/Pacific',
+    'and a stored zone the list does not contain is still the one selected',
+    `picker=${await page.getByTestId('profile-timezone').inputValue().catch(() => '')}`,
+  )
+  await A('/users/me', { method: 'PATCH', body: { timezone: tzBefore } })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(2500)
+  check(
+    (await page.getByTestId('profile-timezone').inputValue().catch(() => '')) === tzBefore,
+    'and it opens on the zone already stored, rather than rewriting it',
+    `picker=${await page.getByTestId('profile-timezone').inputValue().catch(() => '')} stored=${tzBefore}`,
+  )
+
+  check(
+    await page.getByTestId('profile-timezone-notice').isVisible().catch(() => false),
+    'with "notify me of timezone changes" beside it, as her frame has',
+  )
+
+  /*
+   * The refusal. Sent straight to the API: a picker cannot stop another client
+   * — or the next form somebody writes — from storing a typo, so validation
+   * has to live on the server and be checked there.
+   */
+  const badTz = await A('/users/me', { method: 'PATCH', body: { timezone: 'Asia/Karach' } })
+  check(badTz.status === 400, 'a zone the system cannot read is refused', `PATCH returned ${badTz.status}`)
+  const stillGood = await A('/users/me')
+  check(
+    stillGood.data?.timezone === tzBefore,
+    'and the stored zone is untouched by the attempt',
+    `stored=${stillGood.data?.timezone}`,
+  )
+  // Legacy aliases are real and in use, and the server accepts them — so the
+  // validator must not be a whitelist of canonical names only.
+  const legacy = await A('/users/me', { method: 'PATCH', body: { timezone: 'US/Pacific' } })
+  check(legacy.status === 200, 'but a legacy alias somebody actually has is still allowed', `${legacy.status}`)
+  await A('/users/me', { method: 'PATCH', body: { timezone: tzBefore } })
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G06 [07:30] — Help can ask for a call')
