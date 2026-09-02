@@ -1970,3 +1970,46 @@ Six checks in `panel-collapse.mjs`, floor 43 → 49. Five breaks, all caught,
 including the null-folding one that started this.
 
 **Running total: 132 closed, 24 open, 1 unverifiable.**
+
+## G05-4 — Done and Delegated (2 Sep)
+
+> "TODAY ke kya task hain, OVERDUE kaun se ho gaye the, NEXT kaun se upcoming
+> task mere paas aa sakte hain, kaun si aisi cheezein jo maine CREATE ki hain
+> par abhi tak maine kisi ko assign nahi kiya"  `[06:08]`
+
+Four of her six buckets shipped in the earlier pass. The two that had **no
+equivalent anywhere** were Done and Delegated.
+
+- **DONE** deliberately breaks the "open work only" filter every other bucket
+  uses. That *is* the bucket — what did this person actually finish. Ordered by
+  completion with nulls last, and capped, so it is a recent record rather than
+  an archive nobody scrolls.
+- **DELEGATED** is the mirror of `createdUnassigned`: things you made and
+  handed to somebody **else**. Together the two answer accountability in both
+  directions — what I passed on, and what I dropped.
+
+The delegated query needs *both* halves, and each guards a different mistake:
+`exists(anyone is on it)` — or every task you created and never assigned turns
+up here, duplicating createdUnassigned; and `not exists(you are on it)` — or
+your own work counts as handed over.
+
+### Two break tests that caught nothing, and why
+
+Both were the checks' fault, and both had the same shape: **a fixture the break
+could not affect.**
+
+- Deleting "nobody who is me is on it" failed nothing, because the check drove
+  the *finished* task — and `delegated` excludes finished work anyway, so the
+  clause was never reached. Rewritten against an open task you created and
+  kept, which is something delegated would otherwise be willing to include.
+- Deleting the closed-status filter from DONE failed nothing, because the check
+  only asserted the finished task was **present**. A bucket free to contain
+  everything else still contains that. Now also asserts an open task is absent.
+
+Asserting a thing is in a bucket says nothing about what else is; and a fixture
+excluded by some *other* clause cannot test the clause you removed.
+
+Four checks in `person-panel.mjs`, floor 51 → 57. Four breaks, all caught after
+those two were fixed.
+
+**Running total: 133 closed, 23 open, 1 unverifiable.**

@@ -290,7 +290,62 @@ export class PeopleService {
       // from a panel built entirely out of date buckets.
       bucketRows(isNull(tasks.dueDate), 'asc'),
     ])
-    const buckets = { today, overdue, next, unscheduled }
+    /*
+     * G05-4 [06:08] — the two she names that had no equivalent anywhere.
+     *
+     * DONE deliberately breaks the `mine` filter, which excludes finished work
+     * — that is the point of the bucket: "what did I actually get done". Capped
+     * and ordered by completion, so it is a recent record rather than an
+     * archive nobody scrolls.
+     *
+     * DELEGATED is the mirror of createdUnassigned: things you made and handed
+     * to somebody ELSE. Together they answer the accountability question in
+     * both directions — what I passed on, and what I dropped.
+     */
+    const doneColumns = { ...assignedColumns, completedAt: tasks.completedAt }
+    const [done, delegated] = await Promise.all([
+      this.db
+        .select(doneColumns)
+        .from(taskAssignees)
+        .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(
+          and(
+            eq(taskAssignees.userId, userId),
+            eq(spaces.workspaceId, workspaceId),
+            eq(tasks.statusCategory, 'closed'),
+            eq(tasks.isArchived, false),
+          ),
+        )
+        // Nulls last: a closed task with no completedAt is older bookkeeping,
+        // not the most recent thing this person finished.
+        .orderBy(sql`${tasks.completedAt} desc nulls last`)
+        .limit(BUCKET_LIMIT),
+      this.db
+        .select(assignedColumns)
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(
+          and(
+            eq(tasks.createdById, userId),
+            eq(spaces.workspaceId, workspaceId),
+            ne(tasks.status, 'done'),
+            eq(tasks.isArchived, false),
+            // Somebody is on it, and it is not you — "I handed this over".
+            // A task you created and kept is simply your own work.
+            sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id})`,
+            sql`not exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${userId})`,
+          ),
+        )
+        .orderBy(desc(tasks.createdAt))
+        .limit(BUCKET_LIMIT),
+    ])
+
+    const buckets = { today, overdue, next, unscheduled, done, delegated }
 
     /*
      * "Cheezein jo maine CREATE ki hain par abhi tak kisi ko assign nahi kiya"

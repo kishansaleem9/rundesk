@@ -108,7 +108,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 51
+const EXPECTED_CHECKS = 57
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -520,6 +520,106 @@ try {
   )
   for (const t of crowd) {
     if (t?.id) await A(`/tasks/${t.id}`, { method: 'DELETE' })
+  }
+
+  /*
+   * ---------------------------------------------------------------------
+   * G05-4 [06:08] — Done and Delegated
+   *
+   * The other two buckets she counts off. `done` deliberately breaks the
+   * "open work only" filter every other bucket uses — that IS the bucket:
+   * what did this person actually finish. `delegated` is the mirror of
+   * createdUnassigned: things you made and handed to somebody else, so the
+   * two together answer accountability in both directions — what I passed on,
+   * and what I dropped.
+   *
+   * Both are driven with fixtures rather than read off ambient data: an empty
+   * bucket and a bucket whose query is wrong look identical from outside.
+   * ---------------------------------------------------------------------
+   */
+  const otherForBuckets = await fetch(`${API}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: process.env.RUNDESK_EMAIL_2 ?? 'org-admin@rundesk.internal',
+      password: process.env.RUNDESK_PASSWORD_2 ?? 'OrgAdmin@123!',
+    }),
+  }).then((r) => r.json()).then((j) => j?.data).catch(() => null)
+
+  if (!otherForBuckets?.user?.id) {
+    check(false, 'a second account to delegate to', 'could not sign in as the second user')
+    check(false, 'so DELEGATED was never driven', 'skipped')
+    check(false, 'so DONE was never driven', 'skipped')
+    check(false, 'and the two were never told apart', 'skipped')
+    check(false, 'nor unassigned from delegated', 'skipped')
+    check(false, 'nor open work from done', 'skipped')
+  } else {
+    // Delegated: created by me, assigned to somebody who is not me.
+    const bDelegated = await seedTask(`bucket delegated ${Date.now()}`, null, false)
+    await A(`/tasks/${bDelegated.id}/assignees`, {
+      method: 'POST',
+      body: { userId: otherForBuckets.user.id },
+    })
+    // Done: assigned to me, then finished.
+    const bDone = await seedTask(`bucket done ${Date.now()}`, null, true)
+    await A(`/tasks/${bDone.id}`, { method: 'PATCH', body: { status: 'done' } })
+
+    const withBoth = await A(`/workspaces/${workspaceId}/people/${meId}`)
+    const b2 = withBoth.data?.taskBuckets ?? {}
+    const holds2 = (key, id) => (b2[key] ?? []).some((row) => row.id === id)
+
+    check(holds2('delegated', bDelegated.id), 'DELEGATED holds what you handed to somebody else')
+    check(holds2('done', bDone.id), 'DONE holds what you actually finished')
+    /*
+     * The distinction that would be easy to get wrong: a task you created and
+     * kept is your own work, not something you delegated. Without the
+     * "somebody who is not you is on it" clause, every task you made would
+     * appear here.
+     */
+    /*
+     * Driven with an OPEN task you created and kept — `bToday` — not the done
+     * one.
+     *
+     * Using bDone made this check unable to fail: `delegated` excludes
+     * finished work anyway, so deleting the "nobody who is me is on it" clause
+     * changed nothing about it. A break test caught that; the fixture has to
+     * be something delegated would otherwise be willing to include.
+     */
+    check(
+      !holds2('delegated', bToday?.id),
+      'and a task you created and kept is not "delegated"',
+      'your own work is being counted as handed over',
+    )
+    /*
+     * And DONE must mean finished. Asserting only that the finished task is
+     * present leaves the bucket free to contain everything else too — which is
+     * exactly what dropping the closed-status filter does.
+     */
+    check(
+      !holds2('done', bToday?.id),
+      'and DONE holds only finished work, not everything assigned to you',
+      'an open task is being reported as done',
+    )
+    /*
+     * The other half of the same distinction, and the one a "nobody who is me
+     * is on it" clause alone would get wrong: a task you created and assigned
+     * to NOBODY was not delegated — it was dropped, which is what
+     * createdUnassigned is for. Without an "somebody IS on it" clause the two
+     * buckets would show the same rows.
+     */
+    check(
+      !holds2('delegated', bMine?.id) && holds2('createdUnassigned', bMine?.id),
+      'and one you assigned to nobody is dropped, not delegated',
+      'created-unassigned work is being counted as handed over',
+    )
+    // …and DONE must not leak into the buckets that mean "still owed".
+    check(
+      !holds2('today', bDone.id) && !holds2('overdue', bDone.id) && !holds2('unscheduled', bDone.id),
+      'and finished work is not still counted as owed',
+      'a done task is still sitting in an open bucket',
+    )
+    await A(`/tasks/${bDelegated.id}`, { method: 'DELETE' })
+    await A(`/tasks/${bDone.id}`, { method: 'DELETE' })
   }
 
   /*

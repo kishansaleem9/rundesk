@@ -73,6 +73,16 @@ type Profile = {
     next: PersonTask[]
     unscheduled: PersonTask[]
     createdUnassigned: PersonTask[]
+    /**
+     * G05-4 [06:08] — the two she names that had no equivalent anywhere.
+     *
+     * `done` is what this person actually finished; `delegated` is what they
+     * created and handed to somebody else, the mirror of createdUnassigned.
+     * Together those two answer the accountability question in both
+     * directions — what I passed on, and what I dropped.
+     */
+    done: PersonTask[]
+    delegated: PersonTask[]
   }
 }
 
@@ -968,6 +978,10 @@ export function PersonPanel() {
               ['next', 'person.bucketNext'],
               ['unscheduled', 'person.bucketUnscheduled'],
               ['createdUnassigned', 'person.bucketCreatedUnassigned'],
+              // G05-4 — handed over, then finished. Last, because they are the
+              // record rather than the work: what is still owed comes first.
+              ['delegated', 'person.bucketDelegated'],
+              ['done', 'person.bucketDone'],
             ] as const
           ).map(([key, labelKey]) => {
             const rows = profile?.taskBuckets?.[key] ?? []
