@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, PersonAvatar, cn } from '@rundesk/ui'
-import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check , Loader2} from 'lucide-react'
+import { User, Lock, ShieldCheck, Bell, Globe, Camera, Trash2, CalendarClock, Monitor, Sun, Moon, Sparkles, Download, AlertTriangle, Copy, Check , Loader2, Building2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useThemeStore, type Theme } from '../store/theme'
@@ -67,6 +67,16 @@ const TABS = [
   { id: 'general', labelKey: 'profile.tabGeneral', icon: User },
   { id: 'security', labelKey: 'profile.tabSecurity', icon: Lock },
   { id: 'notifications', labelKey: 'profile.tabNotifications', icon: Bell },
+  /*
+   * G08-9 [08:35] — frames 133/136: a per-user page listing every workspace
+   * the account belongs to.
+   *
+   * `/app` already renders that grid, and in practice nobody could reach it:
+   * it redirects straight into the workspace when you have exactly one, and no
+   * menu links to it. So the one place you could see all your memberships was
+   * a page that bounced you off itself.
+   */
+  { id: 'workspaces', labelKey: 'profile.tabWorkspaces', icon: Building2 },
 ] as const
 
 export function ProfilePage() {
@@ -125,6 +135,7 @@ export function ProfilePage() {
             {profileQuery.data && tab === 'general' && <GeneralTab profile={profileQuery.data} />}
             {profileQuery.data && tab === 'security' && <SecurityTab />}
             {tab === 'notifications' && <NotificationsTab />}
+            {tab === 'workspaces' && <WorkspacesTab />}
           </div>
         </div>
       </div>
@@ -155,6 +166,82 @@ function putFileWithProgress(args: {
     xhr.onload = () => resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status })
     xhr.send(args.file)
   })
+}
+
+type WorkspaceEntry = {
+  workspace: { id: string; name: string; slug: string }
+  role: string
+}
+
+/**
+ * G08-9 [08:35] — every workspace this account belongs to, in one place.
+ *
+ * The data and the grid already existed at `/app`, and were effectively
+ * unreachable: that route redirects straight into the workspace when you have
+ * exactly one, and nothing in the app links to it. So "which workspaces am I
+ * in, and as what?" had no answer you could navigate to — only a page that
+ * bounced you off itself.
+ *
+ * Read-only on purpose. Leaving a workspace and changing your own role are
+ * both decisions with consequences for other people, and neither belongs
+ * behind a list you opened to answer a question.
+ */
+function WorkspacesTab() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const query = useQuery({
+    queryKey: ['workspaces'],
+    queryFn: () => api<WorkspaceEntry[]>('/workspaces'),
+  })
+  const entries = query.data ?? []
+
+  return (
+    <Card className="p-6 space-y-4" data-testid="profile-workspaces">
+      <div>
+        <h2 className="text-base font-semibold">{t('profile.tabWorkspaces')}</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">{t('profile.workspacesSubtitle')}</p>
+      </div>
+
+      {query.isLoading && <InlineSkeleton />}
+
+      {!query.isLoading && entries.length === 0 && (
+        <p className="text-sm text-muted-foreground" data-testid="profile-workspaces-empty">
+          {t('profile.workspacesEmpty')}
+        </p>
+      )}
+
+      <ul className="divide-y divide-border/60">
+        {entries.map((entry) => (
+          <li
+            key={entry.workspace.id}
+            data-testid={`profile-workspace-${entry.workspace.id}`}
+            className="flex items-center gap-3 py-3"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium text-foreground">{entry.workspace.name}</div>
+              <div className="truncate text-xs text-muted-foreground">
+                {/* The role is the half of this that is not obvious from the
+                    sidebar, and the reason to come here at all. */}
+                <span className="capitalize">{entry.role.replace(/_/g, ' ')}</span>
+                <span className="mx-1.5 opacity-50">·</span>
+                <span className="font-mono">{entry.workspace.slug}</span>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid={`profile-workspace-open-${entry.workspace.id}`}
+              onClick={() =>
+                navigate({ to: '/app/$workspaceId', params: { workspaceId: entry.workspace.id } })
+              }
+            >
+              {t('profile.workspacesOpen')}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
 }
 
 function GeneralTab({ profile }: { profile: Profile }) {

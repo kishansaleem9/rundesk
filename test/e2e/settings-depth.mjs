@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 31
+const EXPECTED_CHECKS = 37
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -375,6 +375,61 @@ try {
   const legacy = await A('/users/me', { method: 'PATCH', body: { timezone: 'US/Pacific' } })
   check(legacy.status === 200, 'but a legacy alias somebody actually has is still allowed', `${legacy.status}`)
   await A('/users/me', { method: 'PATCH', body: { timezone: tzBefore } })
+
+  /*
+   * ---------------------------------------------------------------------
+   * G08-9 [08:35] — "which workspaces am I in, and as what?"
+   *
+   * Frames 133/136: her account settings has a My Settings group with a
+   * Workspaces page in it. The data and the grid already existed at `/app` and
+   * were effectively unreachable — that route redirects straight into the
+   * workspace when you have exactly one, and nothing links to it. So the only
+   * page that answered the question bounced you off itself.
+   * ---------------------------------------------------------------------
+   */
+  console.log('\n▶ G08-9 [08:35] — every workspace this account is in, somewhere you can get to')
+  await page.goto(`${origin}/app/profile?tab=workspaces`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  check(
+    /[?&]tab=workspaces/.test(page.url()),
+    'the tab has an address that survives being opened directly',
+    page.url(),
+  )
+  const wsPanel = page.getByTestId('profile-workspaces')
+  check(await wsPanel.isVisible().catch(() => false), 'and it renders a Workspaces page')
+
+  const mine = (await A('/workspaces')).data ?? []
+  check(mine.length > 0, 'this account is in at least one workspace to list', `${mine.length}`)
+  if (mine.length > 0) {
+    const row = page.getByTestId(`profile-workspace-${mine[0].workspace.id}`)
+    check(
+      await row.isVisible().catch(() => false),
+      'the workspace the API returns is the one on the page',
+      `looked for ${mine[0].workspace.id}`,
+    )
+    /*
+     * The role is the half you cannot read off the sidebar, and the reason to
+     * open this page rather than just looking at the app.
+     */
+    const rowText = (await row.innerText().catch(() => '')).toLowerCase()
+    check(
+      rowText.includes(String(mine[0].role).replace(/_/g, ' ').toLowerCase()),
+      'and it says what you are in it, not just that you are in it',
+      `row read "${rowText.replace(/\s+/g, ' ').slice(0, 80)}" expected role ${mine[0].role}`,
+    )
+    // A list you cannot act on is a screenshot.
+    await page.getByTestId(`profile-workspace-open-${mine[0].workspace.id}`).click().catch(() => {})
+    await page.waitForTimeout(2500)
+    check(
+      page.url().includes(`/app/${mine[0].workspace.id}`),
+      'and opening one takes you into it',
+      page.url(),
+    )
+  } else {
+    check(false, 'no workspace row to read')
+    check(false, 'so the role caption was never checked')
+    check(false, 'so opening one was never driven')
+  }
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G06 [07:30] — Help can ask for a call')

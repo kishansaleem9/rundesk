@@ -1686,3 +1686,30 @@ its order: lint, typecheck, api tests, web tests, the migration guardrail and
 the verify-ui isolation harness. It is a single command, so there is nothing to
 remember. And a CI claim gets verified against the run for that exact SHA, or
 it does not get made.
+
+## G08-9 — every workspace this account is in, somewhere you can get to (2 Sep)
+
+> Frames 133/136: a "My Settings" group with a **Workspaces** page listing
+> every workspace the account belongs to  `[08:35]`
+
+The data and the grid already existed, at `/app`. In practice nobody could
+reach them: that route **redirects straight into the workspace when you have
+exactly one**, and nothing in the app links to it. So the only page that could
+answer "which workspaces am I in, and as what?" was a page that bounced you off
+itself before you could read it.
+
+Now a fourth tab on the profile, addressable at `?tab=workspaces` — the route's
+own `TABS` list had to learn the value too, or an unrecognised `?tab=` is
+dropped and you land on General.
+
+Read-only on purpose. Leaving a workspace and changing your own role both have
+consequences for other people, and neither belongs behind a list you opened to
+answer a question.
+
+Six checks in `settings-depth.mjs` (floor 31 → 37), four breaks, all caught:
+the route forgetting the tab (5 checks fail), the tab rendering nothing (4),
+the role caption removed (1 — `row read "main workspace ·main open"`), and
+"Open" wired to nothing (1).
+
+**Running total: 127 closed, 29 open, 1 unverifiable.**
+Local: 17 suites, 756 checks, 0 failed. `scripts/preflight.sh` clean.
