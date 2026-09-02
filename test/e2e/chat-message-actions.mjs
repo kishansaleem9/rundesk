@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 48
+const EXPECTED_CHECKS = 56
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -677,6 +677,111 @@ try {
       .catch(() => false)
     check(landed, 'and opening it lands on the message, highlighted', `${copied} did not highlight the message`)
     await recipient.close()
+  }
+
+  /*
+   * ---------------------------------------------------------------------
+   * G11-2 [14:52] — "Forward this message", as a modal
+   *
+   * The old control was an inline popover listing
+   * `[...publicChannels, ...dmChannels].slice(0, 10)`. Three things were wrong
+   * and only one is cosmetic:
+   *
+   *   - a workspace with more than ten conversations could not forward to the
+   *     eleventh AT ALL, however precisely you knew its name
+   *   - there was nowhere to say why you were forwarding
+   *   - one click sent it. No confirm, no undo.
+   *
+   * The eleventh-conversation case is the one worth seeding for: with ten or
+   * fewer channels the old code and the new one behave identically, so a check
+   * against ambient data would pass on the bug.
+   * ---------------------------------------------------------------------
+   */
+  console.log('\n▶ G11-2 [14:52] — forwarding is a decision, not a click')
+  const FWD_TAG = `fwdtarget${Date.now()}`
+  const seededChannels = []
+  for (let i = 0; i < 12; i++) {
+    const made = await A(`/workspaces/${workspaceId}/chat/channels`, {
+      method: 'POST',
+      body: { name: `${FWD_TAG}-${i}`, isPrivate: false },
+    })
+    if (made.data?.id) seededChannels.push(made.data.id)
+  }
+  const priorCleanup = cleanup
+  cleanup = async () => {
+    await priorCleanup?.()
+    for (const id of seededChannels) await A(`/chat/channels/${id}/archive`, { method: 'POST' })
+  }
+  check(seededChannels.length === 12, 'twelve conversations to choose between', `${seededChannels.length} made`)
+
+  await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3500)
+  const fwdRow = page.locator('.group').filter({ hasText: BODY }).first()
+  await fwdRow.hover()
+  await page.waitForTimeout(500)
+  const fwdOverflow = fwdRow.locator('button[data-testid^="message-overflow-"]').first()
+  await fwdOverflow.click().catch(() => {})
+  await page.waitForTimeout(600)
+  await page.getByRole('button', { name: /^forward$/i }).first().click().catch(() => {})
+  await page.waitForTimeout(900)
+
+  const modal = page.getByTestId('forward-modal')
+  check(await modal.isVisible().catch(() => false), 'Forward opens a modal, not a ten-item popover')
+  if (!(await modal.isVisible().catch(() => false))) {
+    check(false, 'with the message it is about', 'no modal')
+    check(false, 'and the eleventh conversation is reachable', 'no modal')
+    check(false, 'and it will not send until somebody is chosen', 'no modal')
+    check(false, 'and the note travels with it', 'no modal')
+  } else {
+    check(
+      (await page.getByTestId('forward-preview').innerText().catch(() => '')).includes(BODY.slice(0, 20)),
+      'with the message it is about, so you can see you picked the right one',
+    )
+    check(
+      await page.getByTestId('forward-confirm').isDisabled().catch(() => true),
+      'and it will not send until somebody is chosen',
+      'the confirm button was live before a recipient was picked',
+    )
+
+    /*
+     * The bug itself. `-11` is the twelfth seeded channel, well past the old
+     * ten-item cap, and it is only reachable because the search filters BEFORE
+     * the list is capped.
+     */
+    await page.getByTestId('forward-search').fill(`${FWD_TAG}-11`)
+    await page.waitForTimeout(600)
+    const eleventh = page.locator('[data-testid^="forward-target-"]')
+    check(
+      (await eleventh.count()) === 1,
+      'and a conversation past the old ten-item cap can still be found',
+      `${await eleventh.count()} matches for ${FWD_TAG}-11`,
+    )
+
+    if ((await eleventh.count()) === 1) {
+      const targetId = (await eleventh.first().getAttribute('data-testid')).replace('forward-target-', '')
+      await eleventh.first().click()
+      await page.getByTestId('forward-note').fill('sharing this for context')
+      await page.waitForTimeout(300)
+      check(
+        !(await page.getByTestId('forward-confirm').isDisabled().catch(() => true)),
+        'picking somebody makes it sendable',
+      )
+      await page.getByTestId('forward-confirm').click()
+      await page.waitForTimeout(2500)
+
+      const landed = await A(`/chat/channels/${targetId}/messages`)
+      const got = (landed.data ?? []).find((msg) => String(msg.body).includes(BODY.slice(0, 20)))
+      check(!!got, 'and it arrives in the conversation you chose', `${(landed.data ?? []).length} messages there`)
+      check(
+        !!got && String(got.body).includes('sharing this for context'),
+        'and the note travels with it',
+        `body: ${String(got?.body ?? '').slice(0, 80)}`,
+      )
+    } else {
+      check(false, 'picking somebody makes it sendable', 'no match to pick')
+      check(false, 'and it arrives in the conversation you chose', 'no match to pick')
+      check(false, 'and the note travels with it', 'no match to pick')
+    }
   }
 
   await done(browser, stack, cleanup)

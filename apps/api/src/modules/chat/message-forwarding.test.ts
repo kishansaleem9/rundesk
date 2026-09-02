@@ -205,16 +205,61 @@ describe('§12 forwarding carries its origin', () => {
 
   it('sends the source id, and no longer pastes a prefix', () => {
     assert.match(page, /forwardedFromId: sourceId/, 'the client does not send the source')
-    assert.match(page, /sourceId: m\.id/, 'the forward does not name the message being forwarded')
-    /*
-     * The old version pasted a "Forwarded message:" prefix into the body, which
-     * became part of the text as soon as anyone forwarded it onward again.
-     * Asserted positively — that the untouched body is what gets sent — because
-     * scanning the file for the old prefix also matched the comment explaining
-     * why it is gone, and failed on correct code.
-     */
+
     const forwardCall = /forwardMutation\.mutate\(\{([\s\S]*?)\}\)/.exec(page)?.[1] ?? ''
     assert.ok(forwardCall, 'could not find the forward call')
-    assert.match(forwardCall, /body: m\.body,/, `the body is being altered: ${forwardCall.trim()}`)
+
+    /*
+     * Read structurally rather than by variable name.
+     *
+     * This used to assert `sourceId: m.id` and `body: m.body,` — literally the
+     * shape of the inline popover it was written against. Both were true and
+     * both stopped compiling the moment G11-2 moved forwarding into a modal
+     * holding a draft, which is a rename, not a regression. A check that fails
+     * on a rename is a check that will eventually be edited to whatever makes
+     * it green, which is how the thing it defends gets lost.
+     *
+     * What actually has to hold is two invariants, and neither mentions a
+     * variable:
+     */
+
+    // 1. You forward the message you are looking at. The id sent as the source
+    //    and the body sent as the text come off the same object — wiring them
+    //    to different messages would mint a source link that points somewhere
+    //    other than the text the recipient reads.
+    const source = /sourceId:\s*([\w.]+)\.id\b/.exec(forwardCall)?.[1] ?? ''
+    assert.ok(source, `the forward does not name the message being forwarded: ${forwardCall.trim()}`)
+
+    const bodyExpr = /\bbody:\s*([\s\S]*?)(?=\n\s*\w+:\s)/.exec(forwardCall)?.[1] ?? ''
+    assert.ok(bodyExpr, `could not read the body being sent: ${forwardCall.trim()}`)
+    assert.match(
+      bodyExpr,
+      new RegExp(`${source.replace(/\./g, '\\.')}\\.body\\b`),
+      `the body sent is not ${source}'s: ${bodyExpr.trim()}`,
+    )
+
+    /*
+     * 2. Nothing the app made up goes into the body.
+     *
+     * The old version pasted a "Forwarded message:" prefix, which became part
+     * of the text as soon as anyone forwarded it onward again — the message
+     * already says it was forwarded, and it says so out of band where a further
+     * forward cannot laminate it.
+     *
+     * G11-2 added a note box, so the body is no longer required to be the
+     * source body untouched; it may carry what the *user* typed. That is the
+     * line this draws: interpolations are fine, because they carry a variable,
+     * and a variable is either the note or the body. Literal text is not,
+     * because literal text can only have come from us. Separators are the one
+     * exception — `\n\n` between the note and the quote is punctuation, not
+     * words.
+     */
+    const literals = bodyExpr
+      .replace(/\$\{[^}]*\}/g, '') // interpolations carry variables, not our words
+      .match(/`[^`]*`|'[^']*'|"[^"]*"/g)
+    for (const literal of literals ?? []) {
+      const visible = literal.slice(1, -1).replace(/\\[nrt]/g, '').trim()
+      assert.equal(visible, '', `the app is pasting its own text into the body: ${literal}`)
+    }
   })
 })

@@ -2074,3 +2074,35 @@ defect in a new place. Either the wizard should stop asking, or they need a
 home where somebody actually sees them. **Flagged rather than guessed at.**
 
 **Running total: 134 closed, 22 open, 1 unverifiable.**
+
+## G11-2 — forwarding is a decision, not a click (2 Sep)
+
+> Clicking Forward should open a modal with a searchable "Choose a user or
+> Channel" field, a "Write a message (optional)" note box, a preview of the
+> message, and a Forward button that stays disabled until a recipient is
+> picked.  `[14:52]`
+
+Ours was an inline popover listing
+`[...publicChannels, ...dmChannels].slice(0, 10)`. Three things were wrong and
+only one of them is cosmetic:
+
+1. **A workspace with more than ten conversations could not forward to the
+   eleventh at all** — however precisely you knew its name. There was no search
+   and no scroll past the slice.
+2. Nowhere to say *why* you were forwarding.
+3. One click sent it. The click that picked the recipient WAS the send: no
+   confirm, no undo.
+
+The fix that matters is ordering: the list is **searched first and capped
+second** (50, scrollable). Capping first is what made the eleventh conversation
+unreachable, and it is the break the checks are built around — seeding twelve
+channels, because with ten or fewer the old code and the new one behave
+identically and a check against ambient data would pass on the bug.
+
+The break confirms it precisely: `0 matches for fwdtarget…-11`.
+
+Eight checks in `chat-message-actions.mjs`, floor 48 → 56. Four breaks, all
+caught: the cap restored, confirm live before a recipient is chosen, the note
+dropped, and the preview removed.
+
+**Running total: 135 closed, 21 open, 1 unverifiable.**

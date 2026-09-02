@@ -369,7 +369,17 @@ export function ChatPage() {
   const [emojiManagerOpen, setEmojiManagerOpen] = useState(false)
   const [newEmojiCode, setNewEmojiCode] = useState('')
   const [newEmojiUrl, setNewEmojiUrl] = useState('')
-  const [forwardPickerFor, setForwardPickerFor] = useState<string | null>(null)
+  /**
+   * G11-2 [14:52] — the forward draft.
+   *
+   * Was a `string | null` naming a message, rendered as an inline popover of
+   * `[...publicChannels, ...dmChannels].slice(0, 10)`. No search, so a
+   * workspace with more than ten conversations physically could not forward to
+   * the eleventh; and no confirm step, so one stray click forwarded
+   * immediately and irreversibly.
+   */
+  const [forwardDraft, setForwardDraft] = useState<{ message: Message; to: string; note: string } | null>(null)
+  const [forwardQuery, setForwardQuery] = useState('')
   /**
    * §G11 [15:36] — which message's Assign picker is open.
    *
@@ -410,6 +420,24 @@ export function ChatPage() {
   const channels = channelsQuery.data ?? []
   const publicChannels = channels.filter((c) => !c.isDm)
   const dmChannels = channels.filter((c) => c.isDm)
+  /*
+   * G11-2 — every conversation, filtered by what you typed, capped at a
+   * scrollable 50.
+   *
+   * The cap is on the RENDER, not on what is searchable: the old `slice(0, 10)`
+   * meant the eleventh conversation could not be reached at all, however
+   * precisely you knew its name. Searching first and capping second is the
+   * whole difference.
+   */
+  const forwardTargets = useMemo(() => {
+    const needle = forwardQuery.trim().toLowerCase()
+    const all = [...publicChannels, ...dmChannels]
+    const named = (c: (typeof all)[number]) =>
+      c.isDm ? (c.dmLabel ?? c.dmPeerName ?? '') : (c.name ?? '')
+    return all
+      .filter((c) => !needle || named(c).toLowerCase().includes(needle))
+      .slice(0, 50)
+  }, [publicChannels, dmChannels, forwardQuery])
 
   // Spaces power the channel-scope picker + sidebar grouping (§6.1). Only spaces
   // the user can see are returned by the API.
@@ -1090,7 +1118,8 @@ export function ChatPage() {
       }),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['chat-messages', vars.channelId] })
-      setForwardPickerFor(null)
+      setForwardDraft(null)
+      setForwardQuery('')
     },
   })
 
@@ -1860,6 +1889,127 @@ export function ChatPage() {
           </div>
         )}
 
+        {/*
+          G11-2 [14:52] — "Forward this message", as a modal.
+        
+          The old control was an inline popover of the first ten conversations.
+          Three things were wrong with it and only one is cosmetic: a workspace
+          with more than ten conversations could not forward to the eleventh at
+          all; there was nowhere to say WHY you were forwarding; and a single
+          click sent it, with no confirm and no undo.
+        */}
+        {forwardDraft && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setForwardDraft(null)}
+          >
+            <Card
+              className="w-full max-w-md p-4"
+              data-testid="forward-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">{t('chat.forwardTitle')}</h3>
+                <button
+                  className="text-muted-foreground hover:text-foreground"
+                  aria-label={t('common.cancel')}
+                  onClick={() => setForwardDraft(null)}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* What you are about to send, so you can see you picked the
+                  right message before it leaves. */}
+              <p
+                className="mb-3 line-clamp-3 rounded border border-border/70 bg-muted/30 px-2 py-1.5 text-[12px] text-muted-foreground"
+                data-testid="forward-preview"
+              >
+                {forwardDraft.message.body}
+              </p>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-[12px] text-muted-foreground">
+                    {t('chat.forwardTo')}
+                  </label>
+                  <Input
+                    autoFocus
+                    value={forwardQuery}
+                    data-testid="forward-search"
+                    placeholder={t('chat.forwardSearchPlaceholder')}
+                    onChange={(e) => setForwardQuery(e.target.value)}
+                  />
+                  <div className="mt-1 max-h-40 overflow-y-auto rounded border border-border/60">
+                    {forwardTargets.length === 0 && (
+                      <p className="px-2 py-1.5 text-[11px] text-muted-foreground" data-testid="forward-no-match">
+                        {t('chat.forwardNoMatch')}
+                      </p>
+                    )}
+                    {forwardTargets.map((channel) => (
+                      <button
+                        key={`fwd-${channel.id}`}
+                        type="button"
+                        data-testid={`forward-target-${channel.id}`}
+                        onClick={() => setForwardDraft((d) => (d ? { ...d, to: channel.id } : d))}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px]',
+                          forwardDraft.to === channel.id
+                            ? 'bg-accent/15 text-foreground'
+                            : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground',
+                        )}
+                      >
+                        {channel.isDm
+                          ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage')
+                          : `#${channel.name}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <label className="block text-[12px] text-muted-foreground">
+                  {t('chat.forwardNote')}
+                  <Input
+                    value={forwardDraft.note}
+                    data-testid="forward-note"
+                    placeholder={t('chat.forwardNotePlaceholder')}
+                    onChange={(e) => setForwardDraft((d) => (d ? { ...d, note: e.target.value } : d))}
+                    className="mt-0.5"
+                  />
+                </label>
+
+                <div className="flex gap-2">
+                  <Button
+                    data-testid="forward-confirm"
+                    // Disabled until somebody is chosen: the old control sent on
+                    // the click that picked the recipient, so a stray click was
+                    // an irreversible forward.
+                    disabled={!forwardDraft.to || forwardMutation.isPending}
+                    onClick={() =>
+                      forwardMutation.mutate({
+                        channelId: forwardDraft.to,
+                        // The note goes ahead of the quoted body. No
+                        // "Forwarded message:" prefix — the message says so
+                        // itself, and the prefix became part of the text the
+                        // moment anyone forwarded it onward again.
+                        body: forwardDraft.note.trim()
+                          ? `${forwardDraft.note.trim()}\n\n${forwardDraft.message.body}`
+                          : forwardDraft.message.body,
+                        sourceId: forwardDraft.message.id,
+                      })
+                    }
+                  >
+                    {forwardMutation.isPending ? t('common.saving') : t('chat.forward')}
+                  </Button>
+                  <Button variant="outline" onClick={() => setForwardDraft(null)}>
+                    {t('common.cancel')}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
         {taskDraft && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -2618,7 +2768,8 @@ export function ChatPage() {
                                   type="button"
                                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
                                   onClick={() => {
-                                    setForwardPickerFor(m.id)
+                                    setForwardDraft({ message: m, to: '', note: '' })
+                                    setForwardQuery('')
                                     setOverflowFor(null)
                                   }}
                                 >
@@ -2736,31 +2887,7 @@ export function ChatPage() {
                               </PopoverContent>
                             </Popover>
                           )}
-                          {forwardPickerFor === m.id && (
-                            <div className="absolute right-0 top-8 z-20 w-60 rounded-lg border border-border bg-card shadow-lg p-1.5 space-y-1">
-                              <div className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground">{t('chat.forwardTo')}</div>
-                              {[...publicChannels, ...dmChannels].slice(0, 10).map((channel) => (
-                                <button
-                                  key={`fwd-${m.id}-${channel.id}`}
-                                  type="button"
-                                  className="w-full text-left rounded px-2 py-1.5 text-xs hover:bg-muted"
-                                  onClick={() =>
-                                    forwardMutation.mutate({
-                                      // No "Forwarded message:" prefix any more —
-                                      // the message says so itself now, and the
-                                      // prefix became part of the text the moment
-                                      // anyone forwarded it onward again.
-                                      channelId: channel.id,
-                                      body: m.body,
-                                      sourceId: m.id,
-                                    })
-                                  }
-                                >
-                                  {channel.isDm ? channel.dmLabel ?? channel.dmPeerName ?? t('chat.directMessage') : `#${channel.name}`}
-                                </button>
-                              ))}
-                            </div>
-                          )}
+
                         </div>
                       </div>
                       )}
