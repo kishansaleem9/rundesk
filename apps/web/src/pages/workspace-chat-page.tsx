@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@rundesk/ui'
+import { PersonAvatar, Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
 import { ChatHeader } from '../components/chat/chat-header'
 import { ChannelCall } from '../components/call/channel-call'
@@ -1865,7 +1865,7 @@ export function ChatPage() {
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
             onClick={() => setTaskDraft(null)}
           >
-            <Card className="w-full max-w-md p-4" onClick={(e) => e.stopPropagation()}>
+            <Card className="w-full max-w-md p-4" data-testid="chat-task-draft" onClick={(e) => e.stopPropagation()}>
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold">{t('chat.createTaskFromMessage')}</h3>
                 <button className="text-muted-foreground hover:text-foreground" onClick={() => setTaskDraft(null)}>
@@ -1880,6 +1880,7 @@ export function ChatPage() {
                   {t('chat.assignee')}
                   <select
                     value={taskDraft.assigneeId}
+                    data-testid="chat-task-draft-assignee"
                     onChange={(e) => setTaskDraft((prev) => (prev ? { ...prev, assigneeId: e.target.value } : prev))}
                     className="mt-0.5 h-8 w-full rounded border border-border bg-background px-2 text-sm text-foreground"
                   >
@@ -3213,6 +3214,8 @@ export function ChatPage() {
             onSetFollowState={(state) =>
               threadFollowMutation.mutate({ messageId: threadParent.id, state })
             }
+            onCreateTask={(message, assigneeId) => setTaskDraft({ message, assigneeId, dueAt: '' })}
+            members={membersQuery.data ?? []}
             pending={sendMutation.isPending}
             namesById={namesById}
             customEmoji={customEmoji}
@@ -3938,6 +3941,8 @@ function ThreadPanel({
   onToggleReaction,
   onMarkUnread,
   onSetFollowState,
+  onCreateTask,
+  members,
   pending,
   namesById,
   customEmoji,
@@ -3956,6 +3961,13 @@ function ThreadPanel({
   onMarkUnread: (messageId: string) => void
   /** §G12 [17:13] — mute or follow this thread, or clear back to the default. */
   onSetFollowState: (state: 'following' | 'muted' | null) => void
+  /**
+   * G11-9 / G12-10 [14:37–14:48], [16:50] — turn the conversation into work
+   * without leaving the panel. Opens the same draft the per-message menu does;
+   * an assignee, when one is picked, is pre-filled rather than a second step.
+   */
+  onCreateTask: (message: Message, assigneeId: string) => void
+  members: WorkspaceMember[]
   pending: boolean
   namesById: Record<string, string>
   customEmoji?: CustomEmoji[]
@@ -4033,11 +4045,76 @@ function ThreadPanel({
       data-testid="chat-thread-panel"
       className="relative z-50 hidden xl:flex w-[360px] shrink-0 border-l border-border/80 bg-[#fbfbfc] dark:bg-[#16181d] flex-col"
     >
-      <div className="h-[52px] shrink-0 border-b border-border/80 px-4 flex items-center justify-between bg-background">
+      <div className="shrink-0 border-b border-border/80 px-4 py-2 flex items-start justify-between bg-background">
         <div className="min-w-0">
-          <div className="text-[14px] font-semibold text-foreground">{t('chat.thread')}</div>
+          {/*
+            G12-10 [16:50] — "Hamda's Thread", not "Thread".
+            Her frame 274 names the panel after whoever started it. With two
+            threads open in a day the generic title tells you nothing about
+            which conversation you are looking at, and the parent author is
+            already the first thing rendered below.
+          */}
+          <div className="truncate text-[14px] font-semibold text-foreground" data-testid="thread-panel-title">
+            {parent.authorName
+              ? t('chat.threadOf', { name: parent.authorName })
+              : t('chat.thread')}
+          </div>
           <div className="truncate text-[11px] text-muted-foreground" title={followers.map((f) => f.name).join(', ')}>
             {tCount('chat.threadFollowers', followers.length)}
+          </div>
+          {/*
+            G11-9 [14:37–14:48] — "Assign to" and "Create Task", directly under
+            the title.
+
+            Both actions already existed and were reachable only from a
+            per-message hover menu, which is the wrong place for a decision
+            about the whole conversation: by the time you have read a thread
+            and concluded somebody should do something, you are looking at the
+            panel, not hovering a row.
+          */}
+          <div className="mt-1 flex items-center gap-1.5">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="thread-assign-to"
+                  className="inline-flex h-6 items-center gap-1 rounded-full border border-border/70 px-2 text-[11px] text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+                >
+                  <UserPlus className="h-3 w-3" />
+                  {t('chat.threadAssignTo')}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-56 p-1">
+                <div className="max-h-56 overflow-y-auto">
+                  {members.length === 0 && (
+                    <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                      {t('chat.threadAssignNobody')}
+                    </p>
+                  )}
+                  {members.map((m) => (
+                    <button
+                      key={m.userId}
+                      type="button"
+                      data-testid={`thread-assign-${m.userId}`}
+                      onClick={() => onCreateTask(parent, m.userId)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[12px] text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+                    >
+                      <PersonAvatar name={m.displayName || m.email} size="xs" />
+                      <span className="truncate">{m.displayName || m.email}</span>
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <button
+              type="button"
+              data-testid="thread-create-task"
+              onClick={() => onCreateTask(parent, '')}
+              className="inline-flex h-6 items-center gap-1 rounded-full border border-border/70 px-2 text-[11px] text-muted-foreground hover:bg-accent/10 hover:text-foreground"
+            >
+              <ListTodo className="h-3 w-3" />
+              {t('chat.createTask')}
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-0.5">

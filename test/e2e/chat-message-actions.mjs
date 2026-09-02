@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 42
+const EXPECTED_CHECKS = 48
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -447,6 +447,83 @@ try {
   } else {
     check(false, 'no "open thread" control to drive')
     check(false, 'so the thread address was never exercised')
+  }
+
+  /*
+   * ── G11-9 / G12-10 [14:37–14:48], [16:50] — the thread header ────────────
+   *
+   * > "…'Assign to' and 'Create Task' sitting right under the title"
+   *
+   * The panel was titled the literal word "Thread", and the two actions that
+   * turn a conversation into work existed only inside a per-message hover
+   * menu. That is the wrong place for a decision about the whole thread: by
+   * the time you have read it and concluded somebody should act, you are
+   * looking at the panel, not hovering a row.
+   *
+   * Driven from the panel that is already open above.
+   */
+  console.log('\n▶ G11-9 / G12-10 — the thread header names the thread, and can turn it into work')
+  if ((await page.locator('[data-testid="chat-thread-panel"]').count()) > 0) {
+    const title = await page.getByTestId('thread-panel-title').innerText().catch(() => '')
+    check(
+      title.trim().length > 0 && !/^thread$/i.test(title.trim()),
+      'the panel is named after whoever started the thread, not "Thread"',
+      `the title reads "${title.trim()}"`,
+    )
+    check(
+      (await page.getByTestId('thread-create-task').count()) > 0,
+      'and "Create Task" is offered on the header',
+      'no create-task control in the thread header',
+    )
+    const assign = page.getByTestId('thread-assign-to')
+    check((await assign.count()) > 0, 'and "Assign to" beside it')
+
+    // The picker must offer real people, not an empty menu — the failure this
+    // would otherwise hide is a members read that returned nothing.
+    await assign.click().catch(() => {})
+    await page.waitForTimeout(800)
+    const candidates = page.locator('[data-testid^="thread-assign-"]').filter({ hasNotText: /^$/ })
+    check(
+      (await page.locator('[data-testid^="thread-assign-"]').count()) > 1,
+      'which opens the people it could be assigned to',
+      `${await candidates.count()} row(s) in the assign menu`,
+    )
+
+    /*
+     * Assigning must reach the create-task draft with the person already on
+     * it. Checked by driving it rather than by looking: a picker that opens
+     * and does nothing is the exact defect this section exists to catch.
+     */
+    const someone = page.locator('[data-testid^="thread-assign-"]').nth(1)
+    const pickedId = (await someone.getAttribute('data-testid').catch(() => '') ?? '').replace('thread-assign-', '')
+    await someone.click().catch(() => {})
+    await page.waitForTimeout(1200)
+    check(
+      (await page.getByTestId('chat-task-draft').count()) > 0,
+      'and picking somebody opens the task draft',
+      'nothing opened after picking a person',
+    )
+    /*
+     * The assertion that matters. "The draft opened" would also pass if the
+     * picker merely opened an empty dialog — and the point of Assign to is
+     * that the person you chose is already on it, not that you get a second
+     * form to fill in.
+     */
+    check(
+      (await page.getByTestId('chat-task-draft-assignee').inputValue().catch(() => '')) === pickedId &&
+        pickedId.length > 0,
+      'with that person already on it, not a blank form',
+      `draft assignee is "${await page.getByTestId('chat-task-draft-assignee').inputValue().catch(() => '')}", expected "${pickedId}"`,
+    )
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(500)
+  } else {
+    check(false, 'no thread panel open to read its header')
+    check(false, 'so "Create Task" was never checked')
+    check(false, 'so "Assign to" was never checked')
+    check(false, 'so the assign menu was never opened')
+    check(false, 'so assigning was never driven')
+    check(false, 'so the pre-filled assignee was never checked')
   }
 
   // ---------------------------------------------------------------------

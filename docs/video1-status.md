@@ -1506,3 +1506,40 @@ and ten were done, so G13 was ticked. The re-audit only caught them because it
 was required to name the implementing line and the UI that reaches it, and to
 treat "the API exists" as not closed when nothing calls it. That rule is what
 should have been applied the first time, and it is the rule from here on.
+
+## G11-9 / G12-10 — the thread header (2 Sep)
+
+> "…'Assign to' and 'Create Task' sitting right under the title"  `[14:37–14:48]`
+> and the panel titled "Hamda's Thread" rather than "Thread"  `[16:50]`, frame 274
+
+Two gap IDs, one change, because they describe the same header from two
+moments in the walkthrough.
+
+The panel was titled the literal word **"Thread"** — with two conversations
+open in a day that tells you nothing about which one you are looking at, and
+the parent author was already the first thing rendered below it. It is now
+named after whoever started it.
+
+Both actions already existed and were reachable only from a **per-message
+hover menu**, which is the wrong place for a decision about a whole
+conversation: by the time you have read a thread and concluded somebody should
+act, you are looking at the panel, not hovering a row. "Assign to" opens the
+people picker and hands the chosen person straight to the existing create-task
+draft with the assignee **already filled in** — not a second form to complete.
+
+Six checks in `chat-message-actions.mjs`, floor 42 → 48, all six break-tested:
+the title reverted, Create Task removed, Assign to removed, the picker offered
+nobody, the draft opened blank, and picking somebody wired to nothing. The
+"already filled in" assertion exists because "a dialog opened" would have
+passed on a blank one — which is precisely the half of the feature that
+matters.
+
+A note on the break testing itself, since a previous entry recorded two false
+greens from the same cause: the first patch for "the picker offers nobody"
+matched `members={membersQuery.data ?? []}` and silently hit an **unrelated
+SearchPanel call site** as well. The break still failed the right checks, but
+for a partly wrong reason, and the interrupted run left both call sites
+patched. Break patches are anchored on an adjacent unique line now.
+
+**Running total: 123 closed, 33 open, 1 unverifiable.**
+Local: 17 suites, 737 checks, 0 failed.
