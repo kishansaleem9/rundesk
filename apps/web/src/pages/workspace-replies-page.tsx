@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, PersonAvatar, cn } from '@rundesk/ui'
@@ -10,6 +11,7 @@ import { resolveNotificationDestination, goToDestination } from '../lib/notifica
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { ThreadReplyComposer } from '../components/chat/chat-composer'
 
 type Notification = {
   id: string
@@ -60,6 +62,9 @@ const SOURCE_ICON: Record<string, React.ElementType> = {
  */
 export function RepliesPage() {
   const navigate = useNavigate()
+  // §G12-2 — which row has its thread open. One at a time: the page is a list
+  // to work through, and several expanded threads turn it back into a wall.
+  const [openThread, setOpenThread] = useState<string | null>(null)
   const qc = useQueryClient()
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/replies' })
@@ -206,7 +211,29 @@ export function RepliesPage() {
                         <MentionText text={n.body} namesById={namesById} className="line-clamp-2" />
                       </div>
                     )}
-                    <div className="mt-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {/*
+                        §G12-2 — answer it here.
+
+                        A chat reply is the case she describes: "ab us ko har
+                        baar chat open karne ki zaroorat nahi." Offered only for
+                        chat replies, because a task or doc comment has no chat
+                        thread behind it and a button that opens nothing is
+                        worse than no button.
+                      */}
+                      {n.type === 'chat_reply' && n.target?.entityId && (
+                        <button
+                          type="button"
+                          data-testid={`reply-open-thread-${n.id}`}
+                          className="inline-flex h-7 items-center rounded-md border border-border/70 px-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpenThread((cur) => (cur === n.id ? null : n.id))
+                          }}
+                        >
+                          {t(openThread === n.id ? 'replies.hideThread' : 'replies.openThread')}
+                        </button>
+                      )}
                       {n.readAt ? (
                         <button
                           type="button"
@@ -233,6 +260,20 @@ export function RepliesPage() {
                         </button>
                       )}
                     </div>
+                    {openThread === n.id && n.target?.entityId && (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <InlineThread
+                          workspaceId={workspaceId}
+                          messageId={n.target.entityId}
+                          onReplied={() => {
+                            // Answering it IS reading it. Leaving the row unread
+                            // after you replied would put it back in the list you
+                            // just cleared.
+                            if (!n.readAt) void markRead.mutateAsync(n.id)
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </Card>
               )
@@ -240,6 +281,135 @@ export function RepliesPage() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+
+type ThreadMessage = {
+  id: string
+  channelId: string
+  body: string
+  createdAt: string
+  authorName?: string | null
+  parentMessageId?: string | null
+}
+
+/**
+ * §G12-2 [17:xx], frames 277 / 282 — read and answer a thread WITHOUT opening
+ * the channel.
+ *
+ * > "ek person 90 chats mein hai, 90 groups mein hai … ab us ko har baar chat
+ * >  open karne ki zaroorat nahi."
+ *
+ * That is the whole point of the page, and a row that navigates away defeats
+ * it: you are back in the channel, which is the thing you came here to avoid.
+ * The parent block, the reply count, the replies and a composer render in
+ * place.
+ *
+ * Fetched lazily, on expand. Loading every thread on the list would be one
+ * request per row for threads nobody opened.
+ */
+function InlineThread({
+  workspaceId,
+  messageId,
+  onReplied,
+}: {
+  workspaceId: string
+  messageId: string
+  onReplied: () => void
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [draft, setDraft] = useState('')
+  const [alsoToChannel, setAlsoToChannel] = useState(false)
+
+  const thread = useQuery({
+    queryKey: ['replies-thread', messageId],
+    // The server roots a thread at its PARENT, so passing the reply's id — which
+    // is what a reply notification carries — still returns the whole thread.
+    queryFn: () => api<{ parent: ThreadMessage; replies: ThreadMessage[] }>(
+      `/chat/messages/${messageId}/thread`,
+    ),
+  })
+
+  const send = useMutation({
+    mutationFn: async () => {
+      const body = draft.trim()
+      const parent = thread.data?.parent
+      if (!body || !parent) return
+      await api(`/chat/channels/${parent.channelId}/messages`, {
+        method: 'POST',
+        body: { body, parentMessageId: parent.id },
+      })
+      // "Also send to #channel" is a SECOND message in the channel, not a flag
+      // on the first: that is what the checkbox does in chat, and two surfaces
+      // that phrase the same promise differently is how they drift.
+      if (alsoToChannel) {
+        await api(`/chat/channels/${parent.channelId}/messages`, {
+          method: 'POST',
+          body: { body },
+        })
+      }
+    },
+    onSuccess: () => {
+      setDraft('')
+      setAlsoToChannel(false)
+      void qc.invalidateQueries({ queryKey: ['replies-thread', messageId] })
+      onReplied()
+    },
+  })
+
+  if (thread.isLoading) {
+    return <div className="mt-2 text-[11px] text-muted-foreground" data-testid="reply-thread-loading">…</div>
+  }
+  if (!thread.data) {
+    return (
+      <div className="mt-2 text-[11px] text-muted-foreground" data-testid="reply-thread-error">
+        {t('replies.threadUnavailable')}
+      </div>
+    )
+  }
+
+  const { parent, replies } = thread.data
+  return (
+    <div className="mt-2 space-y-2" data-testid={`reply-thread-${messageId}`}>
+      {/* The message the thread hangs off, so a reply has something to be a
+          reply TO. Without it the answers are floating quotes. */}
+      <div
+        className="rounded-md border-l-2 border-l-amber-400/70 bg-amber-400/5 px-2 py-1.5"
+        data-testid="reply-thread-parent"
+      >
+        <div className="text-[11px] text-muted-foreground">{parent.authorName ?? ''}</div>
+        <div className="whitespace-pre-wrap text-[13px] text-foreground">{parent.body}</div>
+      </div>
+      <div className="text-[11px] text-muted-foreground" data-testid="reply-thread-count">
+        {t('replies.replyCount', { count: replies.length })}
+      </div>
+      {replies.map((r) => (
+        <div key={r.id} className="pl-2" data-testid="reply-thread-reply">
+          <div className="text-[11px] text-muted-foreground">{r.authorName ?? ''}</div>
+          <div className="whitespace-pre-wrap text-[13px] text-foreground">{r.body}</div>
+        </div>
+      ))}
+      <ThreadReplyComposer
+        workspaceId={workspaceId}
+        value={draft}
+        onChange={setDraft}
+        onSend={() => send.mutate()}
+        disabled={send.isPending}
+        sending={send.isPending}
+      />
+      <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={alsoToChannel}
+          onChange={(e) => setAlsoToChannel(e.target.checked)}
+          data-testid="reply-also-to-channel"
+          className="h-3 w-3 rounded border-border"
+        />
+        {t('replies.alsoSendToChannel')}
+      </label>
     </div>
   )
 }

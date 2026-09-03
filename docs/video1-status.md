@@ -3405,3 +3405,42 @@ One process kill mid-break left a break in the working tree. It was found by
 grepping for each break's signature rather than trusting the harness's
 `finally` — worth doing every time, because a restored-looking `git status` and
 a restored tree are not the same claim.
+
+## Answering a thread without opening the channel (3 Sep)
+
+> `[17:xx]`, frames `277` / `282` — the amber parent block, a reply count, the
+> replies, and a composer with "Also send to #General".
+>
+> "ek person 90 chats mein hai, 90 groups mein hai … ab us ko har baar chat open
+> karne ki zaroorat nahi."
+
+That sentence is the whole page, and the page did not honour it: every row's
+`onClick` navigated away, so reading a reply put you back in the channel — the
+thing you came here to avoid. The only controls were Resolve and Mark unread.
+
+**One bug had to be fixed on the server before the page could work at all.**
+`getThread(messageId)` rooted the thread at whatever id you handed it. A reply
+notification carries the id of the *reply*, so asking for it returned the reply
+as its own parent with an empty list underneath — a thread that reads as having
+nothing in it, which is the opposite of why you opened it. A thread is the same
+thread whichever message in it you name, so it now resolves to the parent.
+
+The composer is the one from chat, lifted rather than rebuilt, so a reply typed
+here runs the same slash commands as one typed there. "Also send to the
+channel" posts a second message exactly as the chat checkbox does — two
+surfaces phrasing the same promise differently is how they drift.
+
+Offered only on chat replies. A task or doc comment has no chat thread behind
+it, and a button that opens nothing is worse than no button.
+
+Seven checks, and the last two are the claim: the answer **reaches the thread**
+*and* the page **never left `/replies`**. Either alone is satisfied by a row
+that navigates to the channel and posts there, which is the defect.
+
+Three breaks, all caught: the inline control removed (the original defect), the
+thread rooted at the reply again (`parent block read "Their reply …"`), and the
+composer posting to the channel instead of into the thread.
+
+The suite makes its own channel and needs two accounts, because a notification
+is only sent to somebody who did not write the message — run it single-handed
+and it looks for a row that was never meant to exist.

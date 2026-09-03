@@ -1728,7 +1728,19 @@ export class ChatService {
   }
 
   async getThread(messageId: string, userId: string, limit = 100) {
-    const parent = await this.getMessageById(messageId, userId)
+    /*
+     * §G12-2 — a thread is the same thread whichever message in it you name.
+     *
+     * Rooted at the parent, not at the id passed in. The Replies page opens a
+     * thread from a NOTIFICATION, and a reply notification carries the id of
+     * the reply — so asking for that id returned the reply as the "parent" with
+     * an empty list of replies under it: a thread that reads as having nothing
+     * in it, which is the opposite of why you opened it.
+     */
+    const named = await this.getMessageById(messageId, userId)
+    const parent = named.parentMessageId
+      ? await this.getMessageById(named.parentMessageId, userId)
+      : named
     const rows = await this.db
       .select({
         id: chatMessages.id,

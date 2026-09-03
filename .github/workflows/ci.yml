@@ -285,6 +285,18 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §G12-2 — answering a thread from the Replies list without opening the
+      # channel. Needs two accounts: a notification only reaches somebody who
+      # did not write the message.
+      - name: Replies answers a thread in place
+        if: '!cancelled()'
+        run: node test/e2e/replies-inline-thread.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          E2E_PEER_EMAIL: org-admin@rundesk.internal
+          E2E_PEER_PASSWORD: OrgAdmin@123!
+
       - name: The DM tab strip (A3.9)
         if: '!cancelled()'
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist
