@@ -32,7 +32,7 @@ const argOf = (name, fallback) => {
  * How many checks a complete run performs. "0 failed" is not "it ran": a
  * selector that matched nothing reports a clean sweep of whatever it reached.
  */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 9
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -111,7 +111,17 @@ try {
   const signup = await apiAs(null)('/auth/signup', {
     method: 'POST',
     body: {
-      fullName: 'Asking Member',
+      /*
+       * Stamped, and removed again below.
+       *
+       * The first version named every one of them "Asking Member" and left
+       * them in the workspace. Ten runs later `ui-sweep`'s reports-to picker —
+       * which finds a person by "Who <name> reports to" — matched ten
+       * identical labels and failed on a strict-mode violation. A suite that
+       * accumulates identically-named people is a fixture that breaks other
+       * suites, which this document has already recorded twice.
+       */
+      fullName: `Asking Member ${stamp}`,
       email: outsider.email,
       password: outsider.password,
       organizationName: `Asking ${stamp}`,
@@ -240,6 +250,22 @@ try {
     'the card renders on a 404, confirming objects the caller was never told about',
   )
   void ownerId
+
+  /*
+   * Put the workspace back. The account itself stays — signup made it and
+   * there is no endpoint to unmake it — but it leaves the roster, which is
+   * what every other suite reads.
+   */
+  const outsiderId = signup.data?.user?.id ?? signup.data?.id
+  if (outsiderId) {
+    await A(`/workspaces/${workspaceId}/members/${outsiderId}`, { method: 'DELETE' }).catch(() => {})
+  }
+  const roster = (await A(`/workspaces/${workspaceId}/members`)).data ?? []
+  chk(
+    !roster.some((m) => (m.user?.email ?? m.email) === outsider.email),
+    'and the check left the roster as it found it',
+    `${outsider.email} is still a member of the workspace`,
+  )
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)

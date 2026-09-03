@@ -297,6 +297,18 @@ jobs:
           E2E_PEER_EMAIL: org-admin@rundesk.internal
           E2E_PEER_PASSWORD: OrgAdmin@123!
 
+      # §G10-6 / §G10-7 — two fan-outs that told nobody. API-level: these are
+      # rows arriving in somebody else's inbox, not pixels, and driving a
+      # browser to observe them would test the inbox rather than the fan-out.
+      - name: Notifications that were never sent
+        if: '!cancelled()'
+        run: node test/e2e/notification-gaps.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          E2E_PEER_EMAIL: org-admin@rundesk.internal
+          E2E_PEER_PASSWORD: OrgAdmin@123!
+
       - name: The DM tab strip (A3.9)
         if: '!cancelled()'
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist

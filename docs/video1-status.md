@@ -3444,3 +3444,78 @@ composer posting to the channel instead of into the thread.
 The suite makes its own channel and needs two accounts, because a notification
 is only sent to somebody who did not write the message — run it single-handed
 and it looks for a row that was never meant to exist.
+
+## Two gestures that told nobody (3 Sep)
+
+Both the same shape: the gesture exists on one surface and notifies, and exists
+on another and does not.
+
+**Reacting to a chat message tells its author. Reacting to a task comment told
+nobody.** So the "reactions" kind she turns off in the Primary customiser could
+only ever have been produced by half the product — and a kind that cannot be
+produced is a toggle for something that never happens.
+
+**Watchers were never told who a task moved to.** `notifyTaskUpdate` covers
+status, priority, due date, title and description. Being assigned notified you;
+being removed notified you; and everybody *watching* — the people it is for —
+found out by noticing. That is the single most consequential change on a task.
+
+Deliberately not folded into `notifyTaskUpdate`: that reads a `before` snapshot
+of scalar columns, and assignees are rows in another table. Wiring them through
+it would mean loading assignees on every patch that touches a title. The
+assignee and the actor are both excluded from the fan-out — each already has a
+notification of their own, and two for one event reads as a bug. And removal
+fires **outside** the `userId !== actorId` guard: taking yourself off a task is
+still news to whoever is watching it.
+
+The body names the person. "Updated." would be true and useless — not knowing
+*who* is the entire complaint.
+
+### One kind deliberately not built
+
+**"Task created" stays open, and the reason is the point.** `subtask_created`
+exists and goes to the parent task's watchers and assignees — a real audience.
+A top-level task has no equivalent: nothing in the product can follow a *list*,
+so the kind would have no recipients and could never fire. Shipping it would
+add a row to the customiser that turns off something that never happens, which
+is the same defect as a chip that filters nothing. It needs list-following
+first.
+
+## The suite that broke another suite (3 Sep)
+
+`ui-sweep` failed with a strict-mode violation: `Who Asking Member reports to`
+matched **ten** elements. The cause was the request-access suite added earlier
+the same day — it signs a member up, adds them to the workspace, and left them
+there, named identically every run. Ten runs, ten "Asking Member"s, and a
+picker that finds a person by name had ten of them.
+
+This is the third time in this document a fixture has disarmed something else:
+the Notepad fixture emptied the top bar, the Clear-all check left the inbox
+read, and now this. The pattern is always the same — a suite changes shared
+state and does not put it back — and the fix is always the same shape: make the
+change unique, undo it, and **assert the undo**. The suite now stamps the name,
+removes the member, and checks the roster is as it found it.
+
+Worth stating plainly: this was found by the full sweep, not by the suite that
+caused it. A suite passing on its own says nothing about what it did to the
+others, which is the whole reason the sweep exists.
+
+And the cleanup was *measured* rather than trusted. Two runs afterwards left
+three rows in `workspace_members` — which looked like the fix not working, and
+was not: each is the account's own signup workspace, which signup necessarily
+creates and no endpoint can unmake. The workspace under test was back to its
+two real members. The reason to count rather than read the check's own verdict
+is that a cleanup check can pass vacuously, and this document has three
+entries about checks that did.
+
+Four breaks on the two fan-outs, all caught: the reaction guard inverted (the
+original silence for everybody else, plus noise for you), a notification sent
+to the reactor as well, watchers told nothing, and a body reading "Updated."
+with no name in it.
+
+Two of those needed the SUITE repaired first. Notifying yourself passed cleanly,
+because the fixture only ever had somebody else react — there is now a check
+that reacting to your own comment tells you nothing. And the first break was
+written against the guard itself, which narrowed a type and would not compile;
+inverting the guard breaks the behaviour without breaking the build, which is
+the difference between a break and a typo.

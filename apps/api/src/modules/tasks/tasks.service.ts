@@ -2978,10 +2978,81 @@ export class TasksService {
             emailContext: { taskTitle: taskRow.title, workspaceName },
           })
         }
+        // §G10-6 — and everybody watching hears who it moved to.
+        void this.notifyWatchersOfAssigneeChange({ taskId, actorId, subjectId: userId, added: true })
       }
     }
 
     return this.getTask(taskId)
+  }
+
+  /**
+   * §G10-6 [12:21] — watchers learn WHO a task moved to, or off.
+   *
+   * `notifyTaskUpdate` covers status, priority, due date, title and
+   * description, and never had an assignee branch — so the single most
+   * consequential change on a task, the one that decides whose problem it is,
+   * was the one nobody watching was told about. Being assigned notified you;
+   * being removed notified you; everybody else found out by noticing.
+   *
+   * Deliberately NOT folded into `notifyTaskUpdate`: that reads a `before`
+   * snapshot of scalar columns, and assignees are rows in another table. Wiring
+   * them through it would mean loading assignees on every patch that touches a
+   * title.
+   *
+   * The assignee and the actor are both excluded — each already has a
+   * notification of their own, and two for one event reads as a bug.
+   */
+  private async notifyWatchersOfAssigneeChange(params: {
+    taskId: string
+    actorId: string
+    subjectId: string
+    added: boolean
+  }) {
+    try {
+      const watcherRows = await this.db
+        .select({ userId: taskWatchers.userId })
+        .from(taskWatchers)
+        .where(eq(taskWatchers.taskId, params.taskId))
+      const watcherIds = [...new Set(watcherRows.map((w) => w.userId))].filter(
+        (id) => id !== params.actorId && id !== params.subjectId,
+      )
+      if (watcherIds.length === 0) return
+
+      const [taskRow] = await this.db
+        .select({ id: tasks.id, title: tasks.title, listId: tasks.listId })
+        .from(tasks)
+        .where(eq(tasks.id, params.taskId))
+        .limit(1)
+      if (!taskRow) return
+      const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+      if (!ctx) return
+
+      const [subject] = await this.db
+        .select({ displayName: users.displayName })
+        .from(users)
+        .where(eq(users.id, params.subjectId))
+        .limit(1)
+      const who = subject?.displayName ?? 'someone'
+      const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+      const url = this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, taskRow.listId, taskRow.id)
+
+      for (const userId of watcherIds) {
+        void this.notifications.create({
+          userId,
+          workspaceId: ctx.workspaceId,
+          actorId: params.actorId,
+          type: 'task_updated',
+          title: `"${taskRow.title}" was updated`,
+          body: params.added ? `Assigned to ${who}.` : `${who} was removed.`,
+          target: { entityType: 'task', entityId: taskRow.id, url },
+          emailContext: { taskTitle: taskRow.title, workspaceName },
+        })
+      }
+    } catch {
+      // Best-effort, like every other fan-out here: a failed notification must
+      // never undo the assignment that caused it.
+    }
   }
 
   async removeAssignee(taskId: string, userId: string, actorId: string) {
@@ -3008,6 +3079,9 @@ export class TasksService {
           .catch(() => undefined)
       }
     }
+    // §G10-6 — outside the `userId !== actorId` guard above: taking YOURSELF
+    // off a task is still news to whoever is watching it.
+    void this.notifyWatchersOfAssigneeChange({ taskId, actorId, subjectId: userId, added: false })
     return this.getTask(taskId)
   }
 
@@ -3444,6 +3518,48 @@ export class TasksService {
       .insert(taskCommentReactions)
       .values({ commentId, userId, emoji })
       .returning()
+
+    /*
+     * §G10-7 [12:21] — reactions are one of the kinds she goes through in the
+     * Primary customiser, and she turns them off for herself. A kind that is
+     * never emitted cannot be turned off, and more to the point: reacting to a
+     * chat message told its author, and reacting to a task comment told nobody.
+     * The same gesture, in two places, with two different meanings.
+     *
+     * Best-effort and un-awaited, exactly as the chat side is: a notification
+     * that fails must not undo the reaction the person just made.
+     */
+    const [comment] = await this.db
+      .select({ id: taskComments.id, taskId: taskComments.taskId, authorId: taskComments.authorId, body: taskComments.body })
+      .from(taskComments)
+      .where(eq(taskComments.id, commentId))
+      .limit(1)
+    // Reacting to your own comment tells you nothing.
+    if (comment?.authorId && comment.authorId !== userId) {
+      const [taskRow] = await this.db
+        .select({ id: tasks.id, title: tasks.title, listId: tasks.listId })
+        .from(tasks)
+        .where(eq(tasks.id, comment.taskId))
+        .limit(1)
+      const ctx = taskRow ? await this.resolveWorkspaceForList(taskRow.listId) : null
+      if (taskRow && ctx) {
+        void this.notifications
+          .create({
+            userId: comment.authorId,
+            workspaceId: ctx.workspaceId,
+            actorId: userId,
+            type: 'message_reaction',
+            title: emoji,
+            body: comment.body ?? undefined,
+            target: {
+              entityType: 'task',
+              entityId: taskRow.id,
+              url: this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, taskRow.listId, taskRow.id),
+            },
+          })
+          .catch(() => undefined)
+      }
+    }
     return { added: true, reaction: created }
   }
 

@@ -126,8 +126,6 @@ export const en = {
   'inbox.new': '{{count}} new',
   'inbox.emptyTitle': "You're all caught up",
   'inbox.emptyDesc': 'Mentions, task assignments and replies will land here. Take a breath.',
-  'inbox.unread': 'Unread',
-  'inbox.earlier': 'Earlier',
 
   // Command palette
   'palette.searchPlaceholder': 'Search, type / for a command, or type to create',
@@ -5693,8 +5691,6 @@ export const es: Record<TranslationKey, string> = {
   'inbox.new': '{{count}} nuevas',
   'inbox.emptyTitle': 'Estás al día',
   'inbox.emptyDesc': 'Las menciones, asignaciones de tareas y respuestas aparecerán aquí. Respira.',
-  'inbox.unread': 'Sin leer',
-  'inbox.earlier': 'Anteriores',
 
   'palette.searchPlaceholder': 'Busca, escribe / para un comando o escribe para crear',
   'palette.title': 'Buscar en Rundesk',
@@ -11201,8 +11197,6 @@ export const ar: Record<TranslationKey, string> = {
   'inbox.new': '{{count}} جديدة',
   'inbox.emptyTitle': 'أنت على اطّلاع بكل شيء',
   'inbox.emptyDesc': 'ستظهر هنا الإشارات وإسنادات المهام والردود. خذ نفسًا.',
-  'inbox.unread': 'غير مقروءة',
-  'inbox.earlier': 'سابقة',
 
   'palette.searchPlaceholder': 'ابحث، أو اكتب / لأمر، أو اكتب للإنشاء',
   'palette.title': 'البحث في Rundesk',
@@ -16706,8 +16700,6 @@ export const ur: Record<TranslationKey, string> = {
   'inbox.new': '{{count}} نئی',
   'inbox.emptyTitle': 'آپ سب کچھ دیکھ چکے ہیں',
   'inbox.emptyDesc': 'ذکر، ٹاسک کی تفویض اور جوابات یہاں آئیں گے۔ ذرا سانس لیں۔',
-  'inbox.unread': 'غیر پڑھی',
-  'inbox.earlier': 'پہلے',
   'palette.searchPlaceholder': 'تلاش کریں، کمانڈ کے لیے / لکھیں، یا بنانے کے لیے ٹائپ کریں',
   'palette.title': 'Rundesk میں تلاش کریں',
   'palette.quickActions': 'فوری اقدامات',
