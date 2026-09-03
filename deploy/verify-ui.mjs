@@ -740,16 +740,39 @@ try {
           'the destinations are still reachable as icons',
           'the rail has no links',
         )
-        // The floating dock lives inside this component; as an early return the
-        // collapsed branch never reached it, so collapsing deleted it.
-        const dockAlive = await page.evaluate(
-          () =>
+        /*
+         * The floating dock lives inside this component; as an early return the
+         * collapsed branch never reached it, so collapsing deleted it.
+         *
+         * Asked BEFORE as well as after, because those are two different
+         * pictures and this check could not tell them apart. An account that
+         * has pinned nothing has no dock to begin with — an empty dock is a
+         * choice the product honours, not a fault — and reading only the
+         * collapsed state reported that as "collapsing removed the dock". It
+         * did exactly that on the deployed app while the behaviour was
+         * correct, which is the worst kind of failing check: it names
+         * something that is not happening, in a component that really did have
+         * this bug once.
+         */
+        const dockAlive = () =>
+          page.evaluate(() =>
             [...document.querySelectorAll('div')].some(
               (el) =>
                 getComputedStyle(el).position === 'fixed' && !!el.querySelector('a[href*="/app/"]'),
             ),
-        )
-        chk(dockAlive, 'and the floating dock survives collapsing', 'collapsing removed the dock')
+          )
+        const dockAfter = await dockAlive()
+        await toggle.click()
+        await page.waitForTimeout(1000)
+        const dockBefore = await dockAlive()
+        await toggle.click()
+        await page.waitForTimeout(1000)
+
+        if (!dockBefore) {
+          ok('this account has pinned no tools, so there is no dock to lose by collapsing')
+        } else {
+          chk(dockAfter, 'and the floating dock survives collapsing', 'collapsing removed the dock')
+        }
         // Put it back — this runs against the real account and should not leave
         // the sidebar collapsed for whoever logs in next.
         await page.locator('[data-testid="sidebar-toggle"]').first().click()
@@ -1610,13 +1633,26 @@ try {
     )
     await apiPost(`/workspaces/${WS}/skills/${created.id}/install`, {})
 
-    // A disabled skill cannot be invoked — that is the AUTHOR's switch, and a
-    // different thing from whether you installed it.
-    await fetch(`${API}/workspaces/${WS}/skills/${created.id}`, {
+    /*
+     * A disabled skill cannot be invoked — that is the AUTHOR's switch, and a
+     * different thing from whether you installed it.
+     *
+     * The disabling is CHECKED, not assumed. It used to be fired and forgotten
+     * with a `.catch(() => null)`, so "a disabled skill was accepted" was also
+     * what a failed PATCH looked like: the skill would still have been enabled
+     * and the answer correct. A check that cannot tell its own setup failing
+     * from the thing it is hunting reports the wrong one about half the time.
+     */
+    const disabled = await fetch(`${API}/workspaces/${WS}/skills/${created.id}`, {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: false }),
-    }).catch(() => null)
+    }).then((r) => r.status).catch(() => 0)
+    chk(
+      disabled >= 200 && disabled < 300,
+      'the author can switch a skill off',
+      `PATCH enabled:false returned ${disabled}, so nothing below is about a disabled skill`,
+    )
     const refused = await fetch(`${API}/ai/chat`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

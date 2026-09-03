@@ -148,17 +148,42 @@ describe('G13-10 — the assistant says what it is reading', () => {
     )
   })
 
-  it('announces loading a skill before resolving it, too', async () => {
+  /*
+   * The skill step is the ONE exception to "announce, then do", and it is a
+   * deliberate trade rather than an oversight.
+   *
+   * A skill can be refused — it may be invisible to this caller, or its author
+   * may have switched it off — and a refusal is an authorization answer, which
+   * belongs in a status code. That is only possible while the headers are
+   * unsent, so the skill is resolved BEFORE the stream opens and its step
+   * reports work already done.
+   *
+   * The alternative was tried and is what this test used to assert: resolve
+   * inside the open stream, announce first, and send the refusal down the wire
+   * as an error frame. It failed closed correctly, but every caller saw HTTP
+   * 201 and had to read the body to find out it had been refused — which a
+   * deployed-app check duly reported as "a disabled skill was accepted".
+   *
+   * The cost is bounded: resolving a skill is three indexed reads, against
+   * `buildWorkspaceContext` — the genuinely slow step — which still announces
+   * itself before it runs. So the step order on the wire is unchanged, and
+   * only this one line's relationship to its own work has moved.
+   */
+  it('resolves a skill before opening the stream, so a refusal can be a status', async () => {
     const { controller, timeline, res } = harness()
     await controller.chat(
       USER as never,
       { messages: MESSAGES, workspaceId: 'ws1', skillId: 'sk1' },
       res as never,
     )
-    assert.deepEqual(stepsIn(timeline), ['workspace', 'skill', 'writing'])
+    assert.deepEqual(
+      stepsIn(timeline),
+      ['workspace', 'skill', 'writing'],
+      'the reader sees the same steps in the same order as before',
+    )
     assert.ok(
-      announced(timeline, 'skill') < called(timeline, 'buildInvocationContext'),
-      `announced after the fact — timeline: ${JSON.stringify(timeline)}`,
+      called(timeline, 'buildInvocationContext') < announced(timeline, 'workspace'),
+      `the skill was resolved after the stream had already started — timeline: ${JSON.stringify(timeline)}`,
     )
   })
 
@@ -183,21 +208,31 @@ describe('G13-10 — the assistant says what it is reading', () => {
     assert.equal(called(timeline, 'buildInvocationContext'), -1, 'and no skill was resolved')
   })
 
-  it('sends a refused skill down the open stream instead of a status code', async () => {
-    // The stream is already open by the time a skill can be refused, and
-    // res.status().send() throws on flushed headers — the client would get a
-    // truncated stream carrying no reason, which is worse than the 4xx it used
-    // to receive.
+  it('refuses a skill with a status code, having written nothing', async () => {
+    /*
+     * The refusal is left to propagate as the exception the skills service
+     * already throws, so Nest maps it to the 400 or 404 it deserves. Nothing
+     * may have been written by then: a single frame on the wire means the
+     * headers are flushed and the status is spent, which is the state this
+     * whole ordering exists to avoid.
+     */
     const { controller, timeline, res } = harness({ skillThrows: true })
-    await controller.chat(
-      USER as never,
-      { messages: MESSAGES, workspaceId: 'ws1', skillId: 'sk1' },
-      res as never,
-    )
 
-    const joined = timeline.join('\n')
-    assert.ok(joined.includes('This skill is disabled'), 'the reason is on the wire')
-    assert.ok(joined.includes('[DONE]'), 'and the stream is closed properly')
+    await assert.rejects(
+      () =>
+        controller.chat(
+          USER as never,
+          { messages: MESSAGES, workspaceId: 'ws1', skillId: 'sk1' },
+          res as never,
+        ),
+      /disabled/,
+      'the refusal was swallowed, so the caller cannot have been given a status',
+    )
+    assert.deepEqual(
+      timeline.filter((e) => e.startsWith('write ')),
+      [],
+      `the stream was already open when the skill was refused — timeline: ${JSON.stringify(timeline)}`,
+    )
     assert.ok(!stepsIn(timeline).includes('writing'), 'and no answer was attempted')
   })
 

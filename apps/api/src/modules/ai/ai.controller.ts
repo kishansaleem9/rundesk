@@ -269,6 +269,40 @@ export class AiController {
      * work rather than decoration: skip buildWorkspaceContext and its line
      * never appears.
      */
+    /*
+     * §15 — resolved BEFORE the stream opens, and that ordering is the point.
+     *
+     * The skill is resolved through SkillsService rather than by reading the
+     * row here: the service owns the visibility filter and the enabled check,
+     * so going through it is what stops a caller invoking a skill they cannot
+     * see, or one its owner has switched off. A skillId without a workspaceId
+     * is not resolvable at all — the id alone names nothing this endpoint may
+     * open.
+     *
+     * This used to sit below, after the stream had been opened, and the
+     * refusal had to go down the stream as an error frame because
+     * `res.status().send()` throws once headers have flushed. It failed closed,
+     * which was the important half — but the CALLER saw HTTP 201 and had to
+     * read the body to discover it had been refused, which is not what a
+     * status code is for. A deployed-app check asserting the 4xx read that 201
+     * as "a disabled skill was accepted", and could not have read it any other
+     * way.
+     *
+     * Resolving first costs one await before the first byte, only on a request
+     * that names a skill, and lets the refusal be an ordinary 400/404 again.
+     * The exception is left to propagate rather than caught: the service
+     * already throws the right ones, and the headers have not been sent yet.
+     */
+    let skillPrompt: string | undefined
+    if (body.skillId && body.workspaceId) {
+      const invocation = await this.skills.buildInvocationContext(
+        body.workspaceId,
+        user.id,
+        body.skillId,
+      )
+      skillPrompt = this.skills.renderSkillPrompt(invocation)
+    }
+
     const stream = openSseStream(res)
     const step = (name: string) => stream.write(`data: ${JSON.stringify({ step: name })}\n\n`)
 
@@ -282,39 +316,11 @@ export class AiController {
       context = body.workspaceContext ?? ''
     }
 
-    // §15 — resolve the skill through SkillsService rather than reading the row
-    // here. The service owns the visibility filter and the enabled check, so
-    // going through it is what stops a caller invoking a skill they cannot see,
-    // or one its owner has switched off. A skillId without a workspaceId is not
-    // resolvable at all: the id alone names nothing this endpoint may open.
-    let skillPrompt: string | undefined
-    if (body.skillId && body.workspaceId) {
-      try {
-        step('skill')
-        const invocation = await this.skills.buildInvocationContext(
-          body.workspaceId,
-          user.id,
-          body.skillId,
-        )
-        skillPrompt = this.skills.renderSkillPrompt(invocation)
-      } catch (err) {
-        /*
-         * Failing closed matters more than streaming something: silently
-         * answering as the generic assistant would look like the skill worked.
-         *
-         * The stream is already open by now, so the refusal goes down it as an
-         * error frame. `res.status().send()` throws once headers have flushed,
-         * and the client would be left with a truncated stream carrying no
-         * reason — worse than the 4xx it used to get.
-         */
-        stream.write(
-          `data: ${JSON.stringify({ error: err instanceof Error ? err.message : 'Skill unavailable' })}\n\n`,
-        )
-        stream.write('data: [DONE]\n\n')
-        stream.end()
-        return
-      }
-    }
+    // The trace still names the skill, in the place it always appeared. It
+    // reports work already done rather than announcing work about to start —
+    // the one step here that does, because a refusal has to be answerable with
+    // a status code and that has to happen before anything is written.
+    if (skillPrompt) step('skill')
 
     await this.ai.chatStream(
       body.messages,
