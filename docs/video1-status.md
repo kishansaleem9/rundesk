@@ -3054,3 +3054,51 @@ It now restores **every** file and rebuilds **both** apps before each break, so
 each run differs from clean by one thing. With that, the three breaks separate
 cleanly — the debounce never firing, the note never loaded back, and the server
 dropping the write each fail on their own checks.
+
+### The Notepad fixture broke three unrelated checks
+
+CI failed on the Notepad commit, and not one of the failures was the Notepad:
+
+```
+[A1.9]   no New button
+[A6.4]   no global AI affordance
+[G13-10] no ai-dock-toggle on the top bar
+```
+
+The fixture pinned Notepad to the top bar and then "restored" what it found:
+
+```js
+const pinnedBefore = (await A('/users/me')).data?.topbarPinned ?? []
+…
+await A('/users/me', { method: 'PATCH', body: { topbarPinned: pinnedBefore } })
+```
+
+**An unset pinned list is not an empty one.** `resolvePinned`
+(`topbar-prefs.ts:84`) reads an array literally — `[]` means *pin nothing* —
+and only falls back when the value is absent. So `?? []` wrote an explicit
+empty list over an account that had simply never chosen, emptying its top bar
+for every suite that ran after it in the same job.
+
+That is the same defect this document already records fixing in the product,
+where clearing nav favourites stored a deliberate empty list instead of falling
+back. Knowing it did not stop me writing it again, in a fixture.
+
+**The first repair was also wrong, and cost a second run.** Restoring
+`DEFAULT_PINNED` looked safe — but `resolvePinned` has *three* branches, and an
+account with a legacy `topbarHidden` resolves through `LEGACY_ITEMS`, which
+includes `ai`. Writing the defaults over that removed the AI dock toggle, so
+A1.9 came back and A6.4/G13-10 stayed broken.
+
+It now mirrors the real fallback chain — explicit list, else legacy minus
+hidden, else defaults — because `PATCH /users/me` refuses a null
+`topbarPinned`, so once a fixture writes one it can never restore "unset". The
+best it can do is restore the set that was *in effect*, and that means
+reproducing the resolution rather than guessing at it.
+
+A sixth check now asserts the cleanup left the bar **exactly** as it found it.
+It caught local pollution from the previous run on its first execution, which
+is the point: **a fixture that quietly disarms later suites is worse than one
+that fails.**
+
+Verified in the order CI runs them — `settings-depth` 57/57, then
+`video-regression` 90/90, the exact sequence that failed.

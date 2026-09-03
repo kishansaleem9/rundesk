@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 56
+const EXPECTED_CHECKS = 57
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -660,7 +660,42 @@ try {
    * that only looked at the DOM.
    */
   {
-    const pinnedBefore = (await A('/users/me')).data?.topbarPinned ?? []
+    /*
+     * An UNSET pinned list is not an empty one.
+     *
+     * resolvePinned (topbar-prefs.ts:84) reads an array literally — `[]` means
+     * "pin nothing" — and falls back to DEFAULT_PINNED only when the value is
+     * absent. Restoring `?? []` therefore wrote an explicit empty list over an
+     * account that had simply never chosen, emptying its top bar for every
+     * suite that ran afterwards. It cost a CI run: video-regression lost the
+     * New button, the AI affordance and the dock toggle, none of which had
+     * anything to do with the change under test.
+     *
+     * Same defect this audit already fixed once in the product, where clearing
+     * nav favourites stored a deliberate empty list instead of falling back —
+     * reproduced here in a fixture.
+     */
+    /*
+     * Restore the RESOLVED set, because "unset" cannot be written back.
+     *
+     * PATCH /users/me refuses a null topbarPinned ("must be an array"), so once
+     * this fixture writes one it can never put the account back to unset. What
+     * it can do is restore the set that was in effect — which means mirroring
+     * resolvePinned's own fallback chain rather than guessing a default.
+     *
+     * Guessing cost a second CI run. DEFAULT_PINNED omits 'ai', but an account
+     * with a legacy `topbarHidden` resolves through LEGACY_ITEMS, which
+     * INCLUDES it — so writing the defaults over it removed the AI dock toggle
+     * and video-regression lost A6.4 and G13-10.
+     */
+    const DEFAULT_PINNED = ['create', 'timer', 'theme']
+    const LEGACY_ITEMS = ['notifications', 'theme', 'timer', 'ai', 'create']
+    const meNow = (await A('/users/me')).data ?? {}
+    const pinnedBefore = Array.isArray(meNow.topbarPinned)
+      ? meNow.topbarPinned
+      : Array.isArray(meNow.topbarHidden)
+        ? LEGACY_ITEMS.filter((i) => !meNow.topbarHidden.includes(i))
+        : DEFAULT_PINNED
     await A('/users/me', {
       method: 'PATCH',
       body: { topbarPinned: [...new Set([...pinnedBefore, 'notepad'])] },
@@ -704,7 +739,19 @@ try {
     )
 
     await A('/users/me/notepad', { method: 'PUT', body: { content: '' } })
+    // Put back what was there. When nothing was, write the defaults explicitly:
+    // that resolves identically to unset, and never leaves a bare [] behind.
     await A('/users/me', { method: 'PATCH', body: { topbarPinned: pinnedBefore } })
+
+    // And prove the cleanup left a usable bar, rather than trusting it did.
+    // A fixture that quietly disarms later suites is worse than a failing one.
+    const expected = [...pinnedBefore].sort()
+    const after = [...((await A('/users/me')).data?.topbarPinned ?? [])].sort()
+    check(
+      after.join(',') === expected.join(','),
+      'and the top bar is left exactly as it was found',
+      `cleanup left ${JSON.stringify(after)}, expected ${JSON.stringify(expected)}`,
+    )
   }
 
   await done(browser, stack, restore)
