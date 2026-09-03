@@ -353,6 +353,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # Video 1 acceptance walk — ONE session touching every shipped surface in
+      # the order a person meets them. The per-feature suites own correctness;
+      # this owns "they are all really there, together, in one running product",
+      # which is where cross-feature interactions surface.
+      - name: Video 1 acceptance walk
+        if: '!cancelled()'
+        run: node test/e2e/video1-acceptance.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: The DM tab strip (A3.9)
         if: '!cancelled()'
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist

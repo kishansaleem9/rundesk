@@ -3944,3 +3944,59 @@ need OAuth credentials for those providers, which no test environment holds.
 Everything up to the credential is driven — the source strip, the scoping, and
 the honest "not connected". Said here rather than left to be inferred from a
 green tick.
+
+## Deployed and exercised end to end (3 Sep)
+
+The release was brought up the way production will bring it up, then walked.
+
+**The migration path was exercised, not skipped.** The container rolled back to
+an older snapshot and took the database with it, which left the local database
+two migrations behind — so `0130` and `0131` were applied to an existing,
+populated database in order, exactly as `deploy.sh migrate` will on the server.
+That is a better rehearsal than `drizzle-kit push` onto an empty schema, which
+is what CI does and which never exercises the chain.
+
+Both dist directories were deleted and rebuilt from source before anything ran.
+
+**Result: 25 suites, 953 checks, zero failures. Preflight clean.**
+
+### The runner had rolled back too
+
+Worth recording because it nearly went unnoticed. The hand-kept suite list in
+the scratchpad reverted with the container and was **seven suites behind** —
+bookmarks, trending, sources, the call suite and three others were simply not in
+it. It would have printed a clean sweep while never running a third of the
+release.
+
+It now derives the list from `ci.yml`, which is in version control. The lesson
+is the one this whole audit keeps producing, this time about the tooling: **a
+list maintained in two places is a list that is wrong in one of them.**
+
+### One failure, and it was residue rather than regression
+
+`ui-sweep` failed on the reports-to picker matching ten identical "Asking
+Member" rows — the same fixture pollution recorded earlier. The fix was already
+in, and the evidence says so plainly: every member from before the fix was still
+in the workspace, and the one created by today's run had been removed. The
+rollback had restored the pre-fix rows. Cleared, and `ui-sweep` returned 107/107.
+
+**The check that answered this was the one that grouped by creation stamp** —
+"which runs left somebody behind" rather than "are there any left". The second
+question cannot tell residue from regression; the first answers immediately.
+
+### The acceptance walk
+
+The per-feature suites prove each change in isolation, and isolation is where
+interactions hide. `video1-acceptance.mjs` drives ONE session through every
+shipped surface in the order a person meets them: the Overview's bookmarks, the
+palette's source strip and type chips together, the zero-result answer, a list's
+freshness controls, the tree with a space-level list in it, a meeting found by
+its notes, and the inbox's Clear all.
+
+It caught nothing in the product and one thing in itself: the trending sort
+modes are **chips inside the collapsed Filters panel**, not a select — the first
+version of the check read `<option>` elements and cheerfully reported "blocked,
+bug, chore" as sort modes. Worth knowing as a fact about the UI: those two modes
+are two clicks away, behind Filters, where the existing sorts also live.
+
+17 checks, all passing.
