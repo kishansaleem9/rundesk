@@ -45,6 +45,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { forgetSearch, recentSearches, rememberSearch } from '../lib/recent-searches'
+import { rememberRevealedTypes, revealedTypesFor } from '../lib/revealed-types'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
 type SearchHit = { id: string; entityType: string; title: string; content: string; url: string }
@@ -129,7 +130,13 @@ export function CommandPalette({
   // the default because it is what a text query is for.
   const [sortBy, setSortBy] = useState<'relevance' | 'updated' | 'created'>('relevance')
   const [typeFilter, setTypeFilter] = useState<Set<SearchEntityType>>(() => new Set())
-  /** Types promoted out of the ⋯ menu and now showing as chips. */
+  /**
+   * §G02-6 — types promoted out of the ⋯ menu and now showing as chips.
+   *
+   * Seeded from storage rather than empty. The palette is mounted only while
+   * it is open, so a chip promoted here used to vanish the moment it closed:
+   * the control worked exactly once and then undid itself.
+   */
   const [revealedTypes, setRevealedTypes] = useState<Set<SearchEntityType>>(() => new Set())
   const [typeMenuOpen, setTypeMenuOpen] = useState(false)
   const typeParam = [...typeFilter].join(',')
@@ -180,6 +187,21 @@ export function CommandPalette({
     () => getWorkspaceIdFromPath(location.pathname),
     [location.pathname],
   )
+
+  // §G02-6 — restore the promoted chips for this workspace. Keyed on
+  // workspaceId as well as `open`, because switching workspace inside an open
+  // palette should bring that workspace's chips, not keep the last one's.
+  useEffect(() => {
+    if (!open) return
+    setRevealedTypes(
+      new Set(
+        revealedTypesFor(workspaceId).filter(
+          (t): t is SearchEntityType => (ENTITY_ORDER as readonly string[]).includes(t),
+        ),
+      ),
+    )
+  }, [open, workspaceId])
+
 
   const labelsQuery = useQuery({
     enabled: open && Boolean(workspaceId),
@@ -756,7 +778,11 @@ export function CommandPalette({
                         type="button"
                         data-testid={`palette-add-type-${v}`}
                         onClick={() => {
-                          setRevealedTypes((prev) => new Set(prev).add(v))
+                          setRevealedTypes((prev) => {
+                            const next = new Set(prev).add(v)
+                            rememberRevealedTypes(workspaceId, next)
+                            return next
+                          })
                           setTypeMenuOpen(false)
                         }}
                         className="w-full rounded-md px-2 py-1 text-left text-[12px] text-muted-foreground hover:bg-accent/10 hover:text-foreground"

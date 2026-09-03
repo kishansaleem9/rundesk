@@ -636,6 +636,49 @@ try {
    * Google, and what is being checked is that the app tries to open the URL it
    * was given — not that Google answers.
    */
+  /*
+   * ── §G02-6 [02:01] — a promoted chip stays promoted ───────────────────────
+   *
+   * > "yeh 3 DOTS dekh rahe hain? … to folders yahan pe appear ho jayega."
+   *
+   * The palette is mounted only while it is open, so `revealedTypes` started
+   * empty on every ⌘K and the chip you promoted was gone the next time. The
+   * control worked exactly once and then undid itself, which is worse than not
+   * offering it — you learn it does nothing.
+   *
+   * The reopen is the whole check. Asserting the chip appears after the click
+   * would have passed the entire time it was broken.
+   */
+  console.log('\n▶ §G02-6 — the ⋯ menu remembers what you promoted')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  await page.keyboard.press('Control+k')
+  await page.waitForTimeout(900)
+  chk(
+    !(await page.getByTestId('palette-type-folder').isVisible().catch(() => false)),
+    'Folders starts behind the ⋯, not on the bar',
+    'the Folders chip is already on the bar, so promoting it proves nothing',
+  )
+  await page.getByTestId('palette-more-types').click()
+  await page.waitForTimeout(600)
+  await page.getByTestId('palette-add-type-folder').click()
+  await page.waitForTimeout(600)
+  chk(
+    await page.getByTestId('palette-type-folder').isVisible().catch(() => false),
+    'choosing Folders puts it on the bar',
+    'the promoted type never appeared as a chip',
+  )
+
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(600)
+  await page.keyboard.press('Control+k')
+  await page.waitForTimeout(1200)
+  chk(
+    await page.getByTestId('palette-type-folder').isVisible().catch(() => false),
+    'and it is still there the next time the palette opens',
+    'the promoted chip was forgotten as soon as the palette closed',
+  )
+
   console.log('\n▶ §G03-5 — a Drive result opens instead of doing nothing')
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)

@@ -3519,3 +3519,61 @@ that reacting to your own comment tells you nothing. And the first break was
 written against the guard itself, which narrowed a type and would not compile;
 inverting the guard breaks the behaviour without breaking the build, which is
 the difference between a break and a typo.
+
+
+## The chip that promoted itself and forgot (3 Sep)
+
+> `[02:01]` — "yeh 3 DOTS dekh rahe hain? Main yahan se aur points pe click out
+> kar ke … to folders yahan pe appear ho jayega."
+
+Choosing Folders from the overflow put a Folders chip on the bar, and the
+palette is mounted only while it is open (`routes/app.tsx:183` renders it
+behind `cmdOpen ?`), so `revealedTypes` started empty on every ⌘K. The chip was
+gone the next time. **The control worked exactly once and then undid itself,
+which is worse than not offering it — you learn it does nothing.**
+
+Stored per workspace in localStorage, beside `recent-searches` and for the same
+reason: this is which chips one person likes seeing, not a record, and the types
+worth having on the bar differ between a workspace full of docs and one full of
+tasks. The setter takes the whole set rather than one addition, because a merge
+would quietly resurrect a chip somebody had removed.
+
+**The reopen is the entire check.** Asserting the chip appears after the click
+would have passed the whole time it was broken — it did appear, and then it
+went away. Two breaks, both caught: the restore reading nothing, and the
+promotion never written.
+
+
+## What is still open, with the evidence (3 Sep)
+
+Written down so the next pass starts from measurements rather than from this
+document's own optimism. Each was checked against the code today.
+
+**A minimised call does not survive navigation.** `ChannelCall` is rendered in
+exactly one place — `workspace-chat-page.tsx:1530` — and its unmount effect
+(`components/call/channel-call.tsx:165-172`) stops every track and calls
+`leave()`. So clicking any task hangs up. The picture-in-picture dock renders
+and looks right, which makes this worse than an absence: the feature appears to
+work until you use it for the one thing it is for. The fix is a shell-level
+host in `routes/app.tsx` so the call outlives the route, and it moves the call
+state, the WebRTC hooks and the dock up with it — which is why it is named here
+rather than half-done.
+
+**Skill Connections bind but never act.** `skills.service.ts:554-559` names the
+attached providers in the prompt and `:561-565` explicitly forbids acting on
+them. No credential is ever resolved. "Connect it to any system" is currently a
+label on an inert list.
+
+**Meetings are invisible to search and the Knowledge tab.**
+`knowledge-embeddings.ts:19` is still `'task' | 'doc' | 'comment' |
+'attachment'` and `search.service.ts` has no `meeting` entity, so a meeting you
+can read on its own page cannot be found from anywhere else.
+
+**Freshness chrome is dashboard-only** (`app.$workspaceId.dashboard.tsx:320-346`
+is the only reader), **there is no engagement or trending sort** (sort is still
+`relevance | updated | created`), **no Gmail or SharePoint source** (only Drive,
+and only as an entity chip), and **workspace Bookmarks do not exist at any
+layer** — no table, no module, no route.
+
+None of these is blocked. They are simply not done, and saying which is which
+is the point of writing them here.
