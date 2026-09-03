@@ -22,6 +22,8 @@
  * nothing is created in a workspace somebody actually uses.
  */
 
+import { signInApi } from './signin.mjs'
+
 /** A tiny API client bound to one token, shaped like the ones in the suites. */
 export function apiClient(base, token) {
   return async (route, init = {}) => {
@@ -43,17 +45,14 @@ export function apiClient(base, token) {
   }
 }
 
-export async function login(base, email, password) {
-  const res = await fetch(`${base}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  })
-  const json = await res.json()
-  const token = json?.data?.accessToken
-  if (!token) throw new Error(`could not sign in as ${email}: ${JSON.stringify(json).slice(0, 200)}`)
-  return json.data
-}
+/**
+ * Sign in over HTTP.
+ *
+ * One line, because the interesting part — the login route's 10-a-minute limit,
+ * which the suites collectively exceed in CI — is handled in one place for
+ * every suite. See `signin.mjs`.
+ */
+export const login = signInApi
 
 /**
  * The workspace a sweep should run against.

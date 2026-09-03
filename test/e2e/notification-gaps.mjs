@@ -20,6 +20,7 @@
  *   node test/e2e/notification-gaps.mjs --api 3011
  */
 import path from 'node:path'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -58,11 +59,7 @@ const apiAs = (token) => async (route, init = {}) => {
   const json = await res.json().catch(() => null)
   return { status: res.status, data: json?.data, error: json?.error }
 }
-const loginAs = async (who) => {
-  const r = await apiAs(null)('/auth/login', { method: 'POST', body: who })
-  if (!r.data?.accessToken) throw new Error(`login failed for ${who.email}: ${r.status}`)
-  return r.data
-}
+const loginAs = (who) => signInApi(API, who.email, who.password)
 const settle = () => new Promise((r) => setTimeout(r, 2000))
 
 try {

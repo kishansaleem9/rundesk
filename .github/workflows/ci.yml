@@ -89,7 +89,14 @@ jobs:
   postgres-harnesses:
     name: Postgres harnesses
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Measured, not guessed: the run at 2cd5d0a reached its seventeenth suite
+    # 18m30s in, and the three after it add roughly three minutes more. The 20
+    # here dated from when this job ran a handful of suites; it now runs
+    # twenty-one, against a real API and a real Postgres, plus the occasional
+    # pause the login rate limit imposes (see test/e2e/lib/signin.mjs).
+    # Splitting the suites across two parallel jobs is the next lever if it
+    # keeps growing — that costs a second setup, so it is not worth it yet.
+    timeout-minutes: 32
 
     services:
       postgres:

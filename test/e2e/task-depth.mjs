@@ -23,6 +23,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -166,13 +167,7 @@ try {
     process.exit(2)
   }
 
-  const loginRes = await fetch(`${API}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(ADMIN),
-  })
-  const admin = (await loginRes.json())?.data
-  if (!admin?.accessToken) throw new Error(`could not sign in as ${ADMIN.email}`)
+  const admin = await signInApi(API, ADMIN.email, ADMIN.password)
   const A = apiAs(admin.accessToken)
   const workspaceId = admin.workspaces[0].id
   const meId = admin.user?.id ?? admin.id
@@ -965,15 +960,13 @@ try {
    * ---------------------------------------------------------------------
    */
   console.log('\n▶ G10-10 / G10-11 — comments and subtasks are their own kinds of news')
-  const otherLogin = await fetch(`${API}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      email: process.env.RUNDESK_EMAIL_2 ?? 'org-admin@rundesk.internal',
-      password: process.env.RUNDESK_PASSWORD_2 ?? 'OrgAdmin@123!',
-    }),
-  }).then((r) => r.json()).catch(() => null)
-  const other = otherLogin?.data
+  // Tolerant on purpose: without a second account the checks below report
+  // themselves as undriven rather than the suite falling over.
+  const other = await signInApi(
+    API,
+    process.env.RUNDESK_EMAIL_2 ?? 'org-admin@rundesk.internal',
+    process.env.RUNDESK_PASSWORD_2 ?? 'OrgAdmin@123!',
+  ).catch(() => null)
   if (!other?.accessToken) {
     check(false, 'a second account to be notified', 'could not sign in as the second user')
     check(false, 'so comment_assigned was never driven')

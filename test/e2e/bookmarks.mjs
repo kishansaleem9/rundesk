@@ -16,6 +16,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -58,9 +59,8 @@ const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 
 try {
-  const login = await apiAs(null)('/auth/login', { method: 'POST', body: ME })
-  if (!login.data?.accessToken) throw new Error(`login failed: ${login.status}`)
-  const A = apiAs(login.data.accessToken)
+  const login = await signInApi(API, ME.email, ME.password)
+  const A = apiAs(login.accessToken)
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
   const stamp = Date.now()
@@ -115,15 +115,12 @@ try {
    * an id. Break-testing found it.
    */
   const mine = external.data?.id
-  const peer = await apiAs(null)('/auth/login', {
-    method: 'POST',
-    body: {
-      email: process.env.E2E_PEER_EMAIL ?? 'org-admin@rundesk.internal',
-      password: process.env.E2E_PEER_PASSWORD ?? 'OrgAdmin@123!',
-    },
-  })
-  if (!peer.data?.accessToken) throw new Error('could not sign in as the peer')
-  const B = apiAs(peer.data.accessToken)
+  const peer = await signInApi(
+    API,
+    process.env.E2E_PEER_EMAIL ?? 'org-admin@rundesk.internal',
+    process.env.E2E_PEER_PASSWORD ?? 'OrgAdmin@123!',
+  )
+  const B = apiAs(peer.accessToken)
   const stray = await B(`/workspaces/${workspaceId}/bookmarks/${mine}`, { method: 'DELETE' })
   const survives = ((await A(`/workspaces/${workspaceId}/bookmarks`)).data ?? []).some((b) => b.id === mine)
   chk(

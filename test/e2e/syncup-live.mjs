@@ -38,6 +38,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -268,17 +269,30 @@ if (!reachable) {
   )
   process.exit(2)
 }
-const login = await api(null, 'POST', '/auth/login', ADMIN)
-check(login.status === 200 || login.status === 201, 'the API is up and the seed account works', `login -> ${login.status}`)
-if (login.status >= 400) await done(null, stack)
+/*
+ * These two sign-ins are CHECKS — "the API is up and the seed account works",
+ * with the guidance for fixing it attached — so a failure has to come back as a
+ * status this can report, not as a thrown error that loses the message. The
+ * rate-limit-aware sign-in is still underneath: see lib/signin.mjs for why the
+ * login route needs one.
+ */
+const signInFor = (who) =>
+  signInApi(`${stack.apiBase}/api/v1`, who.email, who.password).then(
+    (data) => ({ ok: true, data, why: '' }),
+    (err) => ({ ok: false, data: null, why: err.message }),
+  )
+
+const login = await signInFor(ADMIN)
+check(login.ok, 'the API is up and the seed account works', login.why)
+if (!login.ok) await done(null, stack)
 const admin = login.data
-const secondLogin = await api(null, 'POST', '/auth/login', OTHER)
+const secondLogin = await signInFor(OTHER)
 check(
-  secondLogin.status === 200 || secondLogin.status === 201,
+  secondLogin.ok,
   `and so does the second account (${OTHER.email})`,
-  `login -> ${secondLogin.status}. Set RUNDESK_EMAIL2 / RUNDESK_PASSWORD2 to a real second member of the same workspace — a call needs two people.`,
+  `${secondLogin.why}. Set RUNDESK_EMAIL2 / RUNDESK_PASSWORD2 to a real second member of the same workspace — a call needs two people.`,
 )
-if (secondLogin.status >= 400) await done(null, stack)
+if (!secondLogin.ok) await done(null, stack)
 const other = secondLogin.data
 const WS = admin.workspaces?.[0]?.id
 check(!!WS, 'both are in a workspace', `workspaces: ${JSON.stringify(admin.workspaces)?.slice(0, 120)}`)

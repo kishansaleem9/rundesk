@@ -18,6 +18,7 @@ import http from 'node:http'
 import net from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
+import { retryAfterMs } from './signin.mjs'
 
 const TYPES = {
   '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html',
@@ -27,6 +28,73 @@ const TYPES = {
 }
 
 const isApi = (url) => url.startsWith('/api') || url.startsWith('/socket.io') || url.startsWith('/realtime')
+
+/**
+ * Signing in through the FORM, when the login route is entitled to throttle.
+ *
+ * `/auth/login` allows 10 requests a minute per IP, and in CI every suite is
+ * the same IP. A browser suite spends two of that budget on itself — one POST
+ * for its API token, one more when it drives the form — so a run of quick
+ * suites empties the window and whichever suite is running when it does starves
+ * on a 429 it did nothing to earn.
+ *
+ * The API-side half of that is handled in `signin.mjs`, which every suite now
+ * shares. This is the other half, and it lives here because every suite's
+ * browser reaches the API through this one proxy: doing it here covers all
+ * twenty-odd form sign-ins without twenty-odd call sites having to remember,
+ * and covers the next suite too.
+ *
+ * It matters that the page never sees the 429. A throttled sign-in leaves the
+ * form on screen looking exactly like a wrong password, so the suite's
+ * `waitForURL` burns its whole timeout and then reports something untrue about
+ * the app — the failure names the wrong thing, which is worse than the delay.
+ *
+ * Only 429 is retried, and only for the login POST: every other response,
+ * including a real 401, is handed back untouched and immediately.
+ */
+const LOGIN_ATTEMPTS = 4
+const isLogin = (req) => req.method === 'POST' && req.url.includes('/auth/login')
+
+/** Collect a request body so it can be sent more than once. Login bodies are tiny. */
+const readBody = (req) =>
+  new Promise((resolve, reject) => {
+    const chunks = []
+    req.on('data', (chunk) => chunks.push(chunk))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', reject)
+  })
+
+/** One upstream round trip, resolved with the response. */
+const forward = ({ apiPort, path: reqPath, method, headers, body }) =>
+  new Promise((resolve, reject) => {
+    const upstream = http.request({ host: '127.0.0.1', port: apiPort, path: reqPath, method, headers }, resolve)
+    upstream.on('error', reject)
+    upstream.end(body)
+  })
+
+async function proxyLogin(req, res, apiPort) {
+  try {
+    const body = await readBody(req)
+    // Re-sent verbatim, so the length is restated rather than inherited: a
+    // chunked original would otherwise contradict the buffer we now hold.
+    const headers = { ...req.headers, 'content-length': String(body.length) }
+    delete headers['transfer-encoding']
+
+    for (let attempt = 1; ; attempt++) {
+      const up = await forward({ apiPort, path: req.url, method: req.method, headers, body })
+      if (up.statusCode !== 429 || attempt >= LOGIN_ATTEMPTS) {
+        res.writeHead(up.statusCode ?? 502, up.headers)
+        up.pipe(res)
+        return
+      }
+      up.resume() // Drain the 429 so the socket is free for the retry.
+      await new Promise((r) => setTimeout(r, retryAfterMs(up.headers['retry-after'], null)))
+    }
+  } catch (err) {
+    res.writeHead(502, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: `api proxy: ${err.message}` }))
+  }
+}
 
 /**
  * @param {object} opts
@@ -40,6 +108,10 @@ const isApi = (url) => url.startsWith('/api') || url.startsWith('/socket.io') ||
 export async function startLocalStack({ dist, apiPort, port: bindPort = 0 }) {
   const server = http.createServer((req, res) => {
     if (isApi(req.url)) {
+      if (isLogin(req)) {
+        void proxyLogin(req, res, apiPort)
+        return
+      }
       const upstream = http.request(
         { host: '127.0.0.1', port: apiPort, path: req.url, method: req.method, headers: req.headers },
         (up) => {

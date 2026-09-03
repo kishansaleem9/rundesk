@@ -29,6 +29,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -148,18 +149,7 @@ const OTHER = {
 
 const API = REMOTE ? `http://127.0.0.1:${API_PORT}/api/v1` : `http://127.0.0.1:${API_PORT}/api/v1`
 
-async function apiLogin(who) {
-  const res = await fetch(`${API}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(who),
-  })
-  const json = await res.json().catch(() => null)
-  if (!json?.data?.accessToken) {
-    throw new Error(`could not sign in as ${who.email}: ${res.status} ${JSON.stringify(json).slice(0, 200)}`)
-  }
-  return json.data
-}
+const apiLogin = (who) => signInApi(API, who.email, who.password)
 
 const apiAs = (token) => async (route, init = {}) => {
   // Only declare a JSON body when there is one: Fastify refuses an empty body

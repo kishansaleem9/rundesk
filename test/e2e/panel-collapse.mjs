@@ -24,6 +24,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -169,13 +170,7 @@ try {
     process.exit(2)
   }
 
-  const loginRes = await fetch(`${API}/auth/login`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(ADMIN),
-  })
-  const admin = (await loginRes.json())?.data
-  if (!admin?.accessToken) throw new Error(`could not sign in as ${ADMIN.email}`)
+  const admin = await signInApi(API, ADMIN.email, ADMIN.password)
   const A = apiAs(admin.accessToken)
   const workspaceId = admin.workspaces[0].id
 

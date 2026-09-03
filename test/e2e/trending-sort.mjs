@@ -14,6 +14,8 @@
  *
  *   node test/e2e/trending-sort.mjs --api 3011
  */
+import { signInApi } from './lib/signin.mjs'
+
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
   return i === -1 ? fallback : process.argv[i + 1]
@@ -50,11 +52,7 @@ const apiAs = (token) => async (route, init = {}) => {
   const json = await res.json().catch(() => null)
   return { status: res.status, data: json?.data, error: json?.error }
 }
-const loginAs = async (who) => {
-  const r = await apiAs(null)('/auth/login', { method: 'POST', body: who })
-  if (!r.data?.accessToken) throw new Error(`login failed for ${who.email}: ${r.status}`)
-  return r.data
-}
+const loginAs = (who) => signInApi(API, who.email, who.password)
 const split = (hitId) => {
   const at = hitId.indexOf('-')
   return { entityType: hitId.slice(0, at), entityId: hitId.slice(at + 1) }

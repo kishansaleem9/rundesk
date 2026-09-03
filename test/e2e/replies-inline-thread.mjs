@@ -17,6 +17,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -59,11 +60,7 @@ const apiAs = (token) => async (route, init = {}) => {
   const json = await res.json().catch(() => null)
   return { status: res.status, data: json?.data, error: json?.error }
 }
-const loginAs = async (who) => {
-  const r = await apiAs(null)('/auth/login', { method: 'POST', body: who })
-  if (!r.data?.accessToken) throw new Error(`login failed for ${who.email}: ${r.status}`)
-  return r.data
-}
+const loginAs = (who) => signInApi(API, who.email, who.password)
 
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
