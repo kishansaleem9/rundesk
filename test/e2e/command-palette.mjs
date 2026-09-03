@@ -88,6 +88,16 @@ const SESSION = {
  * the whole point: under the old filter every one of these scored 0.
  */
 const QUERY = 'kubernetes'
+/*
+ * §G02 — a SECOND query that also finds results, used once at the very end.
+ *
+ * It has to be a query the palette has never asked the assistant about. The
+ * answer cache is keyed on the query text and holds for five minutes, so
+ * re-typing QUERY there would be served from cache and make no request — and
+ * "it did not ask" would then be true of a palette that asks on every single
+ * search. Break-testing caught exactly that.
+ */
+const QUERY_WITH_HITS = 'kubernetes-rollout'
 const HITS = [
   {
     id: 'task-11111111-1111-4111-8111-111111111111',
@@ -148,17 +158,33 @@ const MEMBERS = [
 
 /** Every /search request this run made, so the filters can be read off the wire. */
 const searchCalls = []
+/** §G02 — every /ai/knowledge request, so "asked once" can be read off the wire. */
+const knowledgeStubCalls = []
+const AI_ANSWER = 'Nothing matched, but the closest thing is the Q3 Finance Plan.'
 
 await ctx.route('**/api/**', async (route) => {
   const url = route.request().url()
   let data = []
   if (url.includes('/users/me')) data = USER
   else if (/\/workspaces\/[^/]+\/members(\?|$)/.test(url)) data = MEMBERS
+  else if (url.includes('/ai/knowledge')) {
+    /*
+     * §G02 — the assistant's answer for a query that matched nothing.
+     *
+     * Stubbed deterministically so the check can assert the exact text reaches
+     * the screen. Without this the route falls through to `[]`, the block
+     * renders with nothing in it, and "the answer appeared" would be true of an
+     * empty box — which is the shape this suite exists to catch.
+     */
+    knowledgeStubCalls.push(url)
+    data = { answer: AI_ANSWER, sources: [] }
+  }
   else if (/\/search\/[^/?]+\?/.test(url)) {
     searchCalls.push(url)
     // Answer only the query under test, so an unrelated prefetch cannot
     // populate the list and make this pass for the wrong reason.
-    data = new URL(url).searchParams.get('q') === QUERY ? HITS : []
+    const q = new URL(url).searchParams.get('q')
+    data = q === QUERY || q === QUERY_WITH_HITS ? HITS : []
   }
   return route.fulfill({ status: 200, contentType: 'application/json', body: envelope(data) })
 })
@@ -444,6 +470,53 @@ try {
     (await page.getByTestId('palette-created-after').inputValue().catch(() => 'x')) === '',
     'and the date field is actually empty again',
     'created-after still holds its value after Clear filters',
+  )
+
+  /*
+   * §G02 [03:52 / 04:32], frames 061_0352 / 071_0432 — "No exact matches found,
+   * but here's a relevant answer from ✨ Brain".
+   *
+   * Two things are checked, and the second is the expensive one to get wrong:
+   * the answer appears when search finds nothing, and the assistant is NOT
+   * asked when it finds something. An LLM call per keystroke, or on every
+   * successful search, is a cost nobody sees until the bill.
+   */
+  console.log('\n▶ §G02 — an answer instead of a dead end')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(500)
+  await page.keyboard.press('Control+k')
+  await page.waitForTimeout(700)
+  const nonsense = `zzqqxx-no-such-thing-${Date.now()}`
+  /*
+   * Typed a character at a time, deliberately. `fill()` sets the value in one
+   * shot, so a palette that asked the assistant on EVERY keystroke would still
+   * make exactly one call and the "asked once" check below would be worth
+   * nothing. Typing is what the user does and what the debounce exists for.
+   */
+  await page.locator('[cmdk-input]').first().pressSequentially(nonsense, { delay: 40 })
+  // Longer than the 700ms debounce plus the round trip.
+  await page.waitForTimeout(7000)
+
+  chk(
+    await page.getByTestId('palette-ai-answer').isVisible().catch(() => false),
+    'a query that matches nothing gets an answer rather than a dead end',
+    'no AI answer on a zero-result query',
+  )
+  const answerText = (await page.getByTestId('palette-ai-text').innerText().catch(() => '')).trim()
+  chk(answerText === AI_ANSWER, 'and the answer it renders is the one the server sent',
+    `rendered ${JSON.stringify(answerText)}`)
+  chk(knowledgeStubCalls.length === 1, `asked the assistant once, not per keystroke (${knowledgeStubCalls.length})`,
+    `${knowledgeStubCalls.length} calls to /ai/knowledge for one query`)
+
+  // A query that DOES find something must not spend a model call. Uses the
+  // second hit-producing query so a cached answer cannot stand in for restraint.
+  const beforeHits = knowledgeStubCalls.length
+  await page.locator('[cmdk-input]').first().fill(QUERY_WITH_HITS)
+  await page.waitForTimeout(7000)
+  chk(
+    knowledgeStubCalls.length === beforeHits,
+    'and a search that finds results does not ask at all',
+    `${knowledgeStubCalls.length - beforeHits} extra call(s) when results existed`,
   )
 
   await page.keyboard.press('Escape')

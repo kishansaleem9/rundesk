@@ -3142,3 +3142,44 @@ meeting — a chip row built from ambient data might contain no tags at all, and
 a filter with nothing to filter passes by not running. Three breaks, all
 caught: the chip filtering nothing (`2 → 2`), the Tags row removed, and the
 server ignoring `?tag`.
+
+## The palette's dead end: an answer where there was nothing (3 Sep)
+
+> `[03:52]` / `[04:32]`, frames `061_0352` / `071_0432` — search finds nothing
+> and the palette says: *"No exact matches found, but here's a relevant answer
+> from ✨ Brain"*, with the answer underneath it.
+
+Everything needed for this already existed and none of it was joined up. The
+palette had a search. The API had `POST /ai/knowledge`, grounded in the
+workspace, already serving the AI page. A query that matched nothing produced
+neither — just an empty list.
+
+**The zero-result state did not exist at all.** The audit note said the palette
+showed "static text" there, and that turned out to be wrong in a way worth
+recording: the copy lived inside `<CommandEmpty>`, and cmdk renders that only
+when the list has *no items* — Quick actions always render, so the list is
+never empty and the element never mounts. Rendering the answer inside it would
+have shipped a feature nobody could see. The block sits above Quick actions
+instead. **A component that is present in the source is not a component that is
+on the screen**, and the only way to tell the two apart is to measure the page.
+
+**The guard is the expensive part.** An index read per keystroke is cheap; an
+assistant call per keystroke is a bill. It asks only when all of these hold:
+the text has stopped moving (700 ms behind the box), the search has *answered*
+for that exact text and returned nothing, and there are at least three
+characters. Asking while results are still in flight would put an AI answer
+under a list about to appear.
+
+Four checks, and repairing one of them is the lesson. "A search that finds
+results does not ask at all" originally re-typed the query used earlier in the
+suite — and passed under a deliberately broken build that asked on *every*
+search, because the answer cache is keyed on the query text and served it
+without touching the network. It now uses a second hit-producing query the
+palette has never asked about. Likewise the zero-result query is typed a
+character at a time: `fill()` sets the value in one shot, so "asked once, not
+per keystroke" would have been true of a palette with no debounce at all.
+
+Four breaks, each caught, each against a clean rebuild: the block not rendered
+(2 checks fail), asking regardless of results (2 fail — `1 extra call when
+results existed`), the debounce removed (`24 calls to /ai/knowledge for one
+query`), and a canned line rendered instead of the server's answer.

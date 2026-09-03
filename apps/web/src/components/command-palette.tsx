@@ -336,6 +336,25 @@ export function CommandPalette({
   const commandMode = query.startsWith('/')
   const commandNeedle = commandMode ? query.slice(1).trim().toLowerCase() : ''
 
+  /*
+   * §G02 [03:52 / 04:32], frames 061_0352 and 071_0432 — "No exact matches
+   * found, but here's a relevant answer from ✨ Brain".
+   *
+   * Her zero-result state does not dead-end: the query goes to the assistant
+   * and the answer appears inline, in the same modal. Ours printed "No matches
+   * — try a different keyword", which is the dead end she is pointing at.
+   *
+   * Debounced separately from the search. The search re-keys on every
+   * keystroke and that is fine — it is a cheap index read. An assistant call
+   * per keystroke is not, so this trails the box and fires once, on text that
+   * has stopped moving.
+   */
+  const [settledQuery, setSettledQuery] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => setSettledQuery(query.trim()), 700)
+    return () => clearTimeout(id)
+  }, [query])
+
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
     queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, createdAfter, createdBefore, spaceFilter, folderFilter, listFilter, customFieldId, customFieldValue],
@@ -363,6 +382,42 @@ export function CommandPalette({
       }
       return api<SearchHit[]>(`/search/${workspaceId}?${params.toString()}`)
     },
+  })
+
+  /*
+   * §G02 — the answer that fills the dead end.
+   *
+   * Fires only when all of these hold, and each one is load-bearing:
+   *   · the text has stopped moving (settledQuery), so this is one call and not
+   *     one per keystroke — an index read is cheap, an assistant is not;
+   *   · the search has ANSWERED for the current text and found nothing. Asking
+   *     while results are still in flight would put an AI answer under a list
+   *     that is about to appear;
+   *   · there is a workspace to ground it in, and we are not in command mode.
+   *
+   * Three characters minimum: below that the query is not a question, and the
+   * answer would be noise on the way to typing a real one.
+   */
+  const searchFoundNothing =
+    !commandMode &&
+    settledQuery.length >= 3 &&
+    settledQuery === query.trim() &&
+    !searchQuery.isFetching &&
+    Array.isArray(searchQuery.data) &&
+    searchQuery.data.length === 0
+
+  const aiAnswer = useQuery({
+    enabled: open && Boolean(workspaceId) && searchFoundNothing,
+    queryKey: ['palette-ai-answer', workspaceId, settledQuery],
+    // The answer for a given question does not change minute to minute, and
+    // re-asking on every reopen would spend a model call to say the same thing.
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    queryFn: () =>
+      api<{ answer: string; sources?: Array<{ title?: string; url?: string }> }>('/ai/knowledge', {
+        method: 'POST',
+        body: { workspaceId, question: settledQuery },
+      }),
   })
 
   /*
@@ -1028,6 +1083,37 @@ export function CommandPalette({
               {t('palette.actionBack')}
             </CommandItem>
           </CommandGroup>
+        )}
+
+        {/*
+          §G02 [03:52 / 04:32], frames 061_0352 and 071_0432 — "No exact matches
+          found, but here's a relevant answer from ✨ Brain".
+
+          Rendered here rather than inside <CommandEmpty>, which never appears:
+          cmdk only shows that when the list holds NO items, and the Quick
+          actions below always render for a non-empty query. Measured — with a
+          nonsense query the palette shows "Ask AI" and "Create task" and the
+          empty-state text is not in the DOM at all. So the zero-result state
+          this was filed against was not static text; it did not exist.
+        */}
+        {searchFoundNothing && (aiAnswer.isFetching || aiAnswer.data) && (
+          <div className="px-3 pb-2" data-testid="palette-ai-answer">
+            <div className="rounded-md border border-border/60 bg-card/60 p-2">
+              <div className="flex items-center gap-1.5 pb-1 text-[11px] text-muted-foreground">
+                <Sparkles className="h-3 w-3 text-accent" />
+                {t('palette.aiAnswerHeading')}
+              </div>
+              {aiAnswer.isFetching ? (
+                <p className="text-[12px] text-muted-foreground" data-testid="palette-ai-thinking">
+                  {t('palette.aiAnswerThinking')}
+                </p>
+              ) : (
+                <p className="whitespace-pre-wrap text-[13px] text-foreground" data-testid="palette-ai-text">
+                  {aiAnswer.data?.answer}
+                </p>
+              )}
+            </div>
+          </div>
         )}
 
         {/* Quick action — create task from query */}
