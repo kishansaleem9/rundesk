@@ -3006,3 +3006,51 @@ not that the text appears.
 
 Sixth instance of the same shape this session, and the same rule answers it:
 **assert the constraint, never the vocabulary.**
+
+## Notepad (3 Sep)
+
+> Frame `087_0535` — the create menu's **Personal Tools** section, in her exact
+> order: Create task · My Work · Track Time · **Notepad** (pin) · Record a Clip
+> · Talk to Text · Create Reminder · Create Doc · Create Whiteboard · View
+> People · Create Dashboard.
+
+The frame audit's own note: *"Genuinely absent: Notepad (no hits for
+'notepad'/'scratchpad' anywhere in apps/web/src)"*. It is now a pinnable tool
+like the rest of that list.
+
+**A scratch pad, deliberately not a document.** No title, no sharing, no place
+in the tree — Docs already do all of that, and two ways to write a paragraph is
+how they drift. It opens in place rather than routing, because leaving the page
+you are on is the opposite of jotting something down.
+
+**Not workspace-scoped**, the way hers is not: it hangs off `/users/me` beside
+the theme and the pinned tools. A thought jotted in one workspace vanishing when
+you switch would be the opposite of a scratch pad.
+
+Reading it returns `''` rather than 404 for someone who has never written in it
+— an empty pad and a missing one are the same thing to a person, and a 404 would
+make the panel open on an error. Writes are capped at 100 000 characters so a
+huge paste cannot become a row nobody can load.
+
+Verified against the real API: empty on first read, round-trips, overwrites, and
+a 250 000-character paste stores exactly 100 000.
+
+Five checks in `settings-depth.mjs`, floor 51 → 56. The important one reads the
+note back **off the server** after the debounce: a textarea that holds text
+until you reload is the defect this audit keeps finding, and it passes anything
+that only looks at the DOM. Three breaks, all caught.
+
+### The same harness fault, twice
+
+The first break run reported B and C as CAUGHT with **identical** failures — C
+patched only the API, and the web dist still held B's build. Two defects
+present at once, and the result said nothing about the one under test.
+
+This is the exact fault recorded a few sections up, with the exact conclusion
+already written down: *a break is only evidence when it is the only thing
+broken.* I then wrote a fresh harness and did not carry the fix into it.
+
+It now restores **every** file and rebuilds **both** apps before each break, so
+each run differs from clean by one thing. With that, the three breaks separate
+cleanly — the debounce never firing, the note never loaded back, and the server
+dropping the write each fail on their own checks.

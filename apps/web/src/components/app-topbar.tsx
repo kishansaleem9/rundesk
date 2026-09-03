@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Menu,
   Search,
   Bell,
+  ClipboardList,
   ChevronRight,
   Plus,
   Sparkles,
@@ -96,6 +97,98 @@ function isUuidLike(value?: string): value is string {
  * Kept as data next to the render so a tool cannot be offered in the picker and
  * then lead nowhere — a checkbox governing nothing is worse than no checkbox.
  */
+
+/**
+ * §6 frame `087_0535` — the Notepad from Personal Tools.
+ *
+ * A scratch pad, not a document: no title, no sharing, no place in the tree —
+ * Docs already do all of that, and two ways to write a paragraph is how they
+ * drift. It opens in place rather than routing, because leaving the page you
+ * are on is the opposite of jotting something down.
+ */
+function NotepadButton() {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const note = useQuery({
+    queryKey: ['notepad'],
+    queryFn: () => api<{ content: string; updatedAt: string | null }>('/users/me/notepad'),
+    enabled: open,
+    staleTime: 30_000,
+  })
+  const save = useMutation({
+    mutationFn: (content: string) =>
+      api('/users/me/notepad', { method: 'PUT', body: { content } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notepad'] }),
+  })
+
+  /*
+   * Debounced, and flushed on unmount.
+   *
+   * Saving every keystroke would be a request per character; saving only on
+   * close would lose the note if the tab goes away mid-thought, which is
+   * exactly when a scratch pad matters. The same shape the sidebar's recents
+   * use, and for the same reason.
+   */
+  const onChange = (next: string) => {
+    setDraft(next)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => save.mutate(next), 800)
+  }
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current)
+    },
+    [],
+  )
+
+  const value = draft ?? note.data?.content ?? ''
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={t('notepad.title')}
+        title={t('notepad.title')}
+        data-testid="notepad-open"
+        className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-card/60 text-muted-foreground transition-colors"
+      >
+        <ClipboardList className="h-4 w-4" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden="true" />
+          <div
+            className="absolute right-0 z-50 mt-1 w-80 rounded-lg border border-border/70 bg-card p-2 shadow-xl"
+            data-testid="notepad-panel"
+          >
+            <div className="flex items-center justify-between px-1 pb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('notepad.title')}
+              </span>
+              <span className="text-[10px] text-muted-foreground" data-testid="notepad-status">
+                {save.isPending ? t('notepad.saving') : note.data ? t('notepad.saved') : ''}
+              </span>
+            </div>
+            <textarea
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={t('notepad.placeholder')}
+              data-testid="notepad-text"
+              rows={10}
+              className="w-full resize-y rounded-md border border-border/60 bg-background p-2 text-[13px] outline-none focus:border-accent"
+            />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 const PINNABLE_TOOLS: Array<{
   item: TopbarItem
   path: string
@@ -186,6 +279,7 @@ export function AppTopbar({
         <AiDockToggle workspaceId={params.workspaceId} onToggle={onAiToggle} open={!!aiOpen} />
       )}
       {visible('create') && <QuickCreateButton />}
+      {visible('notepad') && <NotepadButton />}
       {/*
         §6 [07:55–08:03] — the tools she pins. Each is a shortcut to a place
         that already exists, which is the whole point: "kya cheezein rakhni hain

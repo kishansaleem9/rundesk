@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 51
+const EXPECTED_CHECKS = 56
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -645,6 +645,66 @@ try {
       `the server still says ${JSON.stringify((await A('/users/me')).data?.accentColor ?? null)}`,
     )
     await A('/users/me', { method: 'PATCH', body: { accentColor: startAccent } })
+  }
+
+  // ---------------------------------------------------------------------
+  console.log('\n▶ §6 frame 087_0535 — the Notepad from Personal Tools')
+  // ---------------------------------------------------------------------
+  /*
+   * A scratch pad, not a document: no title, no sharing, no place in the tree.
+   * It opens in place rather than routing, because leaving the page you are on
+   * is the opposite of jotting something down.
+   *
+   * Driven, then read back off the SERVER. A textarea that holds text until you
+   * reload is the defect this audit keeps finding, and it would pass any check
+   * that only looked at the DOM.
+   */
+  {
+    const pinnedBefore = (await A('/users/me')).data?.topbarPinned ?? []
+    await A('/users/me', {
+      method: 'PATCH',
+      body: { topbarPinned: [...new Set([...pinnedBefore, 'notepad'])] },
+    })
+    await A('/users/me/notepad', { method: 'PUT', body: { content: '' } })
+
+    await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3000)
+
+    const opener = page.getByTestId('notepad-open')
+    check(await opener.isVisible().catch(() => false), 'a pinned Notepad reaches the top bar')
+    await opener.click()
+    await page.waitForTimeout(900)
+    check(
+      await page.getByTestId('notepad-panel').isVisible().catch(() => false),
+      'and opens in place rather than navigating away',
+      'the notepad did not open',
+    )
+    check(page.url().includes(`/app/${workspaceId}`), 'without leaving the page you were on', page.url())
+
+    const jotted = `scratch ${Date.now()}`
+    await page.getByTestId('notepad-text').fill(jotted)
+    // Longer than the 800ms debounce, so this measures the save rather than
+    // the keystroke.
+    await page.waitForTimeout(2200)
+    check(
+      ((await A('/users/me/notepad')).data?.content ?? '') === jotted,
+      'what you type is on the server, not just in the box',
+      `server has ${JSON.stringify((await A('/users/me/notepad')).data?.content ?? '')}`,
+    )
+
+    // And it is still there on the next visit — the whole point of a pad.
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(2500)
+    await page.getByTestId('notepad-open').click()
+    await page.waitForTimeout(1200)
+    check(
+      (await page.getByTestId('notepad-text').inputValue().catch(() => '')) === jotted,
+      'and it is still there when you come back',
+      'the note did not survive a reload',
+    )
+
+    await A('/users/me/notepad', { method: 'PUT', body: { content: '' } })
+    await A('/users/me', { method: 'PATCH', body: { topbarPinned: pinnedBefore } })
   }
 
   await done(browser, stack, restore)

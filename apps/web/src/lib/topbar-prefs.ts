@@ -31,6 +31,8 @@ import type { TranslationKey } from './i18n'
  */
 export const TOPBAR_ITEMS = [
   'notifications', 'theme', 'timer', 'ai', 'create',
+  // §6 frame 087_0535 — "Personal Tools": Notepad sits among these, pinnable.
+  'notepad',
   'docs', 'clips', 'recordings', 'whiteboards', 'dashboards',
 ] as const
 export type TopbarItem = (typeof TOPBAR_ITEMS)[number]
@@ -46,6 +48,7 @@ export const TOPBAR_LABEL_KEY: Record<TopbarItem, TranslationKey> = {
   timer: 'profile.topbarTimer',
   ai: 'profile.topbarAi',
   create: 'profile.topbarCreate',
+  notepad: 'profile.topbarNotepad',
   // §6 [07:58–08:03] — "yeh document ka, yeh Loom ka, yeh voice recordings ka,
   // yeh whiteboards ka, aur yeh dashboard ka option hai."
   docs: 'profile.topbarDocs',

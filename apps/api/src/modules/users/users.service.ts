@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import * as bcrypt from 'bcryptjs'
 import {
   users,
+  userNotepads,
   oauthAccounts,
   sessions,
   workspaceMembers,
@@ -59,6 +60,8 @@ export type WeekStartPreference = (typeof WEEK_START_VALUES)[number]
  */
 export const TOPBAR_ITEMS = [
   'notifications', 'theme', 'timer', 'ai', 'create',
+  // §6 frame 087_0535 — "Personal Tools": Notepad sits among these, pinnable.
+  'notepad',
   'docs', 'clips', 'recordings', 'whiteboards', 'dashboards',
 ] as const
 export type TopbarItem = (typeof TOPBAR_ITEMS)[number]
@@ -510,4 +513,37 @@ export class UsersService {
     void passwordHash
     return rest
   }
+
+  /**
+   * §6 frame `087_0535` — the Notepad from Personal Tools.
+   *
+   * Read returns '' rather than 404 for somebody who has never written in it:
+   * an empty scratch pad and a missing one are the same thing to a person, and
+   * a 404 here would make the panel render an error on first open.
+   */
+  async getNotepad(userId: string) {
+    const [row] = await this.db
+      .select({ content: userNotepads.content, updatedAt: userNotepads.updatedAt })
+      .from(userNotepads)
+      .where(eq(userNotepads.userId, userId))
+      .limit(1)
+    return { content: row?.content ?? '', updatedAt: row?.updatedAt ?? null }
+  }
+
+  async saveNotepad(userId: string, content: string) {
+    if (typeof content !== 'string') throw new BadRequestException('content must be a string')
+    // Bounded so a paste of something enormous cannot become a row nobody can
+    // load. Generous enough that no real note hits it.
+    const trimmed = content.slice(0, 100_000)
+    const [row] = await this.db
+      .insert(userNotepads)
+      .values({ userId, content: trimmed, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: userNotepads.userId,
+        set: { content: trimmed, updatedAt: new Date() },
+      })
+      .returning({ content: userNotepads.content, updatedAt: userNotepads.updatedAt })
+    return { content: row.content, updatedAt: row.updatedAt }
+  }
+
 }

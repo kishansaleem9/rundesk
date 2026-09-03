@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Post, Delete, Body, UseGuards } from '@nestjs/common'
+import { Controller, Get, Patch, Post, Put, Delete, Body, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -61,4 +61,24 @@ export class UsersController {
   deleteMeViaPost(@CurrentUser() user: CurrentUserPayload, @Body() body: { confirmEmail?: string }) {
     return this.users.deleteAccount(user.id, body ?? {})
   }
+
+  /**
+   * §6 frame `087_0535` — the Notepad from Personal Tools.
+   *
+   * A scratch pad belongs to the person, not a workspace, so it hangs off
+   * /users/me like their theme and their pinned tools rather than off a
+   * workspace route that would strand a note when they switch.
+   */
+  @Get('me/notepad')
+  @ApiOperation({ summary: 'The signed-in person’s notepad' })
+  async getNotepad(@CurrentUser() user: CurrentUserPayload) {
+    return this.users.getNotepad(user.id)
+  }
+
+  @Put('me/notepad')
+  @ApiOperation({ summary: 'Save the notepad' })
+  async saveNotepad(@CurrentUser() user: CurrentUserPayload, @Body() body: { content?: string }) {
+    return this.users.saveNotepad(user.id, body?.content ?? '')
+  }
+
 }
