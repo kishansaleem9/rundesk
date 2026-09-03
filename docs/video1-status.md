@@ -3308,3 +3308,38 @@ like; the rule itself is unit-tested in `lib/clip-kind.test.ts`, where clips can
 be handed to it without a bucket. Four breaks, all caught: the parameter
 dropped (the original defect), the chip shown unconditionally, the filter
 matching everything, and unstamped keys defaulting to audio.
+
+## The dock kept nothing (3 Sep)
+
+`/ai` owns a thread and hands it down. The **dock** — the assistant handle in
+the top bar, which is the one most people actually use — was rendered with no
+thread at all. So every conversation held there vanished on close, and all four
+per-message actions (create task, save to doc, regenerate, thumbs) were
+`disabled={!threadId}` permanently. Greyed out, for most people, all the time.
+
+The panel now mints its own thread **on the first message**, and that ordering
+is the whole design: minting on open would file an empty thread in the sidebar
+every time somebody pressed the assistant icon and thought better of it. The
+create is awaited, unlike the append beside it, because the id it returns is
+what every later write and every action hangs off — racing past it would drop
+the first turn and leave the row disabled until the second.
+
+**Checked from source rather than in a browser, deliberately.** The composer is
+disabled outright without an `ANTHROPIC_API_KEY` — it renders "Add
+ANTHROPIC_API_KEY to your .env to enable AI features" and refuses input — and
+neither this machine nor CI has one. A browser check would have passed against
+a dock nobody could type into, which is exactly the kind of check this document
+keeps recording the deletion of. Said plainly rather than quietly downgraded.
+
+Two of the four assertions were wrong on the first run and worth recording.
+One balanced braces from the function signature and captured
+`{ skipEcho?: boolean }` — the destructured options object — a reminder that
+the first bracket after a name is rarely the one you want. The other forbade
+`disabled={!threadId}` anywhere, which is *correct* code inside the action row:
+the row gates on the id it receives, and what was wrong sat one level up, in
+what the panel handed it. The assertion is now on what gets passed, not on how
+the row reads it.
+
+Four breaks, all caught: the dock ephemeral again (the original defect), the
+panel unable to mint, minting from an effect on open, and the row handed the
+raw prop so a minted thread still greys it out.

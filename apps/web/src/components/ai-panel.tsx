@@ -76,6 +76,15 @@ type AiPanelProps = {
    * longer discards what was said (frames `296_1817` → `304_1907`).
    */
   threadId?: string | null
+  /**
+   * §G13-8 — keep what is said here.
+   *
+   * When no `threadId` is supplied and this is set, the panel mints one on the
+   * FIRST message. The dock had neither, so its conversations vanished on close
+   * and every per-message action stayed greyed out. Off by default: a caller
+   * that wants a scratch conversation should get one.
+   */
+  persist?: boolean
   /** Fired when a thread names itself, so the sidebar can show the new title. */
   onThreadTitled?: (title: string) => void
 }
@@ -140,12 +149,28 @@ export function AiPanel({
   skillId,
   skillName,
   threadId = null,
+  persist = false,
   onThreadTitled,
 }: AiPanelProps) {
   const { t, locale } = useTranslation()
   const [messages, setMessages] = useState<Message[]>([])
   const chat = useAiChatActions(workspaceId)
-  const threadQuery = useAiChatThread(workspaceId, threadId)
+  /*
+   * §G13-8 — a thread the panel minted for itself.
+   *
+   * The /ai page owns a thread and hands it down; the DOCK was rendered with
+   * none, so every conversation held in it vanished on close and all four
+   * per-message actions — create task, save to doc, regenerate, thumbs — were
+   * `disabled={!threadId}` permanently. The dock is the surface most people
+   * use, so the actions were greyed out for most people all the time.
+   *
+   * Minted on the first message rather than on open, and that ordering is the
+   * whole design: creating on open would file an empty thread in the sidebar
+   * every time somebody pressed the assistant icon and thought better of it.
+   */
+  const [ownThreadId, setOwnThreadId] = useState<string | null>(null)
+  const activeThreadId = threadId ?? ownThreadId
+  const threadQuery = useAiChatThread(workspaceId, activeThreadId)
   // Which thread the on-screen messages belong to, so switching threads
   // replaces the conversation instead of appending to it.
   const loadedThreadRef = useRef<string | null>(null)
@@ -257,7 +282,21 @@ export function AiPanel({
     // blocking the answer on a write nobody is waiting for would make the
     // assistant feel slower than it is. A failed write loses one turn of
     // history, never the reply.
-    if (threadId && !opts.skipEcho) void chat.append(threadId, 'user', content).catch(() => {})
+    /*
+     * Awaited, unlike the append below it: the id it returns is what every
+     * later write and every per-message action hangs off, so racing past it
+     * would drop the first turn of a conversation on the floor and leave the
+     * action row disabled until the second.
+     */
+    let writeTo = activeThreadId
+    if (!writeTo && persist) {
+      writeTo = await chat
+        .create(skillId)
+        .then((thread) => thread.id)
+        .catch(() => null)
+      if (writeTo) setOwnThreadId(writeTo)
+    }
+    if (writeTo && !opts.skipEcho) void chat.append(writeTo, 'user', content).catch(() => {})
     setIsStreaming(true)
     setStreamBuffer('')
     setSteps([])
@@ -350,9 +389,9 @@ export function AiPanel({
       }
       setMessages((prev) => [...prev, assistantMsg])
       setStreamBuffer('')
-      if (threadId && accumulated.trim()) {
+      if (writeTo && accumulated.trim()) {
         void chat
-          .append(threadId, 'assistant', accumulated)
+          .append(writeTo, 'assistant', accumulated)
           // This is the turn that can trigger the rename, per `shouldAutoTitle`.
           .then((r) => { if (r?.title) onThreadTitled?.(r.title) })
           .catch(() => {})
@@ -456,7 +495,7 @@ export function AiPanel({
             key={msg.id}
             message={msg}
             workspaceId={workspaceId}
-            threadId={threadId}
+            threadId={activeThreadId}
             // Only the LAST answer can be regenerated: re-asking from the
             // middle of a conversation would silently discard everything said
             // after it, which is not what a refresh icon promises.

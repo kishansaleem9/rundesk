@@ -164,6 +164,16 @@ function AppShell() {
               ask={aiAsk}
               onAskHandled={() => setAiAsk(undefined)}
               onClose={() => setAiOpen(false)}
+              /*
+               * §G13-8 — the dock keeps what it is told.
+               *
+               * It used to be rendered with no thread at all: close it and the
+               * conversation was gone, and create-task / save-to-doc /
+               * regenerate / thumbs were `disabled={!threadId}` forever. The
+               * dock is the assistant most people actually use, so those four
+               * were greyed out for most people all the time.
+               */
+              persist
               className="h-full"
             />
           </Suspense>
