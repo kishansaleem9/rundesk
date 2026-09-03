@@ -259,7 +259,13 @@ function Dashboard() {
 
   return (
     <DemoDataEmptyState workspaceId={workspaceId}>
-    <div className="max-w-7xl mx-auto p-8">
+    {/*
+      * Named so a test can tell this page from any other. The sweep used to
+      * assert /Dashboard|Widget/ against the whole document, which the word
+      * "Dashboards" in the sidebar satisfies on every page in the app — so it
+      * passed while pointed at the wrong URL entirely.
+      */}
+    <div className="max-w-7xl mx-auto p-8" data-testid="dashboard-page">
       <header className="mb-8">
         <div className="flex items-start justify-between">
           <div>

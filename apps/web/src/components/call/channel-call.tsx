@@ -61,6 +61,9 @@ export function ChannelCall({
     const onEvent = (event: { type?: string }) => {
       if (!event?.type?.startsWith('call.')) return
       if (event.type === 'call.signal' || event.type === 'call.reaction') return
+      // As in CallHost: the query is disabled without a channel, but refetch()
+      // ignores that and would ask the API about `?channelId=null`.
+      if (!channelId) return
       void hereQuery.refetch()
     }
     socket.on('event', onEvent)
@@ -68,7 +71,7 @@ export function ChannelCall({
       socket.off('event', onEvent)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hereQuery.refetch])
+  }, [hereQuery.refetch, channelId])
 
   const askToJoin = () => {
     if (!channelId) return

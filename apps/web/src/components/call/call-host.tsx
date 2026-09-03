@@ -77,14 +77,27 @@ export function CallHost({ workspaceId }: { workspaceId: string | null | undefin
     const onEvent = (event: { type?: string; callId?: string }) => {
       if (!event?.type?.startsWith('call.')) return
       if (event.type === 'call.signal' || event.type === 'call.reaction') return
+      /*
+       * Only when there is a call to ask about.
+       *
+       * `useLiveCall` is disabled without a channel, but `refetch()` is
+       * imperative and ignores `enabled` — so on every call.* event with no
+       * call in progress this ran the query function anyway, interpolating a
+       * missing id straight into the URL as `?channelId=null`. Postgres then
+       * refused `channel_id = 'null'`, which is where the
+       * `invalid input syntax for type uuid: "null"` in the CI log came from.
+       */
+      if (!inCall?.channelId) return
       void joinedQuery.refetch()
     }
     socket.on('event', onEvent)
     return () => {
       socket.off('event', onEvent)
     }
+    // The channel is a dependency because the handler now reads it: without it
+    // the closure could keep answering with the call we were in a moment ago.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joinedQuery.refetch])
+  }, [joinedQuery.refetch, inCall?.channelId])
 
   // Keep the live copy fresh while in the call, so the participants panel and
   // the recording banner reflect what is actually true, not what was true when

@@ -1,8 +1,20 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from '@nestjs/common'
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { isUuid } from '../../common/validation/uuid'
 import { CallsService } from './calls.service'
 import type { CurrentUserPayload } from '../tasks/types'
 
@@ -29,6 +41,15 @@ export class CallsController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     if (!channelId) return null
+    /*
+     * Absent means "no channel, so no call" — but PRESENT AND MALFORMED is a
+     * different thing, and `!channelId` never caught it: the string "null" is
+     * truthy, so a client that interpolated a missing id into the query string
+     * sailed past this line and had its `where channel_id = 'null'` refused by
+     * Postgres. The caller was fixed too (see call-host.tsx), but a request
+     * that cannot be answered should say so here rather than in the database.
+     */
+    if (!isUuid(channelId)) throw new BadRequestException('Malformed channelId')
     return this.svc.liveInChannel(channelId, user.id)
   }
 

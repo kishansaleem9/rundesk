@@ -693,9 +693,28 @@ try {
   await go(`/app/${WS}/docs`, 3500)
   chk(/Doc/i.test(await seen()), 'the docs page renders', 'the docs page did not render')
 
+  /*
+   * The route is `dashboard`, singular.
+   *
+   * This asked for `/dashboards` and passed anyway, for two compounding
+   * reasons. There is no literal `dashboards` route, so the URL fell through to
+   * `$spaceId` and rendered the SPACE page with the id "dashboards" — which
+   * then asked the API for `/projects/space/dashboards` and `/lists/space/
+   * dashboards`, leaving `invalid input syntax for type uuid: "dashboards"` all
+   * over the CI Postgres log. And the check could not notice, because
+   * `/Dashboard|Widget/` against the whole document is satisfied by the word
+   * "Dashboards" in the sidebar — on every page in the app, including this
+   * wrong one.
+   *
+   * So: the right address, and a check that only the dashboards page can pass.
+   */
   ref('A5.3', 'Dashboards')
-  await go(`/app/${WS}/dashboards`, 3500)
-  chk(/Dashboard|Widget/i.test(await seen()), 'the dashboards page renders', 'the dashboards page did not render')
+  await go(`/app/${WS}/dashboard`, 3500)
+  chk(
+    (await page.getByTestId('dashboard-page').count()) > 0,
+    'the dashboards page renders',
+    `the dashboards page did not render — landed on ${page.url()}`,
+  )
 
   ref('A5.7', 'Reporting')
   await go(`/app/${WS}/reports`, 4000)

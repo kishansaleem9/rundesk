@@ -350,6 +350,17 @@ jobs:
           E2E_PEER_EMAIL: org-admin@rundesk.internal
           E2E_PEER_PASSWORD: OrgAdmin@123!
 
+      # An id that cannot be a UUID must be refused on the way in rather than by
+      # Postgres. Both halves of that were live, and neither failed a check —
+      # the only symptom was `invalid input syntax for type uuid` in this job's
+      # own service-container log, which nothing was reading.
+      - name: Malformed ids
+        if: '!cancelled()'
+        run: node test/e2e/malformed-ids.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.

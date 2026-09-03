@@ -21,6 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { resolveChromium, CHROME } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { signInApi } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -29,7 +30,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran": a selector matching nothing sweeps clean. */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 10
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -74,10 +75,9 @@ const browser = await chromium.launch({
 })
 
 try {
-  const login = await apiAs(null)('/auth/login', { method: 'POST', body: ME })
-  if (!login.data?.accessToken) throw new Error(`login failed: ${login.status}`)
-  const A = apiAs(login.data.accessToken)
-  const myId = login.data.user?.id ?? login.data.id
+  const login = await signInApi(API, ME.email, ME.password)
+  const A = apiAs(login.accessToken)
+  const myId = login.user?.id ?? login.id
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
   const stamp = Date.now()
@@ -107,6 +107,27 @@ try {
       permissions: ['microphone', 'camera'],
     })
   ).newPage()
+
+  /*
+   * Every live-call request this session makes, recorded for the check at the
+   * end.
+   *
+   * `useLiveCall` is disabled without a channel, but the socket handlers call
+   * `refetch()`, which is imperative and ignores `enabled` — so on each call.*
+   * event with no call in progress the query function ran anyway and put the
+   * missing id straight into the URL as `?channelId=null`. Postgres refused
+   * `channel_id = 'null'`, and the only trace was a line in its log: the suite
+   * passed, because a failed background refetch changes nothing on screen.
+   *
+   * Which is why this watches the WIRE rather than the page. Nothing visible
+   * distinguishes the two builds.
+   */
+  const liveCalls = []
+  page.on('request', (req) => {
+    const url = req.url()
+    if (url.includes('/calls/live')) liveCalls.push(url)
+  })
+
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', ME.email)
   await page.fill('input[type=password]', ME.password)
@@ -223,6 +244,25 @@ try {
     stillIn.length === 0,
     'and hanging up from another page actually leaves',
     `still listed as present after leaving: ${JSON.stringify(stillIn)}`,
+  )
+
+  /*
+   * Asked of the whole session, not of one moment: the bad request fires on a
+   * call.* event, so it lands at start, at join and at leave, and sampling
+   * anywhere would miss two of the three.
+   *
+   * Shape, not value — a channel id this suite never created is still a bug
+   * worth failing on, and "null" is only the spelling it happened to have.
+   */
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const asked = liveCalls.map((u) => new URL(u).searchParams.get('channelId'))
+  const nonsense = asked.filter((c) => c !== null && !UUID.test(c))
+  chk(
+    liveCalls.length > 0 && nonsense.length === 0,
+    'and never asked the API about a channel that is not one',
+    liveCalls.length === 0
+      ? 'no live-call request was made at all — this check saw nothing to judge'
+      : `asked about ${JSON.stringify([...new Set(nonsense)])} across ${liveCalls.length} requests`,
   )
 } catch (e) {
   failed += 1

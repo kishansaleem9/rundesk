@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   CanActivate,
   ExecutionContext,
   ForbiddenException,
@@ -15,6 +16,7 @@ import {
   type ContainerAccessContext,
 } from '../../../common/permissions/container-access.guard-helper'
 import { canSeePrivateItem, isManagerRole } from '../../../common/permissions/item-visibility'
+import { isUuid } from '../../../common/validation/uuid'
 
 // Per-item (list/task) privacy resolved alongside the container chain so the
 // guard can block a private list, or a private/foreign task, on by-id access.
@@ -26,6 +28,7 @@ type ResolvedItem = {
   taskIsAssignee?: boolean
 }
 type ResolvedResource = { workspaceId: string; container?: ContainerAccessContext; item?: ResolvedItem }
+
 
 /**
  * Enforces workspace membership for resources nested under a space / project /
@@ -132,6 +135,19 @@ export class ResourceMemberGuard implements CanActivate {
     ]
     for (const [id, kind] of order) {
       if (!id) continue
+      /*
+       * Every id below addresses a `uuid` column, so a value that cannot be one
+       * is a query Postgres will refuse rather than a lookup that misses. It
+       * showed up in CI as pages of `invalid input syntax for type uuid:
+       * "dashboards"`, from a URL that had fallen through to a route it was
+       * never meant to match.
+       *
+       * Rejected rather than skipped: falling through to the next candidate
+       * would let a malformed path param be answered by a body field, which is
+       * exactly the precedence this table exists to prevent. The 400 is what
+       * the failed query already produced, so no caller sees a new answer.
+       */
+      if (!isUuid(id)) throw new BadRequestException(`Malformed ${kind} id`)
       return this.resolveByKind(kind, id, actorId)
     }
     return null
