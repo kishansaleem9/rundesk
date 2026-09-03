@@ -3752,3 +3752,65 @@ no module, no route.
 
 None of these is blocked. They are simply not done, and saying which is which
 is the point of writing them here.
+
+## Bookmarks, and a sort that knows what people open (3 Sep)
+
+Two of the three items that were still open.
+
+### Bookmarks — the half a favourite cannot hold
+
+> `[00:35]` — "Bookmarks make it easy to save ClickUp items **or any URL from
+> around the web**." + "Add Bookmark"
+
+The obvious shortcut was to reuse favourites, and it is the wrong one.
+`user_dock_configs.navFavorites` holds `{label, path}` — internal nav paths
+handed to the router — and a router given `https://…` goes nowhere. The
+emphasised half of her sentence is the entire feature, so it needed somewhere
+that can hold one.
+
+A `javascript:` bookmark is refused **on the way in**, not at the point it is
+clicked: a bookmark renders as a link, so storing one would put a script on this
+origin behind somebody's own saved item. Checking at write time means a row that
+exists is a row that is safe to render, rather than leaving every future read
+path to remember.
+
+**One of the four breaks survived, and it mattered.** Dropping the owner from
+the DELETE's `WHERE` passed cleanly — because the check tested an
+*unauthenticated* caller, which the auth guard stops anyway. What owner-scoping
+protects against is a *colleague who knows an id*. Rewritten against a second
+signed-in person, the break now fails with `peer DELETE returned 200; the
+bookmark is GONE`. **A check aimed at the wrong attacker is not a weaker check,
+it is not a check at all.**
+
+### Trending — built on telemetry that did not exist
+
+> `[04:00–04:04]` — the Sort menu offers five modes; we had three.
+
+Trending is a claim about what people are **opening**, and nothing recorded
+that. It could not be faked from data on hand: `updatedAt` tells you what was
+EDITED, which is a different and much smaller group of people than the ones
+reading it. So `search_engagement` came first and the sort second.
+
+An append-only event, not a counter column: trending is about a **window**, and
+a lifetime count would keep last quarter's busiest task at the top forever. The
+window is seven days — long enough that a quiet Monday does not empty the list.
+
+Recorded on OPEN and not on appearance. Counting appearances would rank whatever
+the index happens to match most often, which measures the query rather than
+anybody's interest.
+
+Two decisions the checks then pinned down. **Ties fall back to relevance**, so
+trending *promotes* what is hot and leaves the unopened tail exactly as it was —
+without that, the sort reorders the top and shuffles everything else, which is
+worse than no sort. And **"for you" reads only your own opens**: if both modes
+read the same rows, one of the two menu entries is decoration.
+
+Five breaks, all caught: the sort dropped from the whitelist (falling back to
+relevance — the exact failure the whitelist exists to prevent), opens never
+recorded, the key split on every hyphen so it matched nothing, "for you" reading
+everybody's opens, and the tiebreak reversed.
+
+That third one is worth keeping in mind: a hit id is `type-<uuid>` and a uuid
+contains four more hyphens, so splitting on all of them yields a key that
+matches nothing — **a trending sort that silently scores everything zero and is
+indistinguishable from one nobody switched on.**

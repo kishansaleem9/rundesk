@@ -320,6 +320,29 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §G01-9 — the Overview's Bookmarks card. Needs two accounts: what the
+      # owner-scoping protects against is a colleague who knows an id, not an
+      # anonymous caller, and only a second signed-in user can show that.
+      - name: Bookmarks, internal and external
+        if: '!cancelled()'
+        run: node test/e2e/bookmarks.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          E2E_PEER_EMAIL: org-admin@rundesk.internal
+          E2E_PEER_PASSWORD: OrgAdmin@123!
+
+      # §G03-6 — Trending In Workspace / Trending For You. Two accounts again:
+      # the two modes are only distinguishable when somebody else opens things.
+      - name: Trending sorts
+        if: '!cancelled()'
+        run: node test/e2e/trending-sort.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          E2E_PEER_EMAIL: org-admin@rundesk.internal
+          E2E_PEER_PASSWORD: OrgAdmin@123!
+
       - name: The DM tab strip (A3.9)
         if: '!cancelled()'
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist

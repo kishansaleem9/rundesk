@@ -22,6 +22,24 @@ const PRIORITIES = new Set(['urgent', 'high', 'normal', 'low'])
 export class SearchController {
   constructor(private search: SearchService) {}
 
+  /**
+   * §G03-6 — somebody opened a search result.
+   *
+   * Its own endpoint rather than a side effect of the search call: what makes
+   * a thing trending is being OPENED, not being returned. Counting appearances
+   * would rank whatever the index happens to match most often, which is a
+   * measure of the query and not of anybody's interest.
+   */
+  @Post(':workspaceId/opened')
+  @UseGuards(ResourceMemberGuard)
+  async recordOpen(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string },
+    @Body() body: { entityType?: string; entityId?: string },
+  ) {
+    return this.search.recordOpen(workspaceId, user.id, body?.entityType ?? '', body?.entityId ?? '')
+  }
+
   @Get(':workspaceId')
   query(
     @Param('workspaceId') workspaceId: string,
@@ -69,7 +87,16 @@ export class SearchController {
     if (labelId) filters.labelId = labelId
     // §1.1 — she filters search by type as well as choosing one at create time.
     if (taskTypeId) filters.taskTypeId = taskTypeId
-    if (sort === 'updated' || sort === 'created') filters.sort = sort
+    /*
+     * §G03-6 — the two engagement modes join the whitelist.
+     *
+     * Whitelisted rather than passed through, like every other filter here: an
+     * unrecognised name has to be DROPPED, because a sort the service does not
+     * know silently returns relevance and reads as "the control did nothing".
+     */
+    if (sort === 'updated' || sort === 'created' || sort === 'trending' || sort === 'trending_me') {
+      filters.sort = sort
+    }
     const parseDate = (s?: string) => {
       if (!s) return undefined
       const d = new Date(s)

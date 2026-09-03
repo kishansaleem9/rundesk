@@ -911,6 +911,20 @@
       "when": 1900000097029,
       "tag": "0129_lists_under_a_space",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1900000098029,
+      "tag": "0130_workspace_bookmarks",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1900000099029,
+      "tag": "0131_search_engagement",
+      "breakpoints": true
     }
   ]
 }

@@ -7,7 +7,7 @@ import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, taskAttachments, docs, lists, projects, spaces,
   folders, savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
   workspaceIntegrationConnections,
-  customFieldDefinitions, customFieldValues, meetings,
+  customFieldDefinitions, customFieldValues, meetings, searchEngagement,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -86,7 +86,7 @@ export type SearchFilters = {
    * is the default; the other two order the merged result set by a timestamp
    * each branch now carries.
    */
-  sort?: 'relevance' | 'updated' | 'created'
+  sort?: 'relevance' | 'updated' | 'created' | 'trending' | 'trending_me'
   // Custom-field value filter (Plan §11.2): narrows tasks to those whose value
   // for a given custom-field definition matches. `customFieldId` identifies the
   // per-project definition; `customFieldValue` is the stored value to match
@@ -123,6 +123,20 @@ export function meiliSort(sort: SearchFilters['sort']): string[] | undefined {
   if (sort === 'updated') return ['updatedAt:desc']
   if (sort === 'created') return ['createdAt:desc']
   return undefined
+}
+
+/**
+ * §G03-6 — the key an engagement row is counted under.
+ *
+ * A search hit's id is `"<type>-<rawId>"` and the engagement table keeps the
+ * two in separate columns, so this is the one place the two spellings meet.
+ * Split on the FIRST hyphen only: a uuid contains four more, and splitting on
+ * all of them silently produces a key that matches nothing — a trending sort
+ * that quietly scores everything zero and looks exactly like a sort nobody uses.
+ */
+function engagementKey(hitId: string): string {
+  const at = hitId.indexOf('-')
+  return at < 0 ? `:${hitId}` : `${hitId.slice(0, at)}:${hitId.slice(at + 1)}`
 }
 
 @Injectable()
@@ -348,6 +362,15 @@ export class SearchService implements OnModuleInit {
     filters: SearchFilters = {},
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const trimmed = query.trim()
+    /*
+     * §G03-6 — fetched once for the whole search, and only when a trending mode
+     * is asked for: an extra grouped scan on every keystroke of every ordinary
+     * search would be a real cost for a feature nobody switched on.
+     */
+    const trending =
+      filters.sort === 'trending' || filters.sort === 'trending_me'
+        ? await this.engagementScores(workspaceId, userId, filters.sort === 'trending_me')
+        : undefined
     // §2 per-item privacy: private tasks are only searchable by their creator,
     // assignees, or a workspace manager. Computed once and applied to every
     // task-bearing branch (Postgres task hits, comment hits, attachment hits,
@@ -420,7 +443,7 @@ export class SearchService implements OnModuleInit {
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
       const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit) : []
-      return this.merge(filters.sort, limit, [...safeMeili, ...extras, ...clipHits, ...driveHits])
+      return this.merge(filters.sort, limit, [...safeMeili, ...extras, ...clipHits, ...driveHits], trending)
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
@@ -533,7 +556,7 @@ export class SearchService implements OnModuleInit {
       ...clipHits,
       ...driveHits,
       ...extras,
-    ])
+    ], trending)
   }
 
   /**
@@ -549,8 +572,74 @@ export class SearchService implements OnModuleInit {
    * The cut happens after the sort, never before — truncating first would keep
    * an arbitrary subset and then order that, which is not the top N.
    */
-  private merge(sort: SearchFilters['sort'], limit: number, hits: SearchHit[]): SearchHit[] {
-    return this.applySort(sort, hits).slice(0, limit)
+  private merge(
+    sort: SearchFilters['sort'],
+    limit: number,
+    hits: SearchHit[],
+    trending?: Map<string, number>,
+  ): SearchHit[] {
+    return this.applySort(sort, hits, trending).slice(0, limit)
+  }
+
+  /**
+   * §G03-6 — how long "trending" looks back.
+   *
+   * Seven days. Short enough that a burst of interest still shows while it is
+   * happening; long enough that a quiet Monday does not empty the list. The
+   * window is the reason this is an event table and not a counter — a lifetime
+   * count would put last quarter's busiest task on top forever.
+   */
+  private static readonly TRENDING_WINDOW_DAYS = 7
+
+  /** §G03-6 — somebody opened a search result. */
+  async recordOpen(
+    workspaceId: string,
+    userId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<{ ok: true }> {
+    const type = (entityType ?? '').trim().slice(0, 40)
+    const id = (entityId ?? '').trim().slice(0, 200)
+    // Nothing to count without both halves, and a row with a blank id would
+    // score against every hit that also has none.
+    if (!type || !id) return { ok: true }
+    await this.db.insert(searchEngagement).values({ workspaceId, userId, entityType: type, entityId: id })
+    return { ok: true }
+  }
+
+  /**
+   * §G03-6 — opens per hit inside the window, for one of the two questions.
+   *
+   * `mine` narrows to this person ("Trending For You"); otherwise it is the
+   * whole workspace ("Trending In Workspace"). Counted in SQL rather than by
+   * reading rows into the process: a busy workspace produces far more events
+   * than search results, and pulling them all back to count them here is the
+   * shape that works on a demo and falls over in a year.
+   */
+  private async engagementScores(
+    workspaceId: string,
+    userId: string,
+    mine: boolean,
+  ): Promise<Map<string, number>> {
+    const since = new Date(Date.now() - SearchService.TRENDING_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+    const rows = await this.db
+      .select({
+        entityType: searchEngagement.entityType,
+        entityId: searchEngagement.entityId,
+        opens: sql<number>`count(*)::int`,
+      })
+      .from(searchEngagement)
+      .where(
+        and(
+          eq(searchEngagement.workspaceId, workspaceId),
+          gte(searchEngagement.openedAt, since),
+          mine ? eq(searchEngagement.userId, userId) : undefined,
+        ),
+      )
+      .groupBy(searchEngagement.entityType, searchEngagement.entityId)
+    const scores = new Map<string, number>()
+    for (const r of rows) scores.set(`${r.entityType}:${r.entityId}`, Number(r.opens))
+    return scores
   }
 
   /**
@@ -559,8 +648,27 @@ export class SearchService implements OnModuleInit {
    * putting hits with no timestamp (files, people, messages) last rather than
    * letting an absent date read as "oldest".
    */
-  private applySort(sort: SearchFilters['sort'], hits: SearchHit[]): SearchHit[] {
+  private applySort(
+    sort: SearchFilters['sort'],
+    hits: SearchHit[],
+    trending?: Map<string, number>,
+  ): SearchHit[] {
     if (!sort || sort === 'relevance') return hits
+    /*
+     * §G03-6 — most-opened first, and ties fall back to RELEVANCE rather than
+     * to nothing.
+     *
+     * Most hits have never been opened, so without a tiebreak the whole
+     * unopened tail would come back in whatever order the branches happened to
+     * produce — a sort that reorders the top few and shuffles everything else.
+     * Keeping the incoming order for equal scores means trending PROMOTES what
+     * is hot and leaves the rest exactly as relevance had it.
+     */
+    if (sort === 'trending' || sort === 'trending_me') {
+      const scored = hits.map((h, i) => ({ h, i, score: trending?.get(engagementKey(h.id)) ?? 0 }))
+      scored.sort((a, b) => (b.score - a.score) || (a.i - b.i))
+      return scored.map((x) => x.h)
+    }
     const at = (h: SearchHit) => (h.sortedAt ? new Date(h.sortedAt).getTime() : null)
     return [...hits].sort((a, b) => {
       const x = at(a), y = at(b)

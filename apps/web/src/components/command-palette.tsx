@@ -133,7 +133,9 @@ export function CommandPalette({
   const [query, setQuery] = useState(initialQuery)
   // "main sort bhi kar sakti hoon: last update, last created" — relevance stays
   // the default because it is what a text query is for.
-  const [sortBy, setSortBy] = useState<'relevance' | 'updated' | 'created'>('relevance')
+  const [sortBy, setSortBy] = useState<
+    'relevance' | 'updated' | 'created' | 'trending' | 'trending_me'
+  >('relevance')
   const [typeFilter, setTypeFilter] = useState<Set<SearchEntityType>>(() => new Set())
   /**
    * §G02-6 — types promoted out of the ⋯ menu and now showing as chips.
@@ -548,7 +550,25 @@ export function CommandPalette({
     return () => window.removeEventListener('keydown', handler)
   }, [open])
 
-  function go(to: string) {
+  function go(to: string, hitId?: string) {
+    /*
+     * §G03-6 — opening a result is the signal trending is built on.
+     *
+     * Recorded here, in the single place every hit is opened through, rather
+     * than at each call site: a second way to open a result that forgot to
+     * record would make the sort quietly wrong rather than obviously broken.
+     * Fire-and-forget — a failed count must never delay the navigation, and
+     * losing one is worth less than a hesitation.
+     */
+    if (hitId && workspaceId) {
+      const at = hitId.indexOf('-')
+      if (at > 0) {
+        void api(`/search/${workspaceId}/opened`, {
+          method: 'POST',
+          body: { entityType: hitId.slice(0, at), entityId: hitId.slice(at + 1) },
+        }).catch(() => {})
+      }
+    }
     setOpen(false)
     setQuery('')
     if (to.startsWith('/app/')) {
@@ -813,6 +833,10 @@ export function CommandPalette({
             ['relevance', 'palette.sortRelevance'],
             ['updated', 'palette.sortUpdated'],
             ['created', 'palette.sortCreated'],
+            // §G03-6 [04:00–04:04] — the two her Sort menu has and ours did
+            // not. Ordered by what people OPEN, over the last seven days.
+            ['trending', 'palette.sortTrending'],
+            ['trending_me', 'palette.sortTrendingMe'],
           ] as const).map(([v, key]) => (
             <FilterChip key={v} active={sortBy === v} onClick={() => setSortBy(v)}>
               {t(key)}
@@ -1169,7 +1193,7 @@ export function CommandPalette({
         {/* §A2.1 — extra actions for the row Tab was pressed on. */}
         {!commandMode && actionHit && (
           <CommandGroup heading={t('palette.actionsOn', { title: actionHit.title })}>
-            <CommandItem value={`__action_open__${query}`} onSelect={() => go(actionHit.url)}>
+            <CommandItem value={`__action_open__${query}`} onSelect={() => go(actionHit.url, actionHit.id)}>
               <ArrowRight className="text-muted-foreground" />
               {t('palette.actionOpen')}
             </CommandItem>
@@ -1354,7 +1378,7 @@ export function CommandPalette({
                       <CommandItem
                         key={hit.id}
                         value={`${hit.entityType}-${hit.id}-${hit.title}`}
-                        onSelect={() => go(hit.url)}
+                        onSelect={() => go(hit.url, hit.id)}
                       >
                         <Icon className="text-muted-foreground" />
                         <div className="min-w-0 flex-1">

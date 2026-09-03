@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet, useMatches, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Card, EmptyState as EmptyStateCard, Button, Badge } from '@rundesk/ui'
+import { Card, EmptyState as EmptyStateCard, Button, Badge, toast } from '@rundesk/ui'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { FLAGS } from '@rundesk/feature-flags'
 import {
@@ -291,6 +291,8 @@ function WorkspaceHome() {
         </Card>
       )}
       <DailyBriefingCard workspaceId={workspaceId} latest={latestBriefing} />
+      {/* §G01-9 [00:35] — "save Rundesk items or any URL from around the web". */}
+      <BookmarksCard workspaceId={workspaceId} />
       <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-4">
         <Card variant="glass" className="p-3 h-fit">
           <h1 className="text-3xl font-display font-semibold mb-3">{t('appWorkspace.home')}</h1>
@@ -595,5 +597,146 @@ function HomeItem({
         </Badge>
       )}
     </button>
+  )
+}
+
+
+type Bookmark = { id: string; title: string; url: string }
+
+/**
+ * §G01-9 [00:35] — the Overview's Bookmarks card.
+ *
+ * > "Bookmarks make it easy to save ClickUp items or any URL from around the
+ * >  web." + "Add Bookmark"
+ *
+ * Deliberately not the existing favourites. Those hold internal nav paths and
+ * are handed to the router; the point of a bookmark is the "or any URL from
+ * around the web" half, and a router given `https://…` goes nowhere. So an
+ * external one opens in a new tab and an internal one navigates, decided by
+ * what was saved rather than by hope.
+ */
+function BookmarksCard({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const [adding, setAdding] = useState(false)
+  const [url, setUrl] = useState('')
+  const [title, setTitle] = useState('')
+
+  const bookmarks = useQuery({
+    enabled: Boolean(workspaceId),
+    queryKey: ['bookmarks', workspaceId],
+    queryFn: () => api<Bookmark[]>(`/workspaces/${workspaceId}/bookmarks`),
+  })
+
+  const add = useMutation({
+    mutationFn: () =>
+      api<Bookmark>(`/workspaces/${workspaceId}/bookmarks`, {
+        method: 'POST',
+        body: { url: url.trim(), title: title.trim() || undefined },
+      }),
+    onSuccess: () => {
+      setUrl('')
+      setTitle('')
+      setAdding(false)
+      void qc.invalidateQueries({ queryKey: ['bookmarks', workspaceId] })
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      api(`/workspaces/${workspaceId}/bookmarks/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['bookmarks', workspaceId] }),
+  })
+
+  const rows = bookmarks.data ?? []
+  return (
+    <Card variant="glass" className="p-4" data-testid="home-bookmarks">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">{t('bookmarks.title')}</h2>
+        <Button size="sm" variant="outline" data-testid="bookmark-add-open" onClick={() => setAdding((v) => !v)}>
+          <Plus className="h-3.5 w-3.5 mr-1.5" />
+          {t('bookmarks.add')}
+        </Button>
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{t('bookmarks.blurb')}</p>
+
+      {adding && (
+        <form
+          className="mt-3 flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (url.trim()) add.mutate()
+          }}
+        >
+          <input
+            autoFocus
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder={t('bookmarks.urlPlaceholder')}
+            data-testid="bookmark-url"
+            className="h-8 flex-1 min-w-[14rem] rounded-md border border-border/60 bg-card/40 px-2 text-xs outline-none focus:border-accent/50"
+          />
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={t('bookmarks.namePlaceholder')}
+            data-testid="bookmark-title"
+            className="h-8 w-40 rounded-md border border-border/60 bg-card/40 px-2 text-xs outline-none focus:border-accent/50"
+          />
+          <Button type="submit" size="sm" disabled={!url.trim() || add.isPending} data-testid="bookmark-save">
+            {t('bookmarks.save')}
+          </Button>
+        </form>
+      )}
+
+      {rows.length === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground" data-testid="bookmarks-empty">
+          {t('bookmarks.empty')}
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-1" data-testid="bookmarks-list">
+          {rows.map((b) => (
+            <li key={b.id} className="group flex items-center gap-2">
+              {/*
+                An in-app path navigates; an http(s) one opens a new tab. The
+                server refuses anything else, so this only has to tell the two
+                apart rather than defend against a third.
+              */}
+              {b.url.startsWith('/') ? (
+                <button
+                  type="button"
+                  data-testid={`bookmark-${b.id}`}
+                  onClick={() => navigate({ to: b.url as '/app' })}
+                  className="flex-1 min-w-0 truncate text-left text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {b.title}
+                </button>
+              ) : (
+                <a
+                  href={b.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid={`bookmark-${b.id}`}
+                  className="flex-1 min-w-0 truncate text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {b.title}
+                </a>
+              )}
+              <button
+                type="button"
+                aria-label={t('bookmarks.remove')}
+                data-testid={`bookmark-remove-${b.id}`}
+                onClick={() => remove.mutate(b.id)}
+                className="shrink-0 p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }
