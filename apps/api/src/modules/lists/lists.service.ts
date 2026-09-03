@@ -36,6 +36,78 @@ export class ListsService {
    * change it — which is a window, however short, in which the wrong people
    * can see it. Omitted still means public, exactly as before.
    */
+  /**
+   * §G15-10 [21:49–21:54] — the container that makes "a List in a Space" work.
+   *
+   * Resolved, then created if absent. `project_id` on a list is NOT NULL and
+   * stays that way: 114 inner joins across 34 files reach a list's workspace
+   * through its project — the resource guard among them — so a list with no
+   * project would 404 for everybody while quietly disappearing from search,
+   * the knowledge index, notifications and reminders. The hierarchy the person
+   * sees is Space → List; this is what carries it.
+   *
+   * The insert races safely. Two people creating a list in the same empty space
+   * at once both find nothing and both insert; the partial unique index in
+   * migration 0129 lets exactly one win, and the loser re-reads rather than
+   * failing — which is why this is written as insert-then-reread and not as a
+   * check-then-act.
+   */
+  async defaultContainerForSpace(spaceId: string, actorId?: string): Promise<string> {
+    const [existing] = await this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.spaceId, spaceId), eq(projects.isDefaultContainer, true)))
+      .limit(1)
+    if (existing) return existing.id
+
+    const [space] = await this.db
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(eq(spaces.id, spaceId))
+      .limit(1)
+    if (!space) throw new NotFoundException('Space not found')
+
+    const [made] = await this.db
+      .insert(projects)
+      .values({
+        spaceId,
+        // Never shown. Named rather than blank so anybody reading the table
+        // directly can tell what it is and why it is not in the tree.
+        name: 'Lists',
+        isDefaultContainer: true,
+        createdById: actorId ?? null,
+      })
+      .onConflictDoNothing()
+      .returning({ id: projects.id })
+    if (made) return made.id
+
+    const [won] = await this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.spaceId, spaceId), eq(projects.isDefaultContainer, true)))
+      .limit(1)
+    if (!won) throw new BadRequestException('could not resolve the space container')
+    return won.id
+  }
+
+  /**
+   * §G15-10 — the lists that live directly in a space.
+   *
+   * Everything in the space's hidden container, which is exactly the set that
+   * was created by choosing a Space and nothing else.
+   */
+  async getListsBySpace(spaceId: string, actor?: { id: string; role?: string }) {
+    const [container] = await this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.spaceId, spaceId), eq(projects.isDefaultContainer, true)))
+      .limit(1)
+    // No container means nobody has made a space-level list here yet, which is
+    // an empty list and not an error.
+    if (!container) return []
+    return this.getListsByProject(container.id, actor)
+  }
+
   async createList(
     projectId: string,
     data: { name: string; description?: string; visibility?: 'public' | 'private' },

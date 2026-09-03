@@ -656,9 +656,21 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
       )
       const projectGroups = await Promise.all(
         spaces.map(async (space) => {
-          const [projects, folders] = await Promise.all([
+          /*
+           * §G15-10 — a space has projects AND lists of its own.
+           *
+           * `spaceLists` are the ones made by choosing a Space and stopping.
+           * They live in the space's hidden container, which `/projects/space`
+           * deliberately never returns, so without this call they would exist,
+           * be searchable, be openable by URL — and be absent from the one
+           * place anybody looks for them.
+           */
+          const [projects, folders, spaceLists] = await Promise.all([
             api<Array<{ id: string; name: string; folderId?: string | null }>>(`/projects/space/${space.id}`),
             api<Array<{ id: string; name: string; visibility?: string | null }>>(`/spaces/${space.id}/folders`).catch(() => []),
+            api<Array<{ id: string; name: string; projectId: string; visibility?: string | null }>>(
+              `/lists/space/${space.id}`,
+            ).catch(() => []),
           ])
           const projectsWithLists = await Promise.all(
             projects.map(async (project) => {
@@ -666,7 +678,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               return { ...project, lists }
             }),
           )
-          return { ...space, projects: projectsWithLists, folders }
+          return { ...space, projects: projectsWithLists, folders, spaceLists }
         }),
       )
       return projectGroups
@@ -1689,6 +1701,109 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               {t('nav.recentHint')}
             </div>
             {visibleTree?.map((space) => {
+              /*
+               * §G15-10 — one list row, wherever it hangs.
+               *
+               * Extracted so a list that lives directly in a Space renders
+               * identically to one inside a Project. Copying the row instead
+               * would have given space-level lists a subtly different menu the
+               * first time either was edited, which is how two things that
+               * should be the same drift apart.
+               */
+              const renderListNode = (
+                list: { id: string; name: string; visibility?: string | null },
+                ownerProjectId: string,
+              ) => {
+                        const listPath = resolveRoutePath(
+                          '/app/$workspaceId/$spaceId/$projectId/$listId',
+                          {
+                            workspaceId,
+                            spaceId: space.id,
+                            projectId: ownerProjectId,
+                            listId: list.id,
+                          },
+                        )
+                        const listActive = pathsEqual(pathname, listPath)
+                        return (
+                        <div key={list.id} className="group flex items-center gap-1">
+                          <Link
+                            to="/app/$workspaceId/$spaceId/$projectId/$listId"
+                            params={{ workspaceId, spaceId: space.id, projectId: ownerProjectId, listId: list.id }}
+                            className={cn(
+                              'flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-accent/10',
+                              listActive
+                                ? 'text-foreground font-medium bg-accent/15'
+                                : 'text-muted-foreground hover:text-foreground',
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                'h-1.5 w-1.5 rounded-full',
+                                listActive ? 'bg-brand-500' : 'bg-muted-foreground/50',
+                              )}
+                            />
+                            <span className="truncate">{list.name}</span>
+                          </Link>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
+                                aria-label={t('nav.actionsFor', { name: list.name })}
+                              >
+                                <MoreHorizontal className="h-3 w-3" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem onClick={() => setTreeEdit({ kind: 'list', id: list.id, name: list.name })}>
+                                <Pencil className="h-3.5 w-3.5" />
+                                {t('container.rename')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  void setListVisibility(list.id, list.visibility === 'private' ? 'public' : 'private')
+                                }
+                              >
+                                {list.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                                {list.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => setShareItem({ type: 'list', id: list.id, name: list.name })}
+                              >
+                                <Share2 className="h-3.5 w-3.5" />
+                                {t('share.menuAction')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  setMoveItem({
+                                    kind: 'list',
+                                    id: list.id,
+                                    name: list.name,
+                                    spaceId: space.id,
+                                    parentId: ownerProjectId,
+                                  })
+                                }
+                              >
+                                <ArrowRightLeft className="h-3.5 w-3.5" />
+                                {t('move.action')}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => {
+                                  if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
+                                    void deleteListFromTree(list.id)
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {t('list.deleteAction')}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        )
+              }
+
               const renderProjectNode = (project: (typeof space.projects)[number]) => (
                 <div key={project.id} className="space-y-0.5">
                   <div className="group flex items-center gap-1">
@@ -1765,96 +1880,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                   </div>
                   {projectOpen(project.id) && (
                     <div className="ml-5 space-y-0.5">
-                      {project.lists.map((list) => {
-                        const listPath = resolveRoutePath(
-                          '/app/$workspaceId/$spaceId/$projectId/$listId',
-                          {
-                            workspaceId,
-                            spaceId: space.id,
-                            projectId: project.id,
-                            listId: list.id,
-                          },
-                        )
-                        const listActive = pathsEqual(pathname, listPath)
-                        return (
-                        <div key={list.id} className="group flex items-center gap-1">
-                          <Link
-                            to="/app/$workspaceId/$spaceId/$projectId/$listId"
-                            params={{ workspaceId, spaceId: space.id, projectId: project.id, listId: list.id }}
-                            className={cn(
-                              'flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1 text-[12px] hover:bg-accent/10',
-                              listActive
-                                ? 'text-foreground font-medium bg-accent/15'
-                                : 'text-muted-foreground hover:text-foreground',
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                'h-1.5 w-1.5 rounded-full',
-                                listActive ? 'bg-brand-500' : 'bg-muted-foreground/50',
-                              )}
-                            />
-                            <span className="truncate">{list.name}</span>
-                          </Link>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
-                                aria-label={t('nav.actionsFor', { name: list.name })}
-                              >
-                                <MoreHorizontal className="h-3 w-3" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem onClick={() => setTreeEdit({ kind: 'list', id: list.id, name: list.name })}>
-                                <Pencil className="h-3.5 w-3.5" />
-                                {t('container.rename')}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  void setListVisibility(list.id, list.visibility === 'private' ? 'public' : 'private')
-                                }
-                              >
-                                {list.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-                                {list.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => setShareItem({ type: 'list', id: list.id, name: list.name })}
-                              >
-                                <Share2 className="h-3.5 w-3.5" />
-                                {t('share.menuAction')}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  setMoveItem({
-                                    kind: 'list',
-                                    id: list.id,
-                                    name: list.name,
-                                    spaceId: space.id,
-                                    parentId: project.id,
-                                  })
-                                }
-                              >
-                                <ArrowRightLeft className="h-3.5 w-3.5" />
-                                {t('move.action')}
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                className="text-destructive focus:text-destructive"
-                                onClick={() => {
-                                  if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
-                                    void deleteListFromTree(list.id)
-                                  }
-                                }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                {t('list.deleteAction')}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                        )
-                      })}
+                      {project.lists.map((list) => renderListNode(list, project.id))}
                       {project.lists.length === 0 && (
                         <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.noLists')}</div>
                       )}
@@ -2029,7 +2055,23 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                       )
                     })}
                     {ungrouped.map((project) => renderProjectNode(project))}
-                    {space.projects.length === 0 && (
+                    {/*
+                      §G15-10 — the lists that belong to the SPACE, not to a
+                      project in it.
+                      
+                      Rendered at the same depth as a project, because that is
+                      where they are in the hierarchy she describes: "pehle
+                      space hoti hai, iske baad LIST aati hai." They live in the
+                      space's hidden container, which the project endpoint never
+                      returns, so without this they would be openable by URL and
+                      findable by search and absent from the tree.
+                    */}
+                    {(space.spaceLists ?? []).map((list) => (
+                      <div key={list.id} data-testid={`space-list-${list.id}`}>
+                        {renderListNode(list, list.projectId)}
+                      </div>
+                    ))}
+                    {space.projects.length === 0 && (space.spaceLists ?? []).length === 0 && (
                       <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.noProjects')}</div>
                     )}
                     <button

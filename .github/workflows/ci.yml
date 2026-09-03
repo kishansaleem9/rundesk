@@ -274,6 +274,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §G15-10 — a List that lives directly in a Space. Makes its own space:
+      # reusing an existing one means the hidden container is already there
+      # from an earlier run, so the creation path — the thing under test —
+      # never runs, and a broken container passes cleanly.
+      - name: A List under a Space
+        if: '!cancelled()'
+        run: node test/e2e/list-under-space.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: The DM tab strip (A3.9)
         if: '!cancelled()'
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist

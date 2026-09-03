@@ -3343,3 +3343,65 @@ the row reads it.
 Four breaks, all caught: the dock ephemeral again (the original defect), the
 panel unable to mint, minting from an effect on open, and the row handed the
 raw prop so a minted thread still greys it out.
+
+## A List that lives in a Space (3 Sep)
+
+> `[21:49–21:54]` — "pehle space hoti hai. Iske baad LIST aati hai."
+
+She narrates two levels and makes a List by choosing a Space. Ours forced a
+Project in between: three mandatory dropdowns on every task-create, and a
+Project you had to invent before you could have a list. This was the largest
+structural divergence left.
+
+**`lists.project_id` is still NOT NULL, and that is the decision, not an
+omission.** The obvious change is to make it nullable. Measured first: **114
+inner joins across 34 files** reach a list's workspace *through* its project —
+`resource-member.guard.ts` among them, which is how every read decides whether
+you may see anything at all. A list without a project would resolve to no
+workspace and 404 for everybody, while quietly vanishing from search, the
+knowledge index, notifications and reminders. Converting 114 joins half-way is
+how you get rows that exist and cannot be seen, which is the exact defect this
+document has spent the day finding.
+
+So the hierarchy the person sees is Space → List, carried by **one hidden
+container per space** — created on demand, marked `is_default_container`,
+guarded by a partial unique index so a race cannot make two.
+
+**Hidden in one place, not fourteen.** Fourteen web surfaces render a space's
+projects — the tree, Move, the palette's Location filter, every picker — and
+every one of them reads `GET /projects/space/:id`. Excluding the container
+there hides it from all fourteen at once, which is the difference between one
+decision and fourteen chances to forget.
+
+The list row in the sidebar was **extracted rather than copied**, so a list
+under a Space renders identically to one under a Project. Two copies would have
+grown different menus the first time either was edited.
+
+Eleven checks, and four of them exist only to prove the container has not
+leaked. **Three had to be repaired before they were worth anything:**
+
+The suite used an existing space, so the hidden container was usually already
+there from an earlier run — `defaultContainerForSpace` returned early and the
+creation path never ran. A deliberately broken container that minted a new
+project per list passed cleanly, because no container was ever minted at all.
+It now makes its own space.
+
+"Making one did not add a Project anybody can see" compared a count before
+against a count after, which only catches a container created by *this* run;
+with one already present both counts included it and a leak passed. The check
+that holds is identity: the container this list actually went into must not be
+among the projects anybody is offered.
+
+And a break that removed only the container lookup was **neutralised by the
+unique index** — defence in depth doing its job, but it meant the break proved
+nothing. The break that lands has to defeat both.
+
+Four breaks, all caught: a space rejected on create (the original defect, 7
+checks fail), the container listed as a project, a container minted per list
+(7 fail, naming both ids), and a tree that renders none of the space's own
+lists.
+
+One process kill mid-break left a break in the working tree. It was found by
+grepping for each break's signature rather than trusting the harness's
+`finally` — worth doing every time, because a restored-looking `git status` and
+a restored tree are not the same claim.

@@ -28,6 +28,17 @@ export const projects = pgTable('projects', {
   visibility:  containerVisibilityEnum('visibility'),
   // Time logged on this project's tasks defaults to billable when true (§8.3).
   defaultBillable: boolean('default_billable').notNull().default(false),
+  /*
+   * §G15-10 — the container behind "a List that lives in a Space".
+   *
+   * She creates a List by choosing a Space; ours needed a Project in between.
+   * Rather than make `lists.project_id` nullable — which would strand a list
+   * outside the 114 joins that reach its workspace through its project, the
+   * resource guard included — the space keeps one hidden container and the list
+   * goes in it. One per space (partial unique index, migration 0129), created
+   * on demand, never listed and never offered as a destination.
+   */
+  isDefaultContainer: boolean('is_default_container').notNull().default(false),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

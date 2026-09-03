@@ -29,6 +29,17 @@ export class ListsController {
     return this.listsService.getListsByProject(projectId, { id: user.id, role: user.role })
   }
 
+  /**
+   * §G15-10 — the lists that live directly in a space.
+   *
+   * Declared BEFORE `:listId`, or Nest matches this path as a list whose id is
+   * the word "space" and answers 404 for a route that exists.
+   */
+  @Get('space/:spaceId')
+  async getListsBySpace(@Param('spaceId') spaceId: string, @CurrentUser() user: any) {
+    return this.listsService.getListsBySpace(spaceId, { id: user.id, role: user.role })
+  }
+
   @Get(':listId')
   async getList(@Param('listId') listId: string) {
     return this.listsService.getList(listId)
@@ -37,13 +48,34 @@ export class ListsController {
   @Post()
   async createList(
     @CurrentUser() user: any,
-    @Body() body: { projectId: string; name: string; description?: string; visibility?: 'public' | 'private' },
+    @Body()
+    body: {
+      projectId?: string
+      /** §G15-10 — a List made by choosing a Space and nothing else. */
+      spaceId?: string
+      name: string
+      description?: string
+      visibility?: 'public' | 'private'
+    },
   ) {
     // §G15 [22:07] — a list can be born private. Anything other than the two
     // known values is ignored rather than trusted into the enum column.
     const visibility = body.visibility === 'private' ? 'private' : 'public'
+    /*
+     * §G15-10 — "pehle space hoti hai. Iske baad LIST aati hai."
+     *
+     * A project still wins when one is given, so every existing caller behaves
+     * exactly as before. With only a space, the space's hidden container is
+     * resolved (or made) and the list goes there — which is what lets the
+     * person stop after choosing a Space instead of inventing a Project first.
+     */
+    if (!body.projectId && !body.spaceId) {
+      throw new BadRequestException('a list needs either a projectId or a spaceId')
+    }
+    const projectId =
+      body.projectId ?? (await this.listsService.defaultContainerForSpace(body.spaceId!, user.id))
     return this.listsService.createList(
-      body.projectId,
+      projectId,
       { name: body.name, description: body.description, visibility },
       user.id,
     )

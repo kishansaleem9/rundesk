@@ -113,7 +113,20 @@ export class ProjectsService {
   }
 
   async getProjectsBySpace(spaceId: string, actorId?: string) {
-    const base = and(eq(projects.spaceId, spaceId), eq(projects.isArchived, false))
+    /*
+     * §G15-10 — the space's hidden container is never listed.
+     *
+     * Fourteen surfaces in the web app render a space's projects, and every one
+     * of them reads this endpoint. Excluding the container HERE hides it from
+     * all fourteen at once — the tree, the Move dialog, the palette's Location
+     * filter, every project picker — which is the difference between one
+     * decision and fourteen chances to forget.
+     */
+    const base = and(
+      eq(projects.spaceId, spaceId),
+      eq(projects.isArchived, false),
+      eq(projects.isDefaultContainer, false),
+    )
     if (!actorId || (await this.canSeeAllProjects(spaceId, actorId))) {
       return this.db.select().from(projects).where(base)
     }

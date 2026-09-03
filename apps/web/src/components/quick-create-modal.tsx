@@ -225,10 +225,20 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     queryFn: () => api<Project[]>(`/projects/space/${spaceId}`),
     enabled: !!spaceId,
   }).data ?? []
+  /*
+   * §G15-10 — the lists you can put a task in.
+   *
+   * A project's lists when one is chosen; otherwise the space's own. Without
+   * the second branch, choosing a Space and nothing else left the List field
+   * empty and disabled — the extra mandatory level she does not have.
+   */
   const lists = useQuery({
-    queryKey: ['lists', projectId],
-    queryFn: () => api<List[]>(`/lists/project/${projectId}`),
-    enabled: !!projectId,
+    queryKey: projectId ? ['lists', projectId] : ['lists', 'space', spaceId],
+    queryFn: () =>
+      projectId
+        ? api<List[]>(`/lists/project/${projectId}`)
+        : api<List[]>(`/lists/space/${spaceId}`),
+    enabled: Boolean(projectId || spaceId),
   }).data ?? []
   // §1.1 — "hum is ko 'task' ka naam nahi de sakte — woh MILESTONE hai."
   // Types are per workspace, so this does not wait on the space/project/list
@@ -266,13 +276,30 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
    */
   const makeList = useMutation({
     mutationFn: () =>
-      api<{ id: string }>(`/lists`, {
+      /*
+       * §G15-10 [21:49] — "pehle space hoti hai. Iske baad LIST aati hai."
+       *
+       * A project when one is chosen, the space when none is: making a list no
+       * longer requires inventing a Project you did not want. The server puts a
+       * space-only list in that space's hidden container, so it is addressable
+       * and searchable like any other.
+       */
+      api<{ id: string; projectId: string }>(`/lists`, {
         method: 'POST',
-        body: { projectId, name: newListName.trim(), visibility: newListPrivate ? 'private' : 'public' },
+        body: {
+          ...(projectId ? { projectId } : { spaceId }),
+          name: newListName.trim(),
+          visibility: newListPrivate ? 'private' : 'public',
+        },
       }),
     onSuccess: (list) => {
       qc.invalidateQueries({ queryKey: ['lists', projectId] })
+      qc.invalidateQueries({ queryKey: ['lists', 'space', spaceId] })
       qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      // A space-level list comes back knowing its container, and the task being
+      // created has to go into it — otherwise the list is made and the task
+      // lands nowhere, which is the dead end this replaced.
+      if (!projectId && list.projectId) setProjectId(list.projectId)
       setListId(list.id)
       setMakingList(false)
       setNewListName('')
@@ -405,11 +432,16 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
       <div className="grid grid-cols-3 gap-2">
         <Select data-testid="quick-create-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId(''); setListId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
         <Select data-testid="quick-create-project" labelKey="quickCreate.selectProject" value={projectId} onChange={(v) => { setProjectId(v); setListId('') }} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
-        <Select data-testid="quick-create-list" labelKey="quickCreate.selectList" value={listId} onChange={setListId} options={lists.map((l) => ({ value: l.id, label: l.name }))} disabled={!projectId} />
+        <Select data-testid="quick-create-list" labelKey="quickCreate.selectList" value={listId} onChange={setListId} options={lists.map((l) => ({ value: l.id, label: l.name }))} disabled={!spaceId} />
       </div>
 
-      {/* §G15 [21:59] — a project with no list used to be a dead end here. */}
-      {projectId && (
+      {/*
+        §G15 [21:59] — a project with no list used to be a dead end here.
+        §G15-10 [21:49] — and so was a SPACE with no project: the List field
+        stayed disabled until you had invented one, which is the extra level
+        she does not have. A space is now enough.
+      */}
+      {(projectId || spaceId) && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border/70 px-2 py-1.5">
           {lists.length === 0 && !makingList && (
             <span className="text-[11px] text-muted-foreground">{t('quickCreate.listRequired')}</span>
