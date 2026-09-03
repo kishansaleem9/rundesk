@@ -3872,3 +3872,75 @@ Worth stating as a rule, since it has now cost two CI runs: **a fixed sleep is
 an assumption about someone else's machine.** Both failures looked like locator
 problems and were really the harness asserting too early.
 
+
+# Video 1 — closed
+
+Every gap derived from the fifteen section specs is either shipped with a
+break-tested check, or open with a written reason. Nothing is left in the
+undefined middle, which was the point of the redrive.
+
+**Verification at close:** 25 suites, 953 checks, zero failures locally; CI
+green across all three jobs. Every suite in this list runs in CI, not only here.
+
+## What the audit kept finding
+
+One defect class dominated, and it is worth naming for whoever picks up video 2:
+**work that was complete except for the last inch.** An endpoint with no caller.
+A component with no parent. A control that renders, responds, and does nothing.
+It is worse than an absence, because an absence is visible and this teaches you
+the feature works.
+
+The clearest examples, all found by re-deriving from the spec rather than from
+this document:
+
+- A **Google Drive search result** that did nothing at all — the API queried
+  Drive, the row rendered, and the click handler dropped every URL not starting
+  `/app/`.
+- A **minimised call** that hung up the moment you browsed away, which is the
+  one thing minimise exists for.
+- **Request access** with an endpoint, a table, a fan-out, and zero web callers.
+- The **docked assistant**, whose four per-message actions were greyed out
+  permanently because nothing ever gave it a thread.
+- A **forward** that said "Forwarded" while the channel, author and time sat
+  unused on the wire.
+
+## What the checks kept teaching
+
+Twelve of the checks written during this work **passed against deliberately
+broken code** and had to be repaired before they were worth anything. The causes
+rhyme:
+
+- **Shared state made an assertion true for the wrong reason** — a query cache
+  hiding network calls, an accumulating inbox making "a row exists" permanently
+  true, a container left behind by an earlier run.
+- **The fixture satisfied the check by two routes**, so breaking one changed
+  nothing — a search phrase present in both the title and the notes.
+- **The check was aimed at the wrong attacker** — an unauthenticated caller,
+  where the danger was a colleague who knew an id.
+- **The harness asserted too early.** Twice, a fixed sleep. Both looked exactly
+  like the defect being hunted.
+
+That last pair is the sharpest lesson here: **a harness failure and the bug it
+is hunting are indistinguishable from outside.** Only deliberately breaking the
+code tells them apart, and only doing it against a clean rebuild makes the
+answer trustworthy.
+
+## Deliberately not built
+
+Two things, recorded with reasons rather than quietly skipped:
+
+- **`task_created` as a notification kind.** Nothing in the product can follow a
+  *list*, so it would have no recipients and could never fire — a toggle in the
+  customiser for something that never happens.
+- **`lists.project_id` made nullable.** 114 inner joins across 34 files reach a
+  list's workspace through its project, the permission guard among them. The
+  hierarchy she describes is delivered; the schema change that would strand rows
+  outside those joins is not.
+
+## Known limitation
+
+**The Gmail and SharePoint federated queries are written and unexercised.** They
+need OAuth credentials for those providers, which no test environment holds.
+Everything up to the credential is driven — the source strip, the scoping, and
+the honest "not connected". Said here rather than left to be inferred from a
+green tick.
