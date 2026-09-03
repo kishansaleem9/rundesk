@@ -32,6 +32,12 @@ export interface Meeting {
    */
   recordings?: string[]
   notes: string | null
+  /**
+   * §A6 [19:16–19:20] — the "Tags:" chips in the meeting-notes toolbar.
+   * Optional because an older server does not send it, the same reason
+   * `recordings` is.
+   */
+  tags?: string[]
   taskId: string | null
   createdById: string | null
   createdAt: string

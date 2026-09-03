@@ -47,13 +47,28 @@ export function MeetingsPage() {
 
   const [query, setQuery] = useState('')
   const [mineOnly, setMineOnly] = useState(false)
+  const [tag, setTag] = useState<string | null>(null)
 
   const all = meetingsQuery.data
+  /*
+   * The chips are the tags in use, sorted, de-duplicated case-insensitively so
+   * "Standup" and "standup" are one chip rather than two that look identical.
+   */
+  const allTags = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const m of all ?? []) for (const raw of m.tags ?? []) {
+      const key = raw.toLowerCase()
+      if (!seen.has(key)) seen.set(key, raw)
+    }
+    return [...seen.values()].sort((a, b) => a.localeCompare(b))
+  }, [all])
+
   const filtered = useMemo(() => {
     const rows = all ?? []
     const needle = query.trim().toLowerCase()
     return rows.filter((m) => {
       if (mineOnly && m.createdById !== me?.id) return false
+      if (tag && !(m.tags ?? []).includes(tag)) return false
       if (!needle) return true
       return (
         m.title.toLowerCase().includes(needle) ||
@@ -61,7 +76,7 @@ export function MeetingsPage() {
         m.attendees.some((a) => (a.name ?? a.email ?? '').toLowerCase().includes(needle))
       )
     })
-  }, [all, query, mineOnly, me?.id])
+  }, [all, query, mineOnly, tag, me?.id])
 
   return (
     <div className="p-6 space-y-6" data-testid="meetings-page">
@@ -93,6 +108,34 @@ export function MeetingsPage() {
             >
               {t('meetings.myNotes')}
             </button>
+            {/*
+              §A6 [19:16–19:20] — "the label 'Tags:' followed by chips".
+              Built from the tags actually in use rather than a fixed list: a
+              chip for a tag nobody has applied filters to an empty page, which
+              is a control that can only disappoint.
+            */}
+            {allTags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1" data-testid="meetings-tags">
+                <span className="text-[11px] text-muted-foreground">{t('meetings.tagsLabel')}</span>
+                {allTags.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => setTag((cur) => (cur === name ? null : name))}
+                    aria-pressed={tag === name}
+                    data-testid={`meetings-tag-${name}`}
+                    className={cn(
+                      'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
+                      tag === name
+                        ? 'border-primary/50 bg-primary/10 text-foreground'
+                        : 'border-border/70 text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />

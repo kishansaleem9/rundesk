@@ -40,6 +40,13 @@ let WS = process.env.E2E_WS
   if (dm?.name) DM_NAME = dm.name
   console.log(`\x1b[2m  workspace ${WS}${dm ? `, DM with ${DM_NAME}` : ''}\x1b[0m`)
 }
+/*
+ * A client that outlives the discovery block above, whose own `api` is scoped
+ * to it. The tag checks seed a meeting and read the filter back off the server.
+ */
+const rootAuth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
+const rootApi = apiClient(`${B}/api/v1`, rootAuth.accessToken)
+
 const r = []
 const ok = (m) => { r.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { r.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
@@ -114,6 +121,68 @@ try {
   chk((await p.getByPlaceholder('Weekly sync').inputValue()) === '', 'the title clears', 'the title stuck')
   chk(await p.getByRole('button', { name: /^Save meeting$/ }).count() > 0,
     'the button goes back to Save', 'still offering Update after starting a new one')
+  // -------------------------------------------------------------------
+  console.log('\n▶ §A6 [19:16–19:20] — "Tags:" in the meeting-notes toolbar')
+  // -------------------------------------------------------------------
+  /*
+   * Her toolbar is "Filters · My notes · Tags: <chips> · Search". My notes and
+   * Search shipped; tags did not exist at all — no column, no relation.
+   *
+   * Seeded here rather than borrowed from whatever meetings happen to exist: a
+   * chip row built from ambient data might have no tags in it, and a filter
+   * with nothing to filter passes by not running.
+   */
+  {
+    const tag = `suite-tag-${Date.now()}`
+    const tagged = (await rootApi(`/workspaces/${WS}/meetings`, {
+      method: 'POST',
+      body: { title: `tagged ${tag}`, tags: [tag] },
+    })).data
+    const plain = (await rootApi(`/workspaces/${WS}/meetings`, {
+      method: 'POST',
+      body: { title: `untagged ${tag}` },
+    })).data
+    chk(!!tagged?.id && !!plain?.id, 'a tagged and an untagged meeting could be seeded',
+      'could not seed meetings')
+
+    await p.goto(`${B}/app/${WS}/meetings`, { waitUntil: 'domcontentloaded' })
+    await p.waitForTimeout(3000)
+
+    chk(
+      await p.getByTestId('meetings-tags').isVisible().catch(() => false),
+      'the toolbar shows a Tags row',
+      'no Tags row in the meetings toolbar',
+    )
+    const chip = p.getByTestId(`meetings-tag-${tag}`)
+    chk(await chip.isVisible().catch(() => false), 'with a chip for a tag in use',
+      `no chip for ${tag}`)
+
+    if (await chip.isVisible().catch(() => false)) {
+      const rows = () => p.locator('[data-testid^="meeting-row-"], article, li').filter({ hasText: tag }).count()
+      const before = await rows()
+      await chip.click()
+      await p.waitForTimeout(900)
+      const after = await rows()
+      chk(after > 0 && after < before, `choosing it narrows the list (${before} → ${after})`,
+        `the chip changed nothing: ${before} → ${after}`)
+      await chip.click()
+      await p.waitForTimeout(700)
+      chk((await rows()) === before, 'and choosing it again clears the filter',
+        'the chip could not be turned off')
+    } else {
+      chk(false, 'choosing it narrows the list', 'no chip')
+      chk(false, 'and choosing it again clears the filter', 'no chip')
+    }
+
+    // The server filters too, so a tag on the 201st meeting is still reachable.
+    const filtered = (await rootApi(`/workspaces/${WS}/meetings?tag=${encodeURIComponent(tag)}`)).data ?? []
+    chk(
+      filtered.length === 1 && filtered[0].id === tagged.id,
+      'and the server filters by tag rather than the client after a limit',
+      `server returned ${filtered.length} for ?tag=`,
+    )
+  }
+
 } catch (e) {
   bad(`threw: ${e.message}`)
   await p.screenshot({ path: '/tmp/a61-fail.png', fullPage: true }).catch(() => {})

@@ -24,7 +24,16 @@ export const meetings = pgTable(
     provider:     text('provider').$type<'zoom' | 'google_meet' | 'manual'>().notNull().default('manual'),
     joinUrl:      text('join_url'),
     recordingUrl: text('recording_url'),
-    notes:        text('notes'),
+    /*
+   * §A6 [19:16–19:20] — the "Tags:" chips in the meeting-notes toolbar.
+   *
+   * Free labels somebody applies to their own notes, read only to filter.
+   * Modelled as text[] after chat_message_saves.tags rather than as workspace
+   * labels: those carry colours, an admin surface and a shared vocabulary,
+   * which is a heavier promise than this needs.
+   */
+  tags:       text('tags').array().notNull().default([]),
+  notes:        text('notes'),
     transcript:   text('transcript'),
     /** SET NULL: deleting the task must not delete the record of the conversation. */
     taskId:       uuid('task_id').references(() => tasks.id, { onDelete: 'set null' }),

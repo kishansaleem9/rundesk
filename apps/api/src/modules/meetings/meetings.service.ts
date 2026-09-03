@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
-import { and, asc, desc, eq, gte, inArray, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm'
 import { meetings, meetingAttendees, workspaceMembers, users, tasks, taskAssignees, lists, projects, spaces, calls, callRecordings } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -19,6 +19,32 @@ const MAX_TITLE = 300
  * so the notes the AI can already read have somewhere to live, and the action
  * items it extracts can be turned into real tasks against a real meeting.
  */
+
+/**
+ * §A6 [19:16–19:20] — the tags on a meeting note, cleaned once.
+ *
+ * Trimmed, de-duplicated case-insensitively (so "Standup" and "standup" are one
+ * chip, not two that look identical in the toolbar), blanks dropped, and
+ * bounded. A tag list is chips on a filter bar: a hundred of them, or one
+ * three-thousand characters long, is not a filter any more.
+ */
+export function normalizeMeetingTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of value) {
+    if (typeof raw !== 'string') continue
+    const tag = raw.trim().slice(0, 40)
+    if (!tag) continue
+    const key = tag.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(tag)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
 @Injectable()
 export class MeetingsService {
   constructor(
@@ -148,15 +174,26 @@ export class MeetingsService {
     return byMeeting
   }
 
-  async list(workspaceId: string, userId: string, opts: { taskId?: string } = {}) {
+  async list(workspaceId: string, userId: string, opts: { taskId?: string; tag?: string } = {}) {
     await this.assertMember(workspaceId, userId)
+    /*
+     * §A6 [19:16–19:20] — filtered in SQL, not after the limit.
+     *
+     * This caps at 200. Fetching 200 and then filtering by tag in the client
+     * would make a tag on the 201st meeting unreachable — the same shape as
+     * the forward modal's ten-item cap, where narrowing after slicing put the
+     * thing you searched for permanently out of reach.
+     */
+    const tag = opts.tag?.trim()
     const rows = await this.db
       .select()
       .from(meetings)
       .where(
-        opts.taskId
-          ? and(eq(meetings.workspaceId, workspaceId), eq(meetings.taskId, opts.taskId))
-          : eq(meetings.workspaceId, workspaceId),
+        and(
+          eq(meetings.workspaceId, workspaceId),
+          opts.taskId ? eq(meetings.taskId, opts.taskId) : undefined,
+          tag ? sql`${meetings.tags} @> ARRAY[${tag}]::text[]` : undefined,
+        ),
       )
       // Newest first, and meetings with no start time fall back to when the
       // record was made rather than sorting to the bottom forever.
@@ -259,6 +296,7 @@ export class MeetingsService {
       joinUrl?: string | null
       recordingUrl?: string | null
       notes?: string | null
+      tags?: string[]
       taskId?: string | null
       attendeeIds?: string[]
     },
@@ -283,6 +321,7 @@ export class MeetingsService {
         notes: body.notes ?? null,
         taskId: body.taskId ?? null,
         createdById: userId,
+        tags: normalizeMeetingTags(body.tags),
       })
       .returning()
 
@@ -331,11 +370,16 @@ export class MeetingsService {
       recordingUrl?: string | null
       startsAt?: string | null
       endsAt?: string | null
+      tags?: string[]
     },
   ) {
     await this.assertMember(workspaceId, userId)
     await this.load(workspaceId, meetingId)
     const set: Record<string, unknown> = { updatedAt: new Date() }
+    // Absent means "leave the tags alone"; an empty array means "remove them
+    // all", which is a real answer. Conflating the two is how a clear becomes
+    // impossible — the defect this repo already fixed on nav favourites.
+    if (body.tags !== undefined) set.tags = normalizeMeetingTags(body.tags)
     if (body.title !== undefined) {
       const t = body.title.trim()
       if (!t) throw new BadRequestException('title cannot be empty')

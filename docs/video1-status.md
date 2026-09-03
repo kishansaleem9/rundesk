@@ -3102,3 +3102,43 @@ that fails.**
 
 Verified in the order CI runs them — `settings-depth` 57/57, then
 `video-regression` 90/90, the exact sequence that failed.
+
+## Meeting notes: the Tags half of her toolbar (3 Sep)
+
+> `[19:16–19:20]`, frames `306_1916` / `307_1920` — the meeting-notes toolbar:
+> "funnel icon + **Filters**; a pill toggle **My notes** (active by default);
+> the label **Tags:** followed by chips; a right-aligned **Search**."
+
+My notes and Search shipped earlier. Tags did not exist at any layer — no
+column, no relation, no chips — so the one axis her toolbar organises notes by
+was missing.
+
+`meetings.tags` is a `text[]`, following the precedent this repo already set
+for exactly this shape: `chat_message_saves.tags` — free labels somebody
+applies to their own things, read only to filter. Task **labels** are the other
+pattern and are deliberately not reused: those carry colours, an admin surface
+and a shared workspace vocabulary, which is a heavier promise than a meeting
+note needs.
+
+**Filtered in SQL, not after the limit.** `list()` caps at 200. Fetching 200
+and filtering by tag in the client would put a tag on the 201st meeting
+permanently out of reach — the same shape as the forward modal's ten-item cap,
+where narrowing *after* slicing made the thing you searched for unreachable.
+The break confirms it: with the WHERE clause removed the server returns **61**
+rows for `?tag=`.
+
+Normalised once, on the way in: trimmed, blanks dropped, de-duplicated
+case-insensitively so "Standup" and "standup" are one chip rather than two that
+look identical, capped at 20. And absent means *leave the tags alone* while an
+empty array means *remove them all* — conflating those is how a clear becomes
+impossible, which this document already records fixing on nav favourites.
+
+The chips are built from the tags **in use** rather than a fixed list: a chip
+for a tag nobody has applied filters to an empty page, which is a control that
+can only disappoint.
+
+Six checks in `a61-meeting-record.mjs`, seeding one tagged and one untagged
+meeting — a chip row built from ambient data might contain no tags at all, and
+a filter with nothing to filter passes by not running. Three breaks, all
+caught: the chip filtering nothing (`2 → 2`), the Tags row removed, and the
+server ignoring `?tag`.

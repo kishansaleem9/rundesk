@@ -22,8 +22,10 @@ export class MeetingsController {
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: { id: string },
     @Query('taskId') taskId?: string,
+    /** §A6 [19:16–19:20] — the "Tags:" chips in the meeting-notes toolbar. */
+    @Query('tag') tag?: string,
   ) {
-    return this.meetings.list(workspaceId, user.id, { taskId })
+    return this.meetings.list(workspaceId, user.id, { taskId, tag })
   }
 
   @Post('workspaces/:workspaceId/meetings')
@@ -41,6 +43,7 @@ export class MeetingsController {
       notes?: string | null
       taskId?: string | null
       attendeeIds?: string[]
+      tags?: string[]
     },
   ) {
     return this.meetings.create(workspaceId, user.id, body)
@@ -85,6 +88,7 @@ export class MeetingsController {
       recordingUrl?: string | null
       startsAt?: string | null
       endsAt?: string | null
+      tags?: string[]
     },
   ) {
     return this.meetings.update(workspaceId, meetingId, user.id, body)
