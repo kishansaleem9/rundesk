@@ -3674,6 +3674,47 @@ never checking the embedded TEXT, so indexing the heading alone passed. That
 last one is now asserted on the content hash, which is the only trace of the
 text the row keeps.
 
+
+## How old is this, and when will it change (3 Sep)
+
+The Dashboard had a "last updated" line and an auto-refresh picker. Nothing else
+did. Every other polled surface refreshed on a schedule nobody could see, set to
+a value nobody could change, with no way to tell a current screen from one that
+has been open since you made coffee — and on a list two people are working
+through, "is this stale?" is the first question anybody has.
+
+Lifted out of the dashboard rather than copied into the next place. Two
+implementations of "last updated" drift in exactly the way that makes one of
+them wrong and neither obviously so, so the dashboard now renders the same
+component the list does. The hook returns `refetchInterval` in the shape
+TanStack Query wants (`false`, not `0`) because passing 0 means "refetch as fast
+as possible" — the opposite of off, and a mistake that only shows up later as a
+load-shaped graph.
+
+It gets its own slot in the list chrome rather than joining the toolbar: the
+toolbar is filters and grouping, things you do TO the list, and this is a
+statement ABOUT it. Sharing the slot would have put a sentence in a row of
+buttons.
+
+**Three attempts at checking the refresh button, and the first two are the
+lesson.**
+
+The first created a task behind the page's back and looked for the row after
+pressing refresh. It was already on screen *before* the press — the list keeps
+itself current from the realtime stream — so that check could only ever have
+failed on the socket, never on the button.
+
+The second and third counted the request with `page.route`: a narrow glob
+matched nothing, and a broad one was shadowed by a handler the suite registers
+earlier. **Both reported zero fetches, which is exactly what a button wired to
+nothing reports.** A harness failure and the defect it is hunting can be
+indistinguishable from the outside, and the only thing that separated them was
+building a standalone probe and watching the request actually go out.
+`page.on('request')` cannot be shadowed and changes no behaviour.
+
+Three breaks, all caught: the list without the controls (the original defect),
+the age line removed, and refresh wired to nothing.
+
 ## What is still open, with the evidence (3 Sep)
 
 Written down so the next pass starts from measurements rather than from this
@@ -3684,11 +3725,10 @@ attached providers in the prompt and `:561-565` explicitly forbids acting on
 them. No credential is ever resolved. "Connect it to any system" is currently a
 label on an inert list.
 
-**Freshness chrome is dashboard-only** (`app.$workspaceId.dashboard.tsx:320-346`
-is the only reader), **there is no engagement or trending sort** (sort is still
-`relevance | updated | created`), **no Gmail or SharePoint source** (only Drive,
-and only as an entity chip), and **workspace Bookmarks do not exist at any
-layer** — no table, no module, no route.
+**There is no engagement or trending sort** (sort is still `relevance | updated
+| created`), **no Gmail or SharePoint source** (only Drive, and only as an
+entity chip), and **workspace Bookmarks do not exist at any layer** — no table,
+no module, no route.
 
 None of these is blocked. They are simply not done, and saying which is which
 is the point of writing them here.

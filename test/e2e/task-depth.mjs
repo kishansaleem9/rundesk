@@ -115,7 +115,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 88
+const EXPECTED_CHECKS = 91
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -1030,6 +1030,70 @@ try {
     )
     await A(`/tasks/${parent.data.id}`, { method: 'DELETE' })
   }
+
+  /*
+   * ── §G01-8 — the list says how stale it is ────────────────────────────────
+   *
+   * The Dashboard had a "last updated" line and an auto-refresh picker and
+   * nothing else did. A list polled on somebody else's schedule with nothing on
+   * screen to tell a current board from one that has been open since you made
+   * coffee — and on a list two people are working through, "is this stale?" is
+   * the first question anybody has.
+   *
+   * The refresh BUTTON is the one that has to do something, so it is checked by
+   * effect: a task created behind the page's back appears when you press it.
+   * Asserting the control renders would pass for a button wired to nothing,
+   * which is the defect class this whole audit is about.
+   */
+  console.log('\n▶ §G01-8 — a list tells you how old it is')
+  await page.goto(
+    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await page.waitForTimeout(4000)
+
+  check(
+    await page.getByTestId('freshness-controls').isVisible().catch(() => false),
+    'a list carries the freshness controls, not just the dashboard',
+    'no freshness controls on the list view',
+  )
+  check(
+    (await page.getByTestId('freshness-updated').innerText().catch(() => '')).trim().length > 0,
+    'and says when what you are looking at last arrived',
+    'the list shows no age for its data',
+  )
+
+  /*
+   * The button is checked by the REQUEST it makes, not by a row appearing.
+   *
+   * The first version created a task behind the page's back and looked for it
+   * after pressing refresh — and it was already on screen before the press,
+   * because the list keeps itself current from the realtime stream. That check
+   * could never have failed on the button, only on the socket. Counting the
+   * fetch is the thing the control actually promises.
+   */
+  /*
+   * OBSERVED, not intercepted.
+   *
+   * Two attempts with `page.route` counted nothing: a narrow glob matched no
+   * request, and a broad one was shadowed by a handler this suite registers
+   * earlier. Both reported zero fetches, which reads exactly like a button
+   * wired to nothing — a harness failure wearing the defect's clothes.
+   * `page.on('request')` cannot be shadowed and changes no behaviour.
+   */
+  let listFetches = 0
+  page.on('request', (req) => {
+    if (req.url().includes(`/tasks/list/${listId}`)) listFetches += 1
+  })
+  await page.waitForTimeout(500)
+  const before = listFetches
+  await page.getByTestId('freshness-refresh-now').click()
+  await page.waitForTimeout(2500)
+  check(
+    listFetches > before,
+    'and refreshing actually goes and asks again',
+    `the list was fetched ${listFetches - before} times when refresh was pressed`,
+  )
 
   await done(browser, stack)
 } catch (err) {

@@ -300,6 +300,7 @@ export function TaskListChrome({
   toolbar,
   headerAction,
   secondaryAction,
+  freshness,
 }: {
   listName: string
   taskCount: number
@@ -310,6 +311,14 @@ export function TaskListChrome({
   headerAction?: ReactNode
   /** A line under the title, for context rather than commands (A1.10 forms). */
   secondaryAction?: ReactNode
+  /**
+   * §G01-8 — how old this is and when it will change.
+   *
+   * Its own slot rather than folded into `toolbar`: the toolbar is filters and
+   * grouping, things you do TO the list, and this is a statement ABOUT it.
+   * Sharing the slot would have put a sentence in a row of buttons.
+   */
+  freshness?: ReactNode
 }) {
   return (
     <div className="shrink-0 border-b border-border/80 bg-[#fbfbfc] dark:bg-[#16181d]">
@@ -331,7 +340,10 @@ export function TaskListChrome({
       </div>
       <div className="px-4 sm:px-6 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2 pb-0">
         {viewTabs}
-        <div className="flex flex-wrap items-center gap-1.5 pb-2 xl:pb-2">{toolbar}</div>
+        <div className="flex flex-wrap items-center gap-1.5 pb-2 xl:pb-2">
+          {toolbar}
+          {freshness}
+        </div>
       </div>
     </div>
   )

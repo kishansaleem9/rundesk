@@ -42,6 +42,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { toDateInput, withDatePart } from '../lib/task-dates'
 import { criticalPath } from '../lib/gantt'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
+import { FreshnessControls, useRefreshInterval } from '../components/freshness-controls'
 import { ListStatusesManager } from '../components/list-statuses-manager'
 import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
 import { SharePanel } from '../components/share-panel'
@@ -1137,9 +1138,19 @@ function ListDetail() {
   const [appliedInitialView, setAppliedInitialView] = useState(false)
   const quickAddRef = useRef<HTMLInputElement | null>(null)
 
-  const { data: tasks = [], isLoading, refetch } = useQuery({
+  /*
+   * §G01-8 — the list says how old it is, and lets you say how often it looks.
+   *
+   * It polled on somebody else's schedule with nothing on screen to tell a
+   * current board from one that has been sitting there since you made coffee.
+   * On a list two people are working through, "is this stale?" is the first
+   * question and there was nowhere to look.
+   */
+  const refresh = useRefreshInterval()
+  const { data: tasks = [], isLoading, refetch, dataUpdatedAt } = useQuery({
     queryKey: ['tasks', listId],
     queryFn: () => api<TaskItem[]>(`/tasks/list/${listId}`),
+    refetchInterval: refresh.refetchInterval,
   })
   const { data: projectFields = [] } = useQuery({
     queryKey: ['project-fields', workspaceId, projectId],
@@ -1626,6 +1637,15 @@ function ListDetail() {
       <TaskListChrome
         listName={listMeta?.name ?? t('list.defaultListName')}
         taskCount={visibleTasks.length}
+        freshness={
+          <FreshnessControls
+            refreshMs={refresh.refreshMs}
+            onRefreshMsChange={refresh.setRefreshMs}
+            dataUpdatedAt={dataUpdatedAt}
+            onRefreshNow={() => void refetch()}
+            busy={isLoading}
+          />
+        }
         headerAction={
           // A1.8 — sharing a list was already implemented; it was only
           // reachable from the sidebar row menu, never from the list itself.

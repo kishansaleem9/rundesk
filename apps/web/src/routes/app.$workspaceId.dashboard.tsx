@@ -20,6 +20,7 @@ import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
+import { FreshnessControls, REFRESH_INTERVALS } from '../components/freshness-controls'
 import { DashboardTemplateCards } from '../components/dashboard-templates'
 import { SharePanel } from '../components/share-panel'
 import { useTranslation } from '../lib/i18n'
@@ -83,7 +84,6 @@ type Preset = {
  * on a second monitor, so a static snapshot is misleading rather than merely
  * stale; the shortest interval that isn't wasteful wins.
  */
-const REFRESH_INTERVALS = [0, 60_000, 300_000, 900_000] as const
 
 export const Route = createFileRoute('/app/$workspaceId/dashboard')({
   /*
@@ -312,21 +312,18 @@ function Dashboard() {
               the report builder; this is the missing way in from a dashboard. */}
           {viewMode === 'overview' && (
             <div className="flex flex-wrap items-center gap-2">
-              <select
-                className="h-9 px-3 rounded-md border border-border bg-card text-sm"
-                value={refreshMs}
-                onChange={(e) => setRefreshMs(Number(e.target.value))}
-                title={t('dashboard.refreshHint')}
-              >
-                {REFRESH_INTERVALS.map((ms) => (
-                  <option key={ms} value={ms}>
-                    {ms === 0 ? t('dashboard.refreshOff') : t('dashboard.refreshEvery', { minutes: ms / 60_000 })}
-                  </option>
-                ))}
-              </select>
-              <Button size="sm" variant="outline" onClick={() => void refetch()} title={t('dashboard.refreshNow')}>
-                <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-              </Button>
+              {/*
+                §G01-8 — the shared control. This was the only surface that had
+                one; it is the same component the list uses now, so "last
+                updated" cannot come to mean two different things in two places.
+              */}
+              <FreshnessControls
+                refreshMs={refreshMs}
+                onRefreshMsChange={setRefreshMs}
+                dataUpdatedAt={dataUpdatedAt}
+                onRefreshNow={() => void refetch()}
+                busy={isLoading}
+              />
               {/* The scheduler lives in the report builder; this is the way in,
                   not a second scheduler. */}
               <Button size="sm" variant="outline" asChild>
@@ -338,13 +335,6 @@ function Dashboard() {
             </div>
           )}
         </div>
-        {viewMode === 'overview' && dataUpdatedAt > 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t('dashboard.lastUpdated', {
-              when: formatDistanceToNowStrict(new Date(dataUpdatedAt), { addSuffix: true }),
-            })}
-          </p>
-        )}
         <div className="mt-4 inline-flex rounded-lg border border-border/60 bg-card/30 p-1">
           <button
             onClick={() => setViewMode('overview')}
