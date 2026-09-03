@@ -2885,3 +2885,61 @@ the fan-out, and `notified` counting rows instead of deliveries.
 two rules pull against each other — search must not reveal what you cannot see,
 yet a wall you cannot ask from is the thing she is complaining about. The
 owner-facing half is what she named, and it is what shipped.
+
+## Member-created workspace privacy: mostly already true (2 Sep)
+
+> `[09:43–09:48]` "Ab agar maine workspace banayi to yeh **mere par dependent
+> hai** ke maine apne members ko share karna hai ya nahi karna, kyunke woh
+> **meri email pe** ban rahi hai."
+
+She creates a second workspace on camera (`08:35–09:57`) and four on-screen
+signals say it is hers alone until she invites: the plan line loses its member
+count, the button changes from "Invite" to "People", and the DM list holds only
+her.
+
+**Checked before changing anything, and the claim is already honoured where it
+counts.** `findByMember` joins through `workspace_members`, so an ordinary
+member never sees a workspace somebody else made. The privacy she describes is
+the shipped behaviour.
+
+### The recommendation I did not take
+
+The scope agent proposed spawning a **fresh organization** for every
+member-created workspace. The code says, in as many words, that this was
+deliberately changed the other way — "one top-level org per tenant … rather
+than spawning a fresh org for every workspace (the previous behaviour)".
+
+Her evidence is entirely about **who can see it**; she never mentions
+organizations at all. Reversing a considered decision to solve a problem that
+does not exist on the member path would have been building from a summary
+rather than from what she showed.
+
+### What was actually wrong
+
+`listWorkspaces` returned `select()` — **every column** of every workspace in
+the organization, to an admin who need not belong to any of them. That includes
+`customDomainToken`, the `rundesk-verify=…` secret proving control of a domain,
+plus branding and the `purpose`/`comingFrom` answers people gave inside their
+own workspaces. Its one caller asks for four fields, so the breadth bought
+nothing.
+
+Now an explicit projection. Guarded as "the projection is explicit" rather than
+"these exact columns", because the property that failed is publishing-by-
+default: a bare `select()` hands this audience whatever the table grows next.
+
+**Deliberately not narrowed by membership.** Whether a company admin keeps a
+residual right to enumerate for billing or offboarding is the one thing she
+never settles — she is in a Free-Forever consumer context throughout and never
+shows an admin looking at another member's workspace. Left exactly as it was.
+
+### A fifth "asserts a symbol appears"
+
+The membership check first asserted that `workspaceMembers` appeared somewhere
+in `findByMember`. It still does — in `.from()` and `.innerJoin()` — with the
+user filter deleted, so the check **passed on a version that returned every
+workspace in the system to everybody**. It now asserts
+`eq(workspaceMembers.userId, userId)`, the filter itself.
+
+That is the fifth time this session the same shape has proved hollow. The
+lesson has stopped being "write better checks" and become a rule: **assert the
+constraint, never the vocabulary.**

@@ -177,9 +177,37 @@ export class OrganizationsService {
       .where(eq(organizationMembers.organizationId, organizationId))
   }
 
+  /**
+   * §G08 [08:35–09:57] — the org-admin roster, narrowed to what a roster needs.
+   *
+   * This returned `select()` — every column of every workspace in the
+   * organization, to an admin who need not be a member of any of them. Among
+   * those columns is `customDomainToken`, the `rundesk-verify=…` secret used to
+   * prove control of a domain, plus branding, `purpose` and `comingFrom`, which
+   * are answers somebody gave inside their own workspace.
+   *
+   * Its one caller asks for four fields (master-admin-panel.tsx:762), so the
+   * breadth bought nothing and exposed a secret to people outside the
+   * workspace. Projected explicitly now: a new column is not published to this
+   * audience by default, which is the property that failed here.
+   *
+   * NOT narrowed by membership. She settles that a workspace someone makes is
+   * theirs until they share it — "woh meri email pe ban rahi hai" — and the
+   * member-facing list already honours that (`findByMember` joins through
+   * `workspace_members`). What she never settles is whether a company admin
+   * keeps a residual right to *enumerate* for billing or offboarding, so that
+   * is left exactly as it was rather than decided here.
+   */
   async listWorkspaces(organizationId: string) {
     return this.db
-      .select()
+      .select({
+        id: workspaces.id,
+        name: workspaces.name,
+        slug: workspaces.slug,
+        plan: workspaces.plan,
+        isArchived: workspaces.isArchived,
+        createdAt: workspaces.createdAt,
+      })
       .from(workspaces)
       .where(eq(workspaces.organizationId, organizationId))
   }
