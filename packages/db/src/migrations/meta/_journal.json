@@ -869,6 +869,20 @@
       "when": 1900000091029,
       "tag": "0123_content_access_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1900000092029,
+      "tag": "0124_lists_know_their_space",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1900000093029,
+      "tag": "0125_lists_space_stays_true",
+      "breakpoints": true
     }
   ]
 }

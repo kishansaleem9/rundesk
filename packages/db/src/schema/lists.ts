@@ -1,6 +1,7 @@
 import { pgTable, text, timestamp, uuid, boolean, integer } from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { projects } from './projects'
+import { spaces } from './spaces'
 import { tasks } from './tasks'
 import { users } from './users'
 import { containerVisibilityEnum } from './enums'
@@ -8,6 +9,20 @@ import { containerVisibilityEnum } from './enums'
 export const lists = pgTable('lists', {
   id:         uuid('id').primaryKey().defaultRandom(),
   projectId:  uuid('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  /*
+   * §G15 [21:49–21:54] — "pehle space hoti hai. Iske baad LIST aati hai."
+   *
+   * The space this list lives in, held directly rather than inferred by
+   * joining through the project. Every list already has exactly one, so this
+   * is a denormalisation of something already true (migration 0124), not a new
+   * degree of freedom — and it is what lets "which space?" be answered without
+   * a project in the middle.
+   *
+   * Nullable only because the backfill had to be, and because the column is
+   * added before the writes that populate it. `assertSpaceMatchesProject` is
+   * what keeps it honest while `project_id` is still required.
+   */
+  spaceId:    uuid('space_id').references(() => spaces.id, { onDelete: 'cascade' }),
   name:       text('name').notNull(),
   description: text('description'),
   position:   integer('position').notNull().default(0),
@@ -29,5 +44,6 @@ export const lists = pgTable('lists', {
 
 export const listsRelations = relations(lists, ({ one, many }) => ({
   project: one(projects, { fields: [lists.projectId], references: [projects.id] }),
+  space: one(spaces, { fields: [lists.spaceId], references: [spaces.id] }),
   tasks:   many(tasks),
 }))

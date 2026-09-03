@@ -2943,3 +2943,66 @@ workspace in the system to everybody**. It now asserts
 That is the fifth time this session the same shape has proved hollow. The
 lesson has stopped being "write better checks" and become a rule: **assert the
 constraint, never the vocabulary.**
+
+## A List under a Space: the groundwork, and an honest stopping point (3 Sep)
+
+> `[21:49–21:54]` "Agar aap yeh top pe dekh rahe ho na to yeh poochta hai ke aap
+> ko kis SPACE mein — **pehle space hoti hai. Iske baad LIST aati hai.**"
+
+She narrates two levels and creates a List by choosing a Space. Ours forces a
+Project between them.
+
+**Measured before starting, because "make `project_id` nullable" is not the
+change it sounds like:**
+
+| | |
+|---|---|
+| references to `lists.projectId` in the API | **166** across **40** files |
+| route files assuming `$projectId` | 7 |
+| a list's only link to a space | **through its project** — `lists` had no `space_id` at all |
+
+That last row is the real obstacle. A list with a null project would have been
+an orphan: no space, no workspace, no permission walk. This was never a
+one-line migration.
+
+### What landed
+
+The additive half, which is true of the data today and changes no behaviour:
+every list carries its own `space_id` (0124, backfilled from the owning
+project — 156 rows, 0 orphaned).
+
+Keeping it true is the harder part. Five services insert a list, and a list can
+be **moved** between projects. Patching five call sites fixes the five that
+exist and rots the column the day a sixth appears — including raw SQL, seeds
+and importers that never touch the service layer. So it is derived in a trigger
+(0125), where it cannot be bypassed.
+
+Proved against the real database, including the case that matters most:
+
+```
+on insert   | true   -- filled from the project
+wrong input | true   -- a deliberately WRONG space_id is overruled
+after move  | true   -- follows the list to a project in another space
+```
+
+### Where this stops, and why that is the honest line
+
+`project_id` is **still NOT NULL**. Dropping it is the step that changes what a
+list *is*, and it needs the create flow and the
+`/app/$ws/$space/$project/$list` route to change with it — a list with no
+project has no URL under that scheme. Starting that and leaving it half-done
+would be worse than not starting.
+
+The four checks in `list-space.test.ts` include one asserting `project_id` is
+still required, so the next person can see exactly where the work stopped
+rather than inferring it.
+
+### A break that matched a comment
+
+Break A commented the whole trigger out — `-- CREATE TRIGGER …` — and the check
+**passed**, because it searched the raw file and the words were still there. It
+strips SQL comments now. What is being asserted is that the statement *runs*,
+not that the text appears.
+
+Sixth instance of the same shape this session, and the same rule answers it:
+**assert the constraint, never the vocabulary.**
