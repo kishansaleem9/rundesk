@@ -240,6 +240,43 @@ try {
     chk(false, 'and following it marks the one you came for', 'no url to follow')
   }
 
+  /*
+   * ── §G14-15 — and the assistant can ground an answer in one ───────────────
+   *
+   * Keyword search finding a meeting is half of it. The notes are frequently
+   * the only written record of a decision, and the assistant could not cite
+   * one: "what did we decide about pricing" returned everything except the
+   * place the decision was written down.
+   *
+   * Reindexed explicitly rather than waiting for the cron, so this measures
+   * the indexer rather than whether a scheduled job happened to have run.
+   */
+  console.log('\n▶ §G14-15 — the assistant can cite a meeting')
+  const reindexed = await rootApi(`/workspaces/${WS}/knowledge/reindex`, { method: 'POST' })
+  chk(reindexed.status < 400, 'the workspace can be reindexed',
+    `reindex returned ${reindexed.status}: ${JSON.stringify(reindexed.error)}`)
+
+  const asked = await rootApi('/ai/knowledge', {
+    method: 'POST',
+    body: { workspaceId: WS, question: `what did we decide about the ${phrase} tier` },
+  })
+  const cited = (asked.data?.sources ?? []).filter((x) => x.type === 'meeting')
+  chk(
+    cited.length > 0,
+    'and asking about what a meeting decided cites a meeting',
+    `sources were ${JSON.stringify((asked.data?.sources ?? []).map((x) => x.type))}`,
+  )
+  /*
+   * Citing the right one. Any meeting would satisfy the check above, and with
+   * 46 of them in the workspace that is a low bar — the phrase appears in
+   * exactly one set of notes.
+   */
+  chk(
+    cited.some((x) => x.id === findable.id),
+    'and cites the one whose notes actually say it',
+    `cited ${JSON.stringify(cited.map((x) => x.title))}`,
+  )
+
 } catch (e) {
   bad(`threw: ${e.message}`)
   await p.screenshot({ path: '/tmp/a61-fail.png', fullPage: true }).catch(() => {})

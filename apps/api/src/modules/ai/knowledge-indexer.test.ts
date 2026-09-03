@@ -294,6 +294,68 @@ describe('KnowledgeIndexerService — attachment contents (§15.1)', () => {
     assert.equal(inserts[0].contentHash, contentHash(body))
   })
 
+  /*
+   * §G14-15 — meeting notes are a source like any other.
+   *
+   * The assistant could not ground an answer in a meeting: keyword search found
+   * one, asking Brain about it turned up nothing, and the notes are frequently
+   * the only written record of a decision.
+   */
+  it('indexes a meeting on its NOTES, and deep-links the citation', async () => {
+    const { db, inserts } = makeIndexerDb({
+      ...baseTables(),
+      meetings: [{ id: 'm1', title: 'Weekly sync', notes: 'we decided to ship pricing in Q3' }],
+    })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, makeR2({}).r2)
+    await svc.indexWorkspaceContent('w1')
+
+    const meeting = inserts.find((i) => i.sourceType === 'meeting')
+    assert.ok(meeting, 'no meeting was indexed')
+    assert.equal(meeting.sourceId, 'm1')
+    /*
+     * The citation points at the meeting, not the meetings page. A url that
+     * lands you among every meeting in the workspace is a citation you cannot
+     * follow — the same near-miss the search hit had.
+     */
+    assert.match(meeting.url, /meetings\?meeting=m1$/, `citation url was ${meeting.url}`)
+    /*
+     * And it embedded the NOTES, not the heading.
+     *
+     * Asserted on the content hash, which is the only trace of the text that
+     * reaches the row. Without this the check passed against a build that
+     * indexed `m.title` alone — break-testing found it — and a vector for
+     * "Weekly sync" answers nothing while displacing a source that could.
+     */
+    assert.equal(
+      meeting.contentHash,
+      contentHash('Weekly sync\nwe decided to ship pricing in Q3'),
+      'the meeting was embedded on something other than its title plus notes',
+    )
+  })
+
+  it('skips a meeting with no notes rather than embedding a bare heading', () => {
+    /*
+     * A vector built from "Weekly sync" alone matches anything vaguely
+     * organisational and answers nothing — worse than absent, because it
+     * displaces a source that could have answered.
+     */
+    const { db, inserts } = makeIndexerDb({
+      ...baseTables(),
+      meetings: [
+        { id: 'm1', title: 'Weekly sync', notes: '   ' },
+        { id: 'm2', title: 'Retro', notes: null },
+      ],
+    })
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, makeR2({}).r2)
+    return svc.indexWorkspaceContent('w1').then(() => {
+      assert.equal(
+        inserts.filter((i) => i.sourceType === 'meeting').length,
+        0,
+        'a meeting with no notes was embedded as a title',
+      )
+    })
+  })
+
   it('collects a failed R2 read without aborting the run (best-effort per attachment)', async () => {
     const { db } = makeIndexerDb({
       task_attachments: [

@@ -11,6 +11,7 @@ import {
   projects,
   spaces,
   workspaces,
+  meetings,
   type KnowledgeSourceType,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -116,6 +117,32 @@ export class KnowledgeIndexerService {
         title: d.title,
         url: `/app/${workspaceId}/docs?doc=${d.id}`,
         text: `${d.title}\n${d.plaintext ?? ''}`.trim(),
+      })
+    }
+
+    /*
+     * §G14-15 — meeting notes.
+     *
+     * Indexed on the notes, not the title: a meeting called "Weekly sync"
+     * tells retrieval nothing, and what somebody wants back is the decision
+     * inside it. A meeting with no notes is skipped rather than embedded as a
+     * bare heading — a vector for a title alone matches everything vaguely
+     * organisational and answers nothing.
+     */
+    const meetingRows = await this.db
+      .select({ id: meetings.id, title: meetings.title, notes: meetings.notes })
+      .from(meetings)
+      .where(eq(meetings.workspaceId, workspaceId))
+
+    for (const m of meetingRows) {
+      const notes = (m.notes ?? '').trim()
+      if (!notes) continue
+      items.push({
+        sourceType: 'meeting',
+        sourceId: m.id,
+        title: m.title,
+        url: `/app/${workspaceId}/meetings?meeting=${m.id}`,
+        text: `${m.title}\n${notes}`.trim(),
       })
     }
 

@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiAnswerFeedback, aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
+import { aiAnswerFeedback, aiUsage, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
@@ -1713,14 +1713,16 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     const docIds: string[] = []
     const commentIds: string[] = []
     const attachmentIds: string[] = []
+    const meetingIds: string[] = []
     for (const h of hits) {
       const { type, rawId } = splitSearchId(h.id)
       if (type === 'task') taskIds.push(rawId)
       else if (type === 'doc') docIds.push(rawId)
       else if (type === 'comment') commentIds.push(rawId)
       else if (type === 'attachment') attachmentIds.push(rawId)
+      else if (type === 'meeting') meetingIds.push(rawId)
     }
-    const [taskRows, docRows, commentRows] = await Promise.all([
+    const [taskRows, docRows, commentRows, meetingRows] = await Promise.all([
       taskIds.length
         ? this.db.select({ id: tasks.id, text: tasks.description }).from(tasks).where(inArray(tasks.id, taskIds))
         : Promise.resolve([] as Array<{ id: string; text: string | null }>),
@@ -1730,9 +1732,19 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
       commentIds.length
         ? this.db.select({ id: taskComments.id, text: taskComments.body }).from(taskComments).where(inArray(taskComments.id, commentIds))
         : Promise.resolve([] as Array<{ id: string; text: string | null }>),
+      /*
+       * §G14-15 — the notes, which are the whole point of citing a meeting.
+       *
+       * Without this branch a meeting reaches the model as a bare title, and a
+       * heading like "Weekly sync" grounds nothing: the answer would cite a
+       * meeting it had not actually read.
+       */
+      meetingIds.length
+        ? this.db.select({ id: meetings.id, text: meetings.notes }).from(meetings).where(inArray(meetings.id, meetingIds))
+        : Promise.resolve([] as Array<{ id: string; text: string | null }>),
     ])
     const byId = new Map<string, string>()
-    for (const r of [...taskRows, ...docRows, ...commentRows]) byId.set(r.id, r.text ?? '')
+    for (const r of [...taskRows, ...docRows, ...commentRows, ...meetingRows]) byId.set(r.id, r.text ?? '')
 
     // Attachment bodies live in R2, not the DB — re-read + extract their text for
     // the top hits so the model can answer FROM attachment contents. Best-effort
@@ -1882,6 +1894,19 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
       if (type === 'comment') return okCommentSet.has(rawId)
       if (type === 'doc') return okDocSet.has(rawId)
       if (type === 'attachment') return okAttachmentSet.has(rawId)
+      /*
+       * §G14-15 — a meeting needs workspace membership and nothing else, and
+       * that is already true of every row here: the candidate set is selected
+       * `where workspaceId = ...`, and this whole function is only reached
+       * after `assertWorkspaceMember`.
+       *
+       * Stated rather than left to the fall-through below. That default is
+       * documented as being for types SearchService has already scoped, which
+       * meetings are not — they come from the embeddings table. A branch that
+       * happens to be right for a reason its comment does not describe is one
+       * refactor from being wrong.
+       */
+      if (type === 'meeting') return true
       // user / channel / message — already scoped by SearchService.
       return true
     })

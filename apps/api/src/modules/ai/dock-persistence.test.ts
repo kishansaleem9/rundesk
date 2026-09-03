@@ -136,3 +136,44 @@ describe('§G13-8 the AI dock is not a scratch pad', () => {
     )
   })
 })
+
+/**
+ * §G14-15 — a cited meeting arrives at the model WITH its notes.
+ *
+ * Checked from source, and the reason is worth stating rather than glossing.
+ * `enrichKnowledgeContent` feeds the assembled context to the model, and
+ * without an `ANTHROPIC_API_KEY` the answer path never reaches the model at
+ * all — it returns the deterministic fallback, which lists the sources and
+ * never touches the hydrated text. So removing this branch changes nothing
+ * observable in an end-to-end run: break-testing confirmed it, the suite passed
+ * 25/25 with hydration disabled. A behavioural check here would be a check that
+ * cannot fail.
+ */
+describe('§G14-15 a cited meeting brings its notes with it', () => {
+  const ai = read('apps/api/src/modules/ai/ai.service.ts')
+
+  it('hydrates meeting hits from the notes column', () => {
+    const body = functionBody(ai, 'private async enrichKnowledgeContent')
+    assert.ok(body, 'could not find enrichKnowledgeContent')
+    assert.match(
+      body,
+      /meetingIds\.length\s*\n?\s*\?/,
+      'meeting hits are no longer hydrated — a meeting reaches the model as a bare title, and a heading grounds nothing',
+    )
+    assert.match(body, /meetings\.notes/, 'the hydration reads something other than the notes')
+  })
+
+  it('and a meeting is decided on explicitly, not by falling through', () => {
+    /*
+     * The fall-through default is documented as being for types SearchService
+     * has already scoped. Meetings are not — they come from the embeddings
+     * table — so a branch that happens to be right for a reason its comment
+     * does not describe is one refactor away from being wrong.
+     */
+    assert.match(
+      ai,
+      /if \(type === 'meeting'\) return true/,
+      'meeting access is left to the fall-through default again',
+    )
+  })
+})

@@ -16,7 +16,16 @@ import { workspaces } from './workspaces'
  * L2-normalized, so cosine == dot product). If pgvector is ever present it can
  * be layered on top; it is intentionally NOT required.
  */
-export type KnowledgeSourceType = 'task' | 'doc' | 'comment' | 'attachment'
+/*
+ * §G14-15 — meetings are a source like any other.
+ *
+ * Meeting notes are frequently the only written record of a decision, and the
+ * assistant could not ground an answer in one: keyword search would find the
+ * meeting, and asking Brain about it turned up nothing. There is no reason for
+ * the one place decisions are written down to be the one place retrieval
+ * cannot see.
+ */
+export type KnowledgeSourceType = 'task' | 'doc' | 'comment' | 'attachment' | 'meeting'
 
 export const knowledgeEmbeddings = pgTable(
   'knowledge_embeddings',

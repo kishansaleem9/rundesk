@@ -3641,10 +3641,38 @@ guards an early return for the case where *no* extra type is wanted. The break
 has to defeat the query itself. Both now fail with `0 hits, types []`, which is
 the search saying plainly that it cannot find the meeting.
 
-Still not done, and worth being precise about: meetings are absent from the
-**knowledge index** (`knowledge-embeddings.ts` still types its source as
-`'task' | 'doc' | 'comment' | 'attachment'`), so the assistant cannot ground an
-answer in them. Keyword search finds a meeting; asking Brain about one does not.
+**And the assistant can cite one.** Keyword search finding a meeting was half
+of it: the notes are frequently the only written record of a decision, and
+"what did we decide about pricing" returned everything except the place it was
+written down. Meetings are now a knowledge source like any other.
+
+Indexed on the notes, not the title — a meeting called "Weekly sync" grounds
+nothing — and a meeting with no notes is skipped rather than embedded as a bare
+heading, because a vector for a title alone matches anything vaguely
+organisational and *displaces* a source that could have answered.
+
+The access branch is written out explicitly rather than left to the
+fall-through. A meeting needs workspace membership and nothing more, which is
+already true of every candidate — the set is selected `where workspaceId = …`
+and the function is only reached after `assertWorkspaceMember`. But that
+default is documented as being for types SearchService has already scoped,
+which meetings are not, and **a branch that happens to be right for a reason
+its comment does not describe is one refactor from being wrong**.
+
+**Hydration is guarded from source, and that is a real limitation, not a
+shortcut.** Without an `ANTHROPIC_API_KEY` the answer path never reaches the
+model: it returns the deterministic fallback, which lists sources and never
+touches the assembled context. Break-testing proved the point — with hydration
+disabled the end-to-end suite passed 25/25. A behavioural check there would be
+a check that cannot fail, so it is a source guard that says why.
+
+Nine breaks across the two halves. Three survived first time and each was the
+check's fault: the search fixture put its phrase in the title as well as the
+notes; the "cannot see meetings" break removed a constant that only guards an
+early return; and the indexer test asserted the citation's id and url while
+never checking the embedded TEXT, so indexing the heading alone passed. That
+last one is now asserted on the content hash, which is the only trace of the
+text the row keeps.
 
 ## What is still open, with the evidence (3 Sep)
 
@@ -3655,10 +3683,6 @@ document's own optimism. Each was checked against the code today.
 attached providers in the prompt and `:561-565` explicitly forbids acting on
 them. No credential is ever resolved. "Connect it to any system" is currently a
 label on an inert list.
-
-**Meetings are absent from the knowledge index.** Keyword search finds them now,
-but `knowledge-embeddings.ts:19` still types its source as `'task' | 'doc' |
-'comment' | 'attachment'`, so the assistant cannot ground an answer in a meeting.
 
 **Freshness chrome is dashboard-only** (`app.$workspaceId.dashboard.tsx:320-346`
 is the only reader), **there is no engagement or trending sort** (sort is still
