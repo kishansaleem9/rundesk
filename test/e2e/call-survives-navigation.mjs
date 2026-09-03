@@ -29,7 +29,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran": a selector matching nothing sweeps clean. */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 9
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -91,7 +91,22 @@ try {
   const channelId = channel.data?.id
   if (!channelId) throw new Error(`could not make a channel: ${channel.status}`)
 
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage()
+  /*
+   * The camera and microphone are GRANTED explicitly, not just faked.
+   *
+   * `--use-fake-ui-for-media-stream` auto-accepts Chromium's own prompt, and
+   * that was enough on this machine — but Playwright keeps its own permission
+   * state per context and denies by default, which overrides the flag. This
+   * suite passed locally and failed in CI for exactly that reason: `getUserMedia`
+   * was refused, the pre-join never opened, and the join click sat there until
+   * it timed out. `syncup-live` has granted them since it was written.
+   */
+  const page = await (
+    await browser.newContext({
+      viewport: { width: 1440, height: 1000 },
+      permissions: ['microphone', 'camera'],
+    })
+  ).newPage()
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', ME.email)
   await page.fill('input[type=password]', ME.password)
@@ -109,8 +124,32 @@ try {
     'no start button in the channel header')
   await start.click()
   await page.waitForTimeout(2500)
-  await page.getByTestId('call-prejoin-join').click()
-  await page.waitForTimeout(6000)
+  /*
+   * Reported rather than left to time out. A refused camera makes the pre-join
+   * never appear, and a bare 30-second click timeout says only "locator failed"
+   * — which is the least useful version of a very specific problem.
+   */
+  /*
+   * Checked on the JOIN BUTTON, not on the dialog.
+   *
+   * The dialog opens whether or not the camera does — `disabled={joining ||
+   * !ready}` is what the media actually gates. The first version of this check
+   * asked whether the pre-join appeared, passed cleanly with the camera
+   * refused, and left the click to time out after thirty seconds saying only
+   * "locator failed". Confirmed by denying permission on purpose: same
+   * behaviour, same runtime as the CI failure this suite was written to survive.
+   */
+  const join = page.getByTestId('call-prejoin-join')
+  const canJoin = await join.isEnabled().catch(() => false)
+  chk(
+    canJoin,
+    'the pre-join gets a camera and offers to join',
+    'Join stayed disabled — the browser refused the camera, so no call can start',
+  )
+  if (canJoin) {
+    await join.click()
+    await page.waitForTimeout(6000)
+  }
 
   chk(
     await page.getByTestId('call-surface').isVisible().catch(() => false),

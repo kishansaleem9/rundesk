@@ -3603,6 +3603,26 @@ original defect — fails four checks including `live call after navigating:
 null`, which is the server confirming the navigation ended the call. And a
 leave that never reaches the server fails the last check alone.
 
+**And then it passed here and failed in CI**, which is the direction that
+usually means the harness rather than the code. It did.
+
+The context never granted the camera. `--use-fake-ui-for-media-stream`
+auto-accepts Chromium's own prompt and was enough on this machine, but
+Playwright keeps its own permission state per context and denies by default,
+overriding the flag. `syncup-live` has granted `['microphone', 'camera']` since
+it was written; this suite had not.
+
+**Confirmed rather than assumed.** Denying permission on purpose reproduced the
+CI symptom exactly — a thirty-second `locator.click` timeout and the same
+~32-second runtime — which is how a hypothesis becomes a diagnosis.
+
+That reproduction also showed the first diagnostic check was in the wrong
+place. It asked whether the pre-join DIALOG appeared, and passed cleanly with
+the camera refused: the dialog opens either way, and what the media actually
+gates is `disabled={joining || !ready}` on the Join button. A refused camera now
+fails on the first line with "Join stayed disabled — the browser refused the
+camera", rather than thirty silent seconds ending in "locator failed".
+
 
 ## A meeting you could read and could not find (3 Sep)
 
