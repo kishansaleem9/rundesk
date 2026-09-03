@@ -108,28 +108,44 @@ try {
   await page.goto(`${stack.base}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3500)
   await page.keyboard.press('Control+k')
-  await page.waitForTimeout(1500)
 
+  /*
+   * WAITED FOR, not slept on.
+   *
+   * The first version slept 1500ms and then asked whether the tabs were there.
+   * That is a latency assumption, and CI does not share this machine's: the
+   * sources request had not answered, the Gmail tab did not exist yet, and the
+   * click after it sat for thirty seconds — a 32-second failure that says only
+   * "locator timeout" about a suite that works fine locally.
+   *
+   * Waiting for the element instead makes the check about whether it EVER
+   * appears rather than whether it appeared within a guess.
+   */
+  const strip = page.getByTestId('palette-sources')
+  await strip.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
   chk(
-    await page.getByTestId('palette-sources').isVisible().catch(() => false),
+    await strip.isVisible().catch(() => false),
     'the palette carries a source strip',
     'no source strip under the query',
   )
-  chk(
-    await page.getByTestId('palette-source-gmail').isVisible().catch(() => false),
-    'with a tab for each source',
-    'Gmail has no tab',
-  )
+  const gmailTab = page.getByTestId('palette-source-gmail')
+  await gmailTab.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
+  const gmailThere = await gmailTab.isVisible().catch(() => false)
+  chk(gmailThere, 'with a tab for each source',
+    'Gmail has no tab — did the sources request answer?')
 
   /*
    * The whole point. Before this, choosing an unconnected source produced an
    * empty result list and nothing else — indistinguishable from "there is
    * nothing there".
    */
-  await page.getByTestId('palette-source-gmail').click()
-  await page.waitForTimeout(1500)
+  // Guarded: clicking a tab that never appeared is thirty seconds of silence
+  // followed by a message about locators rather than about sources.
+  if (gmailThere) await gmailTab.click()
+  const notice = page.getByTestId('palette-source-disconnected')
+  await notice.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
   chk(
-    await page.getByTestId('palette-source-disconnected').isVisible().catch(() => false),
+    await notice.isVisible().catch(() => false),
     'and choosing an unconnected one says so, instead of showing an empty list',
     'an unconnected source returned silence — indistinguishable from having nothing',
   )

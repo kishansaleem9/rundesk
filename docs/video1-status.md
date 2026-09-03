@@ -3855,3 +3855,20 @@ something, which is why it is the part worth getting right first.
 Three breaks, all caught: the strip removed, the unconnected notice removed (the
 defect itself — an empty list where an explanation belongs), and a registry that
 reports everything connected so the honest state can never be reached.
+
+**And it failed in CI while passing here — the second time this week, same
+cause.** The suite slept a fixed 1500ms and then asked whether the tabs were
+there. That is a latency assumption, and CI does not share this machine's: the
+sources request had not answered, the Gmail tab did not exist yet, and the click
+after it sat for thirty seconds. A 32-second failure reporting only "locator
+timeout" about a suite that is green locally.
+
+Waiting for the ELEMENT instead of sleeping makes the check about whether it
+ever appears rather than whether it appeared inside a guess. Confirmed rather
+than assumed: with the sources request deliberately delayed to **six seconds —
+four times the old sleep** — the suite still passes.
+
+Worth stating as a rule, since it has now cost two CI runs: **a fixed sleep is
+an assumption about someone else's machine.** Both failures looked like locator
+problems and were really the harness asserting too early.
+
