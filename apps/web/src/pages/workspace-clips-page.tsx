@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
@@ -31,6 +31,7 @@ import {
   Copy,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { matchesClipKind } from '../lib/clip-kind'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
@@ -55,6 +56,9 @@ type WorkspaceMember = {
 export function ClipsPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/clips' })
+  // §G07-5 — which library this is. Undefined means both.
+  const { kind: kindFilter } = useSearch({ from: '/app/$workspaceId/clips' })
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const workspaces = useAuthStore((s) => s.workspaces)
   const [query, setQuery] = useState('')
@@ -117,8 +121,14 @@ export function ClipsPage() {
   const clips = clipsQuery.data ?? []
   const workspaceName =
     workspaces.find((w) => w.id === workspaceId)?.name?.trim() || 'workspace'
-  const filtered = clips.filter((c) =>
-    c.title.toLowerCase().includes(query.toLowerCase()),
+  // §G07-5 — audio recordings and screen clips are different libraries. The
+  // rule lives in lib/clip-kind so it can be tested without a browser: clips
+  // come from object storage, which is unconfigured in CI, so a list-driven
+  // check here would pass against an empty page forever.
+  const filtered = clips.filter(
+    (c) =>
+      c.title.toLowerCase().includes(query.toLowerCase()) &&
+      matchesClipKind(c.storageKey, kindFilter),
   )
   const recordingLabel = useMemo(() => {
     if (!recordingStartedAt) return '00:00'
@@ -370,6 +380,30 @@ export function ClipsPage() {
           </div>
         </Card>
       ) : null}
+
+      {/*
+        §G07-5 — say which library you are in, and offer the way out.
+
+        Filtering silently is how a full library reads as an empty one: with
+        no audio recorded yet, `?kind=audio` showed the same "no clips" panel
+        as a workspace that had never recorded anything, and nothing on screen
+        explained the difference.
+      */}
+      {kindFilter && (
+        <div className="flex items-center gap-2 text-xs" data-testid="clips-kind-filter">
+          <span className="rounded-full border border-border/70 px-2 py-0.5 text-muted-foreground">
+            {t(kindFilter === 'audio' ? 'clips.filterAudio' : 'clips.filterVideo')}
+          </span>
+          <button
+            type="button"
+            data-testid="clips-kind-clear"
+            className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            onClick={() => navigate({ to: '/app/$workspaceId/clips', params: { workspaceId }, search: {} })}
+          >
+            {t('clips.filterShowAll')}
+          </button>
+        </div>
+      )}
 
       {clipsQuery.isLoading ? (
         <Card className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>

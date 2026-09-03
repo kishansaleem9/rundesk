@@ -48,6 +48,7 @@ import {
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
+import { RequestAccessCard } from './request-access-card'
 import { TaskTags } from './task-tags'
 import { SharePanel } from './share-panel'
 import { LinkedDocsSection } from './task-linked-docs'
@@ -956,7 +957,25 @@ export function TaskDetailSheet({
             </div>
           </>
         ) : (
-          <p className="text-sm text-destructive">{t('taskDetail.notFound')}</p>
+          /*
+           * §G10 — a private task is not a missing one.
+           *
+           * The resource guard answers 403 for something that exists and 404
+           * for something that does not, and this screen used to flatten both
+           * into "Task not found." The card renders only on the 403 and offers
+           * the ask; on a 404 nothing changes, because confirming that an
+           * object exists to somebody who was never told about it is the
+           * opposite of what private means.
+           */
+          <div className="space-y-3">
+            <p className="text-sm text-destructive">{t('taskDetail.notFound')}</p>
+            <RequestAccessCard
+              workspaceId={workspaceId}
+              type="task"
+              objectId={taskId}
+              error={detailQuery.error}
+            />
+          </div>
         )}
         {detailQuery.data && workspaceId && (
           <MoveDialog

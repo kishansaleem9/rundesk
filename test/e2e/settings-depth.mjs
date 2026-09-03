@@ -107,7 +107,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 57
+const EXPECTED_CHECKS = 61
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -753,6 +753,50 @@ try {
       `cleanup left ${JSON.stringify(after)}, expected ${JSON.stringify(expected)}`,
     )
   }
+
+  /*
+   * ── §G07-5 [08:35] — "Record a Clip" and "Talk to Text" are two tools ──────
+   *
+   * The top bar offers both as pinnable icons, pointing at `/clips` and
+   * `/clips?kind=audio`. Nothing read the parameter, so pinning both gave two
+   * different icons onto the identical page — a control that looks like a
+   * choice and is not one.
+   *
+   * Checked on the CHROME rather than on the list. Clips live in object
+   * storage, which is unconfigured here and in CI, so the library is empty
+   * everywhere and a count-the-cards check would pass against a page that had
+   * never learned to filter. What the parameter being READ looks like is the
+   * chip; the filtering rule itself is unit-tested in lib/clip-kind.test.ts,
+   * where it can be given clips without a bucket.
+   */
+  console.log('\n▶ §G07-5 — the two clip tools are two libraries')
+  await page.goto(`${origin}/app/${workspaceId}/clips`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  check(
+    !(await page.getByTestId('clips-kind-filter').isVisible().catch(() => false)),
+    'the plain clips page says nothing about a filter',
+    'a filter chip appears with no kind asked for',
+  )
+
+  await page.goto(`${origin}/app/${workspaceId}/clips?kind=audio`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+  check(
+    await page.getByTestId('clips-kind-filter').isVisible().catch(() => false),
+    'and ?kind=audio lands somewhere that knows it is a different library',
+    'the kind parameter is ignored — both pinned tools open the same page',
+  )
+  check(
+    await page.getByTestId('clips-kind-clear').isVisible().catch(() => false),
+    'with a way back to everything',
+    'no way out of the filtered library',
+  )
+  await page.getByTestId('clips-kind-clear').click().catch(() => {})
+  await page.waitForTimeout(1500)
+  check(
+    !(await page.getByTestId('clips-kind-filter').isVisible().catch(() => false)),
+    'and taking it clears the filter',
+    'Show all left the filter in place',
+  )
 
   await done(browser, stack, restore)
 } catch (err) {

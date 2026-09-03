@@ -3252,3 +3252,59 @@ Finally, the new inbox check marks every notification read, which is a global
 change to the account. It records what was unread and puts it back, and a sixth
 check asserts it left the inbox exactly as it found it — the same lesson the
 Notepad fixture cost two CI runs to learn.
+
+## Two tools that were one, and a wall with no door (3 Sep)
+
+**Request access had an API and no caller.** The endpoint, the table, the
+fan-out to whoever holds admin — all shipped in one commit that touched zero
+files under `apps/web`. Hitting a private object was still a dead end that said
+"Task not found." and stopped. That is this document's own defect class, in
+work this document recorded as done.
+
+The card renders **only on a 403**. The resource guard answers 403 for an
+object that exists and 404 for one that does not, and offering to request
+access on a 404 would confirm the existence of things the caller was never told
+about — the reverse of what private is for.
+
+The suite that proves it has to **create its own member**. Every seeded account
+is a `workspace_admin`, and a manager can see private items by design: run as
+one of those and the 403 never happens, the card never renders, and the suite
+reports a dead end that is not there. It signs a user up, adds them to the
+workspace as `member`, and only then is there somebody the wall applies to.
+
+**Two of its checks were hollow and had to be repaired.**
+
+The first asked whether the owner's inbox held any `access_requested` row — and
+it passed against a deliberately inert button, because a previous run had left
+one there. **An accumulating inbox makes "some row of this kind exists" true
+forever after the first success**, which is a check that has stopped checking.
+It now matches the task id, which is minted fresh each run: the difference
+between "somebody once asked for something" and "this click asked for this".
+
+The second never exercised a 404 at all, so a card keyed on *any* error passed
+just as well as one keyed on 403. There is now a check that a task which does
+not exist offers nothing to ask for.
+
+The fixture also cost two wrong turns worth recording. `POST /tasks` does not
+accept a `visibility`, so asking for a private task there yields a public one
+and the 403 under test silently never happens — it is a PATCH. And the detail
+sheet is mounted by the **list** route and nowhere else, so
+`/app/<workspace>?task=…` renders home with the parameter ignored: a screen
+with no card on it, which reads exactly like the defect.
+
+**And "Record a Clip" and "Talk to Text" were the same page.** Both are
+pinnable, pointing at `/clips` and `/clips?kind=audio`, and nothing ever read
+the parameter — two different icons, one destination. The kind is read off the
+storage key, which upload already stamps, rather than off the title: a person
+can rename a clip, and a library that reshuffles itself because somebody edited
+a caption is worse than no filter.
+
+Checked at **two layers, deliberately**. Clips live in object storage, which is
+unconfigured here and in CI, so the library is empty everywhere and a
+count-the-cards check would pass against a page that had never learned to
+filter. The browser checks the chrome — the chip that says which library you
+are in, and the way back — because that is what "the parameter was read" looks
+like; the rule itself is unit-tested in `lib/clip-kind.test.ts`, where clips can
+be handed to it without a bucket. Four breaks, all caught: the parameter
+dropped (the original defect), the chip shown unconditionally, the filter
+matching everything, and unstamped keys defaulting to audio.
