@@ -38,6 +38,12 @@ const REPO = path.resolve(import.meta.dirname, '../..')
 let DM_NAME = process.env.E2E_DM_NAME ?? 'Colleague'
 /** Whether an inbox notification could be arranged; null means "could not". */
 let NOTIFIED = null
+/**
+ * §G10-12 — the authenticated client, hoisted so a check can arrange state the
+ * UI has no button for. Marking every row read is exactly that: the point of
+ * the check below is what the page looks like once nothing is unread.
+ */
+let API = null
 let stack = null
 let BASE = (process.env.BASE ?? '').replace(/\/$/, '')
 if (!BASE) {
@@ -51,6 +57,7 @@ let WS = process.env.WS
 if (!WS) {
   const auth = await login(`${BASE}/api/v1`, EMAIL, PASSWORD)
   const api = apiClient(`${BASE}/api/v1`, auth.accessToken)
+  API = api
   WS = (await pickWorkspace(api)).id
   const myId = auth.user?.id ?? auth.id
   const fixture = await ensureSweepFixture(api, WS)
@@ -351,6 +358,45 @@ try {
       'the inbox can be cleared in one move',
       'no Clear all',
     )
+    /*
+     * §G10-12 — and it is STILL there once nothing is unread.
+     *
+     * Clear all used to be nested inside the "you have N new" block, so it
+     * disappeared the moment you read your mail. That is the inbox that most
+     * wants emptying: two hundred rows you have already been through, and the
+     * button gone precisely because you went through them. Reading and clearing
+     * are different questions and the control must not be gated on the wrong
+     * one.
+     */
+    if (API) {
+      /*
+       * The rows that were unread are recorded and PUT BACK afterwards.
+       *
+       * An earlier fixture in this suite emptied the top bar for every later
+       * suite and cost two CI runs to find; the lesson stuck. Marking every
+       * notification read is a global change to this account, and leaving it
+       * that way makes the very check above — which needs something unread —
+       * fail on the next run for a reason that has nothing to do with the code.
+       */
+      const before = (await API('/notifications?unreadOnly=true')).data ?? []
+      await API('/notifications/mark-all-read', { method: 'POST' })
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(2500)
+      chk(
+        (await page.getByTestId('inbox-clear-all').count()) > 0,
+        'and Clear all survives having read everything',
+        'Clear all vanished once nothing was unread',
+      )
+      for (const n of before) {
+        await API(`/notifications/${n.id}/unread`, { method: 'POST' }).catch(() => {})
+      }
+      const after = (await API('/notifications?unreadOnly=true')).data ?? []
+      chk(
+        after.length === before.length,
+        'and the check left the inbox exactly as it found it',
+        `unread was ${before.length}, is now ${after.length}`,
+      )
+    }
   } else {
     // Said out loud, not skipped silently: the control is correctly absent on
     // an empty inbox, so with nothing to clear this check cannot be answered.

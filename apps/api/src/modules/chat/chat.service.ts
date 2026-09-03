@@ -1430,7 +1430,18 @@ export class ChatService {
      * is the truthful version of the same fact.
      */
     const forwardIds = [...new Set(ordered.map((m) => m.forwardedFromId).filter(Boolean))] as string[]
-    const forwardedFrom = new Map<string, { channelId: string; channelName: string | null } | null>()
+    const forwardedFrom = new Map<
+      string,
+      {
+        channelId: string
+        channelName: string | null
+        // §G11-1 — who wrote it and when. A forward that says only "Forwarded"
+        // strips the two facts that make it worth anything: a quote with no
+        // attribution and no date is a rumour.
+        authorName: string | null
+        sentAt: Date | null
+      } | null
+    >()
     if (forwardIds.length > 0) {
       const sources = await this.db
         .select({
@@ -1439,9 +1450,14 @@ export class ChatService {
           channelName: chatChannels.name,
           isPrivate: chatChannels.isPrivate,
           isDm: chatChannels.isDm,
+          authorName: users.displayName,
+          sentAt: chatMessages.createdAt,
         })
         .from(chatMessages)
         .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
+        // Left, not inner: a deleted author must not make the whole forward
+        // banner disappear along with them.
+        .leftJoin(users, eq(users.id, chatMessages.authorId))
         .where(inArray(chatMessages.id, forwardIds))
       const myChannels = new Set(
         (
@@ -1455,7 +1471,14 @@ export class ChatService {
         const reachable = (!src.isPrivate && !src.isDm) || myChannels.has(src.channelId)
         forwardedFrom.set(
           src.id,
-          reachable ? { channelId: src.channelId, channelName: src.channelName } : null,
+          reachable
+            ? {
+                channelId: src.channelId,
+                channelName: src.channelName,
+                authorName: src.authorName,
+                sentAt: src.sentAt,
+              }
+            : null,
         )
       }
     }

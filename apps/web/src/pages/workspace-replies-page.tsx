@@ -5,6 +5,7 @@ import { ListSkeleton } from '../components/loading-skeletons'
 import { MessageCircleReply, CheckCircle2, FileText, MessageSquare } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
+import { isReplyNotification } from '../lib/reply-types'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
@@ -35,7 +36,7 @@ type Notification = {
  * message is not a reply to anything, and folding those in would make this a
  * second Inbox.
  */
-const REPLY_TYPES = new Set(['task_commented', 'doc_commented', 'chat_reply'])
+
 
 const FILTERS = ['unread', 'read', 'all'] as const
 export type ReplyFilter = (typeof FILTERS)[number]
@@ -76,7 +77,7 @@ export function RepliesPage() {
   })
 
   const { namesById } = useMentionNames(workspaceId)
-  const replies = (notifsQuery.data ?? []).filter((n) => REPLY_TYPES.has(n.type))
+  const replies = (notifsQuery.data ?? []).filter((n) => isReplyNotification(n.type))
   const unreadCount = replies.filter((n) => !n.readAt).length
   const visible =
     filter === 'all' ? replies : replies.filter((n) => (filter === 'read' ? Boolean(n.readAt) : !n.readAt))

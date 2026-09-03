@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
+import { Body, Controller, Get, Patch, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService, openSseStream } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
@@ -384,10 +384,40 @@ export class AiController {
     // retrieval further scopes to content the caller can access. Best-effort —
     // the service never throws on AI failure (deterministic search fallback).
     await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
-    return this.ai.answerKnowledge(body.workspaceId, user.id, body.question, {
+    const answer = await this.ai.answerKnowledge(body.workspaceId, user.id, body.question, {
       userId: user.id,
       workspaceId: body.workspaceId,
     })
+    /*
+     * §G02 — the thumbs come back WITH the answer.
+     *
+     * The palette caches an answer for five minutes and is torn down on every
+     * close, so a rating fetched separately would be a second round trip that
+     * usually arrives after the person has already looked away. Riding along
+     * costs one indexed lookup and means a thumb that was pressed yesterday is
+     * lit the moment the answer appears.
+     */
+    const feedback = await this.ai.getAnswerFeedback(body.workspaceId, user.id, body.question)
+    return { ...answer, feedback }
+  }
+
+  @Patch('knowledge/feedback')
+  @ApiOperation({ summary: '§G02 — thumbs up / down on a palette answer; the same one again clears it' })
+  async knowledgeFeedback(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string; question?: string; feedback?: 'up' | 'down' | null },
+  ) {
+    if (!body?.workspaceId || !body?.question?.trim()) {
+      throw new HttpException('workspaceId and question are required', HttpStatus.BAD_REQUEST)
+    }
+    await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
+    const value = body.feedback
+    return this.ai.setAnswerFeedback(
+      body.workspaceId,
+      user.id,
+      body.question,
+      value === 'up' || value === 'down' ? value : null,
+    )
   }
 
   /*

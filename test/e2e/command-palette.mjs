@@ -98,6 +98,8 @@ const QUERY = 'kubernetes'
  * search. Break-testing caught exactly that.
  */
 const QUERY_WITH_HITS = 'kubernetes-rollout'
+/** §G03-5 — an absolute URL into another product, as the Drive proxy returns. */
+const DRIVE_URL = 'https://drive.google.com/file/d/1AbCdEf/view'
 const HITS = [
   {
     id: 'task-11111111-1111-4111-8111-111111111111',
@@ -127,6 +129,17 @@ const HITS = [
     title: 'Comment on “Q3 Finance Plan”',
     content: 'the kubernetes bill is the line item to watch',
     url: `/app/${WS}/s1/p1/l1?task=11111111-1111-4111-8111-111111111111`,
+  },
+  {
+    /*
+     * §G03-5 — a federated hit. Its URL points at another product, which is
+     * precisely what the palette's navigation used to drop on the floor.
+     */
+    id: 'drive-1AbCdEf',
+    entityType: 'drive',
+    title: 'Kubernetes runbook.pdf',
+    content: 'Google Drive',
+    url: DRIVE_URL,
   },
 ]
 
@@ -161,6 +174,10 @@ const searchCalls = []
 /** §G02 — every /ai/knowledge request, so "asked once" can be read off the wire. */
 const knowledgeStubCalls = []
 const AI_ANSWER = 'Nothing matched, but the closest thing is the Q3 Finance Plan.'
+/** §G02 — the cited sources the answer is grounded in. */
+const AI_SOURCE_TITLE = 'Q3 Finance Plan'
+/** §G02 — every thumbs PATCH, so a rating can be read off the wire. */
+const feedbackStubCalls = []
 
 await ctx.route('**/api/**', async (route) => {
   const url = route.request().url()
@@ -176,8 +193,25 @@ await ctx.route('**/api/**', async (route) => {
      * renders with nothing in it, and "the answer appeared" would be true of an
      * empty box — which is the shape this suite exists to catch.
      */
+    if (route.request().method() === 'PATCH') {
+      /*
+       * §G02 — the thumbs. Recorded rather than merely allowed, because the
+       * question this check has to answer is not "did the button move" but
+       * "did an opinion reach the server", and only the request says that.
+       */
+      feedbackStubCalls.push(JSON.parse(route.request().postData() || '{}'))
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: envelope({ feedback: feedbackStubCalls[feedbackStubCalls.length - 1].feedback }),
+      })
+    }
     knowledgeStubCalls.push(url)
-    data = { answer: AI_ANSWER, sources: [] }
+    data = {
+      answer: AI_ANSWER,
+      sources: [{ type: 'task', title: AI_SOURCE_TITLE, url: `/app/${WS}/s1/p1/l1?task=11111111-1111-4111-8111-111111111111` }],
+      feedback: null,
+    }
   }
   else if (/\/search\/[^/?]+\?/.test(url)) {
     searchCalls.push(url)
@@ -508,6 +542,51 @@ try {
   chk(knowledgeStubCalls.length === 1, `asked the assistant once, not per keystroke (${knowledgeStubCalls.length})`,
     `${knowledgeStubCalls.length} calls to /ai/knowledge for one query`)
 
+  /*
+   * §G02 controls, frames 020_0124–035_0203 — copy, thumbs, and a way out.
+   *
+   * An answer with no way to keep it, disagree with it, or carry it into a
+   * conversation is a paragraph in a dropdown. Each control is checked for the
+   * thing it DOES, not for its presence: the thumb has to reach the server, the
+   * source has to navigate, Continue has to hand the question over.
+   */
+  chk(
+    await page.getByTestId('palette-ai-copy').isVisible().catch(() => false),
+    'the answer can be copied',
+    'no copy control under the answer',
+  )
+  const sourceLabel = (await page.getByTestId('palette-ai-source').first().innerText().catch(() => '')).trim()
+  chk(sourceLabel === AI_SOURCE_TITLE, 'and it cites the source it was grounded in',
+    `source chip read ${JSON.stringify(sourceLabel)}`)
+
+  // The thumb: pressed once it reaches the server as 'up' and lights.
+  await page.getByTestId('palette-ai-up').click()
+  await page.waitForTimeout(800)
+  chk(
+    feedbackStubCalls.length === 1 && feedbackStubCalls[0].feedback === 'up',
+    'a thumbs up reaches the server as an opinion, not just a colour change',
+    `feedback calls: ${JSON.stringify(feedbackStubCalls)}`,
+  )
+  chk(
+    (await page.getByTestId('palette-ai-up').getAttribute('data-active')) === 'true',
+    'and the thumb it pressed is the one that lights up',
+    'thumb did not report itself active',
+  )
+  // Pressing the lit thumb again clears it, matching the AI chat's convention.
+  await page.getByTestId('palette-ai-up').click()
+  await page.waitForTimeout(800)
+  chk(
+    feedbackStubCalls.length === 2 && feedbackStubCalls[1].feedback === null,
+    'pressing the same thumb again clears the opinion',
+    `second feedback call: ${JSON.stringify(feedbackStubCalls[1])}`,
+  )
+
+  chk(
+    await page.getByTestId('palette-ai-continue').isVisible().catch(() => false),
+    'and there is a way to continue the conversation with the assistant',
+    'no "continue" control under the answer',
+  )
+
   // A query that DOES find something must not spend a model call. Uses the
   // second hit-producing query so a cached answer cannot stand in for restraint.
   const beforeHits = knowledgeStubCalls.length
@@ -517,6 +596,71 @@ try {
     knowledgeStubCalls.length === beforeHits,
     'and a search that finds results does not ask at all',
     `${knowledgeStubCalls.length - beforeHits} extra call(s) when results existed`,
+  )
+
+  /*
+   * Continue LAST, because it closes the palette: run earlier it would strand
+   * every check after it, and a check that cannot run is not a check that
+   * passes.
+   *
+   * Asserted on what it produces — the palette gone and the assistant open —
+   * rather than on the click landing. A button that closes the palette and
+   * opens nothing is the dead end wearing a different hat.
+   */
+  await page.locator('[cmdk-input]').first().fill(nonsense)
+  await page.waitForTimeout(7000)
+  await page.getByTestId('palette-ai-continue').click()
+  await page.waitForTimeout(1500)
+  chk(
+    !(await page.locator('[cmdk-input]').first().isVisible().catch(() => false)),
+    'continuing closes the palette rather than stacking two surfaces',
+    'palette still open after Continue',
+  )
+  chk(
+    await page.locator('[data-testid="ai-model-tier"], [data-testid="ai-trace"]').first()
+      .isVisible().catch(() => false),
+    'and it opens the assistant, carrying the question out of the dead end',
+    'assistant did not open after Continue',
+  )
+
+  /*
+   * ── §G03-5 [04:20] — a Google Drive result has to actually open ───────────
+   *
+   * The whole federated chain worked up to the last inch: the API queries
+   * Drive, the row renders under its own heading, and selecting it did
+   * NOTHING. `go()` navigated only when the URL began "/app/", and a Drive hit
+   * carries "https://drive.google.com/…", so the palette closed and the file
+   * never appeared. Built, labelled, and unreachable.
+   *
+   * window.open is patched rather than followed: this run has no network to
+   * Google, and what is being checked is that the app tries to open the URL it
+   * was given — not that Google answers.
+   */
+  console.log('\n▶ §G03-5 — a Drive result opens instead of doing nothing')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  await page.keyboard.press('Control+k')
+  await page.waitForTimeout(700)
+  await page.evaluate(() => {
+    window.__opened = []
+    window.open = (url) => { window.__opened.push(String(url)); return null }
+  })
+  await page.locator('[cmdk-input]').first().fill(QUERY)
+  await page.waitForTimeout(2500)
+  const driveRow = page.locator('[cmdk-item]', { hasText: 'Kubernetes runbook.pdf' }).first()
+  chk(
+    await driveRow.isVisible().catch(() => false),
+    'the Drive result is on screen',
+    'no Drive row rendered for a query that returns one',
+  )
+  await driveRow.click()
+  await page.waitForTimeout(1200)
+  const DRIVE_URL_CHECK = DRIVE_URL
+  const opened = await page.evaluate(() => window.__opened ?? [])
+  chk(
+    opened.includes(DRIVE_URL_CHECK),
+    'and selecting it opens the file rather than silently closing the palette',
+    `window.open received ${JSON.stringify(opened)}`,
   )
 
   await page.keyboard.press('Escape')

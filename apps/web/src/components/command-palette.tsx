@@ -16,8 +16,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   CheckCircle2,
   ChevronRight,
+  Copy,
   FileText,
   Folder,
   GanttChart,
@@ -36,6 +38,8 @@ import {
   SlidersHorizontal,
   Sparkles,
   Target,
+  ThumbsDown,
+  ThumbsUp,
   Users,
   Zap,
 } from 'lucide-react'
@@ -414,11 +418,59 @@ export function CommandPalette({
     staleTime: 5 * 60 * 1000,
     retry: false,
     queryFn: () =>
-      api<{ answer: string; sources?: Array<{ title?: string; url?: string }> }>('/ai/knowledge', {
+      api<{
+        answer: string
+        sources?: Array<{ title?: string; url?: string }>
+        feedback?: 'up' | 'down' | null
+      }>('/ai/knowledge', {
         method: 'POST',
         body: { workspaceId, question: settledQuery },
       }),
   })
+
+  /*
+   * §G02 — the controls under the answer.
+   *
+   * `answerFeedback` is held locally and seeded from the server's reply rather
+   * than read straight off `aiAnswer.data`, because a thumb has to light the
+   * instant it is pressed: the answer itself is cached for five minutes, so
+   * re-fetching it to learn the result of your own click would leave the
+   * control dead for a round trip and then jump.
+   *
+   * `undefined` means "not yet seeded from the server", which is distinct from
+   * `null` meaning "no rating" — collapsing the two would make the seeding
+   * effect below overwrite a click that landed while the answer was arriving.
+   */
+  const [answerFeedback, setAnswerFeedback] = useState<'up' | 'down' | null | undefined>(undefined)
+  const [answerCopied, setAnswerCopied] = useState(false)
+
+  // A new question is a new answer: forget the previous one's rating and its
+  // copied flag, or the thumb from the last query stays lit under this one.
+  useEffect(() => {
+    setAnswerFeedback(undefined)
+    setAnswerCopied(false)
+  }, [settledQuery, workspaceId])
+
+  useEffect(() => {
+    if (aiAnswer.data && answerFeedback === undefined) {
+      setAnswerFeedback(aiAnswer.data.feedback ?? null)
+    }
+  }, [aiAnswer.data, answerFeedback])
+
+  const rateAnswer = (rating: 'up' | 'down') => {
+    // Pressing the lit thumb clears it — the convention the AI chat already
+    // uses, so the two feedback controls in the product agree with each other.
+    const next = answerFeedback === rating ? null : rating
+    setAnswerFeedback(next)
+    void api('/ai/knowledge/feedback', {
+      method: 'PATCH',
+      body: { workspaceId, question: settledQuery, feedback: next },
+    }).catch(() => {
+      // Put the control back rather than leave it showing an opinion the
+      // server never recorded.
+      setAnswerFeedback(answerFeedback ?? null)
+    })
+  }
 
   /*
    * Remember a query only once it has ANSWERED.
@@ -472,7 +524,23 @@ export function CommandPalette({
   function go(to: string) {
     setOpen(false)
     setQuery('')
-    if (to.startsWith('/app/')) navigate({ to: to as '/app' })
+    if (to.startsWith('/app/')) {
+      navigate({ to: to as '/app' })
+      return
+    }
+    /*
+     * §G03-5 — a federated hit carries an absolute URL into another product
+     * (Google Drive today). The router cannot route one, and the old guard
+     * dropped it on the floor: every Drive result closed the palette and did
+     * nothing at all. The server had already made the promise — it labels those
+     * rows "Google Drive" precisely so you know a click leaves — and nothing
+     * kept it.
+     *
+     * New tab, so the workspace she was reading is still there when she comes
+     * back. http(s) only: the URL arrives from an external provider, and
+     * `javascript:` in a window.open is a script running on this origin.
+     */
+    if (/^https?:\/\//i.test(to)) window.open(to, '_blank', 'noopener,noreferrer')
   }
 
   const navTargets = workspaceId
@@ -1108,9 +1176,105 @@ export function CommandPalette({
                   {t('palette.aiAnswerThinking')}
                 </p>
               ) : (
-                <p className="whitespace-pre-wrap text-[13px] text-foreground" data-testid="palette-ai-text">
-                  {aiAnswer.data?.answer}
-                </p>
+                <>
+                  <p className="whitespace-pre-wrap text-[13px] text-foreground" data-testid="palette-ai-text">
+                    {aiAnswer.data?.answer}
+                  </p>
+                  {/*
+                    The sources are the reason to trust the answer. Rendering
+                    the prose alone would ask her to take a generated paragraph
+                    on faith when the thing it was generated from is one click
+                    away — and the retrieval is semantic, so these are exactly
+                    the items the keyword search she just ran could not find.
+                  */}
+                  {(aiAnswer.data?.sources ?? []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1.5" data-testid="palette-ai-sources">
+                      {(aiAnswer.data?.sources ?? []).slice(0, 4).map((s, i) => (
+                        <button
+                          key={`${s.url ?? ''}-${i}`}
+                          type="button"
+                          disabled={!s.url}
+                          data-testid="palette-ai-source"
+                          className="max-w-[180px] truncate rounded border border-border/60 px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted disabled:cursor-default disabled:opacity-60"
+                          onClick={() => {
+                            if (!s.url) return
+                            setOpen(false)
+                            navigate({ to: s.url })
+                          }}
+                        >
+                          {s.title || s.url}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/*
+                    §G02 frames 020_0124–035_0203 — copy, thumbs, and a way to
+                    carry the question into the assistant proper. The palette
+                    answer is a paragraph in a dropdown; "Continue with Brain"
+                    is what turns it into a conversation, and without it the
+                    answer is a cul-de-sac with better scenery.
+                  */}
+                  <div className="flex items-center gap-1 pt-2">
+                    <button
+                      type="button"
+                      data-testid="palette-ai-copy"
+                      title={t('palette.aiAnswerCopy')}
+                      aria-label={t('palette.aiAnswerCopy')}
+                      className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() => {
+                        const text = aiAnswer.data?.answer ?? ''
+                        if (!text) return
+                        // Older/locked-down browsers have no clipboard API;
+                        // swallowing the rejection keeps a copy button from
+                        // throwing an unhandled error into the palette.
+                        void navigator.clipboard?.writeText(text).catch(() => {})
+                        setAnswerCopied(true)
+                      }}
+                    >
+                      {answerCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="palette-ai-up"
+                      data-active={answerFeedback === 'up' ? 'true' : 'false'}
+                      title={t('palette.aiAnswerUp')}
+                      aria-label={t('palette.aiAnswerUp')}
+                      aria-pressed={answerFeedback === 'up'}
+                      className={`rounded p-1 hover:bg-muted ${answerFeedback === 'up' ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => rateAnswer('up')}
+                    >
+                      <ThumbsUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="palette-ai-down"
+                      data-active={answerFeedback === 'down' ? 'true' : 'false'}
+                      title={t('palette.aiAnswerDown')}
+                      aria-label={t('palette.aiAnswerDown')}
+                      aria-pressed={answerFeedback === 'down'}
+                      className={`rounded p-1 hover:bg-muted ${answerFeedback === 'down' ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => rateAnswer('down')}
+                    >
+                      <ThumbsDown className="h-3.5 w-3.5" />
+                    </button>
+                    {onAskAi && (
+                      <button
+                        type="button"
+                        data-testid="palette-ai-continue"
+                        className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-accent hover:bg-muted"
+                        onClick={() => {
+                          const question = settledQuery
+                          setOpen(false)
+                          setQuery('')
+                          onAskAi(question)
+                        }}
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        {t('palette.aiAnswerContinue')}
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>

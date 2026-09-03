@@ -745,18 +745,28 @@ export function InboxPage() {
                 >
                   {t('topbar.markAllRead')}
                 </button>
-                {view === 'inbox' && notifs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => clearAll.mutate()}
-                    disabled={clearAll.isPending}
-                    data-testid="inbox-clear-all"
-                    className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
-                  >
-                    {t('inbox.clearAll')}
-                  </button>
-                )}
               </>
+            )}
+            {/*
+              §G10-12 — Clear all is NOT gated on unread.
+
+              It used to sit inside the `counts.unread > 0` block above, which
+              made it vanish exactly when it was most wanted: an inbox of two
+              hundred rows you have already read is the one you want emptied in
+              a single move, and having read them was what removed the button.
+              Clearing is about getting rows off the screen; whether they have
+              been read is a different question.
+            */}
+            {view === 'inbox' && notifs.length > 0 && (
+              <button
+                type="button"
+                onClick={() => clearAll.mutate()}
+                disabled={clearAll.isPending}
+                data-testid="inbox-clear-all"
+                className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
+              >
+                {t('inbox.clearAll')}
+              </button>
             )}
             {/* §A2.11 — delivery preferences were reachable only from the
                 profile page, so "why am I getting this?" had no answer here. */}

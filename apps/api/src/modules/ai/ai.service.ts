@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
+import { aiAnswerFeedback, aiUsage, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
@@ -1551,6 +1551,78 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
   async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
     const role = await this.memberRole(workspaceId, userId)
     if (!role) throw new ForbiddenException('You do not have access to this workspace')
+  }
+
+  /*
+   * §G02 — the thumbs under a palette answer.
+   *
+   * Keyed on the normalised question rather than on a message id, because a
+   * palette answer is never persisted as a message. See the schema comment on
+   * `ai_answer_feedback` for why that trade is the right way round.
+   */
+  private static normalizeQuestion(question: string): string {
+    return question.trim().toLowerCase().slice(0, 500)
+  }
+
+  async getAnswerFeedback(
+    workspaceId: string,
+    userId: string,
+    question: string,
+  ): Promise<'up' | 'down' | null> {
+    const q = AiService.normalizeQuestion(question)
+    if (!q) return null
+    const [row] = await this.db
+      .select({ rating: aiAnswerFeedback.rating })
+      .from(aiAnswerFeedback)
+      .where(
+        and(
+          eq(aiAnswerFeedback.workspaceId, workspaceId),
+          eq(aiAnswerFeedback.userId, userId),
+          eq(aiAnswerFeedback.question, q),
+        ),
+      )
+      .limit(1)
+    return row?.rating === 'up' || row?.rating === 'down' ? row.rating : null
+  }
+
+  /**
+   * Set, flip or clear. Pressing the thumb that is already lit clears it —
+   * the same convention `chat-threads.controller.ts` uses, so the two feedback
+   * controls in the product do not behave differently from each other.
+   *
+   * Returns the rating now in force, so the caller never has to guess what its
+   * own click produced.
+   */
+  async setAnswerFeedback(
+    workspaceId: string,
+    userId: string,
+    question: string,
+    rating: 'up' | 'down' | null,
+  ): Promise<{ feedback: 'up' | 'down' | null }> {
+    const q = AiService.normalizeQuestion(question)
+    if (!q) return { feedback: null }
+    const current = await this.getAnswerFeedback(workspaceId, userId, q)
+    // No opinion is the absence of a row, not a third value, so clearing is a
+    // delete — otherwise "unrated" and "rated null" become two states that read
+    // the same and count differently.
+    const next = rating === null || rating === current ? null : rating
+    const scope = and(
+      eq(aiAnswerFeedback.workspaceId, workspaceId),
+      eq(aiAnswerFeedback.userId, userId),
+      eq(aiAnswerFeedback.question, q),
+    )
+    if (next === null) {
+      await this.db.delete(aiAnswerFeedback).where(scope)
+      return { feedback: null }
+    }
+    await this.db
+      .insert(aiAnswerFeedback)
+      .values({ workspaceId, userId, question: q, rating: next })
+      .onConflictDoUpdate({
+        target: [aiAnswerFeedback.workspaceId, aiAnswerFeedback.userId, aiAnswerFeedback.question],
+        set: { rating: next, updatedAt: new Date() },
+      })
+    return { feedback: next }
   }
 
   // ─── §15.1 Knowledge base — "Ask about your workspace" ────────────────────

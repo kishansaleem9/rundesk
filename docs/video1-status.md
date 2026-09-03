@@ -3183,3 +3183,72 @@ Four breaks, each caught, each against a clean rebuild: the block not rendered
 (2 checks fail), asking regardless of results (2 fail — `1 extra call when
 results existed`), the debounce removed (`24 calls to /ai/knowledge for one
 query`), and a canned line rendered instead of the server's answer.
+
+## Five dead inches, found by re-deriving the whole scope (3 Sep)
+
+The scope was re-derived from the fifteen section specs against the code rather
+than against this document, on the principle that a status file records what
+was intended and only the code records what shipped. Five of the gaps it found
+were the same shape: **the work was done and the last inch was missing.**
+
+**A Google Drive result did nothing at all.** The API queries Drive, the row
+renders under its own heading, and the server even labels it "Google Drive" so
+you know a click leaves the product — and then `go()` did
+`if (to.startsWith('/app/')) navigate(...)` and dropped everything else on the
+floor. Every federated hit closed the palette and went nowhere. It now opens in
+a new tab, http(s) only, because the URL comes from an external provider and
+`javascript:` inside a `window.open` is a script on this origin.
+
+**A forward said "Forwarded" and nothing else.** The source channel was
+selected by the server, put on the wire, and typed on the client; no component
+ever rendered it. A quote with the attribution torn off is a rumour, so the
+author and the timestamp were added alongside it — all three inside the same
+reachability guard, so a private channel you are not in still leaks nothing.
+
+**Clear all vanished exactly when it was wanted.** It sat inside the
+`counts.unread > 0` block, so reading your mail removed the button for emptying
+it. Two hundred rows you have already been through is the inbox that most wants
+clearing, and having been through them was what took the control away. Reading
+and clearing are different questions.
+
+**Home's Replies badge counted the wrong things.** It filtered
+`['task_commented', 'comment']`. `comment` is in the enum and no service emits
+it; `chat_reply` and `doc_commented` are emitted and were absent. A workspace
+whose replies were all in chat showed a badge of zero beside a page listing
+them. Both surfaces now import one list, and a source test asserts neither
+holds a second copy — matched structurally, on any array containing a reply
+type, because drift arrives under whatever name the next person picks.
+
+**And the palette's answer had no controls.** Copy, thumbs and "Continue with
+Rundesk AI" are in the frames; only the paragraph had shipped. The thumbs are
+keyed on the normalised question rather than a message id, because a palette
+answer is never persisted as a message and writing every stray search into
+somebody's chat history to give the thumbs something to point at costs more
+than the thumbs are worth. No opinion is the absence of a row, so pressing the
+lit thumb is a DELETE.
+
+Nine breaks, each against a clean rebuild, each caught: the answer block not
+rendered; asking regardless of results; the debounce removed (24 calls for one
+query); a canned line instead of the answer; a thumb that lights but never
+reaches the server; a thumb that never clears; Continue that closes the palette
+and opens nothing; citations dropped; and the Drive URL dropped on the floor
+again.
+
+**Two checks had to be repaired before they were worth anything.** "A search
+that finds results does not ask at all" passed under a build that asked on
+*every* search, because the answer cache served the earlier query without
+touching the network — it now uses a second hit-producing query. And the
+zero-result query is typed a character at a time: `fill()` sets the value in one
+shot, so "asked once, not per keystroke" was true of a palette with no debounce
+at all.
+
+**And two source tests failed on a change that altered nothing they guarded.**
+Both allowed "up to N characters" between two landmarks; both broke when the
+forward banner grew the very content it exists to show. They now balance
+brackets instead — the structure is what is being asserted, and the structure
+does not care how long the arguments are.
+
+Finally, the new inbox check marks every notification read, which is a global
+change to the account. It records what was unread and puts it back, and a sixth
+check asserts it left the inbox exactly as it found it — the same lesson the
+Notepad fixture cost two CI runs to learn.

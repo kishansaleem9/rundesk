@@ -135,7 +135,7 @@ const check = (ok, label, detail = '') => {
  * nothing, or an early exit, reports a clean sweep of whatever it reached, and
  * that reads exactly like success. Raise this when checks are added.
  */
-const EXPECTED_CHECKS = 68
+const EXPECTED_CHECKS = 73
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -777,10 +777,60 @@ try {
         'and the note travels with it',
         `body: ${String(got?.body ?? '').slice(0, 80)}`,
       )
+
+      /*
+       * G11-1 — the forward has to say WHERE it came from, WHO wrote it and
+       * WHEN.
+       *
+       * "Forwarded" on its own is a quote with the attribution torn off, and
+       * that is exactly what shipped: the channel name was fetched by the
+       * server, typed on the client, and rendered nowhere. Read off the wire
+       * first — a banner cannot show a field the API never sends — and then off
+       * the screen, because the API sending it was never the half that was
+       * broken.
+       */
+      const prov = got?.forwardedFrom
+      check(
+        !!prov && typeof prov.channelName === 'string' && prov.channelName.length > 0,
+        'the forward carries the channel it came from',
+        `forwardedFrom: ${JSON.stringify(prov)}`,
+      )
+      check(
+        !!prov && typeof prov.authorName === 'string' && prov.authorName.length > 0,
+        'and who wrote it',
+        `authorName: ${JSON.stringify(prov?.authorName)}`,
+      )
+      check(
+        !!prov && !!prov.sentAt && !Number.isNaN(new Date(prov.sentAt).getTime()),
+        'and when they wrote it',
+        `sentAt: ${JSON.stringify(prov?.sentAt)}`,
+      )
+
+      await page.goto(`${origin}/app/${workspaceId}/chat?channel=${targetId}`, {
+        waitUntil: 'domcontentloaded',
+      })
+      await page.waitForTimeout(3500)
+      const banner = page.locator('[data-testid^="forwarded-"]').first()
+      const bannerText = (await banner.innerText().catch(() => '')).trim()
+      check(
+        !!prov?.channelName && bannerText.includes(prov.channelName),
+        'and the banner on screen names that channel, not just "Forwarded"',
+        `banner read ${JSON.stringify(bannerText)}`,
+      )
+      check(
+        !!prov?.authorName && bannerText.includes(prov.authorName),
+        'and names the person who wrote it',
+        `banner read ${JSON.stringify(bannerText)}`,
+      )
     } else {
       check(false, 'picking somebody makes it sendable', 'no match to pick')
       check(false, 'and it arrives in the conversation you chose', 'no match to pick')
       check(false, 'and the note travels with it', 'no match to pick')
+      check(false, 'the forward carries the channel it came from', 'no match to pick')
+      check(false, 'and who wrote it', 'no match to pick')
+      check(false, 'and when they wrote it', 'no match to pick')
+      check(false, 'and the banner on screen names that channel, not just "Forwarded"', 'no match to pick')
+      check(false, 'and names the person who wrote it', 'no match to pick')
     }
   }
 

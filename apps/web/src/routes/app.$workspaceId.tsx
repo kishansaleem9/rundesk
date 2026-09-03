@@ -18,6 +18,7 @@ import {
   Circle,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { isReplyNotification } from '../lib/reply-types'
 import { useMemo, useState } from 'react'
 import { formatDistanceToNowStrict, isToday, isPast } from 'date-fns'
 import { useAuthStore } from '../store/auth'
@@ -185,7 +186,10 @@ function WorkspaceHome() {
   const { namesById } = useMentionNames(workspaceId)
   const notifications = notificationsQuery.data ?? []
   const unread = notifications.filter((n) => !n.readAt)
-  const replies = notifications.filter((n) => ['task_commented', 'comment'].includes(n.type))
+  // §G12-1 — the shared list, so this badge and the Replies page cannot drift
+  // apart again. The old inline list named a type nothing emits and omitted two
+  // that everything does.
+  const replies = notifications.filter((n) => isReplyNotification(n.type))
   const assignedComments = notifications.filter((n) => ['task_mentioned', 'mention'].includes(n.type))
   const myTasks = myTasksQuery.data ?? []
   const assignedToMe = myTasks.filter((task) => !['done', 'cancelled'].includes(task.status))

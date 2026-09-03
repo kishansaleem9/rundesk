@@ -46,7 +46,14 @@ const read = (rel: string) => readFileSync(join(workspaceRoot(process.cwd()), re
  */
 describe('§14 a chat reply is its own kind', () => {
   const service = read('apps/api/src/modules/chat/chat.service.ts')
+  // §G12-1 — ONE list, in one file. The Replies page and workspace Home each
+  // used to carry their own and they disagreed: Home named a type nothing
+  // emits and omitted chat replies entirely, so its badge read zero next to a
+  // page listing them. These read the shared module and then check that both
+  // surfaces actually go through it.
+  const replyTypes = read('apps/web/src/lib/reply-types.ts')
   const repliesPage = read('apps/web/src/pages/workspace-replies-page.tsx')
+  const home = read('apps/web/src/routes/app.$workspaceId.tsx')
 
   it('types a threaded message as a reply, and a top-level one as a message', () => {
     assert.match(
@@ -56,17 +63,42 @@ describe('§14 a chat reply is its own kind', () => {
     )
   })
 
-  it('and the Replies page looks for it', () => {
-    assert.match(repliesPage, /REPLY_TYPES = new Set\(\[[^\]]*'chat_reply'/, 'Replies still ignores chat')
+  it('and the shared reply list looks for it', () => {
+    assert.match(replyTypes, /'chat_reply'/, 'the reply list still ignores chat')
   })
 
   it('but not every chat message — Replies is not a second Inbox', () => {
     // Folding plain chat_message in would fill this page with channel traffic
     // nobody replied to, which is the opposite of what it is for.
-    const set = /REPLY_TYPES = new Set\(\[([^\]]*)\]/.exec(repliesPage)?.[1] ?? ''
+    const set = /REPLY_TYPES[^=]*=\s*new Set\(\[([^\]]*)\]/.exec(replyTypes)?.[1] ?? ''
     assert.ok(set, 'could not read REPLY_TYPES')
     assert.ok(!/'chat_message'/.test(set), `Replies swallows all chat: ${set}`)
   })
+
+  for (const [name, source] of [
+    ['the Replies page', repliesPage],
+    ['workspace Home', home],
+  ] as const) {
+    it(`${name} filters through the shared list rather than its own`, () => {
+      assert.match(
+        source,
+        /from '.*reply-types'/,
+        `${name} does not import the shared reply list`,
+      )
+      /*
+       * And carries no second list of its own. Asserted structurally — any
+       * array or Set literal holding a notification type that looks like a
+       * reply — rather than by naming a variable, because the drift this
+       * guards against arrives under whatever name the next person picks.
+       */
+      const inlineLists = source.match(/\[[^\]]*'(?:task_commented|doc_commented|chat_reply)'[^\]]*\]/g) ?? []
+      assert.deepEqual(
+        inlineLists,
+        [],
+        `${name} still has its own copy of the reply types: ${inlineLists.join(' | ')}`,
+      )
+    })
+  }
 
   it('is offered in the Primary customiser like any other kind', async () => {
     const { PRIMARY_SELECTABLE_TYPES } = await import('../notifications/notifications.service')
@@ -133,6 +165,28 @@ describe('§12 a saved message opens where its actions are', () => {
   })
 })
 
+/**
+ * The text of a call's arguments, found by matching parentheses.
+ *
+ * Every regex in this file that allowed "up to N characters" between two
+ * landmarks has since failed on a change that added a line and altered nothing
+ * it was guarding. Balance the brackets instead: the structure is the thing
+ * being asserted, and the structure does not care how long the arguments are.
+ */
+function balanced(source: string, opener: string): string {
+  const start = source.indexOf(opener)
+  if (start < 0) return ''
+  let depth = 0
+  for (let i = start + opener.length - 1; i < source.length; i += 1) {
+    if (source[i] === '(') depth += 1
+    else if (source[i] === ')') {
+      depth -= 1
+      if (depth === 0) return source.slice(start + opener.length, i)
+    }
+  }
+  return ''
+}
+
 describe('§12 forwarding carries its origin', () => {
   const service = read('apps/api/src/modules/chat/chat.service.ts')
   const controller = read('apps/api/src/modules/chat/chat.controller.ts')
@@ -186,20 +240,44 @@ describe('§12 forwarding carries its origin', () => {
       /const reachable = \(!src\.isPrivate && !src\.isDm\) \|\| myChannels\.has\(src\.channelId\)/,
       'reachability is not computed from the reader and the channel',
     )
+    /*
+     * The false branch of the reachability ternary must be `null`.
+     *
+     * Read by walking to the branch rather than by allowing N characters
+     * between `?` and `: null` — the true branch grew from one line to an
+     * object literal when the author and timestamp were added, and a character
+     * budget would have failed on a change that altered nothing it was guarding.
+     */
+    const call = balanced(list, 'forwardedFrom.set(')
+    assert.ok(call, 'could not find where the resolved source is recorded')
+    const branch = /\breachable\s*\?([\s\S]*)$/.exec(call)?.[1] ?? ''
+    assert.ok(branch, 'the recorded source is not conditional on reachability')
     assert.match(
-      list,
-      /reachable \?[\s\S]{0,120}?: null/,
-      'an unreachable source still yields a followable link',
+      branch.split(/\n\s*:\s*/).pop()?.trim() ?? '',
+      /^null\b/,
+      `an unreachable source still yields a followable link: ${branch.slice(-80)}`,
     )
   })
 
   it('still says a message was forwarded when the source is out of reach', () => {
     // The label is true either way; only the link is conditional. Dropping both
     // would misrepresent the message as something the sender wrote.
-    assert.match(
-      page,
-      /m\.forwardedFromId && \([\s\S]{0,600}?m\.forwardedFrom && \(/,
-      'the banner and the link are gated on the same thing',
+    /*
+     * Two different gates, and which is which is the point: the BANNER hangs
+     * off `forwardedFromId` (this message is a forward — always true of one),
+     * and the LINK hangs off `forwardedFrom` (and you may follow it there).
+     *
+     * Located by nesting rather than by a character budget between them: the
+     * banner grew a channel name, an author and a timestamp, and a fixed
+     * allowance would have failed on content that is exactly what it should
+     * contain.
+     */
+    const bannerStart = page.indexOf('m.forwardedFromId && (')
+    assert.ok(bannerStart > 0, 'the banner is not gated on forwardedFromId')
+    const banner = page.slice(bannerStart, bannerStart + 4000)
+    assert.ok(
+      banner.includes('m.forwardedFrom && ('),
+      'the follow-the-link control is not gated separately on a reachable source',
     )
   })
 

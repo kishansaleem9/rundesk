@@ -130,7 +130,7 @@ type Message = {
    * one they can follow.
    */
   forwardedFromId?: string | null
-  forwardedFrom?: { channelId: string; channelName: string | null } | null
+  forwardedFrom?: { channelId: string; channelName: string | null; authorName?: string | null; sentAt?: string | null } | null
   editedAt?: string | null
   pinnedAt?: string | null
   pinnedById?: string | null
@@ -2485,7 +2485,35 @@ export function ChatPage() {
                               data-testid={`forwarded-${m.id}`}
                             >
                               <Forward className="h-3 w-3 shrink-0" />
-                              <span>{t('chat.forwarded')}</span>
+                              {/*
+                                §G11-1 — "Forwarded" on its own is a quote with
+                                the attribution torn off. The channel, the
+                                author and the time were already on the wire;
+                                only the render was missing. Each part degrades
+                                on its own, because a deleted author or an
+                                unreachable channel must not blank the line.
+                              */}
+                              <span>
+                                {m.forwardedFrom?.channelName
+                                  ? t('chat.forwardedFrom', { channel: m.forwardedFrom.channelName })
+                                  : t('chat.forwarded')}
+                              </span>
+                              {m.forwardedFrom?.authorName && (
+                                <span data-testid={`forwarded-author-${m.id}`}>
+                                  · {m.forwardedFrom.authorName}
+                                </span>
+                              )}
+                              {m.forwardedFrom?.sentAt && (
+                                <span data-testid={`forwarded-when-${m.id}`}>
+                                  ·{' '}
+                                  {new Date(m.forwardedFrom.sentAt).toLocaleString(undefined, {
+                                    day: 'numeric',
+                                    month: 'short',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              )}
                               {m.forwardedFrom && (
                                 <button
                                   type="button"
