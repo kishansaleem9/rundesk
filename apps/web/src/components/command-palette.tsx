@@ -103,6 +103,13 @@ const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
   drive: 'palette.entityDrive',
   meeting: 'palette.entityMeetings',
 }
+/** §G02-9 — what each source is called on its tab. */
+const SOURCE_LABEL_KEY: Record<string, TranslationKey> = {
+  rundesk: 'palette.sourceRundesk',
+  'google-drive': 'palette.entityDrive',
+  gmail: 'palette.sourceGmail',
+  sharepoint: 'palette.sourceSharePoint',
+}
 const PRIORITY_LABEL_KEY: Record<string, TranslationKey> = {
   urgent: 'palette.priorityUrgent',
   high: 'palette.priorityHigh',
@@ -146,7 +153,31 @@ export function CommandPalette({
    */
   const [revealedTypes, setRevealedTypes] = useState<Set<SearchEntityType>>(() => new Set())
   const [typeMenuOpen, setTypeMenuOpen] = useState(false)
-  const typeParam = [...typeFilter].join(',')
+  /**
+   * §G02-9 [01:12] — the source strip under the query.
+   *
+   * `null` is "All". Scoping to a federated source is expressed as a type
+   * filter, so one mechanism decides what comes back rather than two that can
+   * disagree about what "Drive only" means.
+   */
+  const [source, setSource] = useState<string | null>(null)
+  /**
+   * §G02-9 — what the server is asked for, once the source is taken into
+   * account.
+   *
+   * A federated source narrows to its own entity type, overriding the chips:
+   * "Drive" and "Tasks" together is a contradiction, and answering it with an
+   * empty list would look like Drive having nothing. The chips still decide
+   * within Rundesk, which is the only place they mean anything.
+   */
+  const FEDERATED_TYPE: Record<string, string> = {
+    'google-drive': 'drive',
+    gmail: 'gmail',
+    sharepoint: 'sharepoint',
+  }
+  const typeParam = source && FEDERATED_TYPE[source]
+    ? FEDERATED_TYPE[source]
+    : [...typeFilter].join(',')
   const toggleType = (v: SearchEntityType) =>
     setTypeFilter((cur) => {
       const next = new Set(cur)
@@ -209,6 +240,16 @@ export function CommandPalette({
     )
   }, [open, workspaceId])
 
+
+  const sourcesQuery = useQuery({
+    enabled: open && Boolean(workspaceId),
+    queryKey: ['search-sources', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; connected: boolean; provider: string | null }>>(
+        `/search/sources/${workspaceId}`,
+      ),
+  })
+  const activeSource = sourcesQuery.data?.find((s) => s.id === source) ?? null
 
   const labelsQuery = useQuery({
     enabled: open && Boolean(workspaceId),
@@ -390,7 +431,7 @@ export function CommandPalette({
 
   const searchQuery = useQuery({
     enabled: open && Boolean(workspaceId) && !commandMode && (query.trim().length > 0 || hasFilter),
-    queryKey: ['search', workspaceId, query, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, createdAfter, createdBefore, spaceFilter, folderFilter, listFilter, customFieldId, customFieldValue],
+    queryKey: ['search', workspaceId, query, source, typeParam, sortBy, statusFilter, priorityFilter, labelFilter, taskTypeFilter, assigneeFilter, creatorFilter, includeArchived, dueAfter, dueBefore, createdAfter, createdBefore, spaceFilter, folderFilter, listFilter, customFieldId, customFieldValue],
     queryFn: () => {
       const params = new URLSearchParams({ q: query })
       if (typeParam) params.set('types', typeParam)
@@ -745,6 +786,50 @@ export function CommandPalette({
         two levels down. The type chips are part of the search bar; the rest are
         filters.
       */}
+      {/*
+        §G02-9 [01:12] — the source strip, on screen in every search frame.
+
+        A source you have not connected SAYS so and offers the way to connect
+        it. Federation already returned `[]` for an absent connection, and an
+        empty list reads as "you have no matching files" — a wrong answer
+        wearing the clothes of a right one.
+      */}
+      {!commandMode && workspaceId && (
+        <div className="flex flex-wrap items-center gap-1 px-3 pt-2" data-testid="palette-sources">
+          <FilterChip active={source === null} onClick={() => setSource(null)} testId="palette-source-all">
+            {t('palette.sourceAll')}
+          </FilterChip>
+          {(sourcesQuery.data ?? []).map((s) => (
+            <FilterChip
+              key={s.id}
+              active={source === s.id}
+              onClick={() => setSource(s.id)}
+              testId={`palette-source-${s.id}`}
+            >
+              {t(SOURCE_LABEL_KEY[s.id] ?? 'palette.sourceAll')}
+            </FilterChip>
+          ))}
+        </div>
+      )}
+      {activeSource && !activeSource.connected && (
+        <div
+          className="mx-3 mt-2 flex items-center gap-2 rounded-md border border-border/60 bg-card/60 px-2 py-1.5 text-[11px] text-muted-foreground"
+          data-testid="palette-source-disconnected"
+        >
+          <span>{t('palette.sourceNotConnected')}</span>
+          <button
+            type="button"
+            data-testid="palette-source-connect"
+            className="text-accent underline underline-offset-2"
+            onClick={() => {
+              setOpen(false)
+              navigate({ to: '/app/$workspaceId/settings', params: { workspaceId: workspaceId! } })
+            }}
+          >
+            {t('palette.sourceConnect')}
+          </button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60">
         <FilterGroup label={t('palette.filterType')}>
           <FilterChip

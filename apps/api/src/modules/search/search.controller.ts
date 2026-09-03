@@ -40,6 +40,18 @@ export class SearchController {
     return this.search.recordOpen(workspaceId, user.id, body?.entityType ?? '', body?.entityId ?? '')
   }
 
+  /**
+   * §G02-9 — the sources this workspace can search, and which are connected.
+   *
+   * Declared BEFORE `:workspaceId`, or Nest reads "sources" as a workspace id
+   * and answers 404 for a route that exists.
+   */
+  @Get('sources/:workspaceId')
+  @UseGuards(ResourceMemberGuard)
+  async sources(@Param('workspaceId') workspaceId: string) {
+    return this.search.listSources(workspaceId)
+  }
+
   @Get(':workspaceId')
   query(
     @Param('workspaceId') workspaceId: string,

@@ -3814,3 +3814,44 @@ That third one is worth keeping in mind: a hit id is `type-<uuid>` and a uuid
 contains four more hyphens, so splitting on all of them yields a key that
 matches nothing — **a trending sort that silently scores everything zero and is
 indistinguishable from one nobody switched on.**
+
+## A source that cannot answer says so (3 Sep)
+
+> `[01:12]` — the strip under the query: "All | ClickUp | Google Drive | Gmail |
+> SharePoint | Apps", on screen in every search frame of the section.
+
+We had no concept of a SOURCE at all: search meant our own index, so there was
+nothing to scope to and nothing to say when a source was not connected.
+
+**The half that matters is the second one.** Drive federation already existed
+and returned `[]` when the workspace had no connection — which reads to a person
+as "you have no matching files in Drive", and that is false. **Silence is a
+wrong answer wearing the clothes of a right one.** An unconnected source now
+says so and offers the way to connect it.
+
+Scoping is expressed as a type filter, so one mechanism decides what comes back
+rather than two that can disagree about what "Drive only" means. A federated
+source overrides the type chips rather than intersecting with them: "Drive" and
+"Tasks" together is a contradiction, and answering it with an empty list would
+look like Drive having nothing — the same lie in a different place.
+
+SharePoint borrows the OneDrive credential rather than inventing a provider,
+because both are reached through the same Microsoft Graph grant. Gmail is its
+own.
+
+### What is NOT covered, stated rather than implied
+
+**The Gmail and SharePoint queries themselves are unexercised.** They need OAuth
+credentials for those providers, which no test environment holds. What the suite
+drives is everything up to the credential — the strip, the scoping, the honest
+"not connected" — and the federated requests are code that has been written and
+not run.
+
+That is a real limitation and it is written here rather than left for somebody
+to discover from a green tick. The unconnected state is not a workaround for it:
+it is the state every workspace is genuinely in until somebody connects
+something, which is why it is the part worth getting right first.
+
+Three breaks, all caught: the strip removed, the unconnected notice removed (the
+defect itself — an empty list where an explanation belongs), and a registry that
+reports everything connected so the honest state can never be reached.

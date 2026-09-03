@@ -1,5 +1,6 @@
 import { Injectable, Inject, Optional, OnModuleInit, Logger } from '@nestjs/common'
 import { DRIVE_SEARCH_SCOPE, grantCoversWholeDrive } from './drive-scope'
+import { SEARCH_SOURCES, SOURCE_PROVIDER, type SearchSource } from './sources'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 'drizzle-orm'
@@ -590,6 +591,35 @@ export class SearchService implements OnModuleInit {
    * count would put last quarter's busiest task on top forever.
    */
   private static readonly TRENDING_WINDOW_DAYS = 7
+
+  /**
+   * §G02-9 — the source strip, and whether each one can actually answer.
+   *
+   * Returned as data rather than assumed by the client, because "connected" is
+   * a fact about this workspace's stored credentials and the client has no way
+   * to know it. A tab that cannot answer must say so — an unconnected source
+   * that returns nothing reads as "you have no matching files", which is false.
+   */
+  async listSources(
+    workspaceId: string,
+  ): Promise<Array<{ id: SearchSource; connected: boolean; provider: string | null }>> {
+    const rows = await this.db
+      .select({
+        provider: workspaceIntegrationConnections.provider,
+        status: workspaceIntegrationConnections.status,
+        accessToken: workspaceIntegrationConnections.accessToken,
+      })
+      .from(workspaceIntegrationConnections)
+      .where(eq(workspaceIntegrationConnections.workspaceId, workspaceId))
+    const live = new Set(
+      rows.filter((r) => r.status === 'connected' && !!r.accessToken).map((r) => r.provider as string),
+    )
+    return SEARCH_SOURCES.map((id) => {
+      const provider = SOURCE_PROVIDER[id]
+      // Our own data needs no credential and is always available.
+      return { id, provider, connected: provider === null ? true : live.has(provider) }
+    })
+  }
 
   /** §G03-6 — somebody opened a search result. */
   async recordOpen(

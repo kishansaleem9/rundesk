@@ -343,6 +343,16 @@ jobs:
           E2E_PEER_EMAIL: org-admin@rundesk.internal
           E2E_PEER_PASSWORD: OrgAdmin@123!
 
+      # §G02-9 — the source strip, and an unconnected source saying so rather
+      # than returning an empty list. The Gmail/SharePoint QUERIES are not
+      # exercised: they need OAuth credentials no test environment holds.
+      - name: Search source tabs
+        if: '!cancelled()'
+        run: node test/e2e/search-sources.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: The DM tab strip (A3.9)
         if: '!cancelled()'
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist
