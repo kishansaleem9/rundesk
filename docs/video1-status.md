@@ -3544,20 +3544,69 @@ went away. Two breaks, both caught: the restore reading nothing, and the
 promotion never written.
 
 
+
+## A call you minimise is a call you keep (3 Sep)
+
+> `[20:12]` — minimise the SyncUp, carry on working, the call stays with you.
+
+The dock rendered. It looked exactly right. It hung up the moment you used it.
+
+`ChannelCall` owned two things that want to live in different places — the
+header button ("is there a call in the channel I am LOOKING at?", a question
+about the page) and the live call itself (about the person, not the page) — and
+the **chat page mounted it**. Clicking through to a task unmounted the
+component, its cleanup stopped every track and told the server you had left.
+Minimise exists so you can browse while you talk, and browsing was the thing
+that ended the call.
+
+**Worse than a missing feature**, and worth naming as its own category: a
+control that is on screen, responds to a click, and teaches you it works. The
+component's own doc comment said a call "survives navigating around the
+workspace". The mount point said otherwise, and the mount point wins.
+
+Split in two. The button stayed in `ChannelCall` and dies with the page, as it
+should. The live half moved to `CallHost`, mounted once by the shell — so it now
+unmounts only when you leave `/app` entirely, which is exactly when the camera
+*should* stop. The unmount handover is still load-bearing; it simply fires at
+the right boundary. A small store carries the intent one way and the call in
+progress back, so page chrome can still say "you are already in one" without
+owning it.
+
+Two decisions the split forced, both kept honest:
+
+**Invite navigates instead of pretending.** Add People belongs to the chat page,
+and the point of the host is that you may not be on it. It takes you to the
+call's own channel — where the control exists — rather than rendering a dead
+button. And a call need not have a channel at all (a meeting starts one that
+belongs to no room), so with no channel there is nowhere to send you and the
+control does nothing rather than landing you nowhere in particular.
+
+**`canRecord` travels with the intent.** Once you have browsed away, "the
+selected channel" is no longer the one you are talking in — reading it then
+would answer about the wrong room.
+
+**The first version of the check was wrong, and the way it was wrong matters.**
+It navigated with `page.goto`, which is a full document load: it tears down the
+whole application, and no web app can carry a `MediaStream` across one. That
+check would have failed forever while saying nothing about the defect. What
+actually broke was *in-app routing*. It now clicks a link, the way a person
+does, and asserts the URL changed — so a click that did nothing cannot read as
+success.
+
+Both halves are checked, because either alone is satisfied by the bug wearing
+the fix as a hat: the dock still on screen, **and** the server still listing you
+as present. A dock over a call you have already left is the same defect with
+better manners.
+
+Two breaks, both caught. Mounting the host from the chat page again — the exact
+original defect — fails four checks including `live call after navigating:
+null`, which is the server confirming the navigation ended the call. And a
+leave that never reaches the server fails the last check alone.
+
 ## What is still open, with the evidence (3 Sep)
 
 Written down so the next pass starts from measurements rather than from this
 document's own optimism. Each was checked against the code today.
-
-**A minimised call does not survive navigation.** `ChannelCall` is rendered in
-exactly one place — `workspace-chat-page.tsx:1530` — and its unmount effect
-(`components/call/channel-call.tsx:165-172`) stops every track and calls
-`leave()`. So clicking any task hangs up. The picture-in-picture dock renders
-and looks right, which makes this worse than an absence: the feature appears to
-work until you use it for the one thing it is for. The fix is a shell-level
-host in `routes/app.tsx` so the call outlives the route, and it moves the call
-state, the WebRTC hooks and the dock up with it — which is why it is named here
-rather than half-done.
 
 **Skill Connections bind but never act.** `skills.service.ts:554-559` names the
 attached providers in the prompt and `:561-565` explicitly forbids acting on

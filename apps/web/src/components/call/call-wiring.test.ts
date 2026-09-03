@@ -56,19 +56,58 @@ describe('§2.8 the pre-join dialog gives its stream away', () => {
   })
 })
 
-describe('§2.8 leaving the page leaves the call', () => {
-  const text = source('components/call/channel-call.tsx', 'export function ChannelCall')
+describe('§G14-8 the call outlives the page it started on', () => {
+  const host = source('components/call/call-host.tsx', 'export function CallHost')
+  const button = source('components/call/channel-call.tsx', 'export function ChannelCall')
+  const shell = source('routes/app.tsx', '<CallHost')
+  const chat = source('pages/workspace-chat-page.tsx', '<ChannelCall')
 
-  it('stops the camera and tells the server when the component goes away', () => {
-    // The chat page is a lazy route, so clicking through to a task unmounts
-    // this. Without it the camera stayed on with no UI left to turn it off,
-    // and everyone else kept a frozen tile forever.
+  it('is mounted by the SHELL, not by a page', () => {
+    /*
+     * The defect this whole split exists for. `ChannelCall` owned the live
+     * call and the chat page mounted it, so clicking through to a task
+     * unmounted it and its cleanup hung up — while the picture-in-picture dock
+     * rendered and looked exactly right. Minimise existed to let you browse,
+     * and browsing was what ended the call.
+     *
+     * Asserted in both directions, because moving the mount is only half of it:
+     * a page that mounts its own CallHost would put the call back inside a
+     * route and nothing else here would notice.
+     */
+    assert.match(shell, /<CallHost\b/, 'the shell no longer mounts the call host')
+    assert.ok(
+      !/<CallHost\b/.test(chat),
+      'the chat page mounts a CallHost again — the call is back inside a route and dies with it',
+    )
+  })
+
+  it('the page-level button holds no call state of its own', () => {
+    /*
+     * Structural rather than a list of forbidden names: what must not come
+     * back is a SECOND place that owns the live call, whatever it ends up
+     * being called. The button may know a call exists; it may not hold the
+     * stream, the surface, or the pre-join.
+     */
+    for (const owned of ['CallSurface', 'CallPreJoin', 'MediaStream', 'getTracks']) {
+      assert.ok(
+        !button.includes(owned),
+        `the channel button owns ${owned} again — two owners of one call is how they disagree`,
+      )
+    }
+  })
+
+  it('stops the camera and tells the server when the host goes away', () => {
+    const text = host
+    // The host unmounts when you leave /app — signing out, or closing the tab —
+    // which is when the camera SHOULD stop. Without it the light stays on with
+    // no UI left to turn it off, and everyone else keeps a frozen tile forever.
     assert.ok(text.includes('onUnmount'), 'there is no unmount handover')
     assert.match(text, /open\?\.getTracks\(\)\.forEach\(\(tr\) => tr\.stop\(\)\)/)
     assert.match(text, /if \(callId\) void leave\(callId\)/)
   })
 
   it('asks whether the call ended, rather than reading a field that is always null', () => {
+    const text = host
     assert.ok(text.includes('callHasEnded('), 'the ended check is gone')
     assert.ok(
       !/live\.endedAt|joined\?\.endedAt/.test(text),
@@ -77,6 +116,7 @@ describe('§2.8 leaving the page leaves the call', () => {
   })
 
   it('tells callHasEnded how old the answer is', () => {
+    const text = host
     // The two live-call queries share a cache key, so the joined query is
     // served the pre-call `null` the instant it mounts — already isSuccess.
     // Without the timing, starting a SyncUp hangs itself up on the first
@@ -89,10 +129,12 @@ describe('§2.8 leaving the page leaves the call', () => {
     )
   })
 
-  it('watches the call it is IN, not only the channel on screen', () => {
+  it('watches the call it is IN, not the channel on screen', () => {
+    // In the shell there is no channel on screen at all once you have browsed
+    // away, so this is the only key that can be right.
     assert.ok(
-      text.includes("useLiveCall(workspaceId, inCall?.channelId ?? null)"),
-      'the in-call query is keyed on the selected channel again — switching channels freezes the participant list',
+      host.includes("useLiveCall(workspaceId ?? '', inCall?.channelId ?? null)"),
+      'the in-call query is keyed on something other than the call being in — the participant list will freeze',
     )
   })
 })
@@ -249,7 +291,7 @@ describe('§2.8 an already-enabled feature stops being gated', () => {
 describe('§2.8 the speaker you choose is the speaker it uses', () => {
   const prejoin = source('components/call/call-prejoin.tsx', 'export function CallPreJoin')
   const surface = source('components/call/call-surface.tsx', 'export function CallSurface')
-  const channel = source('components/call/channel-call.tsx', 'CallPreJoin')
+  const channel = source('components/call/call-host.tsx', 'CallPreJoin')
 
   it('enumerates outputs, not just inputs', () => {
     assert.match(prejoin, /kind === 'audiooutput'/, 'output devices are never collected')

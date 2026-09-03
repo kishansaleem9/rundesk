@@ -8,6 +8,7 @@ import {
   useRouteLoading,
 } from '../components/loading-skeletons'
 import { WorkspaceSidebar } from '../components/workspace-sidebar'
+import { CallHost } from '../components/call/call-host'
 import { AppTopbar } from '../components/app-topbar'
 // §G06 [05:43] — the person panel overlays whatever page you are on, so it is
 // mounted once in the shell rather than per page.
@@ -179,6 +180,14 @@ function AppShell() {
           </Suspense>
         </aside>
       ) : null}
+      {/*
+        §G14-8 — the live call, hosted here rather than by the chat page.
+
+        Mounted at the shell so it outlives every route change: "minimise"
+        exists to let you browse while you talk, and while this lived in the
+        chat page browsing was what ended the call.
+      */}
+      <CallHost workspaceId={workspaceId} />
       <PersonPanel />
       {cmdOpen ? (
         <Suspense fallback={<CommandPaletteSkeleton />}>

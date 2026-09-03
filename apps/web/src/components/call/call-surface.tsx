@@ -242,7 +242,15 @@ export function CallSurface({
             >
               <Maximize2 className="h-3.5 w-3.5" />
             </button>
-            <button onClick={onLeave} title={t('call.leave')} className="p-1 text-destructive">
+            {/* Named, because hanging up FROM THE DOCK is its own path: the
+                one you take after browsing away, where the full surface is not
+                on screen to leave from. */}
+            <button
+              onClick={onLeave}
+              title={t('call.leave')}
+              data-testid="call-dock-leave"
+              className="p-1 text-destructive"
+            >
               <PhoneOff className="h-3.5 w-3.5" />
             </button>
           </div>

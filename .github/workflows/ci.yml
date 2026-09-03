@@ -309,6 +309,17 @@ jobs:
           E2E_PEER_EMAIL: org-admin@rundesk.internal
           E2E_PEER_PASSWORD: OrgAdmin@123!
 
+      # §G14-8 — a minimised call survives navigating away. Needs fake capture
+      # devices, and needs the navigation to be a CLICK: a full page load tears
+      # down the app and cannot carry a MediaStream, so it would fail forever
+      # and say nothing about the defect.
+      - name: A SyncUp survives leaving the page
+        if: '!cancelled()'
+        run: node test/e2e/call-survives-navigation.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: The DM tab strip (A3.9)
         if: '!cancelled()'
         run: node test/e2e/a39-dm-tabs.mjs --api 3011 --dist apps/web/dist

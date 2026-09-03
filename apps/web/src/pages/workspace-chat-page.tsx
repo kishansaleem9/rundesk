@@ -1538,7 +1538,6 @@ export function ChatPage() {
               canRecord={!!selectedChannel && !selectedChannel.isDm}
               action={callAction}
               onActionHandled={() => setCallAction(null)}
-              onInvite={() => setAddPeopleOpen(true)}
             />
           }
           memberCount={

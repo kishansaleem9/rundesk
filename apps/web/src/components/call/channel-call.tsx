@@ -1,47 +1,40 @@
-import { useEffect, useRef, useState } from 'react'
-import { Button, Badge, cn, toast } from '@rundesk/ui'
-import { Video, Circle, AlertTriangle } from 'lucide-react'
+import { useEffect } from 'react'
+import { Button, Badge, toast } from '@rundesk/ui'
+import { Video, Circle } from 'lucide-react'
 import { useTranslation } from '../../lib/i18n'
 import { getRealtimeSocket } from '../../lib/realtime'
-import { useAuthStore } from '../../store/auth'
-import { FLAGS } from '@rundesk/feature-flags'
-import { presentIn, useCallActions, useLiveCall, type Call } from '../../lib/calls-api'
-import { callHasEnded } from '../../lib/call-lifecycle'
-import { useFeatureGate } from '../feature-gate'
-import { CallPreJoin, type CallBackground } from './call-prejoin'
-import { CallSurface } from './call-surface'
+import { useCallStore } from '../../store/call'
+import { presentIn, useLiveCall } from '../../lib/calls-api'
 
 /**
  * §2.8 SyncUp, from a channel — `[19:40]` "Start SyncUp — Jump on a voice call".
  *
- * Owns the whole arc: the header button, the pre-join screen, the live call,
- * and the consent gate in front of recording. Mounted by the chat page so a
- * call survives navigating around the workspace — the thing "minimise" is for.
+ * The header control, and only that. It answers one question — "is there a call
+ * in the channel I am LOOKING at?" — which is a question about this page, and
+ * dies with it.
+ *
+ * §G14-8: the live call used to live here too, and that was the bug. The chat
+ * page mounts this, so clicking through to a task unmounted the call, stopped
+ * every track and hung up — while the picture-in-picture dock rendered and
+ * looked exactly right. Minimise existed to let you browse, and browsing was
+ * what ended the call. The live half now lives in `CallHost`, mounted by the
+ * shell; this raises an intent and lets the shell act on it.
  */
 export function ChannelCall({
   workspaceId,
   channelId,
   canRecord,
-  onInvite,
   action,
   onActionHandled,
 }: {
   workspaceId: string
   channelId: string | null
-  canRecord: boolean
-  onInvite: () => void
   /**
-   * §2.8 gap 9 — a call card in the message list asking to join or leave.
-   *
-   * The card cannot do either itself: the pre-join dialog, the media and the
-   * live call all live here. It raises the intent, this acts on it and clears
-   * it, so pressing Join twice is two joins rather than one stuck flag.
-   *
-   * It carries the call id, and that is not decoration. Leave used to read the
-   * id from local state, which is empty after a page refresh — so the card that
-   * still (correctly) said "You're in the SyncUp" had a Leave button that told
-   * the server nothing, and the person stayed listed as present forever.
+   * Whether recording may be offered for THIS channel. Passed on to the host
+   * with the intent rather than read there: once you have browsed away, the
+   * channel on screen is no longer the one you are talking in.
    */
+  canRecord: boolean
   /**
    * An intent raised from elsewhere in the page — a call card's Join/Leave, or
    * the empty-channel "Start SyncUp" card (§G11 [14:16]).
@@ -55,341 +48,80 @@ export function ChannelCall({
   onActionHandled?: () => void
 }) {
   const { t } = useTranslation()
-  const me = useAuthStore((s) => s.user)
-  const actions = useCallActions(workspaceId)
-  const { requireFeature, gateDialog } = useFeatureGate(workspaceId)
+  const requestJoin = useCallStore((s) => s.requestJoin)
+  const activeCallId = useCallStore((s) => s.activeCallId)
 
-  const [joining, setJoining] = useState(false)
-  const [prejoin, setPrejoin] = useState(false)
-  const [stream, setStream] = useState<MediaStream | null>(null)
-  const [background, setBackground] = useState<CallBackground>('none')
-  // §2.8 [19:46] — carried from the pre-join into the call, where the audio is.
-  const [speakerId, setSpeakerId] = useState<string>('')
-  const [inCall, setInCall] = useState<Call | null>(null)
-  const [consentOpen, setConsentOpen] = useState(false)
-  const [recordingBusy, setRecordingBusy] = useState(false)
-  /**
-   * When we joined. Any query answer older than this predates the call and
-   * cannot be evidence that it has ended — see callHasEnded.
-   */
-  const joinedAt = useRef(0)
-
-  /**
-   * Two questions, two queries.
-   *
-   *   - "Is there a call in the channel I am LOOKING at?" — drives the header
-   *     button.
-   *   - "What is happening in the call I am IN?" — drives the participants
-   *     panel, the recording banner, and who we open peer connections to.
-   *
-   * They used to be one query keyed on the selected channel, so switching
-   * channels mid-call froze the second one: anybody who joined after the switch
-   * never appeared, and the two of you might or might not connect depending on
-   * how your ids happened to sort. When the two channels are the same, these
-   * share a cache key and there is only one request.
-   */
   const hereQuery = useLiveCall(workspaceId, channelId)
-  const joinedQuery = useLiveCall(workspaceId, inCall?.channelId ?? null)
   const live = hereQuery.data
 
-  // Someone else starting, joining, leaving or recording refreshes the call.
+  // Someone else starting, joining, leaving or recording changes what this
+  // button should say.
   useEffect(() => {
     const socket = getRealtimeSocket()
-    const onEvent = (event: { type?: string; callId?: string }) => {
+    const onEvent = (event: { type?: string }) => {
       if (!event?.type?.startsWith('call.')) return
       if (event.type === 'call.signal' || event.type === 'call.reaction') return
       void hereQuery.refetch()
-      void joinedQuery.refetch()
     }
     socket.on('event', onEvent)
     return () => {
       socket.off('event', onEvent)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hereQuery.refetch, joinedQuery.refetch])
+  }, [hereQuery.refetch])
 
-  // Keep the live copy fresh while in the call, so the participants panel and
-  // the recording banner reflect what is actually true, not what was true when
-  // we joined.
-  useEffect(() => {
-    if (!inCall) return
-    const joined = joinedQuery.data
-    if (joined?.id === inCall.id) {
-      setInCall(joined)
-      return
-    }
-    // `undefined` means the query has not answered yet — which is the state one
-    // render after joining, and hanging up there would end the call the instant
-    // it started. Only a settled answer counts.
-    if (
-      callHasEnded({
-        inCallId: inCall.id,
-        liveId: joined?.id ?? null,
-        settled: joinedQuery.isSuccess,
-        answeredAt: joinedQuery.dataUpdatedAt,
-        joinedAt: joinedAt.current,
-      })
-    ) {
-      hangUpLocally()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joinedQuery.data, joinedQuery.isSuccess, joinedQuery.dataUpdatedAt, inCall?.id])
-
-  const hangUpLocally = () => {
-    // Stop the tracks BEFORE clearing state. Dropping the reference first
-    // leaves the camera light on with nothing left holding the handle.
-    stream?.getTracks().forEach((tr) => tr.stop())
-    setStream(null)
-    setInCall(null)
-    setPrejoin(false)
+  const askToJoin = () => {
+    if (!channelId) return
+    requestJoin({ channelId, callId: live?.id, canRecord })
   }
 
-  /**
-   * Leaving because the page went away.
+  /*
+   * §2.8 gap 9 — act on a card's Join/Leave, then clear it so the next press is
+   * a fresh intent rather than a flag nobody reset.
    *
-   * The chat page is a lazy route, so clicking through to a task unmounts this
-   * whole component. Without this the camera light stayed on with no UI left to
-   * turn it off, and the server went on listing the person as present — so
-   * everybody else kept a frozen tile of them and a peer connection to a page
-   * that no longer existed.
-   *
-   * Kept in a ref because the cleanup must run once, on unmount, and see the
-   * latest call rather than whatever was current when it was registered.
+   * Leave is raised as an intent too. It used to be handled here because the
+   * call state was here; sending it to the host keeps one place that knows
+   * which call is in progress, rather than two that can disagree.
    */
-  const onUnmount = useRef<{ stream: MediaStream | null; callId: string | null; leave: (id: string) => Promise<unknown> }>({
-    stream: null,
-    callId: null,
-    leave: async () => {},
-  })
-  onUnmount.current = { stream, callId: inCall?.id ?? null, leave: actions.leave }
-  useEffect(
-    () => () => {
-      const { stream: open, callId, leave } = onUnmount.current
-      open?.getTracks().forEach((tr) => tr.stop())
-      if (callId) void leave(callId).catch(() => {})
-    },
-    [],
-  )
-
-  const beginJoin = () => setPrejoin(true)
-
-  const confirmJoin = async (media: MediaStream, chosen: CallBackground, speaker: string) => {
-    if (!channelId) return false
-    setJoining(true)
-    try {
-      // start() joins the call already running here, so two people pressing
-      // together land in the same one.
-      const call = live ? await actions.join(live.id) : await actions.start({ channelId })
-      // Stamped BEFORE the state that starts the watcher, so the first render
-      // with a call in hand already knows how old an answer has to be to count.
-      joinedAt.current = Date.now()
-      setStream(media)
-      setBackground(chosen)
-      setSpeakerId(speaker)
-      setInCall(call)
-      setPrejoin(false)
-      return true
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('call.deviceError'))
-      // Reported rather than swallowed: the pre-join dialog is still open and
-      // has to take its camera back, or its Join button is inert from here on.
-      return false
-    } finally {
-      setJoining(false)
-    }
-  }
-
-  /**
-   * Leave.
-   *
-   * `fallbackId` is what a card supplies. After a page refresh the local
-   * `inCall` is empty while the server still lists the person as present, so
-   * the id has to be able to come from the thing that knows it.
-   */
-  const leave = async (fallbackId?: string) => {
-    const id = inCall?.id ?? fallbackId
-    hangUpLocally()
-    if (id) await actions.leave(id).catch(() => {})
-  }
-
-  const endForAll = async () => {
-    const id = inCall?.id
-    hangUpLocally()
-    if (id) {
-      const result = await actions.end(id).catch(() => null)
-      /*
-       * `pending` is not the same as "no record".
-       *
-       * Two people hanging up in the same moment means one of them loses the
-       * race to end the call, and the winner does not have a meeting id to
-       * report until the notes come back seconds later. The loser used to be
-       * handed a null id and quietly say nothing at all — for a record that
-       * was in fact being written. Both states are worth a word; only a real
-       * failure stays silent.
-       */
-      if (result?.meetingId) toast.success(t('call.recordKept'))
-      else if (result?.pending) toast.success(t('call.recordComing'))
-    }
-  }
-
-  // §2.8 gap 9 — act on a card's Join/Leave, then clear it so the next press
-  // is a fresh intent rather than a flag nobody reset.
   useEffect(() => {
     if (!action) return
-    if (action.kind === 'start') {
-      // Already in one is already the answer.
-      if (!inCall) beginJoin()
-      else toast(t('call.alreadyInAnother'))
-    } else if (action.kind === 'join') {
-      if (inCall && inCall.id !== action.callId) {
-        // Being in another call is the ordinary state this feature is built
-        // for — minimise one and browse. Doing nothing silently made the
-        // button look broken; switching calls without asking would drop the
-        // one they are actually in.
-        toast(t('call.alreadyInAnother'))
-      } else if (!inCall) {
-        beginJoin()
-      }
+    if (action.kind === 'leave') {
+      useCallStore.getState().requestLeave(action.callId)
+    } else if (activeCallId) {
+      toast(t('call.alreadyInAnother'))
+    } else if (action.kind === 'start') {
+      if (channelId) requestJoin({ channelId, callId: live?.id, canRecord })
     } else {
-      void leave(action.callId)
+      if (channelId) requestJoin({ channelId, callId: action.callId, canRecord })
     }
     onActionHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [action])
 
-  const toggleRecording = async () => {
-    if (!inCall) return
-    // §2.8 gap 11 — recording "back end se on karna parta hai" [20:45]. If the
-    // workspace has this switched off, say so and offer to ask, rather than
-    // letting the button do nothing. Checked before the consent gate: there is
-    // no point asking everyone's permission for something that cannot happen.
-    if (
-      !inCall.recording &&
-      !requireFeature({
-        flag: FLAGS.AI_MEETING_NOTES,
-        name: t('gate.aiNotetaker'),
-        blurb: t('gate.aiNotetakerBlurb'),
-      })
-    ) {
-      return
-    }
-    // Stopping needs no gate — only starting does, because only starting is
-    // the thing people must be told about.
-    if (inCall.recording) {
-      setRecordingBusy(true)
-      await actions.setRecording(inCall.id, false).catch(() => {})
-      setRecordingBusy(false)
-      return
-    }
-    setConsentOpen(true)
-  }
-
-  const confirmRecording = async () => {
-    if (!inCall) return
-    setRecordingBusy(true)
-    try {
-      await actions.setRecording(inCall.id, true)
-      setConsentOpen(false)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('call.deviceError'))
-    } finally {
-      setRecordingBusy(false)
-    }
-  }
-
   if (!channelId) return null
   const present = presentIn(live)
+  // Already in this very call: the surface is on screen and offering to join it
+  // again would be a button that says the wrong thing.
+  if (activeCallId && live && activeCallId === live.id) return null
 
   return (
-    <>
-      {/* The header control: start one, or join the one already running. */}
-      {!inCall && (
-        <Button
-          size="sm"
-          variant={live ? 'default' : 'outline'}
-          onClick={beginJoin}
-          data-testid={live ? 'call-join-button' : 'call-start-button'}
-          title={live ? t('call.liveHere') : t('call.startSyncUp')}
-        >
-          <Video className="h-3.5 w-3.5 mr-1.5" />
-          {live ? t('call.joinSyncUp') : t('call.startSyncUp')}
-          {live && present.length > 0 && (
-            <Badge variant="secondary" className="ml-1.5 text-[10px]">
-              {present.length}
-            </Badge>
-          )}
-          {live?.recording && (
-            <Circle className="h-2.5 w-2.5 ml-1.5 fill-red-500 text-red-500 animate-pulse" />
-          )}
-        </Button>
+    <Button
+      size="sm"
+      variant={live ? 'default' : 'outline'}
+      onClick={askToJoin}
+      data-testid={live ? 'call-join-button' : 'call-start-button'}
+      title={live ? t('call.liveHere') : t('call.startSyncUp')}
+    >
+      <Video className="h-3.5 w-3.5 mr-1.5" />
+      {live ? t('call.joinSyncUp') : t('call.startSyncUp')}
+      {live && present.length > 0 && (
+        <Badge variant="secondary" className="ml-1.5 text-[10px]">
+          {present.length}
+        </Badge>
       )}
-
-      {prejoin && (
-        <CallPreJoin
-          onJoin={confirmJoin}
-          onCancel={() => setPrejoin(false)}
-          joining={joining}
-          peopleAlreadyIn={present.length}
-        />
+      {live?.recording && (
+        <Circle className="h-2.5 w-2.5 ml-1.5 fill-red-500 text-red-500 animate-pulse" />
       )}
-
-      {inCall && me?.id && (
-        <CallSurface
-          call={inCall}
-          myUserId={me.id}
-          localStream={stream}
-          background={background}
-          onLeave={leave}
-          onEnd={endForAll}
-          onToggleRecording={toggleRecording}
-          recordingBusy={recordingBusy}
-          onInvite={onInvite}
-          canRecord={canRecord}
-          speakerId={speakerId}
-        />
-      )}
-
-      {/*
-        §2.8 gap 10 — the consent gate.
-
-        Not a confirm dialog for safety's sake: in two-party-consent
-        jurisdictions recording without telling people is unlawful, and this
-        screen is where that is said out loud. It cannot be skipped or
-        remembered, because "don't ask again" is exactly the thing that must
-        not exist here.
-      */}
-      {consentOpen && (
-        <div
-          className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4"
-          data-testid="call-consent"
-        >
-          <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card p-5 space-y-3">
-            <h3 className="text-base font-semibold flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              {t('call.consentTitle')}
-            </h3>
-            <p className="text-sm text-muted-foreground">{t('call.consentBody')}</p>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="ghost" onClick={() => setConsentOpen(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button
-                onClick={confirmRecording}
-                disabled={recordingBusy}
-                data-testid="call-consent-confirm"
-                className={cn(recordingBusy && 'opacity-70')}
-              >
-                {t('call.consentConfirm')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* §2.8 gap 11 — the "Unlock AI Notetaker" modal, when the workspace has
-          this switched off. Rendered here rather than inside the call surface
-          so it survives minimising. */}
-      {gateDialog}
-    </>
+    </Button>
   )
 }
