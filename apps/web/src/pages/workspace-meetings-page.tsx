@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link, useParams } from '@tanstack/react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useParams, useSearch } from '@tanstack/react-router'
 import { Button, Input, Badge, cn } from '@rundesk/ui'
 import {
   CalendarClock,
@@ -39,6 +39,10 @@ import {
  */
 export function MeetingsPage() {
   const { workspaceId } = useParams({ strict: false }) as { workspaceId: string }
+  // §G14-15 — the meeting a link points at, if any. `strict: false` for the
+  // same reason useParams above uses it: this component is also rendered
+  // outside its own route in tests and shells.
+  const { meeting: linkedMeetingId } = useSearch({ strict: false }) as { meeting?: string }
   const { t } = useTranslation()
   const me = useAuthStore((s) => s.user)
 
@@ -158,7 +162,12 @@ export function MeetingsPage() {
         ) : (
           <ul className="space-y-2" data-testid="meetings-list">
             {filtered.map((meeting) => (
-              <MeetingRow key={meeting.id} meeting={meeting} workspaceId={workspaceId} />
+              <MeetingRow
+                key={meeting.id}
+                meeting={meeting}
+                workspaceId={workspaceId}
+                highlighted={meeting.id === linkedMeetingId}
+              />
             ))}
           </ul>
         )}
@@ -253,13 +262,37 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
   )
 }
 
-function MeetingRow({ meeting, workspaceId }: { meeting: Meeting; workspaceId: string }) {
+function MeetingRow({
+  meeting,
+  workspaceId,
+  highlighted,
+}: {
+  meeting: Meeting
+  workspaceId: string
+  /** Arrived here from a link pointing at this one — say which. */
+  highlighted?: boolean
+}) {
   const { t } = useTranslation()
   const when = meeting.startsAt ?? meeting.createdAt
+  const row = useRef<HTMLLIElement | null>(null)
+  /*
+   * §G14-15 — bring the linked meeting into view.
+   *
+   * Marking it without scrolling would leave a highlighted row somewhere below
+   * the fold, which reads exactly like a link that did nothing.
+   */
+  useEffect(() => {
+    if (highlighted) row.current?.scrollIntoView({ block: 'center' })
+  }, [highlighted])
   return (
     <li
-      className="rounded-xl border border-border/70 px-4 py-3"
+      ref={row}
+      className={cn(
+        'rounded-xl border px-4 py-3',
+        highlighted ? 'border-accent bg-accent/5' : 'border-border/70',
+      )}
       data-testid={`meeting-${meeting.id}`}
+      data-highlighted={highlighted ? 'true' : 'false'}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">

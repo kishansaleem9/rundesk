@@ -3603,6 +3603,49 @@ original defect — fails four checks including `live call after navigating:
 null`, which is the server confirming the navigation ended the call. And a
 leave that never reaches the server fails the last check alone.
 
+
+## A meeting you could read and could not find (3 Sep)
+
+Meetings were the one kind of workspace content search could not see. You could
+open one on its own page; from anywhere else it did not exist — and the notes
+are frequently the only written record of a decision, which makes them the
+worst thing in the product to lose.
+
+Two halves, and the second is the one that is usually skipped.
+
+**Findable.** Title *and* notes: "what did we decide about pricing" is a
+question about the body, not the heading. Scoped by workspace and nothing more,
+because that is the actual rule — `meetings.service.ts` gates on workspace
+membership alone, and inventing a stricter filter here would hide rows from
+search that the meetings page happily shows.
+
+**Landable.** Meetings rendered only as rows in a list, so there was nothing to
+point at. A hit whose URL is just `/meetings` drops you among every meeting in
+the workspace and leaves you to find it yourself — search that *found*
+something rather than search that *took you to* it. The page now accepts
+`?meeting=<id>`, marks that row and scrolls it into view; marking without
+scrolling would leave a highlighted row below the fold, which reads exactly
+like a link that did nothing.
+
+**Two of the four breaks survived the first time, and both were the check's
+fault rather than the code's.**
+
+The fixture put the phrase in the title *and* the notes, so a build reduced to
+searching titles alone still found it. **A fixture that satisfies a check by two
+routes cannot tell you which one is working.** The phrase now appears in the
+notes only, and the title is deliberately ordinary.
+
+And the first attempt at "search cannot see meetings" removed `'meeting'` from
+`EXTRA_TYPES` — which turned out to disable nothing, because that constant only
+guards an early return for the case where *no* extra type is wanted. The break
+has to defeat the query itself. Both now fail with `0 hits, types []`, which is
+the search saying plainly that it cannot find the meeting.
+
+Still not done, and worth being precise about: meetings are absent from the
+**knowledge index** (`knowledge-embeddings.ts` still types its source as
+`'task' | 'doc' | 'comment' | 'attachment'`), so the assistant cannot ground an
+answer in them. Keyword search finds a meeting; asking Brain about one does not.
+
 ## What is still open, with the evidence (3 Sep)
 
 Written down so the next pass starts from measurements rather than from this
@@ -3613,10 +3656,9 @@ attached providers in the prompt and `:561-565` explicitly forbids acting on
 them. No credential is ever resolved. "Connect it to any system" is currently a
 label on an inert list.
 
-**Meetings are invisible to search and the Knowledge tab.**
-`knowledge-embeddings.ts:19` is still `'task' | 'doc' | 'comment' |
-'attachment'` and `search.service.ts` has no `meeting` entity, so a meeting you
-can read on its own page cannot be found from anywhere else.
+**Meetings are absent from the knowledge index.** Keyword search finds them now,
+but `knowledge-embeddings.ts:19` still types its source as `'task' | 'doc' |
+'comment' | 'attachment'`, so the assistant cannot ground an answer in a meeting.
 
 **Freshness chrome is dashboard-only** (`app.$workspaceId.dashboard.tsx:320-346`
 is the only reader), **there is no engagement or trending sort** (sort is still

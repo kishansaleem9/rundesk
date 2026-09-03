@@ -15,6 +15,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
+  CalendarClock,
   ArrowRight,
   Check,
   CheckCircle2,
@@ -66,6 +67,7 @@ const ENTITY_ICON: Record<string, React.ElementType> = {
   message: MessageSquare,
   comment: MessageSquare,
   user: Users,
+  meeting: CalendarClock,
 }
 const ENTITY_ORDER = [
   'task', 'doc', 'file', 'comment', 'channel', 'message', 'user',
@@ -73,6 +75,8 @@ const ENTITY_ORDER = [
   'folder', 'list', 'space',
   // §4 [04:20] — the linked Google Drive, reached through the ⋯ like the rest.
   'drive',
+  // §G14-15 — meeting notes, often the only written record of a decision.
+  'meeting',
 ] as const
 /**
  * §2 [02:01] — "yeh 3 DOTS dekh rahe hain? Main yahan se aur points pe click
@@ -97,6 +101,7 @@ const ENTITY_LABEL_KEY: Record<string, TranslationKey> = {
   list: 'palette.entityLists',
   space: 'palette.entitySpaces',
   drive: 'palette.entityDrive',
+  meeting: 'palette.entityMeetings',
 }
 const PRIORITY_LABEL_KEY: Record<string, TranslationKey> = {
   urgent: 'palette.priorityUrgent',

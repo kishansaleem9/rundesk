@@ -183,6 +183,63 @@ try {
     )
   }
 
+  /*
+   * ── §G14-15 — a meeting you can find, and land on ─────────────────────────
+   *
+   * Meetings were the one kind of workspace content search could not see: you
+   * could read one on its own page and find it from nowhere else, and the
+   * notes are often the only written record of a decision.
+   *
+   * The phrase lives in the NOTES, not the title. Searching a title would pass
+   * against an index that only ever looked at headings, which is the half that
+   * matters least — "what did we decide about pricing" is a question about the
+   * body.
+   */
+  console.log('\n▶ §G14-15 — a meeting is findable from search')
+  /*
+   * The phrase appears in the NOTES ONLY, and the title is deliberately
+   * ordinary.
+   *
+   * The first version put it in both, so a search that looked at titles alone
+   * still found it — and a break that reduced the query to titles passed
+   * cleanly. A fixture that satisfies the check by two routes cannot tell you
+   * which one is working.
+   */
+  const phrase = `zephyrine-${Date.now()}`
+  const findable = (await rootApi(`/workspaces/${WS}/meetings`, {
+    method: 'POST',
+    body: { title: 'Quarterly planning', notes: `We decided the ${phrase} tier ships in Q3.` },
+  })).data
+  chk(!!findable?.id, 'there is a meeting with a decision in its notes', 'could not create one')
+
+  const hits = (await rootApi(`/search/${WS}?q=${encodeURIComponent(phrase)}`)).data ?? []
+  const hit = hits.find((h) => h.entityType === 'meeting' && h.id === `meeting-${findable.id}`)
+  chk(!!hit, 'and searching what the notes say finds it',
+    `${hits.length} hits, types ${JSON.stringify([...new Set(hits.map((h) => h.entityType))])}`)
+
+  /*
+   * And the hit LANDS on it. A url pointing at the meetings page drops you
+   * among every meeting in the workspace and leaves you to find it — search
+   * that found something rather than search that took you to it.
+   */
+  chk(
+    !!hit?.url && hit.url.includes(`meeting=${findable.id}`),
+    'and the result points at that meeting, not just the meetings page',
+    `url was ${hit?.url}`,
+  )
+  if (hit?.url) {
+    await p.goto(`${B}${hit.url}`, { waitUntil: 'domcontentloaded' })
+    await p.waitForTimeout(3500)
+    const row = p.getByTestId(`meeting-${findable.id}`)
+    chk(
+      (await row.getAttribute('data-highlighted').catch(() => null)) === 'true',
+      'and following it marks the one you came for',
+      'the linked meeting is not distinguished from the rest of the list',
+    )
+  } else {
+    chk(false, 'and following it marks the one you came for', 'no url to follow')
+  }
+
 } catch (e) {
   bad(`threw: ${e.message}`)
   await p.screenshot({ path: '/tmp/a61-fail.png', fullPage: true }).catch(() => {})

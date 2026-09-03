@@ -25,4 +25,12 @@ export const ENTITY_TYPES: SearchEntityType[] = [
   'space',
   // §4 [04:20] — files from the workspace's linked Google Drive.
   'drive',
+  /*
+   * §G14-15 — meeting notes.
+   *
+   * A meeting you can read on its own page could not be found from anywhere
+   * else: the notes are often the only written record of a decision, and they
+   * were the one kind of workspace content search could not see.
+   */
+  'meeting',
 ]

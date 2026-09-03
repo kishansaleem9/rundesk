@@ -7,7 +7,7 @@ import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, taskAttachments, docs, lists, projects, spaces,
   folders, savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
   workspaceIntegrationConnections,
-  customFieldDefinitions, customFieldValues,
+  customFieldDefinitions, customFieldValues, meetings,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -27,7 +27,7 @@ import {
 // yahan pe appear ho jayega". The containers are things you look for by name
 // just as much as the tasks inside them, and they were not searchable at all.
 export type SearchEntityType =
-  | 'task' | 'doc' | 'file' | 'user' | 'comment' | 'channel' | 'message'
+  | 'task' | 'doc' | 'file' | 'user' | 'comment' | 'channel' | 'message' | 'meeting'
   | 'folder' | 'list' | 'space'
   // §4 [04:20] — "Agar hum Google Drive se search karenge to woh humari Google
   // Drive se bhi cheezein dhoond ke mila ke de sakta hai."
@@ -830,7 +830,7 @@ export class SearchService implements OnModuleInit {
     types?: string[],
   ) {
     const wants = (t: string) => !types || types.includes(t)
-    const EXTRA_TYPES = ['user', 'comment', 'channel', 'message', 'folder', 'list', 'space']
+    const EXTRA_TYPES = ['user', 'comment', 'channel', 'message', 'folder', 'list', 'space', 'meeting']
     if (!EXTRA_TYPES.some(wants)) return []
     // Chat search must respect channel access (Plan §6): a user may only see
     // hits from public channels or channels they belong to — never from private
@@ -845,7 +845,7 @@ export class SearchService implements OnModuleInit {
     const accessibleChannel =
       memberChannelIds.length > 0 ? or(publicChannel, inArray(chatChannels.id, memberChannelIds)) : publicChannel
 
-    const [userHits, commentHits, channelHits, messageHits, folderHits, listHits, spaceHits] =
+    const [userHits, commentHits, channelHits, messageHits, folderHits, listHits, spaceHits, meetingHits] =
       await Promise.all([
       this.db
         .select({ id: users.id, displayName: users.displayName, email: users.email })
@@ -921,6 +921,32 @@ export class SearchService implements OnModuleInit {
             .where(and(eq(spaces.workspaceId, workspaceId), ilike(spaces.name, like)))
             .limit(limit)
         : Promise.resolve([]),
+      /*
+       * §G14-15 — meeting notes.
+       *
+       * A meeting you could read on its own page could not be found from
+       * anywhere else, and the notes are often the only written record of a
+       * decision. Title AND notes, because "what did we decide about pricing"
+       * is a question about the body, not the heading.
+       *
+       * Scoped by workspace and nothing more, which is the whole rule: meetings
+       * carry no per-item privacy (`meetings.service.ts` gates on workspace
+       * membership alone), and inventing a stricter filter here would hide rows
+       * from search that the meetings page shows.
+       */
+      wants('meeting')
+        ? this.db
+            .select({ id: meetings.id, title: meetings.title, notes: meetings.notes })
+            .from(meetings)
+            .where(
+              and(
+                eq(meetings.workspaceId, workspaceId),
+                or(ilike(meetings.title, like), ilike(meetings.notes, like)),
+              ),
+            )
+            .orderBy(desc(meetings.createdAt))
+            .limit(limit)
+        : Promise.resolve([]),
     ])
     return [
       ...(wants('user') ? userHits : []).map((u) => ({
@@ -952,6 +978,14 @@ export class SearchService implements OnModuleInit {
       ...spaceHits.map((sp) => ({
         id: `space-${sp.id}`, entityType: 'space', title: sp.name, content: '',
         url: `/app/${workspaceId}/${sp.id}`,
+      })),
+      // Deep-linked, not just "the meetings page": a hit that lands you among
+      // two hundred rows and leaves you to find it is search that found
+      // something rather than search that took you to it.
+      ...meetingHits.map((m) => ({
+        id: `meeting-${m.id}`, entityType: 'meeting', title: m.title,
+        content: (m.notes ?? '').slice(0, 200),
+        url: `/app/${workspaceId}/meetings?meeting=${m.id}`,
       })),
     ]
   }
