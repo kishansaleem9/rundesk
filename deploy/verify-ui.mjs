@@ -28,7 +28,7 @@
  * RUNDESK_PASSWORD, API_PORT, CHROME, PLAYWRIGHT_DIR, NO_HOST_MAP=1 to resolve
  * the hostname normally instead of pinning it to loopback.
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve as resolvePath } from 'node:path'
 
@@ -71,7 +71,7 @@ const SHOT = process.env.SHOT_DIR ?? '/tmp'
  * can see" while playwright sat in node_modules. Reading as an environment
  * problem rather than a resolution bug is what let it stand.
  */
-const { resolveChromium, PW_DIRS } = await import('../test/e2e/lib/playwright.mjs')
+const { resolveChromium, PW_DIRS, CHROME } = await import('../test/e2e/lib/playwright.mjs')
 const chromium = await resolveChromium({ exitIfMissing: false })
 
 if (!chromium) {
@@ -118,6 +118,18 @@ process.on('unhandledRejection', (err) => {
 })
 
 const launchOpts = { args: ['--no-sandbox', '--disable-dev-shm-usage'] }
+/*
+ * The same browser the suites use, not just one named in the environment.
+ *
+ * This honoured `CHROME` and nothing else, so on a machine whose Playwright
+ * install has no default headless shell it refused to start — which is the
+ * ordinary state of this workspace, and it is why the two checks below were
+ * first edited and then run for the first time on the production server rather
+ * than here. `test/e2e/lib/playwright.mjs` already resolves a working binary
+ * for every suite; deferring to it costs nothing on the VPS, where the default
+ * is present and this falls through to it.
+ */
+if (existsSync(CHROME)) launchOpts.executablePath = CHROME
 if (process.env.CHROME) launchOpts.executablePath = process.env.CHROME
 // Pin the site's hostname to loopback. This is what lets the request carry the
 // Host header nginx keys its vhost on while still never leaving the machine —

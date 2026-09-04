@@ -515,39 +515,78 @@ try {
   const n = await pickers.count()
   check(n > 1, `a reports-to picker on each member row (${n})`, `only ${n} picker(s)`)
   if (n > 1) {
-    // Address rows by whose they are, not by position. The list re-renders
-    // after each save and the rows come back in a different order, so nth(1)
-    // was landing on the same person twice — the cycle was never attempted and
-    // the test blamed the product for a request it never sent.
-    const names = await page.locator('select[title="Reports to"]')
-      .evaluateAll((sels) => sels.map((el) => /Who (.+) reports to/.exec(el.getAttribute('aria-label') ?? '')?.[1] ?? ''))
-    const pickerFor = (name) => page.getByLabel(`Who ${name} reports to`)
-    const [personA, personB] = names
+    /*
+     * Address rows by whose they are, not by position — and identify them by
+     * EMAIL rather than by display name.
+     *
+     * Position was the first bug: the list re-renders after each save and the
+     * rows come back in a different order, so nth(1) landed on the same person
+     * twice, the cycle was never attempted, and the test blamed the product for
+     * a request it never sent.
+     *
+     * The name was the second. Display names are not unique — nothing stops two
+     * colleagues being called the same thing, and a workspace that has accrued
+     * several throwaway members from earlier runs has ten. `getByLabel('Who X
+     * reports to')` then matches ten elements and Playwright's strict mode
+     * throws, which ends the whole section: this run reported 82 checks where a
+     * clean one reports 107, and the failure named a picker rather than the
+     * duplicate names that actually caused it.
+     *
+     * Emails are unique, so the row filter is exact. And because the OPTION
+     * labels are display names too, the pair driven through the cycle has to be
+     * two people whose names are unambiguous — otherwise `selectOption({label})`
+     * picks whichever matched first, which may not be the person addressed.
+     */
+    const rows = await page.locator('select[title="Reports to"]').evaluateAll((sels) =>
+      sels.map((el) => ({
+        name: /Who (.+) reports to/.exec(el.getAttribute('aria-label') ?? '')?.[1] ?? '',
+        email: /[\w.+-]+@[\w.-]+\.\w+/.exec(el.closest('li')?.textContent ?? '')?.[0] ?? '',
+      })),
+    )
+    const pickerFor = (row) =>
+      page.getByRole('listitem').filter({ hasText: row.email }).locator('select[title="Reports to"]')
+
+    const seen = new Map()
+    for (const r of rows) seen.set(r.name, (seen.get(r.name) ?? 0) + 1)
+    const distinct = rows.filter((r) => r.name && r.email && seen.get(r.name) === 1)
 
     // Start from nobody-reports-to-anybody: selectOption on a value that is
     // already selected fires no change event, and so no request at all.
-    for (const who of names) {
+    for (const who of rows) {
+      if (!who.email) continue
       await pickerFor(who).selectOption({ index: 0 }).catch(() => {})
       await page.waitForTimeout(900)
     }
-    await pickerFor(personA).selectOption({ label: personB })
-    await page.waitForTimeout(2000)
-    check(await page.getByText('Reporting structure').first().isVisible().catch(() => false),
-      'the reporting tree appears once someone has a manager', 'the tree did not appear')
-    await pickerFor(personB).selectOption({ label: personA })
-    // The refusal arrives as a toast, which is gone a few seconds later —
-    // sampling the page once races it.
-    let cycleMsg = ''
-    for (let i = 0; i < 12; i++) {
-      const body = await page.locator('body').innerText()
-      const hit = body.match(/[^.\n]*\b(loop|themselves|cycle)\b[^.\n]*/i)
-      if (hit) { cycleMsg = hit[0].trim(); break }
-      await page.waitForTimeout(500)
+
+    if (distinct.length < 2) {
+      // Said out loud and skipped, rather than driven with an ambiguous pair.
+      // The rest of the sweep still runs: one unusable fixture must not cost
+      // the twenty-five sections that follow.
+      check(false, 'two members with unambiguous names to drive the cycle with',
+        `this workspace has ${rows.length} member(s) but fewer than two distinct display names, ` +
+          'so a reporting cycle cannot be addressed unambiguously')
+    } else {
+      const [personA, personB] = distinct
+
+      await pickerFor(personA).selectOption({ label: personB.name })
+      await page.waitForTimeout(2000)
+      check(await page.getByText('Reporting structure').first().isVisible().catch(() => false),
+        'the reporting tree appears once someone has a manager', 'the tree did not appear')
+      await pickerFor(personB).selectOption({ label: personA.name })
+      // The refusal arrives as a toast, which is gone a few seconds later —
+      // sampling the page once races it.
+      let cycleMsg = ''
+      for (let i = 0; i < 12; i++) {
+        const body = await page.locator('body').innerText()
+        const hit = body.match(/[^.\n]*\b(loop|themselves|cycle)\b[^.\n]*/i)
+        if (hit) { cycleMsg = hit[0].trim(); break }
+        await page.waitForTimeout(500)
+      }
+      check(Boolean(cycleMsg), `a reporting cycle is refused with a message: "${cycleMsg.slice(0, 60)}"`,
+        'the cycle produced no message')
+      await pickerFor(personA).selectOption({ label: 'No manager' }).catch(() => {})
+      await page.waitForTimeout(1400)
     }
-    check(Boolean(cycleMsg), `a reporting cycle is refused with a message: "${cycleMsg.slice(0, 60)}"`,
-      'the cycle produced no message')
-    await pickers.nth(0).selectOption({ label: 'No manager' })
-    await page.waitForTimeout(1400)
   }
 
   say('13. Task types + work schedule, end to end from the UI')
