@@ -3,6 +3,7 @@ import { and, eq, desc, sql } from 'drizzle-orm'
 import { forms, formFields, formSubmissions, tasks, lists, projects, spaces, users, workspaceMembers, taskAssignees } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { R2Service } from '../../common/storage/r2.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 
@@ -202,6 +203,18 @@ export class FormsService {
         description: taskDescription || null,
         priority: mappedPriority ?? 'normal',
         dueDate: mappedDueDate ?? null,
+        /*
+         * §V2-04 — say on the task that a form made it.
+         *
+         * `[03:26]` names FORM RESPONSE as one of the task types. Rundesk has
+         * created tasks from submissions since forms shipped, and the only
+         * trace was the title reading "Form submission: …" — invisible to the
+         * type filter and to anyone scanning a list.
+         *
+         * Null when the workspace has deleted the type: a submission must never
+         * fail over a missing label.
+         */
+        taskTypeId: await taskTypeIdForOrigin(this.db, targetList.workspaceId, 'form'),
       })
       .returning()
     if (mappedAssigneeEmail) {

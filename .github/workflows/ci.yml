@@ -361,6 +361,16 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-04 — a form submission becomes a task that says a form made it.
+      # The meeting half of the same change cannot run here (it needs a model),
+      # so it is covered by a unit test with the AI stubbed instead.
+      - name: Task provenance
+        if: '!cancelled()'
+        run: node test/e2e/task-provenance.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.

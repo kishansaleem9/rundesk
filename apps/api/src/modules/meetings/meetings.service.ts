@@ -5,6 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PUBLIC_USER_COLUMNS } from '../../common/permissions/public-user'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { AiService } from '../ai/ai.service'
 import { R2Service } from '../../common/storage/r2.service'
 import { TasksService } from '../tasks/tasks.service'
@@ -550,6 +551,17 @@ export class MeetingsService {
     // fallback, or an item the AI described loses the link to the call and
     // "which meeting was this from?" stops having an answer.
     const origin = `From meeting: ${meeting.title}`
+    /*
+     * §V2-04 — and say it on the task itself, not only in its description.
+     *
+     * `[03:26]` names MEETING NOTE as a task type: the type is where a task
+     * came from. The line appended above is prose a person has to read; this is
+     * what the type filter and the list badge can see.
+     *
+     * Resolved once rather than per item — the type cannot change mid-loop, and
+     * a meeting can yield a dozen action items.
+     */
+    const meetingTypeId = await taskTypeIdForOrigin(this.db, workspaceId, 'meeting')
     const created: Array<{ id: string; title: string }> = []
     for (const item of items) {
       const title = (item?.title ?? '').trim()
@@ -560,6 +572,7 @@ export class MeetingsService {
         title,
         description: described ? `${described}\n\n${origin}` : origin,
         createdById: userId,
+        taskTypeId: meetingTypeId,
       })
       // createTask can return null when the list rejects the write; skip
       // rather than reporting a task that was never made.
