@@ -44,6 +44,7 @@ import {
   Globe, Share2,
   Bell,
   FolderInput,
+  MoveVertical,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
@@ -55,7 +56,7 @@ import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
-import { CoverImagePicker } from './cover-image-picker'
+import { CoverImagePicker, type CoverChoice } from './cover-image-picker'
 import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { MoveDialog } from './move-dialog'
@@ -237,6 +238,9 @@ type TaskDetail = {
   title: string
   description: string | null
   coverColor?: string | null
+  /* §V2-09 — the API resolves a stored key or a linked URL into one field. */
+  coverUrl?: string | null
+  coverOffsetY?: number | null
   isMilestone?: boolean
   taskTypeId?: string | null
   // Resolved server-side so the header can render the label without a second fetch.
@@ -476,6 +480,27 @@ export function TaskDetailSheet({
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [coverPickerOpen, setCoverPickerOpen] = useState(false)
+  /*
+   * §V2-09 Reposition — frame `03:10` puts it beside "Change cover" on the
+   * banner. Only an IMAGE can be repositioned; a colour has nothing to move.
+   * While it is on, dragging up and down changes which band of the picture the
+   * banner shows, and letting go saves it.
+   */
+  const [repositioning, setRepositioning] = useState(false)
+  /*
+   * The offset while a drag is in flight. Held locally so dragging does not
+   * write once per pixel — the band follows the pointer immediately and the
+   * value is saved when the drag ends.
+   */
+  const [offsetPreview, setOffsetPreview] = useState<number | null>(null)
+  const draggingCover = useRef(false)
+  const updateCoverOffset = useMutation({
+    mutationFn: (coverOffsetY: number) =>
+      api(`/tasks/${taskId}`, { method: 'PATCH', body: { coverOffsetY } }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
+    },
+  })
   const qc = useQueryClient()
   const navigate = useNavigate()
   const fallbackWorkspaceId = useMemo(() => {
@@ -523,11 +548,24 @@ export function TaskDetailSheet({
     },
   })
 
+  /*
+   * §V2-09 — a cover is a colour or an image, and the two live in different
+   * columns. Every choice writes ALL THREE fields so switching kinds actually
+   * switches: picking a colour must clear the image, or the banner would keep
+   * drawing the old picture over the new colour.
+   */
   const updateCover = useMutation({
-    mutationFn: (coverColor: string | null) =>
+    mutationFn: (choice: CoverChoice) =>
       api(`/tasks/${taskId}`, {
         method: 'PATCH',
-        body: { coverColor },
+        body:
+          choice.kind === 'color'
+            ? { coverColor: choice.value, coverStorageKey: null, coverImageUrl: null }
+            : choice.kind === 'stored'
+              ? { coverColor: null, coverStorageKey: choice.storageKey, coverImageUrl: null, coverOffsetY: 50 }
+              : choice.kind === 'link'
+                ? { coverColor: null, coverStorageKey: null, coverImageUrl: choice.url, coverOffsetY: 50 }
+                : { coverColor: null, coverStorageKey: null, coverImageUrl: null },
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
@@ -635,16 +673,66 @@ export function TaskDetailSheet({
           <TaskSheetSkeleton />
         ) : detailQuery.data ? (
           <>
-            {/* Cover band — renders the saved coverColor when set, else the brand gradient. */}
+            {/*
+              §V2-09 — the cover band: an image if there is one, else a colour,
+              else the brand gradient. `coverUrl` is what the API resolved from
+              either an uploaded key or a link, so this does not care which.
+
+              An image is drawn as a background rather than an <img> so
+              `object-position` and `cover` can crop it to the band, which is
+              what Reposition adjusts.
+            */}
             <div
+              data-testid="task-cover"
+              data-cover-kind={detailQuery.data.coverUrl ? 'image' : detailQuery.data.coverColor ? 'color' : 'none'}
+              data-cover-offset={offsetPreview ?? detailQuery.data.coverOffsetY ?? 50}
+              /*
+               * Reposition, as a drag on the band itself. Arrow keys do the
+               * same thing a nudge at a time, because a drag is not reachable
+               * from a keyboard and the band is the only place this lives.
+               */
+              tabIndex={repositioning ? 0 : -1}
+              onPointerDown={(e) => {
+                if (!repositioning) return
+                draggingCover.current = true
+                ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+              }}
+              onPointerMove={(e) => {
+                if (!repositioning || !draggingCover.current) return
+                const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                const pct = ((e.clientY - box.top) / box.height) * 100
+                setOffsetPreview(Math.max(0, Math.min(100, Math.round(pct))))
+              }}
+              onPointerUp={() => {
+                if (!draggingCover.current) return
+                draggingCover.current = false
+                if (offsetPreview != null) updateCoverOffset.mutate(offsetPreview)
+              }}
+              onKeyDown={(e) => {
+                if (!repositioning) return
+                const current = offsetPreview ?? detailQuery.data?.coverOffsetY ?? 50
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  const next = Math.max(0, Math.min(100, current + (e.key === 'ArrowUp' ? -5 : 5)))
+                  setOffsetPreview(next)
+                  updateCoverOffset.mutate(next)
+                }
+              }}
               className={cn(
                 '-mx-6 -mt-6 mb-4 h-24 relative overflow-hidden rounded-t-md group',
-                !detailQuery.data.coverColor && 'bg-brand-gradient',
+                !detailQuery.data.coverColor && !detailQuery.data.coverUrl && 'bg-brand-gradient',
+                repositioning && 'cursor-ns-resize select-none',
               )}
               style={
-                detailQuery.data.coverColor
-                  ? { background: detailQuery.data.coverColor }
-                  : undefined
+                detailQuery.data.coverUrl
+                  ? {
+                      backgroundImage: `url(${JSON.stringify(detailQuery.data.coverUrl)})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: `50% ${offsetPreview ?? detailQuery.data.coverOffsetY ?? 50}%`,
+                    }
+                  : detailQuery.data.coverColor
+                    ? { background: detailQuery.data.coverColor }
+                    : undefined
               }
             >
               <div className="absolute inset-0 bg-grid-dim opacity-40" aria-hidden />
@@ -673,23 +761,42 @@ export function TaskDetailSheet({
                 <Trash2 className="h-3.5 w-3.5" />
                 {t('taskDetail.deleteTask')}
               </Button>
+              {/* Reposition sits beside Change cover, and only for an image. */}
+              {detailQuery.data.coverUrl && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  data-testid="cover-reposition"
+                  onClick={() => {
+                    if (repositioning) updateCoverOffset.mutate(detailQuery.data?.coverOffsetY ?? 50)
+                    setRepositioning((v) => !v)
+                  }}
+                  className="absolute right-[8.5rem] top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
+                >
+                  <MoveVertical className="h-3.5 w-3.5" />
+                  {repositioning ? t('taskDetail.savePosition') : t('taskDetail.repositionCover')}
+                </Button>
+              )}
               <Button
                 type="button"
                 size="sm"
                 variant="secondary"
                 onClick={() => setCoverPickerOpen(true)}
                 disabled={updateCover.isPending}
+                data-testid="cover-change"
                 className="absolute right-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
                 <ImageIcon className="h-3.5 w-3.5" />
-                {t('taskDetail.editCover')}
+                {t('taskDetail.changeCover')}
               </Button>
             </div>
 
             <CoverImagePicker
               open={coverPickerOpen}
               onOpenChange={setCoverPickerOpen}
-              onPick={(cover) => updateCover.mutate(cover === '' ? null : cover)}
+              taskId={taskId}
+              onPick={(choice) => updateCover.mutate(choice)}
             />
 
             <SheetHeader className="pb-3">

@@ -371,6 +371,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-09 — the task cover. The load-bearing check is that a LINKED image
+      # comes back byte for byte: task attachments store a hyperlink in
+      # `storage_key` and read it back through R2, and this is the shape that
+      # does not repeat it.
+      - name: Task cover
+        if: '!cancelled()'
+        run: node test/e2e/task-cover.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.
