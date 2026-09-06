@@ -2209,6 +2209,22 @@ export class TasksService {
 
     return {
       ...row,
+      /*
+       * §V2-09 — one field the banner can actually render, resolved here so
+       * every caller does not have to know the difference.
+       *
+       * A stored image is a KEY and needs presigning; a linked one is already a
+       * URL and must be passed through untouched. Task attachments conflate the
+       * two — a hyperlink is written into `storage_key` and read back through
+       * `getObjectUrl`, which produces `${CDN}/https://…` — and this is the
+       * shape that avoids repeating it. Null when the cover is a colour, or
+       * when there is none.
+       */
+      coverUrl: row.coverStorageKey
+        ? this.r2.configured
+          ? await this.r2.getObjectUrl(row.coverStorageKey)
+          : null
+        : row.coverImageUrl ?? null,
       parent: parent ?? null,
       taskType: taskType ?? null,
       defaultBillable: await this.projectDefaultBillable(taskId),
@@ -2354,6 +2370,9 @@ export class TasksService {
       position: number
       timeEstimate: number | null
       coverColor: string | null
+      coverStorageKey: string | null
+      coverImageUrl: string | null
+      coverOffsetY: number
       isArchived: boolean
       isMilestone: boolean
       visibility: 'public' | 'private'
@@ -2361,6 +2380,24 @@ export class TasksService {
     }>,
   ) {
     await this.assertTaskWriteAccess(taskId, actorId)
+
+    /*
+     * §V2-09 — the cover fields are spread into the update unchecked, so they
+     * are checked here.
+     *
+     * `coverImageUrl` is the picker's Link tab: an image somewhere else on the
+     * web, stored as given and rendered as given. Anything that is not an
+     * http(s) URL would either render as a broken image or, worse, run — a
+     * `javascript:` cover is a stored XSS on every viewer of the task.
+     */
+    if (patch.coverImageUrl != null && !/^https?:\/\//i.test(patch.coverImageUrl)) {
+      throw new BadRequestException('A cover link must be an http(s) image URL')
+    }
+    // Reposition is a percentage for `object-position`; outside 0–100 it would
+    // silently push the image out of its own banner.
+    if (patch.coverOffsetY != null && (!Number.isFinite(patch.coverOffsetY) || patch.coverOffsetY < 0 || patch.coverOffsetY > 100)) {
+      throw new BadRequestException('Cover position must be between 0 and 100')
+    }
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
 

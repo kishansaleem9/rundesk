@@ -932,6 +932,13 @@
       "when": 1900000100029,
       "tag": "0132_task_type_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1900000101029,
+      "tag": "0133_task_cover_image",
+      "breakpoints": true
     }
   ]
 }

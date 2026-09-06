@@ -32,8 +32,38 @@ export const tasks = pgTable('tasks', {
   dueDate:       timestamp('due_date', { withTimezone: true }),
   completedAt:   timestamp('completed_at', { withTimezone: true }),
   timeEstimate:  integer('time_estimate'), // seconds
-  // Optional cover for the task detail header: a CSS color/gradient string.
+  /*
+   * §V2-09 — the banner across the top of the task detail.
+   *
+   * Frame `03:10` shows the picker: Gallery | Upload | Link | Search |
+   * Attachments, with Remove, and the banner then offering Reposition and
+   * Change cover. Two of those set a COLOUR and three set an IMAGE, so the two
+   * are stored separately rather than one field holding either — whichever was
+   * set last wins, and clearing one does not disturb the other.
+   *
+   * A CSS color/gradient string (the Gallery tab).
+   */
   coverColor:    text('cover_color'),
+  /*
+   * An image the workspace uploaded, or one already attached to the task. Held
+   * as a STORAGE KEY and presigned on read, never as a URL.
+   *
+   * Deliberately not one column shared with `coverImageUrl` below. Task
+   * attachments already made that mistake — a hyperlink attachment is written
+   * into `storage_key` and then read back through `r2.getObjectUrl`, which
+   * either prefixes the CDN host onto `https://…` or presigns a bucket key
+   * named after somebody's URL. Both are dead links. Keeping the two apart is
+   * what stops this repeating it.
+   */
+  coverStorageKey: text('cover_storage_key'),
+  /** An image somewhere else on the web — the picker's Link tab. Used as-is. */
+  coverImageUrl:   text('cover_image_url'),
+  /*
+   * Reposition: how far down the image to sit in the banner, 0–100, as a
+   * percentage for `object-position`. 50 is centred, which is what an image
+   * gets before anybody drags it.
+   */
+  coverOffsetY:    integer('cover_offset_y').notNull().default(50),
   // Milestone marker (Plan §5 timeline): a key deliverable, rendered as a
   // diamond on the timeline and badged in lists.
   isMilestone:   boolean('is_milestone').notNull().default(false),

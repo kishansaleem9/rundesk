@@ -153,7 +153,13 @@ export class TasksController {
       dueDate: string | null
       position: number
       timeEstimate: number | null
+      // §V2-09 — the cover is a colour OR an image, and an image is either one
+      // we hold (a storage key, presigned on read) or one on the web (a URL,
+      // used as given). Kept apart on purpose; see the schema.
       coverColor: string | null
+      coverStorageKey: string | null
+      coverImageUrl: string | null
+      coverOffsetY: number
       isArchived: boolean
       isMilestone: boolean
       visibility: 'public' | 'private'
