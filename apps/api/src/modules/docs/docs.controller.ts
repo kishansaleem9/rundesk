@@ -117,6 +117,18 @@ export class DocsController {
     return this.docs.getForUser(docId, user.id)
   }
 
+  /**
+   * §V2-10 — the other end of a task↔doc link.
+   *
+   * `[06:15]` "acha, is document ka yeh task hai". The task side has existed
+   * since relationships shipped; the doc side was never read, so linking from a
+   * task and then opening the doc showed no sign of it.
+   */
+  @Get('docs/:docId/tasks')
+  linkedTasks(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.listLinkedTasks(docId, user.id, user.role)
+  }
+
   @Get('docs/:docId/export')
   async exportDoc(
     @Param('docId') docId: string,

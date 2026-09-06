@@ -1181,6 +1181,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
       </div>
       )}
 
+      {activeDoc && <DocLinkedTasks docId={activeDoc.id} workspaceId={workspaceId} />}
+
       {commentsOpen && activeDoc && (
         <DocCommentsPane docId={activeDoc.id} workspaceId={workspaceId} />
       )}
@@ -2025,5 +2027,60 @@ function ShareDocButton({
         </Button>
       )}
     </>
+  )
+}
+
+/**
+ * §V2-10 — the tasks that point at this doc.
+ *
+ * `[06:15]` "acha, is document ka yeh task hai" — she reads the relationship
+ * from the DOCUMENT'S side. Rundesk stored `task_doc_links` and only ever read
+ * it by `taskId`, so a task knew its docs and a doc knew nothing: you could
+ * link them from the task, open the doc, and see no sign it had happened.
+ *
+ * Hidden entirely when there are none, rather than showing an empty heading on
+ * every doc that has no tasks — which is most of them.
+ */
+function DocLinkedTasks({ docId, workspaceId }: { docId: string; workspaceId: string }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const linked = useQuery({
+    queryKey: ['doc-linked-tasks', docId],
+    queryFn: () =>
+      api<Array<{ id: string; taskId: string; title: string; statusCategory: string }>>(
+        `/docs/${docId}/tasks`,
+      ),
+    enabled: Boolean(docId),
+  })
+  const rows = linked.data ?? []
+  if (rows.length === 0) return null
+
+  return (
+    <div className="border-t border-border/40 px-4 py-3" data-testid="doc-linked-tasks">
+      <div className="mb-2 text-xs font-medium text-muted-foreground">
+        {t('docs.linkedTasks')}
+      </div>
+      <ul className="space-y-1">
+        {rows.map((row) => (
+          <li key={row.id}>
+            <button
+              type="button"
+              data-testid="doc-linked-task"
+              onClick={() =>
+                navigate({ to: '/app/$workspaceId', params: { workspaceId }, search: { task: row.taskId } as never })
+              }
+              className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted/50"
+            >
+              <CheckSquare
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  row.statusCategory === 'closed' ? 'text-emerald-500' : 'text-muted-foreground'
+                }`}
+              />
+              <span className="truncate">{row.title}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

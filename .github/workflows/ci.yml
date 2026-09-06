@@ -382,6 +382,16 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-10 — a task<->doc link read from the DOC end, which nothing ever
+      # queried. The load-bearing check is the visibility one: a doc listing its
+      # tasks must not become a way to read the titles of private ones.
+      - name: Doc and task links
+        if: '!cancelled()'
+        run: node test/e2e/doc-task-links.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.

@@ -1,10 +1,11 @@
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common'
 import { eq, and, asc, isNull, desc, inArray, isNotNull, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { docs, docComments, docRevisions, docTemplates, users, objectShares, spaces, workspaces } from '@rundesk/db'
+import { docs, docComments, docRevisions, docTemplates, users, objectShares, spaces, workspaces, taskDocLinks, tasks } from '@rundesk/db'
 import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -188,6 +189,43 @@ export class DocsService {
 
   async getForUser(docId: string, userId: string) {
     return this.assertDocAccess(docId, userId)
+  }
+
+  /**
+   * §V2-10 — the tasks linked to this doc.
+   *
+   * `[06:15]` "acha, is document ka yeh task hai" — she describes reading the
+   * relationship FROM THE DOCUMENT. Rundesk has had `task_doc_links` since
+   * relationships shipped and read it in exactly one direction:
+   * `where(taskDocLinks.taskId)` in `tasks.service.listLinkedDocs`. A task knew
+   * its docs; a doc knew nothing. Half a relationship is not a relationship —
+   * linking from the task and then opening the doc showed no sign it had
+   * happened.
+   *
+   * Visibility is filtered rather than assumed. Doc access is workspace
+   * membership, but a linked task may be PRIVATE, and a doc that lists it would
+   * be a way to read titles somebody is not allowed to see. So the same filter
+   * the task lists use is applied here — a manager sees everything, everyone
+   * else sees public tasks plus their own.
+   */
+  async listLinkedTasks(docId: string, userId: string, globalRole?: string | null) {
+    const doc = await this.assertDocAccess(docId, userId)
+    const isManager = await resolveIsManager(this.db, doc.workspaceId, userId, globalRole)
+    const visible = taskVisibilityFilter(this.db, userId, isManager)
+    return this.db
+      .select({
+        id: taskDocLinks.id,
+        taskId: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        listId: tasks.listId,
+        linkedAt: taskDocLinks.createdAt,
+      })
+      .from(taskDocLinks)
+      .innerJoin(tasks, eq(tasks.id, taskDocLinks.taskId))
+      .where(visible ? and(eq(taskDocLinks.docId, docId), visible) : eq(taskDocLinks.docId, docId))
+      .orderBy(desc(taskDocLinks.createdAt))
   }
 
   async create(data: {
