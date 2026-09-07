@@ -55,6 +55,10 @@ type PlannerSettings = {
 }
 
 type PriorityRow = { id: string; taskId: string | null; title: string; doneAt: string | null }
+type MemberRow = { userId: string; displayName?: string | null; email: string }
+/** What `GET /workspaces/:id/people/:userId/calendar` returns, narrowed to
+ *  the half this page draws: real meetings with real start and end times. */
+type PersonCalendar = { meetings: Array<{ id: string; title: string; startsAt: string; endsAt: string }> }
 type TaskRow = { id: string; title: string; dueDate?: string | null }
 
 /** The gutter runs the working day and a margin either side of it. */
@@ -101,6 +105,14 @@ export function PlannerPage() {
 
   const [anchor, setAnchor] = useState(() => new Date())
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /*
+   * §V2-02 `[14:41]` — "yahan se main SEARCH kar sakti hoon [ke] mujhe kis
+   * person ke saath milna hai." Until now this was an input with nothing
+   * behind it: you could type into it and the page did not so much as read
+   * what you typed.
+   */
+  const [meetQuery, setMeetQuery] = useState('')
+  const [meetWith, setMeetWith] = useState<{ id: string; name: string } | null>(null)
 
   const { data: settings } = useQuery({
     queryKey: ['planner-settings', workspaceId],
@@ -135,6 +147,39 @@ export function PlannerPage() {
       ),
     enabled: !!workspaceId,
   })
+
+  /* The roster the search filters. Fetched once; the filtering is local,
+   * because a workspace's member list is small and a keystroke should not be
+   * a round trip. */
+  const { data: members = [] } = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () => api<MemberRow[]>(`/workspaces/${workspaceId}/members`),
+    enabled: !!workspaceId,
+  })
+
+  /*
+   * Their week, for the week ON SCREEN. Re-fetched when you page the calendar,
+   * because "when is Sara free" is a question about the days you are looking
+   * at, not about the days you happened to be looking at when you picked her.
+   */
+  const { data: theirWeek } = useQuery({
+    queryKey: ['planner-meet-with', workspaceId, meetWith?.id, rangeFrom.toISOString()],
+    queryFn: () =>
+      api<PersonCalendar>(
+        `/workspaces/${workspaceId}/people/${meetWith!.id}/calendar` +
+          `?from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}`,
+      ),
+    enabled: !!workspaceId && !!meetWith,
+  })
+  const theirBusy = theirWeek?.meetings ?? []
+
+  const meetMatches = useMemo(() => {
+    const needle = meetQuery.trim().toLowerCase()
+    if (!needle) return []
+    return members
+      .filter((m) => (m.displayName || m.email).toLowerCase().includes(needle))
+      .slice(0, 6)
+  }, [members, meetQuery])
 
   const { data: priorities = [] } = useQuery({
     queryKey: ['planner-priorities', workspaceId, currentUserId],
@@ -334,15 +379,64 @@ export function PlannerPage() {
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.meetWith')}
           </h2>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              placeholder={t('planner.searchPeople')}
-              aria-label={t('planner.searchPeople')}
-              data-testid="planner-meet-with"
-              className="h-8 w-full rounded-md border border-border/80 bg-card pl-7 pr-2 text-[12px]"
-            />
-          </div>
+          {meetWith ? (
+            /*
+             * Who you are comparing against, and a way out. Without the chip
+             * the busy blocks on the grid would have no explanation — a row of
+             * hatched rectangles nobody put there.
+             */
+            <div
+              className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1.5 text-[12px]"
+              data-testid="planner-meet-selected"
+            >
+              <span className="truncate">{meetWith.name}</span>
+              <button
+                type="button"
+                aria-label={t('planner.clearMeetWith')}
+                data-testid="planner-meet-clear"
+                onClick={() => { setMeetWith(null); setMeetQuery('') }}
+                className="rounded px-1 text-muted-foreground hover:text-foreground"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={meetQuery}
+                onChange={(e) => setMeetQuery(e.target.value)}
+                placeholder={t('planner.searchPeople')}
+                aria-label={t('planner.searchPeople')}
+                data-testid="planner-meet-with"
+                className="h-8 w-full rounded-md border border-border/80 bg-card pl-7 pr-2 text-[12px]"
+              />
+              {meetQuery.trim() !== '' && (
+                <div className="mt-1 space-y-0.5">
+                  {meetMatches.length === 0 ? (
+                    <p className="px-2 py-1 text-[11px] text-muted-foreground" data-testid="planner-meet-none">
+                      {t('planner.noPeople')}
+                    </p>
+                  ) : (
+                    meetMatches.map((m) => (
+                      <button
+                        key={m.userId}
+                        type="button"
+                        data-testid="planner-meet-result"
+                        onClick={() => {
+                          setMeetWith({ id: m.userId, name: m.displayName || m.email })
+                          setMeetQuery('')
+                        }}
+                        className="block w-full truncate rounded px-2 py-1 text-left text-[12px] hover:bg-muted/40"
+                      >
+                        {m.displayName || m.email}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </section>
         )}
 
@@ -565,6 +659,31 @@ export function PlannerPage() {
                         </div>
                       )
                     })}
+                  {/*
+                    §V2-02 `[14:41]` — the point of searching for a person is
+                    seeing when they are NOT free. Their meetings are drawn
+                    behind your own blocks, hatched and muted, so the column
+                    reads as "their time, not yours" at a glance. Read-only:
+                    this is somebody else's calendar.
+                  */}
+                  {theirBusy
+                    .filter((m) => sameDay(new Date(m.startsAt), d))
+                    .map((m) => {
+                      const s2 = new Date(m.startsAt)
+                      const e2 = new Date(m.endsAt)
+                      const top = (s2.getHours() + s2.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX
+                      const height = Math.max(14, ((e2.getTime() - s2.getTime()) / 3_600_000) * HOUR_PX)
+                      return (
+                        <div
+                          key={`busy-${m.id}`}
+                          data-testid="planner-busy-block"
+                          title={`${meetWith?.name}: ${m.title}`}
+                          className="pointer-events-none absolute inset-x-0 rounded-sm border border-dashed border-muted-foreground/40 bg-muted-foreground/10"
+                          style={{ top, height }}
+                        />
+                      )
+                    })}
+
                   {/* The red now-line, on today's column only. */}
                   {nowOffset !== null && col === nowColumn && (
                     <div

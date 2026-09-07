@@ -21,6 +21,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -28,7 +29,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 17
+const EXPECTED_CHECKS = 22
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -112,6 +113,17 @@ const ASSIGNED = [
   { id: BACKLOG_TASK, title: 'The unscheduled one' },
 ]
 
+/* §V2-02 `[14:41]` — the roster the Meet-with search filters, and one
+ * person's real busy time for the week on screen. */
+const MEMBERS = [
+  { userId: 'u-sara', displayName: 'Sara Ahmed', email: 'sara@rundesk.test' },
+  { userId: 'u-omar', displayName: 'Omar Iqbal', email: 'omar@rundesk.test' },
+]
+const THEIR_CALENDAR = {
+  tasks: [],
+  meetings: [{ id: 'm1', title: 'Standup', startsAt: at(14), endsAt: at(15) }],
+}
+
 const envelope = (data) => JSON.stringify({ data, error: null })
 const browser = await chromium.launch(LAUNCH)
 /** Every request the page made, so the drag is asserted on what it sent. */
@@ -133,6 +145,8 @@ try {
     if (url.includes('/planner/') && url.includes('/blocks')) return reply(BLOCKS)
     if (url.includes('/planner/') && url.includes('/settings')) return reply({})
     if (url.includes('/priorities')) return reply([])
+    if (url.includes('/calendar')) return reply(THEIR_CALENDAR)
+    if (url.includes('/members')) return reply(MEMBERS)
     if (url.includes('/member/')) return reply(ASSIGNED)
     return reply([])
   })
@@ -250,6 +264,46 @@ try {
     'rounded to the quarter hour, not to pointer precision',
     `it started at ${sent?.startsAt} — that is where the mouse was, not what was meant`,
   )
+
+  console.log('\n▶ Meet with searches real people `[14:41]`')
+  chk(
+    (await page.locator('[data-testid="planner-busy-block"]').count()) === 0,
+    'nobody else\'s time is on the grid to begin with',
+    'busy blocks were drawn before anyone was picked, so the next checks prove nothing',
+  )
+  await page.locator('[data-testid="planner-meet-with"]').fill('sar')
+  const matched = await waitUntil(async () => {
+    const names = await page.locator('[data-testid="planner-meet-result"]').allInnerTexts()
+    return names.some((n) => n.includes('Sara Ahmed')) && !names.some((n) => n.includes('Omar'))
+  }, { timeoutMs: 8000 })
+  chk(
+    matched,
+    'typing a name narrows the workspace to the people who match it',
+    `the search offered ${JSON.stringify(await page.locator('[data-testid="planner-meet-result"]').allInnerTexts())} — this input used to read nothing you typed`,
+  )
+
+  await page.locator('[data-testid="planner-meet-result"]').first().click()
+  const busyShown = await waitUntil(
+    async () => (await page.locator('[data-testid="planner-busy-block"]').count()) > 0,
+    { timeoutMs: 8000 },
+  )
+  chk(
+    busyShown,
+    'and picking them puts their busy time on the week you are looking at',
+    'no busy block appeared — searching a person that changes nothing is the facade this replaced',
+  )
+  chk(
+    (await page.locator('[data-testid="planner-meet-selected"]').innerText()).includes('Sara Ahmed'),
+    'with a chip saying whose calendar you are seeing',
+    'the hatched blocks had no explanation on screen',
+  )
+  await page.locator('[data-testid="planner-meet-clear"]').click()
+  const cleared = await waitUntil(
+    async () => (await page.locator('[data-testid="planner-busy-block"]').count()) === 0,
+    { timeoutMs: 8000 },
+  )
+  chk(cleared, 'and clearing them takes it away again',
+    'their time stayed on the grid after they were cleared')
 
   await ctx.close()
 } catch (e) {
