@@ -466,6 +466,15 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist
 
+      # §V2-02 — the Planner surface. A week grid is easy to draw and easy to
+      # draw wrongly: seven empty columns photograph exactly like somebody's
+      # week. So this checks the grid is showing blocks the API returned, that
+      # the now-line is on today's column and nowhere else, and that the
+      # Backlog holds what is NOT scheduled.
+      - name: Planner grid
+        if: '!cancelled()'
+        run: node test/e2e/planner-grid.mjs --dist apps/web/dist
+
       # §V2-07 `[11:35]` — the "Save view" chip. Drives the built app against a
       # stubbed API: absent on an untouched view, present the moment it is
       # modified, and gone once saved. The last of those three is the one that

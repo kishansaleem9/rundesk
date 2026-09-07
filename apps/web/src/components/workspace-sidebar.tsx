@@ -52,6 +52,7 @@ import {
   CircleCheck,
   CalendarClock,
   ListChecks,
+  CalendarDays,
 } from 'lucide-react'
 import {
   Button,
@@ -287,6 +288,9 @@ const DOCKABLE_TOOLS: Array<{
   { id: 'inbox', path: '/inbox', icon: Inbox, labelKey: 'nav.inbox' },
   { id: 'chat', path: '/chat', icon: MessageCircle, labelKey: 'nav.chat', flag: FLAGS.CHAT },
   { id: 'ai', path: '/ai', icon: Bot, labelKey: 'nav.ai', flag: FLAGS.AI },
+  // §V2-02 — the Planner sits at /calendar; see the route file for why the
+  // label and the address differ.
+  { id: 'planner', path: '/calendar', icon: CalendarDays, labelKey: 'nav.planner' },
   { id: 'docs', path: '/docs', icon: FileText, labelKey: 'nav.docs', flag: FLAGS.DOCS },
   { id: 'dashboards', path: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboards', flag: FLAGS.VIEWS_DASHBOARD },
   { id: 'goals', path: '/goals', icon: Target, labelKey: 'nav.goals' },

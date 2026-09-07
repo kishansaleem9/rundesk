@@ -64,6 +64,7 @@ import { Route as AppWorkspaceIdDocsRouteImport } from './routes/app.$workspaceI
 import { Route as AppWorkspaceIdDashboardRouteImport } from './routes/app.$workspaceId.dashboard'
 import { Route as AppWorkspaceIdClipsRouteImport } from './routes/app.$workspaceId.clips'
 import { Route as AppWorkspaceIdChatRouteImport } from './routes/app.$workspaceId.chat'
+import { Route as AppWorkspaceIdCalendarRouteImport } from './routes/app.$workspaceId.calendar'
 import { Route as AppWorkspaceIdAutomationsRouteImport } from './routes/app.$workspaceId.automations'
 import { Route as AppWorkspaceIdAiRouteImport } from './routes/app.$workspaceId.ai'
 import { Route as AppWorkspaceIdSpaceIdRouteImport } from './routes/app.$workspaceId.$spaceId'
@@ -420,6 +421,13 @@ const AppWorkspaceIdChatRoute = AppWorkspaceIdChatRouteImport.update({
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.chat.lazy').then((d) => d.Route),
 )
+const AppWorkspaceIdCalendarRoute = AppWorkspaceIdCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.calendar.lazy').then((d) => d.Route),
+)
 const AppWorkspaceIdAutomationsRoute =
   AppWorkspaceIdAutomationsRouteImport.update({
     id: '/automations',
@@ -570,6 +578,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
   '/app/$workspaceId/ai': typeof AppWorkspaceIdAiRoute
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
+  '/app/$workspaceId/calendar': typeof AppWorkspaceIdCalendarRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
   '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
@@ -639,6 +648,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
   '/app/$workspaceId/ai': typeof AppWorkspaceIdAiRoute
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
+  '/app/$workspaceId/calendar': typeof AppWorkspaceIdCalendarRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
   '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
@@ -705,6 +715,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/$spaceId': typeof AppWorkspaceIdSpaceIdRouteWithChildren
   '/app/$workspaceId/ai': typeof AppWorkspaceIdAiRoute
   '/app/$workspaceId/automations': typeof AppWorkspaceIdAutomationsRoute
+  '/app/$workspaceId/calendar': typeof AppWorkspaceIdCalendarRoute
   '/app/$workspaceId/chat': typeof AppWorkspaceIdChatRoute
   '/app/$workspaceId/clips': typeof AppWorkspaceIdClipsRoute
   '/app/$workspaceId/dashboard': typeof AppWorkspaceIdDashboardRoute
@@ -777,6 +788,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/$spaceId'
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/automations'
+    | '/app/$workspaceId/calendar'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
@@ -846,6 +858,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/$spaceId'
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/automations'
+    | '/app/$workspaceId/calendar'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
@@ -911,6 +924,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/$spaceId'
     | '/app/$workspaceId/ai'
     | '/app/$workspaceId/automations'
+    | '/app/$workspaceId/calendar'
     | '/app/$workspaceId/chat'
     | '/app/$workspaceId/clips'
     | '/app/$workspaceId/dashboard'
@@ -1349,6 +1363,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspaceIdChatRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
+    '/app/$workspaceId/calendar': {
+      id: '/app/$workspaceId/calendar'
+      path: '/calendar'
+      fullPath: '/app/$workspaceId/calendar'
+      preLoaderRoute: typeof AppWorkspaceIdCalendarRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
     '/app/$workspaceId/automations': {
       id: '/app/$workspaceId/automations'
       path: '/automations'
@@ -1557,6 +1578,7 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdSpaceIdRoute: typeof AppWorkspaceIdSpaceIdRouteWithChildren
   AppWorkspaceIdAiRoute: typeof AppWorkspaceIdAiRoute
   AppWorkspaceIdAutomationsRoute: typeof AppWorkspaceIdAutomationsRoute
+  AppWorkspaceIdCalendarRoute: typeof AppWorkspaceIdCalendarRoute
   AppWorkspaceIdChatRoute: typeof AppWorkspaceIdChatRoute
   AppWorkspaceIdClipsRoute: typeof AppWorkspaceIdClipsRoute
   AppWorkspaceIdDashboardRoute: typeof AppWorkspaceIdDashboardRoute
@@ -1586,6 +1608,7 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdSpaceIdRoute: AppWorkspaceIdSpaceIdRouteWithChildren,
   AppWorkspaceIdAiRoute: AppWorkspaceIdAiRoute,
   AppWorkspaceIdAutomationsRoute: AppWorkspaceIdAutomationsRoute,
+  AppWorkspaceIdCalendarRoute: AppWorkspaceIdCalendarRoute,
   AppWorkspaceIdChatRoute: AppWorkspaceIdChatRoute,
   AppWorkspaceIdClipsRoute: AppWorkspaceIdClipsRoute,
   AppWorkspaceIdDashboardRoute: AppWorkspaceIdDashboardRoute,
