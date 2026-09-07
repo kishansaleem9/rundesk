@@ -28,7 +28,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 17
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -94,7 +94,14 @@ const BACKLOG_TASK = 'task-backlog'
 
 const BLOCKS = [
   {
-    id: 'b1', taskId: SCHEDULED_TASK, label: 'Work on the scheduled one',
+    /*
+     * The label the API returns is the TASK'S TITLE, with no prefix — the
+     * prefix is applied at render. The first version of this fixture said
+     * "Work on the scheduled one" here, which made the prefix check vacuous:
+     * deleting the prefix from the component still passed, because the
+     * fixture had already written it.
+     */
+    id: 'b1', taskId: SCHEDULED_TASK, label: 'The scheduled one',
     startsAt: at(10), endsAt: at(11), isAllDay: false,
     taskStatus: 'todo', taskPriority: 'normal',
   },
@@ -107,6 +114,8 @@ const ASSIGNED = [
 
 const envelope = (data) => JSON.stringify({ data, error: null })
 const browser = await chromium.launch(LAUNCH)
+/** Every request the page made, so the drag is asserted on what it sent. */
+const calls = []
 
 try {
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, serviceWorkers: 'block' })
@@ -115,8 +124,11 @@ try {
     ['rundesk.auth', JSON.stringify(SESSION)],
   )
   await ctx.route('**/api/**', (route) => {
-    const url = route.request().url()
+    const req = route.request()
+    const url = req.url()
+    calls.push({ method: req.method(), url, body: req.postData() ?? '' })
     const reply = (data) => route.fulfill({ status: 200, contentType: 'application/json', body: envelope(data) })
+    if (req.method() === 'POST' && url.includes('/blocks')) return reply({ id: 'new-block' })
     if (url.includes('/users/me')) return reply(USER)
     if (url.includes('/planner/') && url.includes('/blocks')) return reply(BLOCKS)
     if (url.includes('/planner/') && url.includes('/settings')) return reply({})
@@ -148,7 +160,7 @@ try {
   console.log('\n▶ and it is drawing what the API returned, not a picture of a week')
   const blockTexts = await page.locator('[data-testid="planner-block"]').allInnerTexts()
   chk(
-    blockTexts.some((b) => b.includes('Work on the scheduled one')),
+    blockTexts.some((b) => b.includes('The scheduled one')),
     'a timed block from the API is on the grid',
     `the grid showed ${JSON.stringify(blockTexts)} — seven empty columns look identical to a real week`,
   )
@@ -180,6 +192,63 @@ try {
     !backlog.some((b) => b.includes('The scheduled one')),
     'and a task already on the grid is not offered again',
     `the backlog still listed a task that has a block: ${JSON.stringify(backlog)} — dragging it would double-book it`,
+  )
+
+  console.log('\n▶ the block is titled with the prefix `[frame 14:45]`')
+  chk(
+    blockTexts.some((b) => b === 'Work on The scheduled one'),
+    'a task-backed block reads "Work on <task>"',
+    `the blocks read ${JSON.stringify(blockTexts)} — the frame's block is titled "Work on dbgdh"`,
+  )
+  chk(
+    blockTexts.some((b) => b === 'An all-day thing'),
+    'while a block that is not about a task keeps its own words',
+    `a typed block was prefixed too: ${JSON.stringify(blockTexts)}`,
+  )
+
+  console.log('\n▶ dragging a backlog task onto the grid makes a block `[14:52]`')
+  const item = page.locator('[data-testid="planner-backlog-item"]').first()
+  const column = page.locator('[data-testid="planner-day-column"]').first()
+  const from = await item.boundingBox()
+  const to = await column.boundingBox()
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  /*
+   * 127px, not 120. At HOUR_PX 48 a drop 120px down is exactly two and a half
+   * hours in, which is already on a quarter — so the rounding check passed
+   * with the rounding deleted. 127px lands at :38 unrounded and :45 rounded,
+   * which is a question the two answer differently.
+   */
+  await page.mouse.move(to.x + to.width / 2, to.y + 127, { steps: 8 })
+  chk(
+    (await page.locator('[data-testid="planner-drag-ghost"]').count()) === 1,
+    'the drag shows what is being dragged',
+    'nothing followed the pointer — a drag with no feedback is one people do not believe is happening',
+  )
+  await page.mouse.up()
+  await page.waitForTimeout(900)
+
+  const post = calls.filter((c) => c.method === 'POST' && c.url.includes('/blocks')).at(-1)
+  let sent = null
+  try { sent = JSON.parse(post?.body ?? '{}') } catch { /* reported below */ }
+  chk(
+    !!post && sent?.taskId === BACKLOG_TASK,
+    'dropping it posts a block for that task',
+    `the page sent ${JSON.stringify(sent)} — the grid would be a picture you can drag onto`,
+  )
+  chk(
+    typeof sent?.startsAt === 'string' && !Number.isNaN(Date.parse(sent.startsAt)),
+    'with a start time worked out from where it landed',
+    `startsAt was ${JSON.stringify(sent?.startsAt)}`,
+  )
+  /*
+   * Quarter-hour rounding. A calendar that starts a block at 10:07 is
+   * recording where a pointer happened to be, not what anybody meant.
+   */
+  chk(
+    sent?.startsAt ? new Date(sent.startsAt).getMinutes() % 15 === 0 : false,
+    'rounded to the quarter hour, not to pointer precision',
+    `it started at ${sent?.startsAt} — that is where the mouse was, not what was meant`,
   )
 
   await ctx.close()

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
-import { Button, cn } from '@rundesk/ui'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Button, cn, toast } from '@rundesk/ui'
 import { ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 
@@ -145,6 +145,82 @@ export function PlannerPage() {
     [assigned, scheduledTaskIds],
   )
 
+  const qc = useQueryClient()
+
+  /*
+   * §V2-02 frame `14:45` — dragging task `dbgdh` on makes a block called
+   * "Work on dbgdh". The prefix is applied at RENDER, not stored: the label
+   * already resolves from the task server-side, and baking "Work on" into the
+   * row would freeze both the prefix and the task's name at the moment of the
+   * drag. Changing the prefix in settings then re-titles every block, which is
+   * what a setting should do.
+   */
+  const prefix = settings?.blockPrefix ?? t('planner.workOn')
+  const blockLabel = (b: Block) => (b.taskId && b.label ? `${prefix} ${b.label}` : b.label ?? '')
+
+  /** Which task is currently under the pointer, mid-drag. */
+  const [dragging, setDragging] = useState<{ taskId: string; title: string } | null>(null)
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null)
+
+  const createBlock = useMutation({
+    mutationFn: (body: { taskId: string; startsAt: string }) =>
+      api(`/planner/${workspaceId}/blocks`, { method: 'POST', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-blocks', workspaceId] }),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('planner.blockFailed')),
+  })
+
+  /*
+   * A drag that ends anywhere but a day column has to end. Without this the
+   * ghost follows the pointer forever and the next click drops a block
+   * somewhere nobody meant.
+   */
+  useEffect(() => {
+    if (!dragging) return
+    const move = (e: PointerEvent) => setGhost({ x: e.clientX, y: e.clientY })
+    const cancel = () => { setDragging(null); setGhost(null) }
+    document.addEventListener('pointermove', move)
+    document.addEventListener('pointerup', cancel)
+    return () => {
+      document.removeEventListener('pointermove', move)
+      document.removeEventListener('pointerup', cancel)
+    }
+  }, [dragging])
+
+  /**
+   * Where a drop landed, in time. Rounded to the quarter hour, because a
+   * calendar that starts a block at 10:07 is recording pointer precision
+   * rather than intent.
+   */
+  const dropTime = (day: Date, offsetY: number) => {
+    const hoursIn = offsetY / HOUR_PX + FIRST_HOUR
+    const quarter = Math.round(hoursIn * 4) / 4
+    const clamped = Math.min(Math.max(quarter, FIRST_HOUR), LAST_HOUR)
+    const out = new Date(day)
+    out.setHours(Math.floor(clamped), Math.round((clamped % 1) * 60), 0, 0)
+    return out
+  }
+
+  const onDropInColumn = (day: Date, e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const startsAt = dropTime(day, e.clientY - rect.top)
+    createBlock.mutate({ taskId: dragging.taskId, startsAt: startsAt.toISOString() })
+    setDragging(null)
+    setGhost(null)
+  }
+
+  /*
+   * `[16:09]` "is task ka itna time bach gaya" — the tab header of frame
+   * `14:45` reads "Work on dbgdh · 2h 55m left". The block being worked on
+   * RIGHT NOW, and how much of it is left.
+   */
+  const current = blocks.find(
+    (b) => !b.isAllDay && new Date(b.startsAt) <= now && new Date(b.endsAt) > now,
+  )
+  const minutesLeft = current
+    ? Math.max(0, Math.round((new Date(current.endsAt).getTime() - now.getTime()) / 60_000))
+    : null
+
   const monthLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(weekStart)
   const dayName = (d: Date) => new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(d)
 
@@ -164,6 +240,17 @@ export function PlannerPage() {
 
   return (
     <div className="flex h-full min-h-0" data-testid="planner-page">
+      {/* What is being dragged, under the pointer. A drag with no feedback is
+          a drag people do not believe is happening. */}
+      {dragging && ghost && (
+        <div
+          data-testid="planner-drag-ghost"
+          className="pointer-events-none fixed z-50 rounded border border-accent/50 bg-accent/20 px-2 py-1 text-[11px] text-accent shadow"
+          style={{ left: ghost.x + 12, top: ghost.y + 12 }}
+        >
+          {prefix} {dragging.title}
+        </div>
+      )}
       {/* ── the rail, frame 13:08 ─────────────────────────────────────── */}
       <aside className="w-64 shrink-0 border-r border-border/60 overflow-y-auto p-3 space-y-4">
         <h1 className="text-[13px] font-semibold">{t('planner.title')}</h1>
@@ -216,7 +303,16 @@ export function PlannerPage() {
                   key={task.id}
                   data-testid="planner-backlog-item"
                   data-task-id={task.id}
-                  className="truncate rounded px-2 py-1 text-[12px] hover:bg-muted/40"
+                  // Pointer events rather than HTML5 drag-and-drop: the drop
+                  // target needs the pointer's Y to work out what o'clock the
+                  // person meant, and a dragover event does not carry it as
+                  // reliably across browsers.
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    setDragging({ taskId: task.id, title: task.title })
+                    setGhost({ x: e.clientX, y: e.clientY })
+                  }}
+                  className="cursor-grab truncate rounded px-2 py-1 text-[12px] hover:bg-muted/40 active:cursor-grabbing"
                 >
                   {task.title}
                 </li>
@@ -257,6 +353,22 @@ export function PlannerPage() {
           >
             {t('planner.today')}
           </Button>
+          {/*
+            `[16:09]` "is task ka itna time bach gaya" — frame 14:45's header
+            reads "Work on dbgdh · 2h 55m left". Only while something is
+            actually running; a countdown with nothing to count down is noise.
+          */}
+          {current && minutesLeft !== null && (
+            <span className="ml-3 truncate text-[12px] text-muted-foreground" data-testid="planner-time-left">
+              {blockLabel(current)} ·{' '}
+              {t('planner.timeLeft', {
+                time:
+                  minutesLeft >= 60
+                    ? `${Math.floor(minutesLeft / 60)}h ${minutesLeft % 60}m`
+                    : `${minutesLeft}m`,
+              })}
+            </span>
+          )}
           <span className="flex-1" />
           <Button size="sm" variant="outline" className="h-7 text-[12px]" data-testid="planner-settings">
             <Settings2 className="h-3.5 w-3.5" />
@@ -311,7 +423,7 @@ export function PlannerPage() {
                       data-testid="planner-block"
                       className="truncate rounded bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent"
                     >
-                      {b.label}
+                      {blockLabel(b)}
                     </div>
                   ))}
               </div>
@@ -350,8 +462,14 @@ export function PlannerPage() {
                 <div
                   key={d.toISOString()}
                   data-testid="planner-day-column"
+                  data-day={d.toISOString().slice(0, 10)}
                   data-weekend={isWeekend ? 'true' : 'false'}
-                  className={cn('relative border-l border-border/40', isWeekend && 'bg-muted/20')}
+                  onPointerUp={(e) => onDropInColumn(d, e)}
+                  className={cn(
+                    'relative border-l border-border/40',
+                    isWeekend && 'bg-muted/20',
+                    dragging && 'bg-accent/5',
+                  )}
                 >
                   {hours.map((h, i) => (
                     <div
@@ -375,7 +493,7 @@ export function PlannerPage() {
                           className="absolute inset-x-1 overflow-hidden rounded border border-accent/40 bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent"
                           style={{ top, height }}
                         >
-                          {b.label}
+                          {blockLabel(b)}
                         </div>
                       )
                     })}
