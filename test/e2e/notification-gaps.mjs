@@ -21,6 +21,7 @@
  */
 import path from 'node:path'
 import { signInApi } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -60,7 +61,37 @@ const apiAs = (token) => async (route, init = {}) => {
   return { status: res.status, data: json?.data, error: json?.error }
 }
 const loginAs = (who) => signInApi(API, who.email, who.password)
+/**
+ * A fixed wait, kept ONLY for the checks that assert nothing arrived.
+ *
+ * You cannot poll for an absence — a poll that finds nothing has either proved
+ * the point or looked too early, and it cannot tell which. So the negative
+ * checks give the app a fixed moment to be wrong in, and the positive ones
+ * poll (see `expectRow`).
+ */
 const settle = () => new Promise((r) => setTimeout(r, 2000))
+
+/**
+ * Poll a notifications inbox until a row matching `match` appears.
+ *
+ * This replaces a fixed 2-second sleep, which failed once in a full-sweep run
+ * — 39 suites deep, with the API busy — and passed on its own immediately
+ * afterwards. `lib/wait.mjs` was written for exactly this family of mistake
+ * and says so in its own header: the test sampled at a moment instead of
+ * waiting for a condition. Notifications are written after the request that
+ * causes them returns, so how long they take is a property of the machine.
+ *
+ * Returns the rows it last saw, so a genuine failure still reports what WAS
+ * there rather than an empty timeout.
+ */
+async function expectRow(read, match) {
+  let rows = []
+  await waitUntil(async () => {
+    rows = (await read()).data ?? []
+    return rows.some(match)
+  }, { timeoutMs: 15_000, stepMs: 250 })
+  return rows
+}
 
 try {
   const mine = await loginAs(ME)
@@ -104,8 +135,10 @@ try {
     body: { emoji: '🔥' },
   })
   chk(reacted.status < 400, 'a teammate can react to it', `reaction returned ${reacted.status}: ${JSON.stringify(reacted.error)}`)
-  await settle()
-  const mineNow = (await A('/notifications')).data ?? []
+  const mineNow = await expectRow(
+    () => A('/notifications'),
+    (n) => n.type === 'message_reaction' && n.target?.entityId === taskId,
+  )
   const reactionRows = mineNow.filter((n) => n.type === 'message_reaction')
   chk(
     reactionRows.length > before && reactionRows.some((n) => n.target?.entityId === taskId),
@@ -147,8 +180,10 @@ try {
 
   const theirBefore = ((await B('/notifications')).data ?? []).length
   await A(`/tasks/${watchedId}/assignees`, { method: 'POST', body: { userId: myId } })
-  await settle()
-  const theirRows = (await B('/notifications')).data ?? []
+  const theirRows = await expectRow(
+    () => B('/notifications'),
+    (n) => n.target?.entityId === watchedId,
+  )
   const aboutIt = theirRows.filter((n) => n.target?.entityId === watchedId)
   chk(
     aboutIt.length > 0,
