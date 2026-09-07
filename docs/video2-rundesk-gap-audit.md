@@ -284,6 +284,54 @@ Her flagged defect is worth recording even though it is ClickUp's:
 > Devanagari. Whatever Rundesk builds must take a language, and Urdu must mean
 > Urdu. Rundesk already ships an Urdu locale, so the trap is real and avoidable.
 
+---
+
+#### V2-05 read off the frames, with one correction and one good surprise
+
+Frames `04:16` and `04:56` re-extracted and read before writing any code.
+
+**1. CORRECTION — "Insert as text" is not a third option.** The bullet above
+says the voice note offers *"Voice note vs Transcribe vs Insert as text"*.
+Frame `04:16` shows **two buttons** — `Voice note` and `Transcribe` — with
+"Insert as text" rendered as the dark **tooltip above Transcribe**, the cursor
+resting on it. It is the explanation of what Transcribe does, not a third
+choice. Building three buttons from that summary would have invented one.
+
+**2. The "+" menu of frame `04:56` matches the bullet exactly**: Slash commands
+`/` · Assign comment · **Record a Video Clip** · Mention a task `@@` · Add a
+file · New Task · New Whiteboard · Add emoji · Brain `@Brain` · New Doc. The
+composer beneath it carries the recorded clip's play button, a `Comment ▾`
+selector, `…`, a mic, and a split send button.
+
+**3. What she says that the frames do not show.** `[04:43]` a voice note can be
+**downloaded and sent to anyone**, and one can be **uploaded** into a comment.
+`[05:26]`–`[05:38]` a clip is uploaded, its **link copied and pasted into the
+comment**, and it renders there. `[05:42]`–`[05:47]` it is visible to anybody
+you send it to, **even outside the space**. `[05:47]`–`[05:55]` **Reply on a
+comment opens a THREAD**, "jis tarah maine aap ko chat mein dikhaya tha".
+`[05:57]`–`[05:59]` a comment can be **assigned** and **saved**, "same like
+messages".
+
+**4. THE GOOD SURPRISE — her flagged defect is already solved here.**
+`apps/web/src/lib/use-speech-recognition.ts` already carries
+`localeToSpeechLang()`, an exhaustive `Record<Locale, string>` mapping
+`en→en-US, es→es-ES, ar→ar-SA, **ur→ur-PK**`, typed so that adding an app
+locale without a speech mapping is a compile error, and unit-tested with an
+explicit `localeToSpeechLang('ur') === 'ur-PK'` assertion. Transcription in
+Rundesk is browser-side (Web Speech), so the language is ours to set and it is
+already set correctly.
+
+It is wired into `ai-panel.tsx` and `workspace-ai-page.tsx` and **nowhere
+else**. So the Urdu trap is not something V2-05 must solve — it is something
+V2-05 must not lose by transcribing in the composer some other way.
+
+**And the rest of the ground is better than the paragraph above suggests:**
+`taskComments` ALREADY has `parentCommentId` and `resolvedAt`, so threads are
+a schema that exists and a UI that does not. `MediaRecorder` is already wrapped
+in `lib/call-recording.ts` + `use-call-recording.ts`. Chat already has
+`chat_message_assignments` (assignee + resolvedAt), which is the shape
+"Assign comment" needs and which task comments lack.
+
 `size: large` · `chat-composer.tsx`, `task-detail-sheet.tsx`, `modules/clips`
 
 ---
