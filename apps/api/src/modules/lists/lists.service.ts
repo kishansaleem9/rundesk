@@ -156,6 +156,34 @@ export class ListsService {
       .orderBy(asc(lists.position), asc(lists.createdAt))
   }
 
+  /**
+   * §V2-02 — every list in a workspace the actor may see.
+   *
+   * Added for the Planner's "Default list for new tasks" picker (frame
+   * `14:10`), which needs to offer the whole workspace. Lists were reachable
+   * only per-project and per-space, so a workspace-wide picker would have had
+   * to walk every space from the browser — one request per space, and a
+   * different visibility answer than the server would give.
+   *
+   * The same `listVisibilityFilter` the per-project read uses, resolved once
+   * for the workspace rather than once per project: a private list you cannot
+   * open must not be offerable as the place your tasks land.
+   */
+  async getListsByWorkspace(workspaceId: string, actor?: { id: string; role?: string }) {
+    let visFilter: SQL | undefined
+    if (actor) {
+      const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
+      visFilter = listVisibilityFilter(actor.id, isManager)
+    }
+    return this.db
+      .select({ id: lists.id, name: lists.name, projectId: lists.projectId, spaceId: projects.spaceId })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false), visFilter))
+      .orderBy(asc(lists.name))
+  }
+
   /** Reorder lists within a project; writes each list's position to its index. */
   async reorderLists(projectId: string, orderedIds: string[], actorId?: string) {
     const all = await this.getListsByProject(projectId)

@@ -63,7 +63,10 @@ export class PlannerController {
   }
 
   @Patch('settings')
-  updateSettings(@CurrentUser() user: any, @Body() body: PlannerSettings) {
+  updateSettings(
+    @CurrentUser() user: any,
+    @Body() body: PlannerSettings & { weekStart?: string; timezone?: string },
+  ) {
     return this.planner.updateSettings(user.id, body)
   }
 }

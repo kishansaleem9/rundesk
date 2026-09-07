@@ -35,6 +35,17 @@ export class ListsController {
    * Declared BEFORE `:listId`, or Nest matches this path as a list whose id is
    * the word "space" and answers 404 for a route that exists.
    */
+  /**
+   * §V2-02 — the Planner's default-list picker needs the whole workspace.
+   *
+   * Declared BEFORE `@Get(':listId')`, or `/lists/workspace/<id>` arrives as a
+   * list id and 404s — the same ordering trap `/spaces/presets` hit.
+   */
+  @Get('workspace/:workspaceId')
+  byWorkspace(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any) {
+    return this.listsService.getListsByWorkspace(workspaceId, { id: user.id, role: user.role })
+  }
+
   @Get('space/:spaceId')
   async getListsBySpace(@Param('spaceId') spaceId: string, @CurrentUser() user: any) {
     return this.listsService.getListsBySpace(spaceId, { id: user.id, role: user.role })

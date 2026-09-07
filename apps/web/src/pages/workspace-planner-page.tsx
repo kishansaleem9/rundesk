@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
+import { PlannerSettingsDialog } from '../components/planner-settings-dialog'
 
 /**
  * §V2-02 — the Planner, frame `13:08`.
@@ -44,6 +45,13 @@ type PlannerSettings = {
   showWeekends?: boolean
   defaultDurationMinutes?: number
   blockPrefix?: string
+  /** Frame `14:10`: Subtle | Solid. */
+  eventStyle?: 'subtle' | 'solid'
+  colorTasksBy?: 'none' | 'priority' | 'status'
+  /** Which rail sections are shown — the Sidebar page. */
+  railSections?: string[]
+  /** A `users` column, surfaced here because the Appearance page edits it. */
+  weekStart?: string
 }
 
 type PriorityRow = { id: string; taskId: string | null; title: string; doneAt: string | null }
@@ -92,6 +100,7 @@ export function PlannerPage() {
   }, [])
 
   const [anchor, setAnchor] = useState(() => new Date())
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const { data: settings } = useQuery({
     queryKey: ['planner-settings', workspaceId],
@@ -100,7 +109,14 @@ export function PlannerPage() {
   })
   const showWeekends = settings?.showWeekends !== false
 
-  const weekStart = useMemo(() => startOfWeek(anchor, 1), [anchor])
+  /*
+   * The account's own week start, not a hard-coded Monday. `users.weekStart`
+   * is what every other date in the product honours, and a calendar that
+   * disagreed with the rest of the app about which day the week begins on
+   * would be the most visible possible place to disagree.
+   */
+  const weekStartsOn = { sunday: 0, monday: 1, saturday: 6 }[settings?.weekStart ?? 'sunday'] ?? 0
+  const weekStart = useMemo(() => startOfWeek(anchor, weekStartsOn), [anchor, weekStartsOn])
   const days = useMemo(() => {
     const all = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
     // Frame `13:08` shows Sat and Sun dimmed rather than absent; hiding them is
@@ -156,6 +172,36 @@ export function PlannerPage() {
    * what a setting should do.
    */
   const prefix = settings?.blockPrefix ?? t('planner.workOn')
+
+  /**
+   * Frame `14:10`'s "Color tasks by" and event style, applied to a block.
+   *
+   * The colour comes off the TASK the block points at — its priority or its
+   * status — which is why `listBlocks` carries both. A typed block has
+   * neither and keeps the neutral accent, rather than being coloured as
+   * though it were a task with no priority.
+   */
+  const blockTone = (b: Block) => {
+    const solid = settings?.eventStyle === 'solid'
+    const by = settings?.colorTasksBy ?? 'none'
+    let hue = 'accent'
+    if (by === 'priority' && b.taskPriority) {
+      hue = { urgent: 'rose', high: 'orange', normal: 'accent', low: 'slate' }[b.taskPriority] ?? 'accent'
+    } else if (by === 'status' && b.taskStatus) {
+      hue = b.taskStatus === 'done' ? 'emerald' : 'accent'
+    }
+    const map: Record<string, { subtle: string; solid: string }> = {
+      accent: { subtle: 'border-accent/40 bg-accent/15 text-accent', solid: 'border-accent bg-accent text-accent-foreground' },
+      rose: { subtle: 'border-rose-400/40 bg-rose-400/15 text-rose-600 dark:text-rose-300', solid: 'border-rose-500 bg-rose-500 text-white' },
+      orange: { subtle: 'border-orange-400/40 bg-orange-400/15 text-orange-600 dark:text-orange-300', solid: 'border-orange-500 bg-orange-500 text-white' },
+      slate: { subtle: 'border-slate-400/40 bg-slate-400/15 text-slate-600 dark:text-slate-300', solid: 'border-slate-500 bg-slate-500 text-white' },
+      emerald: { subtle: 'border-emerald-400/40 bg-emerald-400/15 text-emerald-600 dark:text-emerald-300', solid: 'border-emerald-500 bg-emerald-500 text-white' },
+    }
+    return map[hue][solid ? 'solid' : 'subtle']
+  }
+
+  /** The Sidebar page. Absent means every section, so an existing planner is unchanged. */
+  const railOn = (key: string) => (settings?.railSections ?? ['priorities', 'meetWith', 'backlog']).includes(key)
   const blockLabel = (b: Block) => (b.taskId && b.label ? `${prefix} ${b.label}` : b.label ?? '')
 
   /** Which task is currently under the pointer, mid-drag. */
@@ -242,6 +288,12 @@ export function PlannerPage() {
     <div className="flex h-full min-h-0" data-testid="planner-page">
       {/* What is being dragged, under the pointer. A drag with no feedback is
           a drag people do not believe is happening. */}
+      <PlannerSettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        workspaceId={workspaceId}
+      />
+
       {dragging && ghost && (
         <div
           data-testid="planner-drag-ghost"
@@ -255,6 +307,7 @@ export function PlannerPage() {
       <aside className="w-64 shrink-0 border-r border-border/60 overflow-y-auto p-3 space-y-4">
         <h1 className="text-[13px] font-semibold">{t('planner.title')}</h1>
 
+        {railOn('priorities') && (
         <section data-testid="planner-priorities">
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.priorities')}
@@ -274,7 +327,9 @@ export function PlannerPage() {
             </ul>
           )}
         </section>
+        )}
 
+        {railOn('meetWith') && (
         <section>
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.meetWith')}
@@ -289,7 +344,9 @@ export function PlannerPage() {
             />
           </div>
         </section>
+        )}
 
+        {railOn('backlog') && (
         <section data-testid="planner-backlog">
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.backlog')}
@@ -320,6 +377,7 @@ export function PlannerPage() {
             </ul>
           )}
         </section>
+        )}
       </aside>
 
       {/* ── the grid ──────────────────────────────────────────────────── */}
@@ -370,7 +428,14 @@ export function PlannerPage() {
             </span>
           )}
           <span className="flex-1" />
-          <Button size="sm" variant="outline" className="h-7 text-[12px]" data-testid="planner-settings">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[12px]"
+            data-testid="planner-settings"
+            aria-label={t('plannerSettings.title')}
+            onClick={() => setSettingsOpen(true)}
+          >
             <Settings2 className="h-3.5 w-3.5" />
           </Button>
         </header>
@@ -490,7 +555,10 @@ export function PlannerPage() {
                           key={b.id}
                           data-testid="planner-block"
                           data-block-id={b.id}
-                          className="absolute inset-x-1 overflow-hidden rounded border border-accent/40 bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent"
+                          className={cn(
+                            'absolute inset-x-1 overflow-hidden rounded border px-1.5 py-0.5 text-[11px]',
+                            blockTone(b),
+                          )}
                           style={{ top, height }}
                         >
                           {blockLabel(b)}

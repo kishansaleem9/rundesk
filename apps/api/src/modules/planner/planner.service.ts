@@ -22,6 +22,23 @@ const MAX_RANGE_DAYS = 62
 /** Frame `14:45` — dragging task `dbgdh` on makes a block "Work on dbgdh". */
 export const DEFAULT_BLOCK_PREFIX = 'Work on'
 
+/** The values `users.week_start` already accepts, unchanged. */
+const WEEK_STARTS = ['sunday', 'monday', 'saturday']
+
+/**
+ * Checked against the runtime's own timezone database rather than a list kept
+ * here. A hard-coded list goes stale the next time a country moves its clocks,
+ * and the failure is a person unable to pick where they live.
+ */
+function isKnownTimezone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: zone })
+    return true
+  } catch {
+    return false
+  }
+}
+
 function parseInstant(value: unknown, field: string): Date {
   if (typeof value !== 'string' && !(value instanceof Date)) {
     throw new BadRequestException(`"${field}" must be a date`)
@@ -85,19 +102,49 @@ export class PlannerService {
     return rows.map((r) => ({ ...r, label: r.title ?? r.taskTitle ?? null }))
   }
 
-  /** The person's own planner preferences, or nulls meaning "never opened". */
-  async getSettings(userId: string): Promise<PlannerSettings> {
+  /**
+   * The person's own planner preferences.
+   *
+   * Returned WITH `weekStart` and `timezone`, which are columns on `users` and
+   * not part of the planner blob. Frame `14:10` puts "Start week on" and
+   * "Timezone" on the Appearance page, so the page needs them — but they are
+   * account-wide settings that every date in the product already honours, and
+   * a planner-local copy that could drift from them would be a bug with a
+   * settings page for creating it. The page reads and writes the real columns
+   * through here.
+   */
+  async getSettings(userId: string): Promise<PlannerSettings & { weekStart: string; timezone: string }> {
     const [row] = await this.db
-      .select({ settings: users.plannerSettings })
+      .select({ settings: users.plannerSettings, weekStart: users.weekStart, timezone: users.timezone })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1)
-    return row?.settings ?? {}
+    return {
+      ...(row?.settings ?? {}),
+      weekStart: row?.weekStart ?? 'sunday',
+      timezone: row?.timezone ?? 'UTC',
+    }
   }
 
-  async updateSettings(userId: string, patch: PlannerSettings) {
+  async updateSettings(
+    userId: string,
+    patch: PlannerSettings & { weekStart?: string; timezone?: string },
+  ) {
     if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
       throw new BadRequestException('Planner settings must be an object')
+    }
+    /*
+     * `weekStart` and `timezone` are peeled off and written to their own
+     * columns rather than into the blob — see `getSettings`. Everything else
+     * in the product reads those columns, so the Appearance page changing
+     * them has to change them for real, not just for the calendar.
+     */
+    const { weekStart, timezone, ...plannerOnly } = patch
+    if (weekStart !== undefined && !WEEK_STARTS.includes(weekStart)) {
+      throw new BadRequestException(`Week start must be one of ${WEEK_STARTS.join(', ')}`)
+    }
+    if (timezone !== undefined && !isKnownTimezone(timezone)) {
+      throw new BadRequestException('That is not a timezone this system knows')
     }
     if (patch.defaultDurationMinutes !== undefined) {
       const n = patch.defaultDurationMinutes
@@ -117,10 +164,18 @@ export class PlannerService {
         .limit(1)
       if (!list) throw new BadRequestException('That list does not exist')
     }
-    const current = await this.getSettings(userId)
-    const next = { ...current, ...patch }
-    await this.db.update(users).set({ plannerSettings: next, updatedAt: new Date() }).where(eq(users.id, userId))
-    return next
+    const { weekStart: currentWeek, timezone: currentZone, ...currentPlanner } = await this.getSettings(userId)
+    const nextPlanner = { ...currentPlanner, ...plannerOnly }
+    await this.db
+      .update(users)
+      .set({
+        plannerSettings: nextPlanner,
+        weekStart: weekStart ?? currentWeek,
+        timezone: timezone ?? currentZone,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+    return { ...nextPlanner, weekStart: weekStart ?? currentWeek, timezone: timezone ?? currentZone }
   }
 
   /**
