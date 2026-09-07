@@ -38,6 +38,12 @@ import {
   ClipboardList,
   Download,
   Settings2,
+  Save,
+  Pin,
+  Lock,
+  ShieldCheck,
+  Home,
+  Link2,
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -176,8 +182,15 @@ export const Route = createFileRoute('/app/$workspaceId/$spaceId/$projectId/$lis
    * only read: the parent route now has a search schema, and an undeclared key
    * on a child is one a router is entitled to drop.
    */
-  validateSearch: (search: Record<string, unknown>): { task?: string } =>
-    typeof search.task === 'string' && search.task ? { task: search.task } : {},
+  validateSearch: (search: Record<string, unknown>): { task?: string; view?: string } => ({
+    ...(typeof search.task === 'string' && search.task ? { task: search.task } : {}),
+    /*
+     * §V2-07 "Copy link to view" (frames 10:36 / 11:14) — a view has to be
+     * addressable, or the menu item has nothing to copy. Declared here because
+     * an undeclared key is one the router is entitled to drop.
+     */
+    ...(typeof search.view === 'string' && search.view ? { view: search.view } : {}),
+  }),
   component: ListDetail,
 })
 
@@ -1148,7 +1161,7 @@ function ListDetail() {
    * today — leaving the list — instead of making the user walk back out
    * through every task they happened to glance at.
    */
-  const { task: taskParam } = Route.useSearch()
+  const { task: taskParam, view: viewParam } = Route.useSearch()
   const selectedTaskId = taskParam ?? null
   const setSelectedTaskId = (id: string | null) =>
     navigate({
@@ -1160,6 +1173,8 @@ function ListDetail() {
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [statusManagerOpen, setStatusManagerOpen] = useState(false)
   const [sharePanelOpen, setSharePanelOpen] = useState(false)
+  /** §V2-07 — "Sharing & Permissions" on the saved view you are looking at. */
+  const [shareViewOpen, setShareViewOpen] = useState(false)
   const [emailAliasOpen, setEmailAliasOpen] = useState(false)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
@@ -1227,7 +1242,22 @@ function ListDetail() {
 
   const { data: savedViews = [] } = useQuery({
     queryKey: ['list-views', listId],
-    queryFn: () => api<Array<{ id: string; name: string; type: 'list' | 'board' | 'calendar' | 'gantt' | 'table'; isDefault?: boolean; config?: any }>>(`/lists/${listId}/views`),
+    queryFn: () =>
+      api<
+        Array<{
+          id: string
+          name: string
+          type: 'list' | 'board' | 'calendar' | 'gantt' | 'table'
+          isDefault?: boolean
+          /** §V2-07 — pinned views sort first; the server already ordered them. */
+          isPinned?: boolean
+          visibility?: 'everyone' | 'private' | 'protected'
+          /** This user's own "Autosave for me" flag on this view. */
+          autosave?: boolean
+          createdById?: string | null
+          config?: any
+        }>
+      >(`/lists/${listId}/views`),
   })
   const { data: workspaceMembers = [] } = useQuery({
     queryKey: ['workspace-members', workspaceId],
@@ -1468,6 +1498,55 @@ function ListDetail() {
     await refreshSavedViews()
   }
 
+  /** The saved view the tab strip is currently on, if it is on one at all. */
+  const selectedSavedView = savedViews.find((v) => v.id === selectedSavedViewId)
+
+  /*
+   * §V2-07 — every switch in the Customize panel that belongs to the VIEW
+   * rather than to this screen: Pin view, Private view, Protect view, Set as
+   * default view. One writer, because the server refuses some combinations
+   * (a private view cannot be the list's default) and a second copy of this
+   * would be a second place for that message to go missing.
+   */
+  const patchSavedView = async (patch: Record<string, unknown>) => {
+    if (!selectedSavedView) return
+    try {
+      await api(`/views/${selectedSavedView.id}`, { method: 'PATCH', body: patch })
+      await refreshSavedViews()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('list.view.changeFailed'))
+    }
+  }
+
+  /* "Autosave for me" is this user's own flag, so it has its own route. */
+  const setViewAutosave = async (autosave: boolean) => {
+    if (!selectedSavedView) return
+    try {
+      await api(`/views/${selectedSavedView.id}/autosave`, { method: 'PATCH', body: { autosave } })
+      await refreshSavedViews()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('list.view.changeFailed'))
+    }
+  }
+
+  /*
+   * "Copy link to view". Built from the current location so it carries whatever
+   * host the person is actually on — a hard-coded origin is how a copied link
+   * ends up pointing at somebody else's deployment.
+   */
+  const copyViewLink = async () => {
+    if (!selectedSavedView) return
+    const url = `${window.location.origin}${window.location.pathname}?view=${selectedSavedView.id}`
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success(t('list.view.linkCopied'))
+    } catch {
+      // A denied clipboard permission is common and is not an error the person
+      // can act on — show them the link so they can copy it themselves.
+      window.prompt(t('list.view.copyLinkManually'), url)
+    }
+  }
+
   const deleteSavedView = async (viewId: string) => {
     await api(`/views/${viewId}`, { method: 'DELETE' })
     if (selectedSavedViewId === viewId) setSelectedSavedViewId('')
@@ -1476,10 +1555,18 @@ function ListDetail() {
 
   useEffect(() => {
     if (appliedInitialView || savedViews.length === 0) return
-    const defaultView = savedViews.find((v) => v.isDefault) ?? savedViews[0]
-    if (defaultView) applyView(defaultView.id)
+    /*
+     * §V2-07 — a `?view=` in the URL is somebody having used "Copy link to
+     * view", so it wins over the list's default. A link to a view that has
+     * since been deleted, or to somebody's PRIVATE view (which the server does
+     * not return to this user at all), falls through to the default rather
+     * than showing an empty list with no explanation.
+     */
+    const linked = viewParam ? savedViews.find((v) => v.id === viewParam) : undefined
+    const target = linked ?? savedViews.find((v) => v.isDefault) ?? savedViews[0]
+    if (target) applyView(target.id)
     setAppliedInitialView(true)
-  }, [appliedInitialView, savedViews])
+  }, [appliedInitialView, savedViews, viewParam])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1858,6 +1945,11 @@ function ListDetail() {
               listId={listId}
               includeClosed={showClosed}
               includeArchived={showArchived}
+              view={selectedSavedView}
+              onPatch={patchSavedView}
+              onAutosave={setViewAutosave}
+              onCopyLink={copyViewLink}
+              onShare={() => setShareViewOpen(true)}
             />
 
             {(activeView === 'table' || activeView === 'list') && (
@@ -2329,6 +2421,15 @@ function ListDetail() {
         objectId={listId}
         objectName={listMeta?.name}
       />
+      {selectedSavedView && (
+        <SharePanel
+          open={shareViewOpen}
+          onOpenChange={setShareViewOpen}
+          objectType="view"
+          objectId={selectedSavedView.id}
+          objectName={selectedSavedView.name}
+        />
+      )}
     </div>
     </ListStatusesContext.Provider>
   )
@@ -4636,10 +4737,105 @@ function ToolbarToggle({
  * The download goes through fetch rather than a plain link because the API
  * wants an Authorization header, and an <a href> cannot carry one.
  */
+/** One switch row of the Customize panel, drawn as the frame draws it. */
+function PanelSwitch({
+  label,
+  icon,
+  checked,
+  onChange,
+  testId,
+  disabled,
+  hint,
+}: {
+  label: string
+  icon: ReactNode
+  checked: boolean
+  onChange: (next: boolean) => void
+  testId: string
+  disabled?: boolean
+  hint?: string
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={hint ?? label}
+      disabled={disabled}
+      data-testid={testId}
+      data-checked={checked ? 'true' : 'false'}
+      onClick={() => onChange(!checked)}
+      className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-[12px] hover:bg-muted/40 disabled:opacity-50 disabled:hover:bg-transparent"
+    >
+      <span className="flex items-center gap-2 text-left">
+        <span className="text-muted-foreground">{icon}</span>
+        {label}
+      </span>
+      <span
+        aria-hidden
+        className={cn(
+          'relative h-4 w-7 shrink-0 rounded-full transition-colors',
+          checked ? 'bg-accent' : 'bg-muted-foreground/30',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all',
+            checked ? 'left-3.5' : 'left-0.5',
+          )}
+        />
+      </span>
+    </button>
+  )
+}
+
+/** A row of the Customize panel that does something rather than toggling. */
+function PanelAction({
+  label,
+  icon,
+  onClick,
+  testId,
+  disabled,
+}: {
+  label: string
+  icon: ReactNode
+  onClick: () => void
+  testId: string
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      data-testid={testId}
+      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-[12px] hover:bg-muted/40 disabled:opacity-50 disabled:hover:bg-transparent"
+    >
+      <span className="text-muted-foreground">{icon}</span>
+      {label}
+    </button>
+  )
+}
+
+type SavedViewRow = {
+  id: string
+  name: string
+  isDefault?: boolean
+  isPinned?: boolean
+  visibility?: 'everyone' | 'private' | 'protected'
+  autosave?: boolean
+}
+
 function CustomizeViewPanel({
   listId,
   includeClosed,
   includeArchived,
+  view,
+  onPatch,
+  onAutosave,
+  onCopyLink,
+  onShare,
 }: {
   listId: string
   /*
@@ -4650,6 +4846,12 @@ function CustomizeViewPanel({
    */
   includeClosed: boolean
   includeArchived: boolean
+  /** The saved view this panel's switches act on, if the tab strip is on one. */
+  view?: SavedViewRow
+  onPatch: (patch: Record<string, unknown>) => void
+  onAutosave: (next: boolean) => void
+  onCopyLink: () => void
+  onShare: () => void
 }) {
   const { t } = useTranslation()
   const [columns, setColumns] = useState<'visible' | 'names' | 'all'>('visible')
@@ -4692,6 +4894,81 @@ function CustomizeViewPanel({
         {t('list.customize')}
       </summary>
       <div className="absolute right-0 z-20 mt-1 w-72 rounded-md border border-border bg-card p-1 shadow-lg">
+        {/*
+          The half of the panel that belongs to the SAVED VIEW, in the order
+          frames `10:36` and `11:14` list it: Autosave for me · Pin view ·
+          Private view · Protect view · Set as default view · Copy link to view
+          · Export view · Sharing & Permissions.
+
+          When the tab strip is on a built-in type rather than a saved view
+          there is nothing here to pin, protect or share, and the panel says
+          that instead of showing seven switches that would silently do
+          nothing. "Favorite" is absent: the frame shows it as a submenu with a
+          chevron, and the video never opens it, so there is no behaviour to
+          build against and a toggle would be a guess wearing a label.
+        */}
+        {view ? (
+          <div className="border-b border-border/40 pb-1" data-testid="list-view-settings">
+            <PanelSwitch
+              testId="list-view-autosave"
+              icon={<Save className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.view.autosave')}
+              hint={t('list.view.autosaveHint')}
+              checked={!!view.autosave}
+              onChange={onAutosave}
+            />
+            <PanelSwitch
+              testId="list-view-pin"
+              icon={<Pin className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.view.pin')}
+              checked={!!view.isPinned}
+              onChange={(next) => onPatch({ isPinned: next })}
+            />
+            <PanelSwitch
+              testId="list-view-private"
+              icon={<Lock className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.view.private')}
+              hint={t('list.view.privateHint')}
+              checked={view.visibility === 'private'}
+              onChange={(next) => onPatch({ visibility: next ? 'private' : 'everyone' })}
+            />
+            <PanelSwitch
+              testId="list-view-protect"
+              icon={<ShieldCheck className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.view.protect')}
+              hint={t('list.view.protectHint')}
+              checked={view.visibility === 'protected'}
+              onChange={(next) => onPatch({ visibility: next ? 'protected' : 'everyone' })}
+            />
+            <PanelSwitch
+              testId="list-view-default"
+              icon={<Home className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.view.setDefault')}
+              checked={!!view.isDefault}
+              // Un-defaulting would leave the list with no default at all, and
+              // the way you change it is by making another view the default.
+              disabled={!!view.isDefault}
+              onChange={() => onPatch({ isDefault: true })}
+            />
+            <PanelAction
+              testId="list-view-copy-link"
+              icon={<Link2 className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.view.copyLink')}
+              onClick={onCopyLink}
+            />
+            <PanelAction
+              testId="list-view-share"
+              icon={<Share2 className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.view.sharing')}
+              onClick={onShare}
+            />
+          </div>
+        ) : (
+          <p className="border-b border-border/40 px-2 pb-2 pt-1 text-[11px] text-muted-foreground" data-testid="list-view-settings-empty">
+            {t('list.view.saveFirst')}
+          </p>
+        )}
+
         <details data-testid="list-export-section">
           <summary className="list-none flex items-center justify-between gap-2 rounded px-2 py-1.5 text-[12px] cursor-pointer select-none hover:bg-muted/40">
             <span className="flex items-center gap-2">

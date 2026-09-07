@@ -21,8 +21,10 @@ export const contentAccessRequests = pgTable(
   {
     id:          uuid('id').primaryKey().defaultRandom(),
     workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    // Kept in step with `object_shares.object_type` — a request for access is a
+    // request for a share, so anything shareable has to be requestable.
     objectType:  text('object_type')
-      .$type<'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard'>()
+      .$type<'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard' | 'view'>()
       .notNull(),
     objectId:    uuid('object_id').notNull(),
     requesterId: uuid('requester_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

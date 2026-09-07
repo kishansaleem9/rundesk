@@ -2,7 +2,7 @@ import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundEx
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm'
 import {
   objectShares, users, workspaceMembers, contentAccessRequests,
-  spaces, folders, projects, lists, tasks, docs, chatChannels, dashboardPresets,
+  spaces, folders, projects, lists, tasks, docs, chatChannels, dashboardPresets, taskViews,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config'
 import { NotificationsService } from '../notifications/notifications.service'
 
 /** Everything that can be shared. */
-export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc', 'channel', 'dashboard'] as const
+export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc', 'channel', 'dashboard', 'view'] as const
 export type ShareType = (typeof SHARE_TYPES)[number]
 
 /**
@@ -127,6 +127,30 @@ export class SharesService {
       if (!r) throw new NotFoundException('Task not found')
       const chain: Array<{ type: ShareType; id: string }> = [
         { type: 'task', id }, { type: 'list', id: r.listId }, { type: 'project', id: r.projectId },
+      ]
+      if (r.folderId) chain.push({ type: 'folder', id: r.folderId })
+      chain.push({ type: 'space', id: r.spaceId })
+      return { workspaceId: r.ws, createdById: r.by, name: r.name, chain }
+    }
+    if (type === 'view') {
+      /*
+       * §V2-07 "Sharing & Permissions" on a saved view. A view inherits from
+       * its list the same way a task does — someone with access to the list
+       * already has access to what the view is a lens onto — so the chain is
+       * the list's chain with the view in front of it.
+       */
+      const [r] = await this.db.select({
+        ws: spaces.workspaceId, by: taskViews.createdById, name: taskViews.name,
+        listId: taskViews.listId, projectId: lists.projectId,
+        folderId: projects.folderId, spaceId: projects.spaceId,
+      })
+        .from(taskViews).innerJoin(lists, eq(lists.id, taskViews.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(taskViews.id, id)).limit(1)
+      if (!r) throw new NotFoundException('View not found')
+      const chain: Array<{ type: ShareType; id: string }> = [
+        { type: 'view', id }, { type: 'list', id: r.listId }, { type: 'project', id: r.projectId },
       ]
       if (r.folderId) chain.push({ type: 'folder', id: r.folderId })
       chain.push({ type: 'space', id: r.spaceId })
@@ -333,6 +357,26 @@ export class SharesService {
         out.set(r.id, {
           name: r.title,
           url: `${base}/${r.spaceId}/${r.projectId}/${r.listId}?task=${r.id}`,
+          context: r.listName,
+        })
+      }
+      return out
+    }
+    if (type === 'view') {
+      // A view has no route of its own; it is the list route with ?view=<id>,
+      // which is exactly what "Copy link to view" puts on the clipboard.
+      const rows = await this.db
+        .select({
+          id: taskViews.id, name: taskViews.name, listId: lists.id, listName: lists.name,
+          projectId: projects.id, spaceId: spaces.id,
+        })
+        .from(taskViews).innerJoin(lists, eq(lists.id, taskViews.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId)).innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskViews.id, ids)))
+      for (const r of rows) {
+        out.set(r.id, {
+          name: r.name,
+          url: `${base}/${r.spaceId}/${r.projectId}/${r.listId}?view=${r.id}`,
           context: r.listName,
         })
       }

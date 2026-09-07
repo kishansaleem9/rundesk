@@ -16,7 +16,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from './loading-skeletons'
 
 /** Every object a share can be attached to. */
-export type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard'
+export type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard' | 'view'
 type ShareLevel = 'view' | 'comment' | 'edit' | 'admin'
 
 type ShareRow = {
@@ -46,6 +46,8 @@ const TITLE_KEY: Record<ShareObjectType, TranslationKey> = {
   doc: 'share.titleDoc',
   channel: 'share.titleChannel',
   dashboard: 'share.titleDashboard',
+  // §V2-07 — "Sharing & Permissions" on a saved view, frames 10:36 and 11:14.
+  view: 'share.titleView',
 }
 
 export function SharePanel({

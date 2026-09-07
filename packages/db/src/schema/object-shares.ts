@@ -17,7 +17,10 @@ export const objectShares = pgTable(
   {
     id:           uuid('id').primaryKey().defaultRandom(),
     workspaceId:  uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-    objectType:   text('object_type').$type<'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard'>().notNull(),
+    // 'view' is §V2-07's "Sharing & Permissions" on a saved view (frames 10:36
+    // and 11:14) — a view is shared like anything else rather than through a
+    // second mechanism of its own.
+    objectType:   text('object_type').$type<'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard' | 'view'>().notNull(),
     objectId:     uuid('object_id').notNull(),
     userId:       uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
     invitedEmail: text('invited_email'),

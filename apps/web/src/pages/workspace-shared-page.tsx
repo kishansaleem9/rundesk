@@ -11,13 +11,14 @@ import {
   FileText,
   Hash,
   LayoutDashboard,
+  Columns3,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { goToDestination } from '../lib/notification-nav'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
-type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard'
+type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard' | 'view'
 type ShareLevel = 'view' | 'comment' | 'edit' | 'admin'
 
 type SharedItem = {
@@ -41,6 +42,7 @@ const TYPE_ICON: Record<ShareObjectType, React.ElementType> = {
   doc: FileText,
   channel: Hash,
   dashboard: LayoutDashboard,
+  view: Columns3,
 }
 
 const TYPE_LABEL_KEY: Record<ShareObjectType, TranslationKey> = {
@@ -52,6 +54,7 @@ const TYPE_LABEL_KEY: Record<ShareObjectType, TranslationKey> = {
   doc: 'shared.typeDoc',
   channel: 'shared.typeChannel',
   dashboard: 'shared.typeDashboard',
+  view: 'shared.typeView',
 }
 
 // The same four levels the share dialog names, so a grant reads identically

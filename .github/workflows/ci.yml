@@ -402,6 +402,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-07 — Private view / Protect view / Pin / default / Copy link /
+      # Sharing. The load-bearing checks are the negative ones: a second, plain
+      # member must not see somebody's private view, and must not be able to
+      # change a protected one. Before this, ANY member could delete ANY view.
+      - name: View visibility
+        if: '!cancelled()'
+        run: node test/e2e/view-visibility.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.
