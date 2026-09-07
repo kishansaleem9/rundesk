@@ -34,10 +34,16 @@ export type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number]
 /**
  * The per-space feature switches — ClickApps, frame `07:19`.
  *
- * Every key here is a feature Rundesk HAS and that something reads. ClickUp's
- * grid also offers Sprints, Remap Subtask Due Dates and Work in Progress
- * Limits greyed out behind their plan; the first two have no Rundesk
- * equivalent to switch, so they are absent rather than decorative.
+ * Every key here is a feature Rundesk has AND that something reads. That
+ * second half is the rule: a switch whose value nothing consults is the facade
+ * this codebase has spent two videos removing.
+ *
+ * So Time Tracking, Time Estimates and Multiple Assignees are NOT here, even
+ * though Rundesk has all three. They live on the task detail sheet, which does
+ * not know which space its task belongs to — threading that through is its own
+ * change, and until it is done those three switches would toggle a column
+ * nobody reads. ClickUp's Remap Subtask Due Dates and Incomplete Warning are
+ * absent for the simpler reason that Rundesk has nothing to switch.
  *
  * `label` is not translated here on purpose — the web owns the wording, and a
  * server-side English string leaking into an Urdu UI is the bug that pattern
@@ -47,9 +53,6 @@ export const SPACE_FEATURE_KEYS = [
   'priority',
   'tags',
   'customFields',
-  'multipleAssignees',
-  'timeTracking',
-  'timeEstimates',
   'milestones',
   'wipLimits',
   'listEmail',
@@ -106,7 +109,7 @@ export const SPACE_PRESETS: SpacePreset[] = [
     views: ['list', 'board', 'calendar'],
     defaultView: 'board',
     statuses: REVIEW_STATUSES,
-    features: ['priority', 'tags', 'customFields', 'multipleAssignees', 'listEmail'],
+    features: ['priority', 'tags', 'customFields', 'listEmail'],
     // A campaign space with one list called "Tasks" would have learned nothing
     // from the question it just asked.
     seedLists: ['Campaigns', 'Content calendar'],
@@ -116,7 +119,7 @@ export const SPACE_PRESETS: SpacePreset[] = [
     views: ['list', 'board', 'gantt', 'calendar'],
     defaultView: 'list',
     statuses: DELIVERY_STATUSES,
-    features: ['priority', 'tags', 'customFields', 'multipleAssignees', 'timeTracking', 'timeEstimates', 'milestones'],
+    features: ['priority', 'tags', 'customFields', 'milestones'],
     seedLists: ['Project plan', 'Milestones'],
   },
   {
@@ -124,7 +127,7 @@ export const SPACE_PRESETS: SpacePreset[] = [
     views: ['list', 'board', 'table'],
     defaultView: 'board',
     statuses: DELIVERY_STATUSES,
-    features: ['priority', 'tags', 'customFields', 'multipleAssignees', 'wipLimits', 'milestones'],
+    features: ['priority', 'tags', 'customFields', 'wipLimits', 'milestones'],
     seedLists: ['Roadmap', 'Bugs'],
   },
 ]

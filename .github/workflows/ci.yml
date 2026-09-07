@@ -444,6 +444,16 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/space-wizard.mjs --dist apps/web/dist
 
+      # §V2-06 — the suite that decides whether the ClickApps grid is a feature
+      # or a picture of one. Renders the same list under a space with every
+      # switch on and a space with them off, and checks the second is genuinely
+      # missing what the first shows. The first three checks are the other half
+      # of the contract: `features: null` — every space made before the column
+      # existed — must read as ALL ON.
+      - name: Space features
+        if: '!cancelled()'
+        run: node test/e2e/space-features.mjs --dist apps/web/dist
+
       # §V2-07 `[11:35]` — the "Save view" chip. Drives the built app against a
       # stubbed API: absent on an untouched view, present the moment it is
       # modified, and gone once saved. The last of those three is the one that

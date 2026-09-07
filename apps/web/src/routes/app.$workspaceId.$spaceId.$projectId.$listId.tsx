@@ -47,6 +47,11 @@ import {
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import {
+  useSpaceFeatures,
+  ALL_SPACE_FEATURES,
+  type SpaceFeatures,
+} from '../lib/use-space-features'
 /*
  * A1.4 / §V2-07 — the filter tree and its evaluator now live in `lib/task-filters.ts`.
  * They were the one piece of real logic in this file that no test could
@@ -471,6 +476,18 @@ const DEFAULT_STATUS_META: Record<string, StatusMeta> = {
 
 const ListStatusesContext = createContext<ListStatus[]>([])
 
+/**
+ * §V2-06 — the space's ClickApps, for the row components that are three levels
+ * down from where they are read. A context beside the one this file already
+ * uses, rather than a `showTags` prop threaded through Board → Column → Card.
+ * Defaults to everything on, so a component rendered outside the provider
+ * (a test, a story) shows the app as it has always looked.
+ */
+const SpaceFeaturesContext = createContext<SpaceFeatures>(ALL_SPACE_FEATURES)
+function useSpaceFeatureFlags() {
+  return useContext(SpaceFeaturesContext)
+}
+
 function useListStatuses() {
   return useContext(ListStatusesContext)
 }
@@ -704,6 +721,7 @@ function FilterBuilderMenu({
   workspaceMembers,
   statusOptions,
   labelOptions,
+  hiddenFields = [],
 }: {
   listId: string
   nodes: FilterNode[]
@@ -714,6 +732,8 @@ function FilterBuilderMenu({
   /** Derived from the tasks on this list — a tag no task here carries would
    *  filter to nothing anyway, so offering it would only mislead. */
   labelOptions: FilterOption[]
+  /** §V2-06 — filter fields the space's ClickApps have switched off. */
+  hiddenFields?: string[]
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -736,7 +756,10 @@ function FilterBuilderMenu({
   const refreshPresets = () => qc.invalidateQueries({ queryKey: ['list-filters', listId] })
 
   const fieldOptions = [
-    ...BUILTIN_FILTER_FIELDS.map((f) => ({ value: f.id, label: t(f.labelKey) })),
+    ...BUILTIN_FILTER_FIELDS.filter((f) => !hiddenFields.includes(f.id)).map((f) => ({
+      value: f.id,
+      label: t(f.labelKey),
+    })),
     ...customFields.map((f) => ({ value: `custom:${f.id}`, label: f.name })),
   ]
 
@@ -1083,6 +1106,7 @@ function ListColumnBar({
   onColumnFilters,
   workspaceMembers,
   groupBy,
+  showPriority = true,
 }: {
   sort: SortState
   onSort: (field: SortField) => void
@@ -1090,6 +1114,8 @@ function ListColumnBar({
   onColumnFilters: (updater: (prev: ColumnFilters) => ColumnFilters) => void
   groupBy: 'status' | 'priority' | 'assignee'
   workspaceMembers: WorkspaceMember[]
+  /** §V2-06 — off when the space has switched the Priority feature off. */
+  showPriority?: boolean
 }) {
   const { t } = useTranslation()
   const ordered = useOrderedStatuses()
@@ -1119,7 +1145,12 @@ function ListColumnBar({
           onChange={(next) => onColumnFilters((f) => ({ ...f, statuses: next }))}
         />
       </div>
-      <div className={cn('items-center gap-1 w-24 shrink-0', groupBy === 'priority' ? 'hidden' : 'flex')}>
+      <div
+        className={cn(
+          'items-center gap-1 w-24 shrink-0',
+          groupBy === 'priority' || !showPriority ? 'hidden' : 'flex',
+        )}
+      >
         <SortHeaderButton label={t('taskDetail.fieldPriority')} field="priority" sort={sort} onSort={onSort} />
         <ColumnFilterMenu
           ariaLabel={t('list.filter.ariaPriority')}
@@ -1907,6 +1938,13 @@ function ListDetail() {
     [listStatuses, t],
   )
   const currentUserId = useAuthStore((state) => state.user?.id) ?? ''
+  /*
+   * §V2-06 — the space's ClickApps, frame `07:19`. Reads the same
+   * `['spaces', workspaceId]` cache this route already keeps for `viewConfig`,
+   * so it costs no extra request. Everything is ON until a space says
+   * otherwise, including while that query loads.
+   */
+  const spaceFeatures = useSpaceFeatures(workspaceId, spaceId)
 
   const statusOptions = listStatuses.length
     ? listStatuses
@@ -1933,6 +1971,7 @@ function ListDetail() {
 
   return (
     <ListStatusesContext.Provider value={listStatuses}>
+    <SpaceFeaturesContext.Provider value={spaceFeatures}>
     <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-[#0f1114]">
       <TaskListChrome
         listName={listMeta?.name ?? t('list.defaultListName')}
@@ -2087,6 +2126,15 @@ function ListDetail() {
               workspaceMembers={workspaceMembers}
               statusOptions={filterStatusOptions}
               labelOptions={labelOptions}
+              /*
+               * §V2-06 — a filter on a field the space has switched off would
+               * narrow the list by something nothing on it displays, which
+               * reads as "the list is broken" rather than "that is filtered".
+               */
+              hiddenFields={[
+                ...(spaceFeatures.priority ? [] : ['priority']),
+                ...(spaceFeatures.tags ? [] : ['tags']),
+              ]}
             />
             {/*
               §V2-07 `[11:28]` — "ASSIGNEE — aap ko ya aap ke alawa [kisi aur
@@ -2121,7 +2169,7 @@ function ListDetail() {
             >
               <option value="created">{t('list.sortCreated')}</option>
               <option value="due">{t('list.sortDueDate')}</option>
-              <option value="priority">{t('list.sortPriority')}</option>
+              {spaceFeatures.priority && <option value="priority">{t('list.sortPriority')}</option>}
               <option value="title">{t('list.table.colTitle')}</option>
               <option value="status">{t('taskDetail.fieldStatus')}</option>
               <option value="assignee">{t('taskDetail.fieldAssignees')}</option>
@@ -2142,7 +2190,9 @@ function ListDetail() {
               ariaLabel={t('list.groupByStatus')}
             >
               <option value="status">{t('list.groupByStatus')}</option>
-              <option value="priority">{t('list.groupByPriority')}</option>
+              {/* Grouping by a field the space has switched off would produce
+                  buckets for something nothing displays. */}
+              {spaceFeatures.priority && <option value="priority">{t('list.groupByPriority')}</option>}
               <option value="assignee">{t('list.groupByAssignee')}</option>
             </WorkFilterSelect>
             {/*
@@ -2175,7 +2225,7 @@ function ListDetail() {
               onShare={() => setShareViewOpen(true)}
             />
 
-            {(activeView === 'table' || activeView === 'list') && (
+            {spaceFeatures.customFields && (activeView === 'table' || activeView === 'list') && (
               <details ref={fieldsDetailsRef} className="relative">
                 <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
                   {t('list.table.fields', { shown: projectFields.length - hiddenFields.size, total: projectFields.length })}
@@ -2278,15 +2328,18 @@ function ListDetail() {
             >
               {t('list.statusesButton')}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 text-[12px]"
-              onClick={() => setEmailAliasOpen(true)}
-              title={t('list.emailAliasTitle')}
-            >
-              {t('list.emailButton')}
-            </Button>
+            {spaceFeatures.listEmail && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-[12px]"
+                onClick={() => setEmailAliasOpen(true)}
+                title={t('list.emailAliasTitle')}
+                data-testid="list-email-button"
+              >
+                {t('list.emailButton')}
+              </Button>
+            )}
           </>
         }
       />
@@ -2315,6 +2368,7 @@ function ListDetail() {
             onColumnFilters={setColumnFilters}
             workspaceMembers={workspaceMembers}
             groupBy={groupBy}
+            showPriority={spaceFeatures.priority}
           />
           <GroupedListView
             tasks={visibleTasks}
@@ -2380,6 +2434,7 @@ function ListDetail() {
                 <BoardColumn
                   key={s.key}
                   status={s.key}
+                  showWip={spaceFeatures.wipLimits}
                   tasks={tasksByStatus[s.key] ?? []}
                   onOpenTask={(taskId) => setSelectedTaskId(taskId)}
                   collapsed={collapsedColumns.has(s.key)}
@@ -2654,6 +2709,7 @@ function ListDetail() {
         />
       )}
     </div>
+    </SpaceFeaturesContext.Provider>
     </ListStatusesContext.Provider>
   )
 }
@@ -3325,6 +3381,8 @@ function TableView({
   onRefresh: () => Promise<unknown>
 }) {
   const { t, tCount, locale } = useTranslation()
+  /** §V2-06 — the space's ClickApps, for the markers this table draws. */
+  const rowFeatures = useSpaceFeatureFlags()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
   // Disambiguate single-click (open task) from double-click (inline rename): a
@@ -3616,7 +3674,9 @@ function TableView({
                           (task.statusCategory === 'closed' || task.status === 'done') && 'line-through text-muted-foreground',
                         )}
                       >
-                        {task.isMilestone && <Diamond className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" />}
+                        {task.isMilestone && rowFeatures.milestones && (
+                          <Diamond className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-500" data-testid="row-milestone" />
+                        )}
                         <TaskTypeMark type={task.taskType} />
                         {task.title}
                       </span>
@@ -4073,6 +4133,7 @@ function BoardColumn({
   onSetWipLimit,
   onAddTask,
   onRename,
+  showWip = true,
 }: {
   status: TaskStatus
   tasks: TaskItem[]
@@ -4084,6 +4145,8 @@ function BoardColumn({
   onAddTask: (title: string) => Promise<void> | void
   /** Rename the underlying status. Absent when the caller cannot edit statuses. */
   onRename?: (name: string) => Promise<void> | void
+  /** §V2-06 — off when the space has switched Work in Progress Limits off. */
+  showWip?: boolean
 }) {
   const { t } = useTranslation()
   const [renaming, setRenaming] = useState(false)
@@ -4164,14 +4227,21 @@ function BoardColumn({
             className="ml-auto h-6 w-14 rounded border border-border bg-background px-1 text-[11px]"
           />
         ) : (
-          <button
-            type="button"
-            onClick={() => setEditingWip(true)}
-            className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
-            title={t('list.board.setWipTitle')}
-          >
-            {wipLimit != null ? t('list.board.wipEdit') : t('list.board.setWip')}
-          </button>
+          // §V2-06 — a space that has switched Work in Progress Limits off gets
+          // no control to set one. An existing limit still shows in the count
+          // above: hiding the number would make a column look uncapped while
+          // the cap was still in force.
+          showWip && (
+            <button
+              type="button"
+              onClick={() => setEditingWip(true)}
+              className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
+              title={t('list.board.setWipTitle')}
+              data-testid="board-set-wip"
+            >
+              {wipLimit != null ? t('list.board.wipEdit') : t('list.board.setWip')}
+            </button>
+          )
         )}
       </div>
       {!collapsed && (
@@ -4218,6 +4288,7 @@ function BoardTaskCard({
   task: TaskItem
   onOpenTask: (taskId: string) => void
 }) {
+  const features = useSpaceFeatureFlags()
   const { t, locale } = useTranslation()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `task:${task.id}`,
@@ -4247,7 +4318,7 @@ function BoardTaskCard({
           : <Flag className={cn('h-3 w-3 mt-0.5 shrink-0', PRIORITY_COLORS[task.priority])} />}
         <div className="font-medium text-sm leading-snug">{task.title}</div>
       </div>
-      {(task.labels?.length ?? 0) > 0 && (
+      {features.tags && (task.labels?.length ?? 0) > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {task.labels!.slice(0, 3).map((l) => (
             <span
