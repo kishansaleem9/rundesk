@@ -397,6 +397,22 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-05 — recording into a comment, and the @ picker's access warning.
+      # Two things here are worth the minutes. The first is the Urdu check: she
+      # flagged `[04:26]` that ClickUp transcribes Urdu into Devanagari, and
+      # this sets the ACCOUNT to Urdu and reads back the language the recognizer
+      # was actually started in, so the one way to reintroduce her defect —
+      # transcribing by some route that skips `localeToSpeechLang` — fails here.
+      # The second is that the "Does not have access to task" flag is compared
+      # against what the GUARD does when that person really opens the task, so a
+      # warning that disagrees with reality is a failure rather than a feature.
+      - name: Comment recording and mention access
+        if: '!cancelled()'
+        run: node test/e2e/comment-recording.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-10 — a task<->doc link read from the DOC end, which nothing ever
       # queried. The load-bearing check is the visibility one: a doc listing its
       # tasks must not become a way to read the titles of private ones.
