@@ -1,4 +1,5 @@
 import { pgTable, text, timestamp, boolean, uuid, jsonb, integer } from 'drizzle-orm/pg-core'
+import type { PlannerSettings } from './time-blocks'
 import { relations } from 'drizzle-orm'
 import { userRoleEnum, oauthProviderEnum } from './enums'
 import { workspaceMembers } from './workspaces'
@@ -184,6 +185,16 @@ export const users = pgTable('users', {
    * default rather than inheriting somebody else's false.
    */
   panelsCollapsed: jsonb('panels_collapsed').$type<Record<string, boolean> | null>(),
+  /**
+   * §V2-02 — the Planner's own preferences, frame `14:10`.
+   *
+   * Null means never opened the settings, so every default is the app's.
+   * Deliberately does NOT hold week start, timezone or time format: those are
+   * `weekStart`, `timezone` and `timeFormat` a few lines up, and a second copy
+   * that could disagree with them is a bug with a settings page for creating
+   * it. See `PlannerSettings` in `schema/time-blocks.ts` for the shape.
+   */
+  plannerSettings: jsonb('planner_settings').$type<PlannerSettings | null>(),
   createdAt:     timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:     timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

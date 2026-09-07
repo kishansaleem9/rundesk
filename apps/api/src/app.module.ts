@@ -37,6 +37,7 @@ import { SprintsModule } from './modules/sprints/sprints.module'
 import { TimeEntriesModule } from './modules/time-entries/time-entries.module'
 import { NotificationsModule } from './modules/notifications/notifications.module'
 import { ViewsModule } from './modules/views/views.module'
+import { PlannerModule } from './modules/planner/planner.module'
 import { FormsModule } from './modules/forms/forms.module'
 import { AutomationsModule } from './modules/automations/automations.module'
 import { AiModule } from './modules/ai/ai.module'
@@ -124,6 +125,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     TimeEntriesModule,
     NotificationsModule,
     ViewsModule,
+    PlannerModule,
     FormsModule,
     AutomationsModule,
     AiModule,

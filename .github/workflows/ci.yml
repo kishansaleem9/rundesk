@@ -436,6 +436,18 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-02 — the Planner's time blocks. `grep -ri time.block` returned zero
+      # files before this. The two load-bearing checks are not about the
+      # feature: a block is PERSONAL, so a second member must not read or
+      # delete one; and its label is RESOLVED from the task, so renaming the
+      # task renames every block pointing at it.
+      - name: Planner blocks
+        if: '!cancelled()'
+        run: node test/e2e/planner-blocks.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-06 — the wizard itself. `space-presets.mjs` proves the API applies
       # what it is sent; this proves a person can send it, which was the gap.
       # The load-bearing checks are the last four: what the wizard POSTs is
