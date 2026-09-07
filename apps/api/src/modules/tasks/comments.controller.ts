@@ -19,6 +19,20 @@ export class TaskCommentsController {
     return this.tasks.listComments(taskId)
   }
 
+  /**
+   * §V2-05, frame `04:00` — the @ picker's people, each flagged with whether
+   * they can actually open this task.
+   *
+   * It hangs off the comments controller because that is the guard it needs:
+   * `ResourceMemberGuard` resolves `:taskId` and refuses anyone who cannot
+   * reach the task themselves, so a person cannot use this to learn the
+   * membership of a task they have no business seeing.
+   */
+  @Get('mention-candidates')
+  mentionCandidates(@Param('taskId') taskId: string) {
+    return this.tasks.listMentionCandidates(taskId)
+  }
+
   @Post()
   create(
     @Param('taskId') taskId: string,

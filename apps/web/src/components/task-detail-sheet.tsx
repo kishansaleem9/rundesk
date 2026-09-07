@@ -57,6 +57,8 @@ import { useAuthStore } from '../store/auth'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker, type CoverChoice } from './cover-image-picker'
+import { CommentRecorder } from './comment-recorder'
+import { presentationFor } from '../lib/composer-recording'
 import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { MoveDialog } from './move-dialog'
@@ -184,6 +186,12 @@ type TaskStatus =
 
 type UserLite = { id: string; displayName?: string | null; email?: string | null }
 type WorkspaceMemberLite = { userId: string; displayName: string; email: string; role?: string }
+/**
+ * §V2-05 frame `04:00` — a mention candidate, and whether they can open the
+ * task you are about to point them at. `hasAccess` is decided on the server by
+ * the same four steps `ResourceMemberGuard` uses; the client never guesses it.
+ */
+type MentionCandidate = WorkspaceMemberLite & { hasAccess: boolean }
 type MentionTaskLite = { id: string; title: string; projectName?: string; listName?: string }
 type MentionDocLite = { id: string; title: string; updatedAt?: string }
 
@@ -1003,6 +1011,7 @@ export function TaskDetailSheet({
                   <button
                     key={tab.key}
                     type="button"
+                    data-testid={`task-tab-${tab.key}`}
                     onClick={() => setActiveTab(tab.key)}
                     className={cn(
                       'whitespace-nowrap py-2.5 text-sm transition-colors',
@@ -3820,6 +3829,19 @@ function AttachmentsPanel({
 // Comments
 // ---------------------------------------------------------------------------
 
+/**
+ * §V2-05 — what a comment's attachments look like.
+ *
+ * Frame `04:45` renders a voice note as an inline player and frame `05:35`
+ * renders a recorded clip as a video with a play button inside the comment. So
+ * audio and video are PLAYED here, not linked: a voice note behind a paperclip
+ * and a filename is a voice note nobody listens to, which is the whole reason
+ * she records one instead of typing.
+ *
+ * The kind is decided from the MIME type by `presentationFor`, so this applies
+ * to an audio file somebody uploaded from their phone exactly as it does to one
+ * recorded in the composer — the same rule, not a flag set at record time.
+ */
 function CommentAttachments({
   files,
 }: {
@@ -3828,17 +3850,44 @@ function CommentAttachments({
   if (!files || files.length === 0) return null
   return (
     <div className="mt-2 flex flex-wrap gap-2">
-      {files.map((f) =>
-        f.mimeType?.startsWith('image/') && f.url ? (
-          <a key={f.id} href={f.url} target="_blank" rel="noreferrer" title={f.fileName}>
-            <img
-              src={f.url}
-              alt={f.fileName}
-              loading="lazy"
-              className="h-16 w-16 rounded-md object-cover border border-border"
-            />
-          </a>
-        ) : (
+      {files.map((f) => {
+        // Without a URL there is nothing to play; those fall through to the
+        // link, which at least names the file.
+        const kind = f.url ? presentationFor(f.mimeType) : 'file'
+        if (kind === 'audio') {
+          return (
+            <div key={f.id} data-testid="comment-audio" className="w-full max-w-sm">
+              <audio src={f.url ?? undefined} controls preload="metadata" className="w-full h-9" />
+              <div className="mt-0.5 text-[10px] text-muted-foreground truncate">{f.fileName}</div>
+            </div>
+          )
+        }
+        if (kind === 'video') {
+          return (
+            <div key={f.id} data-testid="comment-video" className="w-full max-w-sm">
+              <video
+                src={f.url ?? undefined}
+                controls
+                preload="metadata"
+                className="w-full max-h-64 rounded-md border border-border bg-black"
+              />
+              <div className="mt-0.5 text-[10px] text-muted-foreground truncate">{f.fileName}</div>
+            </div>
+          )
+        }
+        if (kind === 'image') {
+          return (
+            <a key={f.id} href={f.url ?? undefined} target="_blank" rel="noreferrer" title={f.fileName}>
+              <img
+                src={f.url ?? undefined}
+                alt={f.fileName}
+                loading="lazy"
+                className="h-16 w-16 rounded-md object-cover border border-border"
+              />
+            </a>
+          )
+        }
+        return (
           <a
             key={f.id}
             href={f.url ?? '#'}
@@ -3849,8 +3898,8 @@ function CommentAttachments({
             <Paperclip className="h-3 w-3 text-muted-foreground" />
             <span className="max-w-[160px] truncate">{f.fileName}</span>
           </a>
-        ),
-      )}
+        )
+      })}
     </div>
   )
 }
@@ -3883,7 +3932,27 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
     queryFn: () => api<MentionDocLite[]>(`/workspaces/${workspaceId}/docs`),
     enabled: !!workspaceId && mentionTab === 'docs',
   })
-  const mentionCandidates = (membersQuery.data ?? []).filter((m) =>
+  /*
+   * §V2-05 frame `04:00`. The picker's people come from the TASK, not the
+   * workspace, because the workspace list cannot say who is locked out of this
+   * one. It falls back to the plain member list if the endpoint is missing, so
+   * an older API loses the warning rather than the picker.
+   */
+  const candidatesQuery = useQuery({
+    queryKey: ['task', taskId, 'mention-candidates'],
+    queryFn: async () => {
+      try {
+        return await api<MentionCandidate[]>(`/tasks/${taskId}/comments/mention-candidates`)
+      } catch (err) {
+        if (isNotWired(err)) return null
+        throw err
+      }
+    },
+  })
+  const mentionPeople: MentionCandidate[] =
+    candidatesQuery.data ??
+    (membersQuery.data ?? []).map((m) => ({ ...m, hasAccess: true }))
+  const mentionCandidates = mentionPeople.filter((m) =>
     (m.displayName || m.email).toLowerCase().includes(mentionQuery),
   )
   const taskMentionCandidates = (mentionTasksQuery.data ?? []).filter((task) =>
@@ -4329,6 +4398,8 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                   <button
                     key={member.userId}
                     type="button"
+                    data-testid="mention-candidate"
+                    data-has-access={member.hasAccess ? 'yes' : 'no'}
                     className={cn(
                       'w-full px-2.5 py-2 text-left text-xs flex items-center gap-2',
                       idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70',
@@ -4336,12 +4407,36 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     onMouseEnter={() => setMentionIndex(idx)}
                     onClick={() => insertMention(member)}
                   >
-                    <div className="h-6 w-6 rounded-full bg-brand-100 text-foreground text-[10px] font-semibold flex items-center justify-center">
+                    <div
+                      className={cn(
+                        'h-6 w-6 rounded-full bg-brand-100 text-foreground text-[10px] font-semibold flex items-center justify-center',
+                        !member.hasAccess && 'opacity-50',
+                      )}
+                    >
                       {(member.displayName || member.email)[0]?.toUpperCase()}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-medium text-foreground truncate">{member.displayName || member.email}</div>
-                      <div className="text-muted-foreground truncate">{member.email}</div>
+                      <div className={cn('font-medium truncate', member.hasAccess ? 'text-foreground' : 'text-muted-foreground')}>
+                        {member.displayName || member.email}
+                      </div>
+                      {/*
+                       * The warning of frame `04:00`, in place of the email —
+                       * the row is one line tall and the thing worth reading
+                       * about somebody who cannot open the task is not their
+                       * address.
+                       *
+                       * They are NOT removed from the list. Mentioning
+                       * somebody is often how you ask for them to be let in,
+                       * and a picker that hides them makes that impossible
+                       * while explaining nothing.
+                       */}
+                      {member.hasAccess ? (
+                        <div className="text-muted-foreground truncate">{member.email}</div>
+                      ) : (
+                        <div data-testid="mention-no-access" className="text-amber-600 dark:text-amber-500 truncate">
+                          {t('taskDetail.mentionNoAccess')}
+                        </div>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -4416,6 +4511,18 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
             ))}
           </div>
         )}
+        {/*
+         * §V2-05 — the mic of frame `04:10` and the "+" menu's Record a Video
+         * Clip of frame `04:56`. Both hand back a File and go up the same
+         * presign/upload path as a picked attachment, so a voice note is an
+         * attachment on the comment rather than a fifth kind of thing.
+         */}
+        <div className="mt-2">
+          <CommentRecorder
+            onAttach={(file) => setCommentFiles((prev) => [...prev, file])}
+            onTranscript={(append) => setText((prev) => append(prev))}
+          />
+        </div>
         <div className="mt-2 flex items-center justify-between gap-2">
           <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
             <Paperclip className="h-3.5 w-3.5" />
@@ -4433,8 +4540,15 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
           </label>
           <Button
             size="sm"
+            data-testid="comment-post"
             onClick={() => create.mutate()}
-            disabled={!text.trim() || create.isPending}
+            /*
+             * A voice note or a clip with no words typed beside it is a whole
+             * comment on its own — frame `04:45` is exactly that. Requiring
+             * text would make the mic a control that cannot post what it
+             * records.
+             */
+            disabled={(!text.trim() && commentFiles.length === 0) || create.isPending}
           >
             {create.isPending ? t('taskDetail.posting') : t('taskDetail.comment')}
           </Button>

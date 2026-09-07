@@ -50,6 +50,8 @@ import {
   type ExternalLinkProvider,
   type ExternalLinkRef,
 } from './external-links.util'
+import { describeAttachments } from './comment-summary'
+import { canReachTask } from './mention-access'
 import { resolveEffectiveStatuses } from '../../common/statuses/status-resolution'
 import {
   resolveIsManager,
@@ -3313,6 +3315,104 @@ export class TasksService {
   }
 
   // --- Comments ------------------------------------------------------------
+  /**
+   * §V2-05, frame `04:00` — who can be @-mentioned on this task, and who would
+   * be notified about something they cannot open.
+   *
+   * The workspace's members, each carrying `hasAccess`. The rule is evaluated by
+   * `canReachTask`, which mirrors `ResourceMemberGuard` step for step; the
+   * memberships it needs are fetched here once as sets rather than once per
+   * candidate, so a fifty-person workspace costs a handful of queries and not a
+   * hundred.
+   *
+   * `hasAccess` is only ever FALSE for a real reason, never as a default: a
+   * picker that greys people out when it is merely unsure teaches everyone to
+   * ignore the warning, which loses the one case it was built for.
+   */
+  async listMentionCandidates(taskId: string) {
+    const [row] = await this.db
+      .select({
+        listId: tasks.listId,
+        taskVisibility: tasks.visibility,
+        taskCreatedById: tasks.createdById,
+        listVisibility: lists.visibility,
+        listCreatedById: lists.createdById,
+        projectId: projects.id,
+        projectVisibility: projects.visibility,
+        spaceId: spaces.id,
+        spaceVisibility: spaces.visibility,
+        workspaceId: spaces.workspaceId,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .leftJoin(projects, eq(projects.id, lists.projectId))
+      .leftJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!row) throw new NotFoundException('Task not found')
+
+    const members = row.workspaceId
+      ? await this.db
+          .select({
+            userId: workspaceMembers.userId,
+            role: workspaceMembers.role,
+            email: users.email,
+            displayName: users.displayName,
+            avatarUrl: users.avatarUrl,
+          })
+          .from(workspaceMembers)
+          .innerJoin(users, eq(users.id, workspaceMembers.userId))
+          .where(eq(workspaceMembers.workspaceId, row.workspaceId))
+      : []
+
+    /*
+     * Only fetched when they can change the answer. A workspace whose spaces
+     * are public — which is most of them — pays for one assignee query and
+     * nothing else.
+     */
+    const assigneeRows = await this.db
+      .select({ userId: taskAssignees.userId })
+      .from(taskAssignees)
+      .where(eq(taskAssignees.taskId, taskId))
+    const spaceRows =
+      row.spaceId && (row.spaceVisibility === 'private' || row.projectVisibility === 'private')
+        ? await this.db
+            .select({ userId: spaceMembers.userId, role: spaceMembers.role })
+            .from(spaceMembers)
+            .where(eq(spaceMembers.spaceId, row.spaceId))
+        : []
+    const projectRows =
+      row.projectId && row.projectVisibility === 'private'
+        ? await this.db
+            .select({ userId: projectMembers.userId })
+            .from(projectMembers)
+            .where(eq(projectMembers.projectId, row.projectId))
+        : []
+
+    const ctx = {
+      spaceVisibility: row.spaceVisibility,
+      projectId: row.projectId,
+      projectVisibility: row.projectVisibility,
+      listVisibility: row.listVisibility,
+      listCreatedById: row.listCreatedById,
+      taskVisibility: row.taskVisibility,
+      taskCreatedById: row.taskCreatedById,
+      spaceMemberIds: new Set(spaceRows.map((s) => s.userId)),
+      spaceAdminIds: new Set(spaceRows.filter((s) => s.role === 'admin').map((s) => s.userId)),
+      projectMemberIds: new Set(projectRows.map((p) => p.userId)),
+      assigneeIds: new Set(assigneeRows.map((a) => a.userId)),
+    }
+
+    return members.map((m) => ({
+      userId: m.userId,
+      email: m.email,
+      displayName: m.displayName,
+      avatarUrl: m.avatarUrl,
+      role: m.role,
+      hasAccess: canReachTask(ctx, { userId: m.userId, workspaceRole: m.role }),
+    }))
+  }
+
   async listComments(taskId: string) {
     const rows = await this.db.query.taskComments.findMany({
       where: eq(taskComments.taskId, taskId),
@@ -3343,7 +3443,6 @@ export class TasksService {
   }
 
   async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {
-    if (!body.trim()) throw new BadRequestException('Comment body cannot be empty')
     // No assertTaskWriteAccess here by design — commenting is open to any
     // member who can see the task — so the bin check has to be made directly.
     const [target] = await this.db
@@ -3353,19 +3452,45 @@ export class TasksService {
       .limit(1)
     if (!target) throw new NotFoundException('Task not found')
     this.assertNotInBin(target.isArchived)
+
+    /*
+     * §V2-05 — a comment with no words is allowed IF it carries a file.
+     *
+     * Frame `04:45` is a voice note posted on its own, and `05:35` a recorded
+     * clip posted on its own. Keeping the old "body cannot be empty" rule would
+     * have left the composer's mic able to record something it could never
+     * post — a control named after a thing it cannot do.
+     *
+     * The attachments are RESOLVED here rather than trusted, and resolved
+     * against this task: an empty body is only accepted once at least one of
+     * the given ids is a real row on this task. Otherwise any caller could post
+     * an empty comment by naming ids that link nothing, and the emptiness check
+     * would be decoration.
+     */
+    const requestedIds = attachmentIds ?? []
+    const linkable = requestedIds.length > 0
+      ? await this.db
+          .select({ id: taskAttachments.id, fileName: taskAttachments.fileName, contentType: taskAttachments.contentType })
+          .from(taskAttachments)
+          .where(and(eq(taskAttachments.taskId, taskId), inArray(taskAttachments.id, requestedIds)))
+      : []
+    if (!body.trim() && linkable.length === 0) {
+      throw new BadRequestException('A comment needs words or a file')
+    }
+
     const extracted = this.extractMentionIds(body).map((userId) => ({ userId, offset: 0, length: 0 }))
     const finalMentions = mentions && mentions.length > 0 ? mentions : extracted
     const [comment] = await this.db
       .insert(taskComments)
       .values({ taskId, authorId, body, parentCommentId, mentions: finalMentions.length > 0 ? finalMentions : null })
       .returning()
-    // Link any pre-uploaded attachments to this comment. Only rows belonging to
-    // the same task are linked, so a caller can't attach files from elsewhere.
-    if (attachmentIds && attachmentIds.length > 0) {
+    // Link the resolved attachments to this comment. Only rows belonging to the
+    // same task are linked, so a caller can't attach files from elsewhere.
+    if (linkable.length > 0) {
       await this.db
         .update(taskAttachments)
         .set({ commentId: comment.id })
-        .where(and(eq(taskAttachments.taskId, taskId), inArray(taskAttachments.id, attachmentIds)))
+        .where(and(eq(taskAttachments.taskId, taskId), inArray(taskAttachments.id, linkable.map((a) => a.id))))
     }
     // Auto-subscribe the author as a watcher (§A4.7 — opt-out).
     if (await this.notifications.autoFollowEnabled(authorId)) {
@@ -3379,8 +3504,9 @@ export class TasksService {
     })
     this.realtime.emitToTask(taskId, { type: 'comment.created', taskId, comment: hydrated })
 
-    // Fire comment + mention notifications (best-effort)
-    void this.notifyComment(taskId, authorId, body, finalMentions)
+    // Fire comment + mention notifications (best-effort). A wordless voice note
+    // gets described by what it is rather than emailed as a blank quote.
+    void this.notifyComment(taskId, authorId, body.trim() ? body : describeAttachments(linkable), finalMentions)
 
     // Fire the "Comment is added to task" automation trigger (best-effort).
     void (async () => {
