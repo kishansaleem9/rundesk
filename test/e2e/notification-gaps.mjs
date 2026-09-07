@@ -129,7 +129,20 @@ try {
   chk(!!taskId && !!commentId, 'there is a comment to react to',
     `task ${task.status}, comment ${comment.status}: ${JSON.stringify(comment.error)}`)
 
-  const before = ((await A('/notifications')).data ?? []).filter((n) => n.type === 'message_reaction').length
+  /*
+   * Deliberately NOT a before/after count.
+   *
+   * `GET /notifications` returns the fifty most recent rows. Once an inbox is
+   * that full — which any long-lived workspace is — every arriving
+   * notification pushes an old one off the bottom, so counting
+   * `message_reaction` rows before and after gives 9 → 9 while the new row is
+   * sitting at the top of the list. This check failed exactly that way on a
+   * local database with a dozen sweeps of history, and passes on CI only
+   * because CI seeds an empty one.
+   *
+   * The question is "did a notification about THIS comment arrive", and the
+   * identity of the row answers it. The count never did.
+   */
   const reacted = await B(`/tasks/${taskId}/comments/${commentId}/reactions`, {
     method: 'POST',
     body: { emoji: '🔥' },
@@ -141,9 +154,9 @@ try {
   )
   const reactionRows = mineNow.filter((n) => n.type === 'message_reaction')
   chk(
-    reactionRows.length > before && reactionRows.some((n) => n.target?.entityId === taskId),
+    reactionRows.some((n) => n.target?.entityId === taskId),
     'and the author is told, exactly as they would be in chat',
-    `message_reaction rows went ${before} → ${reactionRows.length}, none naming ${taskId}`,
+    `no message_reaction naming ${taskId}; the inbox held ${reactionRows.length} reaction row(s) of ${mineNow.length}`,
   )
 
   /*
