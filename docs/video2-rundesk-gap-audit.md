@@ -165,6 +165,57 @@ Sub-items, each visible in a frame:
 
 ---
 
+#### V2-02 read off the frames
+
+Frames `13:08` and `14:10` re-extracted and read. Four corrections and
+additions to the paragraph above:
+
+**1. The route is `/calendar`, not `/planner`.** The address bar reads
+`app.clickup.com/90182956805/calendar` while the left rail is headed
+"Planner" and the tab title is "Planner | Leo". The sidebar entry and the URL
+disagree on purpose — the noun is Planner, the thing is a calendar.
+
+**2. The grid, frame `13:08`.** `‹ ›` `August 2026` · `Week ▾` on the right
+with three icons and a gear. Header row: a `+`, the timezone (`GMT+5`), then
+`Mon 3 … Sun 9` with **today's number in a filled pill**. Below it an **All
+day** row carrying a `⟳`, then an hour gutter (1pm…11pm visible) with a **red
+now-line and a red `6:02` pill in the gutter**, and **weekend columns dimmed**.
+A floating command bar sits at the bottom: *"Search events, teammates,
+commands…"*.
+
+**3. The left rail, frame `13:08`.** Header **Planner** with a `+ ▾`, then:
+**Priorities** — empty state *"Prioritize a Task to see it appear here"* over a
+flag icon, and **+ Add priority** · **Meet with** — *"Search for people…"* ·
+**Assigned to me** › · **Today & overdue** › · **Backlog**, which lists the
+actual task. So Backlog is where an unscheduled task waits to be dragged.
+
+**4. Settings, frame `14:10`.** Seven pages, in this order: **Appearance ·
+Accounts · Sidebar · Upcoming meeting · Time blocking · AI Notetaker ·
+Automations**, with a footer of What's new / Report a problem / Feature
+requests. The Appearance page carries: event style **Subtle | Solid**,
+**Default event duration** (`1 hour`), **Color tasks by** (`None`), **Start
+week on** (`Monday`), **Timezone** (`Asia/Karachi`), and five toggles — Show
+weekends · Show week numbers · Always open at the start of the week ·
+**Darken non-working hours** (*"Visually dim the hours outside your work
+schedule on the calendar grid"*) · **Save personal events quickly**
+(*"Automatically save personal events without asking for confirmation"*).
+
+**What she SAYS that no frame shows.** `[13:11]`–`[13:22]`: "MERE TASK GOOGLE
+CALENDAR PE BHI JAA SAKTE HAIN — mere task jo hain woh yahan se Google
+Calendar pe add honge, aur Google Calendar mein jitne bhi task mere add honge
+woh mujhe yahan show ho jayenge." Two-way, both directions stated explicitly.
+Rundesk's `calendar-sync` already does this; what is missing is the surface it
+should appear on.
+
+`[15:47]`–`[16:01]`: assigning a task prompts **"Add to Priorities"**, and the
+priority then shows **on the calendar** — which is the join Rundesk does not
+have. `user_priorities` exists from video 1 and lives nowhere near a calendar.
+
+`[16:07]`–`[16:11]`: the task shows above the grid with **how much time is
+left**, matching the tab header *"Work on dbgdh · 2h 55m left"*.
+
+---
+
 ### V2-03 · The AI Notetaker joins meetings Rundesk is not in
 **Ask** `[14:22]` *"AI NOTE TAKER aap chaho to add kar sakte ho, CALENDAR select
 kar sakte ho — kis calendar par aap ko AI note taker chahiye"*.
