@@ -2,6 +2,16 @@ name: CI
 
 on:
   pull_request:
+    # A commit that only touches prose cannot break a test. Two of this
+    # branch's twelve runs were `docs/**` only, and each one cost a full
+    # Postgres-harness job to prove that a markdown file still parses.
+    #
+    # Deliberately narrow: `docs/**` and nothing else. `.md` anywhere would
+    # also skip a README that a script reads, and `paths-ignore` skips the
+    # whole run rather than one job, so anything that could conceivably be
+    # load-bearing stays in.
+    paths-ignore:
+      - 'docs/**'
   push:
     branches:
       - main
