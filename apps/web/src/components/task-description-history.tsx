@@ -83,7 +83,17 @@ export function TaskDescriptionHistoryDialog({
         </DialogHeader>
 
         {query.isPending ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
+          /*
+           * §2.9a — a wait is drawn as the SHAPE of what is coming, never as
+           * the word "Loading". `loading-states` enforces that and caught this
+           * file: "Loading…" tells a person nothing about whether anything is
+           * on its way; three stacked rows tell them a list is.
+           */
+          <div className="space-y-2" aria-busy="true" aria-live="polite">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-14 rounded-md border border-border bg-muted/30 animate-pulse" />
+            ))}
+          </div>
         ) : revisions.length === 0 ? (
           /*
            * An empty history is the normal state for a task nobody has edited,

@@ -62,7 +62,8 @@ export function TaskEmailDialog({
         </DialogHeader>
 
         {query.isPending ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</p>
+          /* §2.9a — the shape of the address that is coming, not the word. */
+          <div className="h-9 rounded border border-border bg-muted/30 animate-pulse" aria-busy="true" aria-live="polite" />
         ) : address ? (
           <>
             <p className="text-sm text-muted-foreground">{t('taskEmail.hint')}</p>

@@ -45,11 +45,17 @@ const filters = process.argv.slice(2)
  *
  * Tracked and untracked-but-not-ignored files, hashed. `git commit` is
  * invisible to it; a real edit is not.
+ *
+ * SORTED, and that is not cosmetic. `git ls-files -co` lists cached files and
+ * others in separate passes, so committing an untracked file moves it between
+ * them and changes the ORDER without changing a byte. The unsorted version of
+ * this fired on exactly that — the second false alarm from the same guard, for
+ * a different reason than the first.
  */
 function fingerprint() {
   const content = execFileSync(
     'bash',
-    ['-c', "git ls-files -co --exclude-standard -z | xargs -0 sha1sum | sha1sum | cut -c1-12"],
+    ['-c', "git ls-files -co --exclude-standard -z | sort -z | xargs -0 sha1sum | sha1sum | cut -c1-12"],
     { cwd: ROOT },
   ).toString().trim()
   const suites = fs.readdirSync(path.join(ROOT, 'test/e2e')).filter((f) => f.endsWith('.mjs')).length

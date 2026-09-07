@@ -124,7 +124,12 @@ export function TaskMergeDialog({
         />
         <ul className="mt-2 max-h-[50vh] space-y-1 overflow-auto">
           {candidatesQuery.isPending ? (
-            <li className="py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</li>
+            /* §2.9a — the shape of the list that is coming, not the word. */
+            <li aria-busy="true" aria-live="polite">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="mb-1 h-10 rounded bg-muted/30 animate-pulse" />
+              ))}
+            </li>
           ) : candidates.length === 0 ? (
             <li className="py-6 text-center text-sm text-muted-foreground">{t('taskMerge.noMatches')}</li>
           ) : (
