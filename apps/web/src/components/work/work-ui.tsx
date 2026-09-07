@@ -227,15 +227,28 @@ export function WorkFilterSelect({
   onChange,
   children,
   className,
+  testId,
+  ariaLabel,
 }: {
   value: string
   onChange: (value: string) => void
   children: ReactNode
   className?: string
+  /*
+   * The toolbar was entirely untestidded, so every browser check that wanted
+   * one of these selects had to find it by the text of its options — which
+   * three of them share ("assignee" is a sort field, a group-by and, since
+   * §V2-07, a filter chip). A test that picks the wrong control silently
+   * asserts something about a different control.
+   */
+  testId?: string
+  ariaLabel?: string
 }) {
   return (
     <select
       value={value}
+      data-testid={testId}
+      aria-label={ariaLabel}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
         'h-8 rounded-md border border-border/80 bg-background px-2.5 text-[12px] text-foreground',

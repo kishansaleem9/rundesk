@@ -413,6 +413,27 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-07 — "Saved filters", frame 11:41. The rules themselves are
+      # evaluated in the browser and tested in apps/web/src/lib/task-filters.
+      # test.ts; this covers the half that crosses the wire — per-person
+      # scoping, save-by-name replacing, and refusing a nest the panel could
+      # not have built.
+      - name: List filters
+        if: '!cancelled()'
+        run: node test/e2e/list-filters.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §V2-07 `[11:35]` — the "Save view" chip. Drives the built app against a
+      # stubbed API: absent on an untouched view, present the moment it is
+      # modified, and gone once saved. The last of those three is the one that
+      # caught a real bug — the dirty flag was held in a ref, so the chip
+      # stayed up after a successful save.
+      - name: List save-view chip
+        if: '!cancelled()'
+        run: node test/e2e/list-save-view.mjs --dist apps/web/dist
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.

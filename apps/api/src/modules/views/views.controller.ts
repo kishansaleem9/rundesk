@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ViewsService } from './views.service'
+import { ListFiltersService } from './list-filters.service'
 import type { CurrentUserPayload } from '../tasks/types'
 import type { ViewVisibility } from '@rundesk/db'
 
@@ -21,7 +22,7 @@ import type { ViewVisibility } from '@rundesk/db'
 @Controller()
 @UseGuards(JwtAuthGuard, ResourceMemberGuard)
 export class ViewsController {
-  constructor(private views: ViewsService) {}
+  constructor(private views: ViewsService, private filters: ListFiltersService) {}
 
   @Get('lists/:listId/views')
   list(@Param('listId') listId: string, @CurrentUser() user: CurrentUserPayload) {
@@ -84,5 +85,30 @@ export class ViewsController {
   @Delete('views/:viewId')
   remove(@Param('viewId') viewId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.views.delete(viewId, { id: user.id, role: user.role })
+  }
+
+  // ── §V2-07 "Saved filters", frame 11:41 ───────────────────────────────────
+  //
+  // On the views controller because they are the other half of the same panel
+  // and share its guard: `ResourceMemberGuard` resolves `:listId` to a
+  // workspace, so a member of one workspace cannot read another's presets.
+
+  @Get('lists/:listId/filters')
+  listFilters(@Param('listId') listId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.filters.list(listId, user.id)
+  }
+
+  @Post('lists/:listId/filters')
+  saveFilter(
+    @Param('listId') listId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { name: string; rules?: unknown },
+  ) {
+    return this.filters.save(listId, user.id, body.name, body.rules)
+  }
+
+  @Delete('lists/:listId/filters/:filterId')
+  deleteFilter(@Param('filterId') filterId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.filters.remove(filterId, user.id)
   }
 }

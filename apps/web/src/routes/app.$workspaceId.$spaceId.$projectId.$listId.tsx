@@ -46,6 +46,30 @@ import {
   Link2,
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
+import { useAuthStore } from '../store/auth'
+/*
+ * A1.4 / §V2-07 — the filter tree and its evaluator now live in `lib/task-filters.ts`.
+ * They were the one piece of real logic in this file that no test could
+ * reach, because reaching it meant importing a route.
+ */
+import {
+  type FilterOp,
+  type FilterFieldKind,
+  type FilterRule,
+  type FilterGroup,
+  type FilterNode,
+  type FilterContext,
+  isFilterGroup,
+  filterLeaves,
+  countLeaves,
+  matchesNode,
+  filterFieldKind,
+  dayKey,
+  OPS_BY_KIND,
+  VALUELESS_OPS,
+  BUILTIN_FILTER_FIELDS,
+  UNASSIGNED_FILTER,
+} from '../lib/task-filters'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { toDateInput, withDatePart } from '../lib/task-dates'
 import { criticalPath } from '../lib/gantt'
@@ -136,6 +160,8 @@ type TaskItem = {
   startDate?: string | null
   dueDate?: string | null
   createdAt?: string | null
+  /** §V2-07 — "Date closed" in the filter list, frame 11:41. */
+  completedAt?: string | null
   // Both come back on every row already; the filter builder (A1.4) is the
   // first thing in this view to read them.
   createdById?: string | null
@@ -303,7 +329,6 @@ type SortField = 'title' | 'status' | 'priority' | 'due' | 'assignee' | 'created
 type SortState = { field: SortField; dir: SortDir }
 type ColumnFilters = { statuses: string[]; priorities: TaskPriority[]; assignees: string[] }
 const EMPTY_COLUMN_FILTERS: ColumnFilters = { statuses: [], priorities: [], assignees: [] }
-const UNASSIGNED_FILTER = '__unassigned__'
 
 const PRIORITY_WEIGHT: Record<TaskPriority, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
 
@@ -317,122 +342,14 @@ function columnFiltersActive(f: ColumnFilters): boolean {
   return f.statuses.length > 0 || f.priorities.length > 0 || f.assignees.length > 0
 }
 
-// ---------------------------------------------------------------------------
-// Filter builder (A1.4). The column menus above only reach status / priority /
-// assignee, which are the three attributes that happen to have a column. These
-// rules cover everything else the row already carries — dates, creator,
-// recurrence — plus the project's custom fields, so "show me everything Sara
-// filed that is due this week" stops needing a report.
-// ---------------------------------------------------------------------------
-type FilterOp = 'is' | 'isNot' | 'before' | 'after' | 'between' | 'contains' | 'gt' | 'lt' | 'isSet' | 'isNotSet'
-type FilterFieldKind = 'date' | 'user' | 'flag' | 'text' | 'number' | 'choice'
-type FilterRule = { id: string; field: string; op: FilterOp; value: string; value2?: string }
 
-const OPS_BY_KIND: Record<FilterFieldKind, FilterOp[]> = {
-  date: ['before', 'after', 'between', 'isSet', 'isNotSet'],
-  user: ['is', 'isNot'],
-  flag: ['isSet', 'isNotSet'],
-  text: ['contains', 'isSet', 'isNotSet'],
-  number: ['gt', 'lt', 'isSet', 'isNotSet'],
-  choice: ['is', 'isNot', 'isSet', 'isNotSet'],
-}
-/** Operators that ask only about presence, so the value input is hidden. */
-const VALUELESS_OPS: FilterOp[] = ['isSet', 'isNotSet']
-
-const BUILTIN_FILTER_FIELDS: Array<{ id: string; kind: FilterFieldKind; labelKey: TranslationKey }> = [
-  { id: 'due', kind: 'date', labelKey: 'taskDetail.fieldDueDate' },
-  { id: 'start', kind: 'date', labelKey: 'list.filter.fieldStart' },
-  { id: 'created', kind: 'date', labelKey: 'list.sortCreated' },
-  { id: 'creator', kind: 'user', labelKey: 'list.filter.fieldCreator' },
-  { id: 'recurring', kind: 'flag', labelKey: 'list.filter.fieldRecurring' },
-]
-
-/** Custom-field type → the operator set that makes sense for it. */
-const CUSTOM_FIELD_KIND: Record<CustomFieldType, FilterFieldKind> = {
-  text: 'text',
-  url: 'text',
-  number: 'number',
-  date: 'date',
-  checkbox: 'choice',
-  dropdown: 'choice',
-}
-
-/** Everything the rule evaluator needs beyond the task row itself. */
-type FilterContext = {
-  customFields: CustomFieldDef[]
-  /** taskId → fieldId → value. Empty until a custom rule (or Table) loads it. */
-  customValues: Record<string, Record<string, unknown>>
-}
-
-function filterFieldKind(field: string, customFields: CustomFieldDef[]): FilterFieldKind | null {
-  const builtin = BUILTIN_FILTER_FIELDS.find((f) => f.id === field)
-  if (builtin) return builtin.kind
-  if (!field.startsWith('custom:')) return null
-  const def = customFields.find((f) => f.id === field.slice('custom:'.length))
-  return def ? CUSTOM_FIELD_KIND[def.type] : null
-}
-
-/** Local calendar day of an ISO timestamp, so date rules compare like the
- *  Calendar view groups — lexical order on `yyyy-MM-dd` is chronological. */
-function dayKey(iso: string | null | undefined): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? null : format(d, 'yyyy-MM-dd')
-}
-
-/** The raw value a rule's field holds on one task, or null when unset. */
-function ruleFieldValue(task: TaskItem, field: string, ctx: FilterContext): unknown {
-  switch (field) {
-    case 'due': return task.dueDate ?? null
-    case 'start': return task.startDate ?? null
-    case 'created': return task.createdAt ?? null
-    case 'creator': return task.createdById ?? null
-    case 'recurring': return task.recurrence ?? null
-    default: {
-      if (!field.startsWith('custom:')) return null
-      const raw = ctx.customValues[task.id]?.[field.slice('custom:'.length)]
-      // A false checkbox is a real answer, not an empty one.
-      return raw === undefined || raw === '' ? null : raw
-    }
-  }
-}
-
-function matchesRule(task: TaskItem, rule: FilterRule, ctx: FilterContext): boolean {
-  const kind = filterFieldKind(rule.field, ctx.customFields)
-  if (!kind) return true // the field was deleted underneath the view — don't hide rows
-  const value = ruleFieldValue(task, rule.field, ctx)
-  if (rule.op === 'isSet') return value !== null && value !== false
-  if (rule.op === 'isNotSet') return value === null || value === false
-  if (value === null) return false
-  if (!rule.value.trim()) return true // half-built rule filters nothing
-
-  if (kind === 'date') {
-    const key = dayKey(String(value))
-    if (!key) return false
-    if (rule.op === 'before') return key < rule.value
-    if (rule.op === 'after') return key > rule.value
-    if (rule.op === 'between') return key >= rule.value && key <= (rule.value2 || rule.value)
-    return true
-  }
-  if (kind === 'number') {
-    const num = Number(value)
-    const target = Number(rule.value)
-    if (Number.isNaN(num) || Number.isNaN(target)) return false
-    return rule.op === 'gt' ? num > target : num < target
-  }
-  const text = String(value).toLowerCase()
-  if (rule.op === 'contains') return text.includes(rule.value.trim().toLowerCase())
-  if (rule.op === 'is') return text === rule.value.toLowerCase()
-  if (rule.op === 'isNot') return text !== rule.value.toLowerCase()
-  return true
-}
 
 function filterTasks(
   tasks: TaskItem[],
   statusFilter: 'all' | TaskStatus,
   filters: ColumnFilters,
   search = '',
-  rules: FilterRule[] = [],
+  rules: FilterNode[] = [],
   ctx: FilterContext = { customFields: [], customValues: {} },
   /*
    * §V2-07 `[11:32]` — "Show closed tasks". Closed is the status CATEGORY, so a
@@ -458,7 +375,7 @@ function filterTasks(
     if (statusFilter !== 'all' && task.status !== statusFilter) return false
     if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) return false
     if (filters.priorities.length > 0 && !filters.priorities.includes(task.priority)) return false
-    if (rules.some((rule) => !matchesRule(task, rule, ctx))) return false
+    if (rules.some((node) => !matchesNode(task, node, ctx))) return false
     if (filters.assignees.length > 0) {
       const ids = (task.assignees ?? []).map((a) => a.userId)
       const matchesUnassigned = filters.assignees.includes(UNASSIGNED_FILTER) && ids.length === 0
@@ -763,23 +680,43 @@ const FILTER_OP_LABEL_KEYS: Record<FilterOp, TranslationKey> = {
 }
 
 /**
- * A1.4 — the filter builder: stacked field/operator/value rows, ANDed together
- * and saved with the view like every other toolbar control. It sits beside the
- * column funnels rather than replacing them; those stay the one-click path for
- * the three attributes that have a column.
+ * A1.4 / §V2-07 — the Filters panel of frame `11:41`.
+ *
+ * `[11:13]` "Ab yahan pe FILTERS hain — aap filters add kar sakte ho agar aap
+ * us Customize wale option pe click karte ho." The frame shows a "Select
+ * filter" row over Status · Tags · Due date · Priority · Assignee · Archived ·
+ * Created by · Date closed · Date created, a **+ Add filter**, an **Add nested
+ * filter**, and **Saved filters ▾**.
+ *
+ * Two things changed here beyond the field list. Rows can now be bracketed —
+ * a nested group with its own AND/OR, which is the only way to express
+ * "urgent and (mine or unassigned)" — and a set of rows can be saved under a
+ * name and re-applied, per user, per list.
+ *
+ * It still sits beside the column funnels rather than replacing them; those
+ * stay the one-click path for the three attributes that have a column.
  */
 function FilterBuilderMenu({
-  rules,
+  listId,
+  nodes,
   onChange,
   customFields,
   workspaceMembers,
+  statusOptions,
+  labelOptions,
 }: {
-  rules: FilterRule[]
-  onChange: (next: FilterRule[]) => void
+  listId: string
+  nodes: FilterNode[]
+  onChange: (next: FilterNode[]) => void
   customFields: CustomFieldDef[]
   workspaceMembers: WorkspaceMember[]
+  statusOptions: FilterOption[]
+  /** Derived from the tasks on this list — a tag no task here carries would
+   *  filter to nothing anyway, so offering it would only mislead. */
+  labelOptions: FilterOption[]
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
@@ -791,28 +728,92 @@ function FilterBuilderMenu({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
 
+  const { data: presets = [] } = useQuery({
+    queryKey: ['list-filters', listId],
+    queryFn: () => api<Array<{ id: string; name: string; rules: FilterNode[] }>>(`/lists/${listId}/filters`),
+    enabled: open,
+  })
+  const refreshPresets = () => qc.invalidateQueries({ queryKey: ['list-filters', listId] })
+
   const fieldOptions = [
     ...BUILTIN_FILTER_FIELDS.map((f) => ({ value: f.id, label: t(f.labelKey) })),
     ...customFields.map((f) => ({ value: `custom:${f.id}`, label: f.name })),
   ]
 
-  const patch = (id: string, next: Partial<FilterRule>) =>
-    onChange(rules.map((r) => (r.id === id ? { ...r, ...next } : r)))
+  const leafCount = countLeaves(nodes)
 
-  const addRule = () => {
-    const field = fieldOptions[0]?.value ?? 'due'
-    const kind = filterFieldKind(field, customFields) ?? 'date'
-    onChange([
-      ...rules,
-      { id: `${Date.now()}-${rules.length}`, field, op: OPS_BY_KIND[kind][0], value: '' },
-    ])
+  /* ── editing the tree ───────────────────────────────────────────────────
+   *
+   * Every edit goes through `replace`, which walks the top level and, for a
+   * group, its rules. One walker, so a rule inside a bracket is edited by the
+   * same code as a rule outside it — the alternative is two nearly-identical
+   * code paths that drift the first time an operator is added.
+   */
+  const replace = (ruleId: string, next: Partial<FilterRule> | null) =>
+    onChange(
+      nodes
+        .map((node) => {
+          if (!isFilterGroup(node)) {
+            if (node.id !== ruleId) return node
+            return next === null ? null : { ...node, ...next }
+          }
+          if (!node.rules.some((r) => r.id === ruleId)) return node
+          const rules = next === null
+            ? node.rules.filter((r) => r.id !== ruleId)
+            : node.rules.map((r) => (r.id === ruleId ? { ...r, ...next } : r))
+          return { ...node, rules }
+        })
+        .filter((n): n is FilterNode => n !== null),
+    )
+
+  const newId = (suffix: string) => `${Date.now()}-${suffix}-${Math.random().toString(36).slice(2, 7)}`
+
+  const blankRule = (): FilterRule => {
+    const field = fieldOptions[0]?.value ?? 'status'
+    const kind = filterFieldKind(field, customFields) ?? 'choice'
+    return { id: newId('r'), field, op: OPS_BY_KIND[kind][0], value: '' }
   }
+
+  const addRule = () => onChange([...nodes, blankRule()])
+
+  /** "Add nested filter" — a bracket, pre-loaded with one row to edit. */
+  const addGroup = () =>
+    onChange([...nodes, { id: newId('g'), conjunction: 'or', rules: [blankRule()] }])
+
+  const addToGroup = (groupId: string) =>
+    onChange(
+      nodes.map((node) =>
+        isFilterGroup(node) && node.id === groupId
+          ? { ...node, rules: [...node.rules, blankRule()] }
+          : node,
+      ),
+    )
+
+  const setConjunction = (groupId: string, conjunction: 'and' | 'or') =>
+    onChange(nodes.map((n) => (isFilterGroup(n) && n.id === groupId ? { ...n, conjunction } : n)))
+
+  const removeNode = (nodeId: string) => onChange(nodes.filter((n) => n.id !== nodeId))
 
   // Changing the field can invalidate the operator (a date "before" makes no
   // sense on a creator), so re-seed both operator and value from the new kind.
   const changeField = (rule: FilterRule, field: string) => {
     const kind = filterFieldKind(field, customFields) ?? 'text'
-    patch(rule.id, { field, op: OPS_BY_KIND[kind][0], value: '', value2: undefined })
+    replace(rule.id, { field, op: OPS_BY_KIND[kind][0], value: '', value2: undefined })
+  }
+
+  /** The options a `choice` field offers, which now depends on which field. */
+  const choiceOptions = (field: string): FilterOption[] => {
+    if (field === 'status') return statusOptions
+    if (field === 'tags') return labelOptions
+    if (field === 'priority') return PRIORITY_OPTIONS.map((p) => ({ value: p, label: t(PRIORITY_LABEL_KEYS[p]) }))
+    const def = customFields.find((f) => `custom:${f.id}` === field)
+    if (def?.type === 'checkbox') {
+      return [
+        { value: 'true', label: t('list.filter.checked') },
+        { value: 'false', label: t('list.filter.unchecked') },
+      ]
+    }
+    return (def?.options ?? []).map((o) => ({ value: o.value, label: o.label }))
   }
 
   const valueInput = (rule: FilterRule) => {
@@ -825,7 +826,7 @@ function FilterBuilderMenu({
           <input
             type="date"
             value={rule.value}
-            onChange={(e) => patch(rule.id, { value: e.target.value })}
+            onChange={(e) => replace(rule.id, { value: e.target.value })}
             aria-label={t('list.filter.value')}
             className={cls}
           />
@@ -833,7 +834,7 @@ function FilterBuilderMenu({
             <input
               type="date"
               value={rule.value2 ?? ''}
-              onChange={(e) => patch(rule.id, { value2: e.target.value })}
+              onChange={(e) => replace(rule.id, { value2: e.target.value })}
               aria-label={t('list.filter.valueTo')}
               className={cls}
             />
@@ -845,11 +846,15 @@ function FilterBuilderMenu({
       return (
         <select
           value={rule.value}
-          onChange={(e) => patch(rule.id, { value: e.target.value })}
+          onChange={(e) => replace(rule.id, { value: e.target.value })}
           aria-label={t('list.filter.value')}
           className={cls}
         >
           <option value="">{t('list.filter.pickValue')}</option>
+          {/* Assignee is a set, so it can also be asked about being empty. */}
+          {rule.field === 'assignee' && (
+            <option value={UNASSIGNED_FILTER}>{t('list.group.unassigned')}</option>
+          )}
           {workspaceMembers.map((m) => (
             <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
           ))}
@@ -857,23 +862,15 @@ function FilterBuilderMenu({
       )
     }
     if (kind === 'choice') {
-      const def = customFields.find((f) => `custom:${f.id}` === rule.field)
-      const options =
-        def?.type === 'checkbox'
-          ? [
-              { value: 'true', label: t('list.filter.checked') },
-              { value: 'false', label: t('list.filter.unchecked') },
-            ]
-          : (def?.options ?? []).map((o) => ({ value: o.value, label: o.label }))
       return (
         <select
           value={rule.value}
-          onChange={(e) => patch(rule.id, { value: e.target.value })}
+          onChange={(e) => replace(rule.id, { value: e.target.value })}
           aria-label={t('list.filter.value')}
           className={cls}
         >
           <option value="">{t('list.filter.pickValue')}</option>
-          {options.map((o) => (
+          {choiceOptions(rule.field).map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
@@ -883,7 +880,7 @@ function FilterBuilderMenu({
       <input
         type={kind === 'number' ? 'number' : 'text'}
         value={rule.value}
-        onChange={(e) => patch(rule.id, { value: e.target.value })}
+        onChange={(e) => replace(rule.id, { value: e.target.value })}
         placeholder={t('list.filter.value')}
         aria-label={t('list.filter.value')}
         className={cls}
@@ -891,74 +888,177 @@ function FilterBuilderMenu({
     )
   }
 
+  /** One field/operator/value row, wherever it sits. */
+  const ruleRow = (rule: FilterRule, prefix: string) => {
+    const kind = filterFieldKind(rule.field, customFields) ?? 'text'
+    return (
+      <div key={rule.id} className="flex items-center gap-1" data-testid="list-filter-rule">
+        <span className="w-8 shrink-0 text-[11px] uppercase text-muted-foreground">{prefix}</span>
+        <select
+          value={rule.field}
+          onChange={(e) => changeField(rule, e.target.value)}
+          aria-label={t('list.filter.field')}
+          className="h-7 w-28 shrink-0 rounded border border-border bg-background px-1 text-[12px]"
+        >
+          {fieldOptions.map((f) => (
+            <option key={f.value} value={f.value}>{f.label}</option>
+          ))}
+        </select>
+        <select
+          value={rule.op}
+          onChange={(e) => replace(rule.id, { op: e.target.value as FilterOp })}
+          aria-label={t('list.filter.operator')}
+          className="h-7 w-24 shrink-0 rounded border border-border bg-background px-1 text-[12px]"
+        >
+          {OPS_BY_KIND[kind].map((op) => (
+            <option key={op} value={op}>{t(FILTER_OP_LABEL_KEYS[op])}</option>
+          ))}
+        </select>
+        {valueInput(rule)}
+        <button
+          type="button"
+          onClick={() => replace(rule.id, null)}
+          aria-label={t('list.filter.removeRule')}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+        >
+          <XIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )
+  }
+
+  const saveCurrent = async () => {
+    const name = window.prompt(t('list.filter.savePrompt'))?.trim()
+    if (!name) return
+    try {
+      await api(`/lists/${listId}/filters`, { method: 'POST', body: { name, rules: nodes } })
+      await refreshPresets()
+      toast.success(t('list.filter.saved'))
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('list.filter.saveFailed'))
+    }
+  }
+
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        data-testid="list-filter-builder"
         className={cn(
           'h-8 shrink-0 rounded-md border border-border/80 bg-card px-2.5 text-[12px] inline-flex items-center gap-1.5 hover:bg-muted/40',
-          rules.length > 0 && 'text-violet-600 dark:text-violet-400',
+          leafCount > 0 && 'text-violet-600 dark:text-violet-400',
         )}
         title={t('list.filter.builder')}
       >
-        <Filter className={cn('h-3.5 w-3.5', rules.length > 0 && 'fill-current')} />
-        {rules.length > 0 ? t('list.filter.builderCount', { count: rules.length }) : t('list.filter.builder')}
+        <Filter className={cn('h-3.5 w-3.5', leafCount > 0 && 'fill-current')} />
+        {leafCount > 0 ? t('list.filter.builderCount', { count: leafCount }) : t('list.filter.builder')}
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 right-0 w-[26rem] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card p-2 shadow-lg space-y-1.5">
-          {rules.length === 0 && (
+        <div className="absolute z-30 mt-1 right-0 w-[30rem] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card p-2 shadow-lg space-y-1.5">
+          {/* Saved filters ▾ — frame 11:41 puts it at the panel's top right. */}
+          <div className="flex items-center justify-between gap-2 pb-1">
+            <span className="text-[12px] font-medium">{t('list.filter.builder')}</span>
+            <div className="flex items-center gap-1">
+              <select
+                value=""
+                data-testid="list-filter-presets"
+                aria-label={t('list.filter.savedFilters')}
+                onChange={(e) => {
+                  const preset = presets.find((p) => p.id === e.target.value)
+                  if (preset) onChange(Array.isArray(preset.rules) ? preset.rules : [])
+                }}
+                className="h-7 w-36 rounded border border-border bg-background px-1 text-[12px]"
+              >
+                <option value="">{t('list.filter.savedFilters')}</option>
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={saveCurrent}
+                disabled={leafCount === 0}
+                data-testid="list-filter-save"
+                className="rounded px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                {t('list.filter.saveCurrent')}
+              </button>
+            </div>
+          </div>
+
+          {nodes.length === 0 && (
             <p className="px-1 py-1 text-[12px] text-muted-foreground">{t('list.filter.builderEmpty')}</p>
           )}
-          {rules.map((rule, idx) => {
-            const kind = filterFieldKind(rule.field, customFields) ?? 'text'
+
+          {nodes.map((node, idx) => {
+            const prefix = idx === 0 ? t('list.filter.where') : t('list.filter.and')
+            if (!isFilterGroup(node)) return ruleRow(node, prefix)
             return (
-              <div key={rule.id} className="flex items-center gap-1">
-                <span className="w-8 shrink-0 text-[11px] uppercase text-muted-foreground">
-                  {idx === 0 ? t('list.filter.where') : t('list.filter.and')}
-                </span>
-                <select
-                  value={rule.field}
-                  onChange={(e) => changeField(rule, e.target.value)}
-                  aria-label={t('list.filter.field')}
-                  className="h-7 w-28 shrink-0 rounded border border-border bg-background px-1 text-[12px]"
-                >
-                  {fieldOptions.map((f) => (
-                    <option key={f.value} value={f.value}>{f.label}</option>
-                  ))}
-                </select>
-                <select
-                  value={rule.op}
-                  onChange={(e) => patch(rule.id, { op: e.target.value as FilterOp })}
-                  aria-label={t('list.filter.operator')}
-                  className="h-7 w-24 shrink-0 rounded border border-border bg-background px-1 text-[12px]"
-                >
-                  {OPS_BY_KIND[kind].map((op) => (
-                    <option key={op} value={op}>{t(FILTER_OP_LABEL_KEYS[op])}</option>
-                  ))}
-                </select>
-                {valueInput(rule)}
+              <div
+                key={node.id}
+                data-testid="list-filter-group"
+                className="rounded border border-dashed border-border/70 p-1.5 space-y-1.5"
+              >
+                <div className="flex items-center gap-1">
+                  <span className="w-8 shrink-0 text-[11px] uppercase text-muted-foreground">{prefix}</span>
+                  <select
+                    value={node.conjunction}
+                    onChange={(e) => setConjunction(node.id, e.target.value as 'and' | 'or')}
+                    aria-label={t('list.filter.conjunction')}
+                    data-testid="list-filter-conjunction"
+                    className="h-7 w-20 rounded border border-border bg-background px-1 text-[12px]"
+                  >
+                    <option value="or">{t('list.filter.anyOf')}</option>
+                    <option value="and">{t('list.filter.allOf')}</option>
+                  </select>
+                  <span className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={() => removeNode(node.id)}
+                    aria-label={t('list.filter.removeGroup')}
+                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  >
+                    <XIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {node.rules.map((rule, i) =>
+                  ruleRow(rule, i === 0 ? '' : t(node.conjunction === 'or' ? 'list.filter.or' : 'list.filter.and')),
+                )}
                 <button
                   type="button"
-                  onClick={() => onChange(rules.filter((r) => r.id !== rule.id))}
-                  aria-label={t('list.filter.removeRule')}
-                  className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                  onClick={() => addToGroup(node.id)}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                 >
-                  <XIcon className="h-3.5 w-3.5" />
+                  <Plus className="h-3.5 w-3.5" />
+                  {t('list.filter.addRule')}
                 </button>
               </div>
             )
           })}
-          <div className="flex items-center justify-between pt-1">
-            <button
-              type="button"
-              onClick={addRule}
-              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t('list.filter.addRule')}
-            </button>
-            {rules.length > 0 && (
+
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={addRule}
+                data-testid="list-filter-add"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t('list.filter.addRule')}
+              </button>
+              <button
+                type="button"
+                onClick={addGroup}
+                data-testid="list-filter-add-nested"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t('list.filter.addNested')}
+              </button>
+            </div>
+            {leafCount > 0 && (
               <button
                 type="button"
                 onClick={() => onChange([])}
@@ -1100,7 +1200,7 @@ function ListDetail() {
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(EMPTY_COLUMN_FILTERS)
   // A1.4 filter builder — date / creator / recurrence / custom-field rules,
   // ANDed on top of the column filters and saved with the view.
-  const [filterRules, setFilterRules] = useState<FilterRule[]>([])
+  const [filterRules, setFilterRules] = useState<FilterNode[]>([])
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
   /*
    * §V2-07 — `[11:32]` "Ab yahan CLOSED TASK — agar aap ko [woh] dekhne hon to
@@ -1130,14 +1230,7 @@ function ListDetail() {
   // The Table "Fields" popover is a native <details>; native <details> doesn't
   // close on an outside click, so wire one up to match the other toolbar popovers.
   const fieldsDetailsRef = useRef<HTMLDetailsElement | null>(null)
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      const d = fieldsDetailsRef.current
-      if (d?.open && e.target instanceof Node && !d.contains(e.target)) d.open = false
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [])
+  useDismissableDetails(fieldsDetailsRef)
   // Board: collapsed columns (ephemeral) + per-status WIP limits (persisted).
   const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(() => new Set())
   const [wipLimits, setWipLimits] = useState<Record<string, number>>({})
@@ -1353,7 +1446,13 @@ function ListDetail() {
   // filter rule that names one. Same query key either way, so it is fetched once.
   const needsCustomValues =
     projectFields.length > 0 &&
-    (activeView === 'table' || filterRules.some((r) => r.field.startsWith('custom:')))
+    (activeView === 'table' ||
+      /*
+       * Flattened, because a custom-field rule inside a bracket needs the same
+       * values as one outside it — reading `.field` off the top level would
+       * silently skip the fetch and the rule would then match nothing.
+       */
+      filterLeaves(filterRules).some((r) => r.field.startsWith('custom:')))
   const { data: customFieldByTask = {} } = useQuery({
     queryKey: ['task-custom-fields-batch', workspaceId, projectId, tasks.map((task) => task.id).join(',')],
     enabled: tasks.length > 0 && needsCustomValues,
@@ -1448,10 +1547,15 @@ function ListDetail() {
         : EMPTY_COLUMN_FILTERS,
     )
     // Views saved before the filter builder simply carry no rules.
-    setFilterRules(Array.isArray(cfg.filterRules) ? (cfg.filterRules as FilterRule[]) : [])
+    /*
+     * A view saved before brackets existed holds a flat `FilterRule[]`, which
+     * is a valid `FilterNode[]` — every leaf is a node. Nothing to migrate.
+     */
+    setFilterRules(Array.isArray(cfg.filterRules) ? (cfg.filterRules as FilterNode[]) : [])
     setGroupBy((cfg.groupBy as 'status' | 'priority' | 'assignee') ?? 'status')
     setHiddenFields(new Set(Array.isArray(cfg.hiddenFields) ? (cfg.hiddenFields as string[]) : []))
     setWipLimits(cfg.wipLimits && typeof cfg.wipLimits === 'object' ? (cfg.wipLimits as Record<string, number>) : {})
+    setViewStamp((n) => n + 1)
   }
 
   // Everything a named view remembers. One place, so "save as" and "update"
@@ -1467,6 +1571,46 @@ function ListDetail() {
     wipLimits,
   })
 
+  /*
+   * §V2-07 `[11:35]` / frame `11:41` — the "Save view" chip.
+   *
+   * The frame shows it appearing, highlighted, once the view has been changed:
+   * an unsaved-state affordance. Rundesk had none. You could change the
+   * filters, the sort, the grouping and the columns, walk away, and come back
+   * to find them gone — with nothing having said they were temporary, and
+   * "Update view" buried in a … menu on the tab.
+   *
+   * `hiddenFields` is a Set flattened to an array, so its ORDER carries no
+   * meaning; sorting before comparing stops the chip lighting up because two
+   * identical sets happened to iterate differently.
+   */
+  const configFingerprint = (cfg: ReturnType<typeof currentViewConfig>) =>
+    JSON.stringify({ ...cfg, hiddenFields: [...cfg.hiddenFields].sort() })
+  /*
+   * STATE, not a ref. The first version held this in a ref, and the chip then
+   * stayed up after a successful save: `viewDirty` is computed during render,
+   * the stamping effect runs after it, and updating a ref re-renders nothing —
+   * so the screen kept the value from before the save. `list-save-view.mjs`
+   * failed on exactly that, which is why its last check exists.
+   */
+  const [savedFingerprint, setSavedFingerprint] = useState<string | null>(null)
+  /*
+   * A counter rather than a ref flag, so the stamping effect ALWAYS runs.
+   * With a flag, applying a view whose config happened to equal the current
+   * state would re-render nothing, the effect would not fire, and the stamp
+   * would land later — on a config the person had since changed, which is the
+   * one state where the chip must be lit and would not be.
+   */
+  const [viewStamp, setViewStamp] = useState(0)
+  useEffect(() => {
+    setSavedFingerprint(configFingerprint(currentViewConfig()))
+    // Runs after the setters in applyView/create/update have flushed, so it
+    // fingerprints the settled config rather than the one before them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewStamp])
+  const viewDirty =
+    savedFingerprint !== null && savedFingerprint !== configFingerprint(currentViewConfig())
+
   const refreshSavedViews = () => qc.invalidateQueries({ queryKey: ['list-views', listId] })
 
   const createSavedView = async () => {
@@ -1478,6 +1622,7 @@ function ListDetail() {
     })
     await refreshSavedViews()
     setSelectedSavedViewId(created.id)
+    setViewStamp((n) => n + 1)
   }
 
   const renameSavedView = async (viewId: string, currentName: string) => {
@@ -1490,6 +1635,7 @@ function ListDetail() {
   const updateSavedView = async (viewId: string) => {
     await api(`/views/${viewId}`, { method: 'PATCH', body: { config: currentViewConfig() } })
     await refreshSavedViews()
+    setViewStamp((n) => n + 1)
     toast.success(t('list.viewUpdated'))
   }
 
@@ -1740,6 +1886,28 @@ function ListDetail() {
     })),
   ]
 
+  /*
+   * §V2-07 — the option lists the Filters panel needs.
+   *
+   * Tags come from the tasks already on screen rather than from a workspace
+   * label query: a tag no task in this list carries would filter to nothing,
+   * so offering it would be an option that can only disappoint.
+   */
+  const labelOptions: FilterOption[] = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const task of tasks) for (const l of task.labels ?? []) seen.set(l.id, l.name)
+    return [...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label))
+  }, [tasks])
+  const filterStatusOptions: FilterOption[] = useMemo(
+    () =>
+      (listStatuses.length
+        ? listStatuses
+        : Object.entries(DEFAULT_STATUS_META).map(([k, m]) => ({ key: k, name: m.label }))
+      ).map((st) => ({ value: st.key, label: resolveStatusLabel(st.key, st.name, t) })),
+    [listStatuses, t],
+  )
+  const currentUserId = useAuthStore((state) => state.user?.id) ?? ''
+
   const statusOptions = listStatuses.length
     ? listStatuses
     : Object.entries(DEFAULT_STATUS_META).map(([k, m]) => ({ key: k, name: m.label }))
@@ -1860,6 +2028,26 @@ function ListDetail() {
         }
         toolbar={
           <>
+            {/*
+              §V2-07 `[11:35]` — the chip only exists while there is something
+              to save, which is what makes its presence the message. On a saved
+              view it updates that view; on a built-in tab there is nothing to
+              update, so it offers to save what you have built as a new one.
+            */}
+            {viewDirty && (
+              <button
+                type="button"
+                data-testid="list-save-view"
+                onClick={() =>
+                  selectedSavedViewId
+                    ? void updateSavedView(selectedSavedViewId)
+                    : void createSavedView()
+                }
+                className="h-8 shrink-0 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 text-[12px] font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-500/20"
+              >
+                {t(selectedSavedViewId ? 'list.saveView' : 'list.saveAsView')}
+              </button>
+            )}
             <div className="relative">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -1892,11 +2080,41 @@ function ListDetail() {
               ))}
             </WorkFilterSelect>
             <FilterBuilderMenu
-              rules={filterRules}
+              listId={listId}
+              nodes={filterRules}
               onChange={setFilterRules}
               customFields={projectFields}
               workspaceMembers={workspaceMembers}
+              statusOptions={filterStatusOptions}
+              labelOptions={labelOptions}
             />
+            {/*
+              §V2-07 `[11:28]` — "ASSIGNEE — aap ko ya aap ke alawa [kisi aur
+              ko] — agar aap ko rakhna hai to aap rakh sakte ho." Frame `11:41`
+              has it as a toolbar chip beside Filter and Closed.
+
+              It writes into `columnFilters.assignees`, the set the column
+              funnel already uses, rather than carrying its own state: two
+              controls for one filter is how they end up disagreeing about
+              what is on screen.
+            */}
+            <WorkFilterSelect
+              value={columnFilters.assignees.length === 1 ? columnFilters.assignees[0] : ''}
+              onChange={(v) =>
+                setColumnFilters((f) => ({ ...f, assignees: v ? [v] : [] }))
+              }
+              testId="list-assignee-filter"
+              ariaLabel={t('taskDetail.fieldAssignees')}
+            >
+              <option value="">{t('list.assigneeAnyone')}</option>
+              {currentUserId && <option value={currentUserId}>{t('list.assigneeMe')}</option>}
+              <option value={UNASSIGNED_FILTER}>{t('list.group.unassigned')}</option>
+              {workspaceMembers
+                .filter((m) => m.userId !== currentUserId)
+                .map((m) => (
+                  <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+                ))}
+            </WorkFilterSelect>
             <WorkFilterSelect
               value={sort.field.startsWith('custom:') ? 'created' : sort.field}
               onChange={(v) => setSort((s) => ({ field: v as SortField, dir: s.field === v ? s.dir : defaultSortDir(v as SortField) }))}
@@ -1917,7 +2135,12 @@ function ListDetail() {
             >
               {sort.dir === 'asc' ? '↑' : '↓'}
             </button>
-            <WorkFilterSelect value={groupBy} onChange={(v) => setGroupBy(v as typeof groupBy)}>
+            <WorkFilterSelect
+              value={groupBy}
+              onChange={(v) => setGroupBy(v as typeof groupBy)}
+              testId="list-group-by"
+              ariaLabel={t('list.groupByStatus')}
+            >
               <option value="status">{t('list.groupByStatus')}</option>
               <option value="priority">{t('list.groupByPriority')}</option>
               <option value="assignee">{t('list.groupByAssignee')}</option>
@@ -4683,6 +4906,42 @@ function BulkActionBar({
 }
 
 /**
+ * Make a native `<details>` behave like the app's other popovers: closed by a
+ * click outside it, AND by Escape.
+ *
+ * Escape is the half that was missing everywhere. `<details>` has no built-in
+ * dismissal at all — the outside-click handler was added for the Fields picker
+ * and Escape never was, so a keyboard user who opened one of these had no way
+ * to close it without a mouse. `ui-sweep` presses Escape to close the Fields
+ * picker between two of its sections and has been getting away with it because
+ * the next click happened to close the panel instead.
+ *
+ * This is a robustness and accessibility fix. It is NOT offered as the cause of
+ * any particular CI failure — that panel does close on the click that follows,
+ * so it was not covering anything.
+ */
+function useDismissableDetails(ref: React.RefObject<HTMLDetailsElement | null>) {
+  useEffect(() => {
+    const close = () => {
+      if (ref.current?.open) ref.current.open = false
+    }
+    const onPointerDown = (e: PointerEvent) => {
+      const d = ref.current
+      if (d?.open && e.target instanceof Node && !d.contains(e.target)) d.open = false
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [ref])
+}
+
+/**
  * A toolbar chip that is on or off, and says which — `aria-pressed` so a
  * screen reader gets the state, and a label that changes with it so a sighted
  * person does not have to infer the state from a shade of background.
@@ -4860,6 +5119,7 @@ function CustomizeViewPanel({
   const [timeFormat, setTimeFormat] = useState<'normal' | 'h24' | 'none'>('normal')
   const [busy, setBusy] = useState(false)
   const ref = useRef<HTMLDetailsElement>(null)
+  useDismissableDetails(ref)
 
   async function download() {
     setBusy(true)

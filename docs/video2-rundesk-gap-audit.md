@@ -282,6 +282,32 @@ nested filter groups do not exist.
 
 `size: medium` · `modules/views`, `modules/export`, list toolbar
 
+**CLOSED** — `f8f1031`, `63c6a77`, `91fd444`, and the filter-panel commit that
+follows them. What shipped, against the frames rather than against this
+paragraph:
+
+| Frame | Shipped |
+|---|---|
+| `10:58` File format `CSV \| Excel` | both; the .xlsx is written by `common/export/xlsx.ts` with no new dependency, and its inline-string cells cannot be read as formulas |
+| `10:58` What to export | Visible columns / Task Names only / All columns. (The frame observations said "Task hierarchy info" for the middle one; the frame was re-extracted and read, and it says "Task Names only". That doc is corrected.) |
+| `10:58` Date format / Time format | four date formats, three time formats, rendered in UTC and said so |
+| `11:14` Show closed tasks · `11:41` Archived | two toolbar switches, and both reach the export — `includeArchived` was understood by the API and never once sent by the web |
+| `10:36`/`11:14` Pin · Private · Protect · Set as default | columns on `task_views`, enforced in `ViewsService`, which previously had **no** ownership check at all: any member could delete any view |
+| `10:36`/`11:14` Autosave for me | `task_view_prefs`, keyed by (view, user) — per person, as its own tooltip says |
+| `10:36`/`11:14` Copy link to view | the list route takes `?view=<id>` |
+| `10:36`/`11:14` Sharing & Permissions | `view` added to the share machinery — object type, ancestor chain, shared-with-me resolver |
+| `11:41` Add nested filter | one level of brackets with their own AND/OR, evaluated in `lib/task-filters.ts` |
+| `11:41` Saved filters | `list_filter_presets`, per list per user |
+| `11:41` the field list | Status · Tags · Due date · Priority · Assignee · Created by · Date closed · Date created, plus custom fields |
+| `11:28` Assignee | a toolbar chip writing into the same set the column funnel uses |
+
+**Deliberately NOT built**, so the next pass does not go looking for it:
+*Favorite* (frame shows a submenu with a chevron; the video never opens it, so
+there is no behaviour to build against), *Assigned comment* as a filter field
+(Rundesk has no comment assignment, so the field would match nothing), and the
+*export paywall* of frame `11:00` (Rundesk has no Business tier gating list
+exports, and adding one to imitate a screenshot would be removing a feature).
+
 ---
 
 ### V2-08 · Half the task menu is missing

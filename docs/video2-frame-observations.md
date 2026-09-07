@@ -265,7 +265,10 @@ relationships — see the per-sheet notes.
 - 10:50 LIST VIEW **grouped by status** with per-group counts
 - 10:55 **EXPORT panel**:
     · **File format** `CSV | Excel`
-    · **What to export** — Visible columns / Task hierarchy info / All columns
+    · **What to export** — Visible columns / **Task Names only** / All columns
+      (this line said "Task hierarchy info" until the frame was re-extracted
+      and read at 10:58 — it is a three-way radio and the middle option is
+      "Task Names only". The implementation follows the frame.)
     · **Date format** / **Time format** — `Normal ▾`
     · **+ Download**, labelled **"Business feature"** (paywalled)
   → matches [10:53]–[11:09]
