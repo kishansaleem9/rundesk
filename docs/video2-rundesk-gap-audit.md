@@ -262,6 +262,54 @@ a space that does not use time tracking does not show it.
 
 ---
 
+#### V2-06 read off the frames, not off the paragraph above
+
+The frames were re-extracted and read at `06:52`, `07:06`, `07:12` and `07:19`.
+Four things they carry that the paragraph above does not:
+
+**1. `06:52` — "Create a Space", step one.** Icon & name (a coloured letter
+avatar beside the input) · Description *(optional)* · **Default permission** ⓘ
+`Full edit ▾` · **Make Private** with the subtitle "Only you and invited members
+have access" · footer **Use Templates** / **Continue**. Rundesk's space create
+collects a name and nothing else.
+
+**2. `07:06` — "Define your workflow", step two.** "Choose a pre-configured
+solution or customize to your liking with advanced ClickApps, required views,
+and task statuses." Four cards — **Starter** *(For everyday tasks)* ·
+**Marketing Teams** *(Run effective campaigns)* · **Project Management** *(Plan,
+manage, and execute projects)* · **Product + Engineering** *(Streamline your
+product lifecycle)* — then **Customize defaults for `<preset>`** with three
+expanding rows: **Default views** `List, Board` · **Task statuses**
+`TO DO → IN PROGRESS → COMPLETE` · **ClickApps** `Tags, Time Estimates,
+Priority, Time Tracking, Incomplete Warning, Custom Fields, Milest…`.
+
+**3. `07:12` — "Default settings for views".** Tabs **Required views** /
+**Default View Templates**. "Set up views that appear automatically in every
+Space, Folder, or List — and can't be removed." Rows: **List** *(Required,
+Default, locked on)* · Board · Calendar · Map · Activity · Team · Gantt ·
+Mind Map · Table · Timeline · Workload, each a toggle, with **Mark as default
+view** on hover. Rundesk's `spaces.viewConfig` already holds
+`{ defaultView, enabledViews }` — the shape is right, the step is missing, and
+nothing marks List as un-removable.
+
+**4. `07:19` — "Enable ClickApps".** A master **Turn off all ClickApps**, then a
+grid: Priority · Sprints · Email · Tags · Custom Fields · Multiple Assignees ·
+Time Tracking · Time Estimates · Remap Subtask Due Dates · Work in Progress
+Limits, plus **Show more**. **Sprints, Remap Subtask Due Dates and Work in
+Progress Limits are greyed out** — this is `[07:20]`–`[07:24]`, "ClickUp Apps is
+also dependent on that — ke aap ke paas PACKAGE PLAN kaun sa hai … Free mein of
+course apna option LIMITED hota hai": plan-gated, and **shown greyed rather than
+hidden**, the same teach-then-offer pattern as Team View and the export paywall.
+
+**5. `[07:46]` — and the consequence nobody would guess from a screenshot.**
+"Ab space ke baad jo hai, yeh LIST automatically generate kar deta hai ClickUp …
+us base pe jo aap ne ooper di ho, ke haan mujhe marketing purpose ke liye
+chahiye." **The preset seeds the space's first list**, so a new space is not
+empty. That is what makes the purpose question worth asking, and it is the part
+a UI-only reading of the frames would miss.
+
+---
+
 ### V2-07 · Views are configurable; sharing and export are not
 **Ask** `[09:16]`–`[11:57]`.
 
