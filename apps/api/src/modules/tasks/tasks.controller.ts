@@ -10,8 +10,7 @@ import {
   Query,
   Ip,
   UseGuards,
-  BadRequestException,
-} from '@nestjs/common'
+  BadRequestException, Res } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -72,6 +71,37 @@ export class TasksController {
     @Param('userId') userId: string,
   ) {
     return this.tasks.getTasksForMember(workspaceId, userId)
+  }
+
+  /**
+   * §V2-07 — "Customize → Export view → Download".
+   *
+   * `ResourceMemberGuard`, not `WorkspaceAdminGuard`. The existing export is
+   * admin-only and dumps the whole workspace, so the person actually looking at
+   * a list — usually not an admin — had no way to download it. Exporting the
+   * list you can already read gives away nothing you could not read.
+   */
+  @Get('list/:listId/export')
+  @UseGuards(ResourceMemberGuard)
+  async exportList(
+    @Param('listId') listId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Res() res: any,
+    @Query('columns') columns?: string,
+    @Query('fields') fields?: string,
+  ) {
+    const mode = columns === 'names' || columns === 'all' ? columns : 'visible'
+    const out = await this.tasks.exportListView(
+      listId,
+      { id: user.id, role: user.role },
+      { columns: mode, fields: fields ? fields.split(',').filter(Boolean) : undefined },
+    )
+    // Quoted, and stripped of anything that could end the header early: a list
+    // named `"; drop` would otherwise break the Content-Disposition it lands in.
+    const safeName = out.name.replace(/[^\w \-.]/g, '').trim() || 'list'
+    res.header('Content-Type', 'text/csv; charset=utf-8')
+    res.header('Content-Disposition', `attachment; filename="${safeName}.csv"`)
+    res.send(out.csv)
   }
 
   @Get('list/:listId')

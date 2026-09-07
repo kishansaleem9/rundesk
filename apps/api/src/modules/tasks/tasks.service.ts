@@ -31,6 +31,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { toCsv } from '../../common/export/csv'
 import {
   parseExternalLinkUrl,
   isHttpUrl,
@@ -2148,6 +2149,79 @@ export class TasksService {
       byTask.set(a.taskId, list)
     }
     return rows.map((r) => ({ ...r, assignees: byTask.get(r.id) ?? [] }))
+  }
+
+  /**
+   * §V2-07 — download the list you are looking at.
+   *
+   * `[10:53]`–`[11:09]` "Customize pe aap click karoge — ab yeh dekh rahe ho:
+   * EXPORT VIEW … aur aap is ko download kar lo … woh aap ko COLUMN mein list
+   * de dega, har cheez." Frame `10:57` shows the panel: a file format, a "What
+   * to export" choice of Visible columns / Task Names only / All columns, and
+   * Download.
+   *
+   * What existed was `GET /export/csv/tasks`: the WHOLE WORKSPACE, seven fixed
+   * columns, behind `WorkspaceAdminGuard`. A member standing on a list could
+   * not download it at all, and an admin who did got every task in every list
+   * regardless of the view, its filters, or its sort.
+   *
+   * Built on `getTasksByList` rather than its own query, deliberately: the
+   * export is then the same read the list itself performs, including the
+   * per-item visibility filter. A separate query would be free to drift, and
+   * the way it would drift is by exporting rows the person cannot see on
+   * screen.
+   */
+  async exportListView(
+    listId: string,
+    actor: { id: string; role?: string },
+    opts: { columns?: 'names' | 'visible' | 'all'; fields?: string[]; includeSubtasks?: boolean } = {},
+  ) {
+    const rows = await this.getTasksByList(
+      listId,
+      { includeSubtasks: opts.includeSubtasks ?? false },
+      actor,
+    )
+    const [list] = await this.db.select({ name: lists.name }).from(lists).where(eq(lists.id, listId)).limit(1)
+
+    const COLUMNS: Array<{ key: string; header: string; read: (t: Record<string, any>) => unknown }> = [
+      { key: 'title', header: 'Name', read: (t) => t.title },
+      { key: 'status', header: 'Status', read: (t) => t.status },
+      { key: 'assignees', header: 'Assignees', read: (t) => (t.assignees ?? []).map((a: any) => a.user?.displayName ?? a.user?.email).filter(Boolean).join(', ') },
+      { key: 'priority', header: 'Priority', read: (t) => t.priority },
+      { key: 'startDate', header: 'Start date', read: (t) => t.startDate },
+      { key: 'dueDate', header: 'Due date', read: (t) => t.dueDate },
+      { key: 'timeEstimate', header: 'Time estimate', read: (t) => t.timeEstimate },
+      { key: 'labels', header: 'Tags', read: (t) => (t.labels ?? []).map((l: any) => l.name).filter(Boolean).join(', ') },
+      { key: 'description', header: 'Description', read: (t) => t.description },
+      { key: 'createdAt', header: 'Created', read: (t) => t.createdAt },
+      { key: 'id', header: 'ID', read: (t) => t.id },
+    ]
+
+    const mode = opts.columns ?? 'visible'
+    const chosen =
+      mode === 'names'
+        ? COLUMNS.filter((c) => c.key === 'title')
+        : mode === 'all'
+          ? COLUMNS
+          : // "Visible columns" is the view's own set when the caller names one,
+            // and the list's default shape when it does not.
+            opts.fields?.length
+            ? COLUMNS.filter((c) => opts.fields!.includes(c.key))
+            : COLUMNS.filter((c) => ['title', 'status', 'assignees', 'priority', 'dueDate'].includes(c.key))
+
+    // A `fields` list naming nothing we know would export an empty row per
+    // task, which reads as "the list is empty" rather than "you asked for
+    // columns that do not exist".
+    const columns = chosen.length > 0 ? chosen : COLUMNS.filter((c) => c.key === 'title')
+
+    return {
+      name: list?.name ?? 'list',
+      count: rows.length,
+      csv: toCsv(
+        columns.map((c) => c.header),
+        rows.map((task) => columns.map((c) => c.read(task as Record<string, any>))),
+      ),
+    }
   }
 
   async getTask(taskId: string) {

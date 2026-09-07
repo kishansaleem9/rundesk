@@ -392,6 +392,16 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-07 — exporting the list you are looking at. The load-bearing check
+      # is the injection one: a task titled `=cmd|...` must not reach a
+      # spreadsheet as a formula.
+      - name: List export
+        if: '!cancelled()'
+        run: node test/e2e/list-export.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.

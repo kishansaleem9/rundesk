@@ -36,8 +36,9 @@ import {
   Share2,
   MoreHorizontal,
   ClipboardList,
+  Download,
 } from 'lucide-react'
-import { api, ApiError } from '../lib/api'
+import { api, ApiError, downloadFile } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { toDateInput, withDatePart } from '../lib/task-dates'
 import { criticalPath } from '../lib/gantt'
@@ -1790,6 +1791,8 @@ function ListDetail() {
               <option value="priority">{t('list.groupByPriority')}</option>
               <option value="assignee">{t('list.groupByAssignee')}</option>
             </WorkFilterSelect>
+            <ExportViewMenu listId={listId} />
+
             {(activeView === 'table' || activeView === 'list') && (
               <details ref={fieldsDetailsRef} className="relative">
                 <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
@@ -4508,5 +4511,83 @@ function BulkActionBar({
         </Button>
       </div>
     </div>
+  )
+}
+
+/**
+ * §V2-07 — "Customize → Export view".
+ *
+ * `[10:53]` "Yeh Customize pe aap click karoge — ab yeh dekh rahe ho: EXPORT
+ * VIEW … aur aap is ko download kar lo." Frame `10:57` shows the panel: a file
+ * format, a What-to-export choice of Visible columns / Task Names only / All
+ * columns, and Download.
+ *
+ * Format is CSV only, and that is stated rather than hidden behind a disabled
+ * "Excel" button. She never completes an export in the video — ClickUp gates it
+ * behind their Business tier and the frame says so — and what she asks for is
+ * `[11:09]` "woh aap ko COLUMN mein list de dega, har cheez", which CSV is.
+ * A real .xlsx is a zip of XML and needs a dependency; offering a button that
+ * writes CSV and calls it Excel would be the kind of label this codebase has
+ * spent two videos removing.
+ *
+ * The download goes through fetch rather than a plain link because the API
+ * wants an Authorization header, and an <a href> cannot carry one.
+ */
+function ExportViewMenu({ listId }: { listId: string }) {
+  const { t } = useTranslation()
+  const [columns, setColumns] = useState<'visible' | 'names' | 'all'>('visible')
+  const [busy, setBusy] = useState(false)
+  const ref = useRef<HTMLDetailsElement>(null)
+
+  async function download() {
+    setBusy(true)
+    try {
+      // `downloadFile` already carries the Authorization header, refreshes an
+      // expired token and revokes the object URL — an <a href> can do none of
+      // those, and a second copy of it here would be a second thing to fix.
+      await downloadFile(`/tasks/list/${listId}/export?columns=${columns}`, 'list.csv')
+      if (ref.current) ref.current.open = false
+    } catch {
+      toast.error(t('list.export.failed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <details ref={ref} className="relative" data-testid="list-customize">
+      <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
+        {t('list.customize')}
+      </summary>
+      <div className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-border bg-card p-2.5 shadow-lg">
+        <div className="mb-2 text-[12px] font-medium">{t('list.export.title')}</div>
+        <div className="mb-1.5 text-[11px] text-muted-foreground">{t('list.export.whatToExport')}</div>
+        <div className="space-y-1">
+          {(['visible', 'names', 'all'] as const).map((mode) => (
+            <label key={mode} className="flex items-center gap-2 text-[12px] cursor-pointer">
+              <input
+                type="radio"
+                name="export-columns"
+                checked={columns === mode}
+                onChange={() => setColumns(mode)}
+                data-testid={`list-export-${mode}`}
+              />
+              {t(`list.export.columns.${mode}` as never)}
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">{t('list.export.csvOnly')}</p>
+        <Button
+          size="sm"
+          variant="gradient"
+          className="mt-2 w-full"
+          disabled={busy}
+          onClick={download}
+          data-testid="list-export-download"
+        >
+          <Download className="h-3.5 w-3.5" /> {t('list.export.download')}
+        </Button>
+      </div>
+    </details>
   )
 }
