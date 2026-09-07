@@ -76,6 +76,7 @@ import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { MoveDialog, type MovableKind } from './move-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
+import { CreateSpaceWizard } from './create-space-wizard'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS, type FlagKey } from '@rundesk/feature-flags'
 import { ListSkeleton } from './loading-skeletons'
@@ -502,16 +503,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     if (!spaceDialog || !workspaceId) return
     setSavingSpace(true)
     try {
-      if (spaceDialog.mode === 'create') {
-        const created = await api<{ id: string }>(`/spaces`, {
-          method: 'POST',
-          body: { workspaceId, name: values.name },
-        })
-        await qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
-        await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
-        setSpaceDialog(null)
-        navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId: created.id } })
-      } else {
+      {
+        // §V2-06 — creating no longer comes through here. This dialog renames,
+        // which is the one thing a single name field is the right shape for.
         await api(`/spaces/${spaceDialog.id}`, { method: 'PUT', body: { name: values.name } })
         await qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
         await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
@@ -2325,15 +2319,35 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
       />
 
       <ContainerEditDialog
-        open={spaceDialog !== null}
+        open={spaceDialog !== null && spaceDialog.mode === 'rename'}
         onOpenChange={(next) => {
           if (!next) setSpaceDialog(null)
         }}
-        title={spaceDialog?.mode === 'create' ? t('nav.newSpace') : t('space.editTitle')}
+        title={t('space.editTitle')}
         initial={{ name: spaceDialog?.name ?? '' }}
         submitting={savingSpace}
         onSubmit={submitSpaceDialog}
       />
+
+      {/*
+        §V2-06 — one wizard for creating a space, shared with the quick-create
+        modal's Space tab. Before this there were two different name-only
+        dialogs for the same action, and neither could reach the description,
+        colour and icon `POST /spaces` had accepted all along.
+      */}
+      {workspaceId && (
+        <CreateSpaceWizard
+          open={spaceDialog?.mode === 'create'}
+          onOpenChange={(next) => {
+            if (!next) setSpaceDialog(null)
+          }}
+          workspaceId={workspaceId}
+          onCreated={(space) => {
+            setSpaceDialog(null)
+            navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId: space.id } })
+          }}
+        />
+      )}
 
       {shareItem && (
         <SharePanel

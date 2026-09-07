@@ -436,6 +436,14 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-06 — the wizard itself. `space-presets.mjs` proves the API applies
+      # what it is sent; this proves a person can send it, which was the gap.
+      # The load-bearing checks are the last four: what the wizard POSTs is
+      # what was chosen, not just the name.
+      - name: Space wizard
+        if: '!cancelled()'
+        run: node test/e2e/space-wizard.mjs --dist apps/web/dist
+
       # §V2-07 `[11:35]` — the "Save view" chip. Drives the built app against a
       # stubbed API: absent on an untouched view, present the moment it is
       # modified, and gone once saved. The last of those three is the one that

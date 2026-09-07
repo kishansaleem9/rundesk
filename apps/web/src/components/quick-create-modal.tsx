@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn, toast } from '@rundesk/ui'
 import { CheckSquare, ClipboardList, Folder, FolderOpen, FileText, Layers, Upload, X, Clock, PenTool, LayoutDashboard, Bell, Paperclip } from 'lucide-react'
 import { api } from '../lib/api'
+import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
@@ -987,35 +988,29 @@ function ProjectForm({ workspaceId, onClose }: { workspaceId: string; onClose: (
   )
 }
 
+/**
+ * §V2-06 — the Space tab hands straight to the wizard.
+ *
+ * What stood here was a single name input that POSTed `{ workspaceId, name }`.
+ * The sidebar's "New space" had its own, different, also-name-only dialog. Two
+ * dialogs for one action, and neither could reach the description, colour and
+ * icon the API had accepted all along.
+ *
+ * The wizard opens over this modal and closes it on success, so the person
+ * does not end up looking at a create modal behind a created space.
+ */
 function SpaceForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
-  const { t } = useTranslation()
   const navigate = useNavigate()
-  const qc = useQueryClient()
-  const [name, setName] = useState('')
-
-  const create = useMutation({
-    mutationFn: () => api<{ id: string }>(`/spaces`, { method: 'POST', body: JSON.stringify({ workspaceId, name }) }),
-    onSuccess: (space) => {
-      qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
-      onClose()
-      navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId: space.id } })
-    },
-  })
-
   return (
-    <form
-      className="px-5 py-4 space-y-3"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (name.trim()) create.mutate()
+    <CreateSpaceWizard
+      open
+      onOpenChange={(next) => { if (!next) onClose() }}
+      workspaceId={workspaceId}
+      onCreated={(space) => {
+        onClose()
+        navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId: space.id } })
       }}
-    >
-      <Input autoFocus placeholder={t('quickCreate.spaceNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
-      <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-        <Button type="submit" size="sm" disabled={!name.trim() || create.isPending}>{t('quickCreate.createSpace')}</Button>
-      </div>
-    </form>
+    />
   )
 }
 

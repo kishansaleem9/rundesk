@@ -31,7 +31,7 @@ export type ContainerEditFields = {
 
 // A compact preset palette for space colors. Values are stored verbatim (hex)
 // and rendered as the container swatch elsewhere in the tree.
-const CONTAINER_COLORS = [
+export const CONTAINER_COLORS = [
   '#6366f1',
   '#8b5cf6',
   '#ec4899',
@@ -47,7 +47,7 @@ const CONTAINER_COLORS = [
 // A curated set of space/project icons — clickable so users don't have to know
 // how to type an emoji (the free-text box below still accepts any single emoji
 // or letter). Kept in-app so it works offline with no external picker/CDN.
-const CONTAINER_ICONS = [
+export const CONTAINER_ICONS = [
   '🚀', '🏠', '💼', '📁', '🗂️', '🎯', '⭐', '🔥',
   '💡', '📊', '📈', '🛠️', '⚙️', '🎨', '🧩', '📌',
   '✅', '🧠', '💬', '📅', '🏆', '🌐', '🧪', '🐛',
