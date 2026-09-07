@@ -241,7 +241,18 @@ export function CoverImagePicker({
 
             <TabsContent value="attachments">
               {attachments === null ? (
-                <div className="py-10 text-center text-sm text-muted-foreground">{t('common.loading')}</div>
+                /*
+                 * §2.9a — a wait is drawn as the shape of what is coming, never
+                 * as the word "Loading". The first version of this tab used
+                 * `common.loading` and `loading-states` caught it: that suite
+                 * exists because "Loading…" tells you nothing about whether
+                 * anything is on its way.
+                 */
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2" aria-busy="true" aria-live="polite">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="aspect-[5/3] rounded-lg bg-muted/40 animate-pulse" />
+                  ))}
+                </div>
               ) : attachments.length === 0 ? (
                 <div className="py-10 text-center text-sm text-muted-foreground" data-testid="cover-attachments-empty">
                   {t('coverImage.noImageAttachments')}
