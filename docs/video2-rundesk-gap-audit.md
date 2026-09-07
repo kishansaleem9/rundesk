@@ -325,14 +325,77 @@ It is wired into `ai-panel.tsx` and `workspace-ai-page.tsx` and **nowhere
 else**. So the Urdu trap is not something V2-05 must solve — it is something
 V2-05 must not lose by transcribing in the composer some other way.
 
-**And the rest of the ground is better than the paragraph above suggests:**
-`taskComments` ALREADY has `parentCommentId` and `resolvedAt`, so threads are
-a schema that exists and a UI that does not. `MediaRecorder` is already wrapped
-in `lib/call-recording.ts` + `use-call-recording.ts`. Chat already has
-`chat_message_assignments` (assignee + resolvedAt), which is the shape
-"Assign comment" needs and which task comments lack.
+**5. SECOND CORRECTION — three of the five gaps above are not gaps.** Read
+before building, against the code rather than against this document, and the
+scope collapsed by more than half:
 
-`size: large` · `chat-composer.tsx`, `task-detail-sheet.tsx`, `modules/clips`
+| Claimed gap | Actual state |
+| --- | --- |
+| comment **threads** — "a schema that exists and a UI that does not" | **Built.** `CommentsPanel` splits `roots` from `repliesByParent`, renders replies nested under their parent with their own Reply/Edit/Delete/react row, shows a "N replies" count, and the composer carries a "Replying to …" strip with a cancel. |
+| **Assign comment** — "which task comments lack" | **Built.** `task_comments.assigned_to_user_id` has existed since migration `0006`, `POST /tasks/:id/comments/:commentId/assign` is live, and the comment row carries a member picker plus an "Assigned to X" badge. |
+| resolve a comment | **Built.** `resolved_at` + `resolved_by_user_id`, a `…/resolve` endpoint, and a Resolve/Reopen button with a "Resolved by X" badge. |
+| **@-mentioning non-people** | **Partly built.** The picker already has **People · Tasks · Docs** tabs with their own queries. Whiteboards, Locations, Channels, Brain and Agents are absent — and of those, only Channels and Docs point at things Rundesk has. |
+
+The earlier paragraph said "chat has `chat_message_assignments`, which task
+comments lack". That is the mistake this audit was written to stop making: two
+tables solving the same problem in different modules, and I read the one and
+concluded the other was missing rather than opening it.
+
+**So what is actually missing is the recording half**, which is the half the
+frames spend the most time on:
+
+1. **Voice note** in a task comment, with the two-button choice of frame `04:16`.
+2. **Transcribe**, which must go through `localeToSpeechLang()` — see (4).
+3. **Record a Video Clip** from the composer, embedded with a player (`05:35`).
+4. The **"Does not have access to task"** flag on a mentioned person (`04:00`).
+
+`MediaRecorder` is already wrapped in `lib/call-recording.ts` +
+`use-call-recording.ts`, but both are shaped around a *call* — a mixed stream
+elected across participants — so the composer needs its own recorder rather
+than a parameter on that one.
+
+`size: medium` (was `large`) · `task-detail-sheet.tsx`, `lib/call-recording.ts`
+
+---
+
+#### V2-05 — what was built, and the one place it deviates from the frame
+
+**Built.** `lib/composer-recording.ts` (the decisions, unit-tested),
+`components/comment-recorder.tsx` (the mic, the clip, the timer, the strip),
+`modules/tasks/mention-access.ts` + `GET /tasks/:id/comments/mention-candidates`
+(the access flag), and `test/e2e/comment-recording.mjs` — 31 checks.
+
+**The deviation: there is no "+" menu.** Frame `04:56` puts `Record a Video
+Clip` third in a menu of ten. Nine of the other items are things Rundesk either
+already has somewhere the composer can reach or does not have at all —
+`Assign comment` is on every comment row, `Mention a task` is the picker's Tasks
+tab, `Add a file` is Attach, `Add emoji` is the reaction row, and New
+Whiteboard / New Doc / Brain / Agents have no home here. Building the menu would
+have meant nine entries of which five did nothing, which is the facade this
+audit keeps finding. So the two capabilities the frame demonstrates — voice note
+and video clip — are direct controls on the composer instead. **The capability
+is there; the menu is not.** Say so and it gets built.
+
+**The transcription is live, not after the fact.** Web Speech listens to a
+microphone and cannot be handed a finished file, so the recorder captures audio
+and words at the same time and the strip afterwards is the person choosing which
+to keep. The alternative was uploading private voice notes to a transcription
+service, which is a bigger product decision than this item.
+
+**A bug found on the way, and fixed.** The account's saved language was never
+being applied — `I18nProvider` adopted it only `if (accessToken)`, and the auth
+store deliberately stopped persisting tokens when the session moved to an
+httpOnly cookie. The guard was false on every page load, so a person who chose
+Urdu got English, silently, everywhere. Fixed to `isAuthenticated()`, plus a
+subscription so signing in adopts it without a reload. Picking a language never
+saved to the account either, for the same reason. This blocked V2-05: the
+recognizer's language comes from the app locale, and the app locale never
+followed the account.
+
+**Still open from this item:** `@`-mentioning Whiteboards, Locations and
+Channels (of those, only Channels points at something Rundesk has); a voice note
+uploaded from a file rather than recorded (`[04:43]`); and a clip whose link is
+pasted into a comment and renders there (`[05:26]`–`[05:38]`).
 
 ---
 
