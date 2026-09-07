@@ -286,12 +286,46 @@ function bulkFilterDescription(filter: Record<string, unknown>): string {
   return 'tasks'
 }
 
+/** §V2-11 — the words the audit says are worth stealing outright. */
+export const NO_CHANGES_MADE = 'No changes made.'
+
+/**
+ * Does this sentence already admit that nothing happened?
+ *
+ * Checked so the plain statement is not doubled onto a model that already said
+ * it — "No changes made. I did not make any changes." reads like a stutter, and
+ * a person who sees the product stutter trusts the rest of it less.
+ */
+function alreadySaysNothingHappened(narrative: string): boolean {
+  return /\bno changes\b|\bnothing (?:was |has been )?changed\b|\bdid ?n[o']t (?:make|change)\b/i.test(narrative)
+}
+
 function buildSummary(actions: PlanAction[], readOnly: CommandSearchResult[], narrative?: string): string {
-  if (narrative && narrative.trim()) return narrative.trim()
+  const told = narrative?.trim()
+
+  /*
+   * §V2-11 — "No changes made.", and why it comes FIRST.
+   *
+   * This used to return the model's narrative unconditionally, which is fine
+   * when something happened and dangerous when nothing did: a model that
+   * proposed no actions can still write "I've updated those tasks for you", and
+   * that sentence became the whole answer. The person reads a success, closes
+   * the panel, and finds out later that their work was never done.
+   *
+   * So when there is nothing to show — no actions, no search results — the fact
+   * leads and the model's account follows as explanation. The narrative is kept
+   * rather than discarded because WHY it could not act is the useful half.
+   */
+  if (actions.length === 0 && readOnly.length === 0) {
+    if (!told) return NO_CHANGES_MADE
+    return alreadySaysNothingHappened(told) ? told : `${NO_CHANGES_MADE} ${told}`
+  }
+
+  if (told) return told
   if (actions.length === 0) {
     return readOnly.length
       ? 'Found matching tasks. No changes were proposed.'
-      : 'No changes were proposed for this request.'
+      : `${NO_CHANGES_MADE} Nothing in this request could be turned into a change.`
   }
   const counts = new Map<PlanAction['tool'], number>()
   for (const a of actions) counts.set(a.tool, (counts.get(a.tool) ?? 0) + 1)

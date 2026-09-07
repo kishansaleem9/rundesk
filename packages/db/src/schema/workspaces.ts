@@ -84,6 +84,22 @@ export const workspaces = pgTable('workspaces', {
   // Capacity was already per member; this is what told Workload which days that
   // capacity is spread across, so a Sat/Sun team is no longer counted as idle.
   workDays:       integer('work_days').array().notNull().default([1, 2, 3, 4, 5]),
+  /**
+   * §V2-11 — the benchmark the AI value panel reasons from.
+   *
+   * Frames `19:00`/`19:05` show Time Saved and Human Cost Savings at an
+   * editable $/hour, with "Edit benchmark". Time saved cannot be measured, only
+   * estimated, so the estimate's inputs belong to the workspace rather than to
+   * a constant in our code — one team's guess must not be shown to another team
+   * as a fact.
+   *
+   * The unit is an AI RUN (one `ai_usage` row, one model call), not an
+   * "action": a single user action can be several runs, and counting runs as
+   * actions would overstate the saving invisibly.
+   */
+  aiMinutesSavedPerRun: integer('ai_minutes_saved_per_run').notNull().default(6),
+  /** In cents, so a rate never rounds through a float on its way to a total. */
+  aiHourlyRateCents:    integer('ai_hourly_rate_cents').notNull().default(5000),
   createdAt:      timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

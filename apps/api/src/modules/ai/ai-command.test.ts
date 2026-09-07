@@ -117,6 +117,51 @@ describe('planFromToolCalls — read-only executed, mutations planned not execut
     assert.match(action.humanLabel, /Move 2 overdue tasks to 2026-07-23/)
   })
 
+  /*
+   * §V2-11 — "No changes made.", the words the audit says are worth stealing.
+   *
+   * The dangerous case is not silence, it is CONFIDENCE: a model that proposed
+   * nothing can still write "I've updated those tasks for you", and before this
+   * that sentence became the entire answer. A person reads a success, closes
+   * the panel, and discovers later that nothing was done.
+   */
+  it('says nothing happened even when the model claims otherwise', () => {
+    const plan = planFromToolCalls([], ctx, 'I have updated all the overdue tasks for you.')
+    assert.match(plan.summary, /^No changes made\./)
+    assert.equal(plan.actions.length, 0)
+  })
+
+  it('and keeps the explanation, because WHY is the useful half', () => {
+    const plan = planFromToolCalls([], ctx, 'I could not find a list by that name.')
+    assert.match(plan.summary, /^No changes made\./)
+    assert.match(plan.summary, /could not find a list/)
+  })
+
+  it('does not stutter when the model already admitted it', () => {
+    // "No changes made. I did not make any changes." reads like a stutter, and
+    // a product that stutters is trusted less on everything else.
+    const plan = planFromToolCalls([], ctx, 'No changes were needed here.')
+    assert.equal(plan.summary, 'No changes were needed here.')
+    assert.ok(!/No changes made\. No changes/.test(plan.summary))
+  })
+
+  it('with no narrative at all, it still says it plainly', () => {
+    const plan = planFromToolCalls([], ctx)
+    assert.equal(plan.summary, 'No changes made.')
+  })
+
+  it('but a narrative still leads when something DID happen', () => {
+    // The fix must not reduce every answer to a disclaimer: when actions exist,
+    // the model's account of them is the right headline.
+    const plan = planFromToolCalls(
+      [{ name: 'create_task', input: { listId: 'list-back', title: 'Ship it' } }],
+      ctx,
+      'Created one task in Inbox.',
+    )
+    assert.equal(plan.summary, 'Created one task in Inbox.')
+    assert.equal(plan.actions.length, 1)
+  })
+
   it('produces no actions and a helpful summary when only searching', () => {
     const plan = planFromToolCalls([{ name: 'search_tasks', input: { status: 'closed' } }], ctx)
     assert.equal(plan.actions.length, 0)

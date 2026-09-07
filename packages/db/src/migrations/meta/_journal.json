@@ -981,6 +981,13 @@
       "when": 1900000107029,
       "tag": "0139_merge_activity_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1900000108029,
+      "tag": "0140_ai_value_benchmark",
+      "breakpoints": true
     }
   ]
 }

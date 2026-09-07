@@ -40,6 +40,75 @@ export class AiController {
     return { available: this.ai.isAvailable() }
   }
 
+  /**
+   * §V2-11, frames `19:00`/`19:05` — what the AI was worth, beside what it cost.
+   */
+  @Get('value')
+  @ApiOperation({ summary: 'AI value: runs, estimated time saved and its labour value' })
+  value(
+    @CurrentUser() user: any,
+    @Query('workspaceId') workspaceId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const parse = (s?: string) => {
+      if (!s) return undefined
+      const d = new Date(s)
+      return Number.isNaN(d.getTime()) ? undefined : d
+    }
+    return this.ai.valueSummary({
+      workspaceId,
+      from: parse(from),
+      to: parse(to),
+      actor: { id: user.id, role: user.role },
+    })
+  }
+
+  /** §V2-11 — "Edit benchmark", frame `19:00`. Admin-only. */
+  @Patch('value/benchmark')
+  @ApiOperation({ summary: 'Set the minutes-saved-per-run and hourly rate the value panel reasons from' })
+  updateBenchmark(
+    @CurrentUser() user: any,
+    @Query('workspaceId') workspaceId: string,
+    @Body() body: { minutesSavedPerRun?: number; hourlyRateCents?: number },
+  ) {
+    return this.ai.updateValueBenchmark(workspaceId, { id: user.id, role: user.role }, body)
+  }
+
+  /**
+   * §V2-11, frame `19:05` — the Activity log, one row per AI run.
+   *
+   * Filtered by when, which feature and whose. The frame's "Agent" filter has
+   * no counterpart here on purpose: Rundesk has no agents, and a filter that
+   * can only ever return everything is a control that lies about what it does.
+   */
+  @Get('activity')
+  @ApiOperation({ summary: 'Individual AI runs, newest first' })
+  activity(
+    @CurrentUser() user: any,
+    @Query('workspaceId') workspaceId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('feature') feature?: string,
+    @Query('userId') userId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parse = (s?: string) => {
+      if (!s) return undefined
+      const d = new Date(s)
+      return Number.isNaN(d.getTime()) ? undefined : d
+    }
+    return this.ai.runLog({
+      workspaceId,
+      actor: { id: user.id, role: user.role },
+      from: parse(from),
+      to: parse(to),
+      feature: feature || undefined,
+      userId: userId || undefined,
+      limit: limit ? Number(limit) : undefined,
+    })
+  }
+
   @Get('usage')
   @ApiOperation({ summary: 'AI usage + estimated cost per user / per model' })
   usage(

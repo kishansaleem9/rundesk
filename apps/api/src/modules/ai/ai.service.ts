@@ -16,6 +16,7 @@ import { aiAnswerFeedback, aiUsage, meetings, workspaces, workspaceMembers, spac
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
+import { summariseValue, validateBenchmark } from './ai-value'
 import { formatStandupFallback, type StandupData } from '../people/standup'
 import { modelForTier } from './model-tiers'
 import {
@@ -902,13 +903,17 @@ export class AiService {
       .select({
         userId: aiUsage.userId,
         model: aiUsage.model,
+        // §V2-11 — grouped by feature too, so the value panel can attribute a
+        // saving to what produced it. A total nobody can break down is a total
+        // nobody believes.
+        feature: aiUsage.feature,
         inTok: sql<number>`coalesce(sum(${aiUsage.inputTokens}),0)::int`,
         outTok: sql<number>`coalesce(sum(${aiUsage.outputTokens}),0)::int`,
         calls: sql<number>`count(*)::int`,
       })
       .from(aiUsage)
       .where(where)
-      .groupBy(aiUsage.userId, aiUsage.model)
+      .groupBy(aiUsage.userId, aiUsage.model, aiUsage.feature)
 
     let totalCost = 0
     let totalCalls = 0
@@ -916,6 +921,7 @@ export class AiService {
     let totalOut = 0
     const byUser: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }> = {}
     const byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }> = {}
+    const byFeature: Record<string, { calls: number; inputTokens: number; outputTokens: number; costUsd: number }> = {}
     for (const r of rows) {
       const cost = estimateAiCostUsd(r.model, r.inTok, r.outTok)
       totalCost += cost
@@ -926,13 +932,136 @@ export class AiService {
       u.calls += r.calls; u.inputTokens += r.inTok; u.outputTokens += r.outTok; u.costUsd += cost
       const m = (byModel[r.model] ??= { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 })
       m.calls += r.calls; m.inputTokens += r.inTok; m.outputTokens += r.outTok; m.costUsd += cost
+      const f = (byFeature[r.feature] ??= { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 })
+      f.calls += r.calls; f.inputTokens += r.inTok; f.outputTokens += r.outTok; f.costUsd += cost
     }
     const round = (n: number) => Math.round(n * 10000) / 10000
     return {
       totals: { calls: totalCalls, inputTokens: totalIn, outputTokens: totalOut, costUsd: round(totalCost) },
       byUser: Object.fromEntries(Object.entries(byUser).map(([k, v]) => [k, { ...v, costUsd: round(v.costUsd) }])),
       byModel: Object.fromEntries(Object.entries(byModel).map(([k, v]) => [k, { ...v, costUsd: round(v.costUsd) }])),
+      byFeature: Object.fromEntries(Object.entries(byFeature).map(([k, v]) => [k, { ...v, costUsd: round(v.costUsd) }])),
     }
+  }
+
+  /**
+   * §V2-11, frames `19:00`/`19:05` — what the AI was WORTH, beside what it cost.
+   *
+   * Shares `usageSummary`'s access check by calling it: spend and per-person
+   * usage are workspace-confidential, and a second endpoint answering the same
+   * question through a second, subtly different guard is how a leak happens.
+   */
+  async valueSummary(opts: { workspaceId: string; from?: Date; to?: Date; actor: { id: string; role?: string } }) {
+    const usage = await this.usageSummary(opts)
+    const [ws] = await this.db
+      .select({
+        minutes: workspaces.aiMinutesSavedPerRun,
+        rate: workspaces.aiHourlyRateCents,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, opts.workspaceId))
+      .limit(1)
+    if (!ws) throw new NotFoundException('Workspace not found')
+
+    return {
+      ...summariseValue(usage.totals.calls, usage.totals.costUsd, {
+        minutesSavedPerRun: ws.minutes,
+        hourlyRateCents: ws.rate,
+      }),
+      // Carried through so the panel can break the saving down by what produced
+      // it — a total nobody can attribute is a total nobody believes.
+      byFeature: usage.byFeature,
+    }
+  }
+
+  /**
+   * §V2-11 — "Edit benchmark", frame `19:00`.
+   *
+   * Admin-only, because it changes a number the whole workspace is shown and
+   * that somebody may put in front of a client. Validated here as well as by
+   * the database's CHECK: the API should refuse with a sentence, not surface a
+   * constraint violation.
+   */
+  async updateValueBenchmark(
+    workspaceId: string,
+    actor: { id: string; role?: string },
+    patch: { minutesSavedPerRun?: number; hourlyRateCents?: number },
+  ) {
+    if (actor.role !== 'super_admin') {
+      const [member] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
+        .limit(1)
+      if (!member) throw new ForbiddenException('Workspace membership required')
+      if (!['workspace_admin', 'manager', 'super_admin'].includes(member.role as string)) {
+        throw new ForbiddenException('Only a workspace admin can change the AI benchmark')
+      }
+    }
+    const problem = validateBenchmark(patch)
+    if (problem) throw new BadRequestException(problem)
+
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (patch.minutesSavedPerRun !== undefined) set.aiMinutesSavedPerRun = patch.minutesSavedPerRun
+    if (patch.hourlyRateCents !== undefined) set.aiHourlyRateCents = patch.hourlyRateCents
+    const [row] = await this.db
+      .update(workspaces)
+      .set(set)
+      .where(eq(workspaces.id, workspaceId))
+      .returning({ minutes: workspaces.aiMinutesSavedPerRun, rate: workspaces.aiHourlyRateCents })
+    if (!row) throw new NotFoundException('Workspace not found')
+    return { minutesSavedPerRun: row.minutes, hourlyRateCents: row.rate }
+  }
+
+  /**
+   * §V2-11, frame `19:05` — the Activity log: one row per AI run.
+   *
+   * The frame filters by Date run, Status, My agents and Agent. Rundesk has no
+   * agents, so the equivalent axes are the ones its runs actually have: when,
+   * which FEATURE, and whose. Offering an "Agent" filter over a product with no
+   * agents would be a control that can only ever return everything.
+   *
+   * Capped and newest-first. An unbounded log of every model call a busy
+   * workspace has ever made is a page that never finishes rendering.
+   */
+  async runLog(opts: {
+    workspaceId: string
+    actor: { id: string; role?: string }
+    from?: Date
+    to?: Date
+    feature?: string
+    userId?: string
+    limit?: number
+  }) {
+    // Same confidentiality as the summary, asserted the same way.
+    await this.usageSummary({ workspaceId: opts.workspaceId, actor: opts.actor })
+
+    const filters = [eq(aiUsage.workspaceId, opts.workspaceId)]
+    if (opts.from) filters.push(gte(aiUsage.createdAt, opts.from))
+    if (opts.to) filters.push(lte(aiUsage.createdAt, opts.to))
+    if (opts.feature) filters.push(eq(aiUsage.feature, opts.feature))
+    if (opts.userId) filters.push(eq(aiUsage.userId, opts.userId))
+
+    const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500)
+    const rows = await this.db
+      .select({
+        id: aiUsage.id,
+        feature: aiUsage.feature,
+        model: aiUsage.model,
+        inputTokens: aiUsage.inputTokens,
+        outputTokens: aiUsage.outputTokens,
+        createdAt: aiUsage.createdAt,
+        userId: aiUsage.userId,
+      })
+      .from(aiUsage)
+      .where(and(...filters))
+      .orderBy(desc(aiUsage.createdAt))
+      .limit(limit)
+
+    return rows.map((r) => ({
+      ...r,
+      costUsd: Math.round(estimateAiCostUsd(r.model, r.inputTokens, r.outputTokens) * 10000) / 10000,
+    }))
   }
 
   // ─── Task generation from a natural language prompt ───────────────────────

@@ -411,6 +411,22 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-11 `[18:51]` — what the AI was WORTH, not only what it cost.
+      #
+      # Two checks earn the minutes. The panel must be able to report a LOSS:
+      # the suite stages real spend against a zero benchmark, so a `Math.max(0,
+      # …)` anywhere in the arithmetic — one line, breaking nothing else — is
+      # caught rather than shipped, because that single change turns an
+      # analytics page into marketing. And the benchmark must MOVE the figures:
+      # a settings form that saves, reads back and changes nothing on the page
+      # it belongs to is this codebase's most common defect.
+      - name: AI value and activity
+        if: '!cancelled()'
+        run: node test/e2e/ai-value.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-08 — the two items of frame `15:32` she actually narrates.
       #
       # `[15:27]` description history. The check worth the minutes is that a

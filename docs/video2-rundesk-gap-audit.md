@@ -702,6 +702,53 @@ What the frames show that Rundesk lacks:
 
 ---
 
+#### V2-11 read off the frames and against the code, with three corrections
+
+Frames `17:15`, `18:50`, `19:00`, `19:05` re-extracted; the transcript read for
+`[18:42]`–`[19:18]`.
+
+**1. CORRECTION — frame `18:50` is not the analytics page.** The bullet above
+attributes "Time Saved, Human Cost Savings" to `18:50`. That frame is the Brain
+chat at `/ai/brain`, and what it actually shows is **Follow ups** — three
+chained suggestions under a completed answer ("Add custom fields for priority
+and effort", "Create a workload view grouped by assignee", "Move matching tasks
+into ddddd") — plus two rings in the left rail: **13 Brain AI uses** and **500
+Credits left**. She reaches Analytics at `[18:49]`, and the analytics frames are
+`19:00` and `19:05`.
+
+**2. CORRECTION — "Rundesk has `usageSummary` and no surface" is false.**
+`GET /ai/usage` is rendered by `AiUsageTab` in `workspace-settings-page.tsx`,
+under §A4.4/§A6.8, with cost / calls / input tokens / output tokens, a per-user
+table, a per-model table and 7/30/90-day ranges. Checking beat trusting for the
+seventh time in this audit.
+
+**3. So the analytics gap is a FRAMING gap, not a missing screen.** Read the two
+side by side and the difference is the whole point:
+
+| ClickUp `19:00`–`19:05` | Rundesk today |
+| --- | --- |
+| three tabs: **Analytics · Credits Usage · Activity** | one settings tab |
+| **Time Saved**, **Human Cost Savings** at an editable $/hour, with **Edit benchmark** | cost in dollars only |
+| credits, a usage trend, **Add credits** | dollars, no credit concept |
+| an **Activity** log filtered by **Date run · Status · My agents · Agent**, with a "No activity found … Clear filters" empty state | no per-run log at all |
+
+Rundesk answers "what did AI cost". The frames answer "what did AI save" — and
+that is the question a person renewing a subscription actually asks.
+
+**What that means for building, and one thing deliberately not built.** Time
+saved cannot be measured, only estimated from a per-action benchmark; ClickUp
+says so out loud with **Edit benchmark**. So the benchmark is the workspace's to
+set and the figure is shown as derived from it, never as a measurement. And
+**credits are not built**: Rundesk bills in dollars, and minting a fictional
+in-app currency to mirror a competitor's packaging would invent a product
+concept nobody asked for.
+
+**Also confirmed by the frames, and cheap:** the Activity empty state offers
+**Clear filters** — an empty list with filters applied must say the filters are
+why, which is a rule worth applying wherever Rundesk filters a list.
+
+---
+
 ### V2-12 · Teams Hub
 **Ask** `[20:53]`–`[21:20]`, cut short by time (*"AI par abhi ruk jayein"*).
 
