@@ -768,6 +768,43 @@ under-specifies; treat the frames as the brief and confirm before building.
 
 ---
 
+#### V2-12 read off the frame, and against the schema
+
+**1. Frame `20:55` is a FLYOUT, not a hub page.** Hovering the Teams rail icon
+opens: **All Teams · All People** (badge: 2) **· Org Chart · Analytics**, a rule,
+then **My Teams** with the empty state *"Once you are added to a Team you will
+see it here"*. The status bar shows where it goes — `/teams-pulse`. She never
+opens any of the four, and the transcript is why: `[20:58]` "aap ko show nahi ho
+raha ke TEAM nahi hai?", `[21:05]` "yeh AI par ruk jayein". **So the video
+specifies the NAV and none of the destinations.**
+
+**2. CORRECTION — "previews showing each member with their current work" is not
+in this frame.** The bullet above says so; what the frame shows under My Teams
+is an empty-state card and nothing else.
+
+**3. But the schema says four of the five are buildable from real data**, which
+is a better answer than "confirm before building":
+
+| Destination | What Rundesk already has |
+| --- | --- |
+| All Teams | `workspace_groups` + `workspace_group_members`, full CRUD API |
+| All People | `workspace_members`, already listed everywhere |
+| My Teams | the same groups, filtered to the caller — and the frame gives its empty state verbatim |
+| **Org Chart** | `workspace_members.manager_id`, with an index. Video 1 surfaced a person's OWN line and said explicitly "not the whole tree" — the tree is the missing surface, not the missing data |
+| Analytics | **nothing.** No per-team aggregate exists, and the frame never opens it |
+
+So the honest split is: build the four whose contents are determined by data
+that already exists, and leave **Analytics** out rather than inventing what a
+team's analytics are. A nav item that opens a page somebody has to guess the
+purpose of is the facade this audit keeps removing.
+
+**4. And teams are currently ADMIN furniture.** `GroupsTab` lives in workspace
+settings, which is where you go to *administer* teams. Nowhere in the product do
+you go to *look at* them. That is the gap, and it is why the frame is a rail
+destination rather than a settings tab.
+
+---
+
 ### V2-13 · Smaller things the frames show and the transcript does not
 | | Frame | Note |
 |---|---|---|
