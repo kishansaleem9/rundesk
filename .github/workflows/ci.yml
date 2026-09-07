@@ -425,6 +425,17 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-06 — "Create a Space" collects more than a name, and the workflow
+      # preset does something. The load-bearing check is the last one: the
+      # preset SEEDS THE SPACE'S FIRST LISTS (`[07:46]`), without which the
+      # wizard collects a purpose and throws it away.
+      - name: Space presets
+        if: '!cancelled()'
+        run: node test/e2e/space-presets.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-07 `[11:35]` — the "Save view" chip. Drives the built app against a
       # stubbed API: absent on an untouched view, present the moment it is
       # modified, and gone once saved. The last of those three is the one that

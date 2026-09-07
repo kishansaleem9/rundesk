@@ -5,6 +5,12 @@ import { projects } from './projects'
 import { users } from './users'
 import { containerVisibilityEnum } from './enums'
 
+/**
+ * The rungs a space's default permission can sit on — the same ladder as
+ * `object_shares.level`, weakest first.
+ */
+export type SpaceDefaultPermission = 'view' | 'comment' | 'edit' | 'admin'
+
 export const spaces = pgTable('spaces', {
   id:          uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
@@ -22,6 +28,37 @@ export const spaces = pgTable('spaces', {
   // views this space's lists expose, and which one opens by default. null =
   // all views enabled + 'list' default.
   viewConfig:  jsonb('view_config').$type<{ defaultView?: string; enabledViews?: string[] }>(),
+  /**
+   * §V2-06, frame `06:52` — "Default permission  Full edit ▾".
+   *
+   * What a workspace member gets on this space without an explicit grant.
+   * Deliberately the same four rungs as `object_shares.level`
+   * (view < comment < edit < admin) rather than a second vocabulary: ClickUp's
+   * "Full edit" is this ladder's `edit`, and a space that said "Editor" while
+   * a share said "edit" would be two words for one thing.
+   */
+  defaultPermission: text('default_permission')
+    .$type<SpaceDefaultPermission>()
+    .notNull()
+    .default('edit'),
+  /**
+   * §V2-06, frame `07:19` — "Enable ClickApps": which of this space's optional
+   * features are on. `null` means every one of them, so a space made before
+   * this column existed behaves exactly as it did.
+   *
+   * Only features Rundesk ACTUALLY HAS get a key here. ClickUp's grid includes
+   * entries Rundesk has no equivalent for, and a switch that toggles nothing
+   * is worse than an absent switch, because the absent one is honest.
+   */
+  features:    jsonb('features').$type<Record<string, boolean>>(),
+  /**
+   * Which workflow preset made this space (frame `07:06`), or null for one
+   * made before presets existed. Kept because `[07:46]` — "yeh LIST
+   * automatically generate kar deta hai … us base pe jo aap ne ooper di ho" —
+   * means the preset had consequences, and a space with a seeded list and no
+   * record of why is a space nobody can explain later.
+   */
+  presetKey:   text('preset_key'),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

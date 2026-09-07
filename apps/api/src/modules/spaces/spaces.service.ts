@@ -1,15 +1,26 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common'
 import { eq, and, or, ne, inArray } from 'drizzle-orm'
-import { spaces, spaceMembers, folders, projects, lists, workspaces } from '@rundesk/db'
-import type { Db } from '@rundesk/db'
+import { spaces, spaceMembers, spaceStatuses, folders, projects, lists, workspaces } from '@rundesk/db'
+import type { Db, SpaceDefaultPermission } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { SecurityService } from '../security/security.service'
+import { ListsService } from '../lists/lists.service'
+import {
+  SPACE_VIEW_KEYS,
+  SPACE_FEATURE_KEYS,
+  findPreset,
+  type SpacePreset,
+  type SpaceViewKey,
+} from './space-presets'
 
-// §5 per-space view config. The five task views a list can render.
-export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt'] as const
-type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number]
+// Re-exported from here because this module's callers have always imported it
+// from the service; the list itself now lives beside the presets that use it.
+export { SPACE_VIEW_KEYS }
+
+/** §V2-06 frame `06:52` — the rungs "Default permission" offers. */
+const SPACE_PERMISSIONS: readonly SpaceDefaultPermission[] = ['view', 'comment', 'edit', 'admin']
 
 /**
  * Validate + normalise a space's view config so a bad body can never reach the
@@ -43,14 +54,43 @@ function normalizeViewConfig(
 
 @Injectable()
 export class SpacesService {
+  private readonly logger = new Logger(SpacesService.name)
+
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
+    private lists: ListsService,
   ) {}
 
+  /**
+   * §V2-06 — "Create a Space", frames `06:52` and `07:06`.
+   *
+   * Everything past `name` was already accepted here and never sent: both web
+   * call sites POSTed `{ workspaceId, name }` and nothing else, so description,
+   * colour and icon were live parameters no UI could reach. The wizard now
+   * fills them, and brings four more the frames ask for — default permission,
+   * the workflow preset, its views and its ClickApps.
+   *
+   * The preset is applied here rather than in the controller because
+   * `[07:46]` makes it more than a stored label: "yeh LIST automatically
+   * generate kar deta hai ClickUp … us base pe jo aap ne ooper di ho". A space
+   * created from a preset comes with its statuses and its first lists, or the
+   * question the wizard asked was for nothing.
+   */
   async createSpace(
     workspaceId: string,
-    data: { name: string; description?: string; color?: string; icon?: string; visibility?: 'public' | 'private' },
+    data: {
+      name: string
+      description?: string
+      color?: string
+      icon?: string
+      visibility?: 'public' | 'private'
+      defaultPermission?: SpaceDefaultPermission
+      presetKey?: string
+      /** Overrides the preset's own, so "customize to your liking" is real. */
+      viewConfig?: { defaultView?: string; enabledViews?: string[] }
+      features?: string[]
+    },
     actorId?: string,
   ) {
     // §A4.2 — an agency holding several clients' work wants new spaces closed by
@@ -63,6 +103,23 @@ export class SpacesService {
       .limit(1)
     const visibility = data.visibility ?? (workspace?.defaultSpacePrivate ? 'private' : 'public')
 
+    const preset = findPreset(data.presetKey)
+
+    /*
+     * The wizard's answers win over the preset's defaults, and the preset wins
+     * over nothing at all. A person who opened "Customize defaults" and turned
+     * Calendar off must not get Calendar back because the preset said so.
+     */
+    const chosenViews =
+      data.viewConfig ?? (preset ? { defaultView: preset.defaultView, enabledViews: preset.views } : null)
+    const viewConfig = chosenViews === null ? null : normalizeViewConfig(chosenViews)
+    const features = data.features ?? preset?.features
+    const permission: SpaceDefaultPermission = SPACE_PERMISSIONS.includes(
+      data.defaultPermission as SpaceDefaultPermission,
+    )
+      ? (data.defaultPermission as SpaceDefaultPermission)
+      : 'edit'
+
     const result = await this.db
       .insert(spaces)
       .values({
@@ -72,6 +129,10 @@ export class SpacesService {
         color: data.color || '#354fb0',
         icon: data.icon,
         visibility,
+        defaultPermission: permission,
+        presetKey: preset?.key ?? null,
+        viewConfig: viewConfig ?? null,
+        features: features ? Object.fromEntries(SPACE_FEATURE_KEYS.map((k) => [k, features.includes(k)])) : null,
         createdById: actorId ?? null,
       })
       .returning()
@@ -85,7 +146,51 @@ export class SpacesService {
         .values({ spaceId: space.id, userId: actorId, role: 'admin', addedById: actorId })
         .onConflictDoNothing()
     }
+
+    if (space && preset) await this.applyPreset(space.id, preset, actorId)
     return space
+  }
+
+  /**
+   * `[07:46]` — the preset's statuses and its first lists.
+   *
+   * Failures here are logged and swallowed rather than rolled back: the space
+   * EXISTS by this point, and a person who watched it appear in the sidebar and
+   * then got an error would have no way to tell whether it is there. A space
+   * with no seeded list is recoverable in one click; a space that half-exists
+   * is not.
+   */
+  private async applyPreset(spaceId: string, preset: SpacePreset, actorId?: string) {
+    try {
+      await this.db.insert(spaceStatuses).values(
+        preset.statuses.map((st, i) => ({
+          spaceId,
+          key: st.key,
+          name: st.name,
+          color: st.color,
+          category: st.category,
+          position: i,
+        })),
+      ).onConflictDoNothing()
+    } catch (err) {
+      this.logger.warn(`space ${spaceId}: preset statuses not applied — ${(err as Error).message}`)
+    }
+
+    /*
+     * Through the lists service and the space's hidden container project — the
+     * same path a hand-made list under a space takes (video 1, §G15-10). A
+     * direct insert here would skip whatever that path does about statuses,
+     * default views and search indexing, and the seeded lists would quietly
+     * differ from every other list in the space.
+     */
+    try {
+      const containerId = await this.lists.defaultContainerForSpace(spaceId, actorId)
+      for (const name of preset.seedLists) {
+        await this.lists.createList(containerId, { name }, actorId)
+      }
+    } catch (err) {
+      this.logger.warn(`space ${spaceId}: preset lists not created — ${(err as Error).message}`)
+    }
   }
 
   /**

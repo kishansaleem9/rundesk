@@ -19,7 +19,9 @@ describe('SpacesService.deleteSpace — §13.3 audit event', () => {
   it('archives and logs space.deleted with the actor + IP', async () => {
     const db = { update: mock.fn(() => updateChain()) } as any
     const security = { logAuditEvent: mock.fn(async () => undefined) } as any
-    const svc = new SpacesService(db, security) as any
+    // §V2-06 added ListsService for preset seeding; deleteSpace never touches
+    // it, so a null stand-in says that rather than pretending to be one.
+    const svc = new SpacesService(db, security, null as any) as any
     svc.assertManageable = mock.fn(async () => ({ workspaceId: 'w1', name: 'Product', createdById: 'u1' }))
 
     await svc.deleteSpace('s1', 'actor-1', '198.51.100.22')
@@ -38,7 +40,7 @@ describe('SpacesService.deleteSpace — §13.3 audit event', () => {
   it('does not audit an internal (no-actor) archive', async () => {
     const db = { update: mock.fn(() => updateChain()) } as any
     const security = { logAuditEvent: mock.fn(async () => undefined) } as any
-    const svc = new SpacesService(db, security)
+    const svc = new SpacesService(db, security, null as any)
 
     await svc.deleteSpace('s1')
 
