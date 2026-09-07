@@ -33,27 +33,67 @@ const API_PORT = process.env.E2E_API_PORT ?? '3011'
 
 const filters = process.argv.slice(2)
 
+/**
+ * What was actually under test, by CONTENT.
+ *
+ * The first version of this hashed `HEAD` plus the count of dirty files, which
+ * is git STATE and only a proxy for file content — and the two come apart in
+ * the most ordinary way there is. Committing during a sweep changes HEAD and
+ * empties the dirty count while touching not one byte of the working tree, so
+ * the guard cried wolf on a run whose subject had never changed. A guard that
+ * fires when nothing is wrong gets ignored, and then it is not a guard.
+ *
+ * Tracked and untracked-but-not-ignored files, hashed. `git commit` is
+ * invisible to it; a real edit is not.
+ */
 function fingerprint() {
-  const head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT }).toString().trim()
-  const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT }).toString().trim().split('\n').filter(Boolean).length
+  const content = execFileSync(
+    'bash',
+    ['-c', "git ls-files -co --exclude-standard -z | xargs -0 sha1sum | sha1sum | cut -c1-12"],
+    { cwd: ROOT },
+  ).toString().trim()
   const suites = fs.readdirSync(path.join(ROOT, 'test/e2e')).filter((f) => f.endsWith('.mjs')).length
   const migrations = fs.readdirSync(path.join(ROOT, 'packages/db/src/migrations')).filter((f) => f.endsWith('.sql')).length
-  return `${head}${dirty ? `+${dirty}` : ''} | ${suites} suites | ${migrations} migrations`
+  return `tree ${content} | ${suites} suites | ${migrations} migrations`
 }
 
 /**
- * The `run:` lines of the workflow that invoke a suite, in order.
+ * The suites the workflow runs, in order, WITH the environment each is given.
  *
- * Parsed rather than imported because the workflow is YAML and the only thing
- * needed from it is the command line, which is already exactly what to run.
+ * THE `env:` BLOCK IS NOT OPTIONAL DETAIL. Three suites default to
+ * `verify@rundesk.internal`, a production account no seeded database has, and
+ * ci.yml overrides them to the seeded admin in a per-step `env:`. The first
+ * version of this parser read only the `run:` line, so those three signed in as
+ * nobody and failed 401 — three red suites that were green in CI, for a reason
+ * that had nothing to do with the code. A sweep that goes red on its own
+ * plumbing is a sweep people stop reading.
+ *
+ * Parsed rather than imported because the workflow is YAML and the only things
+ * needed from it are the command and its environment, both of which are already
+ * written there exactly as they should be run.
  */
 function suitesFromWorkflow() {
   const lines = fs.readFileSync(WORKFLOW, 'utf8').split('\n')
   const found = []
-  for (const line of lines) {
-    const m = line.match(/run:\s*(node\s+test\/e2e\/([\w.-]+)\.mjs.*)$/)
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(\s*)run:\s*(node\s+test\/e2e\/([\w.-]+)\.mjs.*)$/)
     if (!m) continue
-    found.push({ name: m[2], command: m[1].trim() })
+    const [, indent, command, name] = m
+    // An `env:` mapping belonging to this step sits at the same indent as
+    // `run:`, with its keys indented deeper. Anything at or left of `run:`'s
+    // indent that is not `env:` ends the step.
+    const env = {}
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j]
+      if (!line.trim()) continue
+      const lead = line.match(/^\s*/)[0].length
+      if (lead <= indent.length && line.trim() !== 'env:') break
+      if (line.trim() === 'env:') continue
+      const kv = line.match(/^\s+([A-Z_][A-Z0-9_]*):\s*(.*)$/)
+      if (!kv) break
+      env[kv[1]] = kv[2].trim().replace(/^['"]|['"]$/g, '')
+    }
+    found.push({ name, command: command.trim(), env })
   }
   // The same suite can appear twice in a workflow (different jobs / flags);
   // running it twice would double the wall clock for no extra coverage.
@@ -85,7 +125,7 @@ for (const suite of suites) {
   const run = spawnSync('bash', ['-c', suite.command], {
     cwd: ROOT,
     encoding: 'utf8',
-    env: { ...process.env, E2E_API_PORT: API_PORT },
+    env: { ...process.env, E2E_API_PORT: API_PORT, ...suite.env },
     timeout: 10 * 60_000,
   })
   const out = `${run.stdout ?? ''}${run.stderr ?? ''}`
