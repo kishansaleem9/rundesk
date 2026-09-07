@@ -89,19 +89,34 @@ export class TasksController {
     @Res() res: any,
     @Query('columns') columns?: string,
     @Query('fields') fields?: string,
+    @Query('format') format?: string,
+    @Query('dateFormat') dateFormat?: string,
+    @Query('timeFormat') timeFormat?: string,
+    @Query('includeArchived') includeArchived?: string,
+    @Query('includeClosed') includeClosed?: string,
   ) {
     const mode = columns === 'names' || columns === 'all' ? columns : 'visible'
     const out = await this.tasks.exportListView(
       listId,
       { id: user.id, role: user.role },
-      { columns: mode, fields: fields ? fields.split(',').filter(Boolean) : undefined },
+      {
+        columns: mode,
+        fields: fields ? fields.split(',').filter(Boolean) : undefined,
+        format: format === 'xlsx' ? 'xlsx' : 'csv',
+        // Unrecognised values fall back inside the service rather than 400ing:
+        // a stale bookmark should still download the list.
+        dateFormat: dateFormat as never,
+        timeFormat: timeFormat as never,
+        includeArchived: includeArchived === 'true',
+        includeClosed: includeClosed !== 'false',
+      },
     )
     // Quoted, and stripped of anything that could end the header early: a list
     // named `"; drop` would otherwise break the Content-Disposition it lands in.
     const safeName = out.name.replace(/[^\w \-.]/g, '').trim() || 'list'
-    res.header('Content-Type', 'text/csv; charset=utf-8')
-    res.header('Content-Disposition', `attachment; filename="${safeName}.csv"`)
-    res.send(out.csv)
+    res.header('Content-Type', out.contentType)
+    res.header('Content-Disposition', `attachment; filename="${safeName}.${out.extension}"`)
+    res.send(out.body)
   }
 
   @Get('list/:listId')

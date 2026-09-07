@@ -32,6 +32,17 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { toCsv } from '../../common/export/csv'
+import { toXlsx } from '../../common/export/xlsx'
+import {
+  asDateFormat,
+  asTimeFormat,
+  formatDate,
+  type DateFormat,
+  type TimeFormat,
+} from '../../common/export/datetime'
+
+/** `[10:57]` "CSV chahiye, Excel chahiye" — frame `10:58` shows exactly these two. */
+export type ExportFormat = 'csv' | 'xlsx'
 import {
   parseExternalLinkUrl,
   isHttpUrl,
@@ -2170,30 +2181,60 @@ export class TasksService {
    * per-item visibility filter. A separate query would be free to drift, and
    * the way it would drift is by exporting rows the person cannot see on
    * screen.
+   *
+   * `includeArchived` and `includeClosed` are here for the same reason. The
+   * toolbar has an "Archived" filter and a "Closed" toggle (`[11:32]`, `[11:37]`),
+   * and an export that ignored them would hand back a different set of rows
+   * than the screen it was launched from — which is the one thing this endpoint
+   * exists not to do.
    */
   async exportListView(
     listId: string,
     actor: { id: string; role?: string },
-    opts: { columns?: 'names' | 'visible' | 'all'; fields?: string[]; includeSubtasks?: boolean } = {},
+    opts: {
+      columns?: 'names' | 'visible' | 'all'
+      fields?: string[]
+      includeSubtasks?: boolean
+      includeArchived?: boolean
+      includeClosed?: boolean
+      format?: ExportFormat
+      dateFormat?: DateFormat
+      timeFormat?: TimeFormat
+    } = {},
   ) {
-    const rows = await this.getTasksByList(
+    const all = await this.getTasksByList(
       listId,
-      { includeSubtasks: opts.includeSubtasks ?? false },
+      { includeSubtasks: opts.includeSubtasks ?? false, includeArchived: opts.includeArchived ?? false },
       actor,
     )
+    /*
+     * "Closed" is the status CATEGORY, not the archive flag — a task can be
+     * complete without being archived, and the list hides the two separately.
+     * `includeClosed` defaults to true so a plain `?columns=all` with no other
+     * parameters still exports the whole list: the caller has to ask to lose
+     * rows, never the other way round.
+     */
+    const rows =
+      opts.includeClosed === false
+        ? all.filter((t: Record<string, any>) => t.statusCategory !== 'closed')
+        : all
     const [list] = await this.db.select({ name: lists.name }).from(lists).where(eq(lists.id, listId)).limit(1)
+
+    const dateFormat = asDateFormat(opts.dateFormat)
+    const timeFormat = asTimeFormat(opts.timeFormat)
+    const date = (v: unknown) => formatDate(v, dateFormat, timeFormat)
 
     const COLUMNS: Array<{ key: string; header: string; read: (t: Record<string, any>) => unknown }> = [
       { key: 'title', header: 'Name', read: (t) => t.title },
       { key: 'status', header: 'Status', read: (t) => t.status },
       { key: 'assignees', header: 'Assignees', read: (t) => (t.assignees ?? []).map((a: any) => a.user?.displayName ?? a.user?.email).filter(Boolean).join(', ') },
       { key: 'priority', header: 'Priority', read: (t) => t.priority },
-      { key: 'startDate', header: 'Start date', read: (t) => t.startDate },
-      { key: 'dueDate', header: 'Due date', read: (t) => t.dueDate },
+      { key: 'startDate', header: 'Start date', read: (t) => date(t.startDate) },
+      { key: 'dueDate', header: 'Due date', read: (t) => date(t.dueDate) },
       { key: 'timeEstimate', header: 'Time estimate', read: (t) => t.timeEstimate },
       { key: 'labels', header: 'Tags', read: (t) => (t.labels ?? []).map((l: any) => l.name).filter(Boolean).join(', ') },
       { key: 'description', header: 'Description', read: (t) => t.description },
-      { key: 'createdAt', header: 'Created', read: (t) => t.createdAt },
+      { key: 'createdAt', header: 'Created', read: (t) => date(t.createdAt) },
       { key: 'id', header: 'ID', read: (t) => t.id },
     ]
 
@@ -2214,13 +2255,21 @@ export class TasksService {
     // columns that do not exist".
     const columns = chosen.length > 0 ? chosen : COLUMNS.filter((c) => c.key === 'title')
 
+    const name = list?.name ?? 'list'
+    const headers = columns.map((c) => c.header)
+    const cells = rows.map((task) => columns.map((c) => c.read(task as Record<string, any>)))
+    const format: ExportFormat = opts.format === 'xlsx' ? 'xlsx' : 'csv'
+
     return {
-      name: list?.name ?? 'list',
+      name,
       count: rows.length,
-      csv: toCsv(
-        columns.map((c) => c.header),
-        rows.map((task) => columns.map((c) => c.read(task as Record<string, any>))),
-      ),
+      format,
+      extension: format === 'xlsx' ? 'xlsx' : 'csv',
+      contentType:
+        format === 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'text/csv; charset=utf-8',
+      body: format === 'xlsx' ? toXlsx(name, headers, cells) : toCsv(headers, cells),
     }
   }
 

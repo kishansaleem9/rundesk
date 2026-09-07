@@ -2,9 +2,11 @@
  * §V2-07 — download the list you are looking at.
  *
  * `[10:53]`–`[11:09]` "Customize pe aap click karoge — ab yeh dekh rahe ho:
- * EXPORT VIEW … aur aap is ko download kar lo … woh aap ko COLUMN mein list de
- * dega, har cheez." Frame `10:57`: File format, a What-to-export choice of
- * Visible columns / Task Names only / All columns, and Download.
+ * EXPORT VIEW … aap se poochte hain ke CSV chahiye, EXCEL chahiye … aur aap is
+ * ko download kar lo … woh aap ko COLUMN mein list de dega, har cheez."
+ * Frame `10:58`: **File format** `CSV | Excel`, a What-to-export choice of
+ * Visible columns / Task Names only / All columns, **Date format**, **Time
+ * format**, Download.
  *
  * What existed was `GET /export/csv/tasks` — the WHOLE workspace, seven fixed
  * columns, behind `WorkspaceAdminGuard`. The person actually looking at a list
@@ -17,11 +19,14 @@
  * export — and the person who typed it did not have to attack anything, they
  * typed it into a task title in an app that invited them to. So one task here is
  * deliberately named that way, and the check is that the exported cell cannot
- * be read as a formula.
+ * be read as a formula — in BOTH formats, by two different mechanisms: the CSV
+ * prefixes an apostrophe, and the XLSX writes the cell as an inline string,
+ * which is a different XML element from the one a formula lives in.
  *
  *   node test/e2e/list-export.mjs --api 3011
  */
 import { signInApi } from './lib/signin.mjs'
+import { xlsxRows, unzip } from './lib/unzip.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -29,7 +34,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 22
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -56,8 +61,18 @@ const apiAs = (token) => async (route, init = {}) => {
 }
 const raw = (token) => async (route) => {
   const res = await fetch(`${API}${route}`, { headers: { authorization: `Bearer ${token}` } })
-  return { status: res.status, text: await res.text(), disposition: res.headers.get('content-disposition') }
+  const bytes = Buffer.from(await res.arrayBuffer())
+  return {
+    status: res.status,
+    bytes,
+    text: bytes.toString('utf8'),
+    type: res.headers.get('content-type'),
+    disposition: res.headers.get('content-disposition'),
+  }
 }
+
+/** A fixed instant, so the date-format assertions can be exact strings. */
+const DUE = '2026-08-07T19:15:00.000Z'
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -76,9 +91,11 @@ try {
 
   const FORMULA = `=cmd|'/c calc'!A1 ${stamp}`
   const COMMA = `Comma, and "quotes" ${stamp}`
+  const DATED = `Dated ${stamp}`
   await A('/tasks', { method: 'POST', body: { listId: list.id, title: `Plain ${stamp}` } })
   await A('/tasks', { method: 'POST', body: { listId: list.id, title: FORMULA } })
   await A('/tasks', { method: 'POST', body: { listId: list.id, title: COMMA } })
+  await A('/tasks', { method: 'POST', body: { listId: list.id, title: DATED, dueDate: DUE } })
 
   console.log('\n▶ §V2-07 — the list downloads as columns')
   const visible = await R(`/tasks/list/${list.id}/export`)
@@ -95,8 +112,8 @@ try {
     'with the columns the list shows',
     `header row was ${JSON.stringify(header)}`,
   )
-  chk(visible.text.split('\r\n').length === 4, 'and one row per task, no more',
-    `got ${visible.text.split('\r\n').length - 1} row(s) for 3 tasks`)
+  chk(visible.text.split('\r\n').length === 5, 'and one row per task, no more',
+    `got ${visible.text.split('\r\n').length - 1} row(s) for 4 tasks`)
 
   console.log('\n▶ what to export')
   const names = await R(`/tasks/list/${list.id}/export?columns=names`)
@@ -136,6 +153,109 @@ try {
     !!commaRow && commaRow.startsWith(`"Comma, and ""quotes""`),
     'and a title with commas and quotes stays one cell',
     `the row was ${JSON.stringify((commaRow ?? '').slice(0, 48))}`,
+  )
+
+  console.log('\n▶ File format: Excel `[10:57]`')
+  const xl = await R(`/tasks/list/${list.id}/export?format=xlsx`)
+  chk(
+    xl.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Excel comes back as a workbook, not as CSV with a new name',
+    `content-type was ${JSON.stringify(xl.type)}`,
+  )
+  chk(
+    /filename="[^"]+\.xlsx"/.test(xl.disposition ?? ''),
+    'and is offered with an .xlsx filename',
+    `content-disposition was ${JSON.stringify(xl.disposition)}`,
+  )
+
+  /*
+   * Opened, not sniffed. "Starts with PK" is true of every zip ever made,
+   * including one Excel refuses; this reads the central directory and the
+   * worksheet part out of it.
+   */
+  let sheet = { rows: [], xml: '' }
+  let opened = false
+  try {
+    sheet = xlsxRows(xl.bytes)
+    opened = unzip(xl.bytes).has('xl/worksheets/sheet1.xml')
+  } catch (e) {
+    console.log(`       (workbook would not open: ${e.message})`)
+  }
+  chk(opened, 'the workbook opens and contains a worksheet part',
+    'the bytes did not parse as a workbook a reader could open')
+  chk(
+    JSON.stringify(sheet.rows[0] ?? []) ===
+      JSON.stringify(['Name', 'Status', 'Assignees', 'Priority', 'Due date']),
+    'with the same columns the CSV has',
+    `first row was ${JSON.stringify(sheet.rows[0])}`,
+  )
+
+  const xlFormulaRow = sheet.rows.find((r) => (r[0] ?? '').includes('calc'))
+  chk(
+    !!xlFormulaRow && xlFormulaRow[0] === FORMULA,
+    'the formula-shaped title survives verbatim — no apostrophe is added',
+    `expected ${JSON.stringify(FORMULA)}, got ${JSON.stringify(xlFormulaRow?.[0])}`,
+  )
+  /*
+   * …because it does not need one. In a workbook a formula is an `<f>`
+   * element, and this writer emits `<is><t>` — an inline string. The absence
+   * of `<f>` is the whole reason the apostrophe would be noise here.
+   */
+  chk(
+    sheet.xml.length > 0 && !/<f[ >]/.test(sheet.xml),
+    'and no cell in the sheet is a formula',
+    'the worksheet contains an <f> element — something is writing formulas',
+  )
+
+  console.log('\n▶ Date format / Time format `[frame 10:58]`')
+  const iso = await R(`/tasks/list/${list.id}/export?dateFormat=iso&timeFormat=h24`)
+  const isoRow = iso.text.split('\r\n').find((l) => l.includes(DATED))
+  chk(
+    !!isoRow && isoRow.includes('"2026-08-07 19:15"'),
+    'ISO + 24-hour writes the due date as 2026-08-07 19:15',
+    `the row was ${JSON.stringify(isoRow)}`,
+  )
+  const us = await R(`/tasks/list/${list.id}/export?dateFormat=us&timeFormat=none`)
+  const usRow = us.text.split('\r\n').find((l) => l.includes(DATED))
+  chk(
+    !!usRow && usRow.includes('"08/07/2026"') && !usRow.includes(':'),
+    'and US + no time writes 08/07/2026 with the time dropped',
+    `the row was ${JSON.stringify(usRow)}`,
+  )
+
+  console.log('\n▶ Closed and archived `[11:32]`, `[11:37]`')
+  const closedTask = (await A('/tasks', { method: 'POST', body: { listId: list.id, title: `Closed ${stamp}` } })).data
+  await A(`/tasks/${closedTask.id}`, { method: 'PATCH', body: { status: 'done' } })
+  const readBack = (await A(`/tasks/${closedTask.id}`)).data
+  chk(
+    readBack?.statusCategory === 'closed',
+    'a task moved to Done is in the closed category',
+    `statusCategory was ${JSON.stringify(readBack?.statusCategory)} — the rest of this section cannot mean anything`,
+  )
+
+  const withClosed = await R(`/tasks/list/${list.id}/export`)
+  chk(withClosed.text.includes(`Closed ${stamp}`), 'and is in the export by default',
+    'a completed task vanished from an export nobody asked to filter')
+  const withoutClosed = await R(`/tasks/list/${list.id}/export?includeClosed=false`)
+  chk(
+    !withoutClosed.text.includes(`Closed ${stamp}`) && withoutClosed.text.includes(`Plain ${stamp}`),
+    'until the view hides closed tasks, and then it is gone',
+    'includeClosed=false did not drop the closed task (or dropped everything)',
+  )
+
+  const archived = (await A('/tasks', { method: 'POST', body: { listId: list.id, title: `Archived ${stamp}` } })).data
+  await A(`/tasks/${archived.id}`, { method: 'PATCH', body: { isArchived: true } })
+  const noArchive = await R(`/tasks/list/${list.id}/export`)
+  chk(
+    !noArchive.text.includes(`Archived ${stamp}`),
+    'an archived task stays out of the export',
+    'an archived task was exported without being asked for',
+  )
+  const withArchive = await R(`/tasks/list/${list.id}/export?includeArchived=true`)
+  chk(
+    withArchive.text.includes(`Archived ${stamp}`),
+    'and comes back when the view is showing archived',
+    'includeArchived=true did not reach the query — this is the parameter the web never used to send',
   )
 
   await A(`/lists/${list.id}`, { method: 'DELETE' }).catch(() => {})

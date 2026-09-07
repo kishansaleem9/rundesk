@@ -18,7 +18,7 @@ import {
   WorkViewTabs,
   type WorkViewTab,
 } from '../components/work/work-ui'
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   ChevronDown,
@@ -37,6 +37,7 @@ import {
   MoreHorizontal,
   ClipboardList,
   Download,
+  Settings2,
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -420,10 +421,26 @@ function filterTasks(
   search = '',
   rules: FilterRule[] = [],
   ctx: FilterContext = { customFields: [], customValues: {} },
+  /*
+   * §V2-07 `[11:32]` — "Show closed tasks". Closed is the status CATEGORY, so a
+   * list whose statuses have been renamed still knows which ones mean finished;
+   * `status === 'done'` is the fallback for rows written before categories
+   * existed, and is the same pair every other check in this file uses.
+   */
+  showClosed = true,
 ): TaskItem[] {
   const needle = search.trim().toLowerCase()
-  if (statusFilter === 'all' && !columnFiltersActive(filters) && !needle && rules.length === 0) return tasks
+  if (
+    statusFilter === 'all' &&
+    !columnFiltersActive(filters) &&
+    !needle &&
+    rules.length === 0 &&
+    showClosed
+  ) {
+    return tasks
+  }
   return tasks.filter((task) => {
+    if (!showClosed && (task.statusCategory === 'closed' || task.status === 'done')) return false
     if (needle && !task.title.toLowerCase().includes(needle)) return false
     if (statusFilter !== 'all' && task.status !== statusFilter) return false
     if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) return false
@@ -1072,6 +1089,24 @@ function ListDetail() {
   // ANDed on top of the column filters and saved with the view.
   const [filterRules, setFilterRules] = useState<FilterRule[]>([])
   const [groupBy, setGroupBy] = useState<'status' | 'priority' | 'assignee'>('status')
+  /*
+   * §V2-07 — `[11:32]` "Ab yahan CLOSED TASK — agar aap ko [woh] dekhne hon to
+   * aap yeh rakh sakte ho" and `[11:37]` "…ARCHIVE…". Frame `11:14` has "Show
+   * closed tasks" in the Customize panel and frame `11:41` has "Archived" in
+   * the filter list, so they are two switches, not one: a task can be complete
+   * without being archived.
+   *
+   * The API has understood `includeArchived` since it was written
+   * (`tasks.controller.ts`) and the web has never once sent it — archived tasks
+   * were unreachable from the list, silently, with no control to explain it.
+   *
+   * Both defaults are what Rundesk already did, deliberately: closed tasks
+   * SHOWN (turning them off by default would hide finished work from every
+   * existing user overnight) and archived tasks HIDDEN. The ask is that the
+   * switches exist and work, not that the list starts somewhere new.
+   */
+  const [showClosed, setShowClosed] = useState(true)
+  const [showArchived, setShowArchived] = useState(false)
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
@@ -1149,8 +1184,12 @@ function ListDetail() {
    */
   const refresh = useRefreshInterval()
   const { data: tasks = [], isLoading, refetch, dataUpdatedAt } = useQuery({
-    queryKey: ['tasks', listId],
-    queryFn: () => api<TaskItem[]>(`/tasks/list/${listId}`),
+    // `showArchived` is in the key because it changes WHICH ROWS the server
+    // returns — leaving it out would serve the unarchived cache for both
+    // states and the toggle would look broken exactly once, on the second use.
+    queryKey: ['tasks', listId, showArchived],
+    queryFn: () =>
+      api<TaskItem[]>(`/tasks/list/${listId}${showArchived ? '?includeArchived=true' : ''}`),
     refetchInterval: refresh.refetchInterval,
   })
   const { data: projectFields = [] } = useQuery({
@@ -1302,14 +1341,19 @@ function ListDetail() {
   })
 
   const visibleTasks = useMemo(() => {
-    const filtered = filterTasks(tasks, statusFilter, columnFilters, taskSearch, filterRules, {
-      customFields: projectFields,
-      customValues: customFieldByTask,
-    })
+    const filtered = filterTasks(
+      tasks,
+      statusFilter,
+      columnFilters,
+      taskSearch,
+      filterRules,
+      { customFields: projectFields, customValues: customFieldByTask },
+      showClosed,
+    )
     // Custom-field sort is resolved inside TableView (it owns the values); for
     // every other view a custom sort is a stable no-op here.
     return sortTasks(filtered, sort, statusOrder)
-  }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder])
+  }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder, showClosed])
 
   // Toggle direction when re-clicking the active column, else adopt the
   // field's natural default direction.
@@ -1791,7 +1835,30 @@ function ListDetail() {
               <option value="priority">{t('list.groupByPriority')}</option>
               <option value="assignee">{t('list.groupByAssignee')}</option>
             </WorkFilterSelect>
-            <ExportViewMenu listId={listId} />
+            {/*
+              §V2-07 `[11:32]`/`[11:37]` — the two switches that change which
+              rows are on screen, next to the filters rather than buried, which
+              is where frame `11:41` puts "Closed" in the toolbar.
+            */}
+            <ToolbarToggle
+              active={!showClosed}
+              onClick={() => setShowClosed((v) => !v)}
+              testId="list-toggle-closed"
+              icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden />}
+              label={t(showClosed ? 'list.closedShown' : 'list.closedHidden')}
+            />
+            <ToolbarToggle
+              active={showArchived}
+              onClick={() => setShowArchived((v) => !v)}
+              testId="list-toggle-archived"
+              icon={<Archive className="h-3.5 w-3.5" aria-hidden />}
+              label={t(showArchived ? 'list.archivedShown' : 'list.archivedHidden')}
+            />
+            <CustomizeViewPanel
+              listId={listId}
+              includeClosed={showClosed}
+              includeArchived={showArchived}
+            />
 
             {(activeView === 'table' || activeView === 'list') && (
               <details ref={fieldsDetailsRef} className="relative">
@@ -4515,37 +4582,101 @@ function BulkActionBar({
 }
 
 /**
- * §V2-07 — "Customize → Export view".
+ * A toolbar chip that is on or off, and says which — `aria-pressed` so a
+ * screen reader gets the state, and a label that changes with it so a sighted
+ * person does not have to infer the state from a shade of background.
+ */
+function ToolbarToggle({
+  active,
+  onClick,
+  label,
+  icon,
+  testId,
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  icon: ReactNode
+  testId: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      data-testid={testId}
+      data-active={active ? 'true' : 'false'}
+      title={label}
+      className={cn(
+        'h-8 shrink-0 px-2.5 flex items-center gap-1.5 rounded-md border text-[12px] transition-colors',
+        active
+          ? 'border-accent/50 bg-accent/10 text-accent'
+          : 'border-border/80 bg-card text-muted-foreground hover:bg-muted/40 hover:text-foreground',
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+/**
+ * §V2-07 — the Customize panel, and "Export view" inside it.
  *
  * `[10:53]` "Yeh Customize pe aap click karoge — ab yeh dekh rahe ho: EXPORT
- * VIEW … aur aap is ko download kar lo." Frame `10:57` shows the panel: a file
- * format, a What-to-export choice of Visible columns / Task Names only / All
- * columns, and Download.
+ * VIEW … aur aap is ko download kar lo." Frames `10:36` (board) and `11:14`
+ * (list) show the panel this hangs off: a column of rows, of which Export view
+ * is one, and which the rows above it will fill.
  *
- * Format is CSV only, and that is stated rather than hidden behind a disabled
- * "Excel" button. She never completes an export in the video — ClickUp gates it
- * behind their Business tier and the frame says so — and what she asks for is
- * `[11:09]` "woh aap ko COLUMN mein list de dega, har cheez", which CSV is.
- * A real .xlsx is a zip of XML and needs a dependency; offering a button that
- * writes CSV and calls it Excel would be the kind of label this codebase has
- * spent two videos removing.
+ * Frame `10:58` shows the export section open, and it has four controls, not
+ * one: **File format** `CSV | Excel`, **What to export** (Visible columns /
+ * Task Names only / All columns), **Date format** and **Time format**, then
+ * Download. All four are here.
  *
  * The download goes through fetch rather than a plain link because the API
  * wants an Authorization header, and an <a href> cannot carry one.
  */
-function ExportViewMenu({ listId }: { listId: string }) {
+function CustomizeViewPanel({
+  listId,
+  includeClosed,
+  includeArchived,
+}: {
+  listId: string
+  /*
+   * What the list is CURRENTLY showing. The export is meant to be the view you
+   * are looking at, so the two toggles that change which rows are on screen
+   * have to reach the request — otherwise "export view" quietly means
+   * "export something else".
+   */
+  includeClosed: boolean
+  includeArchived: boolean
+}) {
   const { t } = useTranslation()
   const [columns, setColumns] = useState<'visible' | 'names' | 'all'>('visible')
+  const [format, setFormat] = useState<'csv' | 'xlsx'>('csv')
+  const [dateFormat, setDateFormat] = useState<'normal' | 'iso' | 'us' | 'eu'>('normal')
+  const [timeFormat, setTimeFormat] = useState<'normal' | 'h24' | 'none'>('normal')
   const [busy, setBusy] = useState(false)
   const ref = useRef<HTMLDetailsElement>(null)
 
   async function download() {
     setBusy(true)
     try {
+      const query = new URLSearchParams({
+        columns,
+        format,
+        dateFormat,
+        timeFormat,
+        includeClosed: String(includeClosed),
+        includeArchived: String(includeArchived),
+      })
       // `downloadFile` already carries the Authorization header, refreshes an
       // expired token and revokes the object URL — an <a href> can do none of
       // those, and a second copy of it here would be a second thing to fix.
-      await downloadFile(`/tasks/list/${listId}/export?columns=${columns}`, 'list.csv')
+      await downloadFile(
+        `/tasks/list/${listId}/export?${query.toString()}`,
+        `list.${format === 'xlsx' ? 'xlsx' : 'csv'}`,
+      )
       if (ref.current) ref.current.open = false
     } catch {
       toast.error(t('list.export.failed'))
@@ -4556,37 +4687,105 @@ function ExportViewMenu({ listId }: { listId: string }) {
 
   return (
     <details ref={ref} className="relative" data-testid="list-customize">
-      <summary className="list-none h-8 px-2.5 flex items-center rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
+      <summary className="list-none h-8 px-2.5 flex items-center gap-1.5 rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
+        <Settings2 className="h-3.5 w-3.5" aria-hidden />
         {t('list.customize')}
       </summary>
-      <div className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-border bg-card p-2.5 shadow-lg">
-        <div className="mb-2 text-[12px] font-medium">{t('list.export.title')}</div>
-        <div className="mb-1.5 text-[11px] text-muted-foreground">{t('list.export.whatToExport')}</div>
-        <div className="space-y-1">
-          {(['visible', 'names', 'all'] as const).map((mode) => (
-            <label key={mode} className="flex items-center gap-2 text-[12px] cursor-pointer">
-              <input
-                type="radio"
-                name="export-columns"
-                checked={columns === mode}
-                onChange={() => setColumns(mode)}
-                data-testid={`list-export-${mode}`}
-              />
-              {t(`list.export.columns.${mode}` as never)}
+      <div className="absolute right-0 z-20 mt-1 w-72 rounded-md border border-border bg-card p-1 shadow-lg">
+        <details data-testid="list-export-section">
+          <summary className="list-none flex items-center justify-between gap-2 rounded px-2 py-1.5 text-[12px] cursor-pointer select-none hover:bg-muted/40">
+            <span className="flex items-center gap-2">
+              <Download className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              {t('list.export.title')}
+            </span>
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+          </summary>
+
+          <div className="px-2 pb-2 pt-1">
+            <div className="mb-1.5 text-[11px] text-muted-foreground">{t('list.export.fileFormat')}</div>
+            <div className="mb-2.5 grid grid-cols-2 gap-1 rounded-md border border-border/70 p-0.5">
+              {(['csv', 'xlsx'] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  data-testid={`list-export-format-${f}`}
+                  aria-pressed={format === f}
+                  onClick={() => setFormat(f)}
+                  className={cn(
+                    'rounded px-2 py-1 text-[12px] transition-colors',
+                    format === f ? 'bg-accent/15 font-medium text-accent' : 'hover:bg-muted/50',
+                  )}
+                >
+                  {t(f === 'csv' ? 'list.export.formatCsv' : 'list.export.formatExcel')}
+                </button>
+              ))}
+            </div>
+
+            <div className="mb-1.5 text-[11px] text-muted-foreground">{t('list.export.whatToExport')}</div>
+            <div className="space-y-1">
+              {(['visible', 'names', 'all'] as const).map((mode) => (
+                <label key={mode} className="flex items-center gap-2 text-[12px] cursor-pointer">
+                  <input
+                    type="radio"
+                    name="export-columns"
+                    checked={columns === mode}
+                    onChange={() => setColumns(mode)}
+                    data-testid={`list-export-${mode}`}
+                  />
+                  {t(`list.export.columns.${mode}` as never)}
+                </label>
+              ))}
+            </div>
+
+            <label className="mt-2.5 block text-[11px] text-muted-foreground" htmlFor="list-export-date">
+              {t('list.export.dateFormat')}
             </label>
-          ))}
-        </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">{t('list.export.csvOnly')}</p>
-        <Button
-          size="sm"
-          variant="gradient"
-          className="mt-2 w-full"
-          disabled={busy}
-          onClick={download}
-          data-testid="list-export-download"
-        >
-          <Download className="h-3.5 w-3.5" /> {t('list.export.download')}
-        </Button>
+            <select
+              id="list-export-date"
+              data-testid="list-export-date-format"
+              value={dateFormat}
+              onChange={(e) => setDateFormat(e.target.value as typeof dateFormat)}
+              className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-[12px]"
+            >
+              {(['normal', 'iso', 'us', 'eu'] as const).map((k) => (
+                <option key={k} value={k}>{t(`list.export.date.${k}` as never)}</option>
+              ))}
+            </select>
+
+            <label className="mt-2 block text-[11px] text-muted-foreground" htmlFor="list-export-time">
+              {t('list.export.timeFormat')}
+            </label>
+            <select
+              id="list-export-time"
+              data-testid="list-export-time-format"
+              value={timeFormat}
+              onChange={(e) => setTimeFormat(e.target.value as typeof timeFormat)}
+              className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-[12px]"
+            >
+              {(['normal', 'h24', 'none'] as const).map((k) => (
+                <option key={k} value={k}>{t(`list.export.time.${k}` as never)}</option>
+              ))}
+            </select>
+
+            {/*
+              Said once, quietly, because it is the thing that makes a date
+              column reproducible: the server renders in UTC rather than in
+              whatever timezone it happens to run in.
+            */}
+            <p className="mt-2 text-[11px] text-muted-foreground">{t('list.export.utcNote')}</p>
+
+            <Button
+              size="sm"
+              variant="gradient"
+              className="mt-2 w-full"
+              disabled={busy}
+              onClick={download}
+              data-testid="list-export-download"
+            >
+              <Download className="h-3.5 w-3.5" /> {t('list.export.download')}
+            </Button>
+          </div>
+        </details>
       </div>
     </details>
   )
