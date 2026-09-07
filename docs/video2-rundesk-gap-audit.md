@@ -537,6 +537,75 @@ stylesheet. Email-into-task exists as a module but is not offered from the menu.
 
 ---
 
+#### V2-08 read off the frame AND the transcript, with four corrections
+
+Frames re-extracted at `15:20`, `15:25`, `15:32`, `15:40`, `15:48` and the
+transcript read for the same window, before writing any code.
+
+**1. The menu, exactly as frame `15:32` draws it**, top to bottom:
+
+| | |
+| --- | --- |
+| header row | Copy link · Copy ID · New tab |
+| | Favorite › · Unfollow task · Remind me in Inbox › |
+| | Move to · Add to › · Merge · Duplicate · Convert to › · Custom Fields · Templates › |
+| | Relationships › · Description history · Task Type › |
+| | Print · Send email to task |
+| | Archive · Delete |
+| footer | **Sharing & Permissions** — a dark bar, not a menu row |
+
+Seven items carry a `›` submenu chevron: Favorite, Remind me in Inbox, Add to,
+Convert to, Templates, Relationships, Task Type. Move to, Custom Fields and
+Description history do not — they open a dialog or a panel.
+
+**2. CORRECTION — the bullet above misreads two of them.** It says "Unfollow"
+where the frame says **"Unfollow task"**, and it lists Sharing & Permissions as
+the last flat item where the frame renders it as a **separated dark footer
+button**, the same shape as the space wizard's footer.
+
+**3. CORRECTION — she narrates FIVE items, and Merge is not one of them.** The
+paragraph above calls "Merge and Description history the real work". The
+transcript says otherwise:
+
+> `[15:22]` "yeh ek to **FAVOURITE** ka [hai], kis ko aap favourite kar lo"
+> `[15:27]` "yahan par aap ko **HISTORY** wagera sab cheezein show hoti hain"
+> `[15:32]` "Aap task ko **PRINT** bhi kar sakte hain — yeh maine aap ko batayi
+> nahi hai; [chalo] dekh lo ke yahan par aap task ko print kar sakte ho"
+> `[15:38]` "aur task ko **CONVERT** bhi kar sakte ho. Theek hai — kisi aur
+> cheez mein."
+> `[15:41]` "aur aap **fields** wagera kuch bhi jo hai woh aap chaho to is mein
+> add kar sakte ho"
+
+So the ask, in her order of emphasis, is **Description history · Print ·
+Convert to · Custom Fields · Favorite**. Merge and Send email to task are in
+the frame and never spoken. That reorders the work: Merge is the largest job in
+the item and the least asked for.
+
+**4. `Convert to` has no stated target.** "kisi aur cheez mein" — into
+something else. She never opens the submenu, so what it converts INTO is not
+specified anywhere in the video, and inventing a list of targets would be
+building from a guess. The defensible reading is the conversion Rundesk's own
+schema already supports: a task ↔ a subtask of another task, which is
+`parentTaskId` and nothing more.
+
+**What Rundesk actually has**, checked rather than assumed: Favorite is a
+header star (`FavoriteStar`), Custom Fields is a working panel, Duplicate is
+wired through `task-templates/duplicate/:id` (not `tasks.service` as the bullet
+says), Archive/Delete/Move to/Sharing exist as header icons. **Description
+history does not exist at all** — `grep -r task_revisions` returns nothing, and
+only docs have revisions. Print has no stylesheet: the app's single
+`@media print` rule is on the reports page. Merge has no endpoint. Email-to-task
+exists as a module with `list_email_aliases`, but it is addressed at a LIST, so
+"Send email to task" is a different address than the one that exists.
+
+**And there is no overflow menu.** Rundesk's task header is a row of eleven
+icon buttons. The frame is a menu precisely because there are more actions than
+a toolbar holds, so the missing capabilities get a `…` menu rather than icons
+twelve through eighteen — and the existing eleven stay where they are, because
+moving them would break every suite that clicks them and buy nothing.
+
+---
+
 ### V2-09 · Cover images, and attachments before a task exists
 **Frames** `01:05`–`01:10`: a file is attached **in the create modal, before the
 task exists**. `03:05`–`03:20`: a **cover picker** with **Gallery (8 colours +

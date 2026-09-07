@@ -397,6 +397,26 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-08 — the two items of frame `15:32` she actually narrates.
+      #
+      # `[15:27]` description history. The check worth the minutes is that a
+      # revision stores the text that was REPLACED rather than the text that
+      # replaced it: `doc_revisions` does the opposite, so this is exactly the
+      # thing a later refactor "corrects" into consistency, and with the other
+      # design the description every existing task has right now would be
+      # destroyed by its own first edit.
+      #
+      # `[15:32]` print. It does not assert that `window.print()` was called —
+      # a stylesheet that hid everything would pass that. It reads the document
+      # that was built for the printer and asserts the description, the title
+      # and the id are on it.
+      - name: Task menu — description history and print
+        if: '!cancelled()'
+        run: node test/e2e/task-menu.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-05 — recording into a comment, and the @ picker's access warning.
       # Two things here are worth the minutes. The first is the Urdu check: she
       # flagged `[04:26]` that ClickUp transcribes Urdu into Devanagari, and

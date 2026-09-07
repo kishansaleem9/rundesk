@@ -13,6 +13,7 @@ import {
   taskChecklistItems,
   taskDependencies,
   taskComments,
+  taskDescriptionRevisions,
   taskCommentReactions,
   taskAttachments,
   timeEntries,
@@ -116,6 +117,18 @@ type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
 
 /** Hard cap on a single task/comment attachment (Plan §4). */
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
+
+/**
+ * §V2-08 — how long consecutive edits by one person collapse into one entry of
+ * description history.
+ *
+ * Two minutes, matching `doc_revisions`. Somebody fixing a typo, then a second
+ * typo, then reordering a sentence is doing one thing, and a history that
+ * records it as three is a history nobody scrolls. Longer than this and two
+ * genuinely separate visits to the same task get merged, which loses the
+ * intermediate text for real.
+ */
+const DESCRIPTION_REVISION_WINDOW_MS = 2 * 60 * 1000
 
 type RecurrenceRule = {
   mode: 'daily' | 'weekly' | 'monthly'
@@ -2596,6 +2609,17 @@ export class TasksService {
       if (await this.typeIsMilestone(before.taskTypeId)) set.taskTypeId = null
     }
 
+    /*
+     * §V2-08 `[15:27]` — description history, recorded BEFORE the row changes.
+     *
+     * It has to happen here, between reading `before` and writing `set`,
+     * because what history keeps is the text that is about to be lost. A
+     * moment later it is unrecoverable.
+     */
+    if ('description' in patch && patch.description !== before.description) {
+      await this.recordDescriptionRevision(taskId, actorId, before.description ?? null)
+    }
+
     const [after] = await this.db.update(tasks).set(set).where(eq(tasks.id, taskId)).returning()
 
     // Auto-materialise the next occurrence when a recurring task is completed,
@@ -3411,6 +3435,65 @@ export class TasksService {
       role: m.role,
       hasAccess: canReachTask(ctx, { userId: m.userId, workspaceRole: m.role }),
     }))
+  }
+
+  /**
+   * §V2-08 — keep what the description said until now.
+   *
+   * COALESCED, so a person tidying a paragraph does not leave eight rows. If
+   * the same editor already replaced this description inside the window, the
+   * row they wrote is the OLDER text and therefore the better one — so this
+   * does nothing rather than overwriting it. `doc_revisions` overwrites in the
+   * same situation, which is right for it: it stores the NEW text, where newer
+   * is better. Here newer is worse.
+   */
+  private async recordDescriptionRevision(taskId: string, editorId: string, previous: string | null) {
+    const [latest] = await this.db
+      .select({ id: taskDescriptionRevisions.id, editorId: taskDescriptionRevisions.editorId, replacedAt: taskDescriptionRevisions.replacedAt })
+      .from(taskDescriptionRevisions)
+      .where(eq(taskDescriptionRevisions.taskId, taskId))
+      .orderBy(desc(taskDescriptionRevisions.replacedAt))
+      .limit(1)
+    const withinWindow = latest?.replacedAt
+      ? Date.now() - new Date(latest.replacedAt).getTime() < DESCRIPTION_REVISION_WINDOW_MS
+      : false
+    if (latest && latest.editorId === editorId && withinWindow) return
+    await this.db.insert(taskDescriptionRevisions).values({ taskId, editorId, description: previous })
+  }
+
+  /**
+   * What this description used to say, newest first.
+   *
+   * The task's CURRENT description is deliberately not in here — it is on the
+   * task, and listing it as a revision would offer somebody a "restore" that
+   * changes nothing.
+   */
+  async listDescriptionRevisions(taskId: string) {
+    return this.db.query.taskDescriptionRevisions.findMany({
+      where: eq(taskDescriptionRevisions.taskId, taskId),
+      orderBy: desc(taskDescriptionRevisions.replacedAt),
+      limit: 100,
+      with: { editor: PUBLIC_USER_WITH },
+    })
+  }
+
+  /**
+   * Put an old description back.
+   *
+   * Routed through `updateTask` rather than writing the column directly, so
+   * restoring is itself an edit: it records what the description said before
+   * the restore, fires the same activity and realtime events, and can be undone
+   * by restoring again. A restore that bypassed all that would be the one
+   * description change in the product with no history — in the history feature.
+   */
+  async restoreDescriptionRevision(taskId: string, revisionId: string, actorId: string) {
+    const [revision] = await this.db
+      .select()
+      .from(taskDescriptionRevisions)
+      .where(eq(taskDescriptionRevisions.id, revisionId))
+      .limit(1)
+    if (!revision || revision.taskId !== taskId) throw new NotFoundException('Revision not found')
+    return this.updateTask(taskId, actorId, { description: revision.description })
   }
 
   async listComments(taskId: string) {

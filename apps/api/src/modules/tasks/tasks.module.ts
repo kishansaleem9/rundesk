@@ -19,6 +19,7 @@ import { SlackModule } from '../integrations/slack/slack.module'
 import { NotificationsModule } from '../notifications/notifications.module'
 import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module'
 import { SecurityModule } from '../security/security.module'
+import { EmailToTaskModule } from '../email-to-task/email-to-task.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 
 @Module({
@@ -30,6 +31,9 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     NotificationsModule,
     CalendarSyncModule,
     SecurityModule,
+    // §V2-08 — the task menu's "Send email to task" needs the address this
+    // module already routes on.
+    EmailToTaskModule,
   ],
   providers: [TasksService, ChecklistTemplatesService, TaskTypesService, WorkspaceMemberGuard],
   controllers: [

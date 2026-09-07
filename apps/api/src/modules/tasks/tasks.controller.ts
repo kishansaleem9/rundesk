@@ -17,6 +17,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
+import { EmailToTaskService } from '../email-to-task/email-to-task.service'
 import { CreateTaskDto, AddAttachmentDto } from './dto/task.dto'
 import type { CurrentUserPayload } from './types'
 
@@ -25,7 +26,10 @@ import type { CurrentUserPayload } from './types'
 @Controller('tasks')
 @UseGuards(JwtAuthGuard)
 export class TasksController {
-  constructor(private tasks: TasksService) {}
+  constructor(
+    private tasks: TasksService,
+    private emailToTask: EmailToTaskService,
+  ) {}
 
   @Get('workspace/:workspaceId/timeline')
   @UseGuards(WorkspaceMemberGuard)
@@ -340,6 +344,34 @@ export class TasksController {
     @Body() body: { listId: string; position: number },
   ) {
     return this.tasks.moveTask(taskId, user.id, body.listId, body.position)
+  }
+
+  /**
+   * §V2-08 `[15:27]` — "yahan par aap ko HISTORY wagera sab cheezein show hoti
+   * hain". What this task's description used to say.
+   */
+  /**
+   * §V2-08, frame `15:32` — "Send email to task". The address that turns an
+   * email into a comment on this task. It has worked since email-to-task was
+   * written; nothing has ever told anybody it exists.
+   */
+  @Get(':taskId/email-address')
+  emailAddress(@Param('taskId') taskId: string) {
+    return this.emailToTask.taskEmailAddress(taskId)
+  }
+
+  @Get(':taskId/description-history')
+  descriptionHistory(@Param('taskId') taskId: string) {
+    return this.tasks.listDescriptionRevisions(taskId)
+  }
+
+  @Post(':taskId/description-history/:revisionId/restore')
+  restoreDescription(
+    @Param('taskId') taskId: string,
+    @Param('revisionId') revisionId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.tasks.restoreDescriptionRevision(taskId, revisionId, user.id)
   }
 
   @Delete(':taskId')

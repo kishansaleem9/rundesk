@@ -14,6 +14,11 @@ import {
   SheetHeader,
   SheetTitle,
   Textarea,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   cn,
   toast,
 } from '@rundesk/ui'
@@ -45,6 +50,14 @@ import {
   Bell,
   FolderInput,
   MoveVertical,
+  MoreHorizontal,
+  History,
+  Printer,
+  Link as LinkIcon,
+  Hash,
+  ExternalLink as NewTabIcon,
+  CornerDownRight,
+  Mail,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
@@ -58,6 +71,10 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker, type CoverChoice } from './cover-image-picker'
 import { CommentRecorder } from './comment-recorder'
+import { TaskDescriptionHistoryDialog } from './task-description-history'
+import { TaskPrintView } from './task-print-view'
+import { TaskConvertDialog } from './task-convert-dialog'
+import { TaskEmailDialog } from './task-email-dialog'
 import { presentationFor } from '../lib/composer-recording'
 import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
@@ -482,6 +499,10 @@ export function TaskDetailSheet({
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
   // §Share — one panel, shared with every other object type.
   const [shareOpen, setShareOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [printing, setPrinting] = useState(false)
+  const [convertOpen, setConvertOpen] = useState(false)
+  const [emailOpen, setEmailOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -979,6 +1000,106 @@ export function TaskDetailSheet({
                     workspaceId={fallbackWorkspaceId}
                     taskId={detailQuery.data.id}
                   />
+                  {/*
+                    §V2-08, frame `15:32` — the "..." menu.
+
+                    THE ELEVEN ICONS BESIDE IT STAY WHERE THEY ARE. The frame
+                    puts everything in one menu, but those eleven already work
+                    and every browser suite clicks them by testid; moving them
+                    would be a large, risky change that buys nothing a person
+                    can see. This carries the actions that had NO home at all,
+                    which is the actual gap.
+                  */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        data-testid="task-more-menu"
+                        title={t('taskDetail.moreActions')}
+                        aria-label={t('taskDetail.moreActions')}
+                        className="h-8 w-8 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem
+                        data-testid="task-menu-description-history"
+                        onSelect={() => setHistoryOpen(true)}
+                      >
+                        <History className="mr-2 h-4 w-4" />
+                        {t('descriptionHistory.title')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        data-testid="task-menu-print"
+                        onSelect={() => setPrinting(true)}
+                      >
+                        <Printer className="mr-2 h-4 w-4" />
+                        {t('taskPrint.print')}
+                      </DropdownMenuItem>
+                      {/*
+                        §V2-08 `[15:38]` "task ko CONVERT bhi kar sakte ho".
+                        Only offered on a task that is not already a subtask —
+                        the opposite direction is the "Promote" button on the
+                        parent strip, so between them a task can go either way
+                        and neither control appears where it would fail.
+                      */}
+                      {!detailQuery.data.parentTaskId && (
+                        <DropdownMenuItem
+                          data-testid="task-menu-convert"
+                          onSelect={() => setConvertOpen(true)}
+                        >
+                          <CornerDownRight className="mr-2 h-4 w-4" />
+                          {t('taskConvert.menuItem')}
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      {/* The frame's header row: Copy link · Copy ID · New tab. */}
+                      <DropdownMenuItem
+                        data-testid="task-menu-copy-link"
+                        onSelect={() => {
+                          const url = window.location.href
+                          void navigator.clipboard?.writeText(url)
+                            .then(() => toast.success(t('taskDetail.copiedLink')))
+                            .catch(() => toast.error(t('taskDetail.copyFailed')))
+                        }}
+                      >
+                        <LinkIcon className="mr-2 h-4 w-4" />
+                        {t('taskDetail.copyLink')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        data-testid="task-menu-copy-id"
+                        onSelect={() => {
+                          void navigator.clipboard?.writeText(detailQuery.data!.id)
+                            .then(() => toast.success(t('taskDetail.copiedId')))
+                            .catch(() => toast.error(t('taskDetail.copyFailed')))
+                        }}
+                      >
+                        <Hash className="mr-2 h-4 w-4" />
+                        {t('taskDetail.copyId')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        data-testid="task-menu-new-tab"
+                        onSelect={() => window.open(window.location.href, '_blank', 'noopener')}
+                      >
+                        <NewTabIcon className="mr-2 h-4 w-4" />
+                        {t('taskDetail.openNewTab')}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {/*
+                        §V2-08 — "Send email to task". The address has routed to
+                        a comment on this task since email-to-task was written
+                        and nothing has ever shown it to anybody.
+                      */}
+                      <DropdownMenuItem
+                        data-testid="task-menu-email"
+                        onSelect={() => setEmailOpen(true)}
+                      >
+                        <Mail className="mr-2 h-4 w-4" />
+                        {t('taskEmail.menuItem')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               <SheetDescription className="sr-only">{t('taskDetail.srDescription')}</SheetDescription>
@@ -1130,6 +1251,30 @@ export function TaskDetailSheet({
           objectName={detailQuery.data?.title}
         />
       )}
+      {/* §V2-08 `[15:27]` — what the description used to say. */}
+      {taskId && (
+        <TaskDescriptionHistoryDialog taskId={taskId} open={historyOpen} onOpenChange={setHistoryOpen} />
+      )}
+      {/*
+        §V2-08 `[15:32]` — Print. Mounted only while printing: a permanently
+        mounted hidden copy of every open task would be read by screen readers
+        and found by ctrl-F, which is a second copy of the page nobody asked for.
+      */}
+      {printing && detailQuery.data && (
+        <TaskPrintView task={detailQuery.data} onDone={() => setPrinting(false)} />
+      )}
+      {/* §V2-08 `[15:38]` — convert this task into a subtask of another. */}
+      {taskId && (
+        <TaskConvertDialog
+          taskId={taskId}
+          workspaceId={fallbackWorkspaceId}
+          hasSubtasks={(detailQuery.data?.subtasks?.length ?? 0) > 0}
+          open={convertOpen}
+          onOpenChange={setConvertOpen}
+        />
+      )}
+      {/* §V2-08 — the inbound address that turns an email into a comment here. */}
+      {taskId && <TaskEmailDialog taskId={taskId} open={emailOpen} onOpenChange={setEmailOpen} />}
     </Sheet>
   )
 }

@@ -423,3 +423,26 @@
 .ProseMirror div[data-callout] { border: 1px solid hsl(var(--border)); border-left: 3px solid hsl(var(--primary)); background: hsl(var(--muted) / 0.5); border-radius: 0.5rem; padding: 0.6rem 0.9rem; margin: 0.7em 0; }
 .ProseMirror div[data-callout] > p:first-child { margin-top: 0; }
 .ProseMirror div[data-callout] > p:last-child { margin-bottom: 0; }
+
+/* §V2-08 — printing a task. `[15:32]` "Aap task ko PRINT bhi kar sakte hain".
+ *
+ * The printed copy is a separate plain document portalled onto `body`
+ * (`components/task-print-view.tsx`), not the app's own markup restyled. The
+ * task sheet is a fixed overlay inside a scroll container next to a sidebar;
+ * coercing that onto paper takes a pile of overrides that break whenever the
+ * layout moves, and the failure is discovered at a printer.
+ *
+ * So: hidden on screen always, and on paper it replaces the app entirely. Both
+ * halves are needed — hiding `#root` without showing this prints a blank page,
+ * and showing this without hiding `#root` prints the task twice.
+ */
+#task-print-root { display: none; }
+
+@media print {
+  body.printing-task > #root { display: none !important; }
+  body.printing-task #task-print-root { display: block !important; }
+  /* Toasts and dialog overlays are portalled onto body too, and would
+   * otherwise print as a grey rectangle across the page. */
+  body.printing-task > [data-sonner-toaster],
+  body.printing-task > [data-radix-popper-content-wrapper] { display: none !important; }
+}

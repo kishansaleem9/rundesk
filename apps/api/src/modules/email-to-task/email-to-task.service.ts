@@ -537,6 +537,40 @@ export class EmailToTaskService {
     }).onConflictDoNothing()
   }
 
+  /**
+   * §V2-08, frame `15:32` — "Send email to task".
+   *
+   * THE ADDRESS ALREADY WORKED; NOTHING EVER SHOWED IT. `parseRecipient` has
+   * routed `list-<localPart>+task-<id>@domain` to a comment on that task since
+   * this module was written, and no screen in the product tells anybody the
+   * address exists. That is the whole gap: a working inbound path nobody can
+   * reach.
+   *
+   * Composed HERE rather than in the web app, even though the pieces are all in
+   * the alias response. The prefix, the `+task-` tag and the domain are this
+   * module's protocol, and a client that assembles them itself is a second
+   * place the format lives — the next time it changes, one of the two is wrong
+   * and the failure is an email silently going nowhere.
+   *
+   * Null when the list has no alias, rather than a plausible-looking address
+   * that bounces.
+   */
+  async taskEmailAddress(taskId: string): Promise<{ address: string | null; listId: string | null }> {
+    const [row] = await this.db
+      .select({ listId: tasks.listId })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!row) throw new NotFoundException('Task not found')
+    const alias = await this.getAlias(row.listId)
+    if (!alias || alias.revokedAt) return { address: null, listId: row.listId }
+    const domain = process.env.INBOUND_EMAIL_DOMAIN ?? 'inbound.rundesk.local'
+    return {
+      address: `${LOCAL_PART_PREFIX}${alias.localPart}${TASK_TAG}${taskId}@${domain}`,
+      listId: row.listId,
+    }
+  }
+
   private aliasView(row: {
     id: string
     listId: string
