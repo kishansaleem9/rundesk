@@ -71,6 +71,12 @@ export const activityActionEnum = pgEnum('activity_action', [
   'attachment_removed',
   'subtask_added',
   'moved',
+  // §V2-08 — merging one task into another leaves an entry on BOTH: the
+  // survivor's log says what arrived, the binned task's says where its work
+  // went. One entry would leave whoever opens the old task looking at an
+  // archived page with no explanation.
+  'merged_in',
+  'merged_away',
 ])
 
 export const dependencyTypeEnum = pgEnum('dependency_type', [

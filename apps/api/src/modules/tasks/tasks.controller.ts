@@ -351,6 +351,24 @@ export class TasksController {
    * hain". What this task's description used to say.
    */
   /**
+   * §V2-08, frame `15:32` — Merge.
+   *
+   * `:taskId` is the task being merged AWAY and `targetTaskId` the survivor:
+   * "merge this into that", which is the direction the menu item reads in.
+   * Both ids go through `ResourceMemberGuard` — the param one here, the body
+   * one inside the service, which also checks write access to it. Merging is a
+   * write to the target as much as to the source.
+   */
+  @Post(':taskId/merge')
+  merge(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { targetTaskId: string },
+  ) {
+    return this.tasks.mergeTask(taskId, body.targetTaskId, user.id)
+  }
+
+  /**
    * §V2-08, frame `15:32` — "Send email to task". The address that turns an
    * email into a comment on this task. It has worked since email-to-task was
    * written; nothing has ever told anybody it exists.

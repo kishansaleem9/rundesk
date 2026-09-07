@@ -397,6 +397,20 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-08 — merging one task into another. She never narrates it, so it
+      # ranked last in the item; it is also the only one whose failure mode is
+      # silent data loss, so the suite loads a task with one of everything and
+      # counts each kind on the survivor afterwards. Both tasks are given the
+      # SAME assignee and watcher first, because duplicates being merged
+      # normally share them and every join table is unique on (task, thing) —
+      # a bulk UPDATE throws on the first collision.
+      - name: Merging one task into another
+        if: '!cancelled()'
+        run: node test/e2e/task-merge.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-08 — the two items of frame `15:32` she actually narrates.
       #
       # `[15:27]` description history. The check worth the minutes is that a

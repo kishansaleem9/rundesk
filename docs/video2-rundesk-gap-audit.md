@@ -606,6 +606,41 @@ moving them would break every suite that clicks them and buy nothing.
 
 ---
 
+#### V2-08 — what was built, and one thing deliberately not
+
+**Built.** `task_description_revisions` (migration `0138`) with a
+read-and-restore dialog; a printable document and its print rules; a `…` menu
+carrying Copy link · Copy ID · New tab · Convert to · Merge · Send email to
+task; `POST /tasks/:id/merge` with `task-merge.ts` holding the pure rules; and
+two suites — `test/e2e/task-menu.mjs` (37 checks) and `test/e2e/task-merge.mjs`
+(25).
+
+**The eleven header icons were left alone.** The frame puts everything in one
+menu. Moving Move-to, Watchers, Share, Private, Milestone, Reminder, Favorite,
+Expand and Save-as-template into it would touch every browser suite that clicks
+them by testid, for no change a person can see. The menu carries the actions
+that had **no home at all**, which is the actual gap. Say the word and the rest
+follow them in.
+
+**Description history diverges from `doc_revisions` on purpose** — it stores the
+text that was REPLACED. See the migration's own comment for why; the short
+version is that the other design destroys every description written before the
+feature shipped, on that description's first edit.
+
+**Merge is not transactional**, and that is a stated compromise rather than an
+oversight. The moves are a dozen `UPDATE … SET task_id` statements; a failure
+part-way leaves work split across two tasks, both still readable, nothing
+deleted, and the merge re-runnable. The source is binned last. If merge ever
+gains a delete, it gains a transaction in the same commit.
+
+**Still open from this item:** the frame's submenus — Favorite ›, Remind me in
+Inbox ›, Add to ›, Templates ›, Relationships ›, Task Type › — all point at
+things Rundesk already has elsewhere, so they are menu plumbing rather than
+capability. And `Convert to` currently converts one way only (task → subtask);
+what else it should convert into is not specified anywhere in the video.
+
+---
+
 ### V2-09 · Cover images, and attachments before a task exists
 **Frames** `01:05`–`01:10`: a file is attached **in the create modal, before the
 task exists**. `03:05`–`03:20`: a **cover picker** with **Gallery (8 colours +

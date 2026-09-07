@@ -58,6 +58,7 @@ import {
   ExternalLink as NewTabIcon,
   CornerDownRight,
   Mail,
+  Merge as MergeIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar } from '../lib/use-favorites'
@@ -75,6 +76,7 @@ import { TaskDescriptionHistoryDialog } from './task-description-history'
 import { TaskPrintView } from './task-print-view'
 import { TaskConvertDialog } from './task-convert-dialog'
 import { TaskEmailDialog } from './task-email-dialog'
+import { TaskMergeDialog } from './task-merge-dialog'
 import { presentationFor } from '../lib/composer-recording'
 import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
@@ -177,6 +179,9 @@ const ACTIVITY_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   checklist_item_toggled: 'taskDetail.activity.checklistItemToggled',
   dependency_added: 'taskDetail.activity.dependencyAdded',
   dependency_removed: 'taskDetail.activity.dependencyRemoved',
+  // §V2-08 — merging leaves an entry on both tasks.
+  merged_in: 'taskDetail.activity.mergedIn',
+  merged_away: 'taskDetail.activity.mergedAway',
 }
 /** Custom-field type identifiers → display labels (the raw type stays canonical). */
 const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
@@ -503,6 +508,7 @@ export function TaskDetailSheet({
   const [printing, setPrinting] = useState(false)
   const [convertOpen, setConvertOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
   const [watchersOpen, setWatchersOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -1053,6 +1059,19 @@ export function TaskDetailSheet({
                           {t('taskConvert.menuItem')}
                         </DropdownMenuItem>
                       )}
+                      {/*
+                        §V2-08 — Merge. In the frame at `15:32` and never
+                        narrated, so it is the last thing this item built; but
+                        it is also the one that moves the most work, so it
+                        reports what it moved rather than saying "done".
+                      */}
+                      <DropdownMenuItem
+                        data-testid="task-menu-merge"
+                        onSelect={() => setMergeOpen(true)}
+                      >
+                        <MergeIcon className="mr-2 h-4 w-4" />
+                        {t('taskMerge.menuItem')}
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {/* The frame's header row: Copy link · Copy ID · New tab. */}
                       <DropdownMenuItem
@@ -1275,6 +1294,21 @@ export function TaskDetailSheet({
       )}
       {/* §V2-08 — the inbound address that turns an email into a comment here. */}
       {taskId && <TaskEmailDialog taskId={taskId} open={emailOpen} onOpenChange={setEmailOpen} />}
+      {/*
+        §V2-08 — Merge. On success the sheet follows the survivor: the task it
+        was showing is now in the bin, and leaving it on screen would show
+        somebody an archived page with their work apparently gone.
+      */}
+      {taskId && detailQuery.data && (
+        <TaskMergeDialog
+          taskId={taskId}
+          taskTitle={detailQuery.data.title}
+          workspaceId={fallbackWorkspaceId}
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          onMerged={(next) => setViewTaskId(next)}
+        />
+      )}
     </Sheet>
   )
 }

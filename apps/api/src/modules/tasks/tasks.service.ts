@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
-import { eq, and, asc, desc, inArray, isNull, sql, type SQL } from 'drizzle-orm'
+import { eq, and, or, asc, desc, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import {
   taskTypes,
   tasks,
@@ -14,6 +14,10 @@ import {
   taskDependencies,
   taskComments,
   taskDescriptionRevisions,
+  taskTimeBlocks,
+  reminders,
+  sprintTasks,
+  customFieldValues,
   taskCommentReactions,
   taskAttachments,
   timeEntries,
@@ -53,6 +57,12 @@ import {
 } from './external-links.util'
 import { describeAttachments } from './comment-summary'
 import { canReachTask } from './mention-access'
+import {
+  MERGE_REFUSAL_MESSAGE,
+  emptyMergeTally,
+  mergeRefusal,
+  mergedDescription,
+} from './task-merge'
 import { resolveEffectiveStatuses } from '../../common/statuses/status-resolution'
 import {
   resolveIsManager,
@@ -112,6 +122,11 @@ type ActivityAction =
   | 'attachment_removed'
   | 'subtask_added'
   | 'moved'
+  // §V2-08 — merging. Two entries, not one: the survivor's log has to say what
+  // arrived, and the binned task's has to say where its work went, or a person
+  // who opens the old task sees it archived with no explanation.
+  | 'merged_in'
+  | 'merged_away'
 
 type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
 
@@ -3435,6 +3450,233 @@ export class TasksService {
       role: m.role,
       hasAccess: canReachTask(ctx, { userId: m.userId, workspaceRole: m.role }),
     }))
+  }
+
+  /**
+   * §V2-08 — merge this task into another one.
+   *
+   * The task named by `taskId` is the one being merged AWAY; `targetTaskId`
+   * survives. See `task-merge.ts` for which tables move and which deliberately
+   * do not.
+   *
+   * NOT WRAPPED IN A TRANSACTION, and that is a compromise worth naming. The
+   * moves are `UPDATE ... SET task_id` statements against a dozen tables; a
+   * failure part-way leaves work split across two tasks, both of which are
+   * still readable and neither of which has lost anything, because nothing is
+   * deleted here. The source is binned LAST, so a failure before that leaves a
+   * merge that can simply be run again. If this file ever gains a delete, it
+   * gains a transaction on the same commit.
+   *
+   * Every move is counted and returned. A merge that reports what it moved is a
+   * merge somebody can check; `{ ok: true }` is a merge you have to take on
+   * faith, and this is the operation where faith is least warranted.
+   */
+  async mergeTask(taskId: string, targetTaskId: string, actorId: string) {
+    const [source] = await this.db
+      .select({ id: tasks.id, listId: tasks.listId, parentTaskId: tasks.parentTaskId, title: tasks.title, description: tasks.description, isArchived: tasks.isArchived })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    const [target] = await this.db
+      .select({ id: tasks.id, listId: tasks.listId, parentTaskId: tasks.parentTaskId, title: tasks.title, description: tasks.description, isArchived: tasks.isArchived })
+      .from(tasks)
+      .where(eq(tasks.id, targetTaskId))
+      .limit(1)
+
+    const sourceChildren = source
+      ? await this.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, taskId))
+      : []
+    const targetChildren = target
+      ? await this.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, targetTaskId))
+      : []
+
+    const refusal = mergeRefusal(
+      source ?? null,
+      target ?? null,
+      sourceChildren.length > 0,
+      new Set(targetChildren.map((c) => c.id)),
+    )
+    if (refusal === 'source-missing' || refusal === 'target-missing') {
+      throw new NotFoundException(MERGE_REFUSAL_MESSAGE[refusal])
+    }
+    if (refusal) throw new BadRequestException(MERGE_REFUSAL_MESSAGE[refusal])
+
+    // Both tasks must be somewhere this person may write. Checked for the
+    // target too: merging is a write to it, and a task you cannot edit is not a
+    // task you may pour another one into.
+    await this.assertTaskWriteAccess(taskId, actorId)
+    await this.assertTaskWriteAccess(targetTaskId, actorId)
+
+    const moved = emptyMergeTally()
+    const count = (rows: unknown) => (Array.isArray(rows) ? rows.length : 0)
+
+    /*
+     * The plain moves: one owner, no uniqueness to collide with.
+     */
+    moved.comments = count(
+      await this.db.update(taskComments).set({ taskId: targetTaskId }).where(eq(taskComments.taskId, taskId)).returning({ id: taskComments.id }),
+    )
+    moved.attachments = count(
+      await this.db.update(taskAttachments).set({ taskId: targetTaskId }).where(eq(taskAttachments.taskId, taskId)).returning({ id: taskAttachments.id }),
+    )
+    moved.checklists = count(
+      await this.db.update(taskChecklists).set({ taskId: targetTaskId }).where(eq(taskChecklists.taskId, taskId)).returning({ id: taskChecklists.id }),
+    )
+    moved.timeEntries = count(
+      await this.db.update(timeEntries).set({ taskId: targetTaskId }).where(eq(timeEntries.taskId, taskId)).returning({ id: timeEntries.id }),
+    )
+    moved.externalLinks = count(
+      await this.db.update(taskExternalLinks).set({ taskId: targetTaskId }).where(eq(taskExternalLinks.taskId, taskId)).returning({ id: taskExternalLinks.id }),
+    )
+    moved.reminders = count(
+      await this.db.update(reminders).set({ taskId: targetTaskId }).where(eq(reminders.taskId, taskId)).returning({ id: reminders.id }),
+    )
+    moved.timeBlocks = count(
+      await this.db.update(taskTimeBlocks).set({ taskId: targetTaskId }).where(eq(taskTimeBlocks.taskId, taskId)).returning({ id: taskTimeBlocks.id }),
+    )
+    // The source's own subtasks become the survivor's.
+    moved.subtasks = count(
+      await this.db.update(tasks).set({ parentTaskId: targetTaskId }).where(eq(tasks.parentTaskId, taskId)).returning({ id: tasks.id }),
+    )
+
+    /*
+     * The moves that can collide. Every one of these tables is unique on
+     * (task, other thing), so a straight UPDATE throws the moment both tasks
+     * share an assignee, a label or a watcher — which duplicates being merged
+     * almost always do. Each row is moved on its own and a collision is
+     * DROPPED, because the target already has what the row was carrying.
+     */
+    moved.assignees = await this.moveOrDrop(
+      taskAssignees, taskId, targetTaskId,
+      (r) => and(eq(taskAssignees.taskId, targetTaskId), eq(taskAssignees.userId, r.userId)),
+      { taskId: taskAssignees.taskId, id: taskAssignees.id, userId: taskAssignees.userId },
+    )
+    moved.watchers = await this.moveOrDrop(
+      taskWatchers, taskId, targetTaskId,
+      (r) => and(eq(taskWatchers.taskId, targetTaskId), eq(taskWatchers.userId, r.userId)),
+      { taskId: taskWatchers.taskId, id: taskWatchers.id, userId: taskWatchers.userId },
+    )
+    moved.labels = await this.moveOrDrop(
+      taskLabelAssignments, taskId, targetTaskId,
+      (r) => and(eq(taskLabelAssignments.taskId, targetTaskId), eq(taskLabelAssignments.labelId, r.labelId)),
+      { taskId: taskLabelAssignments.taskId, id: taskLabelAssignments.id, labelId: taskLabelAssignments.labelId },
+    )
+    moved.docLinks = await this.moveOrDrop(
+      taskDocLinks, taskId, targetTaskId,
+      (r) => and(eq(taskDocLinks.taskId, targetTaskId), eq(taskDocLinks.docId, r.docId)),
+      { taskId: taskDocLinks.taskId, id: taskDocLinks.id, docId: taskDocLinks.docId },
+    )
+    moved.sprints = await this.moveOrDrop(
+      sprintTasks, taskId, targetTaskId,
+      (r) => and(eq(sprintTasks.taskId, targetTaskId), eq(sprintTasks.sprintId, r.sprintId)),
+      { taskId: sprintTasks.taskId, id: sprintTasks.id, sprintId: sprintTasks.sprintId },
+    )
+    /*
+     * Custom fields collide on (task, field), and here a collision means the
+     * two tasks disagree about the same field. The TARGET's value is kept: it
+     * describes the task that continues, and silently overwriting it with the
+     * binned task's answer would change data nobody asked to change.
+     */
+    moved.customFields = await this.moveOrDrop(
+      customFieldValues, taskId, targetTaskId,
+      (r) => and(eq(customFieldValues.taskId, targetTaskId), eq(customFieldValues.fieldId, r.fieldId)),
+      { taskId: customFieldValues.taskId, id: customFieldValues.id, fieldId: customFieldValues.fieldId },
+    )
+
+    /*
+     * Dependencies point both ways and can turn into self-links. "A blocks B",
+     * merged into B, would become "B blocks B" — which every dependency reader
+     * in the product would then treat as a task blocking itself.
+     */
+    moved.dependencies = await this.moveDependencies(taskId, targetTaskId)
+
+    /*
+     * The description. Appended rather than replaced, and written through
+     * `updateTask` so the change lands in the target's description history and
+     * can be undone from there like any other edit.
+     */
+    const nextDescription = mergedDescription(target.description, source.description, source.title)
+    if (nextDescription !== null) {
+      await this.updateTask(targetTaskId, actorId, { description: nextDescription })
+    }
+
+    // Binned LAST: everything above is re-runnable, and this is the step that
+    // makes the merge visible.
+    await this.db.update(tasks).set({ isArchived: true, updatedAt: new Date() }).where(eq(tasks.id, taskId))
+
+    await this.logActivity({ taskId: targetTaskId, actorId, action: 'merged_in', meta: { from: taskId, fromTitle: source.title, moved } })
+    await this.logActivity({ taskId, actorId, action: 'merged_away', meta: { into: targetTaskId, intoTitle: target.title } })
+    this.realtime.emitToTask(targetTaskId, { type: 'task.updated', listId: target.listId, taskId: targetTaskId, patch: {} })
+    this.realtime.emitToList(source.listId, { type: 'task.updated', listId: source.listId, taskId, patch: { isArchived: true } })
+
+    return { ok: true, targetTaskId, moved }
+  }
+
+  /**
+   * Move rows one at a time, dropping any the target already has.
+   *
+   * Every join table here is unique on (task, something), so a bulk UPDATE
+   * throws as soon as the two tasks share a label or an assignee — which is
+   * the normal case for duplicates, not an edge case. Dropping rather than
+   * failing is right because the row carried nothing the target lacks.
+   */
+  private async moveOrDrop<T extends { taskId: unknown }>(
+    table: T,
+    fromTaskId: string,
+    toTaskId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    existing: (row: any) => any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    columns: any,
+  ): Promise<number> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const t = table as any
+    const rows = await this.db.select(columns).from(t).where(eq(t.taskId, fromTaskId))
+    let movedCount = 0
+    for (const row of rows) {
+      const [clash] = await this.db.select({ id: t.id }).from(t).where(existing(row)).limit(1)
+      if (clash) continue
+      await this.db.update(t).set({ taskId: toTaskId }).where(eq(t.id, row.id))
+      movedCount += 1
+    }
+    return movedCount
+  }
+
+  /**
+   * Dependencies, in both directions, without creating self-links.
+   *
+   * A dependency row names two tasks, and the merged task can be on either
+   * side. Rewriting it blindly turns "A blocks B" into "B blocks B" when B is
+   * the survivor. Those rows are dropped: a task cannot block itself, and a
+   * reader that finds one has to invent a meaning for it.
+   */
+  private async moveDependencies(fromTaskId: string, toTaskId: string): Promise<number> {
+    const rows = await this.db
+      .select()
+      .from(taskDependencies)
+      .where(or(eq(taskDependencies.taskId, fromTaskId), eq(taskDependencies.relatedTaskId, fromTaskId)))
+    let movedCount = 0
+    for (const row of rows) {
+      const nextTask = row.taskId === fromTaskId ? toTaskId : row.taskId
+      const nextRelated = row.relatedTaskId === fromTaskId ? toTaskId : row.relatedTaskId
+      if (nextTask === nextRelated) continue
+      const [clash] = await this.db
+        .select({ id: taskDependencies.id })
+        .from(taskDependencies)
+        .where(and(
+          eq(taskDependencies.taskId, nextTask),
+          eq(taskDependencies.relatedTaskId, nextRelated),
+          eq(taskDependencies.type, row.type),
+        ))
+        .limit(1)
+      if (clash) continue
+      await this.db
+        .update(taskDependencies)
+        .set({ taskId: nextTask, relatedTaskId: nextRelated })
+        .where(eq(taskDependencies.id, row.id))
+      movedCount += 1
+    }
+    return movedCount
   }
 
   /**
