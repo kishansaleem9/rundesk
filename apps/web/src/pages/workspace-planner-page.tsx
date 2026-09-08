@@ -61,8 +61,25 @@ type MemberRow = { userId: string; displayName?: string | null; email: string }
 type PersonCalendar = { meetings: Array<{ id: string; title: string; startsAt: string; endsAt: string }> }
 type TaskRow = { id: string; title: string; dueDate?: string | null }
 
-/** The gutter runs the working day and a margin either side of it. */
-const FIRST_HOUR = 6
+/**
+ * The gutter runs the WHOLE day, and the grid scrolls.
+ *
+ * It used to run 6am–11pm — "the working day and a margin either side" — which
+ * is a shortcut that fails twice. Anyone working before six had no row to put
+ * their work on. And `nowOffset` returns null outside the drawn hours, so for
+ * six hours of every night the calendar drew no now-line at all: at 2am it
+ * showed a grid starting at 6am with nothing marking where you were.
+ *
+ * CI found it, not by reasoning — a run that crossed midnight failed the
+ * "exactly one now-line" check that had passed every daytime run before it. A
+ * grid that is only correct during office hours is a grid whose tests are only
+ * correct during office hours.
+ *
+ * Twenty-four rows is taller than the viewport, so the grid scrolls and jumps
+ * to the current hour on arrival — which is what every calendar people already
+ * use does, and what frame `13:08` shows with its own scrollbar.
+ */
+const FIRST_HOUR = 0
 const LAST_HOUR = 23
 const HOUR_PX = 48
 
@@ -324,7 +341,25 @@ export function PlannerPage() {
     if (h < FIRST_HOUR || h > LAST_HOUR + 1) return null
     return (h - FIRST_HOUR) * HOUR_PX
   }, [now])
+  const gridScrollRef = useRef<HTMLDivElement | null>(null)
   const nowColumn = days.findIndex((d) => sameDay(d, now))
+
+  /*
+   * Arrive at the current hour, not at midnight.
+   *
+   * A full-day grid opens on 00:00 unless told otherwise, so the first thing
+   * everybody would do is scroll down past six empty hours. Positioned an hour
+   * earlier than now so the line has context above it rather than sitting on
+   * the top edge, and done once on mount — re-running it every minute would
+   * yank the view back while somebody was reading a different part of the day.
+   */
+  useEffect(() => {
+    const el = gridScrollRef.current
+    if (!el || nowOffset === null) return
+    el.scrollTop = Math.max(0, nowOffset - HOUR_PX)
+    // Mount only, deliberately: `nowOffset` changes every minute.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const allDay = blocks.filter((b) => b.isAllDay)
   const timed = blocks.filter((b) => !b.isAllDay)
@@ -534,7 +569,7 @@ export function PlannerPage() {
           </Button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div ref={gridScrollRef} className="min-h-0 flex-1 overflow-auto">
           {/* Day header. Today's number sits in a filled pill, as in the frame. */}
           <div
             className="sticky top-0 z-10 grid border-b border-border/60 bg-background"
@@ -598,6 +633,7 @@ export function PlannerPage() {
               {hours.map((h, i) => (
                 <div
                   key={h}
+                  data-testid="planner-hour-label"
                   className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground"
                   style={{ top: i * HOUR_PX }}
                 >

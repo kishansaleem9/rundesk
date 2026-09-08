@@ -29,7 +29,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 22
+const EXPECTED_CHECKS = 23
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -182,6 +182,25 @@ try {
     blockTexts.some((b) => b.includes('An all-day thing')),
     'and an all-day block is in the all-day row',
     `the all-day block did not render: ${JSON.stringify(blockTexts)}`,
+  )
+
+  console.log('\n▶ the grid covers the whole day, not just office hours')
+  /*
+   * THE CHECK THIS BLOCK EXISTS FOR, and it was written after CI found the bug
+   * rather than before. The grid used to run 6am–11pm, so `nowOffset` was null
+   * between midnight and six and NO now-line was drawn — the assertion below
+   * passed every daytime run and failed the first run that crossed midnight.
+   *
+   * Counting the hour labels pins the cause directly, so a future change back
+   * to a "working day" grid fails here with a reason, at any hour, instead of
+   * failing the now-line check six hours a night.
+   */
+  const hourLabels = await page.locator('[data-testid="planner-hour-label"]').count()
+  chk(
+    hourLabels === 24,
+    'every hour of the day has a row',
+    `the gutter drew ${hourLabels} hours — a grid that stops at 6am has nowhere to put ` +
+      'work done before it, and draws no now-line at all between midnight and then',
   )
 
   console.log('\n▶ today is marked, and the now-line is on today only')
