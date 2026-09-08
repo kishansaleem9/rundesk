@@ -216,6 +216,69 @@ left**, matching the tab header *"Work on dbgdh · 2h 55m left"*.
 
 ---
 
+### V2-14 · One Google account, for the whole workspace
+**Ask** `[13:26]`–`[13:38]`, and frames `13:40` / `13:50`.
+
+> `[13:32]` "**Manage Account** pe click karoongi
+> `[13:36]` to yahan bhi aap ko **Add Account** [ka option] kehta hai ke aur
+> Google Calendar bhi add kar lo,
+> `[13:38]` aur **jitna chahoon main add kar sakti hoon**. Theek hai — it's up
+> to me."
+
+**Frame `13:50`, the Calendar settings → Accounts page**, read in full:
+
+| | |
+| --- | --- |
+| account card | `hanixh343@gmail.com` · Google Calendar · ✅ **Connected**, with a `…` menu |
+| | **+ Add account** |
+| **Default calendar** | "Select the calendar that will be used as the default calendar" → a picker |
+| **Busy calendars** | "These calendars decide when you're busy. We plan work and suggest free slots around them." → a multi-select, reading **"1 calendar"** |
+| **Conferencing** | "Connect other video conferencing providers" → **Zoom · Connect** |
+
+Frame `13:40` catches the Google account chooser mid-flow, offering two signed-in
+accounts and "Use another account" — so the second account is a second OAuth
+grant, not a second calendar inside one grant.
+
+**THIS IS WHAT "PRIMARY AND SECONDARY" MEANS**, and the two roles are different
+in kind rather than in rank. The **Default calendar** is where new events are
+WRITTEN. The **Busy calendars** are READ, to work out when you are free. A
+person with a work account and a personal one wants their work calendar as the
+default and BOTH counted as busy — which is precisely why one setting is a
+single-select and the other is not.
+
+**Rundesk holds exactly one, for the entire workspace.** Checked, not assumed:
+
+```
+unique('uq_workspace_integration_workspace_provider').on(t.workspaceId, t.provider)
+```
+
+and `requireConnection(workspaceId, provider)` selects it with `.limit(1)`. So:
+
+1. **A second Google account cannot be added at all** — the unique constraint
+   refuses the row. There is no "Add account" to build a UI for yet.
+2. **It is scoped to the WORKSPACE, not the person.** This is the deeper of the
+   two. ClickUp's is a personal setting inside your own Planner; Rundesk's is a
+   workspace integration with a `connected_by_id`, so it is not one calendar
+   each — it is one calendar for everybody, connected by whoever got there
+   first. Multi-account is therefore not a matter of relaxing a constraint; the
+   ownership model has to move to the user first.
+3. **No default-calendar concept** and **no busy-calendars concept** exist.
+   `metadata.inboxListId` decides which LIST pulled events land in — the
+   opposite direction, and not the same idea.
+4. **No conferencing-provider connection.** Zoom appears twice in the frames —
+   here under Conferencing, and again on the AI Notetaker page under
+   Integrations — which suggests one connection surfaced in both places.
+
+**And it bears on §V2-02e, already shipped.** "Meet with" suggests free slots
+from Rundesk's own meetings. Once external calendars are connected, *"these
+calendars decide when you're busy"* is the whole point: a colleague blocked out
+in their own Google Calendar currently reads as free.
+
+`size: large`, and the per-user move is the load-bearing part · `modules/calendar-sync`,
+`schema/integration-connections.ts`
+
+---
+
 ### V2-03 · The AI Notetaker joins meetings Rundesk is not in
 **Ask** `[14:22]` *"AI NOTE TAKER aap chaho to add kar sakte ho, CALENDAR select
 kar sakte ho — kis calendar par aap ko AI note taker chahiye"*.
