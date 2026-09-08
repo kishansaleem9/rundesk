@@ -15,6 +15,10 @@ export const customFieldTypeEnum = pgEnum('custom_field_type', [
   'phone',
   'money',
   'rating',
+  // §V2-01b, frame `00:25` — the one field she demonstrates. Its value is
+  // DERIVED from subtasks, checklists and assigned comments, so no row is ever
+  // written for it in `custom_field_values`; the service computes it on read.
+  'progress_auto',
 ])
 
 /**
@@ -34,6 +38,16 @@ export const customFieldDefinitions = pgTable(
     position:     integer('position').notNull().default(0),
     // For type='dropdown': [{ label, value, color? }]
     options:      jsonb('options').$type<Array<{ label: string; value: string; color?: string }>>(),
+    /*
+     * Type-specific settings that are not an option list. Separate from
+     * `options` because that is typed as an ARRAY and every existing reader
+     * treats it as one — putting an object there would break them or force each
+     * to learn which type stores which shape.
+     *
+     * progress_auto: { sources: { subtasks, checklists, assignedComments },
+     *                  doneStatusIs100 }
+     */
+    config:       jsonb('config').$type<Record<string, unknown>>(),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, asc } from 'drizzle-orm'
+import { and, eq, asc, isNotNull } from 'drizzle-orm'
 import {
   customFieldDefinitions,
   customFieldValues,
@@ -7,11 +7,19 @@ import {
   spaces,
   tasks,
   lists,
+  taskChecklists,
+  taskChecklistItems,
+  taskComments,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
 
-type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
+type CustomFieldType =
+  | 'text' | 'number' | 'dropdown' | 'date' | 'checkbox'
+  | 'url' | 'email' | 'phone' | 'money' | 'rating'
+  // §V2-01b — derived, never stored. See progress.ts.
+  | 'progress_auto'
 type FieldValue = string | number | boolean | null
 
 @Injectable()
@@ -61,6 +69,7 @@ export class CustomFieldsService {
       isRequired?: boolean
       listId?: string
       options?: Array<{ label: string; value: string; color?: string }>
+      config?: unknown
     },
   ) {
     await this.assertProjectInWorkspace(workspaceId, projectId)
@@ -90,6 +99,9 @@ export class CustomFieldsService {
         type: dto.type,
         isRequired: dto.isRequired ?? false,
         options: dto.options ?? null,
+        // Normalised on the way in, so a half-written config cannot make the
+        // percentage depend on which fields somebody happened to send.
+        config: dto.type === 'progress_auto' ? toProgressConfig(dto.config) : null,
         position: nextPos,
       })
       .returning()
@@ -104,6 +116,7 @@ export class CustomFieldsService {
       isRequired?: boolean
       options?: Array<{ label: string; value: string; color?: string }>
       position?: number
+      config?: unknown
     },
   ) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
@@ -113,6 +126,14 @@ export class CustomFieldsService {
     const set: Record<string, unknown> = { updatedAt: new Date() }
     for (const key of ['name', 'isRequired', 'options', 'position'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
+    }
+    /*
+     * §V2-01b — reconfiguring which sources a Progress field tracks. Normalised
+     * through the same reader the computation uses, so turning a source off in
+     * the UI and turning it off in the database cannot mean different things.
+     */
+    if (patch.config !== undefined && def.type === 'progress_auto') {
+      set.config = toProgressConfig(patch.config)
     }
     const [row] = await this.db
       .update(customFieldDefinitions)
@@ -162,10 +183,67 @@ export class CustomFieldsService {
 
     const byField = new Map(values.map((v) => [v.fieldId, v]))
 
+    /*
+     * §V2-01b — Progress (Auto) is COMPUTED HERE, not read.
+     *
+     * The tallies are gathered once, and only when some field on this project
+     * actually asks for them: most projects have no Progress field and should
+     * not pay three extra queries per task read for one that does not exist.
+     */
+    const wantsProgress = defs.some((d) => d.type === 'progress_auto')
+    const progress = wantsProgress ? await this.progressFor(taskId) : null
+
     return defs.map((d) => ({
       definition: d,
-      value: byField.get(d.id)?.value.v ?? null,
+      value:
+        d.type === 'progress_auto'
+          ? computeProgress(toProgressConfig(d.config), progress!.inputs, progress!.taskIsDone)
+          : byField.get(d.id)?.value.v ?? null,
     }))
+  }
+
+  /**
+   * What there is to count on this task, for §V2-01b.
+   *
+   * The three sources are exactly the three the frame names, and each one's
+   * notion of "done" is that source's own: a subtask is done when its status is
+   * in the closed category, a checklist item when it is ticked, an assigned
+   * comment when it has been resolved. Only comments that were ASSIGNED to
+   * somebody count — an ordinary comment is not a piece of work.
+   */
+  private async progressFor(taskId: string): Promise<{ inputs: ProgressInputs; taskIsDone: boolean }> {
+    const [subs, checks, comments, self] = await Promise.all([
+      this.db
+        .select({ done: tasks.statusCategory })
+        .from(tasks)
+        .where(eq(tasks.parentTaskId, taskId)),
+      this.db
+        .select({ done: taskChecklistItems.isDone })
+        .from(taskChecklistItems)
+        .innerJoin(taskChecklists, eq(taskChecklists.id, taskChecklistItems.checklistId))
+        .where(eq(taskChecklists.taskId, taskId)),
+      this.db
+        .select({ resolvedAt: taskComments.resolvedAt })
+        .from(taskComments)
+        .where(and(eq(taskComments.taskId, taskId), isNotNull(taskComments.assignedToUserId))),
+      this.db
+        .select({ statusCategory: tasks.statusCategory })
+        .from(tasks)
+        .where(eq(tasks.id, taskId))
+        .limit(1),
+    ])
+
+    return {
+      inputs: {
+        subtasks: { total: subs.length, done: subs.filter((r) => r.done === 'closed').length },
+        checklists: { total: checks.length, done: checks.filter((r) => r.done).length },
+        assignedComments: {
+          total: comments.length,
+          done: comments.filter((r) => r.resolvedAt != null).length,
+        },
+      },
+      taskIsDone: self[0]?.statusCategory === 'closed',
+    }
   }
 
   async setValue(
@@ -176,6 +254,19 @@ export class CustomFieldsService {
   ) {
     await this.assertTaskInWorkspace(workspaceId, taskId)
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
+
+    /*
+     * §V2-01b — a Progress (Auto) value cannot be written, and refusing is the
+     * point rather than a limitation. The whole meaning of Auto is that the
+     * number follows the work; a stored one would be right until the next
+     * checklist item was ticked and silently wrong afterwards. Accepting the
+     * write and ignoring it would be worse still — the caller would believe it.
+     */
+    if (def.type === 'progress_auto') {
+      throw new BadRequestException(
+        'Progress (Auto) is calculated from subtasks, checklists and assigned comments — it cannot be set directly',
+      )
+    }
 
     // Type validation
     if (value !== null) {

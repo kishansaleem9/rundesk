@@ -35,6 +35,10 @@ export class CustomFieldsController {
       isRequired?: boolean
       listId?: string
       options?: Array<{ label: string; value: string; color?: string }>
+      /* §V2-01b — Progress (Auto)'s settings, frame `00:25`: which of subtasks,
+       * checklists and assigned comments to count, and whether a done task with
+       * nothing to count reads 100%. Normalised by the service. */
+      config?: unknown
     },
   ) {
     return this.svc.createDefinition(workspaceId, projectId, body)

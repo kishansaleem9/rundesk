@@ -995,6 +995,13 @@
       "when": 1900000109029,
       "tag": "0141_user_calendar_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1900000110029,
+      "tag": "0142_progress_auto_field",
+      "breakpoints": true
     }
   ]
 }
