@@ -46,6 +46,7 @@ import { Route as AppWorkspaceIdWhiteboardsRouteImport } from './routes/app.$wor
 import { Route as AppWorkspaceIdTimelineRouteImport } from './routes/app.$workspaceId.timeline'
 import { Route as AppWorkspaceIdTimeRouteImport } from './routes/app.$workspaceId.time'
 import { Route as AppWorkspaceIdTemplatesRouteImport } from './routes/app.$workspaceId.templates'
+import { Route as AppWorkspaceIdTeamsRouteImport } from './routes/app.$workspaceId.teams'
 import { Route as AppWorkspaceIdSprintsRouteImport } from './routes/app.$workspaceId.sprints'
 import { Route as AppWorkspaceIdSkillsRouteImport } from './routes/app.$workspaceId.skills'
 import { Route as AppWorkspaceIdSharedRouteImport } from './routes/app.$workspaceId.shared'
@@ -295,6 +296,13 @@ const AppWorkspaceIdTemplatesRoute = AppWorkspaceIdTemplatesRouteImport.update({
   getParentRoute: () => AppWorkspaceIdRoute,
 } as any).lazy(() =>
   import('./routes/app.$workspaceId.templates.lazy').then((d) => d.Route),
+)
+const AppWorkspaceIdTeamsRoute = AppWorkspaceIdTeamsRouteImport.update({
+  id: '/teams',
+  path: '/teams',
+  getParentRoute: () => AppWorkspaceIdRoute,
+} as any).lazy(() =>
+  import('./routes/app.$workspaceId.teams.lazy').then((d) => d.Route),
 )
 const AppWorkspaceIdSprintsRoute = AppWorkspaceIdSprintsRouteImport.update({
   id: '/sprints',
@@ -597,6 +605,7 @@ export interface FileRoutesByFullPath {
   '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
   '/app/$workspaceId/skills': typeof AppWorkspaceIdSkillsRouteWithChildren
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
+  '/app/$workspaceId/teams': typeof AppWorkspaceIdTeamsRoute
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
@@ -663,6 +672,7 @@ export interface FileRoutesByTo {
   '/app/$workspaceId/reports': typeof AppWorkspaceIdReportsRoute
   '/app/$workspaceId/settings': typeof AppWorkspaceIdSettingsRoute
   '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
+  '/app/$workspaceId/teams': typeof AppWorkspaceIdTeamsRoute
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
   '/app/$workspaceId/whiteboards': typeof AppWorkspaceIdWhiteboardsRoute
@@ -734,6 +744,7 @@ export interface FileRoutesById {
   '/app/$workspaceId/shared': typeof AppWorkspaceIdSharedRoute
   '/app/$workspaceId/skills': typeof AppWorkspaceIdSkillsRouteWithChildren
   '/app/$workspaceId/sprints': typeof AppWorkspaceIdSprintsRouteWithChildren
+  '/app/$workspaceId/teams': typeof AppWorkspaceIdTeamsRoute
   '/app/$workspaceId/templates': typeof AppWorkspaceIdTemplatesRoute
   '/app/$workspaceId/time': typeof AppWorkspaceIdTimeRouteWithChildren
   '/app/$workspaceId/timeline': typeof AppWorkspaceIdTimelineRoute
@@ -807,6 +818,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/shared'
     | '/app/$workspaceId/skills'
     | '/app/$workspaceId/sprints'
+    | '/app/$workspaceId/teams'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
     | '/app/$workspaceId/timeline'
@@ -873,6 +885,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/reports'
     | '/app/$workspaceId/settings'
     | '/app/$workspaceId/shared'
+    | '/app/$workspaceId/teams'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/timeline'
     | '/app/$workspaceId/whiteboards'
@@ -943,6 +956,7 @@ export interface FileRouteTypes {
     | '/app/$workspaceId/shared'
     | '/app/$workspaceId/skills'
     | '/app/$workspaceId/sprints'
+    | '/app/$workspaceId/teams'
     | '/app/$workspaceId/templates'
     | '/app/$workspaceId/time'
     | '/app/$workspaceId/timeline'
@@ -1235,6 +1249,13 @@ declare module '@tanstack/react-router' {
       path: '/templates'
       fullPath: '/app/$workspaceId/templates'
       preLoaderRoute: typeof AppWorkspaceIdTemplatesRouteImport
+      parentRoute: typeof AppWorkspaceIdRoute
+    }
+    '/app/$workspaceId/teams': {
+      id: '/app/$workspaceId/teams'
+      path: '/teams'
+      fullPath: '/app/$workspaceId/teams'
+      preLoaderRoute: typeof AppWorkspaceIdTeamsRouteImport
       parentRoute: typeof AppWorkspaceIdRoute
     }
     '/app/$workspaceId/sprints': {
@@ -1597,6 +1618,7 @@ interface AppWorkspaceIdRouteChildren {
   AppWorkspaceIdSharedRoute: typeof AppWorkspaceIdSharedRoute
   AppWorkspaceIdSkillsRoute: typeof AppWorkspaceIdSkillsRouteWithChildren
   AppWorkspaceIdSprintsRoute: typeof AppWorkspaceIdSprintsRouteWithChildren
+  AppWorkspaceIdTeamsRoute: typeof AppWorkspaceIdTeamsRoute
   AppWorkspaceIdTemplatesRoute: typeof AppWorkspaceIdTemplatesRoute
   AppWorkspaceIdTimeRoute: typeof AppWorkspaceIdTimeRouteWithChildren
   AppWorkspaceIdTimelineRoute: typeof AppWorkspaceIdTimelineRoute
@@ -1627,6 +1649,7 @@ const AppWorkspaceIdRouteChildren: AppWorkspaceIdRouteChildren = {
   AppWorkspaceIdSharedRoute: AppWorkspaceIdSharedRoute,
   AppWorkspaceIdSkillsRoute: AppWorkspaceIdSkillsRouteWithChildren,
   AppWorkspaceIdSprintsRoute: AppWorkspaceIdSprintsRouteWithChildren,
+  AppWorkspaceIdTeamsRoute: AppWorkspaceIdTeamsRoute,
   AppWorkspaceIdTemplatesRoute: AppWorkspaceIdTemplatesRoute,
   AppWorkspaceIdTimeRoute: AppWorkspaceIdTimeRouteWithChildren,
   AppWorkspaceIdTimelineRoute: AppWorkspaceIdTimelineRoute,

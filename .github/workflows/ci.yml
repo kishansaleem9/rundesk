@@ -411,6 +411,24 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-12, frame `20:55` — the Teams destination.
+      #
+      # It is driven as a REGISTERED PLAIN MEMBER, and that is the whole point:
+      # All People, All Teams and the reporting tree already existed inside
+      # workspace settings, whose route redirects any non-admin back to /app, so
+      # looking at your own organisation required admin rights. Run as the
+      # seeded admin every check here would pass against the old code too.
+      #
+      # It also fails if an Analytics tab appears. The frame lists one, nothing
+      # exists behind it, and she never opens it — so it would be a page whose
+      # purpose somebody has to guess.
+      - name: The Teams destination
+        if: '!cancelled()'
+        run: node test/e2e/teams-destination.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-11 `[18:51]` — what the AI was WORTH, not only what it cost.
       #
       # Two checks earn the minutes. The panel must be able to report a LOSS:

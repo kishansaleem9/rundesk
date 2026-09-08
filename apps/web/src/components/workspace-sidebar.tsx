@@ -32,6 +32,7 @@ import {
   Hash,
   CheckSquare,
   Target,
+  Users2,
   Clock3,
   ArrowUp,
   ArrowDown,
@@ -294,6 +295,14 @@ const DOCKABLE_TOOLS: Array<{
   { id: 'docs', path: '/docs', icon: FileText, labelKey: 'nav.docs', flag: FLAGS.DOCS },
   { id: 'dashboards', path: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboards', flag: FLAGS.VIEWS_DASHBOARD },
   { id: 'goals', path: '/goals', icon: Target, labelKey: 'nav.goals' },
+  /*
+   * §V2-12, frame `20:55` — Teams is a DESTINATION, and deliberately not
+   * `adminOnly`. Everything it shows already existed inside workspace settings,
+   * which redirects any non-admin back to `/app`, so an ordinary member could
+   * not see who was on which team or who reported to whom. Marking this admin
+   * too would rebuild the wall this item exists to remove.
+   */
+  { id: 'teams', path: '/teams', icon: Users2, labelKey: 'nav.teams' },
   { id: 'whiteboards', path: '/whiteboards', icon: Frame, labelKey: 'nav.whiteboards' },
   { id: 'settings', path: '/settings', icon: Settings, labelKey: 'nav.settings', adminOnly: true },
 ]

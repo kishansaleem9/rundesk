@@ -803,6 +803,30 @@ settings, which is where you go to *administer* teams. Nowhere in the product do
 you go to *look at* them. That is the gap, and it is why the frame is a rail
 destination rather than a settings tab.
 
+**5. AND IT IS SHARPER THAN THAT — checked, not assumed.** Two more things were
+already built: `MembersTab` is All People, and `ReportingTree` in the same file
+is the Org Chart, drawing the full tree from `manager_id` and already handling
+people whose manager is missing and cycles. So THREE of the four destinations
+existed.
+
+What none of them are is reachable. `app.$workspaceId.settings.tsx` does
+`if (!getWorkspaceRole(workspaceId).isAdmin) throw redirect({ to: '/app' })` —
+the whole settings route turns a non-admin away. **So looking at your own
+organisation required admin rights**: an ordinary member could not see who was
+on which team, or who reported to whom, anywhere in the product.
+
+The APIs were never the problem. `GET /workspaces/:id/groups` and `…/members`
+both sit behind `WorkspaceMemberGuard`, with `WorkspaceAdminGuard` only on the
+mutations. **The gate was the web route and nothing else.**
+
+That turns V2-12 from "build four screens" into "make three that exist
+reachable, and do not build the fourth" — and building the four would have
+duplicated three, including the orphan-and-cycle handling in the tree, which is
+exactly the code a second copy gets subtly wrong. `ReportingTree` was extracted
+to `components/reporting-tree.tsx` and is now used by both.
+
+`size: small` (was `medium`)
+
 ---
 
 ### V2-13 · Smaller things the frames show and the transcript does not
