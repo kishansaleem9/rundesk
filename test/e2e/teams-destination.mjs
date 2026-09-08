@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 12
+const EXPECTED_CHECKS = 14
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -156,7 +156,26 @@ try {
   )
 
   console.log('\n▶ My Teams, with the empty state the frame hands over verbatim')
-  const mine = await page.getByTestId('teams-mine').innerText()
+  /*
+   * READ IT ONLY ONCE IT IS THERE.
+   *
+   * This used to be a bare `.innerText()`, which auto-waits thirty seconds and
+   * then THROWS. In CI that turned a missing panel into `threw: ...` with no
+   * name attached, thirty seconds of budget spent and nothing to debug from —
+   * a run failed exactly that way and the cause could not be recovered from the
+   * log afterwards. A named check that says which element never arrived is
+   * worth more than a stack trace, so the wait is explicit and short.
+   */
+  const mineReady = await waitUntil(
+    () => page.getByTestId('teams-mine').isVisible().catch(() => false),
+    { timeoutMs: 15_000 },
+  )
+  const mine = mineReady ? await page.getByTestId('teams-mine').innerText() : ''
+  chk(
+    mineReady,
+    'the My Teams panel is on the page',
+    'My Teams never rendered — everything below reads from a panel that is not there',
+  )
   chk(
     /Once you are added to a team/i.test(mine),
     'a member in no team is told so, in the frame’s own words',
@@ -197,7 +216,17 @@ try {
     'there are exactly the three destinations that have something behind them',
     `there are ${tabs} tabs — the frame's Analytics has no data behind it and she never opens it`,
   )
-  const bodyText = await page.getByTestId('teams-page').innerText()
+  // Guarded for the same reason as My Teams above: a bare read here would spend
+  // thirty seconds and throw rather than name what was missing.
+  const bodyText = await page
+    .getByTestId('teams-page')
+    .innerText({ timeout: 10_000 })
+    .catch(() => '')
+  chk(
+    bodyText !== '',
+    'the Teams page is still on screen to be read',
+    'the page went away between the tab count and reading it',
+  )
   chk(
     !/analytics/i.test(bodyText),
     'and Analytics is not among them',

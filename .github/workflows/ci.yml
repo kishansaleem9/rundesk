@@ -122,8 +122,18 @@ jobs:
           POSTGRES_DB: rundesk_calls
         ports:
           - 5432:5432
+        # `-U rundesk` is not a detail. Bare `pg_isready` connects as the
+        # container's OS user, which is root, and root is not a Postgres role —
+        # so every five seconds for the whole twenty-odd minutes this job runs,
+        # the service container logs `FATAL: role "root" does not exist`. The
+        # healthcheck still passes (the server answered, which is all it asks),
+        # so nothing looked wrong; what it cost was the LOG. Roughly 280 lines
+        # of that noise are appended after the test output, and the API only
+        # serves log tails — so a failing suite's own message sat behind more
+        # noise than could be paged back through, and a real failure could not
+        # be diagnosed without spending another run.
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U rundesk -d rundesk_calls"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
