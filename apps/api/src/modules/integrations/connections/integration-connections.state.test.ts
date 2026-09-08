@@ -28,7 +28,9 @@ function fakeConfig(vals: Record<string, string | undefined>): ConfigService {
 }
 
 const makeSvc = (vals: Record<string, string | undefined>) =>
-  new IntegrationConnectionsService({} as any, {} as any, fakeConfig(vals), {} as any)
+  // The fifth argument is CalendarAccountsService (§V2-14). These checks only
+  // exercise OAuth state signing, so every collaborator is a stub.
+  new IntegrationConnectionsService({} as any, {} as any, fakeConfig(vals), {} as any, {} as any)
 
 const payload = { provider: 'github', workspaceId: 'w1', userId: 'u1', ts: 1_700_000_000_000 }
 

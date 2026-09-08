@@ -582,6 +582,30 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/planner-settings.mjs --dist apps/web/dist
 
+      # §V2-14 `[13:32]`–`[13:38]`, frame `13:50` — a person's own calendar
+      # accounts, more than one of them.
+      #
+      # The first check EARNS THE MINUTES BY ITSELF: it inserts twice into
+      # `workspace_integration_connections` to demonstrate, against the real
+      # table, that a second Google account could only ever have replaced the
+      # first — so the premise behind the new table stays proven rather than
+      # remembered.
+      #
+      # It also asserts that no access or refresh token appears in the accounts
+      # response. Those rows hold long-lived access to somebody's personal
+      # Google account, and a leak there would look like an ordinary payload.
+      #
+      # NOT EXERCISED: Google itself. There are no credentials here, so the
+      # freeBusy call is never made. What is covered is which accounts get
+      # asked, that a busy window can carry no title, that windows merge, and
+      # that an unreadable calendar costs its own time and not the panel.
+      - name: Calendar accounts and busy time
+        if: '!cancelled()'
+        run: node test/e2e/calendar-accounts.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-07 `[11:35]` — the "Save view" chip. Drives the built app against a
       # stubbed API: absent on an untouched view, present the moment it is
       # modified, and gone once saved. The last of those three is the one that

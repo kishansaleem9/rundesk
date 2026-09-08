@@ -56,9 +56,22 @@ type PlannerSettings = {
 
 type PriorityRow = { id: string; taskId: string | null; title: string; doneAt: string | null }
 type MemberRow = { userId: string; displayName?: string | null; email: string }
-/** What `GET /workspaces/:id/people/:userId/calendar` returns, narrowed to
- *  the half this page draws: real meetings with real start and end times. */
-type PersonCalendar = { meetings: Array<{ id: string; title: string; startsAt: string; endsAt: string }> }
+/**
+ * What `GET /workspaces/:id/people/:userId/calendar` returns, narrowed to the
+ * half this page draws.
+ *
+ * `meetings` are Rundesk's own, with titles a colleague in this workspace is
+ * entitled to read. `busy` is §V2-14c's: those same meetings UNIONED with any
+ * external calendar the person marked as counting, carrying start, end and
+ * source — and NO TITLE, because a personal calendar says things like "MRI
+ * results". The two are separate fields rather than one enriched list exactly
+ * so that the titles cannot ride along with the external time by accident.
+ */
+type BusyWindow = { startsAt: string; endsAt: string; source: 'rundesk' | 'external' }
+type PersonCalendar = {
+  meetings: Array<{ id: string; title: string; startsAt: string; endsAt: string }>
+  busy?: BusyWindow[]
+}
 type TaskRow = { id: string; title: string; dueDate?: string | null }
 
 /**
@@ -188,7 +201,39 @@ export function PlannerPage() {
       ),
     enabled: !!workspaceId && !!meetWith,
   })
-  const theirBusy = theirWeek?.meetings ?? []
+  /*
+   * §V2-14c — this line used to read `theirWeek?.meetings`, and that was the
+   * bug frame `13:50` describes: somebody blocked out all afternoon in their
+   * own Google Calendar read as completely free here, which is worse than
+   * showing nothing, because it is confidently wrong.
+   *
+   * `busy` is the union, so a Rundesk meeting still draws a block — the older
+   * checks that only count blocks keep passing for the right reason, not by
+   * luck. The fallback to `meetings` is for an API that has not been redeployed
+   * yet: losing external time is a smaller failure than losing the whole panel.
+   */
+  const theirMeetings = theirWeek?.meetings ?? []
+  const theirBusy: BusyWindow[] =
+    theirWeek?.busy ??
+    theirMeetings.map((m) => ({ startsAt: m.startsAt, endsAt: m.endsAt, source: 'rundesk' as const }))
+
+  /*
+   * What a hatched block says when you hover it.
+   *
+   * The window itself carries no title, so the names come from the SEPARATE
+   * `meetings` list — Rundesk's own, which this viewer can already read on the
+   * task and in the meeting. A window with nothing in that list overlapping it
+   * is external time, and it says only that the person is busy. That is the
+   * whole privacy rule, and it holds without a `delete` anywhere: there is no
+   * title on the window to forget to strip.
+   */
+  const busyLabel = (w: BusyWindow) => {
+    const named = theirMeetings
+      .filter((m) => m.startsAt < w.endsAt && w.startsAt < m.endsAt)
+      .map((m) => m.title)
+    const who = meetWith?.name ?? ''
+    return named.length ? `${who}: ${named.join(', ')}` : t('planner.busyPrivate', { name: who })
+  }
 
   const meetMatches = useMemo(() => {
     const needle = meetQuery.trim().toLowerCase()
@@ -703,17 +748,19 @@ export function PlannerPage() {
                     this is somebody else's calendar.
                   */}
                   {theirBusy
-                    .filter((m) => sameDay(new Date(m.startsAt), d))
-                    .map((m) => {
-                      const s2 = new Date(m.startsAt)
-                      const e2 = new Date(m.endsAt)
+                    .filter((w) => sameDay(new Date(w.startsAt), d))
+                    .map((w) => {
+                      const s2 = new Date(w.startsAt)
+                      const e2 = new Date(w.endsAt)
                       const top = (s2.getHours() + s2.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX
                       const height = Math.max(14, ((e2.getTime() - s2.getTime()) / 3_600_000) * HOUR_PX)
                       return (
                         <div
-                          key={`busy-${m.id}`}
+                          /* Merged windows never overlap, so the pair is unique. */
+                          key={`busy-${w.startsAt}-${w.endsAt}`}
                           data-testid="planner-busy-block"
-                          title={`${meetWith?.name}: ${m.title}`}
+                          data-busy-source={w.source}
+                          title={busyLabel(w)}
                           className="pointer-events-none absolute inset-x-0 rounded-sm border border-dashed border-muted-foreground/40 bg-muted-foreground/10"
                           style={{ top, height }}
                         />

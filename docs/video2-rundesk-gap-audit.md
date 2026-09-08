@@ -277,6 +277,55 @@ in their own Google Calendar currently reads as free.
 `size: large`, and the per-user move is the load-bearing part · `modules/calendar-sync`,
 `schema/integration-connections.ts`
 
+#### V2-14 — what was built, what is unexercised, and what is deliberately not
+
+**The eviction was worse than "only one".** The OAuth callback UPSERTS on
+`(workspace_id, provider)`, so connecting a second Google account never *failed*
+— it silently REPLACED the first, orphaning that account's `task_calendar_links`.
+The first check in `test/e2e/calendar-accounts.mjs` demonstrates this against the
+real table rather than describing it, so the premise stays on the record.
+
+**a — the ownership moved to the person.** `0141_user_calendar_accounts.sql`
+adds `user_calendar_accounts`, unique on
+`(user_id, workspace_id, provider, external_account_id)` — so re-connecting the
+same account refreshes it and a *different* account is a new row. `isDefault`
+(where events are written, at most one, enforced by a PARTIAL UNIQUE INDEX so a
+future endpoint that forgets to clear the old one fails loudly) and
+`countsAsBusy` (read for availability, any number). Existing workspace grants
+for gcal/outlook are copied to their `connected_by_id` owner by the migration.
+Tokens are projected out through `PUBLIC_CALENDAR_ACCOUNT_COLUMNS`, and every
+lookup is `(id AND userId)` with a **404**, not a 403, on somebody else's row.
+
+**b — the Accounts page**, a fourth page in Planner settings, with per-row
+"New events go here" / "Counts as busy" and an "+ Add account" link into the
+existing OAuth flow, because there should be one place that talks to Google.
+
+**c — the busy half, which is what makes §V2-02e honest.** `GET
+people/:userId/calendar` now returns `busy`: Rundesk's own meetings UNIONED with
+the external calendars that person marked as counting, merged so touching
+windows join and no free minute is offered at a seam that does not exist. The
+planner draws that union.
+
+**THE PRIVACY RULE IS STRUCTURAL.** A busy window is `{startsAt, endsAt,
+source}` and the type has no field for a title, so no call site can leak one by
+forgetting; Google is asked via `freeBusy` rather than the events list precisely
+because freeBusy returns start/end pairs and no summaries, so the titles of
+somebody's personal appointments never enter the process. Rundesk's own meeting
+names are still shown, looked up client-side from the separate `meetings` list —
+what the workspace can explain stays readable, what it cannot stays opaque.
+
+**What is NOT exercised, said plainly.** There are no Google credentials in this
+environment, so no check reaches Google. Covered instead: which accounts get
+asked, what a window may contain, how windows merge, that a revoked token costs
+its own busy time and not the panel, and that the page reads the merged list
+rather than the old field — the last one proved with two *overlapping* fixtures,
+because counting blocks or reading tooltips both pass on the code this replaces.
+
+**Deliberately out of scope.** `pushTask` still mirrors into the workspace
+connection. Which person's calendar a *task* belongs in is a product question
+the video never answers, and guessing it would write events into somebody's
+personal calendar on the strength of an inference.
+
 ---
 
 ### V2-03 · The AI Notetaker joins meetings Rundesk is not in

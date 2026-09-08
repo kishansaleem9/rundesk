@@ -242,6 +242,29 @@ try {
   console.log('\n▶ dragging a backlog task onto the grid makes a block `[14:52]`')
   const item = page.locator('[data-testid="planner-backlog-item"]').first()
   const column = page.locator('[data-testid="planner-day-column"]').first()
+
+  /*
+   * SCROLL THE GRID HOME FIRST, and this is not tidying.
+   *
+   * The grid runs a full 24 hours and jumps to the current hour on arrival, so
+   * a column is taller than the viewport and its top is usually ABOVE it: at
+   * 12:43 the box measured `y: -152`, which put the drop point below at
+   * `y: -25` — off the page. `mouse.up()` then landed on nothing and no block
+   * was posted, so three checks failed for a reason that had nothing to do
+   * with dragging.
+   *
+   * It failed by the CLOCK, not by the code — before about 1am the grid has not
+   * scrolled and the same test passes. That is the exact fault the 24-hour grid
+   * was built to fix, reappearing in the test that guards it, so the fix is the
+   * same in spirit: do not assume the hours on screen are the hours you want.
+   */
+  await page.evaluate(() => {
+    let el = document.querySelector('[data-testid="planner-day-column"]')?.parentElement
+    while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement
+    if (el) el.scrollTop = 0
+  })
+  await page.waitForTimeout(150)
+
   const from = await item.boundingBox()
   const to = await column.boundingBox()
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)

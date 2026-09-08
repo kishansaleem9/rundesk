@@ -24,6 +24,8 @@ import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
 import type { StandupData } from './standup'
 import { startOfDayIn } from '../../common/time/zone'
+import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
+import { mergeBusy, toBusyWindows } from '../calendar-sync/free-busy'
 
 /**
  * §G06 [05:35–06:35] — the person profile panel.
@@ -52,6 +54,8 @@ export class PeopleService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private ai: AiService,
+    // §V2-14c — the calendars a person has marked as deciding when they are busy.
+    private calendarAccounts: CalendarAccountsService,
   ) {}
 
   /**
@@ -685,11 +689,36 @@ export class PeopleService {
       .orderBy(asc(meetings.startsAt))
       .limit(200)
 
+    /*
+     * §V2-14c, frame `13:50` — "These calendars decide when you're busy."
+     *
+     * `meetings` stays exactly as it was, because the planner draws it with
+     * titles for a colleague you are allowed to see. `busy` is the union of
+     * that and any EXTERNAL calendar this person has marked as counting — and
+     * it carries no titles at all, because a personal calendar says things
+     * like "MRI results". You may know somebody is busy at three; you may not
+     * know why.
+     *
+     * External windows are fetched best-effort: a Google outage, or a token
+     * that needs re-granting, must not take out a colleague's whole calendar
+     * view. When they cannot be fetched the answer is Rundesk's own time,
+     * which is what it was before this existed.
+     */
+    const external = await this.calendarAccounts
+      .externalBusyWindows(userId, workspaceId, from, to)
+      .catch(() => [] as ReturnType<typeof toBusyWindows>)
+
+    const busy = mergeBusy([
+      ...toBusyWindows(inRoom.map((m) => ({ start: m.startsAt, end: m.endsAt })), 'rundesk'),
+      ...external,
+    ])
+
     return {
       from: from.toISOString(),
       to: to.toISOString(),
       tasks: dated,
       meetings: inRoom,
+      busy,
     }
   }
 

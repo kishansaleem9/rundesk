@@ -10,10 +10,19 @@
  * check here is a BEFORE/AFTER on the calendar itself — turn the setting on,
  * reload, and look at the grid. None of them assert that the switch moved.
  *
- * THREE PAGES, NOT SEVEN. Accounts, Upcoming meeting, AI Notetaker and
- * Automations are deliberately absent — see the dialog's header for why each
- * one would have been a page that does nothing. This suite asserts the nav has
- * exactly the three that work, so adding a dead fourth breaks it.
+ * FOUR PAGES, NOT SEVEN — and it was three until §V2-14.
+ *
+ * Upcoming meeting, AI Notetaker and Automations are still deliberately absent;
+ * the dialog's header says why each would be a page that does nothing. ACCOUNTS
+ * has moved from that list to this one: it was excluded because a page here
+ * "would be a read-only copy" of the workspace integration, and that reasoning
+ * was wrong — the workspace connection was one for everybody, unique on
+ * (workspace, provider), and a second Google account overwrote the first.
+ * §V2-14 gives a person their own accounts with a default and a busy set, none
+ * of which has an entry point anywhere else.
+ *
+ * The count is still asserted, because the rule has not changed: a nav page
+ * that toggles nothing is a facade. Only the number of real ones has.
  *
  *   node test/e2e/planner-settings.mjs --dist apps/web/dist
  */
@@ -133,9 +142,9 @@ try {
   await page.waitForSelector('[data-testid="planner-settings-dialog"]', { timeout: 10_000 })
   const navs = await page.locator('[data-testid^="planner-settings-nav-"]').count()
   chk(
-    navs === 3,
-    'the nav offers exactly the three pages that do something',
-    `the nav had ${navs} pages — the frame shows seven, and four of them would toggle nothing here`,
+    navs === 4,
+    'the nav offers exactly the four pages that do something',
+    `the nav had ${navs} pages — the frame shows seven, and three of them would toggle nothing here`,
   )
 
   console.log('\n▶ Appearance changes the grid, not just the switch')

@@ -7,9 +7,12 @@ import { WorkspaceAdminGuard } from '../../auth/guards/workspace-admin.guard'
 import { SecurityModule } from '../../security/security.module'
 import { CustomRolesModule } from '../../custom-roles/custom-roles.module'
 import { NotificationsModule } from '../../notifications/notifications.module'
+import { CalendarSyncModule } from '../../calendar-sync/calendar-sync.module'
 
 @Module({
-  imports: [DatabaseModule, SecurityModule, CustomRolesModule, NotificationsModule],
+  // §V2-14 — a calendar grant is also recorded as the connecting person's own
+  // account, so the callback needs CalendarAccountsService.
+  imports: [DatabaseModule, SecurityModule, CustomRolesModule, NotificationsModule, CalendarSyncModule],
   controllers: [IntegrationConnectionsController],
   providers: [IntegrationConnectionsService, WorkspaceMemberGuard, WorkspaceAdminGuard],
   exports: [IntegrationConnectionsService],

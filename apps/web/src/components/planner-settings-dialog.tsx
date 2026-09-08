@@ -10,7 +10,8 @@ import {
   cn,
   toast,
 } from '@rundesk/ui'
-import { Palette, PanelLeft, CalendarClock } from 'lucide-react'
+import { Palette, PanelLeft, CalendarClock, CalendarPlus } from 'lucide-react'
+import { PlannerAccountsPage } from './planner-accounts-page'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 
@@ -20,13 +21,17 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
  * The frame's left nav has seven pages: Appearance · Accounts · Sidebar ·
  * Upcoming meeting · Time blocking · AI Notetaker · Automations.
  *
- * THREE ARE HERE. The other four are not, and their absence is the point.
+ * FOUR ARE HERE. The other three are not, and their absence is the point.
  *
- *   · **Accounts** is "connect another Google Calendar". Rundesk's
- *     `calendar-sync` module does two-way sync and its connect flow lives in
- *     workspace integrations — a second entry point here would be a second
- *     place to keep in step, and a page that only listed accounts would be a
- *     read-only copy of one that already exists.
+ *   · **Accounts** IS HERE NOW, and the reasoning that kept it out was wrong.
+ *     It said a page here "would be a read-only copy of one that already
+ *     exists" — but the thing that existed was a single WORKSPACE-owned
+ *     connection, unique on (workspace, provider), whose OAuth callback
+ *     overwrote itself. So it was not one calendar each and a second account
+ *     evicted the first. §V2-14 gives a person their own accounts, several of
+ *     them, with a default and a set that count as busy; none of that has an
+ *     entry point anywhere else, which is what makes this page real rather
+ *     than duplicate.
  *   · **Upcoming meeting** is mostly a desktop menubar and a quick-join
  *     window. Rundesk has no desktop app; two of its three switches would
  *     toggle nothing.
@@ -36,8 +41,8 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
  *   · **Automations** is "sync a list to a Google Calendar", which is a
  *     feature, not a setting — it belongs with the automations module.
  *
- * A settings nav with four pages that do nothing is the facade this codebase
- * has spent two videos removing. Better three real pages and an honest gap.
+ * A settings nav with pages that do nothing is the facade this codebase has
+ * spent two videos removing. Better four real pages and an honest gap.
  *
  * WEEK START AND TIMEZONE ARE NOT PLANNER SETTINGS. Frame `14:10` shows both
  * on the Appearance page, and they are account-wide columns on `users` that
@@ -62,8 +67,10 @@ type Settings = {
 
 type ListRow = { id: string; name: string }
 
-const PAGES: Array<{ key: 'appearance' | 'sidebar' | 'timeBlocking'; icon: typeof Palette; labelKey: TranslationKey }> = [
+const PAGES: Array<{ key: 'appearance' | 'accounts' | 'sidebar' | 'timeBlocking'; icon: typeof Palette; labelKey: TranslationKey }> = [
   { key: 'appearance', icon: Palette, labelKey: 'plannerSettings.appearance' },
+  // §V2-14, frame `13:50` — a person's own calendar accounts.
+  { key: 'accounts', icon: CalendarPlus, labelKey: 'plannerSettings.accounts' },
   { key: 'sidebar', icon: PanelLeft, labelKey: 'plannerSettings.sidebar' },
   { key: 'timeBlocking', icon: CalendarClock, labelKey: 'plannerSettings.timeBlocking' },
 ]
@@ -90,7 +97,7 @@ export function PlannerSettingsDialog({
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [page, setPage] = useState<'appearance' | 'sidebar' | 'timeBlocking'>('appearance')
+  const [page, setPage] = useState<'appearance' | 'accounts' | 'sidebar' | 'timeBlocking'>('appearance')
 
   const { data: settings } = useQuery({
     queryKey: ['planner-settings', workspaceId],
@@ -232,6 +239,8 @@ export function PlannerSettingsDialog({
                 </Row>
               </div>
             )}
+
+            {page === 'accounts' && <PlannerAccountsPage workspaceId={workspaceId} />}
 
             {page === 'sidebar' && (
               <div className="space-y-1" data-testid="planner-settings-sidebar">

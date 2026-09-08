@@ -13,6 +13,7 @@ import {
 import { DB_TOKEN } from '../../../common/database/database.module'
 import { SecurityService } from '../../security/security.service'
 import { NotificationsService } from '../../notifications/notifications.service'
+import { CalendarAccountsService } from '../../calendar-sync/calendar-accounts.service'
 
 type Provider =
   | 'github'
@@ -53,6 +54,7 @@ export class IntegrationConnectionsService {
     private readonly security: SecurityService,
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
+    private readonly calendarAccounts: CalendarAccountsService,
   ) {}
 
   async list(workspaceId: string) {
@@ -182,6 +184,42 @@ export class IntegrationConnectionsService {
         provider,
         ...patch,
       })
+    }
+
+    /*
+     * §V2-14 — a CALENDAR grant is also recorded as the connecting person's own
+     * account, and that is where the eviction bug is fixed.
+     *
+     * The upsert above is keyed on (workspace, provider), so a second Google
+     * account never failed — it overwrote the first and orphaned every
+     * `task_calendar_links` row pointing at it. `user_calendar_accounts` is
+     * keyed on the PROVIDER'S account id instead, so a second account is a
+     * second row and re-connecting the same one refreshes it.
+     *
+     * The workspace row is still written, deliberately: the existing task
+     * push/pull resolves its connection from the workspace and runs as a
+     * background side-effect with no user in scope. Which person's calendar a
+     * task should mirror into is a real product question the video never
+     * answers — she shows a person managing their OWN accounts — so it is left
+     * alone rather than guessed at.
+     */
+    if (provider === 'gcal' || provider === 'outlook') {
+      await this.calendarAccounts
+        .upsertFromOAuth({
+          userId: payload.userId,
+          workspaceId: payload.workspaceId,
+          provider,
+          externalAccountId: profile.id ?? '',
+          externalAccountEmail: profile.email,
+          accessToken: token.accessToken,
+          refreshToken: token.refreshToken,
+          tokenExpiresAt: token.expiresAt,
+          scopes: token.scopes,
+        })
+        // Best-effort: a calendar that syncs but is missing from the account
+        // list is recoverable by reconnecting; a callback that 500s after the
+        // grant leaves the person with no connection and a scary error.
+        .catch(() => undefined)
     }
 
     await this.security.logAuditEvent({
