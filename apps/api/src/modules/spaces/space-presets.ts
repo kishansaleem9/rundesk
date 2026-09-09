@@ -28,7 +28,7 @@ import type { StatusCategory } from '@rundesk/db'
  */
 
 /** The list views Rundesk can actually render. Not ClickUp's eleven. */
-export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt'] as const
+export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt', 'team'] as const
 export type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number]
 
 /**

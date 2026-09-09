@@ -284,6 +284,10 @@ export function WorkViewTabs({ tabs, trailing }: { tabs: WorkViewTab[]; trailing
           <button
             type="button"
             onClick={tab.onSelect}
+            /* Addressable by key, not by label: a label is translated, and a
+             * check that clicks "Team" passes only in English. */
+            data-testid={`work-view-tab-${tab.key.replace(':', '-')}`}
+            aria-current={tab.active}
             className={cn(
               'px-3 py-2 text-[13px] font-medium transition-colors whitespace-nowrap',
               tab.action && 'pr-1',

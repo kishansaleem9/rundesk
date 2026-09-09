@@ -1183,7 +1183,7 @@ function ListDetail() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
   const [newTaskDueDate, setNewTaskDueDate] = useState('')
-  const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table' | 'gantt'>('list')
+  const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table' | 'gantt' | 'team'>('list')
   // §5 per-space view config (ClickUp "required views"): which task views this
   // space's lists expose + the default that opens. Reuses the ['spaces', ws]
   // cache, so it adds no fetch beyond what the sidebar/space page already do.
@@ -1196,7 +1196,17 @@ function ListDetail() {
     enabled: !!workspaceId,
   })
   const spaceViewConfig = spaceViewCfgQuery.data?.find((s) => s.id === spaceId)?.viewConfig ?? null
-  const ALL_VIEWS = ['list', 'board', 'table', 'calendar', 'gantt'] as const
+  /*
+   * §V2-13 — 'team' added here as well as to the tab list, and the pair is the
+   * point. This is a SECOND hand-kept copy of the view set; the API has its own
+   * in `space-presets.ts`. A view missing from this one is filtered out of the
+   * tabs silently — no error, no empty tab, just absence — which is exactly how
+   * the first version of Team View rendered nothing.
+   *
+   * It is the third duplicated-list bug found in this pass: the planner's two
+   * settings types, the two field-type lists, and now this.
+   */
+  const ALL_VIEWS = ['list', 'board', 'table', 'calendar', 'gantt', 'team'] as const
   const enabledViews: Array<typeof activeView> =
     spaceViewConfig?.enabledViews && spaceViewConfig.enabledViews.length
       ? (spaceViewConfig.enabledViews.filter((v) => (ALL_VIEWS as readonly string[]).includes(v)) as Array<typeof activeView>)
@@ -1864,6 +1874,8 @@ function ListDetail() {
         { id: 'table', label: t('list.viewTable') },
         { id: 'calendar', label: t('list.viewCalendar') },
         { id: 'gantt', label: t('list.viewGantt') },
+        // §V2-13, frames `07:40` / `09:25` — work by the person doing it.
+        { id: 'team', label: t('list.viewTeam') },
       ] as { id: typeof activeView; label: string }[]
     )
       .filter((tb) => enabledViews.includes(tb.id))
@@ -2531,6 +2543,8 @@ function ListDetail() {
             onOpenTask={(id) => setSelectedTaskId(id)}
             onReschedule={rescheduleTaskSpan}
           />
+        ) : activeView === 'team' ? (
+          <TeamView tasks={visibleTasks} onOpenTask={(id) => setSelectedTaskId(id)} />
         ) : (
           <Card className="p-4">
             <div className="flex items-center justify-between mb-3">
@@ -4533,6 +4547,123 @@ function GanttBar({
       }
     >
       <span className="pointer-events-none truncate">{task.title}</span>
+    </div>
+  )
+}
+
+/**
+ * §V2-13 — TEAM VIEW, frames `07:40` and `09:25`.
+ *
+ * Team appears three times in the frames: in the required-views list at
+ * `07:10`, in the list's view tabs at `07:40`, and at `09:25` where ClickUp
+ * PAYWALLS it and the paywall teaches what it would show — a member card, a
+ * 16/8 load, a 25% donut, and Ready / In Progress / Review.
+ *
+ * IT IS NOT GATED HERE, and that is deliberate. The re-audit recorded this as
+ * "the paywall is wired to one call site", but the paywall was never the ask:
+ * ClickUp gates Team View because it is a paid tier there. Imitating the gate
+ * would mean offering to unlock something Rundesk does not have — and having
+ * built it, gating it would be inventing a tier to take it away again.
+ *
+ * ONE ROW PER PERSON, AND ONE FOR NOBODY. Unassigned work is the column most
+ * worth seeing on a board about who is doing what: a view that silently
+ * dropped it would report a team as fully allocated while work sat unowned.
+ */
+function TeamView({
+  tasks,
+  onOpenTask,
+}: {
+  tasks: TaskItem[]
+  onOpenTask: (id: string) => void
+}) {
+  const { t } = useTranslation()
+
+  const groups = useMemo(() => {
+    const by = new Map<string, { name: string; tasks: TaskItem[] }>()
+    for (const task of tasks) {
+      // A task with several assignees belongs on each of their rows — the
+      // question this view answers is "what is on this person's plate", and
+      // shared work is on both plates.
+      const owners = task.assignees?.length
+        ? task.assignees.map((a) => ({
+            id: a.userId,
+            name: a.user?.displayName || t('list.team.unassigned'),
+          }))
+        : [{ id: '__none__', name: t('list.team.unassigned') }]
+      for (const owner of owners) {
+        const row = by.get(owner.id) ?? { name: owner.name, tasks: [] }
+        row.tasks.push(task)
+        by.set(owner.id, row)
+      }
+    }
+    return [...by.entries()]
+      .map(([id, row]) => {
+        const done = row.tasks.filter((x) => x.statusCategory === 'closed').length
+        return {
+          id,
+          name: row.name,
+          tasks: row.tasks,
+          done,
+          // Rounded once, here, so the bar and the caption cannot disagree.
+          pct: row.tasks.length ? Math.round((done / row.tasks.length) * 100) : 0,
+        }
+      })
+      // Busiest first, but nobody-in-particular last whatever its size: it is
+      // a gap to close, not a person to compare against.
+      .sort((a, b) =>
+        a.id === '__none__' ? 1 : b.id === '__none__' ? -1 : b.tasks.length - a.tasks.length,
+      )
+  }, [tasks, t])
+
+  if (groups.length === 0) {
+    return (
+      <Card className="p-6 text-center" data-testid="team-view-empty">
+        <p className="text-sm text-muted-foreground">{t('list.team.empty')}</p>
+      </Card>
+    )
+  }
+
+  return (
+    <div className="space-y-2" data-testid="team-view">
+      {groups.map((g) => (
+        <Card key={g.id} className="p-3" data-testid="team-view-row">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium" data-testid="team-view-name">{g.name}</div>
+              <div className="text-[11px] text-muted-foreground" data-testid="team-view-load">
+                {t('list.team.load', { done: g.done, total: g.tasks.length })}
+              </div>
+            </div>
+            <div className="w-28 shrink-0">
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-accent" style={{ width: `${g.pct}%` }} />
+              </div>
+              <div className="mt-0.5 text-right text-[10px] tabular-nums text-muted-foreground">
+                {g.pct}%
+              </div>
+            </div>
+          </div>
+          <ul className="mt-2 space-y-0.5">
+            {g.tasks.slice(0, 8).map((task) => (
+              <li key={`${g.id}-${task.id}`}>
+                <button
+                  type="button"
+                  data-testid="team-view-task"
+                  onClick={() => onOpenTask(task.id)}
+                  className="w-full truncate rounded px-1.5 py-0.5 text-left text-[12px] hover:bg-muted/50"
+                >
+                  {task.title}
+                </button>
+              </li>
+            ))}
+            {g.tasks.length > 8 && (
+              <li className="px-1.5 text-[11px] text-muted-foreground">
+                {t('list.team.andMore', { n: g.tasks.length - 8 })}
+              </li>
+            )}
+          </ul>
+        </Card>
+      ))}
     </div>
   )
 }

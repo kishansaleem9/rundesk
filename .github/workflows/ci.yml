@@ -665,6 +665,24 @@ jobs:
       # missing what the first shows. The first three checks are the other half
       # of the contract: `features: null` — every space made before the column
       # existed — must read as ALL ON.
+      # §V2-13, frames `07:10` / `07:40` / `09:25` — Team View.
+      #
+      # The frames show Team three times, and it was not a view type at all.
+      # NOT paywalled here, deliberately: ClickUp gates it because it is a paid
+      # tier there, and imitating the gate would mean offering to unlock
+      # something Rundesk does not have.
+      #
+      # The checks are on the ARITHMETIC each row reports, not on the rows
+      # existing. A view that grouped by person but counted the whole list
+      # renders identically — the fixture gives two people different loads, one
+      # task with two assignees and one with none, so the numbers separate them.
+      - name: Team view
+        if: '!cancelled()'
+        run: node test/e2e/team-view.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

@@ -1009,6 +1009,13 @@
       "when": 1900000111029,
       "tag": "0143_more_custom_field_types",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1900000112029,
+      "tag": "0144_team_view",
+      "breakpoints": true
     }
   ]
 }

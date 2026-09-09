@@ -162,6 +162,8 @@ export const viewTypeEnum = pgEnum('view_type', [
   'calendar',
   'gantt',
   'table',
+  // §V2-13, frames `07:10` / `07:40` / `09:25` — work by the person doing it.
+  'team',
 ])
 
 // Container-level (space / project) membership role and visibility.

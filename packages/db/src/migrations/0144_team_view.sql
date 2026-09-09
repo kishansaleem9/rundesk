@@ -1,0 +1,19 @@
+-- §V2-13 / frame `09:25` — TEAM VIEW.
+--
+-- The frames show Team three times: in the required-views toggle list at
+-- `07:10`, in the list's view tabs at `07:40` (List | Board | Team | Calendar |
+-- Gantt), and at `09:25` where it is PAYWALLED and the paywall teaches what it
+-- would show — a member card, a 16/8 load, a 25% donut, and Ready / In
+-- Progress / Review.
+--
+-- Rundesk had no such view type. The re-audit recorded this as "the paywall is
+-- wired to one call site", but the paywall was never the point: ClickUp gates
+-- Team View because it is a paid feature there, and imitating the gate would
+-- mean offering to unlock something that does not exist. The honest reading is
+-- that the VIEW is the ask, so it is built and not gated.
+--
+-- List export is deliberately NOT given the same treatment. It was behind
+-- `WorkspaceAdminGuard` and removing that gate was the fix (see
+-- test/e2e/list-export.mjs); adding a plan tier now would take a working
+-- feature away to match a screenshot.
+ALTER TYPE "view_type" ADD VALUE IF NOT EXISTS 'team';
