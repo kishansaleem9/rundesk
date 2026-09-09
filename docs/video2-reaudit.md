@@ -47,6 +47,21 @@ went missing entirely. A list that is only written once stops being true.
   keeps its own `ALL_VIEWS` copy and silently filters out anything missing from
   it. Four now: two planner settings types, two field-type lists, the API vs
   route view keys, and this.
+- **A fifth, and the first visible on screen.** Two implementations of "how long
+  ago" that disagreed: the list route's locale-aware `formatAge`, and
+  `docs-panel.tsx`'s hardcoded-English `relativeTime` returning "3d ago". The
+  English-only problem had been found and fixed in ONE copy, so Arabic and Urdu
+  readers kept getting English in docs. Consolidated into
+  `apps/web/src/lib/relative-time.ts`; the docs bug went with it.
+- **Checklists, frames `02:15`–`02:55`.** The API had supported many checklists
+  per task since it was written and the UI could not make a second one: the only
+  creation path was implicit, inside add-an-item, and opened
+  `if (firstChecklist) return firstChecklist`. When a template did produce a
+  second list, the single add-item form at the bottom of the panel still wrote
+  into `checklists[0]` whichever list you were looking at — a facade that
+  photographs correctly. Now: "Add checklist", a per-list "Add item", an open
+  count on the header, and an activity entry naming the item and its list.
+  13 checks, five separate break-tests.
 
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
@@ -126,13 +141,14 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | Attach on create — uploads *after* the task exists, single file, no removable list |
 | M | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") |
 | M | "Collapse empty fields" |
-| M | Relative times in the activity feed + "Show more" |
+| B | Relative times in the activity feed + "Show more" |
 | M | "Comment ▾" split button; "Create Task ▾" split button |
 | M | Toast "Task created — `<title>` › `<list>`" with Copy / View |
 | P | Time-estimate popover with a unit-suggestion row |
-| P | Attachments "Drop files here" — the panel exists, **no drop handler** |
-| P | "Add checklist" — only created implicitly by adding an item |
-| M | Checklist header open-item count ("Checklists 2 open") |
+| B | Attachments "Drop files here" — the panel exists, **no drop handler** |
+| B | "Add checklist" — several named checklists, each with its own "Add item" |
+| B | Checklist header open-item count ("Checklists 2 open") |
+| B | Activity names the item and the checklist it went into (frame `02:47`) |
 | M | Attachment thumbnail hover actions; attachments header view-toggle |
 | B | Cover: Gallery / Upload / Link / Attachments / Remove, Reposition, Change cover |
 | M | Cover: Search tab (documented as deliberate); Gallery "Custom" swatch |

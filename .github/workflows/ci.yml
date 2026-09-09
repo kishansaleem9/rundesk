@@ -683,6 +683,21 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S03, frames `02:15`–`02:55` — checklists.
+      #
+      # The API supported many checklists per task from the start; the UI could
+      # never make a second one, and when a template produced one the single
+      # add-item form at the bottom of the panel still wrote into
+      # `checklists[0]` whichever list you were looking at. The discriminating
+      # check is phrased by DESTINATION — "an item was added" passes on the
+      # broken build too, because the item existed, just in the wrong list.
+      - name: Checklists
+        if: '!cancelled()'
+        run: node test/e2e/checklists.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

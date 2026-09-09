@@ -118,6 +118,10 @@ type ActivityAction =
   | 'dependency_added'
   | 'dependency_removed'
   | 'checklist_item_toggled'
+  // §V2-S03 frame `02:47` — the feed reads "You added item task required to
+  // checklist Checklist". Ticking an item was logged; adding one was not, so
+  // a checklist could grow by ten lines and the activity feed stayed silent.
+  | 'checklist_item_added'
   | 'attachment_added'
   | 'attachment_removed'
   | 'subtask_added'
@@ -4214,7 +4218,13 @@ export class TasksService {
     return { ok: true }
   }
 
-  async addChecklistItem(checklistId: string, content: string, assigneeId?: string | null, dueDate?: Date | null) {
+  async addChecklistItem(
+    checklistId: string,
+    content: string,
+    assigneeId?: string | null,
+    dueDate?: Date | null,
+    actorId?: string | null,
+  ) {
     const [parent] = await this.db.select().from(taskChecklists).where(eq(taskChecklists.id, checklistId))
     if (!parent) throw new NotFoundException('Checklist not found')
     const [existing] = await this.db
@@ -4231,6 +4241,15 @@ export class TasksService {
         position: (existing?.maxPos ?? -1) + 1,
       })
       .returning()
+    // Frame `02:47`: the feed names both the item and the list it went into.
+    // With more than one named checklist per task that is not decoration —
+    // "added an item" tells you nothing about which list grew.
+    await this.logActivity({
+      taskId: parent.taskId,
+      actorId,
+      action: 'checklist_item_added',
+      meta: { itemId: item.id, content: item.content, checklist: parent.title },
+    })
     this.realtime.emitToTask(parent.taskId, { type: 'checklist.updated', taskId: parent.taskId })
     return item
   }
@@ -4260,7 +4279,7 @@ export class TasksService {
           taskId: parent.taskId,
           actorId,
           action: 'checklist_item_toggled',
-          meta: { itemId, content: updated.content, isDone: updated.isDone },
+          meta: { itemId, content: updated.content, isDone: updated.isDone, checklist: parent.title },
         })
       }
       this.realtime.emitToTask(parent.taskId, { type: 'checklist.updated', taskId: parent.taskId })

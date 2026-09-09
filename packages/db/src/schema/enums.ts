@@ -67,6 +67,9 @@ export const activityActionEnum = pgEnum('activity_action', [
   'dependency_added',
   'dependency_removed',
   'checklist_item_toggled',
+  // §V2-S03 frame `02:47` — ticking an item was logged, adding one was not, so
+  // a checklist could grow by ten lines with nothing in the activity feed.
+  'checklist_item_added',
   'attachment_added',
   'attachment_removed',
   'subtask_added',

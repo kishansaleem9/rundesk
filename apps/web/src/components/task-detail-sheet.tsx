@@ -178,6 +178,7 @@ const ACTIVITY_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   label_added: 'taskDetail.activity.labelAdded',
   label_removed: 'taskDetail.activity.labelRemoved',
   checklist_item_toggled: 'taskDetail.activity.checklistItemToggled',
+  checklist_item_added: 'taskDetail.activity.checklistItemAdded',
   dependency_added: 'taskDetail.activity.dependencyAdded',
   dependency_removed: 'taskDetail.activity.dependencyRemoved',
   // §V2-08 — merging leaves an entry on both tasks.
@@ -2966,11 +2967,16 @@ function ChecklistsPanel({
   workspaceId?: string
   checklists: Checklist[]
 }) {
-  const { t } = useTranslation()
+  const { t, tCount } = useTranslation()
   const qc = useQueryClient()
-  const [itemText, setItemText] = useState('')
-  const [itemAssignee, setItemAssignee] = useState('')
   const [templateId, setTemplateId] = useState('')
+  // §V2-S03 frame `02:15` — "Add checklist" is its own button, because a task
+  // holds SEVERAL named checklists. The panel used to have no way to make one:
+  // the only creation path was implicit, inside "add an item", and it
+  // short-circuited on `checklists[0]`, so the second checklist was
+  // unreachable from the UI on an API that had supported many all along.
+  const [addingChecklist, setAddingChecklist] = useState(false)
+  const [newChecklistTitle, setNewChecklistTitle] = useState('')
 
   // Reusable checklists — "main template se bhi checklist kar sakti hoon".
   const templatesQuery = useQuery({
@@ -3011,31 +3017,60 @@ function ChecklistsPanel({
   const [editingChecklistTitle, setEditingChecklistTitle] = useState('')
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [editingItemContent, setEditingItemContent] = useState('')
-  const firstChecklist = useMemo(() => checklists[0] ?? null, [checklists])
+
+  /*
+   * Frame `02:15` — the section header carries an open-item count
+   * ("Checklists 2 open"). Open, not total: what is left is the number a
+   * person opening the tab is looking for.
+   */
+  const totals = useMemo(() => {
+    let open = 0
+    let total = 0
+    for (const cl of checklists) {
+      total += cl.items.length
+      open += cl.items.filter((i) => !i.isDone).length
+    }
+    return { open, total }
+  }, [checklists])
 
   const createChecklist = useMutation({
-    mutationFn: async () => {
-      if (firstChecklist) return firstChecklist
-      return api<{ id: string }>(`/tasks/${taskId}/checklists`, {
-        method: 'POST',
-        body: JSON.stringify({ title: 'Checklist' }),
-      })
+    mutationFn: (title: string) =>
+      api<{ id: string }>(`/tasks/${taskId}/checklists`, { method: 'POST', body: { title } }),
+    onSuccess: async () => {
+      setAddingChecklist(false)
+      setNewChecklistTitle('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('taskDetail.checklistCreateFailed')),
   })
 
   const addItem = useMutation({
-    mutationFn: async () => {
-      const checklist = firstChecklist ?? (await createChecklist.mutateAsync())
-      return api(`/tasks/${taskId}/checklists/${checklist.id}/items`, {
+    mutationFn: async ({
+      checklistId,
+      content,
+      assigneeId,
+    }: { checklistId: string | null; content: string; assigneeId: string | null }) => {
+      // `checklistId` is null only from the empty state, where there is no list
+      // to choose yet. Every other form belongs to a specific checklist and
+      // says so — the old single form at the bottom of the panel always wrote
+      // into `checklists[0]` no matter which list you were looking at.
+      const id =
+        checklistId ??
+        (
+          await api<{ id: string }>(`/tasks/${taskId}/checklists`, {
+            method: 'POST',
+            body: { title: t('taskDetail.checklistDefaultTitle') },
+          })
+        ).id
+      return api(`/tasks/${taskId}/checklists/${id}/items`, {
         method: 'POST',
-        body: JSON.stringify({ content: itemText, assigneeId: itemAssignee || null }),
+        body: { content, assigneeId },
       })
     },
     onSuccess: async () => {
-      setItemText('')
-      setItemAssignee('')
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
     },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('taskDetail.checklistCreateFailed')),
   })
 
   const renameChecklist = useMutation({
@@ -3120,7 +3155,69 @@ function ChecklistsPanel({
   })
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="checklists-panel">
+      {/* Frame `02:15` — heading, open count, and "Add checklist" on the right. */}
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-medium">{t('taskDetail.tab.checklists')}</h3>
+        {totals.total > 0 && (
+          <span
+            data-testid="checklist-open-count"
+            className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
+          >
+            {totals.open > 0 ? tCount('taskDetail.checklistOpen', totals.open) : t('taskDetail.checklistAllDone')}
+          </span>
+        )}
+        <div className="flex-1" />
+        {addingChecklist ? (
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const title = newChecklistTitle.trim()
+              if (title) createChecklist.mutate(title)
+            }}
+          >
+            <Input
+              autoFocus
+              value={newChecklistTitle}
+              onChange={(e) => setNewChecklistTitle(e.target.value)}
+              placeholder={t('taskDetail.checklistNamePlaceholder')}
+              aria-label={t('taskDetail.checklistNamePlaceholder')}
+              data-testid="checklist-name-input"
+              className="h-8 w-[190px]"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              data-testid="checklist-create-confirm"
+              disabled={!newChecklistTitle.trim() || createChecklist.isPending}
+            >
+              {t('taskDetail.add')}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setAddingChecklist(false)
+                setNewChecklistTitle('')
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+          </form>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="checklist-add"
+            onClick={() => setAddingChecklist(true)}
+          >
+            + {t('taskDetail.checklistAdd')}
+          </Button>
+        )}
+      </div>
       {templates.length > 0 && (
         <div className="flex items-center gap-2 rounded-md border border-border/70 bg-card/40 px-3 py-2">
           <span className="text-[12px] text-muted-foreground shrink-0">{t('taskDetail.checklistFromTemplate')}</span>
@@ -3170,7 +3267,21 @@ function ChecklistsPanel({
                 </>
               ) : (
                 <>
-                  <div className="text-sm font-medium flex-1">{cl.title}</div>
+                  <div className="text-sm font-medium">{cl.title}</div>
+                  {/* Per-list count as well as the section total: with several
+                      named checklists, one number for the whole tab cannot say
+                      which list still has work left in it. */}
+                  <span
+                    data-testid="checklist-progress"
+                    title={t('taskDetail.checklistProgressLabel', {
+                      done: cl.items.filter((i) => i.isDone).length,
+                      total: cl.items.length,
+                    })}
+                    className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+                  >
+                    {cl.items.filter((i) => i.isDone).length}/{cl.items.length}
+                  </span>
+                  <div className="flex-1" />
                   <button
                     type="button"
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -3212,6 +3323,7 @@ function ChecklistsPanel({
                   >
                     <input
                       type="checkbox"
+                      data-testid="checklist-item-checkbox"
                       checked={item.isDone}
                       onChange={(e) =>
                         toggleItem.mutate({ itemId: item.id, isDone: e.target.checked })
@@ -3304,38 +3416,94 @@ function ChecklistsPanel({
                 ))
               )}
             </ul>
+            {/* Frame `02:15` — "Add item" belongs to the checklist it is under.
+                One form at the bottom of the panel could only ever feed the
+                first list. */}
+            <ChecklistItemForm
+              members={members}
+              pending={addItem.isPending}
+              onAdd={(content, assigneeId) =>
+                addItem.mutateAsync({ checklistId: cl.id, content, assigneeId })
+              }
+            />
           </div>
         ))
       )}
 
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (itemText.trim()) addItem.mutate()
-        }}
-      >
-        <Input
-          value={itemText}
-          onChange={(e) => setItemText(e.target.value)}
-          placeholder={t('taskDetail.addChecklistItemPlaceholder')}
+      {/* With no checklist yet there is nothing to add an item to, so this one
+          form makes the default list on the way — the behaviour the empty
+          state's own hint promises. */}
+      {checklists.length === 0 && (
+        <ChecklistItemForm
+          members={members}
+          pending={addItem.isPending}
+          onAdd={(content, assigneeId) => addItem.mutateAsync({ checklistId: null, content, assigneeId })}
         />
-        <select
-          value={itemAssignee}
-          onChange={(e) => setItemAssignee(e.target.value)}
-          aria-label={t('taskDetail.checklistAssignNewLabel')}
-          className="h-9 w-[155px] shrink-0 rounded-md border border-border bg-background px-2 text-sm"
-        >
-          <option value="">{t('taskDetail.checklistUnassigned')}</option>
-          {members.map((m) => (
-            <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
-          ))}
-        </select>
-        <Button type="submit" disabled={!itemText.trim() || addItem.isPending} size="sm">
-          {t('taskDetail.add')}
-        </Button>
-      </form>
+      )}
     </div>
+  )
+}
+
+/**
+ * The "Add item" row under a single checklist.
+ *
+ * Its own component so each checklist keeps its own draft: with the state
+ * hoisted into the panel, typing into one list's box would have shown the same
+ * text under every other list.
+ */
+function ChecklistItemForm({
+  members,
+  pending,
+  onAdd,
+}: {
+  members: WorkspaceMemberLite[]
+  pending: boolean
+  onAdd: (content: string, assigneeId: string | null) => Promise<unknown>
+}) {
+  const { t } = useTranslation()
+  const [text, setText] = useState('')
+  const [assignee, setAssignee] = useState('')
+  return (
+    <form
+      data-testid="checklist-item-form"
+      className="flex gap-2 border-t border-border px-3 py-2"
+      onSubmit={async (e) => {
+        e.preventDefault()
+        const content = text.trim()
+        if (!content) return
+        try {
+          await onAdd(content, assignee || null)
+        } catch {
+          // The mutation has already surfaced the failure; keep what was typed
+          // so the person can retry rather than retype it.
+          return
+        }
+        setText('')
+        setAssignee('')
+      }}
+    >
+      <Input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={t('taskDetail.addChecklistItemPlaceholder')}
+        data-testid="checklist-item-input"
+        className="h-8"
+      />
+      <select
+        value={assignee}
+        onChange={(e) => setAssignee(e.target.value)}
+        aria-label={t('taskDetail.checklistAssignNewLabel')}
+        className="h-8 w-[155px] shrink-0 rounded-md border border-border bg-background px-2 text-sm"
+      >
+        <option value="">{t('taskDetail.checklistUnassigned')}</option>
+        {members.map((m) => (
+          <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
+        ))}
+      </select>
+      <Button type="submit" disabled={!text.trim() || pending} size="sm">
+        {t('taskDetail.add')}
+      </Button>
+    </form>
   )
 }
 
@@ -4940,10 +5108,32 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
   const shown = showAllActivity ? entries : entries.slice(0, ACTIVITY_PREVIEW)
   const hidden = entries.length - shown.length
   // Map known actions to localized phrasing; fall back to a humanized raw string.
-  const actionLabel = (action: string) => {
-    const key = ACTIVITY_ACTION_LABEL_KEYS[action]
+  //
+  // Frame `02:47` — "You added item task required to checklist Checklist". The
+  // checklist entries carry the item and the list in their meta, and a task
+  // with three checklists cannot use "toggled a checklist item" for any of
+  // them. When the meta is there the named phrasing wins; older rows written
+  // before the meta existed still fall back to the plain label.
+  const actionLabel = (a: ActivityEntry) => {
+    const meta = a.meta as { content?: unknown; checklist?: unknown; isDone?: unknown } | null | undefined
+    const item = typeof meta?.content === 'string' ? meta.content : null
+    const checklist = typeof meta?.checklist === 'string' ? meta.checklist : null
+    if (item && checklist) {
+      if (a.action === 'checklist_item_added') {
+        return t('taskDetail.activity.checklistItemAddedDetail', { item, checklist })
+      }
+      if (a.action === 'checklist_item_toggled') {
+        return t(
+          meta?.isDone
+            ? 'taskDetail.activity.checklistItemCheckedDetail'
+            : 'taskDetail.activity.checklistItemUncheckedDetail',
+          { item, checklist },
+        )
+      }
+    }
+    const key = ACTIVITY_ACTION_LABEL_KEYS[a.action]
     if (key) return t(key)
-    return action
+    return a.action
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase())
   }
@@ -5011,7 +5201,7 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
               <span className="font-medium">
                 {a.actor?.displayName ?? a.actor?.email ?? t('taskDetail.system')}
               </span>{' '}
-              <span className="text-muted-foreground">{actionLabel(a.action)}</span>
+              <span className="text-muted-foreground">{actionLabel(a)}</span>
               {transition && (
                 <span className="inline-flex items-center gap-1.5 ml-1.5 align-middle">
                   <span className="text-muted-foreground">{t('taskDetail.activity.from')}</span>

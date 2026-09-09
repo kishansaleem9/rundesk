@@ -38,6 +38,7 @@ export class TaskChecklistsController {
   @Post(':checklistId/items')
   addItem(
     @Param('checklistId') checklistId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Body() body: { content: string; assigneeId?: string | null; dueDate?: string | null },
   ) {
     return this.tasks.addChecklistItem(
@@ -45,6 +46,7 @@ export class TaskChecklistsController {
       body.content,
       body.assigneeId,
       body.dueDate ? new Date(body.dueDate) : null,
+      user.id,
     )
   }
 
