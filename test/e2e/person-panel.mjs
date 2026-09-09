@@ -17,6 +17,7 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi } from './lib/signin.mjs'
+import { readText } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -344,7 +345,7 @@ try {
     await page.getByTestId('person-priorities').isVisible().catch(() => false),
     'Priorities is the tab it opens on',
   )
-  const emptyText = await page.getByTestId('person-priorities').innerText()
+  const emptyText = await readText(page.getByTestId('person-priorities'))
   check(/most important/i.test(emptyText), 'the empty state invites you to add them', emptyText.slice(0, 90))
 
   await page.getByTestId('priority-input').fill('Ship the release')

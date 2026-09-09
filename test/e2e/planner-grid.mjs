@@ -21,7 +21,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, readText } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -335,7 +335,7 @@ try {
     'no busy block appeared — searching a person that changes nothing is the facade this replaced',
   )
   chk(
-    (await page.locator('[data-testid="planner-meet-selected"]').innerText()).includes('Sara Ahmed'),
+    (await readText(page.locator('[data-testid="planner-meet-selected"]'))).includes('Sara Ahmed'),
     'with a chip saying whose calendar you are seeing',
     'the hatched blocks had no explanation on screen',
   )

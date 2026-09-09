@@ -23,6 +23,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
+import { readText } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -174,7 +175,7 @@ try {
   const cards = await page.locator('[data-testid^="space-wizard-preset-"]').count()
   chk(cards === 4, 'all four cards are on screen', `found ${cards} preset card(s)`)
   chk(
-    (await page.locator('[data-testid="space-wizard-seed-note"]').innerText()).includes('Tasks'),
+    (await readText(page.locator('[data-testid="space-wizard-seed-note"]'))).includes('Tasks'),
     'and it says which lists the Space will be created with `[07:46]`',
     'nothing warned that the Space arrives with lists nobody made',
   )

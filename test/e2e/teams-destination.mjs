@@ -24,7 +24,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi } from './lib/signin.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, readText } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -148,7 +148,7 @@ try {
   chk(teamsListed, 'and sees the teams that exist',
     'the teams list was empty for a member on a workspace that has a team')
 
-  const rowText = await page.getByTestId('teams-row').first().innerText()
+  const rowText = await readText(page.getByTestId('teams-row').first())
   chk(
     /\d+\s/.test(rowText) || /\d/.test(rowText),
     'with how many people are in each',

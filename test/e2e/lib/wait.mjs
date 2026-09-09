@@ -50,3 +50,31 @@ export async function textOf(page) {
   }
   return ''
 }
+
+/**
+ * Read one element's text, or come back empty — never throw.
+ *
+ * THE FOURTH MEMBER OF THE FAMILY described at the top of this file, and it cost
+ * two CI runs before it was named. `await page.getByTestId('x').innerText()` on
+ * an element that never mounts does not fail fast: Playwright auto-waits its
+ * default thirty seconds and then THROWS. The suite dies with `threw: ...`, no
+ * check name attached, thirty seconds of a finite CI budget spent, and nothing
+ * in the log to debug from — while the same read passes locally because the
+ * machine is quicker and the element happens to be there.
+ *
+ * That is how `teams-destination` failed on one run and `ai-value` on another.
+ * Both were reading an element that a slower runner had not drawn yet.
+ *
+ * So: a SHORT bounded wait, and '' when it does not arrive. The caller then
+ * writes a named check against the text, which fails saying WHICH element was
+ * missing instead of dying anonymously. Empty string is deliberately not
+ * special-cased here — an assertion on '' fails on its own, and it fails with
+ * the caller's own words.
+ */
+export async function readText(locator, { timeoutMs = 8000 } = {}) {
+  try {
+    return await locator.innerText({ timeout: timeoutMs })
+  } catch {
+    return ''
+  }
+}

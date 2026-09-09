@@ -29,7 +29,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi } from './lib/signin.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, readText } from './lib/wait.mjs'
 import { openDb } from './lib/db.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -254,7 +254,9 @@ try {
    * show where it came from. Without this the page is a number with no
    * provenance, which is exactly what makes such numbers untrustworthy.
    */
-  const working = await page.getByTestId('ai-value-time').innerText()
+  // Guarded: an unmounted element here used to auto-wait thirty seconds and
+  // THROW, which is how this suite failed in CI while passing locally.
+  const working = await readText(page.getByTestId('ai-value-time'))
   chk(
     /×/.test(working) && /\d/.test(working),
     'showing its arithmetic beside it',
