@@ -69,6 +69,11 @@ import { SharePanel } from './share-panel'
 import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
 import { relativeTime, exactTime } from '../lib/relative-time'
+import {
+  useCollapseEmptyFields,
+  setCollapseEmptyFields,
+  isEmptyFieldValue,
+} from '../lib/collapse-empty-fields'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker, type CoverChoice } from './cover-image-picker'
@@ -1716,6 +1721,22 @@ function OverviewPanel({
     if (r.cadenceDays === 14) return 'biweekly'
     return 'custom'
   })()
+  /*
+   * §V2-S02 frame `01:20` — which of the built-in fields have nothing in them.
+   *
+   * Status and Priority are absent on purpose: every task has both, so neither
+   * can ever be empty and listing them would put two entries in this object
+   * that are permanently `false`. `Repeat` counts as empty when it is "off",
+   * which is the value the select shows for a task that does not repeat.
+   */
+  const emptyFields = {
+    dueDate: isEmptyFieldValue(detail.dueDate),
+    startDate: isEmptyFieldValue(detail.startDate),
+    repeat: recurrenceValue === 'off',
+    timeEstimate: isEmptyFieldValue(detail.timeEstimate),
+    assignees: isEmptyFieldValue(detail.assignees),
+  }
+
   const onRecurrenceChange = (v: string) => {
     if (v === 'off') return setRecurrence.mutate(null)
     if (v === 'daily') return setRecurrence.mutate({ cadenceDays: 1 })
@@ -2086,6 +2107,16 @@ function OverviewPanel({
         )}
       </section>
 
+      {/*
+        §V2-S02 frame `01:20` — "Collapse empty fields" beside the field grid.
+        Which fields are empty is decided HERE, once, so the toggle, the count
+        and the hiding cannot disagree: a count computed separately from the
+        fields it describes is the same bug in a smaller box.
+      */}
+      <CollapseEmptyFieldsToggle
+        emptyCount={Object.values(emptyFields).filter(Boolean).length}
+      />
+
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('taskDetail.fieldStatus')}>
           <select
@@ -2132,6 +2163,7 @@ function OverviewPanel({
           </div>
         </Field>
         <Field
+          empty={emptyFields.dueDate}
           label={
             <span className="flex items-center justify-between">
               {t('taskDetail.fieldDueDate')}
@@ -2190,7 +2222,7 @@ function OverviewPanel({
             </button>
           </div>
         </Field>
-        <Field label={t('taskDetail.fieldStartDate')}>
+        <Field label={t('taskDetail.fieldStartDate')} empty={emptyFields.startDate}>
           <input
             type="datetime-local"
             data-testid="task-start-date"
@@ -2200,7 +2232,7 @@ function OverviewPanel({
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
         </Field>
-        <Field label={t('taskDetail.fieldRepeat')}>
+        <Field label={t('taskDetail.fieldRepeat')} empty={emptyFields.repeat}>
           <select
             value={recurrenceValue}
             onChange={(e) => onRecurrenceChange(e.target.value)}
@@ -2232,7 +2264,7 @@ function OverviewPanel({
             onSubmit={(rule) => setRecurrence.mutate({ rule })}
           />
         </Field>
-        <Field label={t('taskDetail.fieldEstimate')}>
+        <Field label={t('taskDetail.fieldEstimate')} empty={emptyFields.timeEstimate}>
           <input
             type="number"
             min={0}
@@ -2251,7 +2283,7 @@ function OverviewPanel({
         </Field>
       </div>
 
-      <Field label={t('taskDetail.fieldAssignees')}>
+      <Field label={t('taskDetail.fieldAssignees')} empty={emptyFields.assignees}>
         {detail.assignees && detail.assignees.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {detail.assignees.map((a) => (
@@ -2302,11 +2334,61 @@ function OverviewPanel({
   )
 }
 
-function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
+/**
+ * One field in the detail grid.
+ *
+ * `empty` is passed by the caller rather than sniffed from `children`, because
+ * only the caller knows: an empty date input and a date input holding a date
+ * are the same React element with a different `value`, and the rendered node
+ * cannot tell you which. §V2-S02 frame `01:20`.
+ */
+function Field({
+  label,
+  empty = false,
+  children,
+}: {
+  label: React.ReactNode
+  empty?: boolean
+  children: React.ReactNode
+}) {
+  const collapse = useCollapseEmptyFields()
+  if (empty && collapse) return null
   return (
-    <div>
+    <div data-testid={empty ? 'task-field-empty' : 'task-field'}>
       <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{label}</div>
       <div>{children}</div>
+    </div>
+  )
+}
+
+/**
+ * The toggle itself, plus how much it is hiding.
+ *
+ * SAYING THE COUNT IS NOT DECORATION. Collapsed, an empty field and a field
+ * that does not exist look identical, and somebody who forgot they turned this
+ * on files a bug about a missing field. The count is the difference between
+ * hidden and gone.
+ */
+function CollapseEmptyFieldsToggle({ emptyCount }: { emptyCount: number }) {
+  const { t, tCount } = useTranslation()
+  const collapse = useCollapseEmptyFields()
+  if (emptyCount === 0 && !collapse) return null
+  return (
+    <div className="flex items-center gap-2 justify-end">
+      {collapse && emptyCount > 0 && (
+        <span className="text-[11px] text-muted-foreground" data-testid="empty-fields-hidden">
+          {tCount('taskDetail.emptyFieldsHidden', emptyCount)}
+        </span>
+      )}
+      <button
+        type="button"
+        data-testid="collapse-empty-fields"
+        aria-pressed={collapse}
+        onClick={() => setCollapseEmptyFields(!collapse)}
+        className="text-[11px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+      >
+        {collapse ? t('taskDetail.showEmptyFields') : t('taskDetail.collapseEmptyFields')}
+      </button>
     </div>
   )
 }
@@ -5575,6 +5657,8 @@ function CustomFieldsPanelInner({
   const { t } = useTranslation()
   const qc = useQueryClient()
 
+  const collapse = useCollapseEmptyFields()
+
   const fieldsQuery = useQuery({
     queryKey: ['custom-fields', workspaceId, taskId],
     queryFn: () =>
@@ -5605,10 +5689,25 @@ function CustomFieldsPanelInner({
     )
   }
 
+  /*
+   * §V2-S02 frame `01:20` — the same "Collapse empty fields" preference the
+   * Overview grid uses, from the same module. This is where it earns its keep:
+   * every custom field defined on the workspace appears on every task, so a
+   * workspace with twenty fields gives every task seventeen empty ones.
+   *
+   * Required fields are never hidden. An empty required field is the one thing
+   * on this panel somebody needs to see.
+   */
+  const isHideable = ({ definition, value }: CustomFieldRow) =>
+    !definition.isRequired && isEmptyFieldValue(value)
+  const hiddenCount = fields.filter(isHideable).length
+  const shown = collapse ? fields.filter((f) => !isHideable(f)) : fields
+
   return (
     <div className="space-y-3">
-      {fields.map(({ definition, value }) => (
-        <div key={definition.id}>
+      <CollapseEmptyFieldsToggle emptyCount={hiddenCount} />
+      {shown.map(({ definition, value }) => (
+        <div key={definition.id} data-testid="custom-field-row">
           <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">
             {definition.name}
             {definition.isRequired && <span className="text-destructive">*</span>}

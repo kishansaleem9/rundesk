@@ -698,6 +698,20 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S02, frame `01:20` — "Collapse empty fields".
+      #
+      # A toggle that hides things is easy to build wrongly: it hides fields
+      # that have values, it hides silently (a collapsed field and a missing
+      # one look identical), or it forgets on reload. One check each, plus the
+      # exemption the frame does not show and the product needs — an empty
+      # REQUIRED field is the one blank somebody has to see.
+      - name: Collapse empty fields
+        if: '!cancelled()'
+        run: node test/e2e/collapse-empty-fields.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

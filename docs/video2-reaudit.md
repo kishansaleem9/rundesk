@@ -63,6 +63,15 @@ went missing entirely. A list that is only written once stops being true.
   count on the header, and an activity entry naming the item and its list.
   13 checks, five separate break-tests.
 
+- **"Collapse empty fields", frame `01:20`.** Absent entirely — `grep -ri
+  "collapse.*field\|emptyField\|hideEmpty"` over `apps/` returned nothing. Built
+  as ONE preference in `apps/web/src/lib/collapse-empty-fields.ts`, read by both
+  the built-in grid and the custom-field list, because the same setting kept as
+  local state in two components is the duplicated-logic bug waiting to happen.
+  An empty **required** field is exempt: it is the one blank on the page
+  somebody has to act on, and hiding it turns "you must fill this in" into
+  "this field does not exist". 11 checks, five break-tests.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -140,7 +149,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | Toast "Created field `<name>`" |
 | P | Attach on create — uploads *after* the task exists, single file, no removable list |
 | M | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") |
-| M | "Collapse empty fields" |
+| B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
 | M | "Comment ▾" split button; "Create Task ▾" split button |
 | M | Toast "Task created — `<title>` › `<list>`" with Copy / View |
