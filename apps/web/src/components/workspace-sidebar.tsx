@@ -68,6 +68,7 @@ import {
   TooltipTrigger,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { offerUndo, undoLastDelete } from '../lib/undoable-delete'
 import { ContainerEditDialog, type ContainerEditValues } from './container-edit-dialog'
 import { CreateWorkspaceFlow, type WorkspaceDraft } from './create-workspace-flow'
 import { useFavorites, useToggleFavorite, type FavoriteEntityType } from '../lib/use-favorites'
@@ -364,6 +365,30 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [toggleCollapsed])
+
+  /*
+   * §V2-13, frame `09:10` — the shortcut is printed beside the button, so it
+   * is part of the ask rather than a flourish.
+   *
+   * Guarded the same way as Cmd+\ above: Ctrl+Z inside a text box means undo
+   * the typing, and stealing it there would be worse than not having it. It
+   * also only swallows the keystroke when there was actually something to undo.
+   */
+  useEffect(() => {
+    const onUndoKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'z' || !(event.metaKey || event.ctrlKey) || event.shiftKey) return
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return
+      }
+      if (undoLastDelete()) event.preventDefault()
+    }
+    window.addEventListener('keydown', onUndoKey)
+    return () => window.removeEventListener('keydown', onUndoKey)
+  }, [])
   const [spacesExpanded, setSpacesExpanded] = useState(true)
   const [favoritesExpanded, setFavoritesExpanded] = useState(true)
   const [browseExpanded, setBrowseExpanded] = useState(true)
@@ -453,6 +478,18 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const archiveProjectFromTree = async (projectId: string) => {
     try {
       await api(`/projects/${projectId}`, { method: 'DELETE' })
+      if (workspaceId) {
+        offerUndo({
+          workspaceId,
+          type: 'project',
+          id: projectId,
+          message: t('trash.projectMoved'),
+          undoLabel: t('trash.undo'),
+          restoredMessage: t('trash.restored'),
+          failedMessage: t('trash.restoreFailed'),
+          onRestored: () => qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] }),
+        })
+      }
       await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
     } catch (err) {
       window.alert(err instanceof Error ? err.message : t('container.deleteError'))
@@ -484,10 +521,26 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   }
 
   // §2.5 — DELETE /lists/:id removes the list from its project.
+  //
+  // §V2-13 frame `09:10` — and says so, with the way back. This used to
+  // succeed in silence: the list vanished from the tree and the only route
+  // home was knowing that Trash is a settings tab.
   const deleteListFromTree = async (listId: string) => {
     try {
       await api(`/lists/${listId}`, { method: 'DELETE' })
       await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      if (workspaceId) {
+        offerUndo({
+          workspaceId,
+          type: 'list',
+          id: listId,
+          message: t('trash.listMoved'),
+          undoLabel: t('trash.undo'),
+          restoredMessage: t('trash.restored'),
+          failedMessage: t('trash.restoreFailed'),
+          onRestored: () => qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] }),
+        })
+      }
     } catch (err) {
       window.alert(err instanceof Error ? err.message : t('container.deleteError'))
     }
@@ -540,6 +593,19 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
       await api(`/spaces/${spaceId}`, { method: 'DELETE' })
       await qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
       await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      offerUndo({
+        workspaceId,
+        type: 'space',
+        id: spaceId,
+        message: t('trash.spaceMoved'),
+        undoLabel: t('trash.undo'),
+        restoredMessage: t('trash.restored'),
+        failedMessage: t('trash.restoreFailed'),
+        onRestored: async () => {
+          await qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
+          await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+        },
+      })
       if (pathname.startsWith(`/app/${workspaceId}/${spaceId}`)) {
         navigate({ to: '/app/$workspaceId', params: { workspaceId } })
       }
@@ -1754,6 +1820,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <button
+                                data-testid={`list-actions-${list.id}`}
                                 className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
                                 aria-label={t('nav.actionsFor', { name: list.name })}
                               >
@@ -1796,6 +1863,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
+                                data-testid={`list-delete-${list.id}`}
                                 onClick={() => {
                                   if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
                                     void deleteListFromTree(list.id)

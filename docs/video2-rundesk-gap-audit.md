@@ -1022,6 +1022,40 @@ to `components/reporting-tree.tsx` and is now used by both.
 | Paywalls that teach | `09:25`, `11:00` | The locked feature is explained, previewed, and routed to **"Contact your admin"**. Rundesk's §2.8d already does the "explains itself" half — the *preview* and *who to ask* halves are missing |
 | Skeletons | `08:30` | ClickUp draws skeletons on list load — the §2.9a principle Rundesk already adopted |
 
+#### V2-13 — what was built, and two rows of this table that were wrong
+
+**Undo on destructive actions — REAL, and now built.** Deleting a list, project
+or space from the tree succeeded in **silence**: no toast, nothing to press, and
+`window.alert` only on failure. Trash and restore both existed; reaching them
+meant knowing that Trash is a settings tab, going there, and finding the row.
+The frame offers the way back in the second after the mistake, which is the
+only second in which it is easy.
+
+The deletes are SOFT — `isArchived`/`archivedAt` — which is the only reason an
+undo can exist, and the suite demonstrates that first so a future hard delete
+fails loudly rather than turning the button into an apology. Ctrl+Z is wired
+too, guarded exactly like the existing Cmd+\ so it never steals undo from a
+text box, and the offer expires with the toast: the shortcut means "undo what I
+just did", and a stale one is worse than none.
+
+**Paywalls that teach — HALF WRONG.** The table said the *preview* and
+*who-to-ask* halves were both missing. **"Contact your admin" was already
+built** — `feature-gate.tsx` not only offers it but really notifies the admins
+and reports honestly when nobody was reached. Only the preview was absent, and
+it is now a list of what the feature actually does rather than a mocked-up
+screenshot: an invented picture would depict something that may not match what
+ships, and this dialog is where somebody decides whether to go and ask.
+
+**Template Center — WRONG.** "Rundesk has templates; it has no gallery." It has
+one: `/app/:workspaceId/templates` is browsable and searchable, filters by
+`all / builtin / custom` — which is exactly the frame's Workspace-vs-stock
+split — and is linked from the sidebar, so it is reachable as well as present.
+Checked against the route, the page and the nav after §V2-12's lesson that
+existing things can still be unreachable.
+
+**Import breadth** stays as the table has it: named for completeness, not a gap
+to close. **Skeletons** were already adopted as §2.9a.
+
 ---
 
 ## 3. Suggested order

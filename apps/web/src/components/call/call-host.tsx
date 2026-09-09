@@ -261,6 +261,14 @@ export function CallHost({ workspaceId }: { workspaceId: string | null | undefin
         flag: FLAGS.AI_MEETING_NOTES,
         name: t('gate.aiNotetaker'),
         blurb: t('gate.aiNotetakerBlurb'),
+        // §V2-13 — what it actually does, so the decision to go and ask is an
+        // informed one. Each line is something AI notes already do inside a
+        // Rundesk call; none of it is aspirational.
+        highlights: [
+          t('gate.aiNotetakerPoint1'),
+          t('gate.aiNotetakerPoint2'),
+          t('gate.aiNotetakerPoint3'),
+        ],
       })
     ) {
       return

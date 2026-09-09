@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button, cn } from '@rundesk/ui'
-import { Lock, Loader2 } from 'lucide-react'
+import { Lock, Loader2, Check } from 'lucide-react'
 import type { FlagKey } from '@rundesk/feature-flags'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
@@ -25,6 +25,13 @@ export interface GatedFeature {
   name: string
   /** One line on what it does — the reason to want it turned on. */
   blurb: string
+  /*
+   * §V2-13, frames `09:25`/`11:00` — the locked feature is PREVIEWED, not just
+   * named. Concrete capabilities rather than a picture: a mocked-up screenshot
+   * would be a depiction of something that may not match what ships, and this
+   * dialog is the one place a person decides whether to go and ask for it.
+   */
+  highlights?: string[]
 }
 
 /**
@@ -124,6 +131,18 @@ export function FeatureGateDialog({
           {t('gate.unlock', { feature: feature.name })}
         </h3>
         <p className="text-sm text-muted-foreground">{feature.blurb}</p>
+
+        {feature.highlights && feature.highlights.length > 0 && (
+          <ul className="space-y-1 rounded-lg border border-border/60 bg-muted/30 p-3" data-testid="feature-gate-preview">
+            {feature.highlights.map((line) => (
+              <li key={line} className="flex items-start gap-2 text-[13px]">
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-500" />
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <p className="text-sm">{t('gate.contactBody', { feature: feature.name })}</p>
 
         {result && (

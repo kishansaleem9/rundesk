@@ -467,6 +467,22 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-13, frame `09:10` — "List moved to trash" + Undo (Ctrl+Z).
+      #
+      # Deleting from the tree used to succeed in SILENCE, with the only way
+      # back being knowledge that Trash is a settings tab. The checks that earn
+      # the minutes are the two that cannot be faked: that the delete is SOFT
+      # (an undo over a hard delete would be a button that apologises), and
+      # that pressing Undo puts the list back according to the API rather than
+      # the screen. A suite asserting "a toast appeared" would pass against a
+      # button wired to nothing.
+      - name: Undo a delete
+        if: '!cancelled()'
+        run: node test/e2e/undo-delete.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Task provenance
         if: '!cancelled()'
         run: node test/e2e/task-provenance.mjs --api 3011
