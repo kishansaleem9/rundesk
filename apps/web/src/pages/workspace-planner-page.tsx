@@ -52,6 +52,17 @@ type PlannerSettings = {
   railSections?: string[]
   /** A `users` column, surfaced here because the Appearance page edits it. */
   weekStart?: string
+  /*
+   * §V2-02d, frame `14:20` — and THIS OMISSION IS WHY THEY WERE DEAD.
+   *
+   * The settings dialog declared, drew and saved `showAssigned` and
+   * `showOverdue`. This page — the only thing that could act on them — never
+   * listed them in its own copy of the settings type, so it could not read
+   * them, and nothing anywhere failed to compile. Two hand-written types for
+   * one payload, disagreeing quietly.
+   */
+  showAssigned?: boolean
+  showOverdue?: boolean
 }
 
 type PriorityRow = { id: string; taskId: string | null; title: string; doneAt: string | null }
@@ -263,10 +274,51 @@ export function PlannerPage() {
     () => new Set(blocks.map((b) => b.taskId).filter(Boolean) as string[]),
     [blocks],
   )
+
+  /*
+   * §V2-02d, frame `14:20` — the two Time-blocking switches that decide what
+   * work reaches this page.
+   *
+   * BOTH OF THESE USED TO BE DEAD. `showAssigned` and `showOverdue` were
+   * declared in the settings type, drawn as switches, written to the database
+   * and read by NOTHING — a settings form that saves, reads back and changes
+   * nothing, which is the defect this codebase has spent two videos removing,
+   * shipped inside the item whose title was "settings pages that change the
+   * calendar". Its suite asserted before/after on the other toggles and never
+   * touched these two.
+   */
+  const showAssigned = settings?.showAssigned !== false
+  const showOverdue = settings?.showOverdue !== false
+
   const backlog = useMemo(
-    () => assigned.filter((task) => !scheduledTaskIds.has(task.id)).slice(0, 25),
-    [assigned, scheduledTaskIds],
+    () =>
+      showAssigned
+        ? assigned.filter((task) => !scheduledTaskIds.has(task.id)).slice(0, 25)
+        : [],
+    [assigned, scheduledTaskIds, showAssigned],
   )
+
+  /*
+   * "Show overdue tasks in the Planner board — roll overdue tasks and reminders
+   * into today's column."
+   *
+   * ROLLED FORWARD, NOT DRAWN WHERE THEY WERE DUE. A task due last Tuesday
+   * belongs in the day you can still act on it; drawing it on a Tuesday that
+   * has gone is a record rather than a plan. So they land in today's column,
+   * which is also why they carry their own testid — the point of the setting is
+   * that you can turn this rolling-forward off and see the week as it was.
+   */
+  const overdue = useMemo(() => {
+    if (!showOverdue || !showAssigned) return []
+    const startOfToday = startOfDay(new Date()).getTime()
+    return assigned
+      .filter((task) => {
+        if (!task.dueDate) return false
+        const due = new Date(task.dueDate).getTime()
+        return Number.isFinite(due) && due < startOfToday && !scheduledTaskIds.has(task.id)
+      })
+      .slice(0, 12)
+  }, [assigned, scheduledTaskIds, showOverdue, showAssigned])
 
   const qc = useQueryClient()
 
@@ -663,6 +715,26 @@ export function PlannerPage() {
                       className="truncate rounded bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent"
                     >
                       {blockLabel(b)}
+                    </div>
+                  ))}
+                {/*
+                  §V2-02d, frame `14:20` — overdue work rolled into TODAY, and
+                  only into today. Drawn in the all-day row rather than at an
+                  hour, because the one thing known about an overdue task is
+                  that it did not happen when it was meant to; putting it at
+                  10am would invent a time nobody chose.
+                */}
+                {sameDay(d, now) &&
+                  overdue.map((task) => (
+                    <div
+                      key={`overdue-${task.id}`}
+                      data-testid="planner-overdue"
+                      title={t('planner.overdueSince', {
+                        date: new Date(task.dueDate!).toLocaleDateString(locale),
+                      })}
+                      className="mt-0.5 truncate rounded border border-rose-500/40 bg-rose-500/10 px-1.5 py-0.5 text-[11px] text-rose-600 dark:text-rose-400"
+                    >
+                      {task.title}
                     </div>
                   ))}
               </div>

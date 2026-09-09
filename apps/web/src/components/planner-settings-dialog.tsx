@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
@@ -67,6 +67,27 @@ type Settings = {
 
 type ListRow = { id: string; name: string }
 
+/*
+ * §V2-02d — the zones the Timezone picker offers.
+ *
+ * `Intl.supportedValuesOf` is the browser's own list and matches what the API
+ * validates against (`new Intl.DateTimeFormat(...)` succeeding). Older engines
+ * lack it, so a short honest fallback is used rather than an empty select —
+ * and the account's stored zone is always included, so a value set elsewhere
+ * is never silently replaced by whatever happens to sort first.
+ */
+const browserZone = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' }
+})()
+
+const ALL_ZONES: string[] = (() => {
+  try {
+    const supported = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf
+    if (typeof supported === 'function') return supported('timeZone')
+  } catch { /* falls through */ }
+  return ['UTC', 'Asia/Karachi', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
+})()
+
 const PAGES: Array<{ key: 'appearance' | 'accounts' | 'sidebar' | 'timeBlocking'; icon: typeof Palette; labelKey: TranslationKey }> = [
   { key: 'appearance', icon: Palette, labelKey: 'plannerSettings.appearance' },
   // §V2-14, frame `13:50` — a person's own calendar accounts.
@@ -129,6 +150,14 @@ export function PlannerSettingsDialog({
   const set = (patch: Settings) => save.mutate(patch)
 
   useEffect(() => { if (!open) setPage('appearance') }, [open])
+
+  /* The account's own zone is always offered, even if this browser's list
+   * lacks it — otherwise opening the page on a different machine would show a
+   * value that is not in the select, and the first save would change it. */
+  const zoneOptions = useMemo(() => {
+    const current = settings?.timezone ?? browserZone
+    return ALL_ZONES.includes(current) ? ALL_ZONES : [current, ...ALL_ZONES]
+  }, [settings?.timezone])
 
   const railOn = (key: string) => (settings?.railSections ?? [...RAIL_SECTIONS]).includes(key)
 
@@ -230,6 +259,33 @@ export function PlannerSettingsDialog({
                   </select>
                 </Row>
 
+                {/*
+                  §V2-02d, frame `14:05` — Timezone.
+                  The comment above says week start AND TIMEZONE are `users`
+                  columns worth showing here, and the server has validated
+                  `timezone` since this page shipped — but no control was ever
+                  drawn for it. So the sentence described a field that did not
+                  exist, which is how the gap survived a review of this file.
+
+                  The browser's own zone list rather than a hand-kept one: the
+                  server accepts anything `Intl` accepts, so keeping a shorter
+                  list here would refuse zones the API is happy with. The
+                  account's current value is prepended in case it came from
+                  somewhere with a longer list than this browser knows.
+                */}
+                <Row label={t('plannerSettings.timezone')} hint={t('plannerSettings.accountWide')}>
+                  <select
+                    value={settings?.timezone ?? browserZone}
+                    onChange={(e) => set({ timezone: e.target.value })}
+                    data-testid="planner-timezone"
+                    className="h-8 max-w-[190px] rounded-md border border-border bg-background px-2 text-[12px]"
+                  >
+                    {zoneOptions.map((z) => (
+                      <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>
+                    ))}
+                  </select>
+                </Row>
+
                 <Row label={t('plannerSettings.showWeekends')}>
                   <Switch
                     checked={settings?.showWeekends !== false}
@@ -292,6 +348,22 @@ export function PlannerSettingsDialog({
                       <option key={l.id} value={l.id}>{l.name}</option>
                     ))}
                   </select>
+                </Row>
+
+                {/*
+                  Frame `14:20` — "Show tasks assigned to me with due date".
+                  `showAssigned` was declared in the settings type and saved by
+                  nothing, because no control was ever drawn for it. It decides
+                  whether assigned work reaches the Backlog rail at all, which
+                  is why it sits above the overdue switch: turning it off makes
+                  that one moot, and the planner reflects that.
+                */}
+                <Row label={t('plannerSettings.showAssigned')}>
+                  <Switch
+                    checked={settings?.showAssigned !== false}
+                    data-testid="planner-show-assigned"
+                    onCheckedChange={(next) => set({ showAssigned: next })}
+                  />
                 </Row>
 
                 <Row label={t('plannerSettings.showOverdue')}>

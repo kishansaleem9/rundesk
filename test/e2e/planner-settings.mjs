@@ -40,7 +40,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 15
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -98,6 +98,25 @@ const BLOCKS = [{
 }]
 
 /*
+ * §V2-02d — assigned work for the two Time-blocking switches to act on.
+ *
+ * THE ABSENCE OF THIS FIXTURE IS WHY THEY WENT DEAD. `/member/` answered with
+ * an empty list, so the Backlog was empty and nothing overdue existed; a switch
+ * controlling which of nothing is shown looks identical whether it is wired or
+ * not. Both toggles saved, read back, and were asserted by nobody.
+ */
+const dayOffset = (n) => {
+  const d = new Date(now)
+  d.setDate(d.getDate() + n)
+  d.setHours(12, 0, 0, 0)
+  return d.toISOString()
+}
+const ASSIGNED = [
+  { id: 't-late', title: 'Late thing', dueDate: dayOffset(-3) },
+  { id: 't-soon', title: 'Soon thing', dueDate: dayOffset(3) },
+]
+
+/*
  * A MUTABLE stub. The whole point of these checks is that saving a setting
  * changes what the grid draws, so the stub has to actually apply the PATCH —
  * a stub that accepts a write and keeps answering with the old value is the
@@ -129,7 +148,7 @@ try {
     if (url.includes('/planner/') && url.includes('/blocks')) return reply(BLOCKS)
     if (url.includes('/lists/workspace/')) return reply([{ id: 'l1', name: 'Inbox list' }])
     if (url.includes('/priorities')) return reply([])
-    if (url.includes('/member/')) return reply([])
+    if (url.includes('/member/')) return reply(ASSIGNED)
     return reply([])
   })
 
@@ -238,6 +257,75 @@ try {
     'and changing the prefix re-titles the blocks already on the grid',
     'the blocks kept saying "Work on" — the prefix would be frozen at the moment of each drag',
   )
+
+  /*
+   * §V2-02d — the two switches that were saving and doing nothing.
+   *
+   * Both were declared in the settings dialog's type, drawn (one of them), and
+   * written to the database. NOTHING READ THEM: the planner page's own copy of
+   * the settings type did not list them, so it could not, and no compiler ever
+   * complained because the two hand-written types never meet. They are checked
+   * here the way every other setting on this page is — before and after, on the
+   * CALENDAR, never on the switch.
+   */
+  console.log('\n▶ the switches that were saving and changing nothing')
+  const backlogTitles = () =>
+    page.locator('[data-testid="planner-backlog-item"]').allInnerTexts()
+  const overdueCount = () => page.locator('[data-testid="planner-overdue"]').count()
+
+  chk(
+    (await overdueCount()) > 0,
+    'an overdue assigned task is rolled into today’s column',
+    'nothing overdue was drawn — frame `14:20` rolls overdue work into today, and this ' +
+      'switch used to control a behaviour that did not exist',
+  )
+
+  await page.locator('[data-testid="planner-show-overdue"]').click()
+  const overdueGone = await waitUntil(async () => (await overdueCount()) === 0, { timeoutMs: 8000 })
+  chk(
+    overdueGone,
+    'and turning "show overdue" off really takes it off the grid',
+    'the overdue marker stayed after the switch was turned off — the setting saves and ' +
+      'changes nothing, which is what it did before this item',
+  )
+  chk(
+    (await backlogTitles()).length > 0,
+    'while the Backlog is untouched — the two switches are not the same switch',
+    'turning overdue off also emptied the Backlog',
+  )
+
+  await page.locator('[data-testid="planner-show-assigned"]').click()
+  const backlogGone = await waitUntil(async () => (await backlogTitles()).length === 0, { timeoutMs: 8000 })
+  chk(
+    backlogGone,
+    'and turning "show assigned" off empties the Backlog rail',
+    `the Backlog still listed ${JSON.stringify(await backlogTitles())} — this switch had no ` +
+      'control at all until now, and nothing read the value it stored',
+  )
+
+  console.log('\n▶ Timezone, which the server has always accepted and nothing could set')
+  await page.locator('[data-testid="planner-settings-nav-appearance"]').click()
+  const zonePresent = await waitUntil(
+    () => page.getByTestId('planner-timezone').isVisible().catch(() => false),
+    { timeoutMs: 8000 },
+  )
+  chk(
+    zonePresent,
+    'the Appearance page offers a timezone',
+    'there is no timezone control — the API has validated `timezone` since this page shipped, ' +
+      'and the file even carried a comment claiming the page edits it',
+  )
+  if (zonePresent) {
+    await page.locator('[data-testid="planner-timezone"]').selectOption('Asia/Karachi')
+    const zoneSaved = await waitUntil(() => settings.timezone === 'Asia/Karachi', { timeoutMs: 8000 })
+    chk(
+      zoneSaved,
+      'and choosing one sends it to the account, not just to this dialog',
+      `the settings the page saved were ${JSON.stringify(settings)}`,
+    )
+  } else {
+    chk(false, 'and choosing one sends it to the account', 'skipped — no control to choose from')
+  }
 
   await ctx.close()
 } catch (e) {
