@@ -164,11 +164,14 @@ function ModeTab({
 /*
  * §V2-01a — what the field-type picker offers.
  *
- * Everything that can be CREATED, which is everything except `progress_auto`'s
- * siblings that need config this row has no space for — and progress_auto
- * itself is here because its defaults are the frame's defaults, so it needs
- * none. The order follows the frame's picker loosely: the plain ones first,
- * then the ones that hold a list, then the derived one.
+ * Everything that can be CREATED. The order follows the frame's picker
+ * loosely: the plain ones first, then the ones that hold a list, then the
+ * derived one.
+ *
+ * This comment used to say progress_auto "needs no config, its defaults are
+ * the frame's defaults". That was wrong twice over — frame `00:25` is the
+ * config panel, and the defaults were only defaults because nothing could
+ * change them. The panel is below.
  */
 const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> = [
   { value: 'text', labelKey: 'taskDetail.fieldType.text' },
@@ -213,6 +216,13 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const [newFieldType, setNewFieldType] = useState('text')
   const [newFieldOptions, setNewFieldOptions] = useState('')
   const [madeFields, setMadeFields] = useState<string[]>([])
+  /* §V2-01b frame `00:25` — the config the panel collects. Defaulted to all
+   * three sources on, which is what the API defaults to, so the panel opens
+   * showing the truth rather than a blank it would then contradict. */
+  const [progressSources, setProgressSources] = useState({
+    subtasks: true, checklists: true, assignedComments: true,
+  })
+  const [progressDoneIs100, setProgressDoneIs100] = useState(true)
   // §G15 frame #12 — the three footer controls.
   const [templateId, setTemplateId] = useState('')
   const [watcherIds, setWatcherIds] = useState<string[]>([])
@@ -362,6 +372,11 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         body: {
           name: newFieldName.trim(),
           type: newFieldType,
+          // §V2-01b — the config panel's answers, sent only for the type
+          // that has them. The service normalises whatever arrives.
+          ...(newFieldType === 'progress_auto'
+            ? { config: { sources: progressSources, doneStatusIs100: progressDoneIs100 } }
+            : {}),
           ...(needsOptions
             ? {
                 // "High, Low" typed by a person becomes real options. The value
@@ -631,6 +646,54 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
                 choices, and the API refuses them without — so the input appears
                 rather than letting the save fail.
               */}
+              {/*
+                §V2-01b, frame `00:25` — THE PANEL SHE ACTUALLY FILLS IN.
+                The field she demonstrates is Progress (Auto), and the frame is
+                not the percentage, it is this configuration: which of three
+                sources to count, and what a task with nothing to count should
+                read when it is done.
+
+                It was missing, and missing invisibly: the API has accepted
+                `config` since the type shipped, so every field was created
+                with hard-coded defaults and no way to change them. A setting
+                that exists on the server and nowhere on screen is the same
+                defect as a switch that changes nothing, seen from the other
+                side.
+              */}
+              {newFieldType === 'progress_auto' && (
+                <div
+                  data-testid="quick-create-progress-config"
+                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border/60 px-2 py-1.5"
+                >
+                  <span className="text-[11px] font-medium text-muted-foreground">
+                    {t('quickCreate.trackCompletionOf')}
+                  </span>
+                  {(['subtasks', 'checklists', 'assignedComments'] as const).map((src) => (
+                    <label key={src} className="inline-flex items-center gap-1 text-[11px]">
+                      <input
+                        type="checkbox"
+                        checked={progressSources[src]}
+                        data-testid={`quick-create-progress-${src}`}
+                        onChange={(e) =>
+                          setProgressSources((prev) => ({ ...prev, [src]: e.target.checked }))
+                        }
+                        className="h-3 w-3 rounded border-border"
+                      />
+                      {t(`quickCreate.source.${src}` as TranslationKey)}
+                    </label>
+                  ))}
+                  <label className="inline-flex w-full items-center gap-1 text-[11px] text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={progressDoneIs100}
+                      data-testid="quick-create-progress-done100"
+                      onChange={(e) => setProgressDoneIs100(e.target.checked)}
+                      className="h-3 w-3 rounded border-border"
+                    />
+                    {t('quickCreate.doneStatusIs100')}
+                  </label>
+                </div>
+              )}
               {(newFieldType === 'dropdown' || newFieldType === 'labels') && (
                 <input
                   value={newFieldOptions}

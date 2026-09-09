@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 36
+const EXPECTED_CHECKS = 40
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -540,6 +540,79 @@ try {
       madeDef.options.some((o) => o.label === 'Low'),
     'with the choices that were typed, not an empty list',
     `it was created with ${JSON.stringify(madeDef?.options)}`,
+  )
+
+  // ── §V2-01b — the config panel frame `00:25` is entirely about ───────────
+  /*
+   * WHAT WAS WRONG. The engine was built, unit-tested and reachable; the
+   * PANEL was not. `createDefinition` accepted `config`, the create form sent
+   * only name/type/options, and nothing in the web app mentioned
+   * `doneStatusIs100` or `sources`. So every Progress field was created with
+   * hard-coded defaults that no one could change — a setting that lives on the
+   * server and nowhere on screen, which is the same defect as a switch that
+   * changes nothing, seen from the other side.
+   *
+   * The check is on the PERCENTAGE, not on the stored config. Storing a
+   * config nothing counts differently would be the same bug with extra steps.
+   */
+  console.log('\n▶ §V2-01b — the config panel, and a config that changes the number')
+  await page.getByTestId('quick-create-new-field').click()
+  await page.getByTestId('quick-create-new-field-name').fill(`Subtasks only ${TAG}`)
+  await page.getByTestId('quick-create-new-field-type').selectOption('progress_auto')
+
+  const panelShown = await waitUntil(
+    () => page.getByTestId('quick-create-progress-config').isVisible().catch(() => false),
+    { timeoutMs: 10_000 },
+  )
+  chk(
+    panelShown,
+    'choosing Progress (Auto) offers the config the frame shows',
+    'no config panel appeared — frame `00:25` IS that panel, and without it every ' +
+      'Progress field is created with defaults nobody chose and nobody can change',
+  )
+
+  // Count subtasks ONLY — the checklist and the assigned comment are switched off.
+  await page.getByTestId('quick-create-progress-checklists').uncheck()
+  await page.getByTestId('quick-create-progress-assignedComments').uncheck()
+  await page.getByTestId('quick-create-new-field-save').click()
+
+  const configured = await waitUntil(
+    async () => (await fieldNames()).includes(`Subtasks only ${TAG}`),
+    { timeoutMs: 15_000 },
+  )
+  chk(configured, 'and the field is created', `fields are ${JSON.stringify(await fieldNames())}`)
+
+  const defs = (await A(`/workspaces/${workspaceId}/projects/${project.id}/custom-fields`)).data ?? []
+  const subOnly = defs.find((d) => d.name === `Subtasks only ${TAG}`)
+  chk(
+    subOnly?.config?.sources?.subtasks === true &&
+      subOnly?.config?.sources?.checklists === false &&
+      subOnly?.config?.sources?.assignedComments === false,
+    'with exactly the sources that were ticked',
+    `it stored ${JSON.stringify(subOnly?.config)}`,
+  )
+
+  /*
+   * THE CHECK THAT MAKES THE PANEL REAL, and the two fields are COMPLEMENTARY.
+   *
+   * The first field had `subtasks` switched off earlier in this suite, so it
+   * counts the checklist and the comment: 2 of 3, 67%. The one just made from
+   * the panel counts subtasks ALONE: 1 of 2, 50%. Same task, same work, two
+   * configs that partition it — so the two numbers must differ, and each must
+   * be the one its own config implies.
+   *
+   * Equal numbers would mean the config was stored and never counted, which is
+   * the failure this whole item is about.
+   */
+  const values = await valuesFor()
+  const withoutSubtasks = values.find((r) => r.definition.id === fieldId)?.value
+  const subtasksOnly = values.find((r) => r.definition.id === subOnly?.id)?.value
+  chk(
+    withoutSubtasks === 67 && subtasksOnly === 50,
+    'and two Progress fields on ONE task disagree, because their configs do',
+    `the field with subtasks OFF read ${JSON.stringify(withoutSubtasks)} (expected 67, being ` +
+      `2 of 3) and the subtasks-ONLY field read ${JSON.stringify(subtasksOnly)} (expected 50, ` +
+      'being 1 of 2) — if they match, the panel wrote a config nothing counts',
   )
 
 } catch (e) {
