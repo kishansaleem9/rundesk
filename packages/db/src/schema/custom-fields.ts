@@ -19,6 +19,16 @@ export const customFieldTypeEnum = pgEnum('custom_field_type', [
   // DERIVED from subtasks, checklists and assigned comments, so no row is ever
   // written for it in `custom_field_values`; the service computes it on read.
   'progress_auto',
+  // §V2-01c — storage plus a renderer, nothing more. Files and Voting are
+  // deliberately absent: one needs upload plumbing, the other needs to know
+  // who voted, and `setValue` has no actor because every other type's value
+  // is the same for everybody.
+  'long_text',
+  'labels',
+  'people',
+  'location',
+  'tshirt_size',
+  'progress_manual',
 ])
 
 /**
@@ -67,12 +77,15 @@ export const customFieldValues = pgTable(
     taskId:         uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
     fieldId:        uuid('field_id').notNull().references(() => customFieldDefinitions.id, { onDelete: 'cascade' }),
     // Discriminated by the definition's type:
-    //   text/url    → { v: string }
-    //   number      → { v: number }
-    //   dropdown    → { v: string }      (option value)
-    //   date        → { v: ISO string }
-    //   checkbox    → { v: boolean }
-    value:          jsonb('value').$type<{ v: string | number | boolean | null }>().notNull(),
+    //   text/url/long_text/location → { v: string }
+    //   number/money/progress_manual → { v: number }
+    //   dropdown/tshirt_size        → { v: string }    (option value)
+    //   date                        → { v: ISO string }
+    //   checkbox                    → { v: boolean }
+    //   labels/people               → { v: string[] }  (§V2-01c)
+    //
+    // No row is ever written for `progress_auto` — it is derived on read.
+    value:          jsonb('value').$type<{ v: string | number | boolean | string[] | null }>().notNull(),
     updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

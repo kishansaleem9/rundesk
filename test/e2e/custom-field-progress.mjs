@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 36
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -310,6 +310,236 @@ try {
     'and a finished empty task shows 100%, not an empty bar',
     `the closed task with nothing to count read ` +
       `${JSON.stringify(await page.getByTestId('custom-field-progress-pct').innerText().catch(() => null))}`,
+  )
+
+  // ── §V2-01c — the types that are storage plus a renderer ─────────────────
+  /*
+   * Frames `00:20`/`00:40` show ~29 types; Rundesk had ten. These six need
+   * nothing but somewhere to put a value and something to draw it with.
+   *
+   * The checks that earn their place are the ones about a type meaning
+   * something: that T-shirt Size is a FIXED set (otherwise it is a dropdown
+   * with a different name), that Labels takes SEVERAL (otherwise likewise),
+   * and that People cannot name somebody who is not in this workspace.
+   */
+  console.log('\n▶ §V2-01c — the field types she scrolls past at `00:20`')
+  const makeField = (name, type, extra = {}) =>
+    A(`/workspaces/${workspaceId}/projects/${project.id}/custom-fields`, {
+      method: 'POST',
+      body: { name: `${name} ${TAG}`, type, ...extra },
+    })
+  const setOn = (fieldId, value, taskId = task.id) =>
+    A(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${fieldId}`, {
+      method: 'PUT',
+      body: { value },
+    })
+  const readBack = async (fieldId) =>
+    (await valuesFor()).find((r) => r.definition.id === fieldId)?.value
+
+  const made = await Promise.all([
+    makeField('Notes', 'long_text'),
+    makeField('Where', 'location'),
+    makeField('Size', 'tshirt_size'),
+    makeField('Done pct', 'progress_manual'),
+    makeField('Tags', 'labels', {
+      options: [
+        { label: 'Red', value: 'red' },
+        { label: 'Blue', value: 'blue' },
+      ],
+    }),
+    makeField('Who', 'people'),
+  ])
+  chk(
+    made.every((r) => r.status === 201 || r.status === 200),
+    'all six new types can be defined',
+    `they returned ${JSON.stringify(made.map((r) => r.status))}`,
+  )
+  const [longText, location, tshirt, manual, labels, people] = made.map((r) => r.data?.id)
+
+  await setOn(longText, 'a paragraph\nand another')
+  await setOn(location, 'Lahore')
+  chk(
+    (await readBack(longText)) === 'a paragraph\nand another' &&
+      (await readBack(location)) === 'Lahore',
+    'long text keeps its newlines, and a location keeps what was written',
+    `they read back as ${JSON.stringify([await readBack(longText), await readBack(location)])}`,
+  )
+
+  chk((await setOn(tshirt, 'm')).status < 300, 'a t-shirt size can be set', 'setting m failed')
+  const badSize = await setOn(tshirt, 'enormous')
+  chk(
+    badSize.status === 400,
+    'but only one of the fixed set — otherwise it is a dropdown with a different name',
+    `"enormous" was accepted with ${badSize.status}; the whole point of the type is that ` +
+      'everybody\'s sizes are the same',
+  )
+
+  const badPct = await setOn(manual, 140)
+  chk(
+    badPct.status === 400 && (await setOn(manual, 40)).status < 300,
+    'manual progress takes 0–100 and refuses 140',
+    `140 returned ${badPct.status}`,
+  )
+
+  /*
+   * SEVERAL AT ONCE is the whole difference from a dropdown.
+   */
+  await setOn(labels, ['red', 'blue'])
+  const both = await readBack(labels)
+  chk(
+    Array.isArray(both) && both.length === 2 && both.includes('red') && both.includes('blue'),
+    'labels holds more than one at a time',
+    `it read back ${JSON.stringify(both)} — one at a time is what dropdown already does`,
+  )
+  const badLabel = await setOn(labels, ['red', 'chartreuse'])
+  chk(
+    badLabel.status === 400,
+    'and refuses one that was never defined',
+    `an undefined label was stored (${badLabel.status}) — the chips would render blank`,
+  )
+  const dupLabel = await setOn(labels, ['red', 'red'])
+  chk(
+    dupLabel.status === 400,
+    'and refuses the same one twice rather than quietly de-duplicating',
+    `a duplicate returned ${dupLabel.status}; storing it draws the same chip twice, and ` +
+      'silently dropping it hides the caller\'s bug',
+  )
+
+  await setOn(people, [me.id])
+  chk(
+    JSON.stringify(await readBack(people)) === JSON.stringify([me.id]),
+    'a people field holds a member of this workspace',
+    `it read back ${JSON.stringify(await readBack(people))}`,
+  )
+  /*
+   * THE CHECK THAT MATTERS MOST HERE. Without it the field stores any uuid at
+   * all — including somebody from a workspace this one cannot see — and the
+   * renderer then draws either a stranger or a blank. A field that can name
+   * somebody who is not here is a small information leak wearing a text box.
+   */
+  const stranger = '00000000-0000-4000-8000-00000000dead'
+  const badPerson = await setOn(people, [stranger])
+  chk(
+    badPerson.status === 400,
+    'and refuses a uuid that is nobody in this workspace',
+    `a non-member was stored (${badPerson.status}) — the field would name somebody who is not here`,
+  )
+
+  /* An unset list is [], never null, so no reader has to treat the two as
+   * different states. */
+  const freshList = (await valuesFor(bare.id)).find((r) => r.definition.id === labels)?.value
+  chk(
+    Array.isArray(freshList) && freshList.length === 0,
+    'and an unset list reads as empty rather than null',
+    `an untouched labels field came back as ${JSON.stringify(freshList)}`,
+  )
+
+  console.log('\n▶ and each new type has something to edit it with')
+  await openFields(task.id)
+  const drawn = await waitUntil(
+    async () =>
+      (await page.getByTestId('cf-long-text').count()) > 0 &&
+      (await page.getByTestId('cf-tshirt').count()) > 0 &&
+      (await page.getByTestId('cf-labels').count()) > 0 &&
+      (await page.getByTestId('cf-people').count()) > 0,
+    { timeoutMs: 20_000 },
+  )
+  chk(
+    drawn,
+    'long text, size, labels and people are all on the task',
+    'a type was defined with nothing to edit it — a field you can create and never fill',
+  )
+  chk(
+    drawn && (await page.getByTestId('cf-tshirt-m').getAttribute('aria-pressed')) === 'true',
+    'and the size set through the API is the one shown as chosen',
+    'the size button did not reflect the stored value',
+  )
+  // Driven from the page, read back from the API — a control that changes the
+  // screen and not the database is this codebase's commonest defect.
+  await page.getByTestId('cf-label-blue').click()
+  const toggledOff = await waitUntil(async () => {
+    const v = await readBack(labels)
+    return Array.isArray(v) && !v.includes('blue') && v.includes('red')
+  }, { timeoutMs: 15_000 })
+  chk(
+    toggledOff,
+    'and clicking a label really removes it, in the database',
+    `after the click the stored labels were ${JSON.stringify(await readBack(labels))}`,
+  )
+
+  // ── §V2-01a — the field is created WHILE the task is being made ──────────
+  /*
+   * `[00:12]`–`[00:16]` "humein ek task ke andar aur bhi option chahiye … hum
+   * woh FIELD ke through add kar sakte hain." She creates the field from the
+   * create modal, which is the whole reason the control is on screen there:
+   * you find you need somewhere to put something while you are describing the
+   * work, not later in a settings page you have to go and find.
+   *
+   * Rundesk could only define fields from the project page. The check that
+   * matters is therefore that the control is IN THE MODAL and that pressing it
+   * reaches the database — a button that opens a row and saves nothing is the
+   * facade this audit keeps removing.
+   */
+  console.log('\n▶ §V2-01a — "+ Create new field", from the create modal')
+  const fieldNames = async () =>
+    ((await A(`/workspaces/${workspaceId}/projects/${project.id}/custom-fields`)).data ?? [])
+      .map((d) => d.name)
+
+  await page.goto(`${stack.base}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
+  // The modal has to be OPENED — arriving at the workspace does not open it.
+  await page.getByTestId('quick-create-open').click({ timeout: 20_000 })
+  await page.getByTestId('create-tab-task').click({ timeout: 20_000 })
+  await page.getByTestId('quick-create-space').selectOption({ label: `Space ${TAG}` })
+  await page.getByTestId('quick-create-project').selectOption({ label: `Project ${TAG}` })
+
+  const offered = await waitUntil(
+    () => page.getByTestId('quick-create-new-field').isVisible().catch(() => false),
+    { timeoutMs: 15_000 },
+  )
+  chk(
+    offered,
+    'the create modal offers to make a field, once it knows the project',
+    'there is no way to create a field while creating a task — she does exactly that at [00:16]',
+  )
+
+  await page.getByTestId('quick-create-new-field').click()
+  await page.getByTestId('quick-create-new-field-name').fill(`Made inline ${TAG}`)
+  await page.getByTestId('quick-create-new-field-type').selectOption('labels')
+  const wantsOptions = await waitUntil(
+    () => page.getByTestId('quick-create-new-field-options').isVisible().catch(() => false),
+    { timeoutMs: 10_000 },
+  )
+  chk(
+    wantsOptions,
+    'and asks for choices when the type cannot exist without them',
+    'labels was offered with nowhere to put its options — the save would 400',
+  )
+  await page.getByTestId('quick-create-new-field-options').fill('High, Low')
+  await page.getByTestId('quick-create-new-field-save').click()
+
+  const reached = await waitUntil(
+    async () => (await fieldNames()).includes(`Made inline ${TAG}`),
+    { timeoutMs: 15_000 },
+  )
+  chk(
+    reached,
+    'and the field really exists on the project afterwards',
+    `the project's fields are ${JSON.stringify(await fieldNames())} — the row saved nothing`,
+  )
+
+  /*
+   * TYPED CHOICES BECOME REAL OPTIONS. "High, Low" has to arrive as two
+   * options, or the field is defined and unusable — which looks identical to
+   * working until somebody opens the task.
+   */
+  const madeDef = ((await A(`/workspaces/${workspaceId}/projects/${project.id}/custom-fields`)).data ?? [])
+    .find((d) => d.name === `Made inline ${TAG}`)
+  chk(
+    (madeDef?.options ?? []).length === 2 &&
+      madeDef.options.some((o) => o.label === 'High') &&
+      madeDef.options.some((o) => o.label === 'Low'),
+    'with the choices that were typed, not an empty list',
+    `it was created with ${JSON.stringify(madeDef?.options)}`,
   )
 
 } catch (e) {

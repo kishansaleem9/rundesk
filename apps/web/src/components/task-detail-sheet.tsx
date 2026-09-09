@@ -196,6 +196,13 @@ const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
   money: 'taskDetail.fieldType.money',
   rating: 'taskDetail.fieldType.rating',
   progress_auto: 'taskDetail.fieldType.progressAuto',
+  // §V2-01c
+  long_text: 'taskDetail.fieldType.longText',
+  labels: 'taskDetail.fieldType.labels',
+  people: 'taskDetail.fieldType.people',
+  location: 'taskDetail.fieldType.location',
+  tshirt_size: 'taskDetail.fieldType.tshirtSize',
+  progress_manual: 'taskDetail.fieldType.progressManual',
 }
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -5159,13 +5166,19 @@ type CustomFieldDef = {
     | 'url' | 'email' | 'phone' | 'money' | 'rating'
     /* §V2-01b — read-only here, because the value is derived. */
     | 'progress_auto'
+    /* §V2-01c — storage plus a renderer. */
+    | 'long_text' | 'labels' | 'people' | 'location' | 'tshirt_size' | 'progress_manual'
   isRequired: boolean
   options: Array<{ label: string; value: string; color?: string }> | null
 }
 
+/** `string[]` is §V2-01c's `labels` and `people`; the API sends [] when unset,
+ *  never null, so nothing here has to treat the two as separate states. */
+type CustomFieldValue = string | number | boolean | string[] | null
+
 type CustomFieldRow = {
   definition: CustomFieldDef
-  value: string | number | boolean | null
+  value: CustomFieldValue
 }
 
 function CustomFieldsPanel({
@@ -5199,7 +5212,7 @@ function CustomFieldsPanelInner({
   })
 
   const setValue = useMutation({
-    mutationFn: ({ fieldId, value }: { fieldId: string; value: string | number | boolean | null }) =>
+    mutationFn: ({ fieldId, value }: { fieldId: string; value: CustomFieldValue }) =>
       api(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields/${fieldId}`, {
         method: 'PUT',
         body: { value },
@@ -5243,6 +5256,7 @@ function CustomFieldsPanelInner({
             <CustomFieldEditor
               definition={definition}
               value={value}
+              workspaceId={workspaceId}
               disabled={setValue.isPending}
               onCommit={(next) => setValue.mutate({ fieldId: definition.id, value: next })}
             />
@@ -5288,18 +5302,22 @@ function ProgressAutoValue({ value }: { value: number | null }) {
 function CustomFieldEditor({
   definition,
   value,
+  workspaceId,
   disabled,
   onCommit,
 }: {
   definition: CustomFieldDef
-  value: string | number | boolean | null
+  value: CustomFieldValue
+  /** §V2-01c — only `people` needs it, to ask who is in the workspace. */
+  workspaceId: string
   disabled?: boolean
-  onCommit: (next: string | number | boolean | null) => void
+  onCommit: (next: CustomFieldValue) => void
 }) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState<string>(() => {
     if (value == null) return ''
     if (typeof value === 'boolean') return value ? 'true' : 'false'
+    if (Array.isArray(value)) return ''
     return String(value)
   })
 
@@ -5410,5 +5428,192 @@ function CustomFieldEditor({
         </select>
       )
     }
+
+    // ── §V2-01c ──────────────────────────────────────────────────────────
+    case 'long_text':
+      return (
+        <textarea
+          data-testid="cf-long-text"
+          rows={4}
+          value={draft}
+          disabled={disabled}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => onCommit(draft.trim() === '' ? null : draft)}
+          className="text-sm rounded-md border border-input bg-transparent px-2 py-1.5 w-full resize-y"
+        />
+      )
+    case 'location':
+      return (
+        <Input
+          data-testid="cf-location"
+          value={draft}
+          disabled={disabled}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => onCommit(draft.trim() === '' ? null : draft)}
+          placeholder={t('taskDetail.locationPlaceholder')}
+        />
+      )
+    case 'tshirt_size': {
+      /*
+       * A FIXED set, which is the only thing separating this from a dropdown —
+       * so the sizes are not read from `options`. A field whose sizes differed
+       * per project would just be a dropdown with a different name.
+       */
+      const current = typeof value === 'string' ? value : ''
+      return (
+        <div className="flex items-center gap-1" data-testid="cf-tshirt">
+          {['xs', 's', 'm', 'l', 'xl'].map((size) => (
+            <button
+              key={size}
+              type="button"
+              disabled={disabled}
+              data-testid={`cf-tshirt-${size}`}
+              aria-pressed={current === size}
+              onClick={() => onCommit(current === size ? null : size)}
+              className={cn(
+                'rounded border px-2 py-0.5 text-xs uppercase transition-colors disabled:opacity-50',
+                current === size
+                  ? 'border-accent bg-accent/15 text-foreground font-medium'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {size}
+            </button>
+          ))}
+        </div>
+      )
+    }
+    case 'progress_manual': {
+      // Drawn as the same bar as the derived one, because to a reader they are
+      // the same fact; the difference is only in who is responsible for it.
+      const pct = typeof value === 'number' ? value : 0
+      return (
+        <div className="space-y-1" data-testid="cf-progress-manual">
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={pct}
+              disabled={disabled}
+              data-testid="cf-progress-manual-input"
+              onChange={(e) => setDraft(e.target.value)}
+              onMouseUp={() => onCommit(Number(draft || pct))}
+              onKeyUp={() => onCommit(Number(draft || pct))}
+              className="h-1.5 flex-1 accent-accent"
+            />
+            <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
+              {draft === '' ? pct : draft}%
+            </span>
+          </div>
+        </div>
+      )
+    }
+    case 'labels': {
+      const opts = definition.options ?? []
+      const chosen = Array.isArray(value) ? value : []
+      return (
+        <div className="flex flex-wrap items-center gap-1" data-testid="cf-labels">
+          {opts.map((o) => {
+            const on = chosen.includes(o.value)
+            return (
+              <button
+                key={o.value}
+                type="button"
+                disabled={disabled}
+                data-testid={`cf-label-${o.value}`}
+                aria-pressed={on}
+                onClick={() =>
+                  // Several at once — that is the whole difference from a
+                  // dropdown, so the click toggles rather than replaces.
+                  onCommit(on ? chosen.filter((v) => v !== o.value) : [...chosen, o.value])
+                }
+                className={cn(
+                  'rounded-full border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                  on
+                    ? 'border-accent/40 bg-accent/10 text-foreground'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {o.label}
+              </button>
+            )
+          })}
+        </div>
+      )
+    }
+    case 'people':
+      return (
+        <PeopleFieldEditor
+          value={Array.isArray(value) ? value : []}
+          workspaceId={workspaceId}
+          disabled={disabled}
+          onCommit={onCommit}
+        />
+      )
   }
+}
+
+/**
+ * §V2-01c — several workspace members.
+ *
+ * Its own component because it is the only field type that has to ASK THE
+ * SERVER what the choices are; every other one either has its options on the
+ * definition or a fixed set. The API refuses ids that are not members of this
+ * workspace, so the list here is the same set the write will accept rather than
+ * a superset that produces a 400 on click.
+ */
+function PeopleFieldEditor({
+  value,
+  workspaceId,
+  disabled,
+  onCommit,
+}: {
+  value: string[]
+  workspaceId: string
+  disabled?: boolean
+  onCommit: (next: CustomFieldValue) => void
+}) {
+  const { t } = useTranslation()
+  const { data: members = [] } = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () =>
+      api<Array<{ userId: string; displayName?: string | null; email: string }>>(
+        `/workspaces/${workspaceId}/members`,
+      ),
+    enabled: !!workspaceId,
+  })
+
+  return (
+    <div className="flex flex-wrap items-center gap-1" data-testid="cf-people">
+      {members.length === 0 ? (
+        <span className="text-xs text-muted-foreground">{t('taskDetail.noPeopleYet')}</span>
+      ) : (
+        members.map((m) => {
+          const on = value.includes(m.userId)
+          return (
+            <button
+              key={m.userId}
+              type="button"
+              disabled={disabled}
+              data-testid={`cf-person-${m.userId}`}
+              aria-pressed={on}
+              onClick={() =>
+                onCommit(on ? value.filter((v) => v !== m.userId) : [...value, m.userId])
+              }
+              className={cn(
+                'rounded-full border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+                on
+                  ? 'border-accent/40 bg-accent/10 text-foreground'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {m.displayName || m.email}
+            </button>
+          )
+        })
+      )}
+    </div>
+  )
 }

@@ -77,7 +77,8 @@ export class CustomFieldsController {
     @Param('workspaceId') workspaceId: string,
     @Param('taskId') taskId: string,
     @Param('fieldId') fieldId: string,
-    @Body() body: { value: string | number | boolean | null },
+    // `string[]` is §V2-01c's `labels` and `people`.
+    @Body() body: { value: string | number | boolean | string[] | null },
   ) {
     return this.svc.setValue(workspaceId, taskId, fieldId, body.value)
   }

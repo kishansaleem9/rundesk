@@ -151,10 +151,43 @@ Two decisions worth naming, both break-tested:
 `0142_progress_auto_field.sql` adds the enum value and a `config` column —
 separate from `options`, which is typed as an array and read as one everywhere.
 
-**Still open:** V2-01a (create a field from the create modal, `[00:16]`) and
-V2-01c (the types that are storage plus a renderer). Formula and the AI four —
-Summary, Translation, Sentiment, Action Items — are features rather than field
-types and are not in either.
+**V2-01a — the field made while the task is, gap 1.** `[00:16]` is the point:
+she needs somewhere to put something *while describing the work*, not later in
+a settings page she would have to go and find. `+ Create new field` is now in
+the create modal, gated on a project being chosen because that is what a field
+belongs to. It creates the DEFINITION — a value cannot be set before the task
+exists to hang it on — and typed choices ("High, Low") become real options,
+because a field defined without them is unusable in a way that looks identical
+to working until somebody opens the task.
+
+**V2-01c — the types that are storage plus a renderer, gap 3.** Six of them:
+`long_text`, `labels`, `people`, `location`, `tshirt_size`, `progress_manual`.
+Two carry a rule worth stating:
+
+  · **T-shirt Size is a FIXED set.** `dropdown` already covers "one of this
+    field's options"; if the sizes varied per field the type would be a
+    dropdown with a different name, so the API refuses anything but XS–XL.
+  · **A People field cannot name somebody who is not in the workspace.**
+    Without that check it stores any uuid at all — including a member of a
+    workspace this one cannot see — and the renderer then draws a stranger or a
+    blank. A field that can name somebody who is not here is a small
+    information leak wearing a text box.
+
+`labels` and `people` hold several at once, which is the whole difference from
+a dropdown, so the stored value widened to admit `string[]`. An unset list
+comes back as `[]` rather than null, so no reader has to treat "none yet" and
+"cleared" as two states that mean the same thing. `task_templates` widened too
+— a template that silently dropped a task's people field would restore a task
+that looks complete and is not.
+
+**NOT BUILT, and said plainly rather than quietly skipped.** **Files** is a
+reference into the attachments module, not a value; a half-built one is a field
+you can define and never fill. **Voting** needs to know *who* voted, and
+`setValue` has no actor because every other type's value is the same for
+everybody — per-user state is a feature, not a field type. **Formula** and the
+AI four (Summary, Translation, Sentiment, Action Items) are features wearing a
+type's clothing. That leaves Rundesk at seventeen of the frame's twenty-nine,
+with the remaining twelve named rather than forgotten.
 
 ---
 

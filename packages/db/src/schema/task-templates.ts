@@ -71,6 +71,9 @@ export type TaskTemplatePayload = {
   }>
   customFieldValues: Array<{
     fieldName: string
-    value: string | number | boolean | null
+    // `string[]` for §V2-01c's `labels` and `people`. Widened here rather than
+    // filtered out in the template writer: a template that silently dropped a
+    // task's people field would restore a task that looks complete and is not.
+    value: string | number | boolean | string[] | null
   }>
 }

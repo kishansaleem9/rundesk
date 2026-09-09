@@ -161,6 +161,35 @@ function ModeTab({
   )
 }
 
+/*
+ * §V2-01a — what the field-type picker offers.
+ *
+ * Everything that can be CREATED, which is everything except `progress_auto`'s
+ * siblings that need config this row has no space for — and progress_auto
+ * itself is here because its defaults are the frame's defaults, so it needs
+ * none. The order follows the frame's picker loosely: the plain ones first,
+ * then the ones that hold a list, then the derived one.
+ */
+const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> = [
+  { value: 'text', labelKey: 'taskDetail.fieldType.text' },
+  { value: 'long_text', labelKey: 'taskDetail.fieldType.longText' },
+  { value: 'number', labelKey: 'taskDetail.fieldType.number' },
+  { value: 'money', labelKey: 'taskDetail.fieldType.money' },
+  { value: 'date', labelKey: 'taskDetail.fieldType.date' },
+  { value: 'checkbox', labelKey: 'taskDetail.fieldType.checkbox' },
+  { value: 'url', labelKey: 'taskDetail.fieldType.url' },
+  { value: 'email', labelKey: 'taskDetail.fieldType.email' },
+  { value: 'phone', labelKey: 'taskDetail.fieldType.phone' },
+  { value: 'location', labelKey: 'taskDetail.fieldType.location' },
+  { value: 'rating', labelKey: 'taskDetail.fieldType.rating' },
+  { value: 'tshirt_size', labelKey: 'taskDetail.fieldType.tshirtSize' },
+  { value: 'dropdown', labelKey: 'taskDetail.fieldType.dropdown' },
+  { value: 'labels', labelKey: 'taskDetail.fieldType.labels' },
+  { value: 'people', labelKey: 'taskDetail.fieldType.people' },
+  { value: 'progress_manual', labelKey: 'taskDetail.fieldType.progressManual' },
+  { value: 'progress_auto', labelKey: 'taskDetail.fieldType.progressAuto' },
+]
+
 /** §G15 frame #12 — what the create footer needs to know about. */
 type TaskTemplate = { id: string; name: string }
 type WorkspaceMember = { userId: string; displayName?: string | null; email?: string | null }
@@ -174,6 +203,16 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const [projectId, setProjectId] = useState('')
   const [listId, setListId] = useState('')
   const [taskTypeId, setTaskTypeId] = useState('')
+  /*
+   * §V2-01a — creating a custom field without leaving the create modal.
+   * `madeFields` is only for saying what happened: the field itself lives on
+   * the project the moment it is saved, so nothing here needs to hold it.
+   */
+  const [makingField, setMakingField] = useState(false)
+  const [newFieldName, setNewFieldName] = useState('')
+  const [newFieldType, setNewFieldType] = useState('text')
+  const [newFieldOptions, setNewFieldOptions] = useState('')
+  const [madeFields, setMadeFields] = useState<string[]>([])
   // §G15 frame #12 — the three footer controls.
   const [templateId, setTemplateId] = useState('')
   const [watcherIds, setWatcherIds] = useState<string[]>([])
@@ -307,6 +346,46 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
       setNewListPrivate(false)
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : String(err)),
+  })
+
+  /*
+   * §V2-01a — the field is created on the PROJECT, which is where custom-field
+   * definitions live. So it exists for this task and every other one in the
+   * project, which is what defining a field means; it is not a per-task
+   * scribble.
+   */
+  const makeField = useMutation({
+    mutationFn: () => {
+      const needsOptions = newFieldType === 'dropdown' || newFieldType === 'labels'
+      return api(`/workspaces/${workspaceId}/projects/${projectId}/custom-fields`, {
+        method: 'POST',
+        body: {
+          name: newFieldName.trim(),
+          type: newFieldType,
+          ...(needsOptions
+            ? {
+                // "High, Low" typed by a person becomes real options. The value
+                // is the label lowercased rather than an invented id, so what
+                // is stored is readable in the database too.
+                options: newFieldOptions
+                  .split(',')
+                  .map((o) => o.trim())
+                  .filter(Boolean)
+                  .map((label) => ({ label, value: label.toLowerCase().replace(/\s+/g, '-') })),
+              }
+            : {}),
+        },
+      })
+    },
+    onSuccess: () => {
+      // The Fields tab on any task in this project reads from this list.
+      qc.invalidateQueries({ queryKey: ['custom-fields'] })
+      setMadeFields((prev) => [...prev, newFieldName.trim()])
+      setMakingField(false)
+      setNewFieldName('')
+      setNewFieldOptions('')
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.fieldFailed')),
   })
 
   const create = useMutation({
@@ -487,6 +566,101 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
                 {t('quickCreate.createList')}
               </Button>
             </>
+          )}
+        </div>
+      )}
+      {/*
+        §V2-01a `[00:12]`–`[00:16]` — "humein ek task ke andar aur bhi option
+        chahiye … hum woh FIELD ke through add kar sakte hain."
+
+        SHE CREATES THE FIELD WHILE MAKING THE TASK. That is the whole reason
+        the control is on screen at `[00:16]`: you discover you need somewhere
+        to put something at the moment you are describing the work, not later in
+        a settings page you would have to go and find. Rundesk could only define
+        fields from the project page.
+
+        It creates the DEFINITION, not a value. Custom fields belong to the
+        project, so the field is there the moment this task is — and on every
+        other task in the project too, which is what defining a field means. A
+        value cannot be set before the task exists to hang it on.
+
+        Gated on `projectId` because that is what a field belongs to. Picking
+        only a space leaves it blank until a list is made, which sets it.
+      */}
+      {projectId && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border/70 px-2 py-1.5">
+          {!makingField ? (
+            <button
+              type="button"
+              data-testid="quick-create-new-field"
+              onClick={() => setMakingField(true)}
+              className="text-[11px] font-medium text-primary hover:underline"
+            >
+              {t('quickCreate.newFieldHere')}
+            </button>
+          ) : (
+            <>
+              <input
+                autoFocus
+                value={newFieldName}
+                onChange={(e) => setNewFieldName(e.target.value)}
+                data-testid="quick-create-new-field-name"
+                placeholder={t('quickCreate.fieldNamePlaceholder')}
+                className="h-7 w-40 rounded-md border border-border bg-card px-1.5 text-[11px]"
+              />
+              {/*
+                A native select rather than a search box. The frame's picker is
+                searchable because it lists twenty-nine types; this lists the
+                ones that exist, and a browser's own type-to-jump already
+                handles that many without a second search UI to keep in step.
+              */}
+              <select
+                value={newFieldType}
+                onChange={(e) => setNewFieldType(e.target.value)}
+                data-testid="quick-create-new-field-type"
+                className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
+              >
+                {CREATABLE_FIELD_TYPES.map((ft) => (
+                  <option key={ft.value} value={ft.value}>
+                    {t(ft.labelKey)}
+                  </option>
+                ))}
+              </select>
+              {/*
+                Dropdown and labels are the two that cannot exist without
+                choices, and the API refuses them without — so the input appears
+                rather than letting the save fail.
+              */}
+              {(newFieldType === 'dropdown' || newFieldType === 'labels') && (
+                <input
+                  value={newFieldOptions}
+                  onChange={(e) => setNewFieldOptions(e.target.value)}
+                  data-testid="quick-create-new-field-options"
+                  placeholder={t('quickCreate.fieldOptionsPlaceholder')}
+                  className="h-7 w-44 rounded-md border border-border bg-card px-1.5 text-[11px]"
+                />
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                data-testid="quick-create-new-field-save"
+                disabled={
+                  !newFieldName.trim() ||
+                  makeField.isPending ||
+                  ((newFieldType === 'dropdown' || newFieldType === 'labels') &&
+                    newFieldOptions.trim() === '')
+                }
+                onClick={() => makeField.mutate()}
+              >
+                {t('quickCreate.createField')}
+              </Button>
+            </>
+          )}
+          {madeFields.length > 0 && (
+            <span className="text-[11px] text-muted-foreground" data-testid="quick-create-made-fields">
+              {t('quickCreate.fieldsAdded', { names: madeFields.join(', ') })}
+            </span>
           )}
         </div>
       )}

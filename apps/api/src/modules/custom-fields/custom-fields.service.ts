@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, asc, isNotNull } from 'drizzle-orm'
+import { and, eq, asc, isNotNull, inArray } from 'drizzle-orm'
 import {
   customFieldDefinitions,
   customFieldValues,
@@ -10,6 +10,7 @@ import {
   taskChecklists,
   taskChecklistItems,
   taskComments,
+  workspaceMembers,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -20,7 +21,23 @@ type CustomFieldType =
   | 'url' | 'email' | 'phone' | 'money' | 'rating'
   // §V2-01b — derived, never stored. See progress.ts.
   | 'progress_auto'
-type FieldValue = string | number | boolean | null
+  // §V2-01c — storage plus a renderer.
+  | 'long_text' | 'labels' | 'people' | 'location' | 'tshirt_size' | 'progress_manual'
+
+/** `string[]` is §V2-01c's: `labels` and `people` hold several at once. */
+type FieldValue = string | number | boolean | string[] | null
+
+/**
+ * §V2-01c — T-shirt Size is a FIXED set, not a per-field one.
+ *
+ * `dropdown` already covers "pick one of the options this field defines". The
+ * whole point of a separate type is that everybody's sizes are the same, so
+ * they are defined here rather than typed in again on every field.
+ */
+export const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
+
+/** The types that hold a list rather than one value. */
+const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people'])
 
 @Injectable()
 export class CustomFieldsService {
@@ -79,8 +96,10 @@ export class CustomFieldsService {
     if (dto.options != null && !Array.isArray(dto.options)) {
       throw new BadRequestException('Custom field "options" must be an array')
     }
-    if (dto.type === 'dropdown' && (!dto.options || dto.options.length === 0)) {
-      throw new BadRequestException('Dropdown fields require at least one option')
+    // `labels` is a dropdown you can pick several of, so it needs options for
+    // the same reason and the message names the type rather than assuming one.
+    if ((dto.type === 'dropdown' || dto.type === 'labels') && (!dto.options || dto.options.length === 0)) {
+      throw new BadRequestException(`${dto.type === 'labels' ? 'Labels' : 'Dropdown'} fields require at least one option`)
     }
 
     // Position = current max + 1
@@ -193,13 +212,26 @@ export class CustomFieldsService {
     const wantsProgress = defs.some((d) => d.type === 'progress_auto')
     const progress = wantsProgress ? await this.progressFor(taskId) : null
 
-    return defs.map((d) => ({
-      definition: d,
-      value:
-        d.type === 'progress_auto'
-          ? computeProgress(toProgressConfig(d.config), progress!.inputs, progress!.taskIsDone)
-          : byField.get(d.id)?.value.v ?? null,
-    }))
+    return defs.map((d) => {
+      if (d.type === 'progress_auto') {
+        return {
+          definition: d,
+          value: computeProgress(toProgressConfig(d.config), progress!.inputs, progress!.taskIsDone),
+        }
+      }
+      const stored = byField.get(d.id)?.value.v ?? null
+      /*
+       * §V2-01c — an unset list comes back as [], not null.
+       *
+       * Otherwise every renderer and every caller has to treat "no labels yet"
+       * and "labels cleared" as two states that mean the same thing, and one of
+       * them eventually gets forgotten. One shape, decided here.
+       */
+      return {
+        definition: d,
+        value: MULTI_TYPES.has(d.type) ? (Array.isArray(stored) ? stored : []) : stored,
+      }
+    })
   }
 
   /**
@@ -312,6 +344,74 @@ export class CustomFieldsService {
           const opts = (def.options as Array<{ value: string }> | null) ?? []
           if (typeof value !== 'string' || !opts.some((o) => o.value === value)) {
             throw new BadRequestException('Value must match a defined option')
+          }
+          break
+        }
+        // ── §V2-01c ────────────────────────────────────────────────────────
+        case 'long_text':
+        case 'location':
+          if (typeof value !== 'string') {
+            throw new BadRequestException('Field expects a string value')
+          }
+          break
+        case 'tshirt_size':
+          // A FIXED set, which is the only thing separating this from a
+          // dropdown. Accepting anything else would make every field's sizes
+          // different and the type pointless.
+          if (typeof value !== 'string' || !(TSHIRT_SIZES as readonly string[]).includes(value)) {
+            throw new BadRequestException(`Size must be one of ${TSHIRT_SIZES.join(', ')}`)
+          }
+          break
+        case 'progress_manual':
+          if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+            throw new BadRequestException('Progress must be a number from 0 to 100')
+          }
+          break
+        case 'labels': {
+          const opts = (def.options as Array<{ value: string }> | null) ?? []
+          if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+            throw new BadRequestException('Labels expects a list of option values')
+          }
+          const unknown = value.filter((v) => !opts.some((o) => o.value === v))
+          if (unknown.length) {
+            throw new BadRequestException(`Not a defined option: ${unknown.join(', ')}`)
+          }
+          // Duplicates are a caller bug, and storing them would draw the same
+          // chip twice; de-duplicating silently would hide it. Refuse.
+          if (new Set(value).size !== value.length) {
+            throw new BadRequestException('The same label was given twice')
+          }
+          break
+        }
+        case 'people': {
+          if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+            throw new BadRequestException('People expects a list of user ids')
+          }
+          if (new Set(value).size !== value.length) {
+            throw new BadRequestException('The same person was given twice')
+          }
+          /*
+           * THE IDS MUST BE PEOPLE IN THIS WORKSPACE. Without this the field
+           * would happily store any uuid — including a member of a workspace
+           * this one cannot see — and the renderer would then either draw a
+           * stranger or a blank. A field that can name somebody who is not
+           * here is a small information leak wearing a text box.
+           */
+          if (value.length) {
+            const members = await this.db
+              .select({ userId: workspaceMembers.userId })
+              .from(workspaceMembers)
+              .where(
+                and(
+                  eq(workspaceMembers.workspaceId, workspaceId),
+                  inArray(workspaceMembers.userId, value as string[]),
+                ),
+              )
+            const known = new Set(members.map((m) => m.userId))
+            const strangers = (value as string[]).filter((v) => !known.has(v))
+            if (strangers.length) {
+              throw new BadRequestException('Those people are not members of this workspace')
+            }
           }
           break
         }
