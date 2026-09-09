@@ -292,12 +292,29 @@ try {
   const sheet = page.locator('div.shadow-2xl.border-l')
   check(await sheet.count() > 0, 'the task detail sheet opens from the list', 'the sheet did not open')
   const tabs = await sheet.locator('button:visible').allInnerTexts()
-  for (const t of ['Overview', 'Subtasks', 'Checklists', 'Dependencies', 'Attachments', 'Comments', 'Activity', 'Time']) {
+  for (const t of ['Overview', 'Subtasks', 'Checklists', 'Related Items', 'Attachments', 'Comments', 'Activity', 'Time']) {
     check(tabs.includes(t), `the ${t} tab is present`, `the ${t} tab is missing`)
   }
-  check(tabs.includes('Dependencies'),
-    'Dependencies is still present — reverted to original, awaiting the client (V6)',
-    'Dependencies is gone; the revert did not hold')
+  /*
+   * THIS CHECK USED TO INSIST ON THE WORD "Dependencies", annotated "reverted to
+   * original, awaiting the client (V6)" — a guard holding a naming decision that
+   * had been handed to the client and never came back.
+   *
+   * §V2-10 answers it. Frame `06:10` shows the panel titled **Related Items**
+   * with Relationships | References inside, and the walkthrough is the
+   * specification for this engagement. So the tab is renamed and the guard now
+   * holds the thing the old one was actually protecting: the dependency UI must
+   * still be REACHABLE, not merely named. A rename that quietly dropped
+   * task↔task links would pass a check on the label alone.
+   */
+  const related = sheet.locator('button:visible', { hasText: 'Related Items' }).first()
+  if (await related.count()) await related.click().catch(() => {})
+  await page.waitForTimeout(500)
+  check(
+    (await sheet.locator('[data-testid="related-tab-relationships"]').count()) > 0,
+    'and Related Items still carries the dependency half, under its new name',
+    'the dependency UI is gone; renaming the tab lost what it contained',
+  )
 
   say('4. Watchers / followers popover (V7)')
   const bell = sheet.getByRole('button', { name: /watcher|follow/i }).first()
