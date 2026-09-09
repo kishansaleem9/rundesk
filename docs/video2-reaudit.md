@@ -86,6 +86,24 @@ went missing entirely. A list that is only written once stops being true.
   own copy of the rail default instead of importing `RAIL_SECTIONS`, and it
   would have hidden this very change.
 
+- **The task menu's Favorite and Archive, frame `15:25`.** The row said both
+  "exist elsewhere". Half true. Favorite existed as a star beside the "..." and
+  is now in the menu too, through the SAME hook, so the two controls cannot
+  disagree about whether a task is pinned. **Archive existed nowhere — because
+  it was wearing the wrong name.** `DELETE /tasks/:id` sets `isArchived`, stamps
+  `archivedAt`, logs the activity as `archived`, lists the task under
+  `GET /workspaces/:id/archived-tasks` and restores it with
+  `POST /tasks/:id/restore`. Every layer called that archiving except the
+  button, which called it Delete and asked *"Delete this task? This cannot be
+  undone."* about an action that can be undone. A reversible action presented as
+  permanent is one people avoid — which is why the product looked as if it had
+  no Archive at all. Renamed end to end, in four locales, and put in the menu.
+  11 checks, four break-tests.
+- **What was deliberately NOT built there:** a second menu item called "Delete".
+  Rundesk has one soft archive and no permanent task delete, so a "Delete" that
+  fired the same request would be two names for one behaviour. Recorded as a
+  real gap above instead of papered over.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -261,7 +279,9 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | `showAssigned` — given a control and a reader |
 | B | Default list for new tasks; timeblock prefix; quarter-hour snapping |
 | B | Task menu: Copy link/ID/New tab, Merge, Convert, Description history, Print, Send email, Duplicate, Move, Follow, Remind, Task type, Templates, Sharing, Delete |
-| P | Favorite and Archive exist elsewhere, not in the task menu |
+| B | Favorite in the task menu (same hook as the star) |
+| B | Archive in the task menu — and named honestly for the first time |
+| M | A PERMANENT delete for a task — the frame lists Archive *and* Delete; Rundesk has one soft archive and no purge |
 | M | "Add to ›" (a task in more than one list) |
 | M | Assignee picker: search box, invite-by-email, Agents, "⚡ Assign with AI" |
 | M | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |

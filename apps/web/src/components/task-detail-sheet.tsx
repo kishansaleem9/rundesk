@@ -51,6 +51,7 @@ import {
   FolderInput,
   MoveVertical,
   MoreHorizontal,
+  Star,
   History,
   Printer,
   Link as LinkIcon,
@@ -61,7 +62,7 @@ import {
   Merge as MergeIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import { FavoriteStar } from '../lib/use-favorites'
+import { FavoriteStar, useFavorites, useToggleFavorite } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
 import { RequestAccessCard } from './request-access-card'
 import { TaskTags } from './task-tags'
@@ -573,6 +574,16 @@ export function TaskDetailSheet({
     queryFn: () => api<TaskDetail>(`/tasks/${taskId}`),
   })
 
+  /*
+   * §V2-S15 — the menu's Favorite item reads and writes through the SAME hooks
+   * the star does, so the two controls in the header cannot end up disagreeing
+   * about whether this task is pinned. `useFavorites` shares its cache entry
+   * with the star's own read, so this costs no extra request.
+   */
+  const { data: favorites } = useFavorites(fallbackWorkspaceId)
+  const toggleFavorite = useToggleFavorite(fallbackWorkspaceId)
+  const isFavorited = !!favorites?.some((f) => f.entityType === 'task' && f.entityId === taskId)
+
   // "Yeh task mein main main-task bana sakti hoon" — a subtask must be able to
   // become a top-level task without being recreated by hand.
   const promoteToTask = useMutation({
@@ -664,17 +675,34 @@ export function TaskDetailSheet({
     },
   })
 
-  const deleteTask = useMutation({
+  /*
+   * §V2-S15 frame `15:25` — ARCHIVE, which is what this always did.
+   *
+   * `DELETE /tasks/:id` sets `isArchived`, stamps `archivedAt`/`archivedById`,
+   * logs the activity as `archived`, and the task then appears under
+   * `GET /workspaces/:id/archived-tasks` with `POST /tasks/:id/restore` to
+   * bring it back. Every layer of the product called that archiving except the
+   * button, which called it Delete and warned "This cannot be undone" — the
+   * opposite of the truth, about the one action people most need to trust.
+   *
+   * There is no permanent delete for a task in Rundesk. Offering a second menu
+   * item called "Delete" that ran this same request would be two names for one
+   * behaviour; the frame lists both, and the honest half is the one that exists.
+   */
+  const archiveTask = useMutation({
     mutationFn: () => api(`/tasks/${taskId}`, { method: 'DELETE' }),
     onSuccess: async () => {
-      toast.success(t('taskDetail.taskDeleted'))
+      toast.success(t('taskDetail.taskArchived'))
       await qc.invalidateQueries()
       onOpenChange(false)
     },
     onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotDelete'))
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotArchive'))
     },
   })
+  const confirmArchive = () => {
+    if (window.confirm(t('taskDetail.confirmArchiveTask'))) archiveTask.mutate()
+  }
 
   const commitTitle = () => {
     const next = titleDraft.trim()
@@ -806,14 +834,13 @@ export function TaskDetailSheet({
                 type="button"
                 size="sm"
                 variant="secondary"
-                onClick={() => {
-                  if (window.confirm(t('taskDetail.confirmDeleteTask'))) deleteTask.mutate()
-                }}
-                disabled={deleteTask.isPending}
+                data-testid="task-archive"
+                onClick={confirmArchive}
+                disabled={archiveTask.isPending}
                 className="absolute left-[7.25rem] top-3 h-7 gap-1.5 px-2.5 text-xs text-red-600 hover:text-red-600 opacity-90 hover:opacity-100"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                {t('taskDetail.deleteTask')}
+                {t('taskDetail.archiveTask')}
               </Button>
               {/* Reposition sits beside Change cover, and only for an image. */}
               {detailQuery.data.coverUrl && (
@@ -1123,6 +1150,32 @@ export function TaskDetailSheet({
                         <NewTabIcon className="mr-2 h-4 w-4" />
                         {t('taskDetail.openNewTab')}
                       </DropdownMenuItem>
+                      {/*
+                        §V2-S15 frame `15:25` — Favorite sits directly under the
+                        Copy row in the menu. The star beside the "..." is easy
+                        to miss and easy to hit by accident; the menu is where
+                        the walkthrough reaches for it.
+
+                        SAME HOOK AS THE STAR. `useToggleFavorite` is the one
+                        implementation, so the two controls cannot disagree
+                        about whether this task is pinned — a second
+                        `favorited` computed here would be the seventh
+                        duplicated-state bug in this codebase.
+                      */}
+                      <DropdownMenuItem
+                        data-testid="task-menu-favorite"
+                        onSelect={() =>
+                          toggleFavorite.mutate({ entityType: 'task', entityId: detailQuery.data!.id })
+                        }
+                      >
+                        <Star
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            isFavorited && 'fill-amber-400 text-amber-400',
+                          )}
+                        />
+                        {isFavorited ? t('favorites.remove') : t('favorites.add')}
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {/*
                         §V2-08 — "Send email to task". The address has routed to
@@ -1135,6 +1188,20 @@ export function TaskDetailSheet({
                       >
                         <Mail className="mr-2 h-4 w-4" />
                         {t('taskEmail.menuItem')}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {/*
+                        Archive, second from the bottom in the frame. Same
+                        mutation as the banner button — one action, one name, in
+                        both of the places the walkthrough reaches for it.
+                      */}
+                      <DropdownMenuItem
+                        data-testid="task-menu-archive"
+                        onSelect={confirmArchive}
+                        className="text-red-600 focus:text-red-600"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {t('taskDetail.archiveTask')}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

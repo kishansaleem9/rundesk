@@ -727,6 +727,21 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S15, frame `15:25` — Favorite and Archive in the task menu.
+      #
+      # Favorite existed as a star; the menu is where the frame reaches for it,
+      # and both controls read one hook so they cannot drift. Archive existed
+      # only as behaviour: DELETE /tasks/:id soft-archives and restores, while
+      # the button called it Delete and warned "This cannot be undone" — about
+      # an action that can be. The confirmation text is asserted, and so is the
+      # round trip through restore.
+      - name: Task menu favorite and archive
+        if: '!cancelled()'
+        run: node test/e2e/task-menu-favorite-archive.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist
