@@ -389,6 +389,24 @@ jobs:
       # §V2-04 — a form submission becomes a task that says a form made it.
       # The meeting half of the same change cannot run here (it needs a model),
       # so it is covered by a unit test with the AI stubbed instead.
+      # §V2-01b `[00:24]`, frame `00:25` — "Progress (Auto)", the one custom
+      # field she demonstrates end to end.
+      #
+      # The value is DERIVED, so the checks that earn their minutes are the ones
+      # about not lying: that nothing is stored for it, that writing it is
+      # refused, that an ordinary comment is not counted as work, and that a
+      # task with nothing to count reports null rather than a confident 0%.
+      #
+      # It stages its own space, project and list — custom fields are defined
+      # per project, so a field on the seeded project would change the shape of
+      # every other suite's task rows.
+      - name: Progress (Auto) custom field
+        if: '!cancelled()'
+        run: node test/e2e/custom-field-progress.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Task provenance
         if: '!cancelled()'
         run: node test/e2e/task-provenance.mjs --api 3011

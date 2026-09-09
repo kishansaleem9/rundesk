@@ -117,6 +117,45 @@ holds.
 `size: large` · `apps/api/src/modules/custom-fields/*`,
 `apps/web/src/components/quick-create-modal.tsx`, `task-detail-sheet.tsx`
 
+#### V2-01 — what was built, and how this item was nearly missed
+
+**IT WAS UNTRACKED, and that is the first thing to record.** Nine other V2
+items were closed while this one — *the subject the video opens with* — had no
+task against it at all. It surfaced only when the audit doc was read back to
+check what remained, and the doc's own "what was built" sections turned out to
+be an unreliable index: three items had them, nine did not. The status was
+re-derived from the code instead, which is what should have happened from the
+start.
+
+**V2-01b — Progress (Auto), gap 2, the one she demonstrates.** Frame `00:25` is
+the whole specification and all three inputs already existed unread:
+`tasks.parent_task_id`, `task_checklist_items.is_done`, and
+`task_comments.assigned_to_user_id` with `resolved_at`.
+
+**THE VALUE IS DERIVED, NEVER STORED.** `getValuesForTask` computes it on read
+and `setValue` REFUSES the write — refusing rather than accepting-and-ignoring,
+because a caller told "saved" would believe it. Nothing is ever written to
+`custom_field_values` for this type, and the suite asserts the table stays
+empty.
+
+Two decisions worth naming, both break-tested:
+
+  · **Every item weighs the same**, whichever source it came from. Averaging the
+    three sources' percentages lets one checklist item outweigh fifteen
+    subtasks.
+  · **Nothing to count reports null, not zero.** "0%" claims none of the work is
+    done, and on a task with no subtasks, no checklist and no assigned comments
+    there is no work to claim it about. The frame's own second setting is the
+    single exception: a done task with nothing to count reads 100%.
+
+`0142_progress_auto_field.sql` adds the enum value and a `config` column —
+separate from `options`, which is typed as an array and read as one everywhere.
+
+**Still open:** V2-01a (create a field from the create modal, `[00:16]`) and
+V2-01c (the types that are storage plus a renderer). Formula and the AI four —
+Summary, Translation, Sentiment, Action Items — are features rather than field
+types and are not in either.
+
 ---
 
 ### V2-02 · There is no Planner, and it is a quarter of the video

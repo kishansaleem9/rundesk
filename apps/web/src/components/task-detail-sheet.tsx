@@ -195,6 +195,7 @@ const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
   phone: 'taskDetail.fieldType.phone',
   money: 'taskDetail.fieldType.money',
   rating: 'taskDetail.fieldType.rating',
+  progress_auto: 'taskDetail.fieldType.progressAuto',
 }
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -5153,7 +5154,11 @@ type CustomFieldDef = {
   id: string
   projectId: string
   name: string
-  type: 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
+  type:
+    | 'text' | 'number' | 'dropdown' | 'date' | 'checkbox'
+    | 'url' | 'email' | 'phone' | 'money' | 'rating'
+    /* §V2-01b — read-only here, because the value is derived. */
+    | 'progress_auto'
   isRequired: boolean
   options: Array<{ label: string; value: string; color?: string }> | null
 }
@@ -5226,14 +5231,56 @@ function CustomFieldsPanelInner({
             {definition.isRequired && <span className="text-destructive">*</span>}
             <span className="ml-auto text-[10px] opacity-70">{FIELD_TYPE_LABEL_KEYS[definition.type] ? t(FIELD_TYPE_LABEL_KEYS[definition.type]) : definition.type}</span>
           </div>
-          <CustomFieldEditor
-            definition={definition}
-            value={value}
-            disabled={setValue.isPending}
-            onCommit={(next) => setValue.mutate({ fieldId: definition.id, value: next })}
-          />
+          {/*
+            §V2-01b — Progress (Auto) is SHOWN, not edited.
+            The API refuses a write to it, so an editor here would be a control
+            that produces an error every time it is used. The number follows the
+            subtasks, checklist and assigned comments instead.
+          */}
+          {definition.type === 'progress_auto' ? (
+            <ProgressAutoValue value={typeof value === 'number' ? value : null} />
+          ) : (
+            <CustomFieldEditor
+              definition={definition}
+              value={value}
+              disabled={setValue.isPending}
+              onCommit={(next) => setValue.mutate({ fieldId: definition.id, value: next })}
+            />
+          )}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * §V2-01b, frame `00:25` — the derived percentage.
+ *
+ * NULL IS DRAWN AS "NOTHING TO COUNT", NOT AS ZERO. An empty bar at 0% claims
+ * none of the work is done; on a task with no subtasks, no checklist and no
+ * assigned comments there is no work to make that claim about, and the API
+ * sends null to say so.
+ */
+function ProgressAutoValue({ value }: { value: number | null }) {
+  const { t } = useTranslation()
+  if (value == null) {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="custom-field-progress-empty">
+        {t('taskDetail.fieldType.progressNothing')}
+      </p>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2" data-testid="custom-field-progress">
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-accent transition-[width] duration-300"
+          style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+        />
+      </div>
+      <span className="w-10 text-right text-sm tabular-nums" data-testid="custom-field-progress-pct">
+        {value}%
+      </span>
     </div>
   )
 }
