@@ -68,6 +68,7 @@ import { TaskTags } from './task-tags'
 import { SharePanel } from './share-panel'
 import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
+import { relativeTime, exactTime } from '../lib/relative-time'
 import { getRealtimeSocket } from '../lib/realtime'
 import { SaveAsTemplateButton } from './task-templates-section'
 import { CoverImagePicker, type CoverChoice } from './cover-image-picker'
@@ -4894,7 +4895,14 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
 // ---------------------------------------------------------------------------
 
 function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | null }) {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
+  /*
+   * Frame `03:45` — the feed shows relative times and a "Show more". It used
+   * to render every entry with an absolute `toLocaleString()`, so a busy task
+   * opened onto a wall of identical-looking timestamps and the reader had to
+   * do the arithmetic to find out what happened recently.
+   */
+  const [showAllActivity, setShowAllActivity] = useState(false)
   const activityQuery = useQuery({
     queryKey: ['task', taskId, 'activity'],
     queryFn: async () => {
@@ -4923,6 +4931,14 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
   }
 
   const entries = activityQuery.data ?? []
+  /*
+   * "Show more", frame `03:45`. Ten is enough to see what just happened; a
+   * long-lived task accumulates hundreds and the recent ones are what anybody
+   * opening the panel came for. The rest are one click away rather than gone.
+   */
+  const ACTIVITY_PREVIEW = 10
+  const shown = showAllActivity ? entries : entries.slice(0, ACTIVITY_PREVIEW)
+  const hidden = entries.length - shown.length
   // Map known actions to localized phrasing; fall back to a humanized raw string.
   const actionLabel = (action: string) => {
     const key = ACTIVITY_ACTION_LABEL_KEYS[action]
@@ -4983,8 +4999,9 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
   }
 
   return (
+    <>
     <ol className="relative border-l border-border pl-4 space-y-3">
-      {entries.map((a) => {
+      {shown.map((a) => {
         const transition = transitionOf(a)
         return (
           <li key={a.id} className="relative">
@@ -5004,13 +5021,30 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
                 </span>
               )}
             </div>
-            <div className="text-xs text-muted-foreground">
-              {new Date(a.createdAt).toLocaleString()}
+            {/* Relative on screen, exact on hover: "3 days ago" is easier to
+                read and useless for settling when something actually happened. */}
+            <div
+              className="text-xs text-muted-foreground"
+              data-testid="activity-time"
+              title={exactTime(a.createdAt, locale)}
+            >
+              {relativeTime(a.createdAt, locale)}
             </div>
           </li>
         )
       })}
     </ol>
+      {hidden > 0 && (
+        <button
+          type="button"
+          data-testid="activity-show-more"
+          onClick={() => setShowAllActivity(true)}
+          className="mt-2 text-xs font-medium text-primary hover:underline"
+        >
+          {t('taskDetail.activityShowMore', { n: hidden })}
+        </button>
+      )}
+    </>
   )
 }
 

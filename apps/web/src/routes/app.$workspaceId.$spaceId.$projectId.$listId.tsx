@@ -87,6 +87,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
 import { ListSkeleton } from '../components/loading-skeletons'
+import { relativeTime } from '../lib/relative-time'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Status is now a free-text key validated against the list's list_statuses.
@@ -267,27 +268,6 @@ function resolveStatusLabel(
 // follow the active locale instead of a fixed English date-fns token.
 function shortDate(date: Date, locale: string): string {
   return date.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
-}
-
-const AGE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-  ['year', 31536000],
-  ['month', 2592000],
-  ['week', 604800],
-  ['day', 86400],
-  ['hour', 3600],
-  ['minute', 60],
-]
-// Localized "how long ago" for the Created column, replacing date-fns'
-// English-only formatDistanceToNowStrict. numeric:'auto' yields idiomatic
-// forms like "yesterday" / "ayer" / "أمس".
-function formatAge(iso: string, locale: string): string {
-  const diffSec = Math.round((Date.now() - new Date(iso).getTime()) / 1000)
-  const abs = Math.abs(diffSec)
-  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
-  for (const [unit, secs] of AGE_UNITS) {
-    if (abs >= secs) return rtf.format(-Math.round(diffSec / secs), unit)
-  }
-  return rtf.format(-diffSec, 'second')
 }
 
 // Converts a native <input type="date"> value (yyyy-MM-dd, or '') into an ISO
@@ -3905,7 +3885,7 @@ function TableView({
 
                   {/* Created */}
                   <div className="w-24 px-3 flex items-center text-xs text-muted-foreground tabular-nums">
-                    {task.createdAt ? formatAge(task.createdAt, locale) : '—'}
+                    {task.createdAt ? relativeTime(task.createdAt, locale) : '—'}
                   </div>
 
                   {customColumns.map((field) => {

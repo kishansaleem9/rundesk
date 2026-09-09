@@ -65,6 +65,7 @@ import { MentionText } from './mention-text'
 import { DocTemplatesDialog, DOC_TEMPLATES, type DocTemplate } from './doc-templates'
 import { useMentionNames } from '../hooks/use-mention-names'
 import { InlineSkeleton } from './loading-skeletons'
+import { relativeTime } from '../lib/relative-time'
 
 type Doc = {
   id: string
@@ -1220,7 +1221,7 @@ function DocsIndexPane({
   onOpenDoc: (id: string) => void
   onToggleFavorite: (id: string) => void
 }) {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const [sortBy, setSortBy] = useState<'title' | 'updatedAt' | 'createdByName'>('updatedAt')
   const [asc, setAsc] = useState(false)
 
@@ -1300,7 +1301,7 @@ function DocsIndexPane({
                 <td className="px-3 py-2 text-muted-foreground truncate">
                   {doc.createdByName ?? doc.createdByEmail ?? t('docs.unknown')}
                 </td>
-                <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{relativeTime(doc.updatedAt)}</td>
+                <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{relativeTime(doc.updatedAt, locale)}</td>
                 <td className="px-3 py-2 text-muted-foreground">
                   <span className="inline-flex items-center gap-1 text-xs">
                     {doc.publicShareId ? (
@@ -1499,17 +1500,6 @@ function EmbedListPickerDialog({
   )
 }
 
-function relativeTime(iso: string): string {
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (s < 60) return 'just now'
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  if (d < 7) return `${d}d ago`
-  return new Date(iso).toLocaleDateString()
-}
 
 type DocRevision = {
   id: string
@@ -1528,7 +1518,7 @@ function DocHistoryPane({
   onClose: () => void
 }) {
   const qc = useQueryClient()
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const revisionsQuery = useQuery({
     queryKey: ['doc-revisions', docId],
     queryFn: () => api<DocRevision[]>(`/docs/${docId}/revisions`),
@@ -1569,7 +1559,7 @@ function DocHistoryPane({
                 {i === 0 ? t('docs.currentVersion') : t('docs.versionN', { n: revs.length - i })}
               </div>
               <div className="text-[11px] text-muted-foreground truncate">
-                {r.editor?.displayName ?? t('docs.unknown')} · {relativeTime(r.updatedAt)}
+                {r.editor?.displayName ?? t('docs.unknown')} · {relativeTime(r.updatedAt, locale)}
               </div>
             </div>
             {i !== 0 && (
