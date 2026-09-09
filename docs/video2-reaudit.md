@@ -22,9 +22,41 @@ and is corrected here.
 
 ---
 
+## 0. Progress on this re-audit
+
+Kept current deliberately. The first audit's "what was built" sections became an
+unreliable index — three items had them, nine did not — and that is how V2-01
+went missing entirely. A list that is only written once stops being true.
+
+**§1 defects: all four fixed.**
+
+| | fixed in | how it is now held |
+|---|---|---|
+| V2-02d dead toggles | `showOverdue` reads the backlog, `showAssigned` and `timezone` given controls | 15 checks, before/after on the calendar |
+| V2-01b config panel | frame `00:25`'s panel added to the create-field row | 45 checks; two fields on one task disagree because their configs do |
+| V2-10 Related Items | one panel, Relationships \| References | 13 checks; the API-only suite now opens a browser |
+| V2-13 Team View | built as a view type, ungated | 9 checks, all on the arithmetic |
+
+**Beyond §1:**
+
+- **Field types 17 → 19.** `files` and `voting`, the two `0143` deferred by
+  name. Both deferrals were answered rather than overruled — see the commit.
+  Voting ignores the submitted body entirely and toggles only the caller's own
+  vote, because a vote you can cast on somebody else's behalf is not a vote.
+- **A fourth duplicated-list bug**, found while adding Team View: the list route
+  keeps its own `ALL_VIEWS` copy and silently filters out anything missing from
+  it. Four now: two planner settings types, two field-type lists, the API vs
+  route view keys, and this.
+
+**Still open:** the AI four and the remaining ~9 field types, everything in §2
+still marked M or P, and V2-03.
+
+---
+
 ## 1. Items marked BUILT that do not satisfy the frame
 
-This is the part worth reading first. Each of these is closed in the task list.
+**All four are now fixed** — this section is kept as the record of what was
+wrong, because the pattern matters more than the individual defects.
 
 ### V2-02d — a settings toggle that changes nothing
 
@@ -86,9 +118,9 @@ Legend: **B** built · **P** partial · **M** missing.
 |---|---|
 | B | Create-modal tab strip; time estimate, dates+times, priority, tags-on-enter |
 | B | `+ Create new field` on the create modal; 17 field types |
-| P | ~30 field types — **13 absent**: Formula, Summary, Progress Updates, Files, Relationship, Tasks, Categorize, Translation, Sentiment, Signature, Button, Action Items, Voting |
+| P | ~30 field types — **11 absent**: Formula, Summary, Progress Updates, Relationship, Tasks, Categorize, Translation, Sentiment, Signature, Button, Action Items. ~~Files~~ and ~~Voting~~ built in `0145` |
 | M | Searchable field-type picker (it is a native `<select>`) |
-| P | **Progress (Auto) config panel — engine built, no UI** (see §1) |
+| B | Progress (Auto) config panel — engine *and* the panel frame `00:25` shows |
 | M | Field config: required marker, "More settings and permissions", Cancel/Create |
 | M | Toast "Created field `<name>`" |
 | P | Attach on create — uploads *after* the task exists, single file, no removable list |
@@ -127,7 +159,7 @@ Legend: **B** built · **P** partial · **M** missing.
 
 | | capability |
 |---|---|
-| P | **Related Items — no References tab, no single entry point** (see §1) |
+| B | Related Items — one panel, Relationships \| References, single entry point |
 | M | Right-rail "Related Items" icon + tooltip |
 | P | Sidebar Direct Messages — exists on the chat page, not the workspace tree |
 | M | Create-menu search "Describe anything to create"; Create with AI; Super Agent |
@@ -146,7 +178,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | Error toasts — bottom-right not bottom-left, **list names have no uniqueness constraint**, quick-create ListForm has no `onError` (a failure there is silent) |
 | B | **Delete → trash + Undo + Ctrl+Z** |
 | B | Board view: status lanes, colours, counts, per-lane add, drag between lanes, + Add group |
-| M | **Team view** — does not exist as a view type |
+| B | **Team view** — a view type, ungated; rows per person with their own load |
 | P | Paywall that teaches — built, wired to one call site (see §1) |
 | M | Plan-tier paywall UI; "uses have expired" metered state |
 | B | Calendar view, Gantt (today line, zoom, drag, critical path) |
@@ -181,13 +213,13 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | **View selector Day / 4 days / Week / Month** + shortcuts `d x w m` |
 | B | Show weekends; event style; default duration; colour tasks by; start week on |
 | M | Appearance: Grid size |
-| P | **Timezone — server complete, no control** (see §1) |
+| B | Timezone — the control the validated server support was missing |
 | B | Sidebar page: show/hide rail sections |
 | M | Sidebar: drag-reorder, "+ Add a new section" |
 | M | **Upcoming meeting page** entirely (show time left, desktop, quick-join) |
 | M | Time blocking: show closed, future recurring, focus-time visibility, per-day work schedule |
-| P | **`showOverdue` — a live toggle nothing reads** (see §1) |
-| M | `showAssigned` — declared, no control, no reader |
+| B | `showOverdue` — now read by the backlog |
+| B | `showAssigned` — given a control and a reader |
 | B | Default list for new tasks; timeblock prefix; quarter-hour snapping |
 | B | Task menu: Copy link/ID/New tab, Merge, Convert, Description history, Print, Send email, Duplicate, Move, Follow, Remind, Task type, Templates, Sharing, Delete |
 | P | Favorite and Archive exist elsewhere, not in the task menu |
