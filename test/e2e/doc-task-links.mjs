@@ -21,9 +21,19 @@
  * forget to link anything, which is why it also asserts the PUBLIC one IS
  * visible to that same person.
  *
- *   node test/e2e/doc-task-links.mjs --api 3011
+ * AND THE PANEL, which this suite did not look at until §V2-10 was re-audited.
+ * It checked the API from both ends, thoroughly, and never opened a browser —
+ * so the fact that frame `06:10`'s Related Items panel did not exist went
+ * unnoticed while the item was marked complete. An API-only suite cannot tell
+ * you a screen is missing.
+ *
+ *   node test/e2e/doc-task-links.mjs --api 3011 --dist apps/web/dist
  */
+import path from 'node:path'
 import { signInApi } from './lib/signin.mjs'
+import { resolveChromium, launchOptions } from './lib/playwright.mjs'
+import { startLocalStack } from './lib/local-stack.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -31,7 +41,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 13
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -56,6 +66,12 @@ const apiAs = (token) => async (route, init = {}) => {
   const json = await res.json().catch(() => null)
   return { status: res.status, data: json?.data, error: json?.error }
 }
+
+const REPO = path.resolve(import.meta.dirname, '../..')
+const DIST = path.resolve(REPO, argOf('--dist', 'apps/web/dist'))
+const chromium = await resolveChromium()
+const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
+const browser = await chromium.launch(launchOptions())
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -154,6 +170,78 @@ try {
     'a member could not read the linked tasks of a doc in their own workspace',
   )
 
+  // ── §V2-10 frame `06:10` — the panel, which is where this item was closed
+  //    on a different deliverable ─────────────────────────────────────────
+  /*
+   * Rundesk had both halves and neither was in one place: task↔task links in a
+   * tab, task↔doc links in a section hundreds of lines further down the same
+   * sheet, under a different heading and with its own add flow. The frame is
+   * ONE panel with two tabs.
+   */
+  console.log('\n▶ §V2-10 — Related Items is one panel with two tabs')
+  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage()
+  await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
+  await page.fill('input[type=email]', ME.email)
+  await page.fill('input[type=password]', ME.password)
+  await page.click('button[type=submit]')
+  await page.waitForURL(/\/app/, { timeout: 30000 })
+
+  const openTask = (await A(`/tasks/${open.id}`)).data
+  await page.goto(
+    `${stack.base}/app/${workspaceId}/${openTask.spaceId}/${openTask.projectId}/${openTask.listId}?task=${open.id}`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await page.getByTestId('task-tab-dependencies').click({ timeout: 20_000 })
+
+  const panelShown = await waitUntil(
+    () => page.getByTestId('related-items-panel').isVisible().catch(() => false),
+    { timeoutMs: 20_000 },
+  )
+  chk(
+    panelShown,
+    'the task has a Related Items panel',
+    'no Related Items panel — the frame shows one, and this item was marked done having ' +
+      'built the doc-side backlink instead',
+  )
+  chk(
+    panelShown && (await page.getByTestId('related-tab-relationships').isVisible().catch(() => false)),
+    'with a Relationships tab',
+    'the Relationships tab is missing',
+  )
+  chk(
+    panelShown && (await page.getByTestId('related-tab-references').isVisible().catch(() => false)),
+    'and a References tab beside it',
+    'there is no References tab — the frame shows two, and Rundesk had task links and doc ' +
+      'links in two unrelated places instead',
+  )
+
+  /*
+   * THE TABS MUST SHOW DIFFERENT THINGS. Two tabs over one list would be the
+   * panel as decoration. Relationships is task↔task, References is task↔doc,
+   * and the doc linked earlier in this suite is the evidence for the second.
+   */
+  await page.getByTestId('related-tab-references').click()
+  const docShown = await waitUntil(async () => {
+    const body = await page.getByTestId('related-items-panel').innerText().catch(() => '')
+    return body.includes(`Link doc ${stamp}`)
+  }, { timeoutMs: 15_000 })
+  chk(
+    docShown,
+    'and References carries the doc this task is linked to',
+    `the References tab did not name the linked doc — it read ` +
+      `${JSON.stringify((await page.getByTestId('related-items-panel').innerText().catch(() => '')).slice(0, 120))}`,
+  )
+  await page.getByTestId('related-tab-relationships').click()
+  const backToTasks = await waitUntil(async () => {
+    const body = await page.getByTestId('related-items-panel').innerText().catch(() => '')
+    return !body.includes(`Link doc ${stamp}`)
+  }, { timeoutMs: 15_000 })
+  chk(
+    backToTasks,
+    'while Relationships does not — the two tabs are not one list twice',
+    'the doc was still listed under Relationships, so the tabs show the same thing',
+  )
+
   // Tidy up — this runs against a real workspace.
   await A(`/tasks/${open.id}`, { method: 'DELETE' }).catch(() => {})
   await A(`/tasks/${secret.id}`, { method: 'DELETE' }).catch(() => {})
@@ -162,6 +250,8 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
+  await browser.close().catch(() => {})
+  stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran < EXPECTED_CHECKS) {

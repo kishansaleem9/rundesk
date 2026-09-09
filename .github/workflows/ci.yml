@@ -590,7 +590,7 @@ jobs:
       # tasks must not become a way to read the titles of private ones.
       - name: Doc and task links
         if: '!cancelled()'
-        run: node test/e2e/doc-task-links.mjs --api 3011
+        run: node test/e2e/doc-task-links.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

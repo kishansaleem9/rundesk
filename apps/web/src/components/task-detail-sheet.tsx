@@ -354,7 +354,9 @@ const TABS: Array<{ key: TabKey; labelKey: TranslationKey }> = [
   { key: 'fields', labelKey: 'taskDetail.tab.fields' },
   { key: 'subtasks', labelKey: 'taskDetail.tab.subtasks' },
   { key: 'checklists', labelKey: 'taskDetail.tab.checklists' },
-  { key: 'dependencies', labelKey: 'taskDetail.tab.dependencies' },
+  // §V2-10 frame `06:10` — one "Related Items" panel, not a tab for
+  // task links and a section further down the page for doc links.
+  { key: 'dependencies', labelKey: 'taskDetail.tab.relatedItems' },
   { key: 'attachments', labelKey: 'taskDetail.tab.attachments' },
   { key: 'comments', labelKey: 'taskDetail.tab.comments' },
   { key: 'activity', labelKey: 'taskDetail.tab.activity' },
@@ -1199,7 +1201,7 @@ export function TaskDetailSheet({
                 />
               )}
               {activeTab === 'dependencies' && (
-                <DependenciesPanel
+                <RelatedItemsPanel
                   taskId={detailQuery.data.id}
                   workspaceId={fallbackWorkspaceId}
                   inline={detailQuery.data.dependencies ?? []}
@@ -2288,8 +2290,9 @@ function OverviewPanel({
         )}
       </Field>
 
-      <LinkedDocsSection taskId={taskId} workspaceId={workspaceId} />
-
+      {/* §V2-10 — LinkedDocsSection moved into the Related Items panel, where
+          frame `06:10` puts it: one place that answers "what is this connected
+          to", rather than task links in a tab and doc links down here. */}
       <LinkedWorkSection taskId={taskId} workspaceId={workspaceId} />
     </div>
   )
@@ -3491,6 +3494,86 @@ function WatchersPanel({
 // ---------------------------------------------------------------------------
 // Dependencies
 // ---------------------------------------------------------------------------
+
+/**
+ * §V2-10 — "Related Items", frame `06:10`.
+ *
+ * The frame is ONE panel with two tabs, **Relationships | References**, an
+ * empty state reading *"No related items — Link related Tasks or Docs to
+ * organize and quickly access them here"*, and a single **+ Relate a Task or
+ * Doc**.
+ *
+ * WHAT WAS WRONG. Rundesk had both halves and neither was here. Task↔task
+ * dependencies lived in a tab; task↔doc links lived in a section hundreds of
+ * lines further down the same sheet, under a different heading, with its own
+ * add flow. Two answers to one question — "what is this connected to?" — in
+ * two places, and the item that was supposed to build this panel shipped
+ * something else entirely (the doc-side backlink) and was marked done.
+ *
+ * WHICH TAB MEANS WHAT, and this is a READING rather than a certainty. The
+ * video never opens either tab. Rundesk has exactly two kinds of relation —
+ * task↔task and task↔doc — so Relationships is read as the first and
+ * References as the second, which is also what the frame's own empty state
+ * says: "Link related **Tasks or Docs**".
+ *
+ * The alternative reading is that References means BACKLINKS — everywhere this
+ * task is mentioned. That is not buildable today and the gap is worth naming:
+ * a task mention in a comment is written as `#<title>` PLAIN TEXT
+ * (`insertTaskMention`), so nothing records that one thing referred to
+ * another, and a rename silently orphans the words. Backlinks need that fixed
+ * first.
+ */
+function RelatedItemsPanel({
+  taskId,
+  workspaceId,
+  inline,
+  onOpenTask,
+}: {
+  taskId: string
+  /* Optional for the same reason DependenciesPanel's is: the sheet can be
+   * opened from a place that has not resolved the workspace yet. */
+  workspaceId?: string
+  inline: Dependency[]
+  onOpenTask: (relatedTaskId: string) => void
+}) {
+  const { t } = useTranslation()
+  const [tab, setTab] = useState<'relationships' | 'references'>('relationships')
+
+  return (
+    <div className="space-y-3" data-testid="related-items-panel">
+      <div className="flex gap-1 border-b border-border/60">
+        {(['relationships', 'references'] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            data-testid={`related-tab-${key}`}
+            aria-current={tab === key}
+            onClick={() => setTab(key)}
+            className={cn(
+              'px-2.5 py-1.5 text-[12px] transition-colors',
+              tab === key
+                ? '-mb-px border-b-2 border-accent font-medium text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t(`taskDetail.related.${key}` as TranslationKey)}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'relationships' ? (
+        <DependenciesPanel
+          taskId={taskId}
+          workspaceId={workspaceId}
+          inline={inline}
+          onOpenTask={onOpenTask}
+        />
+      ) : (
+        <LinkedDocsSection taskId={taskId} workspaceId={workspaceId} />
+      )}
+    </div>
+  )
+}
 
 function DependenciesPanel({
   taskId,
