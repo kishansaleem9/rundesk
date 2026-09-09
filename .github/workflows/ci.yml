@@ -712,6 +712,21 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S14, frame `13:05` — the planner rail's five sections.
+      #
+      # AGAINST THE REAL API on purpose. The planner asked for its assigned
+      # tasks at `/tasks/workspace/:ws/member/:id` and the API serves
+      # `/members/`; every load 404'd, so the Backlog was permanently empty and
+      # the Time-blocking switches gated nothing. Both stubbed planner suites
+      # matched the CLIENT's spelling, so neither could ever see it. The first
+      # check here watches the request the page really makes and fails on a 404.
+      - name: Planner rail
+        if: '!cancelled()'
+        run: node test/e2e/planner-rail.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

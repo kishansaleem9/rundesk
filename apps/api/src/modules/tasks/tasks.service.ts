@@ -1806,6 +1806,11 @@ export class TasksService {
         id: tasks.id,
         title: tasks.title,
         status: tasks.status,
+        // §V2-S14 — the planner rail needs to leave finished work out of
+        // "Assigned to me" and "Today & overdue". `status` is a per-list key
+        // that a workspace can rename, so the client cannot tell closed from
+        // open by reading it; the category can.
+        statusCategory: tasks.statusCategory,
         priority: tasks.priority,
         dueDate: tasks.dueDate,
         updatedAt: tasks.updatedAt,

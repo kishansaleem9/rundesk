@@ -72,6 +72,20 @@ went missing entirely. A list that is only written once stops being true.
   somebody has to act on, and hiding it turns "you must fill this in" into
   "this field does not exist". 11 checks, five break-tests.
 
+- **The planner rail, frame `13:05`** — five sections listed, three drawn. Built,
+  and underneath it **a live 404 nobody could see**: the planner asked for its
+  assigned tasks at `/tasks/workspace/:ws/member/:id` while the API serves
+  `/members/`. Every load answered 404, so `assigned` was permanently `[]` — the
+  Backlog rail was always empty and the two Time-blocking switches gated
+  nothing, *after* the commit whose subject was making those switches work.
+  It survived because both planner suites **stubbed the client's spelling**
+  (`if (url.includes('/member/')) return reply(ASSIGNED)`), which implements a
+  route the API does not have; a check written against that can never fail on
+  the real product. `planner-rail.mjs` watches the request the page really makes
+  against the real API. **Sixth duplicated-list bug** here too: the page kept its
+  own copy of the rail default instead of importing `RAIL_SECTIONS`, and it
+  would have hidden this very change.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -229,7 +243,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | "Team schedules" — one person at a time, no side-by-side grid |
 | B | Planner: Priorities rail, Meet with, Backlog, day columns, all-day row, 24h gutter, live now-line |
 | P | "+ Add priority" — exists in the person panel, planner rail is read-only |
-| M | Rail sections **Assigned to me** and **Today & overdue** |
+| B | Rail sections **Assigned to me** and **Today & overdue** |
 | M | Planner bottom command bar |
 | M | **Calendar picker grouped by account** (+ workspace calendars: Time off, Holidays) |
 | P | Calendar settings — 4 of 7 pages |

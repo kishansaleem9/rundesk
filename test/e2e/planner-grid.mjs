@@ -146,8 +146,18 @@ try {
     if (url.includes('/planner/') && url.includes('/settings')) return reply({})
     if (url.includes('/priorities')) return reply([])
     if (url.includes('/calendar')) return reply(THEIR_CALENDAR)
+    /*
+     * `/tasks/workspace/:ws/members/:userId` — PLURAL, and matched in full.
+     *
+     * This stub used to match `/member/`, singular: a path the client asked for
+     * and the API answered 404 to, so every check below passed against a route
+     * that did not exist. Matching the whole shape rather than the word matters
+     * as much as the spelling — a bare `/members/` test is caught by the
+     * workspace-members branch on the next line, which hands the Backlog a list
+     * of PEOPLE and leaves it rendering rows with no title and no task id.
+     */
+    if (/\/tasks\/workspace\/[^/]+\/members\//.test(url)) return reply(ASSIGNED)
     if (url.includes('/members')) return reply(MEMBERS)
-    if (url.includes('/member/')) return reply(ASSIGNED)
     return reply([])
   })
 

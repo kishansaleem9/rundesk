@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
-import { PlannerSettingsDialog } from '../components/planner-settings-dialog'
+import { PlannerSettingsDialog, RAIL_SECTIONS } from '../components/planner-settings-dialog'
 
 /**
  * §V2-02 — the Planner, frame `13:08`.
@@ -83,7 +83,13 @@ type PersonCalendar = {
   meetings: Array<{ id: string; title: string; startsAt: string; endsAt: string }>
   busy?: BusyWindow[]
 }
-type TaskRow = { id: string; title: string; dueDate?: string | null }
+type TaskRow = {
+  id: string
+  title: string
+  dueDate?: string | null
+  /** 'open' | 'closed' — a per-list status key can be renamed; this cannot. */
+  statusCategory?: string | null
+}
 
 /**
  * The gutter runs the WHOLE day, and the grid scrolls.
@@ -267,7 +273,16 @@ export function PlannerPage() {
    */
   const { data: assigned = [] } = useQuery({
     queryKey: ['planner-assigned', workspaceId, currentUserId],
-    queryFn: () => api<TaskRow[]>(`/tasks/workspace/${workspaceId}/member/${currentUserId}`),
+    /*
+     * `/members/`, PLURAL. This read `/member/` and answered 404 on every load,
+     * so `assigned` was permanently `[]` — the Backlog rail was always empty,
+     * and the two Time-blocking switches that gate this list were gating
+     * nothing. The suites did not catch it because they STUBBED the singular
+     * path: `if (url.includes('/member/')) return reply(ASSIGNED)` implements a
+     * route the API does not have, and a check written against it can never
+     * fail on the real product.
+     */
+    queryFn: () => api<TaskRow[]>(`/tasks/workspace/${workspaceId}/members/${currentUserId}`),
     enabled: !!workspaceId && !!currentUserId,
   })
   const scheduledTaskIds = useMemo(
@@ -320,6 +335,39 @@ export function PlannerPage() {
       .slice(0, 12)
   }, [assigned, scheduledTaskIds, showOverdue, showAssigned])
 
+  /*
+   * §V2-S14 frame `13:05` — the two rail sections the frame lists and the rail
+   * did not have: `Assigned to me ›` and `Today & overdue ›`.
+   *
+   * NOT GATED BY THE TIME-BLOCKING SWITCHES, deliberately. Frame `14:20` words
+   * both of those as being about the Planner BOARD — "Show tasks assigned to me
+   * with due date", "Show overdue tasks in the Planner **board**" — and the
+   * rail has its own show/hide on the Sidebar page. Wiring the board's switches
+   * to the rail would invent a coupling the walkthrough does not describe and
+   * make the Sidebar checkbox look broken.
+   *
+   * `todayOverdue` is NOT the same rule as the board's `overdue` above, and the
+   * difference is on purpose: the board wants work it can roll into today's
+   * column, so it takes only what is strictly late AND not already scheduled;
+   * the rail is a reading list, so it takes anything due by the end of today,
+   * scheduled or not. Two rules, two expressions — collapsing them into one
+   * "shared" helper would silently change one of the two surfaces.
+   */
+  const openAssigned = useMemo(
+    () => assigned.filter((task) => task.statusCategory !== 'closed'),
+    [assigned],
+  )
+  const todayOverdue = useMemo(() => {
+    const endOfToday = startOfDay(addDays(new Date(), 1)).getTime()
+    return openAssigned
+      .filter((task) => {
+        if (!task.dueDate) return false
+        const due = new Date(task.dueDate).getTime()
+        return Number.isFinite(due) && due < endOfToday
+      })
+      .slice(0, 25)
+  }, [openAssigned])
+
   const qc = useQueryClient()
 
   /*
@@ -360,7 +408,18 @@ export function PlannerPage() {
   }
 
   /** The Sidebar page. Absent means every section, so an existing planner is unchanged. */
-  const railOn = (key: string) => (settings?.railSections ?? ['priorities', 'meetWith', 'backlog']).includes(key)
+  /*
+   * §V2-S14 — the default comes from `RAIL_SECTIONS`, not from a second copy of
+   * it written out here.
+   *
+   * This line used to read `?? ['priorities', 'meetWith', 'backlog']`. It
+   * agreed with the constant by luck, and the luck would have run out on this
+   * very commit: adding two sections to the constant would have put two new
+   * checkboxes on the Sidebar page controlling two sections the rail never drew
+   * for anybody who had not saved a preference. Sixth instance of the same
+   * shape in this codebase; the compiler cannot see any of them.
+   */
+  const railOn = (key: string) => (settings?.railSections ?? [...RAIL_SECTIONS]).includes(key)
   const blockLabel = (b: Block) => (b.taskId && b.label ? `${prefix} ${b.label}` : b.label ?? '')
 
   /** Which task is currently under the pointer, mid-drag. */
@@ -568,6 +627,75 @@ export function PlannerPage() {
                 </div>
               )}
             </div>
+          )}
+        </section>
+        )}
+
+        {/* Frame `13:05` puts these two between "Meet with" and "Backlog". */}
+        {railOn('assignedToMe') && (
+        <section data-testid="planner-assigned">
+          <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t('planner.assignedToMe')}
+          </h2>
+          {openAssigned.length === 0 ? (
+            <p className="px-1 text-[11px] text-muted-foreground">{t('planner.assignedToMeEmpty')}</p>
+          ) : (
+            <ul className="space-y-1">
+              {openAssigned.slice(0, 25).map((task) => (
+                <li
+                  key={task.id}
+                  data-testid="planner-assigned-item"
+                  data-task-id={task.id}
+                  className="truncate rounded px-2 py-1 text-[12px] hover:bg-muted/40"
+                >
+                  {task.title}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        )}
+
+        {railOn('todayOverdue') && (
+        <section data-testid="planner-today-overdue">
+          <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t('planner.todayOverdue')}
+          </h2>
+          {todayOverdue.length === 0 ? (
+            <p className="px-1 text-[11px] text-muted-foreground">{t('planner.todayOverdueEmpty')}</p>
+          ) : (
+            <ul className="space-y-1">
+              {todayOverdue.map((task) => {
+                const late = new Date(task.dueDate as string).getTime() < startOfDay(new Date()).getTime()
+                return (
+                  <li
+                    key={task.id}
+                    data-testid="planner-today-overdue-item"
+                    data-task-id={task.id}
+                    data-late={late ? 'true' : 'false'}
+                    className="flex items-baseline gap-1.5 rounded px-2 py-1 text-[12px] hover:bg-muted/40"
+                  >
+                    <span className="truncate">{task.title}</span>
+                    {/* Late and due-today are both in this section; which one a
+                        row is has to be readable, or the section says "you have
+                        six things" and nothing about how much trouble you are
+                        in. */}
+                    <span
+                      className={cn(
+                        'ml-auto shrink-0 text-[10px]',
+                        late ? 'text-rose-500' : 'text-muted-foreground',
+                      )}
+                    >
+                      {late
+                        ? t('planner.overdueSince', {
+                            date: new Date(task.dueDate as string).toLocaleDateString(),
+                          })
+                        : t('planner.dueToday')}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
           )}
         </section>
         )}

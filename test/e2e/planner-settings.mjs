@@ -100,10 +100,18 @@ const BLOCKS = [{
 /*
  * §V2-02d — assigned work for the two Time-blocking switches to act on.
  *
- * THE ABSENCE OF THIS FIXTURE IS WHY THEY WENT DEAD. `/member/` answered with
- * an empty list, so the Backlog was empty and nothing overdue existed; a switch
- * controlling which of nothing is shown looks identical whether it is wired or
- * not. Both toggles saved, read back, and were asserted by nobody.
+ * THE ABSENCE OF THIS FIXTURE IS WHY THEY WENT DEAD. The assigned-tasks call
+ * answered with an empty list, so the Backlog was empty and nothing overdue
+ * existed; a switch controlling which of nothing is shown looks identical
+ * whether it is wired or not. Both toggles saved, read back, and were asserted
+ * by nobody.
+ *
+ * AND THE REASON IT ANSWERED EMPTY WAS NOT "no fixture". It was a 404: the page
+ * requested `/tasks/workspace/:ws/member/:id` and the API serves `/members/`.
+ * This stub was written to match the CLIENT's spelling, which made the symptom
+ * go away here and left the product broken — the rail is empty in the running
+ * app no matter what these toggles say. `planner-rail.mjs` checks the real
+ * request against the real API, which is the only place that mistake shows up.
  */
 const dayOffset = (n) => {
   const d = new Date(now)
@@ -148,7 +156,15 @@ try {
     if (url.includes('/planner/') && url.includes('/blocks')) return reply(BLOCKS)
     if (url.includes('/lists/workspace/')) return reply([{ id: 'l1', name: 'Inbox list' }])
     if (url.includes('/priorities')) return reply([])
-    if (url.includes('/member/')) return reply(ASSIGNED)
+    /*
+     * `/tasks/workspace/:ws/members/:userId` — PLURAL, and matched in full.
+     *
+     * This stub used to match `/member/`, singular: a path the client asked for
+     * and the API answered 404 to, so every check below passed against a route
+     * that did not exist. Matched in full rather than on the word `members`,
+     * which also appears in the workspace-members list.
+     */
+    if (/\/tasks\/workspace\/[^/]+\/members\//.test(url)) return reply(ASSIGNED)
     return reply([])
   })
 

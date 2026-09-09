@@ -96,11 +96,33 @@ const PAGES: Array<{ key: 'appearance' | 'accounts' | 'sidebar' | 'timeBlocking'
   { key: 'timeBlocking', icon: CalendarClock, labelKey: 'plannerSettings.timeBlocking' },
 ]
 
-/** The rail sections of frame `13:08`, in the order the frame lists them. */
-export const RAIL_SECTIONS = ['priorities', 'meetWith', 'backlog'] as const
+/**
+ * The rail sections of frame `13:05`, in the order the frame lists them.
+ *
+ * It used to hold three and carry this same comment. The frame lists FIVE —
+ * `Priorities · Meet with · Assigned to me › · Today & overdue › · Backlog` —
+ * and the planner page's own header comment described five while the page
+ * rendered three, so the file documented the gap for as long as it had it.
+ *
+ * THIS IS THE ONE LIST. `workspace-planner-page.tsx` used to keep its own
+ * hardcoded `['priorities', 'meetWith', 'backlog']` default instead of
+ * importing this, which is the sixth instance of the duplicated-list bug in
+ * this codebase and the one that would have hidden this very change: adding
+ * two names here while the page kept its own copy means two new sections that
+ * the Sidebar page offers and the rail never draws.
+ */
+export const RAIL_SECTIONS = [
+  'priorities',
+  'meetWith',
+  'assignedToMe',
+  'todayOverdue',
+  'backlog',
+] as const
 const RAIL_LABEL: Record<string, TranslationKey> = {
   priorities: 'planner.priorities',
   meetWith: 'planner.meetWith',
+  assignedToMe: 'planner.assignedToMe',
+  todayOverdue: 'planner.todayOverdue',
   backlog: 'planner.backlog',
 }
 
