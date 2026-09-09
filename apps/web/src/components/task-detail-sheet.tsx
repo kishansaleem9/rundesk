@@ -71,6 +71,12 @@ import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
 import { relativeTime, exactTime } from '../lib/relative-time'
 import {
+  usePriorities,
+  usePriorityActions,
+  priorityPromptMuted,
+  mutePriorityPrompt,
+} from '../lib/use-priorities'
+import {
   useCollapseEmptyFields,
   setCollapseEmptyFields,
   isEmptyFieldValue,
@@ -1520,6 +1526,19 @@ function OverviewPanel({
 }) {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  /*
+   * §V2-S16 — the priorities half of the assign chain, in the panel that owns
+   * the assignee controls. Reads and writes through the same
+   * `lib/use-priorities` the Planner rail and the person panel use, so a task
+   * added here is in the rail's list without a reload.
+   */
+  const currentUserId = useAuthStore((s) => s.user?.id) ?? ''
+  const { data: myPriorities } = usePriorities(workspaceId, currentUserId)
+  const priorityActions = usePriorityActions(workspaceId, currentUserId)
+  const [priorityPromptOpen, setPriorityPromptOpen] = useState(false)
+  // Offering to add something that is already on the list is noise.
+  const isAlreadyPriority = !!myPriorities?.some((p) => p.taskId === taskId && !p.doneAt)
   const [editingDescription, setEditingDescription] = useState(false)
   // §G15 [22:28] — the slash menu on the description, and what has been typed
   // after the slash to narrow it.
@@ -1910,16 +1929,53 @@ function OverviewPanel({
     enabled: Boolean(workspaceId),
   })
 
+  /*
+   * §V2-S16 frames `15:50`–`15:55` — assigning offers to put the task on your
+   * day, and the toast that follows links to where it landed.
+   *
+   * ONLY WHEN THE ASSIGNEE IS YOU. The frame's prompt names the assignee
+   * ("Add this task to Hamda Tahir's priorities?") and the toast that follows
+   * says "your Priorities", because she was assigning to herself. Priorities
+   * are written through `POST /workspaces/:id/priorities`, which takes no
+   * `:userId` on purpose — see `PrioritiesController`: routing the write under
+   * `/people/:userId` "would invite a client to pass somebody else's id and
+   * expect it to work". Offering to fill a colleague's day is a permission this
+   * product has deliberately not given, so the prompt does not pretend to.
+   */
   const addAssignee = useMutation({
     mutationFn: (userId: string) =>
       api(`/tasks/${taskId}/assignees`, {
         method: 'POST',
         body: { userId },
       }),
-    onSuccess: async () => {
+    onSuccess: async (_data, userId) => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      if (userId === currentUserId && !priorityPromptMuted() && !isAlreadyPriority) {
+        setPriorityPromptOpen(true)
+      }
     },
   })
+
+  const addToPriorities = () => {
+    priorityActions.add.mutate(
+      { taskId },
+      {
+        onSuccess: () => {
+          setPriorityPromptOpen(false)
+          // The toast links to where the task went. "Added" with no way to look
+          // is a claim the reader has to take on trust.
+          toast.success(t('planner.addedToPriorities'), {
+            action: workspaceId
+              ? {
+                  label: t('planner.openPriorities'),
+                  onClick: () => navigate({ to: `/app/${workspaceId}/calendar` }),
+                }
+              : undefined,
+          })
+        },
+      },
+    )
+  }
 
   const removeAssignee = useMutation({
     mutationFn: (userId: string) => api(`/tasks/${taskId}/assignees/${userId}`, { method: 'DELETE' }),
@@ -2374,6 +2430,7 @@ function OverviewPanel({
             {availableMembers.slice(0, 8).map((m) => (
               <button
                 key={m.userId}
+                data-testid={`assign-member-${m.userId}`}
                 onClick={() => addAssignee.mutate(m.userId)}
                 className="inline-flex"
                 title={t('taskDetail.assignMember', { name: m.displayName || m.email })}
@@ -2389,6 +2446,44 @@ function OverviewPanel({
         {(pendingInvitesQuery.data?.length ?? 0) > 0 && (
           <div className="mt-2 text-xs text-muted-foreground">
             {tCount('taskDetail.pendingInvites', pendingInvitesQuery.data?.length ?? 0)}
+          </div>
+        )}
+        {/*
+          §V2-S16 frame `15:50` — the offer, beside the assignee control the
+          frame shows it beside. Two ways out, exactly as the frame has them:
+          take it, or stop being asked.
+        */}
+        {priorityPromptOpen && (
+          <div
+            data-testid="priority-prompt"
+            className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent/5 px-3 py-2"
+          >
+            <span className="text-[12px]">{t('planner.addToPrioritiesAsk')}</span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-testid="priority-prompt-mute"
+                onClick={() => {
+                  mutePriorityPrompt()
+                  setPriorityPromptOpen(false)
+                }}
+                className="h-7 px-2 text-[11px]"
+              >
+                {t('planner.dontAskAgain')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="priority-prompt-add"
+                disabled={priorityActions.add.isPending}
+                onClick={addToPriorities}
+                className="h-7 px-2 text-[11px]"
+              >
+                {t('planner.addToPriorities')} →
+              </Button>
+            </div>
           </div>
         )}
       </Field>

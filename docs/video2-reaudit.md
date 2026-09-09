@@ -118,6 +118,19 @@ went missing entirely. A list that is only written once stops being true.
   one key, checked by writing in the rail and reading back per-person.
   9 checks, four break-tests.
 
+- **The assign → priorities chain, frames `15:50`–`16:05`** — the one the
+  walkthrough itself calls the `[15:47]`–`[16:19]` chain. Four links, none of
+  which existed: the offer after assigning, "Don't ask again", the toast with
+  **Open Priorities**, and the task appearing in the Planner rail with a
+  counter. Assigning wrote an assignee and stopped.
+  **The prompt only appears when the assignee is you**, because
+  `POST /workspaces/:id/priorities` deliberately takes no `:userId` —
+  `PrioritiesController` says routing it under `/people/:userId` "would invite a
+  client to pass somebody else's id and expect it to work". Filling a
+  colleague's day is a permission this product has not granted, so the prompt
+  does not offer it; the suite checks that assigning a teammate raises nothing.
+  10 checks, five break-tests.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -298,7 +311,8 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | A PERMANENT delete for a task — the frame lists Archive *and* Delete; Rundesk has one soft archive and no purge |
 | M | "Add to ›" (a task in more than one list) |
 | M | Assignee picker: search box, invite-by-email, Agents, "⚡ Assign with AI" |
-| M | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
+| B | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
+| M | Add to a COLLEAGUE's priorities — the write takes no `:userId`, deliberately |
 | B | Live focus countdown in the header |
 | M | Countdown in the browser tab title |
 | M | Brain² hub, `/ai/brain`, AI-scoped left nav, Ask\|Agents toggle, Super Agents |

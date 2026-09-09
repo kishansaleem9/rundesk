@@ -135,7 +135,7 @@ const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
 export function PlannerPage() {
-  const { t, locale } = useTranslation()
+  const { t, tCount, locale } = useTranslation()
   const { workspaceId } = useParams({ strict: false }) as { workspaceId: string }
   const currentUserId = useAuthStore((s) => s.user?.id) ?? ''
 
@@ -549,8 +549,17 @@ export function PlannerPage() {
 
         {railOn('priorities') && (
         <section data-testid="planner-priorities">
-          <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <h2 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.priorities')}
+            {/* Frame `16:05` — the rail carries a count once something is on it. */}
+            {priorities.filter((p) => !p.doneAt).length > 0 && (
+              <span
+                data-testid="planner-priority-count"
+                className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] normal-case tracking-normal"
+              >
+                {tCount('planner.priorityCount', priorities.filter((p) => !p.doneAt).length)}
+              </span>
+            )}
           </h2>
           {priorities.filter((p) => !p.doneAt).length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/70 p-4 text-center">

@@ -32,6 +32,33 @@ export type Priority = {
   doneAt: string | null
 }
 
+/*
+ * §V2-S16 frame `15:50` — "Don't ask again".
+ *
+ * The prompt after assigning is a convenience, and a convenience that cannot be
+ * switched off becomes an irritation. Per-viewer, because it is a preference
+ * about being interrupted rather than anything the workspace needs to know.
+ */
+const PROMPT_OFF_KEY = 'rundesk.priorityPromptOff'
+
+export function priorityPromptMuted(): boolean {
+  try {
+    return window.localStorage.getItem(PROMPT_OFF_KEY) === '1'
+  } catch {
+    // Blocked site data throws rather than returning null. If the preference
+    // cannot be read, ask — the prompt is dismissible either way.
+    return false
+  }
+}
+
+export function mutePriorityPrompt(): void {
+  try {
+    window.localStorage.setItem(PROMPT_OFF_KEY, '1')
+  } catch {
+    // Nothing to do: it will ask again next session, which is the safe failure.
+  }
+}
+
 /** The one cache key for a person's priorities. */
 export const prioritiesKey = (workspaceId: string | undefined, userId: string | undefined) =>
   ['priorities', workspaceId, userId] as const

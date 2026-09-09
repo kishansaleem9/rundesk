@@ -756,6 +756,20 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S16, frames `15:50`-`16:05` — the assign → priorities chain.
+      #
+      # Four links, none of which existed: the offer after assigning, "Don't ask
+      # again", the toast with "Open Priorities", and the task turning up in the
+      # rail with a counter. Each photographs fine alone, so every check crosses
+      # a boundary — the prompt is followed to the server, the toast's link is
+      # followed to the Planner, and the rail is read for THAT task.
+      - name: Assign to priorities
+        if: '!cancelled()'
+        run: node test/e2e/assign-to-priorities.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist
