@@ -742,6 +742,20 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S14b, frame `13:05` — "+ Add priority" in the Planner rail.
+      #
+      # The rail drew the list and the empty state that says "Prioritize a task
+      # to see it appear here", and offered nothing to press: no add, no tick,
+      # no remove, while the API had all four writes. Every check here is on a
+      # row that survived the round trip, which is the difference between a
+      # control and a readout.
+      - name: Planner priorities
+        if: '!cancelled()'
+        run: node test/e2e/planner-priorities.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

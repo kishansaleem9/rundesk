@@ -7,6 +7,7 @@ import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { PlannerSettingsDialog, RAIL_SECTIONS } from '../components/planner-settings-dialog'
+import { usePriorities, usePriorityActions } from '../lib/use-priorities'
 
 /**
  * §V2-02 — the Planner, frame `13:08`.
@@ -260,11 +261,14 @@ export function PlannerPage() {
       .slice(0, 6)
   }, [members, meetQuery])
 
-  const { data: priorities = [] } = useQuery({
-    queryKey: ['planner-priorities', workspaceId, currentUserId],
-    queryFn: () => api<PriorityRow[]>(`/workspaces/${workspaceId}/people/${currentUserId}/priorities`),
-    enabled: !!workspaceId && !!currentUserId,
-  })
+  /*
+   * §V2-S14b — one cache entry, shared with the person panel. Both surfaces
+   * read the same endpoint and used to keep separate keys for it, so adding a
+   * priority in one left the other showing yesterday's list.
+   */
+  const { data: priorities = [] } = usePriorities(workspaceId, currentUserId)
+  const priorityActions = usePriorityActions(workspaceId, currentUserId)
+  const [priorityDraft, setPriorityDraft] = useState('')
 
   /*
    * The Backlog rail: things assigned to me that are not on the grid yet.
@@ -556,12 +560,75 @@ export function PlannerPage() {
           ) : (
             <ul className="space-y-1">
               {priorities.filter((p) => !p.doneAt).map((p) => (
-                <li key={p.id} className="truncate rounded px-2 py-1 text-[12px] hover:bg-muted/40">
-                  {p.title}
+                <li
+                  key={p.id}
+                  data-testid="planner-priority-item"
+                  data-priority-id={p.id}
+                  className="group flex items-center gap-1.5 rounded px-2 py-1 text-[12px] hover:bg-muted/40"
+                >
+                  {/*
+                    Ticking one off is the point of a daily list. The rail could
+                    show priorities and do nothing else with them — you had to
+                    open the person panel to finish one.
+                  */}
+                  <button
+                    type="button"
+                    data-testid={`planner-priority-done-${p.id}`}
+                    title={p.doneAt ? t('planner.priorityReopen') : t('planner.priorityDone')}
+                    aria-label={p.doneAt ? t('planner.priorityReopen') : t('planner.priorityDone')}
+                    disabled={priorityActions.setDone.isPending}
+                    onClick={() => priorityActions.setDone.mutate({ id: p.id, done: !p.doneAt })}
+                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-border hover:border-emerald-500"
+                  />
+                  <span className="flex-1 truncate">{p.title}</span>
+                  <button
+                    type="button"
+                    data-testid={`planner-priority-remove-${p.id}`}
+                    title={t('planner.priorityRemove')}
+                    aria-label={t('planner.priorityRemove')}
+                    disabled={priorityActions.remove.isPending}
+                    onClick={() => priorityActions.remove.mutate(p.id)}
+                    className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
                 </li>
               ))}
             </ul>
           )}
+          {/*
+            §V2-S14b frame `13:05` — "+ Add priority". The frame puts it under
+            the empty state, and it is the reason the empty state's own copy
+            ("Prioritize a task to see it appear here") was not a dead end.
+          */}
+          <form
+            className="mt-1.5 flex gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const title = priorityDraft.trim()
+              if (!title) return
+              priorityActions.add.mutate(title, { onSuccess: () => setPriorityDraft('') })
+            }}
+          >
+            <input
+              value={priorityDraft}
+              onChange={(e) => setPriorityDraft(e.target.value)}
+              data-testid="planner-priority-input"
+              placeholder={t('planner.priorityPlaceholder')}
+              aria-label={t('planner.addPriority')}
+              className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-[12px]"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              data-testid="planner-priority-add"
+              disabled={!priorityDraft.trim() || priorityActions.add.isPending}
+              className="h-7 px-2 text-[11px]"
+            >
+              + {t('planner.addPriority')}
+            </Button>
+          </form>
         </section>
         )}
 

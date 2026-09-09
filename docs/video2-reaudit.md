@@ -104,6 +104,20 @@ went missing entirely. A list that is only written once stops being true.
   fired the same request would be two names for one behaviour. Recorded as a
   real gap above instead of papered over.
 
+- **The Priorities rail, frame `13:05`.** It drew the heading, the list and the
+  empty state *"Prioritize a task to see it appear here"* — and offered nothing
+  to press, while the API had `POST`, `PATCH`, `DELETE` and `PUT order` all
+  along. The instruction printed on the surface could not be followed on that
+  surface. Now: add, tick, remove.
+  **The seventh duplicate, avoided and one more found.** The person panel
+  already had all four mutations, so copying them into the rail would have been
+  another one-fact-two-copies bug; both now go through
+  `apps/web/src/lib/use-priorities.ts`. And they had been reading the *same*
+  endpoint under two different React Query keys (`person-priorities` vs
+  `planner-priorities`), so a write on one surface left the other stale — now
+  one key, checked by writing in the rail and reading back per-person.
+  9 checks, four break-tests.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -260,7 +274,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Connect Google / Outlook; two-way scope; drag task → block; prefix applied |
 | P | "Team schedules" — one person at a time, no side-by-side grid |
 | B | Planner: Priorities rail, Meet with, Backlog, day columns, all-day row, 24h gutter, live now-line |
-| P | "+ Add priority" — exists in the person panel, planner rail is read-only |
+| B | "+ Add priority" in the planner rail — add, tick and remove, one shared hook |
 | B | Rail sections **Assigned to me** and **Today & overdue** |
 | M | Planner bottom command bar |
 | M | **Calendar picker grouped by account** (+ workspace calendars: Time off, Holidays) |

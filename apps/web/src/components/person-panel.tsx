@@ -43,6 +43,7 @@ import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { usePersonPanel } from '../store/person-panel'
+import { usePriorities, usePriorityActions } from '../lib/use-priorities'
 import { InlineSkeleton } from './loading-skeletons'
 
 type Person = {
@@ -145,43 +146,15 @@ function Priorities({ workspaceId, userId, isMe }: { workspaceId: string; userId
   const qc = useQueryClient()
   const [draft, setDraft] = useState('')
 
-  const key = ['person-priorities', workspaceId, userId]
-  const query = useQuery({
-    queryKey: key,
-    queryFn: () => api<Priority[]>(`/workspaces/${workspaceId}/people/${userId}/priorities`),
-  })
+  /*
+   * §V2-S14b — the read and the writes both come from `lib/use-priorities`, so
+   * this panel and the Planner rail share one cache entry. They used to keep
+   * separate keys for the same endpoint, which meant adding a priority in one
+   * place left the other showing a stale list.
+   */
+  const query = usePriorities(workspaceId, userId)
   const items = query.data ?? []
-
-  const invalidate = () => qc.invalidateQueries({ queryKey: key })
-  const onError = (err: unknown) =>
-    toast.error(err instanceof ApiError ? err.message : (err as Error).message)
-
-  const add = useMutation({
-    mutationFn: (title: string) =>
-      api(`/workspaces/${workspaceId}/priorities`, { method: 'POST', body: { title } }),
-    onSuccess: () => {
-      setDraft('')
-      invalidate()
-    },
-    onError,
-  })
-  const setDone = useMutation({
-    mutationFn: ({ id, done }: { id: string; done: boolean }) =>
-      api(`/workspaces/${workspaceId}/priorities/${id}`, { method: 'PATCH', body: { done } }),
-    onSuccess: invalidate,
-    onError,
-  })
-  const remove = useMutation({
-    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/priorities/${id}`, { method: 'DELETE' }),
-    onSuccess: invalidate,
-    onError,
-  })
-  const reorder = useMutation({
-    mutationFn: (ids: string[]) =>
-      api(`/workspaces/${workspaceId}/priorities/order`, { method: 'PUT', body: { ids } }),
-    onSuccess: invalidate,
-    onError,
-  })
+  const { add, setDone, remove, reorder } = usePriorityActions(workspaceId, userId)
 
   const move = (index: number, delta: number) => {
     const next = [...items]
@@ -269,7 +242,7 @@ function Priorities({ workspaceId, userId, isMe }: { workspaceId: string; userId
             onKeyDown={(e) => {
               if (e.key === 'Enter' && draft.trim()) {
                 e.preventDefault()
-                add.mutate(draft.trim())
+                add.mutate(draft.trim(), { onSuccess: () => setDraft('') })
               }
             }}
             className="h-8 text-[13px]"
@@ -278,7 +251,7 @@ function Priorities({ workspaceId, userId, isMe }: { workspaceId: string; userId
             size="sm"
             data-testid="priority-add"
             disabled={!draft.trim() || add.isPending}
-            onClick={() => add.mutate(draft.trim())}
+            onClick={() => add.mutate(draft.trim(), { onSuccess: () => setDraft('') })}
           >
             <Plus className="h-3.5 w-3.5" />
           </Button>
