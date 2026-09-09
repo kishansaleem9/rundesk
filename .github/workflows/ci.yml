@@ -11,11 +11,11 @@ on:
   # `apps/`, `packages/` and `test/`, so `docs/**` never matched and the very
   # next docs-only push spent a full run proving it.
   #
-  # Making it work would mean changing how this workflow triggers — a `push`
-  # trigger scoped by branch, or a job-level guard computing the pushed file
-  # list — either of which changes CI semantics for every contributor. That is
-  # a decision to take deliberately, not a tidy-up. Until then the saving comes
-  # from BATCHING PUSHES (one per cluster), which costs nothing to get right.
+  # THE SAVING IS TAKEN AT THE JOB LEVEL INSTEAD — see the `changes` job. That
+  # comment used to end here saying the fix "changes CI semantics for every
+  # contributor" and that batching pushes was the answer for now. It was not:
+  # three more docs-only pushes went out after it was written, at a full run
+  # each. Documenting a leak is not closing one.
   pull_request:
   push:
     branches:
@@ -39,6 +39,63 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Did this PUSH touch anything but prose?
+  #
+  # WHY A JOB RATHER THAN `paths-ignore`. Path filters on `pull_request` are
+  # evaluated against the whole PR diff, which for this PR is hundreds of files,
+  # so they never match. But the `synchronize` payload DOES carry `before` and
+  # `after` for the push that triggered it — the incremental range, which is
+  # exactly the question worth asking. So the diff is computed here and the two
+  # expensive jobs are gated on the answer.
+  #
+  # IT FAILS OPEN, EVERY TIME. Anything unexpected — a force-push where `before`
+  # is no longer an ancestor, a first push, a shallow fetch that lacks the
+  # commit, an empty diff — runs the full suite. The cost of wrongly running is
+  # thirty minutes; the cost of wrongly skipping is shipping untested code, and
+  # those are not the same size of mistake.
+  #
+  # `Verify Monorepo` is deliberately NOT gated. It is about four minutes of the
+  # thirty-three, and leaving it always-on means a docs push still reports a
+  # real check rather than an empty set that a branch protection rule might
+  # read as nothing having run.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.decide.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The head of the branch, with history, so `before` is reachable.
+          # Without this the checkout is a merge commit and the diff below
+          # cannot resolve either end of the range.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -u
+          code=true
+          if [ "$EVENT" = "pull_request" ] && [ "$ACTION" = "synchronize" ] \
+             && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null \
+             && git cat-file -e "${AFTER}^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$BEFORE" "$AFTER")
+            echo "files in this push:"
+            echo "$changed" | sed 's/^/  /'
+            # Skip only when there IS a diff and NOTHING in it lies outside
+            # docs. An empty diff means something unexpected, so it runs.
+            if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qvE '^(docs/|[^/]*\.md$)'; then
+              code=false
+            fi
+          fi
+          echo "run expensive jobs: $code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   verify:
     name: Verify Monorepo
     runs-on: ubuntu-latest
@@ -104,6 +161,9 @@ jobs:
   postgres-harnesses:
     name: Postgres harnesses
     runs-on: ubuntu-latest
+    # ~22 of the run's ~33 minutes. Skipped when the push was prose only.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # Measured, not guessed: the run at 2cd5d0a reached its seventeenth suite
     # 18m30s in, and the three after it add roughly three minutes more. The 20
     # here dated from when this job ran a handful of suites; it now runs
@@ -681,6 +741,8 @@ jobs:
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     timeout-minutes: 20
 
     steps:
