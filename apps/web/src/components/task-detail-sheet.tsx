@@ -3908,6 +3908,8 @@ function AttachmentsPanel({
   const [linkUrl, setLinkUrl] = useState('')
   const [fileName, setFileName] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [draggingFiles, setDraggingFiles] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   // Probe the dedicated endpoint; fall back to inline list if 404.
   const probe = useQuery({
     queryKey: ['task', taskId, 'attachments'],
@@ -3942,36 +3944,38 @@ function AttachmentsPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
     },
   })
+  /*
+   * Takes FILES, because a drop is inherently several and the picker was
+   * single. One mutation for both routes, so the drop cannot drift from the
+   * button — the upload triple (presign, PUT, record) is already written
+   * inline in several places in this codebase and a seventh copy is how they
+   * get out of step.
+   */
   const uploadAttachment = useMutation({
-    mutationFn: async () => {
-      if (!selectedFile) return
-      if (selectedFile.size > MAX_ATTACHMENT_BYTES) {
-        throw new Error(t('taskDetail.fileTooLarge', { limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }))
+    mutationFn: async (files: File[]) => {
+      for (const file of files) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          // One oversized file must not abort the rest of the drop.
+          toast.error(t('taskDetail.fileTooLarge', { limit: MAX_ATTACHMENT_BYTES / (1024 * 1024) }))
+          continue
+        }
+        const contentType = file.type || 'application/octet-stream'
+        const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
+          method: 'POST',
+          body: { fileName: file.name, contentType, sizeBytes: file.size },
+        })
+        const putRes = await fetch(presign.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': contentType },
+          body: file,
+        })
+        // Reject when the storage PUT is blocked/failed so we never record a phantom attachment.
+        if (!putRes.ok) throw new Error(t('taskDetail.uploadFailedStatus', { status: putRes.status }))
+        await api(`/tasks/${taskId}/attachments`, {
+          method: 'POST',
+          body: { fileName: file.name, storageKey: presign.storageKey, contentType, sizeBytes: file.size },
+        })
       }
-      const presign = await api<{ uploadUrl: string; storageKey: string }>(`/tasks/${taskId}/attachments/presign`, {
-        method: 'POST',
-        body: {
-          fileName: selectedFile.name,
-          contentType: selectedFile.type || 'application/octet-stream',
-          sizeBytes: selectedFile.size,
-        },
-      })
-      const putRes = await fetch(presign.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': selectedFile.type || 'application/octet-stream' },
-        body: selectedFile,
-      })
-      // Reject when the storage PUT is blocked/failed so we never record a phantom attachment.
-      if (!putRes.ok) throw new Error(t('taskDetail.uploadFailedStatus', { status: putRes.status }))
-      await api(`/tasks/${taskId}/attachments`, {
-        method: 'POST',
-        body: {
-          fileName: selectedFile.name,
-          storageKey: presign.storageKey,
-          contentType: selectedFile.type || 'application/octet-stream',
-          sizeBytes: selectedFile.size,
-        },
-      })
     },
     onSuccess: async () => {
       setSelectedFile(null)
@@ -3994,10 +3998,57 @@ function AttachmentsPanel({
 
   return (
     <div className="space-y-3">
+      {/*
+        THIS ZONE USED TO BE A PICTURE OF A DROP ZONE.
+        It rendered "Drag and drop files here to upload" over a dashed border
+        with NO onDrop, onDragOver or onDragEnter anywhere in this file — and
+        the empty state said "Drop files above to get started", so the lie was
+        told twice. Uploading worked only through the separate file input
+        below.
+
+        Frame `01:55` shows one zone that is both: "Drop files here or browse".
+        So it takes a drop AND opens the picker on click, and the two go
+        through the same mutation — a drop that used its own upload path is a
+        second copy waiting to drift.
+
+        `isFileDrag` guards on the dataTransfer TYPES rather than on files,
+        because during dragover the file list is deliberately empty; testing
+        `files.length` there would reject every real drag. Copied from the chat
+        pane, which learned it the same way.
+      */}
       <div
+        data-testid="task-attachments-dropzone"
+        role="button"
+        tabIndex={uploadWired ? 0 : -1}
+        aria-disabled={!uploadWired}
+        onClick={() => uploadWired && fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (!uploadWired) return
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click() }
+        }}
+        onDragOver={(e) => {
+          if (!uploadWired || !Array.from(e.dataTransfer.types).includes('Files')) return
+          e.preventDefault()
+          setDraggingFiles(true)
+        }}
+        onDragLeave={(e) => {
+          // Ignore the events fired while crossing this zone's own children.
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+          setDraggingFiles(false)
+        }}
+        onDrop={(e) => {
+          if (!uploadWired || !Array.from(e.dataTransfer.types).includes('Files')) return
+          e.preventDefault()
+          setDraggingFiles(false)
+          const files = Array.from(e.dataTransfer.files ?? [])
+          if (files.length) uploadAttachment.mutate(files)
+        }}
         className={cn(
-          'rounded-md border-2 border-dashed border-border bg-muted/20 px-4 py-8 text-center',
-          'text-sm text-muted-foreground',
+          'rounded-md border-2 border-dashed px-4 py-8 text-center text-sm transition-colors',
+          uploadWired && 'cursor-pointer',
+          draggingFiles
+            ? 'border-accent bg-accent/10 text-foreground'
+            : 'border-border bg-muted/20 text-muted-foreground',
         )}
       >
         {t('taskDetail.dragDrop')}
@@ -4010,13 +4061,21 @@ function AttachmentsPanel({
           <div className="text-xs font-medium text-muted-foreground">{t('taskDetail.uploadFile')}</div>
           <div className="flex flex-col md:flex-row gap-2 md:items-center">
             <Input
+              ref={fileInputRef}
               type="file"
-              onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+              multiple
+              data-testid="task-attachments-input"
+              onChange={(e) => {
+                const picked = Array.from(e.target.files ?? [])
+                // Picking several and dropping several now behave identically.
+                if (picked.length > 1) uploadAttachment.mutate(picked)
+                else setSelectedFile(picked[0] ?? null)
+              }}
               className="h-8"
             />
             <Button
               size="sm"
-              onClick={() => uploadAttachment.mutate()}
+              onClick={() => uploadAttachment.mutate(selectedFile ? [selectedFile] : [])}
               disabled={!selectedFile || uploadAttachment.isPending}
             >
               {t('taskDetail.upload')}

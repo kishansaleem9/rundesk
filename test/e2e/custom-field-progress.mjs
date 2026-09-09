@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 45
+const EXPECTED_CHECKS = 47
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -685,6 +685,59 @@ try {
     `the field with subtasks OFF read ${JSON.stringify(withoutSubtasks)} (expected 67, being ` +
       `2 of 3) and the subtasks-ONLY field read ${JSON.stringify(subtasksOnly)} (expected 50, ` +
       'being 1 of 2) — if they match, the panel wrote a config nothing counts',
+  )
+
+  // ── The attachments drop zone was a picture of a drop zone ───────────────
+  /*
+   * Frame `01:55` shows "Drop files here or browse" — one zone that is both.
+   * Rundesk drew the dashed border and the words "Drag and drop files here to
+   * upload" with NO onDrop, onDragOver or onDragEnter anywhere in the file,
+   * and told the lie a second time in the empty state ("Drop files above to
+   * get started"). Uploading worked only through the separate file input.
+   *
+   * THE CHECK IS THAT A DROP REACHES THE API. Asserting the border highlights
+   * would pass on a zone that lights up and swallows the file — a worse
+   * failure than the inert one, because it looks like it worked.
+   */
+  console.log('\n\u25b6 the attachments drop zone takes an actual drop')
+  await openFields(task.id)
+  await page.getByTestId('task-tab-attachments').click({ timeout: 20_000 })
+  const zone = await waitUntil(
+    () => page.getByTestId('task-attachments-dropzone').isVisible().catch(() => false),
+    { timeoutMs: 15_000 },
+  )
+  chk(zone, 'the drop zone is on the Attachments tab', 'no drop zone rendered')
+
+  /*
+   * Playwright cannot drag from the OS, so the drop event is synthesised with
+   * a real DataTransfer holding a real File. Everything downstream of `onDrop`
+   * is the product's own code.
+   */
+  const posted = []
+  page.on('request', (r) => {
+    const path = new URL(r.url()).pathname
+    if (path.includes('/attachments')) posted.push(`${r.method()} ${path}`)
+  })
+  // The panel mounts its handlers a tick after the tab renders; dispatching on
+  // the frame the element appears samples before React has attached them.
+  await page.waitForTimeout(800)
+  await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="task-attachments-dropzone"]')
+    const dt = new DataTransfer()
+    dt.items.add(new File(['hello'], 'dropped.txt', { type: 'text/plain' }))
+    el.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }))
+    el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
+  })
+  const dropUploaded = await waitUntil(
+    () => posted.some((r) => r.endsWith('/presign')),
+    { timeoutMs: 15_000 },
+  )
+  chk(
+    dropUploaded,
+    'and dropping a file starts a real upload',
+    `the drop was swallowed \u2014 the zone accepted the gesture and asked the server for ` +
+      `nothing. Requests seen: ${JSON.stringify(posted)}. An inert border and a border that ` +
+      'lights up then eats the file are the same lie; the second just has better manners.',
   )
 
 } catch (e) {
