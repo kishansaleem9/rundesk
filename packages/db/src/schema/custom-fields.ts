@@ -19,16 +19,17 @@ export const customFieldTypeEnum = pgEnum('custom_field_type', [
   // DERIVED from subtasks, checklists and assigned comments, so no row is ever
   // written for it in `custom_field_values`; the service computes it on read.
   'progress_auto',
-  // §V2-01c — storage plus a renderer, nothing more. Files and Voting are
-  // deliberately absent: one needs upload plumbing, the other needs to know
-  // who voted, and `setValue` has no actor because every other type's value
-  // is the same for everybody.
+  // §V2-01c — storage plus a renderer, nothing more.
   'long_text',
   'labels',
   'people',
   'location',
   'tshirt_size',
   'progress_manual',
+  // 0145. `files` holds task_attachments ids; `voting` holds the ids of the
+  // people who voted, and only the caller can add or remove their own.
+  'files',
+  'voting',
 ])
 
 /**

@@ -11,6 +11,7 @@ import {
   taskChecklistItems,
   taskComments,
   workspaceMembers,
+  taskAttachments,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -23,6 +24,8 @@ type CustomFieldType =
   | 'progress_auto'
   // §V2-01c — storage plus a renderer.
   | 'long_text' | 'labels' | 'people' | 'location' | 'tshirt_size' | 'progress_manual'
+  // 0145 — `files` references task attachments; `voting` holds who voted.
+  | 'files' | 'voting'
 
 /** `string[]` is §V2-01c's: `labels` and `people` hold several at once. */
 type FieldValue = string | number | boolean | string[] | null
@@ -37,7 +40,7 @@ type FieldValue = string | number | boolean | string[] | null
 export const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
 
 /** The types that hold a list rather than one value. */
-const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people'])
+const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people', 'files', 'voting'])
 
 @Injectable()
 export class CustomFieldsService {
@@ -278,11 +281,17 @@ export class CustomFieldsService {
     }
   }
 
+  /**
+   * @param actorId who is writing. Only `voting` uses it, and that is the whole
+   *   reason it exists: a vote you can cast on somebody else's behalf is not a
+   *   vote. Every other type's value is the same whoever sets it.
+   */
   async setValue(
     workspaceId: string,
     taskId: string,
     fieldId: string,
     value: FieldValue,
+    actorId?: string,
   ) {
     await this.assertTaskInWorkspace(workspaceId, taskId)
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
@@ -298,6 +307,43 @@ export class CustomFieldsService {
       throw new BadRequestException(
         'Progress (Auto) is calculated from subtasks, checklists and assigned comments — it cannot be set directly',
       )
+    }
+
+    /*
+     * VOTING IGNORES THE SUBMITTED VALUE, on purpose.
+     *
+     * The obvious design — accept a list of voter ids — lets anyone rewrite the
+     * tally, adding colleagues who never voted or removing ones who did. So the
+     * body is not read at all: this toggles the CALLER's own vote and nothing
+     * else. The endpoint is therefore "vote" rather than "set the votes", which
+     * is what the control on screen actually means.
+     */
+    if (def.type === 'voting') {
+      if (!actorId) {
+        throw new BadRequestException('Voting needs to know who is voting')
+      }
+      const [row] = await this.db
+        .select()
+        .from(customFieldValues)
+        .where(and(eq(customFieldValues.taskId, taskId), eq(customFieldValues.fieldId, fieldId)))
+        .limit(1)
+      const current = Array.isArray(row?.value?.v) ? (row!.value.v as string[]) : []
+      const next = current.includes(actorId)
+        ? current.filter((id) => id !== actorId)
+        : [...current, actorId]
+      if (row) {
+        const [updated] = await this.db
+          .update(customFieldValues)
+          .set({ value: { v: next }, updatedAt: new Date() })
+          .where(eq(customFieldValues.id, row.id))
+          .returning()
+        return updated
+      }
+      const [inserted] = await this.db
+        .insert(customFieldValues)
+        .values({ taskId, fieldId, value: { v: next } })
+        .returning()
+      return inserted
     }
 
     // Type validation
@@ -380,6 +426,36 @@ export class CustomFieldsService {
           // chip twice; de-duplicating silently would hide it. Refuse.
           if (new Set(value).size !== value.length) {
             throw new BadRequestException('The same label was given twice')
+          }
+          break
+        }
+        case 'files': {
+          if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+            throw new BadRequestException('Files expects a list of attachment ids')
+          }
+          if (new Set(value).size !== value.length) {
+            throw new BadRequestException('The same file was given twice')
+          }
+          /*
+           * THE IDS MUST BE FILES ON THIS TASK. Without this the field stores
+           * any attachment id at all — including one on a task the reader
+           * cannot open — and the renderer would then link to somebody else's
+           * document. The same shape of rule as `people`, for the same reason.
+           */
+          if (value.length) {
+            const rows = await this.db
+              .select({ id: taskAttachments.id })
+              .from(taskAttachments)
+              .where(
+                and(
+                  eq(taskAttachments.taskId, taskId),
+                  inArray(taskAttachments.id, value as string[]),
+                ),
+              )
+            const known = new Set(rows.map((r) => r.id))
+            if ((value as string[]).some((v) => !known.has(v))) {
+              throw new BadRequestException('Those files are not attached to this task')
+            }
           }
           break
         }

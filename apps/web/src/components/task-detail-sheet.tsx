@@ -203,6 +203,8 @@ const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
   location: 'taskDetail.fieldType.location',
   tshirt_size: 'taskDetail.fieldType.tshirtSize',
   progress_manual: 'taskDetail.fieldType.progressManual',
+  files: 'taskDetail.fieldType.files',
+  voting: 'taskDetail.fieldType.voting',
 }
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -5251,6 +5253,8 @@ type CustomFieldDef = {
     | 'progress_auto'
     /* §V2-01c — storage plus a renderer. */
     | 'long_text' | 'labels' | 'people' | 'location' | 'tshirt_size' | 'progress_manual'
+    /* 0145 — attachment ids, and the ids of whoever voted. */
+    | 'files' | 'voting'
   isRequired: boolean
   options: Array<{ label: string; value: string; color?: string }> | null
 }
@@ -5340,6 +5344,7 @@ function CustomFieldsPanelInner({
               definition={definition}
               value={value}
               workspaceId={workspaceId}
+              taskId={taskId}
               disabled={setValue.isPending}
               onCommit={(next) => setValue.mutate({ fieldId: definition.id, value: next })}
             />
@@ -5386,13 +5391,16 @@ function CustomFieldEditor({
   definition,
   value,
   workspaceId,
+  taskId,
   disabled,
   onCommit,
 }: {
   definition: CustomFieldDef
   value: CustomFieldValue
-  /** §V2-01c — only `people` needs it, to ask who is in the workspace. */
+  /** §V2-01c — `people` asks who is in the workspace; 0145's `files` asks what
+   *  is attached to this task. Everything else needs neither. */
   workspaceId: string
+  taskId: string
   disabled?: boolean
   onCommit: (next: CustomFieldValue) => void
 }) {
@@ -5626,6 +5634,18 @@ function CustomFieldEditor({
         </div>
       )
     }
+    case 'files':
+      return (
+        <FilesFieldEditor
+          taskId={taskId}
+          workspaceId={workspaceId}
+          value={Array.isArray(value) ? value : []}
+          disabled={disabled}
+          onCommit={onCommit}
+        />
+      )
+    case 'voting':
+      return <VotingFieldEditor value={Array.isArray(value) ? value : []} disabled={disabled} onCommit={onCommit} />
     case 'people':
       return (
         <PeopleFieldEditor
@@ -5636,6 +5656,111 @@ function CustomFieldEditor({
         />
       )
   }
+}
+
+/**
+ * 0145 — FILES, frame `00:20`'s picker.
+ *
+ * A reference into the attachments that are ALREADY ON THIS TASK, not a second
+ * upload path. The API refuses an id that is not attached here, so the choices
+ * offered are exactly the choices the write will accept — a picker that could
+ * offer more than the server takes is a 400 waiting for a click.
+ */
+function FilesFieldEditor({
+  taskId,
+  workspaceId,
+  value,
+  disabled,
+  onCommit,
+}: {
+  taskId: string
+  workspaceId: string
+  value: string[]
+  disabled?: boolean
+  onCommit: (next: CustomFieldValue) => void
+}) {
+  const { t } = useTranslation()
+  const { data: files = [] } = useQuery({
+    queryKey: ['task-attachments', workspaceId, taskId],
+    queryFn: () =>
+      api<Array<{ id: string; fileName: string }>>(`/tasks/${taskId}/attachments`),
+  })
+
+  if (files.length === 0) {
+    return <span className="text-xs text-muted-foreground">{t('taskDetail.noFilesYet')}</span>
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1" data-testid="cf-files">
+      {files.map((f) => {
+        const on = value.includes(f.id)
+        return (
+          <button
+            key={f.id}
+            type="button"
+            disabled={disabled}
+            data-testid={`cf-file-${f.id}`}
+            aria-pressed={on}
+            onClick={() => onCommit(on ? value.filter((v) => v !== f.id) : [...value, f.id])}
+            className={cn(
+              'max-w-[12rem] truncate rounded border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+              on
+                ? 'border-accent/40 bg-accent/10 text-foreground'
+                : 'border-border text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {f.fileName}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * 0145 — VOTING.
+ *
+ * ONE BUTTON, AND IT IS ALWAYS YOUR OWN VOTE. The API ignores whatever value
+ * this sends and toggles the caller's vote, so there is deliberately no way to
+ * express "add Omar's vote" — a vote you can cast on somebody else's behalf is
+ * not a vote. The count is shown because that is the useful part; who voted is
+ * not drawn, because a public tally changes how people vote.
+ */
+function VotingFieldEditor({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: string[]
+  disabled?: boolean
+  onCommit: (next: CustomFieldValue) => void
+}) {
+  const { t } = useTranslation()
+  const me = useAuthStore((s) => s.user?.id) ?? ''
+  const mine = value.includes(me)
+  return (
+    <div className="flex items-center gap-2" data-testid="cf-voting">
+      <button
+        type="button"
+        disabled={disabled}
+        data-testid="cf-vote"
+        aria-pressed={mine}
+        /* The body is ignored by the API; it is sent only because the endpoint
+         * takes one. What decides the outcome is who is asking. */
+        onClick={() => onCommit(value)}
+        className={cn(
+          'rounded-full border px-2.5 py-0.5 text-[11px] transition-colors disabled:opacity-50',
+          mine
+            ? 'border-accent/40 bg-accent/10 text-foreground'
+            : 'border-border text-muted-foreground hover:text-foreground',
+        )}
+      >
+        {mine ? t('taskDetail.voted') : t('taskDetail.vote')}
+      </button>
+      <span className="text-[11px] tabular-nums text-muted-foreground" data-testid="cf-vote-count">
+        {t('taskDetail.voteCount', { n: value.length })}
+      </span>
+    </div>
+  )
 }
 
 /**

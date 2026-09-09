@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 40
+const EXPECTED_CHECKS = 45
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -465,6 +465,78 @@ try {
     toggledOff,
     'and clicking a label really removes it, in the database',
     `after the click the stored labels were ${JSON.stringify(await readBack(labels))}`,
+  )
+
+  // ── 0145 — Files and Voting, the two types 0143 deferred by name ─────────
+  /*
+   * Both were named as deliberately out, and both reasons are answered rather
+   * than overruled: Files IS a reference into the attachments module, and that
+   * module already exists; Voting DOES need to know who is voting, and that is
+   * why the service now takes the caller — not a reason to refuse it.
+   *
+   * The checks that earn their place here are the two security rules. Without
+   * them Files stores any attachment id at all, including one on a task the
+   * reader cannot open, and Voting lets anyone rewrite the tally.
+   */
+  console.log('\n▶ 0145 — Files references what is attached to THIS task')
+  const filesField = (await makeField('Docs', 'files')).data?.id
+  const votingField = (await makeField('Shall we', 'voting')).data?.id
+  chk(
+    !!filesField && !!votingField,
+    'both deferred types can now be defined',
+    `they returned ${JSON.stringify([filesField, votingField])}`,
+  )
+
+  const [att] = await sql`
+    insert into task_attachments (task_id, file_name, content_type, size_bytes, storage_key)
+    values (${task.id}, ${`brief-${TAG}.pdf`}, 'application/pdf', 1024, ${`k/${TAG}`})
+    returning id`
+  const [elsewhere] = await sql`
+    insert into task_attachments (task_id, file_name, content_type, size_bytes, storage_key)
+    values (${bare.id}, ${`other-${TAG}.pdf`}, 'application/pdf', 1024, ${`k/other-${TAG}`})
+    returning id`
+
+  chk(
+    (await setOn(filesField, [att.id])).status < 300,
+    'a file attached to this task can be referenced',
+    'referencing this task\'s own attachment was refused',
+  )
+  /*
+   * THE CHECK THAT MATTERS. `elsewhere` is a real attachment id — on a
+   * DIFFERENT task. Storing it would make the field link to a document the
+   * reader may have no right to, and the renderer would draw it as if it
+   * belonged here.
+   */
+  const foreign = await setOn(filesField, [elsewhere.id])
+  chk(
+    // `filesField &&` is the guard: on the first run this check PASSED while
+    // the type did not exist, because a write to a missing field 400s too.
+    // A refusal for the wrong reason is not evidence of the rule.
+    !!filesField && foreign.status === 400 && (await readBack(filesField))?.[0] === att.id,
+    'but one attached to a different task is refused, and the good one survives',
+    `a foreign attachment id was stored (${foreign.status}) — the field would link to ` +
+      'a document that is not on this task',
+  )
+
+  console.log('\n▶ 0145 — a vote is always your own')
+  await setOn(votingField, [])
+  const after1 = await readBack(votingField)
+  chk(
+    Array.isArray(after1) && after1.length === 1 && after1[0] === me.id,
+    'voting records the caller, whatever the body said',
+    `it stored ${JSON.stringify(after1)} — expected exactly the caller`,
+  )
+  /*
+   * THE BODY IS IGNORED, and this is the check that proves it. A stranger's id
+   * is submitted; if the endpoint honoured the body it would appear in the
+   * tally, and anyone could vote on anyone's behalf.
+   */
+  await setOn(votingField, ['00000000-0000-4000-8000-00000000dead'])
+  const after2 = await readBack(votingField)
+  chk(
+    Array.isArray(after2) && after2.length === 0,
+    'and voting again is a toggle, not a second vote — the submitted id is ignored',
+    `it stored ${JSON.stringify(after2)} — a body-supplied id must never reach the tally`,
   )
 
   // ── §V2-01a — the field is created WHILE the task is being made ──────────

@@ -1016,6 +1016,13 @@
       "when": 1900000112029,
       "tag": "0144_team_view",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1900000113029,
+      "tag": "0145_files_and_voting_fields",
+      "breakpoints": true
     }
   ]
 }

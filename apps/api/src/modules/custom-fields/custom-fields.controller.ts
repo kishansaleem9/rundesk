@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CustomFieldsService } from './custom-fields.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
 
@@ -74,12 +75,15 @@ export class CustomFieldsController {
   @Put('tasks/:taskId/custom-fields/:fieldId')
   @ApiOperation({ summary: 'Set a custom field value on a task' })
   setValue(
+    @CurrentUser() user: { id: string },
     @Param('workspaceId') workspaceId: string,
     @Param('taskId') taskId: string,
     @Param('fieldId') fieldId: string,
-    // `string[]` is §V2-01c's `labels` and `people`.
+    // `string[]` is §V2-01c's `labels`, `people` and `files`.
     @Body() body: { value: string | number | boolean | string[] | null },
   ) {
-    return this.svc.setValue(workspaceId, taskId, fieldId, body.value)
+    // The actor is passed for `voting` only, which ignores `body.value` and
+    // toggles this person's own vote — see the service.
+    return this.svc.setValue(workspaceId, taskId, fieldId, body.value, user.id)
   }
 }

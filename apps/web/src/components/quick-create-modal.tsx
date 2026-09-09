@@ -190,6 +190,8 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
   { value: 'labels', labelKey: 'taskDetail.fieldType.labels' },
   { value: 'people', labelKey: 'taskDetail.fieldType.people' },
   { value: 'progress_manual', labelKey: 'taskDetail.fieldType.progressManual' },
+  { value: 'files', labelKey: 'taskDetail.fieldType.files' },
+  { value: 'voting', labelKey: 'taskDetail.fieldType.voting' },
   { value: 'progress_auto', labelKey: 'taskDetail.fieldType.progressAuto' },
 ]
 

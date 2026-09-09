@@ -1,0 +1,23 @@
+-- §V2-01c — the two field types 0143 deferred by name.
+--
+-- Frames `00:20`/`00:40` show ~30 types in the picker she scrolls through while
+-- saying ClickUp gives us all of these. 0143 built six and named Files and
+-- Voting as deliberately out, for reasons that were true at the time and are
+-- now answered:
+--
+--   · **Files** was called "a reference into the attachments module, not a
+--     value". It is exactly that, and `task_attachments` already exists with
+--     upload and presign endpoints — so the field stores attachment ids and the
+--     module it references is already there. Nothing new to plumb.
+--
+--   · **Voting** was called out because `setValue` has no actor, "because every
+--     other type's value is the same for everybody". Still true, and it is the
+--     reason voting needs the actor rather than a reason to refuse it: a vote
+--     you can cast on somebody else's behalf is not a vote. The service now
+--     takes the caller's id and voting IGNORES the submitted value entirely,
+--     toggling only the caller's own vote.
+--
+-- Both store `string[]` in the existing jsonb value column, like `labels` and
+-- `people` — attachment ids for one, voter ids for the other.
+ALTER TYPE "custom_field_type" ADD VALUE IF NOT EXISTS 'files';
+ALTER TYPE "custom_field_type" ADD VALUE IF NOT EXISTS 'voting';
