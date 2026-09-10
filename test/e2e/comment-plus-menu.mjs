@@ -43,7 +43,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 12
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -153,6 +153,7 @@ try {
     'comment-plus-mention-task',
     'comment-plus-file',
     'comment-plus-emoji',
+    'comment-plus-slash',
     'comment-plus-new-task',
     'comment-plus-new-doc',
     'comment-plus-new-whiteboard',
@@ -163,7 +164,7 @@ try {
   }
   chk(
     present.length === wanted.length,
-    `all eight buildable items are in the menu`,
+    `all ${wanted.length} buildable items are in the menu`,
     `only ${present.length} of ${wanted.length}: missing ${wanted.filter((w) => !present.includes(w)).join(', ')}`,
   )
 
@@ -172,11 +173,22 @@ try {
    * honest: Slash commands and Brain would be trivial to add as rows and would
    * do nothing, which is the defect class this codebase keeps removing.
    */
+  /*
+   * BRAIN STAYS OUT. Slash commands used to be excluded alongside it for the
+   * same reason — nothing behind them — and §V2-S05c built the engine, so the
+   * item is real now and IS expected. Brain² still does not exist, so that half
+   * of this check stands unchanged: the menu must not grow a label over nothing.
+   */
   const menuText = (await readText(page.locator('[role="menu"]').first())).toLowerCase()
   chk(
-    !menuText.includes('brain') && !menuText.includes('slash'),
-    'and the two with nothing behind them are absent, not labels',
+    !menuText.includes('brain'),
+    'and Brain, which has nothing behind it, is still absent',
     `the menu offered: ${menuText.replace(/\n/g, ' | ')}`,
+  )
+  chk(
+    menuText.includes('slash'),
+    'while Slash commands, which now has an engine, is offered',
+    'the composer has a slash menu and the "+" does not mention it',
   )
 
   // -------------------------------------------------------------------------

@@ -258,6 +258,26 @@ went missing entirely. A list that is only written once stops being true.
     not "and permissions", because there are still no per-field permission
     columns to put there.
 
+- **Slash commands in the comment composer, frame `04:50` — and the prerequisite
+  that made them worth anything.** The previous item deliberately left "Slash
+  commands" out of the "+" menu because the composer had none. Building them
+  needed comments to RENDER markdown first: comment bodies were plain text, so a
+  slash command inserting `## ` would have left two hashes on screen for ever.
+  The blocks now live in `apps/web/src/lib/composer-blocks.ts`, shared with the
+  description editor rather than copied (10 unit tests), and the "+" menu's item
+  is real.
+  **A check caught the renderer eating an existing corpus.** The first version
+  ran inline markdown on every comment, and a comment seeded before any of this
+  — `file_name_here` — came back as `filenamehere`, because `_..._` is emphasis
+  and the underscores were consumed. That is not a formatting preference, it is
+  losing characters somebody typed. Markdown now applies only to a comment that
+  ACTUALLY contains block markdown — a list, quote, table or fence, which nobody
+  writes by accident — and everything else renders byte for byte as before. The
+  cost is that `**bold**` in a one-liner stays literal; the alternative was
+  re-interpreting every comment ever written. 10 checks, three break-tests.
+  The composer hint carries the `/` half only: there is no space-for-AI hook on
+  this composer, and half a hint that works beats a whole one that lies.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -358,14 +378,14 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Voice note, Transcribe, Insert as text, inline player, **locale→speech language** |
 | M | "Attach as audio file" tooltip |
 | B | **Comment "+" menu** — eight of the frame's ten items, each one wired |
-| M | Slash commands in the comment composer — no engine, so absent from the menu |
+| B | Slash commands in the comment composer, and in the "+" menu |
 | M | "Brain" in the "+" menu — the Brain² hub does not exist |
-| M | Slash commands in the comment composer (description editor only) |
+| B | Comment bodies render block markdown, which is what makes the above visible |
 | B | Record a Video Clip; real `getDisplayMedia` |
 | M | Screen-record setup panel (source / 1080p / mic device) |
 | M | "Clip created!" card — Create a task · New tab · Copy link; "Link copied" |
 | P | Clip in a comment renders, but no title, spinner, or card actions |
-| M | Composer hint "Press 'space' for AI or '/' for commands" |
+| P | Composer hint — the "/" half, which is the half that works; no space-for-AI hook exists |
 | P | Threads — replies nest inline; no "Thread by `<name>`" panel with own composer |
 | B | Reactions, react/reply/assign hover actions, resolve/reopen |
 | M | "Save" a comment |

@@ -103,6 +103,7 @@ import { MoveDialog } from './move-dialog'
 import { QuickCreateModal } from './quick-create-modal'
 import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
+import { COMPOSER_BLOCKS, applyBlockAtCaret, matchBlocks } from '../lib/composer-blocks'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useDateFormat } from '../lib/date-format'
 import {
@@ -1636,26 +1637,20 @@ function OverviewPanel({
    * callouts to receive it. Same gesture, same blocks, no rewrite of data
    * people already have.
    */
+  /*
+   * §V2-S05c — the blocks come from `lib/composer-blocks`, which the COMMENT
+   * composer now shares. They used to be written out here, and a second copy in
+   * the comment composer would have drifted the moment either surface gained a
+   * block, with nothing failing to compile.
+   *
+   * `image` stays local: it needs a file uploaded before there is anything to
+   * insert, so it is an action rather than a piece of markdown, and it belongs
+   * with the uploader that can perform it (§G15 `[22:48]`).
+   */
   const DESCRIPTION_BLOCKS = [
-    { id: 'h2', labelKey: 'taskDetail.slash.heading', md: '## ' },
-    { id: 'bullet', labelKey: 'taskDetail.slash.bulletList', md: '- ' },
-    { id: 'numbered', labelKey: 'taskDetail.slash.numberedList', md: '1. ' },
-    { id: 'todo', labelKey: 'taskDetail.slash.todoList', md: '- [ ] ' },
-    { id: 'quote', labelKey: 'taskDetail.slash.quote', md: '> ' },
-    { id: 'code', labelKey: 'taskDetail.slash.code', md: '```\n\n```\n' },
-    { id: 'table', labelKey: 'taskDetail.slash.table', md: '| Column | Column |\n| --- | --- |\n|  |  |\n' },
-    { id: 'divider', labelKey: 'taskDetail.slash.divider', md: '---\n' },
-    { id: 'banner', labelKey: 'taskDetail.slash.banner', md: ':::note\n\n:::\n' },
-    { id: 'warning', labelKey: 'taskDetail.slash.warning', md: ':::warn\n\n:::\n' },
-    /*
-     * §G15 [22:48] — "main yahan pe koi aur image embed kar sakti hoon".
-     *
-     * The only block that is not a piece of markdown to paste in: an image
-     * needs a file first. Picking one uploads it through the same presign path
-     * the Files tab uses, then writes a reference to it — see onPickImage.
-     */
-    { id: 'image', labelKey: 'taskDetail.slash.image', action: 'image' as const },
-  ] as const
+    ...COMPOSER_BLOCKS.map((b) => ({ ...b, action: undefined as 'image' | undefined })),
+    { id: 'image', labelKey: 'taskDetail.slash.image' as TranslationKey, md: '', action: 'image' as const },
+  ]
 
   /**
    * Replace the `/query` the caret sits in with a block.
@@ -4843,6 +4838,17 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
    * pieces that make its entries real, not a menu over ten finished things.
    */
   const [assignTo, setAssignTo] = useState<string>('')
+  /*
+   * §V2-S05c — slash commands in the COMMENT composer, frame `04:50`.
+   *
+   * The description has had them since §G15 `[22:28]`; the composer did not,
+   * and the "+" menu could not honestly offer them. The prerequisite was that
+   * comments RENDER markdown, or a slash command would insert `## ` and leave
+   * it on screen as two hashes for ever — see the `markdown` prop on
+   * `MentionText`.
+   */
+  const [commentSlashOpen, setCommentSlashOpen] = useState(false)
+  const [commentSlashQuery, setCommentSlashQuery] = useState('')
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [quickCreate, setQuickCreate] = useState<'task' | 'doc' | 'whiteboard' | null>(null)
   const commentFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -5102,7 +5108,13 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                     {new Date(c.createdAt).toLocaleString()}
                   </span>
                 </div>
-                <MentionText text={c.body} namesById={namesById} className="mt-1 text-sm" />
+                {/*
+                  §V2-S05c — `markdown` on, so a block the slash menu inserted
+                  is laid out rather than shown as its own syntax. A comment
+                  with no block markdown renders exactly as it always did; see
+                  the `hasBlockMarkdown` note in MentionText.
+                */}
+                <MentionText markdown text={c.body} namesById={namesById} className="mt-1 text-sm" />
                 <CommentAttachments files={c.attachments} />
                 <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                   {c.assignee?.displayName && (
@@ -5212,7 +5224,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                             {new Date(reply.createdAt).toLocaleString()}
                           </span>
                         </div>
-                        <MentionText text={reply.body} namesById={namesById} className="mt-1 text-sm" />
+                        <MentionText markdown text={reply.body} namesById={namesById} className="mt-1 text-sm" />
                         <CommentAttachments files={reply.attachments} />
                         <div className="mt-2 flex gap-2">
                           <button
@@ -5303,7 +5315,24 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
         <Textarea
           ref={commentTextRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value
+            setText(next)
+            /*
+             * A slash only starts a command at the start of a line or after a
+             * space — otherwise "and/or" or a URL would open the menu, which is
+             * the behaviour that makes people stop typing slashes.
+             */
+            const caret = e.target.selectionStart ?? next.length
+            const before = next.slice(0, caret)
+            const slash = before.lastIndexOf('/')
+            const opensCommand =
+              slash !== -1 &&
+              (slash === 0 || /[\s]/.test(before[slash - 1])) &&
+              !/\s/.test(before.slice(slash + 1))
+            setCommentSlashOpen(opensCommand)
+            setCommentSlashQuery(opensCommand ? before.slice(slash + 1) : '')
+          }}
           placeholder={t('taskDetail.commentPlaceholder')}
           data-testid="comment-input"
           rows={3}
@@ -5486,6 +5515,56 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
             onTranscript={(append) => setText((prev) => append(prev))}
           />
         </div>
+        {/*
+          §V2-S05c frame `04:50` — the slash menu, and the same blocks the
+          description offers because both read `COMPOSER_BLOCKS`.
+        */}
+        {commentSlashOpen && (
+          <div
+            data-testid="comment-slash-menu"
+            className="mt-1 max-h-48 overflow-auto rounded-lg border border-border bg-card shadow-lg"
+          >
+            {matchBlocks(COMPOSER_BLOCKS, commentSlashQuery, t).length === 0 ? (
+              <div className="px-2.5 py-2 text-xs text-muted-foreground">
+                {t('taskDetail.slashNoMatch')}
+              </div>
+            ) : (
+              matchBlocks(COMPOSER_BLOCKS, commentSlashQuery, t).map((block) => (
+                <button
+                  key={block.id}
+                  type="button"
+                  data-testid={`comment-slash-${block.id}`}
+                  // onMouseDown, so the click lands before the textarea blurs.
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    const el = commentTextRef.current
+                    const caret = el?.selectionStart ?? text.length
+                    const next = applyBlockAtCaret(text, caret, block.md)
+                    setText(next.text)
+                    setCommentSlashOpen(false)
+                    setCommentSlashQuery('')
+                    requestAnimationFrame(() => {
+                      el?.focus()
+                      el?.setSelectionRange(next.caret, next.caret)
+                    })
+                  }}
+                  className="w-full px-2.5 py-1.5 text-left text-xs hover:bg-muted/70"
+                >
+                  {t(block.labelKey)}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        {/*
+          The hint frame `04:50` prints under the box — the "/" half only.
+          ClickUp's reads "Press 'space' for AI or '/' for commands"; there is no
+          space-for-AI hook on this composer, and half a hint that works beats a
+          whole one that lies about the other half.
+        */}
+        <p className="mt-1 text-[10px] text-muted-foreground" data-testid="comment-composer-hint">
+          {t('taskDetail.composerHint')}
+        </p>
         {/* "Add emoji". A short row of the ones people actually use, inserted at
             the caret's end — not a full picker, and not pretending to be. */}
         {emojiOpen && (
@@ -5554,6 +5633,13 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                 commentTextRef.current?.focus()
               }}
               onEmoji={() => setEmojiOpen((v) => !v)}
+              onSlash={() => {
+                // Same menu the "/" key opens, reached from the "+" instead.
+                setText((prev) => (prev.endsWith('/') ? prev : `${prev}/`))
+                setCommentSlashQuery('')
+                setCommentSlashOpen(true)
+                commentTextRef.current?.focus()
+              }}
               onQuickCreate={setQuickCreate}
             />
           </div>
@@ -5601,6 +5687,7 @@ function CommentPlusMenu({
   onRecordClip,
   onMentionTask,
   onEmoji,
+  onSlash,
   onQuickCreate,
 }: {
   members: WorkspaceMemberLite[]
@@ -5610,6 +5697,7 @@ function CommentPlusMenu({
   onRecordClip: () => void
   onMentionTask: () => void
   onEmoji: () => void
+  onSlash: () => void
   onQuickCreate: (mode: 'task' | 'doc' | 'whiteboard') => void
 }) {
   const { t } = useTranslation()
@@ -5656,6 +5744,16 @@ function CommentPlusMenu({
           <DropdownMenuItem data-testid="comment-plus-file" onSelect={onAddFile}>
             <Paperclip className="mr-2 h-4 w-4" />
             {t('commentPlus.addFile')}
+          </DropdownMenuItem>
+          {/*
+            §V2-S05c — Slash commands, which frame `04:50` lists FIRST and which
+            were deliberately absent from this menu while the composer had none.
+            It has them now, so the item is real: this opens the same menu
+            typing "/" opens.
+          */}
+          <DropdownMenuItem data-testid="comment-plus-slash" onSelect={onSlash}>
+            <Hash className="mr-2 h-4 w-4" />
+            {t('commentPlus.slashCommands')}
           </DropdownMenuItem>
           <DropdownMenuItem data-testid="comment-plus-emoji" onSelect={onEmoji}>
             <Smile className="mr-2 h-4 w-4" />

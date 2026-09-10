@@ -837,6 +837,20 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S05c, frame `04:50` — slash commands in the comment composer.
+      #
+      # Worthless without comments rendering markdown: a slash command in a
+      # plain-text box leaves "## " on screen for ever. So the pair is checked
+      # together, AND a comment seeded before any of it — containing
+      # `file_name_here` and `and/or` — must still read byte for byte. That
+      # check caught the first version eating the underscores as emphasis.
+      - name: Comment slash commands
+        if: '!cancelled()'
+        run: node test/e2e/comment-slash-commands.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist
