@@ -2525,6 +2525,10 @@ export const en = {
   'taskDetail.timeTrackingUnavailable': 'Time tracking is not available.',
   'taskDetail.system': 'System',
   'taskDetail.noActivity': 'No activity yet',
+  'taskDetail.createdOn': 'Created {{date}}',
+  'taskDetail.showActivityRail': 'Show activity panel',
+  'taskDetail.hideActivityRail': 'Hide activity panel',
+
   'taskDetail.noActivityHint': 'Changes will show up here.',
   'taskDetail.timerRunning': 'Timer running',
   'taskDetail.timerSince': 'since {{time}} · elapsed {{duration}}',
@@ -8490,6 +8494,10 @@ export const es: Record<TranslationKey, string> = {
   'taskDetail.timeTrackingUnavailable': 'El seguimiento de tiempo no está disponible.',
   'taskDetail.system': 'Sistema',
   'taskDetail.noActivity': 'Aún no hay actividad',
+  'taskDetail.createdOn': 'Creada el {{date}}',
+  'taskDetail.showActivityRail': 'Mostrar panel de actividad',
+  'taskDetail.hideActivityRail': 'Ocultar panel de actividad',
+
   'taskDetail.noActivityHint': 'Los cambios aparecerán aquí.',
   'taskDetail.timerRunning': 'Temporizador en marcha',
   'taskDetail.timerSince': 'desde {{time}} · transcurrido {{duration}}',
@@ -14407,6 +14415,10 @@ export const ar: Record<TranslationKey, string> = {
   'taskDetail.timeTrackingUnavailable': 'تتبّع الوقت غير متاح.',
   'taskDetail.system': 'النظام',
   'taskDetail.noActivity': 'لا يوجد نشاط بعد',
+  'taskDetail.createdOn': 'أُنشئت في {{date}}',
+  'taskDetail.showActivityRail': 'إظهار لوحة النشاط',
+  'taskDetail.hideActivityRail': 'إخفاء لوحة النشاط',
+
   'taskDetail.noActivityHint': 'ستظهر التغييرات هنا.',
   'taskDetail.timerRunning': 'المؤقت يعمل',
   'taskDetail.timerSince': 'منذ {{time}} · المنقضي {{duration}}',
@@ -20245,6 +20257,10 @@ export const ur: Record<TranslationKey, string> = {
   'taskDetail.timeTrackingUnavailable': 'وقت کی ٹریکنگ دستیاب نہیں ہے۔',
   'taskDetail.system': 'سسٹم',
   'taskDetail.noActivity': 'ابھی کوئی سرگرمی نہیں',
+  'taskDetail.createdOn': '{{date}} کو بنایا گیا',
+  'taskDetail.showActivityRail': 'سرگرمی پینل دکھائیں',
+  'taskDetail.hideActivityRail': 'سرگرمی پینل چھپائیں',
+
   'taskDetail.noActivityHint': 'تبدیلیاں یہاں ظاہر ہوں گی۔',
   'taskDetail.timerRunning': 'ٹائمر چل رہا ہے',
   'taskDetail.timerSince': '{{time}} سے · گزرا وقت {{duration}}',

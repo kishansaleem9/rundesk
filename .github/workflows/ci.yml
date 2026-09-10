@@ -869,6 +869,21 @@ jobs:
           E2E_PEER_EMAIL: org-admin@rundesk.internal
           E2E_PEER_PASSWORD: OrgAdmin@123!
 
+      # §V2-S04, frame `03:40` — "Created <date>" and the activity panel as a
+      # toggleable rail rather than a tab.
+      #
+      # The load-bearing check is the field grid and an activity entry on screen
+      # at the same moment: every other check here would pass on a build that
+      # merely renamed the Activity tab. The chip is protected by seeding a task
+      # created in August and requiring THAT date — a chip reading "today"
+      # passes any presence check while being wrong about every older task.
+      - name: Activity rail and created chip
+        if: '!cancelled()'
+        run: node test/e2e/activity-rail.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

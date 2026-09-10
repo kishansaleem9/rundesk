@@ -301,6 +301,38 @@ went missing entirely. A list that is only written once stops being true.
   its comments out of your Later tab; and the comment is verified against the
   task in the path, because a comment id is not a capability. 13 checks.
 
+- **"Created `<date>`" and the activity panel as a rail, frame `03:40`.** Two
+  gaps, one surface. The chip needed no server work at all: `getTask` selects
+  the whole row, so `createdAt` had been arriving in the payload since custom
+  fields shipped and the header simply never asked — a task could not tell you
+  how old it was without opening the activity feed and scrolling to its end.
+  The frame's note is "Activity panel is toggleable (button top-right of the
+  task)", and at `01:20` the feed sits to the RIGHT of the task with the field
+  grid still on screen. Rundesk had it as a TAB, which makes reading the
+  history and reading the fields two different screens: "You estimated 12
+  hours" could never be read beside the estimate it changed.
+  `apps/web/src/lib/activity-rail.ts` holds the preference, same shape as
+  `collapse-empty-fields.ts` — two readers (the sheet chrome, which has to make
+  room and drop the tab, and the rail) several hundred lines apart, so one store
+  rather than state lifted and eventually copied.
+  Three things follow from the rail being on, kept together so they cannot
+  disagree: the sheet widens (a 672px side sheet split in two leaves neither
+  half readable, so asking for the rail asks for the room), the Activity TAB
+  comes out of the strip (the same feed in two places is the duplicated-list
+  bug in a new hat), and a reader sitting on that tab is moved to Overview
+  rather than left on a tab that no longer exists.
+  OFF BY DEFAULT, unlike ClickUp, which shows the panel straight away — its
+  task is a full-page view and Rundesk's is a side sheet. The gap the re-audit
+  named is that the panel could not be toggled at all.
+  NOT "Brain²" beside the chip: that button leads to a hub this product does
+  not have. 12 checks, nine break-tests.
+  **A tenth break-test found a suite defect of the familiar kind.** The "sheet
+  widens" check SAMPLED a width that is animated, so it compared 672px, failed,
+  then re-measured 685px for its own failure message — the mistake
+  `test/e2e/lib/wait.mjs` opens by describing, made again. It waits for the
+  condition now, with a 300px margin: far more than a transition frame, far
+  less than the 672→1440 it is asserting.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -399,8 +431,9 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Cover: Gallery / Upload / Link / Attachments / Remove, Reposition, Change cover |
 | M | Cover: Search tab (documented as deliberate); Gallery "Custom" swatch |
 | M | Task type "Fill with AI" |
-| P | Activity panel is a tab, not a toggleable rail |
-| M | Task header "Created `<date>`" chip; "Brain²" button |
+| B | **Activity panel toggles to a rail** beside the fields; the tab drops out while it is up |
+| B | Task header **"Created `<date>`" chip** — the API returned it all along |
+| M | Task header "Brain²" button — deliberate: the hub does not exist |
 | B | @ picker People/Tasks/Docs; "Does not have access to task" |
 | M | @ picker Whiteboards / Locations / Channels; Brain section; Agents |
 | M | Per-@-type keyboard hint footer |

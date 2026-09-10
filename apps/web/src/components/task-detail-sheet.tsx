@@ -66,8 +66,10 @@ import {
   Mail,
   Merge as MergeIcon,
   Bookmark,
+  PanelRight,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useActivityRail, setActivityRail } from '../lib/activity-rail'
 import { FavoriteStar, useFavorites, useToggleFavorite } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
 import { RequestAccessCard } from './request-access-card'
@@ -325,6 +327,14 @@ type TaskDetail = {
   recurrence?: { cadenceDays?: number | null; rule?: RecurrenceRule | null } | null
   parentTaskId?: string | null
   parent?: { id: string; title: string } | null
+  /**
+   * §V2-S04 frame `03:40` — "Created 7 Aug" on the header's right side.
+   *
+   * The API has always returned this (`getTask` selects the whole row); the
+   * header simply never asked for it. Declaring it here is the whole of the
+   * server side of that chip.
+   */
+  createdAt?: string | null
 }
 
 type TaskComment = {
@@ -566,6 +576,27 @@ export function TaskDetailSheet({
   const [watchersOpen, setWatchersOpen] = useState(false)
   const [moveOpen, setMoveOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  /*
+   * §V2-S04 frame `03:40` — the activity feed as a rail rather than a tab.
+   *
+   * THREE THINGS FOLLOW FROM IT BEING ON, and they are here rather than spread
+   * around so they cannot disagree:
+   *  - the sheet is widened, because a 672px sheet split in two leaves neither
+   *    half readable. Asking for the rail asks for the room;
+   *  - the Activity TAB comes out of the strip. The same feed in two places at
+   *    once is the duplicated-list bug with a fresh coat of paint, and a reader
+   *    who can see the rail has no use for the tab;
+   *  - a reader sitting ON the Activity tab when they turn the rail on is moved
+   *    to Overview, which is the point of the rail: the fields and the history
+   *    at the same time.
+   */
+  const activityRail = useActivityRail()
+  useEffect(() => {
+    if (!activityRail) return
+    setExpanded(true)
+    setActiveTab((tab) => (tab === 'activity' ? 'overview' : tab))
+  }, [activityRail])
+  const visibleTabs = activityRail ? TABS.filter((tab) => tab.key !== 'activity') : TABS
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [coverPickerOpen, setCoverPickerOpen] = useState(false)
@@ -778,6 +809,7 @@ export function TaskDetailSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
+        testId="task-sheet"
         className={cn(
           'w-full overflow-y-auto transition-[max-width] duration-200',
           expanded ? 'sm:max-w-[90vw]' : 'sm:max-w-2xl',
@@ -999,6 +1031,48 @@ export function TaskDetailSheet({
                   </SheetTitle>
                 )}
                 <div className="flex items-center gap-1 shrink-0">
+                  {/*
+                    §V2-S04 frame `03:40` — the header's right side reads
+                    "Created 7 Aug · Brain² · Share · ⋯", and this is the first
+                    of those. The date came back from the API all along; nothing
+                    asked for it, so a task could not tell you how old it was
+                    without opening the activity feed and scrolling to the end.
+
+                    NOT "Brain²" beside it: that button leads to a hub this
+                    product does not have, and a control named after a place
+                    that does not exist is the facade this audit keeps removing.
+
+                    `formatDate` rather than the frame's literal "7 Aug", so the
+                    chip follows the reader's own date format — the same one the
+                    due-date badge above it uses.
+                  */}
+                  {detailQuery.data.createdAt && (
+                    <span
+                      className="mr-1 hidden text-[11px] text-muted-foreground sm:inline"
+                      title={new Date(detailQuery.data.createdAt).toLocaleString()}
+                      data-testid="task-created-chip"
+                    >
+                      {t('taskDetail.createdOn', { date: formatDate(detailQuery.data.createdAt) })}
+                    </span>
+                  )}
+                  {/*
+                    And the button the frame's note names: "Activity panel is
+                    toggleable (button top-right of the task)".
+                  */}
+                  <button
+                    type="button"
+                    title={t(activityRail ? 'taskDetail.hideActivityRail' : 'taskDetail.showActivityRail')}
+                    aria-label={t(activityRail ? 'taskDetail.hideActivityRail' : 'taskDetail.showActivityRail')}
+                    aria-pressed={activityRail}
+                    onClick={() => setActivityRail(!activityRail)}
+                    data-testid="task-activity-rail-toggle"
+                    className={cn(
+                      'h-8 w-8 inline-flex items-center justify-center rounded hover:text-foreground',
+                      activityRail ? 'text-accent' : 'text-muted-foreground',
+                    )}
+                  >
+                    <PanelRight className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     title={t('taskDetail.moveTask')}
@@ -1265,7 +1339,7 @@ export function TaskDetailSheet({
 
             {/* Tab strip */}
             <div className="flex gap-4 overflow-x-auto scrollbar-none border-b border-border/60 -mx-6 px-6">
-              {TABS.map((tab) => {
+              {visibleTabs.map((tab) => {
                 const isActive = activeTab === tab.key
                 return (
                   <button
@@ -1286,7 +1360,19 @@ export function TaskDetailSheet({
               })}
             </div>
 
-            <div className="pt-4">
+            {/*
+              §V2-S04 frame `01:20` — the field grid and the activity feed on
+              screen together, which is the whole reason the rail exists: "You
+              estimated 12 hours" is worth more beside the estimate than on a
+              screen of its own.
+
+              `lg:flex-row` and not a hard split: turning the rail on widens the
+              sheet to 90vw, which is past `lg` on any real display, but on a
+              phone the rail stacks under the panel instead of squeezing both
+              into nothing.
+            */}
+            <div className={cn('pt-4', activityRail && 'flex flex-col gap-4 lg:flex-row lg:items-start')}>
+              <div className={cn(activityRail && 'min-w-0 flex-1')} data-testid="task-tab-panel">
               {activeTab === 'overview' && (
                 <OverviewPanel detail={detailQuery.data} taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
               )}
@@ -1333,6 +1419,23 @@ export function TaskDetailSheet({
               )}
               {activeTab === 'time' && (
                 <TimePanel taskId={detailQuery.data.id} estimate={detailQuery.data.timeEstimate} defaultBillable={detailQuery.data.defaultBillable} />
+              )}
+              </div>
+              {/*
+                ONE ActivityPanel, in whichever place is showing. The tab above
+                is filtered out while the rail is on, so this is never a second
+                copy of the feed — it is the same component, given a column.
+              */}
+              {activityRail && (
+                <aside
+                  className="w-full shrink-0 rounded-md border border-border/70 bg-card/40 p-3 lg:w-[340px]"
+                  data-testid="task-activity-rail"
+                >
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t('taskDetail.tab.activity')}
+                  </h3>
+                  <ActivityPanel taskId={detailQuery.data.id} listId={detailQuery.data.listId} />
+                </aside>
               )}
             </div>
           </>

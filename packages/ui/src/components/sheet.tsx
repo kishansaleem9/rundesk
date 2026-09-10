@@ -45,10 +45,20 @@ export function SheetContent({
   className,
   children,
   side = 'right',
+  testId,
 }: {
   className?: string
   children: React.ReactNode
   side?: 'left' | 'right'
+  /**
+   * A handle on the panel itself, for a caller that needs to measure it.
+   *
+   * §V2-S04 needed one: turning the activity rail on widens the sheet, and
+   * "it got wider" cannot be asserted against a panel with nothing to select.
+   * The wrapper is `position: fixed; inset: 0` and the panel inside it is the
+   * element with the width, so the id goes on the inner div.
+   */
+  testId?: string
 }) {
   const { open, setOpen } = useSheetCtx()
   if (!open) return null
@@ -60,6 +70,7 @@ export function SheetContent({
         onClick={() => setOpen(false)}
       />
       <div
+        data-testid={testId}
         className={cn(
           'absolute top-0 h-full w-[95vw] max-w-2xl bg-card border-l border-border shadow-2xl p-5 overflow-auto',
           side === 'right' ? 'right-0' : 'left-0 border-l-0 border-r',
