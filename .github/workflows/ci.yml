@@ -794,6 +794,21 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S05b, frame `04:50` — the comment composer's "+" menu.
+      #
+      # A menu is the easiest thing in a UI to fake: ten rows that open, close
+      # and do nothing photograph perfectly. So no check stops at "the item is
+      # in the menu" — each follows the item to what it claims to do, and the
+      # assign check follows it to the database. One check asserts the OPPOSITE:
+      # Slash commands and Brain must NOT be there, because nothing is behind
+      # them.
+      - name: Comment plus menu
+        if: '!cancelled()'
+        run: node test/e2e/comment-plus-menu.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

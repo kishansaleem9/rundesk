@@ -155,6 +155,34 @@ went missing entirely. A list that is only written once stops being true.
   point of the button — CHOOSING the person — and a button that returns an
   arbitrary colleague with a confident label is worse than no button.
 
+- **The comment "+" menu, frame `04:50`.** The row said "the ten items exist
+  scattered, no menu gathers them" — half wrong, and checking paid for itself.
+  Record a Video Clip, Add a file and Mention a task did exist as their own
+  controls. **Assigning the comment you are WRITING did not** (the API can
+  assign one, and the UI used it only as a hover action on a comment already
+  posted — a different gesture). An emoji inserter did not exist in the composer
+  at all. New Task / New Doc / New Whiteboard had no entry point from here. So
+  this was a menu *plus* three missing pieces.
+  Everything in it goes to the code the direct controls use: Add a file clicks
+  the composer's own input, Record a Video Clip calls the recorder's own
+  `start` through a published ref, and the three "New …" items open the
+  quick-create modal on the matching tab rather than being three more creators.
+  11 checks, four break-tests — one of which asserts the menu does NOT offer
+  Slash commands or Brain.
+- **Two defects found while building it, both dead handlers:**
+  · the quick-create modal's Escape was `onKeyDown` on a `<div>`, which takes no
+    focus and so never receives a key event — the modal looked as if it closed
+    on Escape and did not, for anybody. Moved to a document listener.
+  · keeping the "+" menu open to show the assign picker left Radix's
+    `pointer-events: none` on the body, so the composer and the Comment button
+    behind it stopped responding. That one was mine, introduced and caught in
+    the same hour.
+- **A second vacuous check, caught by break-testing.** "The picker is showing
+  TASKS" read the whole page — and the list behind the sheet renders the same
+  task title, so switching the tab to People failed nothing. Scoped to the
+  picker element. Same cause as the first: asserting on `body` instead of on the
+  thing that is supposed to have changed.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -252,7 +280,9 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | Per-@-type keyboard hint footer |
 | B | Voice note, Transcribe, Insert as text, inline player, **locale→speech language** |
 | M | "Attach as audio file" tooltip |
-| M | **Comment "+" menu** — the ten items exist scattered, no menu gathers them |
+| B | **Comment "+" menu** — eight of the frame's ten items, each one wired |
+| M | Slash commands in the comment composer — no engine, so absent from the menu |
+| M | "Brain" in the "+" menu — the Brain² hub does not exist |
 | M | Slash commands in the comment composer (description editor only) |
 | B | Record a Video Clip; real `getDisplayMedia` |
 | M | Screen-record setup panel (source / 1080p / mic device) |

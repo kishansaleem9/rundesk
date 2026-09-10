@@ -57,12 +57,20 @@ export function CommentRecorder({
   onAttach,
   onTranscript,
   className,
+  startRef,
 }: {
   /** Hand the finished recording to the composer as an attachment. */
   onAttach: (file: File) => void
   /** Put the spoken words into the composer's text box. */
   onTranscript: (append: (existing: string) => string) => void
   className?: string
+  /*
+   * §V2-S05b frame `04:50` — the composer's "+" menu lists "Record a Video
+   * Clip", and the button for it already lives in here. The parent borrows
+   * `start` through this ref rather than reaching into this component's DOM to
+   * click it, which would break the moment the markup moved.
+   */
+  startRef?: React.MutableRefObject<((kind: RecordingKind) => void) | null>
 }) {
   const { t, locale } = useTranslation()
   const [kind, setKind] = useState<RecordingKind | null>(null)
@@ -215,6 +223,21 @@ export function CommentRecorder({
     // recording does not need.
     if (next === 'voice') speech.start()
   }
+
+  /*
+   * Published for the composer's "+" menu. Kept in a ref rather than passed
+   * down as a callback so the menu item calls the SAME `start` this component's
+   * own buttons call — one recorder, one entry point, two ways in.
+   */
+  useEffect(() => {
+    if (!startRef) return
+    startRef.current = (kind: RecordingKind) => {
+      void start(kind)
+    }
+    return () => {
+      startRef.current = null
+    }
+  })
 
   const discard = () => {
     if (finished) URL.revokeObjectURL(finished.url)

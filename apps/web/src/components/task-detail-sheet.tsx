@@ -52,6 +52,11 @@ import {
   MoveVertical,
   MoreHorizontal,
   Star,
+  Plus,
+  UserPlus,
+  Smile,
+  PenTool,
+  CheckSquare,
   History,
   Printer,
   Link as LinkIcon,
@@ -95,6 +100,7 @@ import { presentationFor } from '../lib/composer-recording'
 import { MentionText } from './mention-text'
 import { RecurringTaskDialog, type RecurrenceRule } from './recurring-task-dialog'
 import { MoveDialog } from './move-dialog'
+import { QuickCreateModal } from './quick-create-modal'
 import { Markdown } from './markdown'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -4826,6 +4832,22 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
   const [editingBody, setEditingBody] = useState('')
   const [selectedMentionUserIds, setSelectedMentionUserIds] = useState<string[]>([])
   const [mentionTab, setMentionTab] = useState<'people' | 'tasks' | 'docs'>('people')
+  /*
+   * §V2-S05b frame `04:50` — the composer's "+" menu.
+   *
+   * THE RE-AUDIT SAID "the ten items exist scattered, no menu gathers them".
+   * Half true, and checking it was worth the time: Record a Video Clip, Add a
+   * file and Mention a task did exist; assigning the comment you are WRITING,
+   * an emoji inserter, and the three "New …" entry points did not; and Slash
+   * commands and Brain have no engine at all. So this is a menu plus the three
+   * pieces that make its entries real, not a menu over ten finished things.
+   */
+  const [assignTo, setAssignTo] = useState<string>('')
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const [quickCreate, setQuickCreate] = useState<'task' | 'doc' | 'whiteboard' | null>(null)
+  const commentFileInputRef = useRef<HTMLInputElement | null>(null)
+  const commentTextRef = useRef<HTMLTextAreaElement | null>(null)
+  const startRecordingRef = useRef<((kind: 'voice' | 'clip') => void) | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
   const mentionQuery = text.slice(text.lastIndexOf('@') + 1).toLowerCase()
   const membersQuery = useQuery({
@@ -4860,9 +4882,9 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
       }
     },
   })
+  const members = membersQuery.data ?? []
   const mentionPeople: MentionCandidate[] =
-    candidatesQuery.data ??
-    (membersQuery.data ?? []).map((m) => ({ ...m, hasAccess: true }))
+    candidatesQuery.data ?? members.map((m) => ({ ...m, hasAccess: true }))
   const mentionCandidates = mentionPeople.filter((m) =>
     (m.displayName || m.email).toLowerCase().includes(mentionQuery),
   )
@@ -4922,7 +4944,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
         })
         attachmentIds.push(rec.id)
       }
-      return api(`/tasks/${taskId}/comments`, {
+      const posted = await api<{ id: string }>(`/tasks/${taskId}/comments`, {
         method: 'POST',
         body: JSON.stringify({
           body: text,
@@ -4931,12 +4953,36 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
         }),
       })
+      /*
+       * "Assign comment" is chosen BEFORE posting, so the assignment happens
+       * here rather than being a second thing to remember afterwards. It is a
+       * separate request because the API assigns an existing comment — and if
+       * it fails the comment still exists, so the error says so rather than
+       * pretending the whole post failed.
+       */
+      if (assignTo) {
+        const name =
+          members.find((m) => m.userId === assignTo)?.displayName ||
+          members.find((m) => m.userId === assignTo)?.email ||
+          assignTo
+        try {
+          await api(`/tasks/${taskId}/comments/${posted.id}/assign`, {
+            method: 'POST',
+            body: { userId: assignTo },
+          })
+          toast.success(t('commentPlus.assignedOnPost', { name }))
+        } catch {
+          toast.error(t('commentPlus.assignFailed'))
+        }
+      }
+      return posted
     },
     onSuccess: async () => {
       setText('')
       setCommentFiles([])
       setReplyTo(null)
       setSelectedMentionUserIds([])
+      setAssignTo('')
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'attachments'] })
       await qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
@@ -5255,9 +5301,11 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
           </div>
         )}
         <Textarea
+          ref={commentTextRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={t('taskDetail.commentPlaceholder')}
+          data-testid="comment-input"
           rows={3}
           onKeyDown={(e) => {
             if (!showMentions || activeCandidates.length === 0) return
@@ -5280,7 +5328,10 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
           }}
         />
         {showMentions && mentionCandidates.length > 0 && (
-          <div className="mt-2 rounded-lg border border-border bg-card shadow-lg overflow-hidden">
+          <div
+            data-testid="comment-mention-picker"
+            className="mt-2 rounded-lg border border-border bg-card shadow-lg overflow-hidden"
+          >
             <div className="px-2 pt-2 pb-1 border-b border-border/70 flex items-center gap-1">
               {([
                 ['people', 'taskDetail.mentionPeople'],
@@ -5430,25 +5481,82 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
          */}
         <div className="mt-2">
           <CommentRecorder
+            startRef={startRecordingRef}
             onAttach={(file) => setCommentFiles((prev) => [...prev, file])}
             onTranscript={(append) => setText((prev) => append(prev))}
           />
         </div>
+        {/* "Add emoji". A short row of the ones people actually use, inserted at
+            the caret's end — not a full picker, and not pretending to be. */}
+        {emojiOpen && (
+          <div className="mt-2 flex flex-wrap gap-1" data-testid="comment-emoji-row">
+            {['👍', '🎉', '❤️', '🙏', '😄', '🔥', '👀', '✅'].map((e) => (
+              <button
+                key={e}
+                type="button"
+                data-testid={`comment-emoji-${e}`}
+                onClick={() => {
+                  setText((prev) => prev + e)
+                  setEmojiOpen(false)
+                  commentTextRef.current?.focus()
+                }}
+                className="rounded px-1.5 py-0.5 text-base hover:bg-muted/60"
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
+        {assignTo && (
+          <p className="mt-2 text-[11px] text-muted-foreground" data-testid="comment-assign-pending">
+            {t('commentPlus.assignTo', {
+              name:
+                members.find((m) => m.userId === assignTo)?.displayName ||
+                members.find((m) => m.userId === assignTo)?.email ||
+                assignTo,
+            })}
+          </p>
+        )}
+        {quickCreate && (
+          <QuickCreateModal initialMode={quickCreate} onClose={() => setQuickCreate(null)} />
+        )}
         <div className="mt-2 flex items-center justify-between gap-2">
-          <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
-            <Paperclip className="h-3.5 w-3.5" />
-            {t('taskDetail.attach')}
+          <div className="flex items-center gap-2">
             <input
+              ref={commentFileInputRef}
               type="file"
               multiple
               className="hidden"
+              data-testid="comment-file-input"
               onChange={(e) => {
                 const picked = Array.from(e.target.files ?? [])
                 if (picked.length) setCommentFiles((prev) => [...prev, ...picked])
                 e.target.value = ''
               }}
             />
-          </label>
+            <button
+              type="button"
+              onClick={() => commentFileInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+              {t('taskDetail.attach')}
+            </button>
+            <CommentPlusMenu
+              members={members}
+              assignTo={assignTo}
+              onAssignTo={setAssignTo}
+              onAddFile={() => commentFileInputRef.current?.click()}
+              onRecordClip={() => startRecordingRef.current?.('clip')}
+              onMentionTask={() => {
+                setMentionTab('tasks')
+                setText((prev) => (prev.endsWith('@') ? prev : `${prev}@`))
+                commentTextRef.current?.focus()
+              }}
+              onEmoji={() => setEmojiOpen((v) => !v)}
+              onQuickCreate={setQuickCreate}
+            />
+          </div>
           <Button
             size="sm"
             data-testid="comment-post"
@@ -5466,6 +5574,135 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * §V2-S05b frame `04:50` — the comment composer's "+" menu.
+ *
+ * The frame lists ten items. EIGHT are here. The two that are not are absent
+ * because there is nothing behind them, and putting them in the menu would be
+ * the facade this codebase has spent two videos removing:
+ *
+ *   · **Slash commands** in the comment composer. The description editor has
+ *     them; the composer does not, and it is its own row in the re-audit.
+ *   · **Brain**. The Brain² hub does not exist — also its own row.
+ *
+ * Everything here goes to the SAME code the direct controls use: Add a file
+ * clicks the composer's own file input, Record a Video Clip calls the recorder's
+ * own `start`, and New Task / New Doc / New Whiteboard open the quick-create
+ * modal on the matching tab rather than being three more creators.
+ */
+function CommentPlusMenu({
+  members,
+  assignTo,
+  onAssignTo,
+  onAddFile,
+  onRecordClip,
+  onMentionTask,
+  onEmoji,
+  onQuickCreate,
+}: {
+  members: WorkspaceMemberLite[]
+  assignTo: string
+  onAssignTo: (userId: string) => void
+  onAddFile: () => void
+  onRecordClip: () => void
+  onMentionTask: () => void
+  onEmoji: () => void
+  onQuickCreate: (mode: 'task' | 'doc' | 'whiteboard') => void
+}) {
+  const { t } = useTranslation()
+  const [assignOpen, setAssignOpen] = useState(false)
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            data-testid="comment-plus"
+            title={t('commentPlus.menu')}
+            aria-label={t('commentPlus.menu')}
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          {/*
+            NO `preventDefault` HERE. Keeping the menu open to show the picker
+            leaves Radix's `pointer-events: none` on the body, so the composer
+            and the Comment button behind it stop responding — the menu was
+            still capturing every click while looking closed enough to use. The
+            menu closes and the picker appears beside the "+", which is where it
+            can actually be used.
+          */}
+          <DropdownMenuItem
+            data-testid="comment-plus-assign"
+            onSelect={() => setAssignOpen(true)}
+          >
+            <UserPlus className="mr-2 h-4 w-4" />
+            {t('commentPlus.assign')}
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="comment-plus-clip" onSelect={onRecordClip}>
+            <Video className="mr-2 h-4 w-4" />
+            {t('commentPlus.recordClip')}
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="comment-plus-mention-task" onSelect={onMentionTask}>
+            <Hash className="mr-2 h-4 w-4" />
+            {t('commentPlus.mentionTask')}
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="comment-plus-file" onSelect={onAddFile}>
+            <Paperclip className="mr-2 h-4 w-4" />
+            {t('commentPlus.addFile')}
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="comment-plus-emoji" onSelect={onEmoji}>
+            <Smile className="mr-2 h-4 w-4" />
+            {t('commentPlus.addEmoji')}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem data-testid="comment-plus-new-task" onSelect={() => onQuickCreate('task')}>
+            <CheckSquare className="mr-2 h-4 w-4" />
+            {t('commentPlus.newTask')}
+          </DropdownMenuItem>
+          <DropdownMenuItem data-testid="comment-plus-new-doc" onSelect={() => onQuickCreate('doc')}>
+            <FileText className="mr-2 h-4 w-4" />
+            {t('commentPlus.newDoc')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            data-testid="comment-plus-new-whiteboard"
+            onSelect={() => onQuickCreate('whiteboard')}
+          >
+            <PenTool className="mr-2 h-4 w-4" />
+            {t('commentPlus.newWhiteboard')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Who the comment will be assigned to when it is posted. A select rather
+          than a nested menu: the member list is as long as the workspace. */}
+      {assignOpen && (
+        <select
+          autoFocus
+          value={assignTo}
+          data-testid="comment-assign-select"
+          aria-label={t('commentPlus.assign')}
+          onChange={(e) => {
+            onAssignTo(e.target.value)
+            setAssignOpen(false)
+          }}
+          className="h-6 max-w-[170px] rounded border border-border bg-background px-1 text-[11px]"
+        >
+          <option value="">{t('commentPlus.assignNobody')}</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.displayName || m.email}
+            </option>
+          ))}
+        </select>
+      )}
+    </>
   )
 }
 

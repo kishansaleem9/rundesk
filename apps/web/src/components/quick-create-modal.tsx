@@ -48,11 +48,23 @@ const MODE_TABS = [
   { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space' },
 ] as const
 
-export function QuickCreateModal({ onClose }: { onClose: () => void }) {
+export function QuickCreateModal({
+  onClose,
+  initialMode,
+}: {
+  onClose: () => void
+  /*
+   * §V2-S05b frame `04:50` — the comment composer's "+" menu offers New Task,
+   * New Doc and New Whiteboard, which are three of this modal's own tabs.
+   * Opening it on the right one reuses the creator rather than writing three
+   * more; the topbar keeps the default.
+   */
+  initialMode?: Mode
+}) {
   const { t } = useTranslation()
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const workspaceId = params.workspaceId
-  const [mode, setMode] = useState<Mode>('task')
+  const [mode, setMode] = useState<Mode>(initialMode ?? 'task')
 
   if (!workspaceId) {
     return (
@@ -99,13 +111,30 @@ function Backdrop({ children, onClose }: { children: React.ReactNode; onClose: (
     return () => setMounted(false)
   }, [])
 
+  /*
+   * ESCAPE, ON THE DOCUMENT.
+   *
+   * This used to be `onKeyDown` on the backdrop div below — a handler that can
+   * never fire, because a plain `<div>` takes no focus and so receives no key
+   * events. The modal looked as though it closed on Escape and did not, for
+   * anybody: a mouse user could click the backdrop, and a keyboard user was
+   * simply stuck. Found while a suite pressed Escape and the backdrop went on
+   * swallowing every click behind it.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   if (!mounted) return null
 
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] bg-black/55 backdrop-blur-[1px] flex items-start justify-center pt-24 px-4"
       onClick={onClose}
-      onKeyDown={(e) => e.key === 'Escape' && onClose()}
     >
       <div className="relative z-[10000]" onClick={(e) => e.stopPropagation()}>{children}</div>
     </div>,
