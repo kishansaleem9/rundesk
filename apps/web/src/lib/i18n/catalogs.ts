@@ -1980,6 +1980,8 @@ export const en = {
   'quickCreate.fieldFailed': 'That field could not be created.',
   // §V2-S11 frames `00:35` / `08:50` — the two toasts the frames show.
   'quickCreate.fieldCreated': 'Created field {{name}}',
+  // §V2-S01b frame `00:25` — the asterisk on "Field name*".
+  'quickCreate.fieldRequired': 'Required',
   'quickCreate.listFailed': 'That list could not be created.',
   'quickCreate.taskTypeDefault': 'default',
   'quickCreate.selectList': 'List',
@@ -7940,6 +7942,7 @@ export const es: Record<TranslationKey, string> = {
   'quickCreate.fieldsAdded': 'Añadido: {{names}}',
   'quickCreate.fieldFailed': 'No se pudo crear ese campo.',
   'quickCreate.fieldCreated': 'Campo {{name}} creado',
+  'quickCreate.fieldRequired': 'Obligatorio',
   'quickCreate.listFailed': 'No se pudo crear esa lista.',
   'quickCreate.taskTypeDefault': 'predeterminado',
   'quickCreate.selectList': 'Lista',
@@ -13837,6 +13840,7 @@ export const ar: Record<TranslationKey, string> = {
   'quickCreate.fieldsAdded': 'تمت الإضافة: {{names}}',
   'quickCreate.fieldFailed': 'تعذّر إنشاء هذا الحقل.',
   'quickCreate.fieldCreated': 'أُنشئ الحقل {{name}}',
+  'quickCreate.fieldRequired': 'مطلوب',
   'quickCreate.listFailed': 'تعذّر إنشاء هذه القائمة.',
   'quickCreate.taskTypeDefault': 'افتراضي',
   'quickCreate.selectList': 'قائمة',
@@ -19661,6 +19665,7 @@ export const ur: Record<TranslationKey, string> = {
   'quickCreate.fieldsAdded': 'شامل کیا: {{names}}',
   'quickCreate.fieldFailed': 'یہ فیلڈ نہیں بن سکا۔',
   'quickCreate.fieldCreated': 'فیلڈ {{name}} بن گیا',
+  'quickCreate.fieldRequired': 'لازمی',
   'quickCreate.listFailed': 'یہ لسٹ نہیں بن سکی۔',
   'quickCreate.taskTypeDefault': 'ڈیفالٹ',
   'quickCreate.selectList': 'فہرست',

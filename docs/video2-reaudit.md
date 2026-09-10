@@ -225,6 +225,31 @@ went missing entirely. A list that is only written once stops being true.
   index is what holds. 13 checks, three break-tests.
   Frame `00:35`'s toast is in the same commit: creating a field said nothing.
 
+- **The field creator's required flag and Cancel, frames `00:25`–`00:30`.** The
+  frame reads "Field name*" and pairs **Cancel** with **Create**. Two real gaps
+  behind that: `isRequired` has been accepted by this endpoint since custom
+  fields shipped, and the project-shell form already offered it, but the surface
+  the frames actually use did not — so a field created while writing a task
+  could never be required, and both the task sheet's required marker and
+  "Collapse empty fields"'s required exemption had nothing to act on from here.
+  And there was **no Cancel**: pressing "+ Create new field" was one-way, out
+  only by creating a field you had decided against or abandoning the task.
+  Found while testing: the field TYPE persisted across creations while its
+  options were cleared, so after making a Labels field the next one opened as
+  Labels with an empty options box and a **disabled Create button** — a dead
+  form for a reason the person had not caused and could not see. The type resets
+  now. 3 checks added to `custom-field-progress` (50 total), two break-tests.
+- **Two rows reclassified from M to deliberate, not built:**
+  · *Searchable field-type picker.* The code already carried the reasoning: the
+    frame's picker is searchable because it lists ~29 types; this lists the 19
+    that exist, in a native `<select>`, where the browser's own type-to-jump
+    already handles that many. Respecting a recorded decision rather than
+    quietly overruling it — the same rule that stopped the `ui-sweep`
+    Dependencies guard being edited around.
+  · *"More settings and permissions".* `custom_field_definitions` has no
+    permission columns. An expander over nothing is the facade this pass keeps
+    removing.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -296,9 +321,10 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Create-modal tab strip; time estimate, dates+times, priority, tags-on-enter |
 | B | `+ Create new field` on the create modal; 17 field types |
 | P | ~30 field types — **11 absent**: Formula, Summary, Progress Updates, Relationship, Tasks, Categorize, Translation, Sentiment, Signature, Button, Action Items. ~~Files~~ and ~~Voting~~ built in `0145` |
-| M | Searchable field-type picker (it is a native `<select>`) |
+| — | Searchable field-type picker — **deliberate**: a native `<select>` of 19 types, with the browser's own type-to-jump. See §3 |
 | B | Progress (Auto) config panel — engine *and* the panel frame `00:25` shows |
-| M | Field config: required marker, "More settings and permissions", Cancel/Create |
+| B | Field config: required flag and Cancel/Create |
+| — | "More settings and permissions" — **deliberate**: there are no per-field permissions to put behind it |
 | B | Toast "Created field `<name>`" |
 | P | Attach on create — uploads *after* the task exists, single file, no removable list |
 | M | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") |

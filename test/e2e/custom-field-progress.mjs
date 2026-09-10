@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 47
+const EXPECTED_CHECKS = 50
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -600,6 +600,64 @@ try {
   )
 
   /*
+   * §V2-S01b frames `00:25`–`00:30` — "Field name*" and the Cancel / Create
+   * pair.
+   *
+   * `isRequired` has been accepted by this endpoint since custom fields
+   * shipped, and the project-shell form already offered it; THIS surface — the
+   * one the frames use — did not, so a field made while writing a task could
+   * never be a required one. The required marker the task sheet draws, and the
+   * exemption "Collapse empty fields" gives required fields, both had nothing
+   * to act on from here.
+   */
+  console.log('\n▶ frame `00:25` — Field name*, and a way out')
+
+  const REQUIRED_NAME = `Needs filling ${TAG}`
+  await page.getByTestId('quick-create-new-field').click()
+  await page.getByTestId('quick-create-new-field-name').fill(REQUIRED_NAME)
+  // Type named explicitly: this section is about the required flag, and
+  // inheriting the previous section's Labels type would leave Create disabled
+  // for want of options — which is how this check first failed.
+  await page.getByTestId('quick-create-new-field-type').selectOption('text')
+  await page.getByTestId('quick-create-new-field-required').check()
+  await page.getByTestId('quick-create-new-field-save').click()
+
+  chk(
+    await waitUntil(async () => {
+      const rows = await sql`
+        select is_required from custom_field_definitions where name = ${REQUIRED_NAME}`
+      return rows[0]?.is_required === true
+    }, { timeoutMs: 15_000 }),
+    'a field can be created REQUIRED from the modal the frames use',
+    'the field was created optional — the flag the API accepts had no control here',
+  )
+
+  /*
+   * CANCEL. Without it this row was one-way: once "+ Create new field" was
+   * pressed the only ways out were to create a field you had decided against,
+   * or to abandon the task you were in the middle of writing.
+   */
+  const ABANDONED = `Never made ${TAG}`
+  await page.getByTestId('quick-create-new-field').click()
+  await page.getByTestId('quick-create-new-field-name').fill(ABANDONED)
+  await page.getByTestId('quick-create-new-field-cancel').click()
+  chk(
+    await waitUntil(
+      async () => !(await page.getByTestId('quick-create-new-field-name').isVisible().catch(() => false)),
+      { timeoutMs: 10_000 },
+    ),
+    'Cancel closes the field row',
+    'Cancel left the row open — the frame pairs it with Create for a reason',
+  )
+  const abandonedRows = await sql`
+    select 1 from custom_field_definitions where name = ${ABANDONED}`
+  chk(
+    abandonedRows.length === 0,
+    'and creates nothing',
+    'cancelling still created the field — which is worse than having no Cancel at all',
+  )
+
+  /*
    * TYPED CHOICES BECOME REAL OPTIONS. "High, Low" has to arrive as two
    * options, or the field is defined and unusable — which looks identical to
    * working until somebody opens the task.
@@ -742,7 +800,17 @@ try {
 
 } catch (e) {
   failed += 1
+  /*
+   * THE LINE, not just the message. "threw: Timeout 30000ms exceeded" names
+   * neither the locator nor the place, so every throw in a 50-check suite looks
+   * identical and the only way to find it is to bisect by hand — which is how
+   * one of these cost twenty minutes.
+   */
+  const where = (e.stack ?? '')
+    .split('\n')
+    .find((line) => line.includes('custom-field-progress.mjs'))
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
+  if (where) console.log(`         at ${where.trim()}`)
 } finally {
   if (sql) {
     // Space first: project, list, tasks, fields and values all cascade from it.

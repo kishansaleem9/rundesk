@@ -246,6 +246,7 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const [newFieldName, setNewFieldName] = useState('')
   const [newFieldType, setNewFieldType] = useState('text')
   const [newFieldOptions, setNewFieldOptions] = useState('')
+  const [newFieldRequired, setNewFieldRequired] = useState(false)
   const [madeFields, setMadeFields] = useState<string[]>([])
   /* §V2-01b frame `00:25` — the config the panel collects. Defaulted to all
    * three sources on, which is what the API defaults to, so the panel opens
@@ -403,6 +404,15 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         body: {
           name: newFieldName.trim(),
           type: newFieldType,
+          /*
+           * §V2-S01b frame `00:25` — "Field name*", and she says the name has
+           * to come first. `isRequired` has been accepted by this endpoint
+           * since custom fields shipped, and the project-shell field form
+           * already offers it — this surface, the one the frames actually use,
+           * did not. So a field created here could never be a required one,
+           * and the required marker the task sheet draws had nothing to draw.
+           */
+          isRequired: newFieldRequired,
           // §V2-01b — the config panel's answers, sent only for the type
           // that has them. The service normalises whatever arrives.
           ...(newFieldType === 'progress_auto'
@@ -433,6 +443,15 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
       setMakingField(false)
       setNewFieldName('')
       setNewFieldOptions('')
+      setNewFieldRequired(false)
+      /*
+       * THE TYPE RESETS TOO. It used to persist while the options were
+       * cleared, so after making a Labels field the next one opened as Labels
+       * with an empty options box and a DISABLED Create button — a dead form,
+       * for a reason the person had not caused and could not see. Found by a
+       * suite whose next click simply never became possible.
+       */
+      setNewFieldType('text')
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.fieldFailed')),
   })
@@ -737,6 +756,22 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
                   className="h-7 w-44 rounded-md border border-border bg-card px-1.5 text-[11px]"
                 />
               )}
+              {/*
+                Frame `00:25` — the asterisk on "Field name*". A required field
+                is a real thing here: the task sheet marks it, and
+                "Collapse empty fields" refuses to hide it because an empty
+                required field is the one blank somebody has to act on.
+              */}
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <input
+                  type="checkbox"
+                  data-testid="quick-create-new-field-required"
+                  checked={newFieldRequired}
+                  onChange={(e) => setNewFieldRequired(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border"
+                />
+                {t('quickCreate.fieldRequired')}
+              </label>
               <Button
                 type="button"
                 size="sm"
@@ -751,6 +786,26 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
                 onClick={() => makeField.mutate()}
               >
                 {t('quickCreate.createField')}
+              </Button>
+              {/*
+                Frame `00:25` pairs Create with Cancel. Without it this row was
+                one-way: once "+ Create new field" was pressed the only ways out
+                were to create a field you had decided against, or to close the
+                whole task you were in the middle of writing.
+              */}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-testid="quick-create-new-field-cancel"
+                onClick={() => {
+                  setMakingField(false)
+                  setNewFieldName('')
+                  setNewFieldOptions('')
+                  setNewFieldRequired(false)
+                }}
+              >
+                {t('common.cancel')}
               </Button>
             </>
           )}
