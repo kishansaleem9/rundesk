@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, asc, isNotNull, inArray } from 'drizzle-orm'
+import { and, eq, or, asc, isNull, isNotNull, inArray } from 'drizzle-orm'
 import {
   customFieldDefinitions,
   customFieldValues,
@@ -59,7 +59,7 @@ export class CustomFieldsService {
 
   private async assertTaskInWorkspace(workspaceId: string, taskId: string) {
     const [row] = await this.db
-      .select({ taskId: tasks.id, projectId: lists.projectId })
+      .select({ taskId: tasks.id, projectId: lists.projectId, listId: tasks.listId })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -192,10 +192,31 @@ export class CustomFieldsService {
   // ── Values ──────────────────────────────────────────────────────────────────
   async getValuesForTask(workspaceId: string, taskId: string) {
     const task = await this.assertTaskInWorkspace(workspaceId, taskId)
+    /*
+     * §V2-S01c — `listId` NARROWS THE FIELD, and until now it did not.
+     *
+     * `createDefinition` has accepted and STORED `listId` since custom fields
+     * shipped — the column means "this field applies to one list, not the whole
+     * project". Every reader filtered on `projectId` alone, so a field scoped to
+     * a single list appeared on every task in the project anyway. A setting the
+     * server records and no reader honours is the same defect as a switch that
+     * changes nothing, seen from the other side; this codebase has now found it
+     * in both directions.
+     *
+     * NULL means project-wide, which is what every existing row is.
+     */
     const defs = await this.db
       .select()
       .from(customFieldDefinitions)
-      .where(eq(customFieldDefinitions.projectId, task.projectId))
+      .where(
+        and(
+          eq(customFieldDefinitions.projectId, task.projectId),
+          or(
+            isNull(customFieldDefinitions.listId),
+            eq(customFieldDefinitions.listId, task.listId),
+          ),
+        ),
+      )
       .orderBy(asc(customFieldDefinitions.position))
 
     const values = await this.db

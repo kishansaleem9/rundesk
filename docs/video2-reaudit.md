@@ -239,16 +239,24 @@ went missing entirely. A list that is only written once stops being true.
   Labels with an empty options box and a **disabled Create button** — a dead
   form for a reason the person had not caused and could not see. The type resets
   now. 3 checks added to `custom-field-progress` (50 total), two break-tests.
-- **Two rows reclassified from M to deliberate, not built:**
-  · *Searchable field-type picker.* The code already carried the reasoning: the
-    frame's picker is searchable because it lists ~29 types; this lists the 19
-    that exist, in a native `<select>`, where the browser's own type-to-jump
-    already handles that many. Respecting a recorded decision rather than
-    quietly overruling it — the same rule that stopped the `ui-sweep`
-    Dependencies guard being edited around.
-  · *"More settings and permissions".* `custom_field_definitions` has no
-    permission columns. An expander over nothing is the facade this pass keeps
-    removing.
+- **Both rows I had set aside as "deliberate" were reopened and built, and one
+  of them hid a real bug.** The reasoning I had accepted for the type picker —
+  nineteen types do not need search when the browser can type-to-jump — ignored
+  what the frame says AND the row two lines above it: eleven more types are
+  still to come, so the list is heading for thirty. A control that needs
+  replacing at thirty may as well search at nineteen. The `<select>` stays under
+  the search box, because it is what a suite can `selectOption`, what a screen
+  reader announces, and what works on a phone.
+  · **"More settings" turned out to have something real behind it, and worse
+    than missing.** `custom_field_definitions.listId` means "this field applies
+    to one list, not the whole project". `createDefinition` has accepted and
+    STORED it since custom fields shipped; both readers filtered on `projectId`
+    alone. So "only this list" was a promise the product broke every time — a
+    setting recorded by the server and honoured by nobody, which is the
+    §V2-02d defect seen from the other side. `getValuesForTask` narrows on it
+    now, and the expander is the control that sets it. Named "More settings",
+    not "and permissions", because there are still no per-field permission
+    columns to put there.
 
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
@@ -321,10 +329,11 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Create-modal tab strip; time estimate, dates+times, priority, tags-on-enter |
 | B | `+ Create new field` on the create modal; 17 field types |
 | P | ~30 field types — **11 absent**: Formula, Summary, Progress Updates, Relationship, Tasks, Categorize, Translation, Sentiment, Signature, Button, Action Items. ~~Files~~ and ~~Voting~~ built in `0145` |
-| — | Searchable field-type picker — **deliberate**: a native `<select>` of 19 types, with the browser's own type-to-jump. See §3 |
+| B | Searchable field-type picker — a search box that narrows the `<select>` and selects as you type |
 | B | Progress (Auto) config panel — engine *and* the panel frame `00:25` shows |
 | B | Field config: required flag and Cancel/Create |
-| — | "More settings and permissions" — **deliberate**: there are no per-field permissions to put behind it |
+| B | "More settings" — the field's SCOPE, which the API stored and no reader honoured |
+| — | …"and permissions" — deliberate: `custom_field_definitions` has no permission columns |
 | B | Toast "Created field `<name>`" |
 | P | Attach on create — uploads *after* the task exists, single file, no removable list |
 | M | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") |

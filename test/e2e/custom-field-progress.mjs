@@ -33,7 +33,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 50
+const EXPECTED_CHECKS = 58
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -655,6 +655,109 @@ try {
     abandonedRows.length === 0,
     'and creates nothing',
     'cancelling still created the field — which is worse than having no Cancel at all',
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ frame `00:20` — the type picker searches')
+
+  await page.getByTestId('quick-create-new-field').click()
+  const typeOptions = () =>
+    page.getByTestId('quick-create-new-field-type').locator('option').count()
+  const allTypes = await typeOptions()
+  chk(
+    allTypes > 10,
+    `the picker offers all ${allTypes} types to begin with`,
+    `it offered ${allTypes} — too few for the search below to mean anything`,
+  )
+
+  await page.getByTestId('quick-create-new-field-type-search').fill('progress')
+  chk(
+    await waitUntil(async () => {
+      const n = await typeOptions()
+      return n > 0 && n < allTypes
+    }, { timeoutMs: 10_000 }),
+    'and typing narrows it',
+    `after searching "progress" it still offered ${await typeOptions()} of ${allTypes} — ` +
+      'a search box that does not narrow is a search box in name only',
+  )
+  /*
+   * AND TYPING SELECTS. The frame's picker is one gesture: type, and the type
+   * is chosen. A filter you then have to act on separately is a different,
+   * slower control.
+   */
+  chk(
+    (await page.getByTestId('quick-create-new-field-type').inputValue()).startsWith('progress'),
+    'and lands on a matching type without a second click',
+    `the selected type was "${await page.getByTestId('quick-create-new-field-type').inputValue()}"`,
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ frame `00:25` — "More settings", and a scope that is honoured')
+
+  chk(
+    await page.getByTestId('quick-create-new-field-more').isVisible().catch(() => false),
+    'the row offers More settings',
+    'there is no expander — frame `00:25` has one',
+  )
+  await page.getByTestId('quick-create-new-field-more').click()
+  chk(
+    await waitUntil(
+      () => page.getByTestId('quick-create-new-field-scope').isVisible().catch(() => false),
+      { timeoutMs: 10_000 },
+    ),
+    'and behind it, what the field applies to',
+    'the expander opened onto nothing, which is the facade this pass removes',
+  )
+
+  /*
+   * THE ONE THAT MATTERS. `listId` was stored by the API and read by no
+   * reader, so a field scoped to one list appeared on every task in the
+   * project. The check is therefore on a task in ANOTHER list: the scoped
+   * field must not be there.
+   */
+  /*
+   * "Only this list" is offered only once a list is chosen — it has to have a
+   * list to mean. That is a deliberate disable, so it is pinned here rather
+   * than left as something a later change could quietly drop.
+   */
+  chk(
+    await page.getByTestId('quick-create-new-field-scope').isDisabled(),
+    'and it will not offer "only this list" before a list is chosen',
+    'the scope could be set to a list that had not been picked, which stores a ' +
+      'scope pointing nowhere',
+  )
+  await page.getByTestId('quick-create-list').selectOption({ label: `List ${TAG}` })
+
+  const SCOPED = `Only here ${TAG}`
+  await page.getByTestId('quick-create-new-field-type-search').fill('text')
+  await page.getByTestId('quick-create-new-field-name').fill(SCOPED)
+  await page.getByTestId('quick-create-new-field-scope').selectOption('list')
+  await page.getByTestId('quick-create-new-field-save').click()
+
+  let scopedRow = null
+  chk(
+    await waitUntil(async () => {
+      const rows = await sql`
+        select list_id from custom_field_definitions where name = ${SCOPED}`
+      scopedRow = rows[0] ?? null
+      return !!scopedRow?.list_id
+    }, { timeoutMs: 15_000 }),
+    'a field can be scoped to one list',
+    `the definition stored list_id=${JSON.stringify(scopedRow?.list_id ?? null)}`,
+  )
+
+  const [otherList] = await sql`
+    insert into lists (project_id, name) values (${project.id}, ${`Other list ${TAG}`}) returning id`
+  const [otherTask] = await sql`
+    insert into tasks (list_id, title) values (${otherList.id}, ${`Elsewhere ${TAG}`}) returning id`
+  const elsewhereFields = (await A(`/workspaces/${workspaceId}/tasks/${otherTask.id}/custom-fields`))
+    .data ?? []
+  chk(
+    !elsewhereFields.some((f) => f.definition?.name === SCOPED),
+    'and a task in a DIFFERENT list does not carry it',
+    `the scoped field appeared on a task in another list: ` +
+      `${JSON.stringify(elsewhereFields.map((f) => f.definition?.name))} — ` +
+      'listId was stored and no reader honoured it',
   )
 
   /*

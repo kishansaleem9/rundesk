@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -247,6 +247,33 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   const [newFieldType, setNewFieldType] = useState('text')
   const [newFieldOptions, setNewFieldOptions] = useState('')
   const [newFieldRequired, setNewFieldRequired] = useState(false)
+  /*
+   * §V2-S01c frame `00:20` — "a SEARCHABLE FIELD-TYPE PICKER".
+   *
+   * This was a bare native `<select>`, defended in a comment on the grounds
+   * that nineteen types do not need search when the browser can type-to-jump.
+   * That reasoning ignored two things the frames and the re-audit both say: the
+   * frame's picker IS searchable, and ELEVEN more types are still to build, so
+   * the list is heading for thirty. A control that needs replacing at thirty
+   * may as well search at nineteen.
+   */
+  const [fieldTypeQuery, setFieldTypeQuery] = useState('')
+  // Frame `00:25`'s expander, over the one real setting behind it.
+  const [fieldMoreOpen, setFieldMoreOpen] = useState(false)
+  const [newFieldListOnly, setNewFieldListOnly] = useState(false)
+  /*
+   * What the select contains once the search box has had its say. The CURRENT
+   * type is always kept when nothing matches — otherwise a query that matched
+   * nothing would empty the select and leave no way back to the chosen type.
+   */
+  const fieldTypeMatches = useMemo(() => {
+    const q = fieldTypeQuery.trim().toLowerCase()
+    if (!q) return CREATABLE_FIELD_TYPES
+    const matches = CREATABLE_FIELD_TYPES.filter((ft) => t(ft.labelKey).toLowerCase().includes(q))
+    if (matches.length > 0) return matches
+    const current = CREATABLE_FIELD_TYPES.find((ft) => ft.value === newFieldType)
+    return current ? [current] : []
+  }, [fieldTypeQuery, newFieldType, t])
   const [madeFields, setMadeFields] = useState<string[]>([])
   /* §V2-01b frame `00:25` — the config the panel collects. Defaulted to all
    * three sources on, which is what the API defaults to, so the panel opens
@@ -413,6 +440,14 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
            * and the required marker the task sheet draws had nothing to draw.
            */
           isRequired: newFieldRequired,
+          /*
+           * §V2-S01c — the field's SCOPE. `listId` has been accepted and stored
+           * since custom fields shipped and honoured by no reader, so a field
+           * meant for one list appeared on every task in the project anyway.
+           * `getValuesForTask` narrows on it now; this is the control that sets
+           * it.
+           */
+          ...(newFieldListOnly && listId ? { listId } : {}),
           // §V2-01b — the config panel's answers, sent only for the type
           // that has them. The service normalises whatever arrives.
           ...(newFieldType === 'progress_auto'
@@ -444,6 +479,12 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
       setNewFieldName('')
       setNewFieldOptions('')
       setNewFieldRequired(false)
+      setNewFieldListOnly(false)
+      setFieldTypeQuery('')
+      setFieldMoreOpen(false)
+      setNewFieldListOnly(false)
+      setFieldTypeQuery('')
+      setFieldMoreOpen(false)
       /*
        * THE TYPE RESETS TOO. It used to persist while the options were
        * cleared, so after making a Labels field the next one opened as Labels
@@ -677,23 +718,51 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
                 className="h-7 w-40 rounded-md border border-border bg-card px-1.5 text-[11px]"
               />
               {/*
-                A native select rather than a search box. The frame's picker is
-                searchable because it lists twenty-nine types; this lists the
-                ones that exist, and a browser's own type-to-jump already
-                handles that many without a second search UI to keep in step.
+                §V2-S01c frame `00:20` — a SEARCHABLE picker.
+                
+                THE SELECT IS STILL HERE, and deliberately. It is what a suite
+                can `selectOption` on, what a screen reader announces as a
+                listbox, and what works on a phone; the search box beside it
+                narrows what it contains. Replacing it with a bespoke listbox
+                would have traded three of those for one.
               */}
+              <input
+                value={fieldTypeQuery}
+                onChange={(e) => {
+                  setFieldTypeQuery(e.target.value)
+                  /*
+                   * Typing moves the selection to the first match, so the
+                   * search box is not a filter you then have to act on
+                   * separately — one gesture, as in the frame.
+                   */
+                  const q = e.target.value.trim().toLowerCase()
+                  if (!q) return
+                  const hit = CREATABLE_FIELD_TYPES.find((ft) =>
+                    t(ft.labelKey).toLowerCase().includes(q),
+                  )
+                  if (hit) setNewFieldType(hit.value)
+                }}
+                data-testid="quick-create-new-field-type-search"
+                placeholder={t('quickCreate.fieldTypeSearch')}
+                className="h-7 w-36 rounded-md border border-border bg-card px-1.5 text-[11px]"
+              />
               <select
                 value={newFieldType}
                 onChange={(e) => setNewFieldType(e.target.value)}
                 data-testid="quick-create-new-field-type"
                 className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
               >
-                {CREATABLE_FIELD_TYPES.map((ft) => (
+                {fieldTypeMatches.map((ft) => (
                   <option key={ft.value} value={ft.value}>
                     {t(ft.labelKey)}
                   </option>
                 ))}
               </select>
+              {fieldTypeMatches.length === 0 && (
+                <span className="text-[11px] text-muted-foreground" data-testid="quick-create-new-field-type-none">
+                  {t('quickCreate.fieldTypeNoMatch')}
+                </span>
+              )}
               {/*
                 Dropdown and labels are the two that cannot exist without
                 choices, and the API refuses them without — so the input appears
@@ -772,6 +841,48 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
                 />
                 {t('quickCreate.fieldRequired')}
               </label>
+              {/*
+                §V2-S01c frame `00:25` — "More settings and permissions".
+                
+                NAMED "More settings", not "and permissions", because there are
+                no per-field permissions in this product to put behind it —
+                `custom_field_definitions` has no permission columns, and an
+                expander over nothing is the facade this pass keeps removing.
+                What IS behind it is real and was worse than missing: the
+                field's SCOPE. `listId` was stored by the API and read by
+                nobody, so "only this list" was a promise the product broke
+                every time.
+              */}
+              <button
+                type="button"
+                data-testid="quick-create-new-field-more"
+                onClick={() => setFieldMoreOpen((v) => !v)}
+                className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+              >
+                {t('quickCreate.fieldMoreSettings')}
+              </button>
+              {fieldMoreOpen && (
+                <div
+                  data-testid="quick-create-new-field-more-panel"
+                  className="flex w-full items-center gap-2 rounded border border-border/60 px-2 py-1.5"
+                >
+                  <span className="text-[11px] text-muted-foreground">
+                    {t('quickCreate.fieldAppliesTo')}
+                  </span>
+                  <select
+                    value={newFieldListOnly ? 'list' : 'project'}
+                    onChange={(e) => setNewFieldListOnly(e.target.value === 'list')}
+                    data-testid="quick-create-new-field-scope"
+                    disabled={!listId}
+                    className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px] disabled:opacity-50"
+                  >
+                    <option value="project">{t('quickCreate.fieldAppliesProject')}</option>
+                    {/* Offered only when a list is chosen: "only this list" has
+                        to have a list to mean. */}
+                    <option value="list">{t('quickCreate.fieldAppliesList')}</option>
+                  </select>
+                </div>
+              )}
               <Button
                 type="button"
                 size="sm"
@@ -803,6 +914,12 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
                   setNewFieldName('')
                   setNewFieldOptions('')
                   setNewFieldRequired(false)
+                  setNewFieldListOnly(false)
+                  setFieldTypeQuery('')
+                  setFieldMoreOpen(false)
+                  setNewFieldListOnly(false)
+                  setFieldTypeQuery('')
+                  setFieldMoreOpen(false)
                 }}
               >
                 {t('common.cancel')}
