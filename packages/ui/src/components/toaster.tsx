@@ -3,7 +3,15 @@ import { Toaster as SonnerToaster, toast } from 'sonner'
 export function Toaster() {
   return (
     <SonnerToaster
-      position="bottom-right"
+      /*
+       * §V2-S11 frames `00:35` and `08:50` — bottom-LEFT.
+       *
+       * Both frames that show a toast show it there: "Created field progress",
+       * and two "List name taken" errors stacked. It also keeps them clear of
+       * the privacy banner, which sits bottom-right and has swallowed clicks
+       * meant for things behind it in three suites.
+       */
+      position="bottom-left"
       theme="dark"
       toastOptions={{
         classNames: {

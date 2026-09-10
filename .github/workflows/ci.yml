@@ -822,6 +822,21 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S11, frame `08:50` — "List name taken", bottom-left.
+      #
+      # `createList` accepted any name, so a project could hold three lists
+      # called "Backlog". The rule now lives in a partial case-insensitive
+      # unique index (0147) with a service check on top of it purely to make the
+      # 409 say the frame's words — one check here writes PAST the service to
+      # prove the index is what holds. Both list-creation paths in the dialog are
+      # driven, because only one of them had an `onError`.
+      - name: List name taken
+        if: '!cancelled()'
+        run: node test/e2e/list-name-taken.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

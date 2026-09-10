@@ -1,5 +1,11 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { eq, and, asc, type SQL } from 'drizzle-orm'
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common'
+import { eq, and, ne, asc, sql, type SQL } from 'drizzle-orm'
 import { lists, listStatuses, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -108,11 +114,42 @@ export class ListsService {
     return this.getListsByProject(container.id, actor)
   }
 
+  /**
+   * §V2-S11 frame `08:50` — "List name taken".
+   *
+   * The constraint lives in the database (migration 0147, a partial
+   * case-insensitive unique index) so two requests racing cannot both win. This
+   * check exists so the ANSWER is a 409 with the frame's words rather than a
+   * bare Postgres unique-violation surfacing as a 500 — the person typed a
+   * name, and what they need back is that the name is taken.
+   *
+   * Archived lists are excluded, matching the index: a name in the bin does not
+   * reserve itself forever.
+   */
+  private async assertListNameFree(projectId: string, name: string, exceptListId?: string) {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const clash = await this.db
+      .select({ id: lists.id })
+      .from(lists)
+      .where(
+        and(
+          eq(lists.projectId, projectId),
+          eq(lists.isArchived, false),
+          sql`lower(${lists.name}) = lower(${trimmed})`,
+          exceptListId ? ne(lists.id, exceptListId) : undefined,
+        ),
+      )
+      .limit(1)
+    if (clash.length > 0) throw new ConflictException('List name taken')
+  }
+
   async createList(
     projectId: string,
     data: { name: string; description?: string; visibility?: 'public' | 'private' },
     actorId?: string,
   ) {
+    await this.assertListNameFree(projectId, data.name)
     const result = await this.db
       .insert(lists)
       .values({
@@ -226,6 +263,16 @@ export class ListsService {
     const set: Record<string, unknown> = { updatedAt: new Date() }
     for (const key of ['name', 'description', 'visibility'] as const) {
       if (data[key] !== undefined) set[key] = data[key]
+    }
+    // Renaming obeys the same rule as creating, or the constraint is half a
+    // rule: blocked at the front door and open at the side.
+    if (data.name !== undefined) {
+      const [owner] = await this.db
+        .select({ projectId: lists.projectId })
+        .from(lists)
+        .where(eq(lists.id, listId))
+        .limit(1)
+      if (owner) await this.assertListNameFree(owner.projectId, data.name, listId)
     }
     const result = await this.db
       .update(lists)

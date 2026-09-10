@@ -208,6 +208,23 @@ went missing entirely. A list that is only written once stops being true.
   now asserts the TEXT THAT ARRIVED: the handler calls `preventDefault`, so an
   unguarded shortcut eats the character and the field reads "eek ahea".
 
+- **"List name taken", frame `08:50`, and the toasts around it.** Three things,
+  and they only make sense together: `createList` accepted any name, so a
+  project could hold three lists called "Backlog" with nothing but their ids to
+  tell them apart; the List tab's create mutation had **no `onError`**, so even
+  once the API refused a duplicate the dialog would have sat there silently; and
+  toasts were bottom-RIGHT while both frames that show one — `00:35` "Created
+  field progress" and `08:50` "List name taken" ×2 — put it bottom-left.
+  The rule lives in migration `0147` as a **partial, case-insensitive** unique
+  index: `(project_id, lower(name)) where is_archived = false`. Case-insensitive
+  because "Backlog" and "backlog" are the same name to the person reading the
+  sidebar; partial because a list in the bin must not reserve its name for ever.
+  The service check on top exists only so the answer carries the frame's words —
+  break-tested: without it the status is still 409 but the message degrades to
+  "That resource already exists". One check writes PAST the service to prove the
+  index is what holds. 13 checks, three break-tests.
+  Frame `00:35`'s toast is in the same commit: creating a field said nothing.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -282,7 +299,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | Searchable field-type picker (it is a native `<select>`) |
 | B | Progress (Auto) config panel — engine *and* the panel frame `00:25` shows |
 | M | Field config: required marker, "More settings and permissions", Cancel/Create |
-| M | Toast "Created field `<name>`" |
+| B | Toast "Created field `<name>`" |
 | P | Attach on create — uploads *after* the task exists, single file, no removable list |
 | M | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
@@ -338,7 +355,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | Create Folder — no description column, no private toggle in the dialog, no templates |
 | M | Folder "Use Space statuses" inheritance |
 | B | Skeletons on load; sidebar hierarchy; breadcrumb |
-| P | Error toasts — bottom-right not bottom-left, **list names have no uniqueness constraint**, quick-create ListForm has no `onError` (a failure there is silent) |
+| B | Error toasts bottom-left; **list names unique per project**; both create paths report failure |
 | B | **Delete → trash + Undo + Ctrl+Z** |
 | B | Board view: status lanes, colours, counts, per-lane add, drag between lanes, + Add group |
 | B | **Team view** — a view type, ungated; rows per person with their own load |

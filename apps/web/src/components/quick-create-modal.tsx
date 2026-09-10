@@ -426,6 +426,9 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
     onSuccess: () => {
       // The Fields tab on any task in this project reads from this list.
       qc.invalidateQueries({ queryKey: ['custom-fields'] })
+      // Frame `00:35` — "Created field progress". The field appeared in a list
+      // further down the dialog and nothing said it had been created.
+      toast.success(t('quickCreate.fieldCreated', { name: newFieldName.trim() }))
       setMadeFields((prev) => [...prev, newFieldName.trim()])
       setMakingField(false)
       setNewFieldName('')
@@ -1016,6 +1019,14 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
        */
       setCreatedList({ id: list.id, name })
     },
+    /*
+     * §V2-S11 frame `08:50` — the error toast. THIS MUTATION HAD NO `onError`,
+     * so a refused create — now including "List name taken" — did nothing at
+     * all: the dialog sat there with the button looking un-pressed and the
+     * person had no idea why. The frame's toast could not have appeared however
+     * the API answered.
+     */
+    onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.listFailed')),
   })
 
   if (createdList) {
@@ -1041,7 +1052,7 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         if (name.trim() && projectId) create.mutate()
       }}
     >
-      <Input autoFocus placeholder={t('quickCreate.listNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+      <Input autoFocus data-testid="quick-create-list-name" placeholder={t('quickCreate.listNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
       {/* §G15 [22:07] — "yeh pooch raha ke PRIVATE karni hai ke nahi". Asked
           while the list is being made, not after: changing it afterwards
           leaves a window in which the wrong people can see it. */}
@@ -1056,12 +1067,12 @@ function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         {t('quickCreate.listPrivate')}
       </label>
       <div className="grid grid-cols-2 gap-2">
-        <Select labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
-        <Select labelKey="quickCreate.selectProject" value={projectId} onChange={setProjectId} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
+        <Select data-testid="quick-create-list-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
+        <Select data-testid="quick-create-list-project" labelKey="quickCreate.selectProject" value={projectId} onChange={setProjectId} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
       </div>
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-        <Button type="submit" size="sm" disabled={!name.trim() || !projectId || create.isPending}>{t('quickCreate.createList')}</Button>
+        <Button type="submit" size="sm" data-testid="quick-create-list-submit" disabled={!name.trim() || !projectId || create.isPending}>{t('quickCreate.createList')}</Button>
       </div>
     </form>
   )
