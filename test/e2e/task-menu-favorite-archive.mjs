@@ -40,7 +40,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
 
@@ -108,7 +108,7 @@ try {
   await page.fill('input[type=email]', ME.email)
   await page.fill('input[type=password]', ME.password)
   await page.click('button[type=submit]')
-  await page.waitForURL(/\/app/, { timeout: 30000 })
+  await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
   const taskUrl =
     `${stack.base}/app/${workspaceId}/${space.id}/${project.id}/${list.id}?task=${task.id}`
   await page.goto(taskUrl, { waitUntil: 'domcontentloaded' })

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureShared } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 const chromium = await resolveChromium()
 
 const argOf = (name, fallback) => {
@@ -61,7 +62,7 @@ try {
   await p.fill('input[type=email]', EMAIL)
   await p.fill('input[type=password]', PASSWORD)
   await p.click('button[type=submit]')
-  await p.waitForURL(/\/app\//, { timeout: 25000 })
+  await p.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await p.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
   await p.goto(`${B}/app/${WS}/chat`, { waitUntil: 'domcontentloaded' })
   await p.waitForTimeout(3500)

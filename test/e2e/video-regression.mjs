@@ -12,6 +12,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureNotification } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
+import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 const chromium = await resolveChromium()
 
 const argOf = (name, fallback) => {
@@ -164,7 +165,7 @@ try {
   await page.fill('input[type=email]', EMAIL)
   await page.fill('input[type=password]', PASSWORD)
   await page.click('button[type=submit]')
-  await page.waitForURL(/\/app\//, { timeout: 30000 })
+  await page.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
   console.log(`signed in as ${EMAIL}`)
 
@@ -791,7 +792,7 @@ try {
     await aiPage.fill('input[type=email]', EMAIL)
     await aiPage.fill('input[type=password]', PASSWORD)
     await aiPage.click('button[type=submit]')
-    await aiPage.waitForURL(/\/app\//, { timeout: 30000 })
+    await aiPage.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
     await aiPage.goto(`${BASE}/app/${WS}`, { waitUntil: 'domcontentloaded' })
     await aiPage.waitForTimeout(3500)
 

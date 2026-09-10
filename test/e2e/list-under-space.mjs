@@ -22,7 +22,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -176,7 +176,7 @@ try {
   await page.fill('input[type=email]', ADMIN.email)
   await page.fill('input[type=password]', ADMIN.password)
   await page.click('button[type=submit]')
-  await page.waitForURL(/\/app/, { timeout: 30000 })
+  await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.goto(`${stack.base}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(4500)
   await page.getByTestId(`space-toggle-${spaceId}`).click().catch(() => {})

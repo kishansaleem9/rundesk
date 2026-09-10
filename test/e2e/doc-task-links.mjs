@@ -30,7 +30,7 @@
  *   node test/e2e/doc-task-links.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { waitUntil } from './lib/wait.mjs'
@@ -184,7 +184,7 @@ try {
   await page.fill('input[type=email]', ME.email)
   await page.fill('input[type=password]', ME.password)
   await page.click('button[type=submit]')
-  await page.waitForURL(/\/app/, { timeout: 30000 })
+  await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
 
   const openTask = (await A(`/tasks/${open.id}`)).data
   await page.goto(

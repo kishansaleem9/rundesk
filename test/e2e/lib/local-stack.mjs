@@ -52,7 +52,17 @@ const isApi = (url) => url.startsWith('/api') || url.startsWith('/socket.io') ||
  * Only 429 is retried, and only for the login POST: every other response,
  * including a real 401, is handed back untouched and immediately.
  */
-const LOGIN_ATTEMPTS = 4
+/*
+ * THREE ATTEMPTS, not four, and the reason is the caller's patience.
+ *
+ * The window is fixed, so each retry waits up to 61 seconds for it to roll.
+ * Four attempts is a budget of ~183 seconds — longer than any caller will wait,
+ * so the extra attempt could only ever produce a login that arrives after the
+ * suite has already given up. Three bounds it at ~122s, and `LOGIN_NAV_TIMEOUT_MS`
+ * is set to cover one boundary comfortably; needing two means the harness is
+ * asking for more sign-ins than it should, which is worth failing over.
+ */
+const LOGIN_ATTEMPTS = 3
 const isLogin = (req) => req.method === 'POST' && req.url.includes('/auth/login')
 
 /** Collect a request body so it can be sent more than once. Login bodies are tiny. */
@@ -88,7 +98,18 @@ async function proxyLogin(req, res, apiPort) {
         return
       }
       up.resume() // Drain the 429 so the socket is free for the retry.
-      await new Promise((r) => setTimeout(r, retryAfterMs(up.headers['retry-after'], null)))
+      const waitMs = retryAfterMs(up.headers['retry-after'], null)
+      /*
+       * SAID OUT LOUD. A sign-in that takes 45 seconds and then works is
+       * indistinguishable from a hung page unless something says why. This line
+       * is what run 529 needed and did not have: it would have named the cause
+       * in the log instead of leaving a 30-second timeout to be guessed at.
+       */
+      console.log(
+        `  \x1b[33m…\x1b[0m login throttled (attempt ${attempt}/${LOGIN_ATTEMPTS}); ` +
+          `waiting ${Math.round(waitMs / 1000)}s for the rate-limit window to roll`,
+      )
+      await new Promise((r) => setTimeout(r, waitMs))
     }
   } catch (err) {
     res.writeHead(502, { 'content-type': 'application/json' })

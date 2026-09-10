@@ -16,7 +16,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { readText } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -217,7 +217,7 @@ try {
   await page.fill('input[type=email]', ADMIN.email)
   await page.fill('input[type=password]', ADMIN.password)
   await page.click('button[type=submit]')
-  await page.waitForURL(/\/app\//, { timeout: 30000 })
+  await page.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3500)
 

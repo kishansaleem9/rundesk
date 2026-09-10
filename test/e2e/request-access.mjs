@@ -21,7 +21,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -175,7 +175,7 @@ try {
   await page.click('button[type=submit]')
   // Not /app/<id>: signup gave this account its own workspace too, and where a
   // fresh login lands is not the thing under test.
-  await page.waitForURL(/\/app/, { timeout: 30000 }).catch(async () => {
+  await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(async () => {
     await page.screenshot({ path: '/tmp/request-access-login.png' }).catch(() => {})
     throw new Error(`login did not reach /app — landed on ${page.url()}`)
   })

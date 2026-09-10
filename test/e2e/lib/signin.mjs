@@ -46,6 +46,39 @@ export function retryAfterMs(headerValue, bodyValue) {
   return (usable + 1) * 1000
 }
 
+/**
+ * HOW LONG A SIGN-IN MAY TAKE WHEN IT IS BEING THROTTLED — and why the number
+ * that used to sit at every call site was wrong.
+ *
+ * The retry above, and its twin in the login proxy in `local-stack.mjs`, were
+ * meant to make throttling harmless. They did not, and CI run 529 is the
+ * receipt: `ai-value` failed on `page.waitForURL(/\/app/, { timeout: 30000 })`
+ * exactly 30 seconds after clicking submit, while the proxy underneath it was
+ * doing precisely what it was written to do — waiting for the window to roll.
+ *
+ * THE ARITHMETIC NOBODY DID. The limiter's window is FIXED, not sliding
+ * (`routeKey:clientIp:windowIndex`), so `Retry-After` is the distance to the
+ * next boundary: up to 60 seconds, 30 on average. Retrying sooner just earns
+ * another 429. So a throttled login legitimately takes up to ~61 seconds, and
+ * every caller was giving it 30 — the mechanism could not succeed, and its
+ * failure was reported as the app failing to log anybody in.
+ *
+ * The burst is real, and it was countable in that run's own log: between
+ * 13:40:24 and 13:41:22 fifteen-odd suites' worth of sign-ins went through one
+ * window with a budget of ten. Nothing was broken. The eleventh caller simply
+ * had to wait, and was not allowed to.
+ *
+ * 90 seconds covers one boundary and a margin. It does NOT cover two, and that
+ * is deliberate: two consecutive full windows means the harness is asking for
+ * far more sign-ins than it should, which is worth a red run rather than a
+ * quietly slower one.
+ *
+ * AND IT IS ONE CONSTANT, not forty-two literals. The old 30000 was copied into
+ * every suite, so the arithmetic above could not be applied in one place — the
+ * shape of every duplicated-value bug in this repo.
+ */
+export const LOGIN_NAV_TIMEOUT_MS = 90_000
+
 /** True when a response is the rate limiter talking, rather than a bad password. */
 const isRateLimited = (status) => status === 429
 

@@ -29,7 +29,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -170,7 +170,7 @@ async function signIn(page, origin, who) {
   await page.fill('input[type=email]', who.email)
   await page.fill('input[type=password]', who.password)
   await page.click('button[type=submit]')
-  await page.waitForURL(/\/app\//, { timeout: 30000 })
+  await page.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
 }
 
 const done = async (browser, stack, cleanup) => {
