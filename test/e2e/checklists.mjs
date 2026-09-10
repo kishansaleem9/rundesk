@@ -36,7 +36,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
-import { waitUntil, readText } from './lib/wait.mjs'
+import { waitUntil, readText, waitForCount } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -153,17 +153,31 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ frame `02:15` — "Add item" belongs to the checklist it sits under')
 
+  /*
+   * WAITED FOR, NOT SAMPLED. `newChecklist` above waits for the DATABASE row;
+   * these two checks used to read `count()` straight afterwards, and in CI run
+   * 531 that landed thirty-one milliseconds later — before the page had
+   * refetched. They reported "1 checklist blocks rendered for 2 checklists",
+   * which is a sentence about the product being broken when the product was
+   * fine.
+   *
+   * The tell was in the same output: the very next check PASSED, because it
+   * types into `forms.nth(1)` and Playwright's auto-wait held on until the
+   * second form arrived. `count()` is the one locator read with no auto-wait —
+   * it answers for the DOM at that instant, by design — so the suite claimed
+   * the second block did not exist and then used it.
+   */
   const panel = page.getByTestId('checklists-panel')
   const blocks = panel.getByTestId('checklist-progress')
   chk(
-    (await blocks.count()) === 2,
+    await waitForCount(blocks, 2),
     'each checklist draws its own block',
     `${await blocks.count()} checklist blocks rendered for 2 checklists`,
   )
 
   const forms = panel.getByTestId('checklist-item-form')
   chk(
-    (await forms.count()) === 2,
+    await waitForCount(forms, 2),
     'and each block has its own add-item row',
     `${await forms.count()} add-item forms for 2 checklists — one shared form can only feed the first list`,
   )

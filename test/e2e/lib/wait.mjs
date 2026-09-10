@@ -78,3 +78,31 @@ export async function readText(locator, { timeoutMs = 8000 } = {}) {
     return ''
   }
 }
+
+/**
+ * Wait for a locator to match EXACTLY `expected` elements, and say whether it did.
+ *
+ * THE FIFTH MEMBER OF THE FAMILY at the top of this file, and the one that has
+ * now cost a CI run. `checklists` asserted `(await blocks.count()) === 2`
+ * thirty-one milliseconds after confirming the second checklist existed in the
+ * database — before the page had refetched. It read 1, failed, and said "1
+ * checklist blocks rendered for 2 checklists", which is a sentence about the
+ * product being broken when the product was fine.
+ *
+ * WHAT MADE IT INVISIBLE. The very next check passed, because it typed into
+ * `forms.nth(1)` and Playwright's own auto-wait held on until the second form
+ * arrived. So the suite simultaneously claimed the second block did not exist
+ * and used it. A race that contradicts itself inside one suite is one nobody
+ * reads as a race.
+ *
+ * `count()` is the one Playwright read with NO auto-wait — it answers for the
+ * DOM as it is at that instant, by design. Every other locator method waits.
+ * That asymmetry is the whole trap: the fix is not a longer timeout somewhere,
+ * it is asking the question as a condition instead of as a sample.
+ *
+ * Returns a boolean like `waitUntil`, so the caller still writes its own named
+ * check and still fails when the count genuinely never arrives.
+ */
+export async function waitForCount(locator, expected, { timeoutMs = 15000 } = {}) {
+  return waitUntil(async () => (await locator.count()) === expected, { timeoutMs })
+}

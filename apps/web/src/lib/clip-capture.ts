@@ -81,8 +81,9 @@ export function displayConstraints(setup: ClipSetup): MediaStreamConstraints {
       // 16:9 at the chosen height, so a quality label means a size and not
       // just a vertical count.
       width: { ideal: Math.round((height * 16) / 9) },
-      // @ts-expect-error — displaySurface is standard for getDisplayMedia and
-      // absent from lib.dom's MediaTrackConstraints in this TS version.
+      // `displaySurface` IS in this TypeScript's lib.dom, so no suppression is
+      // needed — an `@ts-expect-error` here failed the build as an unused
+      // directive, which is the compiler correctly refusing a lie about itself.
       displaySurface: setup.surface,
     },
     // System audio, which is not the microphone — see the note at the top.
