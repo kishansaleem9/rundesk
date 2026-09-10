@@ -85,11 +85,12 @@ try {
   A = apiAs(auth.accessToken)
   const me = (await A('/users/me')).data
   /*
-   * ITS OWN WORKSPACE. The assignee control renders the first eight members as
-   * chips with no search (frame `15:45`'s search box is a separate gap), and
-   * the shared fixture workspace has accumulated 70-odd members from earlier
-   * suites — so "click your own chip" was a bet on where you sort. A fresh
-   * workspace holds two people: you, and the teammate added below.
+   * ITS OWN WORKSPACE, so the fixture is two people rather than whatever the
+   * shared one has accumulated. When this was written the assignee control was
+   * a row of the first EIGHT members with no search, and the shared workspace
+   * had seventy-odd — so "click your own chip" was a bet on sort order. §V2-S17
+   * gave the picker a search box; the isolation is kept because a fixture that
+   * depends on other suites' leftovers is a fixture that fails on its own.
    */
   const madeWorkspace = await A('/workspaces', {
     method: 'POST',
@@ -165,16 +166,26 @@ try {
       timeoutMs: 25_000,
     })
 
-  // By user id, not by display name: the chip row is capped at eight members,
-  // so a name match is a bet on where somebody sorts in the workspace.
-  const assignChip = (userId) => page.getByTestId(`assign-member-${userId}`)
+  /*
+   * §V2-S17 moved assignment behind a picker with a search box, so the member
+   * rows exist only once it is open. By user id rather than display name: a
+   * name match is a bet on where somebody sorts.
+   */
+  const assignChip = async (userId) => {
+    const row = page.getByTestId(`assign-member-${userId}`)
+    if (!(await row.isVisible().catch(() => false))) {
+      await page.getByTestId('assignee-picker-open').click({ timeout: 20_000 })
+      await waitUntil(() => row.isVisible().catch(() => false), { timeoutMs: 10_000 })
+    }
+    return row
+  }
 
   await openTask(task.id)
 
   // -------------------------------------------------------------------------
   console.log('\n▶ frame `15:50` — assigning yourself offers the priority')
 
-  await assignChip(me.id).click({ timeout: 20_000 })
+  await (await assignChip(me.id)).click({ timeout: 20_000 })
   chk(
     await waitUntil(
       () => page.getByTestId('priority-prompt').isVisible().catch(() => false),
@@ -256,7 +267,7 @@ try {
    * assignment. So the check is on a different task, after a full page load.
    */
   await openTask(muteTask.id)
-  await assignChip(me.id).click({ timeout: 20_000 })
+  await (await assignChip(me.id)).click({ timeout: 20_000 })
   await waitUntil(
     () => page.getByTestId('priority-prompt').isVisible().catch(() => false),
     { timeoutMs: 15_000 },
@@ -264,7 +275,7 @@ try {
   await page.getByTestId('priority-prompt-mute').click()
 
   await openTask(afterMuteTask.id)
-  await assignChip(me.id).click({ timeout: 20_000 })
+  await (await assignChip(me.id)).click({ timeout: 20_000 })
   await page.waitForTimeout(1500)
   chk(
     !(await page.getByTestId('priority-prompt').isVisible().catch(() => false)),
@@ -284,7 +295,7 @@ try {
    * whose day it claimed to fill would never know.
    */
   await openTask(other.id)
-  await assignChip(mateId).click({ timeout: 20_000 })
+  await (await assignChip(mateId)).click({ timeout: 20_000 })
   await page.waitForTimeout(1500)
   chk(
     !(await page.getByTestId('priority-prompt').isVisible().catch(() => false)),

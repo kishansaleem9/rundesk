@@ -131,6 +131,30 @@ went missing entirely. A list that is only written once stops being true.
   does not offer it; the suite checks that assigning a teammate raises nothing.
   10 checks, five break-tests.
 
+- **The assignee picker, frame `15:45` — and the worst-shaped defect of this
+  pass.** The control was `availableMembers.slice(0, 8)` rendered as chips: no
+  search, no email entry, and nothing on screen to say anybody else existed. In
+  the fixture workspace, which has accumulated seventy-odd members, sixty-odd of
+  them **could not be assigned to a task at all**. It was not slow or awkward;
+  it was incapable, and it photographed as finished. Found by accident, when the
+  previous item's suite could not click the admin's own chip.
+  Built: the search box, **Me** first, and invite-by-email (gated on
+  `isManagerOrAbove`, because `POST /invitations` requires admin or manager and
+  `use-workspace-role.ts` puts the rule plainly — "offering one that 403s is the
+  state this fixes"). 10 checks, four break-tests.
+  **A vacuous check, caught by break-testing.** The first version searched for
+  the twelfth member and asserted the row appeared — which still passed with
+  filtering removed and the cap back at eight, because that member happened to
+  sort inside the first eight. Replaced with two claims the old behaviour cannot
+  satisfy: the whole roster is listed, and a search for one person leaves exactly
+  one row.
+- **Not built there, on purpose:** *Agents / + Create Agent* (Rundesk has no
+  agents — `ai.service.ts` already refuses an Agent filter for the same reason)
+  and *"⚡ Assign with AI"*. Half of the latter exists: `assign_task` is a real
+  tool, declared, previewed and executed. The half that does not is the whole
+  point of the button — CHOOSING the person — and a button that returns an
+  arbitrary colleague with a confident label is worse than no button.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -310,7 +334,9 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Archive in the task menu — and named honestly for the first time |
 | M | A PERMANENT delete for a task — the frame lists Archive *and* Delete; Rundesk has one soft archive and no purge |
 | M | "Add to ›" (a task in more than one list) |
-| M | Assignee picker: search box, invite-by-email, Agents, "⚡ Assign with AI" |
+| B | Assignee picker: search box, **Me** first, invite-by-email |
+| M | "⚡ Assign with AI" — `assign_task` exists; CHOOSING the person does not |
+| — | Agents / "+ Create Agent" — excluded: Rundesk has no agents (see §3) |
 | B | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
 | M | Add to a COLLEAGUE's priorities — the write takes no `:userId`, deliberately |
 | B | Live focus countdown in the header |

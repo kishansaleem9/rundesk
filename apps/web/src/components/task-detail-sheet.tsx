@@ -69,6 +69,7 @@ import { TaskTags } from './task-tags'
 import { SharePanel } from './share-panel'
 import { LinkedDocsSection } from './task-linked-docs'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { relativeTime, exactTime } from '../lib/relative-time'
 import {
   usePriorities,
@@ -2426,22 +2427,13 @@ function OverviewPanel({
           <span className="text-sm text-muted-foreground">{t('taskDetail.unassigned')}</span>
         )}
         {workspaceId && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {availableMembers.slice(0, 8).map((m) => (
-              <button
-                key={m.userId}
-                data-testid={`assign-member-${m.userId}`}
-                onClick={() => addAssignee.mutate(m.userId)}
-                className="inline-flex"
-                title={t('taskDetail.assignMember', { name: m.displayName || m.email })}
-              >
-                <Badge variant="outline">+ {m.displayName || m.email}</Badge>
-              </button>
-            ))}
-            {availableMembers.length === 0 && (
-              <span className="text-xs text-muted-foreground">{t('taskDetail.noMoreMembers')}</span>
-            )}
-          </div>
+          <AssigneePicker
+            workspaceId={workspaceId}
+            members={availableMembers}
+            currentUserId={currentUserId}
+            onPick={(userId) => addAssignee.mutate(userId)}
+            pending={addAssignee.isPending}
+          />
         )}
         {(pendingInvitesQuery.data?.length ?? 0) > 0 && (
           <div className="mt-2 text-xs text-muted-foreground">
@@ -2492,6 +2484,181 @@ function OverviewPanel({
           frame `06:10` puts it: one place that answers "what is this connected
           to", rather than task links in a tab and doc links down here. */}
       <LinkedWorkSection taskId={taskId} workspaceId={workspaceId} />
+    </div>
+  )
+}
+
+/**
+ * §V2-S17 frame `15:45` — the assignee picker.
+ *
+ * WHAT WAS THERE. A row of chips built from `availableMembers.slice(0, 8)`.
+ * Eight. With no search, no email entry and no indication that anybody else
+ * existed — so in the fixture workspace, which has accumulated seventy-odd
+ * members, sixty-odd of them could not be assigned to a task at all. The
+ * control was not slow or awkward; it was incapable, and it looked complete.
+ *
+ * WHAT THE FRAME SHOWS, and what is here:
+ *   · a search box, *"Search or enter email…"*          — built
+ *   · **People**, with **Me** first                      — built
+ *   · **"Invite people via email"**                      — built, gated
+ *   · **Agents**, **+ Create Agent**                     — NOT built, see below
+ *   · footer **"⚡ Assign with AI"**                      — NOT built, see below
+ *
+ * AGENTS DO NOT EXIST IN THIS PRODUCT. `ai.service.ts` already says so in as
+ * many words, about the same frame's Agent filter: "Rundesk has no agents, so
+ * … offering an 'Agent' filter over a product with no agents would be a
+ * control that can only ever return everything." An Agents section with a
+ * "+ Create Agent" button would be the same mistake with a bigger promise.
+ *
+ * "ASSIGN WITH AI" IS NOT BUILT EITHER, and the reason is worth writing down
+ * because half of it does exist. The AI can assign: `assign_task` is a real
+ * tool, declared, previewed and executed. What it cannot do is CHOOSE the
+ * person — that is the whole content of the button — and a button that returns
+ * an arbitrary colleague with a confident label is worse than no button. It is
+ * recorded as an open gap in the re-audit.
+ *
+ * The invite row is gated on `isManagerOrAbove` because `POST /invitations`
+ * requires workspace_admin or manager. `use-workspace-role.ts` puts the rule
+ * plainly: "offering one that 403s is the state this fixes."
+ */
+function AssigneePicker({
+  workspaceId,
+  members,
+  currentUserId,
+  onPick,
+  pending,
+}: {
+  workspaceId: string
+  members: WorkspaceMemberLite[]
+  currentUserId: string
+  onPick: (userId: string) => void
+  pending: boolean
+}) {
+  const { t, tCount } = useTranslation()
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const { isManagerOrAbove } = useWorkspaceRole(workspaceId)
+
+  const invite = useMutation({
+    mutationFn: (email: string) =>
+      api('/invitations', { method: 'POST', body: { email, workspaceId, role: 'member' } }),
+    onSuccess: (_res, email) => {
+      toast.success(t('taskDetail.assignInvited', { email }))
+      setQuery('')
+      void qc.invalidateQueries({ queryKey: ['workspace-invitations', workspaceId] })
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.assignInviteFailed')),
+  })
+
+  const needle = query.trim().toLowerCase()
+  const matches = useMemo(() => {
+    const scored = members.filter(
+      (m) =>
+        !needle ||
+        (m.displayName ?? '').toLowerCase().includes(needle) ||
+        m.email.toLowerCase().includes(needle),
+    )
+    // Yourself first, which is who most assignments are for and what the frame
+    // puts at the top of its People section.
+    return scored.sort((a, b) =>
+      a.userId === currentUserId ? -1 : b.userId === currentUserId ? 1 : 0,
+    )
+  }, [members, needle, currentUserId])
+
+  /*
+   * A cap on what is DRAWN, with the remainder counted out loud. The old code
+   * capped at eight and said nothing, which is the difference between a long
+   * list and a short one that lies about its length.
+   */
+  const SHOWN = 20
+  const shown = matches.slice(0, SHOWN)
+  const hidden = matches.length - shown.length
+
+  const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(query.trim())
+  const alreadyHere = members.some((m) => m.email.toLowerCase() === needle)
+  const canInvite = looksLikeEmail && !alreadyHere && isManagerOrAbove
+
+  if (!open) {
+    return (
+      <div className="mt-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          data-testid="assignee-picker-open"
+          onClick={() => setOpen(true)}
+          className="h-7 px-2 text-[11px]"
+        >
+          + {t('taskDetail.assignPicker')}
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="mt-2 rounded-md border border-border bg-card/60 p-2"
+      data-testid="assignee-picker"
+    >
+      <Input
+        autoFocus
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={t('taskDetail.assignSearchPlaceholder')}
+        aria-label={t('taskDetail.assignSearchPlaceholder')}
+        data-testid="assignee-search"
+        className="h-8"
+      />
+      <ul className="mt-2 max-h-56 space-y-0.5 overflow-y-auto">
+        {shown.map((m) => (
+          <li key={m.userId}>
+            <button
+              type="button"
+              data-testid={`assign-member-${m.userId}`}
+              disabled={pending}
+              onClick={() => {
+                onPick(m.userId)
+                setOpen(false)
+                setQuery('')
+              }}
+              title={t('taskDetail.assignMember', { name: m.displayName || m.email })}
+              className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] hover:bg-muted/60 disabled:opacity-50"
+            >
+              <span className="truncate">{m.displayName || m.email}</span>
+              {m.userId === currentUserId && (
+                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                  {t('taskDetail.assignMe')}
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {hidden > 0 && (
+        <p className="px-2 pt-1 text-[10px] text-muted-foreground" data-testid="assignee-more-hidden">
+          {tCount('taskDetail.assignMoreHidden', hidden)}
+        </p>
+      )}
+      {shown.length === 0 && !canInvite && (
+        <p className="px-2 py-1 text-[11px] text-muted-foreground">
+          {needle ? t('taskDetail.assignNoMatches') : t('taskDetail.noMoreMembers')}
+        </p>
+      )}
+      {canInvite && (
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          data-testid="assignee-invite"
+          disabled={invite.isPending}
+          onClick={() => invite.mutate(query.trim())}
+          className="mt-1 h-7 w-full px-2 text-[11px]"
+        >
+          {t('taskDetail.assignInvite', { email: query.trim() })}
+        </Button>
+      )}
     </div>
   )
 }

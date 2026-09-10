@@ -161,17 +161,26 @@ jobs:
   postgres-harnesses:
     name: Postgres harnesses
     runs-on: ubuntu-latest
-    # ~22 of the run's ~33 minutes. Skipped when the push was prose only.
+    # The long job. Skipped when the push was prose only.
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    # Measured, not guessed: the run at 2cd5d0a reached its seventeenth suite
-    # 18m30s in, and the three after it add roughly three minutes more. The 20
-    # here dated from when this job ran a handful of suites; it now runs
-    # twenty-one, against a real API and a real Postgres, plus the occasional
-    # pause the login rate limit imposes (see test/e2e/lib/signin.mjs).
-    # Splitting the suites across two parallel jobs is the next lever if it
-    # keeps growing — that costs a second setup, so it is not worth it yet.
-    timeout-minutes: 32
+    # THE COMMENT HERE WAS STALE BY TWENTY-NINE SUITES, and the number under it
+    # would have failed the run.
+    #
+    # It said "it now runs twenty-one" and set 32 minutes, measured off the run
+    # at 2cd5d0a: seventeen suites in 18m30s, so roughly 1.1 minutes each. This
+    # job now runs FIFTY. At the rate its own comment records that is about 55
+    # minutes plus setup — so 32 was not a backstop any more, it was a
+    # guaranteed failure a few suites from the end, after paying for all of it.
+    #
+    # 75 costs nothing when the job finishes sooner: GitHub bills the runtime,
+    # not the limit. The limit only decides whether a slow run is allowed to
+    # finish or is killed with the answer half-written.
+    #
+    # Splitting across parallel jobs shortens the WALL CLOCK and not the bill —
+    # the minutes are the same either way, plus a second setup — so it is worth
+    # doing when somebody is waiting on the result, not to save the budget.
+    timeout-minutes: 75
 
     services:
       postgres:
@@ -766,6 +775,21 @@ jobs:
       - name: Assign to priorities
         if: '!cancelled()'
         run: node test/e2e/assign-to-priorities.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §V2-S17, frame `15:45` — the assignee picker.
+      #
+      # It was `availableMembers.slice(0, 8)` as chips: no search, no email
+      # entry, and nothing to say anybody else existed, so in a workspace of
+      # seventy people sixty-odd could not be assigned at all. Two checks here
+      # cannot pass on that behaviour — the whole roster is listed, and a search
+      # for one person leaves exactly one row. The first version of the
+      # load-bearing check was VACUOUS and a break-test caught it.
+      - name: Assignee picker
+        if: '!cancelled()'
+        run: node test/e2e/assignee-picker.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
