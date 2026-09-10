@@ -76,10 +76,22 @@ export function CookieConsentBanner() {
             </p>
           </div>
         </div>
+        {/*
+          TEST IDS ON BOTH, because this banner is a FIXED overlay across the
+          bottom of every page and so every browser suite has to dismiss it
+          before touching anything down there. Until now the only handle was
+          `button:has-text("Accept")` — which cannot work in a suite that has
+          switched the account to Urdu, and `comment-recording` is one. It never
+          dismissed the banner at all, and the first control that landed under
+          it (the clip setup panel's Record button) timed out while being
+          visible and enabled, with `elementFromPoint` returning the banner's
+          own paragraph.
+        */}
         <div className="flex shrink-0 items-center justify-end gap-2">
           <Button
             variant="ghost"
             size="sm"
+            data-testid="cookie-decline"
             onClick={() => decide('declined')}
           >
             {t('cookie.decline')}
@@ -87,6 +99,7 @@ export function CookieConsentBanner() {
           <Button
             variant="gradient"
             size="sm"
+            data-testid="cookie-accept"
             onClick={() => decide('accepted')}
           >
             {t('cookie.accept')}

@@ -333,6 +333,43 @@ went missing entirely. A list that is only written once stops being true.
   condition now, with a 300px margin: far more than a transition frame, far
   less than the 672→1440 it is asserting.
 
+- **The screen-record setup panel, frame `04:55`.** Source `Entire screen`,
+  quality `1080p`, mic `Default – Internal Microphone`, red Record Clip. Both
+  recorders went straight to `getDisplayMedia({ video: true, audio: true })` on
+  the click, each with its own hardcoded copy of that constraint — so the panel
+  had to be a shared module or it would have been the tenth duplicated-logic
+  instance, with the recorder that missed out still capturing at whatever the
+  browser felt like. `apps/web/src/lib/clip-capture.ts` holds the choices and
+  the constraints; `components/clip-setup-panel.tsx` is only the controls; both
+  `comment-recorder.tsx` and `workspace-clips-page.tsx` go through it. No
+  `getDisplayMedia` call site remains outside it except `call-surface.tsx`,
+  which is live screen SHARING in a call — a different feature with no quality
+  or mic choice to make.
+  **Two things the frame implies that the API does not allow**, answered by
+  saying so. A web page cannot enumerate screens: `getDisplayMedia` always
+  opens the browser's own picker and `displaySurface` only pre-selects a tab in
+  it, so the source row is a preference and the panel says the browser will
+  still ask. And `getDisplayMedia`'s audio is SYSTEM audio, not the microphone
+  — which is why the frame has a mic selector beside the source — so a clip
+  with commentary is two captures joined, and the mic half is best-effort:
+  losing the screen aborts, losing the mic warns and records anyway.
+  14 checks, eight break-tests, plus 20 unit tests on the module. Every check
+  asserts the CONSTRAINTS that reached the browser rather than the select's own
+  value, because three dropdowns that remember their values and change nothing
+  is the easiest facade in this audit to build.
+  **It broke a neighbour, and that was the useful part.** `comment-recording`
+  clicked straight through to a recording, so the panel made `getDisplayMedia`
+  0× — correctly. Walking the new path fixed the count, and then its Record
+  button timed out while visible and enabled: `elementFromPoint` returned the
+  COOKIE BANNER's paragraph. That suite had never dismissed the banner because
+  it switches the account to Urdu and the only handle was
+  `button:has-text("Accept")`. The banner's buttons now carry test ids, so a
+  fixed overlay every suite must clear is finally dismissable in any language.
+  Its own fake also lacked `addTrack`, so the mix step threw, was caught as
+  "that microphone could not be used", and the suite went on passing while
+  exercising the error path — a fake missing a method the product calls does
+  not fail, it quietly tests something else.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -444,7 +481,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | "Brain" in the "+" menu — the Brain² hub does not exist |
 | B | Comment bodies render block markdown, which is what makes the above visible |
 | B | Record a Video Clip; real `getDisplayMedia` |
-| M | Screen-record setup panel (source / 1080p / mic device) |
+| B | **Screen-record setup panel** — source hint / quality / mic, one module for both recorders |
 | M | "Clip created!" card — Create a task · New tab · Copy link; "Link copied" |
 | P | Clip in a comment renders, but no title, spinner, or card actions |
 | P | Composer hint — the "/" half, which is the half that works; no space-for-AI hook exists |

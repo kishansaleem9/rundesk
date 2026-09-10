@@ -101,6 +101,18 @@ function fakeStream(kinds) {
     getTracks: () => tracks,
     getAudioTracks: () => tracks.filter((t) => t.kind === 'audio'),
     getVideoTracks: () => tracks.filter((t) => t.kind === 'video'),
+    /*
+     * V2-S05 — a clip now joins the chosen microphone's track to the display
+     * stream, so the fake needs addTrack. WITHOUT IT the product's mix step
+     * threw, was caught as "that microphone could not be used", and the clip
+     * recorded anyway — so this suite would have gone on passing while
+     * exercising the error path instead of the real one. A fake missing a
+     * method the product calls does not fail; it quietly tests something else.
+     *
+     * (No backticks in here: this whole harness is a template literal, and the
+     * first draft of this comment closed it.)
+     */
+    addTrack: (t) => tracks.push(t),
   }
 }
 
@@ -485,7 +497,39 @@ try {
   // ── The clip: the screen, and no Transcribe ──────────────────────────────
   console.log('\n▶ Record a Video Clip, frame `04:56`')
   await page.getByTestId('comment-recording-discard').click().catch(() => {})
+  /*
+   * §V2-S05 frame `04:55` — the clip button now opens a SETUP PANEL first
+   * (source, quality, microphone) and its red Record Clip button starts the
+   * capture. This suite used to click straight through to a recording, so it
+   * went red the moment the panel arrived: `getDisplayMedia` was called 0×,
+   * correctly, because nothing had been asked for yet.
+   *
+   * The check below is unchanged — a clip must still ask for the SCREEN — only
+   * the path to it gained the step the frame shows. Weakening the check to
+   * accommodate a UI change would have been the wrong repair; walking the new
+   * path is the right one.
+   */
   await page.getByTestId('comment-record-clip').click()
+  const panelUp = await waitUntil(
+    () => page.getByTestId('clip-setup-panel').isVisible().catch(() => false),
+    { timeoutMs: 15_000 },
+  )
+  if (!panelUp) throw new Error('the clip button did not open the setup panel')
+  /*
+   * THE PRIVACY BANNER IS A FIXED OVERLAY along the bottom of the page, and
+   * this suite never dismissed it because nothing it clicked used to sit down
+   * there. The setup panel's Record button does, so the click timed out with
+   * the button visible and enabled — `elementFromPoint` at its centre returned
+   * the banner's paragraph, not the button.
+   *
+   * And it is dismissed BY TEST ID, not by text: this suite switches the
+   * account to Urdu, so `button:has-text("Accept")` — the handle every other
+   * suite uses — cannot match here. The banner's buttons were given ids for
+   * exactly that reason.
+   */
+  const accept = page.getByTestId('cookie-accept')
+  if (await accept.isVisible().catch(() => false)) await accept.click().catch(() => {})
+  await page.getByTestId('clip-setup-record').click()
   await waitUntil(() => page.getByTestId('comment-recording-active').isVisible().catch(() => false), { timeoutMs: 10_000 })
   const clipAsked = await page.evaluate(() => window.__rec)
   chk(

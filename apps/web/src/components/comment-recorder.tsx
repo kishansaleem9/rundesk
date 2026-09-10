@@ -33,6 +33,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, cn, toast } from '@rundesk/ui'
 import { Mic, Square, Video, Trash2, Loader2 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
+import { ClipSetupPanel } from './clip-setup-panel'
+import { openClipStream, readClipSetup, type ClipSetup } from '../lib/clip-capture'
 import { useSpeechRecognition } from '../lib/use-speech-recognition'
 import {
   formatDuration,
@@ -77,6 +79,8 @@ export function CommentRecorder({
   const [seconds, setSeconds] = useState(0)
   const [finished, setFinished] = useState<Finished | null>(null)
   const [starting, setStarting] = useState(false)
+  /* §V2-S05 frame `04:55` — the setup panel stands between the click and the capture. */
+  const [setupOpen, setSetupOpen] = useState(false)
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -146,7 +150,7 @@ export function CommentRecorder({
     [],
   )
 
-  const start = async (next: RecordingKind) => {
+  const start = async (next: RecordingKind, setup?: ClipSetup) => {
     if (kind || starting) return
     if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices) {
       toast.error(t('commentRecorder.unsupported'))
@@ -162,10 +166,20 @@ export function CommentRecorder({
     setStarting(true)
     let stream: MediaStream
     try {
-      stream =
-        next === 'clip'
-          ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-          : await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (next === 'clip') {
+        /*
+         * §V2-S05 frame `04:55` — the setup panel's choices, sent as real
+         * constraints. `openClipStream` is shared with the clips page, so the
+         * quality and the microphone mean the same thing in both recorders.
+         */
+        const opened = await openClipStream(setup ?? readClipSetup())
+        stream = opened.stream
+        // A screen without the mic is worth keeping and worth mentioning; only
+        // the screen failing means there is nothing to record.
+        if (opened.micError) toast.warning(t('clipSetup.micUnavailable'))
+      } else {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      }
     } catch {
       // Denied, dismissed, or no device — all three arrive as a rejection and
       // all three mean the same thing to the person: nothing is recording.
@@ -348,6 +362,23 @@ export function CommentRecorder({
     )
   }
 
+  /*
+   * Frame `04:55` — the panel stands in for the buttons while it is open, so
+   * the two are never both on screen offering to start the same recording.
+   */
+  if (setupOpen) {
+    return (
+      <ClipSetupPanel
+        starting={starting}
+        onCancel={() => setSetupOpen(false)}
+        onRecord={(setup) => {
+          setSetupOpen(false)
+          void start('clip', setup)
+        }}
+      />
+    )
+  }
+
   return (
     <div className={cn('inline-flex items-center gap-1', className)}>
       <button
@@ -368,7 +399,7 @@ export function CommentRecorder({
         aria-label={t('commentRecorder.recordClip')}
         title={t('commentRecorder.recordClip')}
         disabled={starting}
-        onClick={() => start('clip')}
+        onClick={() => setSetupOpen(true)}
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
       >
         <Video className="h-3.5 w-3.5" />

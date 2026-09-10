@@ -34,6 +34,8 @@ import { api } from '../lib/api'
 import { matchesClipKind } from '../lib/clip-kind'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
+import { ClipSetupPanel } from '../components/clip-setup-panel'
+import { openClipStream, readClipSetup, type ClipSetup } from '../lib/clip-capture'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Clip = {
@@ -64,6 +66,8 @@ export function ClipsPage() {
   const [query, setQuery] = useState('')
   const [recordingMode, setRecordingMode] = useState<'screen' | 'voice'>('screen')
   const [isRecording, setIsRecording] = useState(false)
+  /* §V2-S05 frame `04:55` — chosen before the capture, not after. */
+  const [setupOpen, setSetupOpen] = useState(false)
   const [recordingStartedAt, setRecordingStartedAt] = useState<number | null>(null)
   const [recordingNow, setRecordingNow] = useState<number>(Date.now())
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -144,7 +148,7 @@ export function ClipsPage() {
     return () => window.clearInterval(timer)
   }, [isRecording])
 
-  async function startRecording(mode: 'screen' | 'voice') {
+  async function startRecording(mode: 'screen' | 'voice', setup?: ClipSetup) {
     if (isRecording) return
     try {
       setUploadError(null)
@@ -158,10 +162,18 @@ export function ClipsPage() {
 
       let stream: MediaStream
       try {
-        stream =
-          mode === 'screen'
-            ? await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-            : await navigator.mediaDevices.getUserMedia({ audio: true })
+        if (mode === 'screen') {
+          /*
+           * §V2-S05 frame `04:55` — the same shared opener the comment
+           * composer uses, so quality and microphone mean one thing across
+           * both recorders instead of two hardcoded constraint objects.
+           */
+          const opened = await openClipStream(setup ?? readClipSetup())
+          stream = opened.stream
+          if (opened.micError) toast.warning(t('clipSetup.micUnavailable'))
+        } else {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        }
       } catch (captureError) {
         // getDisplayMedia/getUserMedia reject when permission is denied, the
         // picker is dismissed, the context is insecure, or display-capture is
@@ -343,9 +355,19 @@ export function ClipsPage() {
           <Button variant="outline" size="lg" onClick={() => startRecording('voice')} disabled={isRecording || uploading}>
             <Mic className="h-4 w-4" /> {t('clips.voiceOnly')}
           </Button>
-          <Button variant="gradient" size="lg" onClick={() => startRecording('screen')} disabled={isRecording || uploading}>
+          <Button variant="gradient" size="lg" data-testid="clips-record-screen" onClick={() => setSetupOpen(true)} disabled={isRecording || uploading}>
             <Monitor className="h-4 w-4" /> {t('clips.recordScreen')}
           </Button>
+          {/* Frame `04:55` — the setup panel, shared with the comment composer. */}
+          {setupOpen && !isRecording && (
+            <ClipSetupPanel
+              onCancel={() => setSetupOpen(false)}
+              onRecord={(setup) => {
+                setSetupOpen(false)
+                void startRecording('screen', setup)
+              }}
+            />
+          )}
           {isRecording && (
             <Button variant="destructive" size="lg" onClick={stopRecording}>
               <Square className="h-4 w-4" /> {t('clips.stop')} ({recordingMode === 'screen' ? t('clips.modeScreen') : t('clips.modeVoice')} · {recordingLabel})

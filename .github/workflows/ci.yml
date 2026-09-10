@@ -884,6 +884,22 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S05, frame `04:55` — the screen-record setup panel.
+      #
+      # Three dropdowns that remember their values and change nothing is the
+      # easiest facade in this audit to build, so every check here asserts the
+      # CONSTRAINTS that reached the browser rather than the select's own value:
+      # 720p arrives as `height.ideal`, a picked headset arrives as its own
+      # getUserMedia call with the track joined to the stream. The browser's own
+      # screen picker is not ours and not automatable — so the check is that the
+      # `displaySurface` hint is sent, and that the panel says so.
+      - name: Clip setup panel
+        if: '!cancelled()'
+        run: node test/e2e/clip-setup.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist
