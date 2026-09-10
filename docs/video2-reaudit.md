@@ -370,6 +370,39 @@ went missing entirely. A list that is only written once stops being true.
   exercising the error path — a fake missing a method the product calls does
   not fail, it quietly tests something else.
 
+- **The "Clip created!" card, frames `05:25`–`05:30`.** The composer offered a
+  preview, Attach and Discard, and nothing that produced a link.
+  **The honest problem:** a just-recorded clip is a `Blob` behind an object URL,
+  private to the document that made it. Copying that would put a link on the
+  clipboard that works in one tab and nowhere else — the neatest facade in this
+  audit, because it would even paste. So Copy link and New tab upload first,
+  LAZILY, on the first action that needs it: uploading on sight spends bandwidth
+  on a clip about to be discarded, and cleaning up means a `DELETE /clips` that
+  can itself fail and orphan an object. `Attach clip` is untouched, so the
+  ordinary path still uploads once, as a comment attachment, on post.
+  `uploadBlobWithProgress` was module-local at the bottom of the clips page and
+  is now in `lib/clip-publish.ts`, imported by both.
+  **R2 is not configured here or in CI**, so storage is stubbed and the suite
+  says so rather than letting 18 green checks imply otherwise. The guard that
+  makes it honest runs first against the real API: neither endpoint may answer
+  404, and each must fail for a storage reason. That guard caught its own
+  author — the first version pinned 400 on both, and `share` answers 500
+  "Storage is not configured" while `presign` answers 400 "R2 is not
+  configured". The same cause, two verdicts on whose fault it is; noted, not
+  fixed here.
+  18 checks, ten break-tests. **A real bug came out of writing one of them:**
+  the uploaded key is remembered so a second Copy link re-signs instead of
+  re-uploading, and nothing cleared it when a NEW recording began — so record
+  clip A, copy, discard, record clip B, copy, and the clipboard hands out a link
+  to clip A. The right kind of thing, silently, for the wrong recording.
+  **And two of the new checks were weaker than they read**, each in a different
+  way. "A second clip is not the first clip" navigated between the recordings,
+  which remounts the app and destroys the state the check is about — so it
+  passed on the broken build. "A failed upload is reported" accepted ANY toast,
+  and on the build that ignored a failed PUT the toast was "Link copied", so it
+  passed while the product did the exact thing it was written to catch. Both
+  now assert what arrived rather than that something did.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -482,7 +515,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Comment bodies render block markdown, which is what makes the above visible |
 | B | Record a Video Clip; real `getDisplayMedia` |
 | B | **Screen-record setup panel** — source hint / quality / mic, one module for both recorders |
-| M | "Clip created!" card — Create a task · New tab · Copy link; "Link copied" |
+| B | **"Clip created!" card** — Create a task · New tab · Copy link, and "Link copied" |
 | P | Clip in a comment renders, but no title, spinner, or card actions |
 | P | Composer hint — the "/" half, which is the half that works; no space-for-AI hook exists |
 | P | Threads — replies nest inline; no "Thread by `<name>`" panel with own composer |

@@ -36,6 +36,7 @@ import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import { ClipSetupPanel } from '../components/clip-setup-panel'
 import { openClipStream, readClipSetup, type ClipSetup } from '../lib/clip-capture'
+import { uploadBlobWithProgress } from '../lib/clip-publish'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Clip = {
@@ -634,32 +635,3 @@ function ClipCard({
   )
 }
 
-async function uploadBlobWithProgress(args: {
-  url: string
-  blob: Blob
-  contentType: string
-  onProgress: (percent: number) => void
-  networkErrorMessage?: string
-}): Promise<{ ok: boolean; status: number; statusText: string; responseText: string }> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open('PUT', args.url, true)
-    xhr.setRequestHeader('Content-Type', args.contentType)
-    xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable) return
-      const percent = Math.round((event.loaded / event.total) * 100)
-      args.onProgress(Math.min(100, Math.max(0, percent)))
-    }
-    xhr.onerror = () =>
-      reject(new Error(args.networkErrorMessage ?? 'Network error while uploading clip'))
-    xhr.onload = () => {
-      resolve({
-        ok: xhr.status >= 200 && xhr.status < 300,
-        status: xhr.status,
-        statusText: xhr.statusText,
-        responseText: xhr.responseText,
-      })
-    }
-    xhr.send(args.blob)
-  })
-}

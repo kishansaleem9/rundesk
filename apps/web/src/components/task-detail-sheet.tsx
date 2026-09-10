@@ -1412,6 +1412,7 @@ export function TaskDetailSheet({
                   taskId={detailQuery.data.id}
                   workspaceId={fallbackWorkspaceId}
                   focusCommentId={focusCommentId}
+                  listId={detailQuery.data.listId}
                 />
               )}
               {activeTab === 'activity' && (
@@ -4947,11 +4948,18 @@ function CommentsPanel({
   taskId,
   workspaceId,
   focusCommentId,
+  listId,
 }: {
   taskId: string
   workspaceId?: string
   /** §V2-S06 — the one comment to scroll to and mark, arriving from a link. */
   focusCommentId?: string | null
+  /**
+   * §V2-S05 — where "Create a task" from the "Clip created!" card puts it.
+   * This task's own list: the list the person is already working in, and the
+   * frame offers no picker.
+   */
+  listId?: string | null
 }) {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
@@ -5734,6 +5742,8 @@ function CommentsPanel({
         <div className="mt-2">
           <CommentRecorder
             startRef={startRecordingRef}
+            workspaceId={workspaceId}
+            listId={listId ?? undefined}
             onAttach={(file) => setCommentFiles((prev) => [...prev, file])}
             onTranscript={(append) => setText((prev) => append(prev))}
           />

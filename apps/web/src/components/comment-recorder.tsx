@@ -35,6 +35,8 @@ import { Mic, Square, Video, Trash2, Loader2 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
 import { ClipSetupPanel } from './clip-setup-panel'
 import { openClipStream, readClipSetup, type ClipSetup } from '../lib/clip-capture'
+import { publishClip, clipShareUrl } from '../lib/clip-publish'
+import { api, ApiError } from '../lib/api'
 import { useSpeechRecognition } from '../lib/use-speech-recognition'
 import {
   formatDuration,
@@ -60,6 +62,8 @@ export function CommentRecorder({
   onTranscript,
   className,
   startRef,
+  workspaceId,
+  listId,
 }: {
   /** Hand the finished recording to the composer as an attachment. */
   onAttach: (file: File) => void
@@ -73,6 +77,14 @@ export function CommentRecorder({
    * click it, which would break the moment the markup moved.
    */
   startRef?: React.MutableRefObject<((kind: RecordingKind) => void) | null>
+  /**
+   * §V2-S05 frames `05:25`–`05:30` — the "Clip created!" card needs a
+   * workspace to upload the clip into and a list to create a task in. Both
+   * optional: without them the card still plays back and attaches, it just
+   * cannot offer a link to somewhere that does not exist.
+   */
+  workspaceId?: string
+  listId?: string
 }) {
   const { t, locale } = useTranslation()
   const [kind, setKind] = useState<RecordingKind | null>(null)
@@ -81,6 +93,12 @@ export function CommentRecorder({
   const [starting, setStarting] = useState(false)
   /* §V2-S05 frame `04:55` — the setup panel stands between the click and the capture. */
   const [setupOpen, setSetupOpen] = useState(false)
+  /*
+   * The uploaded clip's key, once something has needed it. Kept so the second
+   * link action does not upload the same clip again.
+   */
+  const [clipKey, setClipKey] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState(false)
 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -193,6 +211,15 @@ export function CommentRecorder({
     // URL — a preview kept alive here is a leak for the life of the page.
     if (finished) URL.revokeObjectURL(finished.url)
     setFinished(null)
+    /*
+     * §V2-S05b — THE REMEMBERED CLIP KEY MUST GO WITH IT, and this was a real
+     * bug rather than tidiness. `ensureLink` reuses `clipKey` so a second Copy
+     * link re-signs instead of re-uploading; without clearing it here, record
+     * clip A, copy its link, discard, record clip B, copy — and the clipboard
+     * gets a link to clip A. The right clip, silently, for the wrong recording.
+     * Found by writing the check for it, not by using it.
+     */
+    setClipKey(null)
     chunksRef.current = []
     transcriptRef.current = ''
     startedAtRef.current = Date.now()
@@ -280,12 +307,92 @@ export function CommentRecorder({
     setFinished(null)
   }
 
+  /*
+   * §V2-S05 frames `05:25`–`05:30` — "Clip created!" offers Create a task ·
+   * New tab · Copy link, and the last confirms "Link copied".
+   *
+   * ALL THREE NEED A URL, and a just-recorded clip has none: it is a Blob
+   * behind an object URL, private to this document. Copying that would produce
+   * a link that works in this tab and nowhere else, which is the neatest facade
+   * available here. So the clip is uploaded — LAZILY, on the first action that
+   * needs it, and once. See `lib/clip-publish.ts` for why not sooner.
+   */
+  const ensureLink = async (): Promise<string | null> => {
+    if (!finished || !workspaceId) return null
+    setPublishing(true)
+    try {
+      const key = clipKey ?? (await publishClip({
+        workspaceId,
+        file: finished.file,
+        title: finished.file.name,
+        durationSeconds: finished.seconds,
+      }))
+      if (!clipKey) setClipKey(key)
+      return await clipShareUrl(workspaceId, key)
+    } catch {
+      // An upload or a signature that failed must say so: the alternative is a
+      // Copy link that reports success and puts nothing on the clipboard.
+      toast.error(t('clipCreated.uploadFailed'))
+      return null
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const copyClipLink = async () => {
+    const url = await ensureLink()
+    if (!url) return
+    try {
+      await navigator.clipboard?.writeText(url)
+      // The frame's own confirmation, at `05:30`.
+      toast.success(t('clipCreated.linkCopied'))
+    } catch {
+      toast.error(t('clipCreated.copyFailed'))
+    }
+  }
+
+  const openClipInNewTab = async () => {
+    const url = await ensureLink()
+    if (url) window.open(url, '_blank', 'noopener')
+  }
+
+  const createTaskFromClip = async () => {
+    if (!listId) return
+    const url = await ensureLink()
+    if (!url) return
+    try {
+      /*
+       * In THIS list, because that is the list the person is already working
+       * in and the frame offers no picker. The clip's link goes in the
+       * description rather than the title: a title carrying a signed URL is
+       * unreadable in every list view it appears in.
+       */
+      await api('/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: finished?.file.name ?? t('clipCreated.title'),
+          listId,
+          description: url,
+        }),
+      })
+      toast.success(t('clipCreated.taskCreated'))
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : t('clipCreated.taskFailed'))
+    }
+  }
+
   if (finished) {
     return (
       <div
         data-testid="comment-recording-ready"
         className={cn('rounded-md border border-border bg-muted/30 p-2 space-y-2', className)}
       >
+        {/* Frame `05:25` heads the card with what just happened. */}
+        {finished.kind === 'clip' && (
+          <h4 className="text-xs font-semibold" data-testid="clip-created-title">
+            {t('clipCreated.title')}
+          </h4>
+        )}
         {finished.kind === 'voice' ? (
           <audio data-testid="comment-recording-preview" src={finished.url} controls className="w-full h-9" />
         ) : (
@@ -328,6 +435,57 @@ export function CommentRecorder({
             )}
           </div>
         </div>
+        {/*
+          Frame `05:25` — Create a task · New tab · Copy link.
+
+          DELIBERATELY OUTSIDE `comment-recording-choices` above. That wrapper
+          exists so frame `04:16`'s "exactly two choices" can be asserted, and
+          putting three more buttons inside it would turn a real check into a
+          failing one for no reason. These are a different row in the frame too.
+
+          Only for a clip, and only where there is a workspace to upload into:
+          a voice note has no "open in a new tab" to offer, and a link action
+          with nowhere to upload is a button that cannot work.
+        */}
+        {finished.kind === 'clip' && workspaceId && (
+          <div className="flex flex-wrap items-center gap-1.5" data-testid="clip-created-actions">
+            {listId && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={publishing}
+                data-testid="clip-created-task"
+                onClick={() => void createTaskFromClip()}
+              >
+                {t('clipCreated.createTask')}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={publishing}
+              data-testid="clip-created-newtab"
+              onClick={() => void openClipInNewTab()}
+            >
+              {t('clipCreated.newTab')}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={publishing}
+              data-testid="clip-created-copy"
+              onClick={() => void copyClipLink()}
+            >
+              {t('clipCreated.copyLink')}
+            </Button>
+            {/* The upload the person did not ask for explicitly, said out loud. */}
+            {publishing && (
+              <span className="text-[11px] text-muted-foreground" data-testid="clip-created-uploading">
+                {t('clipCreated.uploading')}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     )
   }

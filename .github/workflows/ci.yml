@@ -900,6 +900,22 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S05b, frames `05:25`–`05:30` — the "Clip created!" card.
+      #
+      # PART OF THIS IS STUBBED and the suite says so: clip storage is R2, which
+      # is not configured in CI, so presign / PUT / share are intercepted in the
+      # browser. What makes that honest is the guard that runs FIRST against the
+      # real API — neither endpoint may answer 404, and each must fail for a
+      # storage reason. A 404 would mean the stub implements an address the
+      # product does not serve, which is how §V2-S14's planner 404 survived two
+      # suites that stubbed the client's spelling of a route that never existed.
+      - name: Clip created card
+        if: '!cancelled()'
+        run: node test/e2e/clip-created-card.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist
